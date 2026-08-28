@@ -1,0 +1,64 @@
+# Dependencies
+node_modules/
+.pnp.*
+.yarn/*
+
+# Builds
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# Environment — never commit real values, only .env.example
+.env
+.env.*
+!.env.example
+
+# Test / coverage
+coverage/
+.nyc_output/
+*.lcov
+playwright-report/
+test-results/
+
+# Logs
+*.log
+.chronica-worker.pid
+.chronica-web.pid
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+
+# Caches
+.turbo/
+.eslintcache
+.cache/
+.vite/
+.swc/
+
+# Local databases / dumps
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.sql.gz
+
+# AI transcript / prompt dumps (may contain game or key material)
+/tmp/
+.ai-cache/
+*.prompt.local.*
+
+# Developer-only GeoJSON fixtures. Never ship or publish supplied map sources.
+/apps/web/private-worlds/*.geojson
+
+# Editors & OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp

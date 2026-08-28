@@ -1,0 +1,255 @@
+import { z } from "zod";
+import { ElapsedStepSchema, EntityIdSchema } from "../material-state";
+
+// What a player submits, and what the simulation makes of it (docs/14, ADR-0032).
+//
+// The promise here is that anything is possible: type what your character
+// attempts, in your own words. The funnel that keeps it affordable -- grammar,
+// then one batched assessment, then adjudication only for genuine novelty --
+// exists to make the common verbs free, never to bound what can be attempted.
+
+export const MAX_DIRECTIVES_PER_BATCH = 32;
+export const MAX_BATCH_CODE_POINTS = 4_000;
+
+/**
+ * One instruction. Array position in the batch is the player's own priority,
+ * and applies only when their directives compete for the same actor or
+ * resource -- it never moves their work ahead of another player's.
+ */
+export const OrderDirectiveSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("new"), text: z.string().trim().min(1) }).strict(),
+  z.object({ kind: z.literal("revise"), actionId: EntityIdSchema, text: z.string().trim().min(1) }).strict(),
+  z.object({ kind: z.literal("cancel"), actionId: EntityIdSchema }).strict(),
+]);
+export type OrderDirective = z.infer<typeof OrderDirectiveSchema>;
+
+/** Code points, not UTF-16 units: an emoji or a Greek name must not cost double. */
+export function batchCodePoints(directives: readonly OrderDirective[]): number {
+  return [...directives.map((directive) => ("text" in directive ? directive.text : "")).join("")].length;
+}
+
+export const OrderBatchSchema = z
+  .object({
+    directives: z.array(OrderDirectiveSchema).min(1).max(MAX_DIRECTIVES_PER_BATCH),
+  })
+  .strict()
+  .superRefine((batch, context) => {
+    const codePoints = batchCodePoints(batch.directives);
+    if (codePoints > MAX_BATCH_CODE_POINTS) {
+      context.addIssue({
+        code: "custom",
+        path: ["directives"],
+        message: `Order batch is ${codePoints} code points; the limit is ${MAX_BATCH_CODE_POINTS}.`,
+      });
+    }
+  });
+export type OrderBatch = z.infer<typeof OrderBatchSchema>;
+
+/**
+ * An internal workflow call. Never a player-facing menu item.
+ *
+ * Grammar, assessment, NPC logic and the Event Director may all *propose* one
+ * of these; none executes it. `source` and `sourceRef` are stamped by
+ * orchestration after output is accepted -- they are never fields copied from
+ * model text, because a model that could name its own source could launder an
+ * illegal invocation into a trusted one.
+ */
+export const InvocationSourceSchema = z.enum([
+  "grammar",
+  "assessment",
+  "npc",
+  "event_director",
+  "simulation",
+]);
+export type InvocationSource = z.infer<typeof InvocationSourceSchema>;
+
+/** What a proposer may say. Deliberately missing `source` and `sourceRef`. */
+export const ProposedInvocationSchema = z
+  .object({
+    actionId: EntityIdSchema,
+    actorId: EntityIdSchema,
+    parameters: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+export type ProposedInvocation = z.infer<typeof ProposedInvocationSchema>;
+
+export const ActionInvocationSchema = ProposedInvocationSchema.extend({
+  source: InvocationSourceSchema,
+  sourceRef: z.string().trim().min(1).max(200),
+}).strict();
+export type ActionInvocation = z.infer<typeof ActionInvocationSchema>;
+
+/** How feasible the assessment thinks an attempt is. The simulation decides. */
+export const FeasibilitySchema = z.enum([
+  "feasible",
+  "conditional",
+  "unlawful",
+  "impossible",
+  "uncertain",
+]);
+export type Feasibility = z.infer<typeof FeasibilitySchema>;
+
+export const StepRangeSchema = z
+  .object({
+    min: z.number().int().positive(),
+    max: z.number().int().positive(),
+  })
+  .strict()
+  .refine((range) => range.max >= range.min, {
+    message: "A step range's max must be at least its min.",
+    path: ["max"],
+  });
+export type StepRange = z.infer<typeof StepRangeSchema>;
+
+/**
+ * A workflow candidate selected by order assessment.
+ *
+ * The model may name only a registered workflow and its untrusted parameters.
+ * The resolver supplies the player actor and stamps the source after the
+ * registry has parsed and validated this proposal against the current world.
+ */
+export const AssessedWorkflowSchema = z
+  .object({
+    actionId: EntityIdSchema,
+    parameters: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+export type AssessedWorkflow = z.infer<typeof AssessedWorkflowSchema>;
+
+/**
+ * The compact result of the one turn-wide Basic assessment (M2).
+ *
+ * Stored against an immutable action revision and reused without another call.
+ * Changing circumstances are simulation inputs, or a reason for the player to
+ * submit a new revision -- never a reason to re-assess silently.
+ */
+export const OrderAssessmentSchema = z
+  .object({
+    directiveId: EntityIdSchema,
+    interpretation: z.string().trim().min(1).max(600),
+    feasibility: FeasibilitySchema,
+    obstacleIds: z.array(z.string().trim().min(1)),
+    dependencyActionIds: z.array(EntityIdSchema),
+    estimatedSteps: StepRangeSchema,
+    /** Null only when this is genuinely novel or cannot map to the pinned library. */
+    workflow: AssessedWorkflowSchema.nullable().default(null),
+    needsAdjudication: z.boolean(),
+  })
+  .strict();
+export type OrderAssessment = z.infer<typeof OrderAssessmentSchema>;
+
+/**
+ * One immutable entry in an action's history.
+ *
+ * A compatible revision preserves the action's identity and earned progress; a
+ * materially different objective must replace the action instead. Original text
+ * is never modified -- it is the audit trail when a player disputes an
+ * interpretation.
+ */
+export const ActionRevisionSchema = z
+  .object({
+    revision: z.number().int().positive(),
+    sourceIntentId: EntityIdSchema,
+    submittedTurnIndex: z.number().int().nonnegative(),
+    directiveKind: z.enum(["new", "revise"]),
+    rawText: z.string().min(1),
+    priority: z.number().int().nonnegative(),
+    assessment: OrderAssessmentSchema.nullable(),
+    preservesProgress: z.boolean(),
+  })
+  .strict();
+export type ActionRevision = z.infer<typeof ActionRevisionSchema>;
+
+export const ActionStatusSchema = z.enum([
+  "waiting",
+  "active",
+  "completed",
+  "failed",
+  "impossible",
+  "cancelled",
+  "replaced",
+]);
+export type ActionStatus = z.infer<typeof ActionStatusSchema>;
+
+/** The five ways an action ends. Nothing else is terminal. */
+export const TERMINAL_ACTION_STATUSES = [
+  "completed",
+  "failed",
+  "impossible",
+  "cancelled",
+  "replaced",
+] as const satisfies readonly ActionStatus[];
+
+export const isTerminalStatus = (status: ActionStatus): boolean =>
+  (TERMINAL_ACTION_STATUSES as readonly string[]).includes(status);
+
+export const ActionProgressSchema = z
+  .object({
+    stepsElapsed: z.number().int().nonnegative(),
+    /**
+     * Null when the total is genuinely unknown. A range is always presented as
+     * an estimate, never a false percentage.
+     */
+    stepsExpected: StepRangeSchema.nullable(),
+  })
+  .strict();
+
+/**
+ * Work already in progress, as authoritative snapshot state (ADR-0030).
+ *
+ * The identity is stable across compatible revisions and every snapshot, so a
+ * salience interruption resumes the same action without another order or model
+ * call. Standing orders describe future choices; this is not the same shape.
+ */
+export const OngoingActionSchema = z
+  .object({
+    id: EntityIdSchema,
+    actorId: EntityIdSchema,
+    sourceIntentId: EntityIdSchema,
+    revision: z.number().int().positive(),
+    revisions: z.array(ActionRevisionSchema).min(1),
+    invocation: ActionInvocationSchema,
+    startedTurnIndex: z.number().int().nonnegative(),
+    startedAtStep: ElapsedStepSchema,
+    priority: z.number().int().nonnegative(),
+    dependencyActionIds: z.array(EntityIdSchema),
+    progress: ActionProgressSchema,
+    continuationPolicy: z.literal("automatic"),
+    status: ActionStatusSchema,
+    /** Names the blocking action or resource, so waiting is explicable. */
+    waitingReason: z.string().trim().min(1).max(300).nullable(),
+    terminalReason: z.string().trim().min(1).max(300).nullable(),
+    replacedByActionId: EntityIdSchema.nullable(),
+  })
+  .strict()
+  .superRefine((action, context) => {
+    if (action.revisions.length !== action.revision) {
+      context.addIssue({
+        code: "custom",
+        path: ["revisions"],
+        message: "An action's revision number must match the length of its immutable history.",
+      });
+    }
+    if (action.status === "waiting" && action.waitingReason === null) {
+      context.addIssue({
+        code: "custom",
+        path: ["waitingReason"],
+        message: "Waiting work must name what it is waiting for.",
+      });
+    }
+    if (action.status === "replaced" && action.replacedByActionId === null) {
+      context.addIssue({
+        code: "custom",
+        path: ["replacedByActionId"],
+        message: "A replaced action must name what replaced it.",
+      });
+    }
+    if (action.status !== "replaced" && action.replacedByActionId !== null) {
+      context.addIssue({
+        code: "custom",
+        path: ["replacedByActionId"],
+        message: "Only a replaced action names a replacement.",
+      });
+    }
+  });
+export type OngoingAction = z.infer<typeof OngoingActionSchema>;

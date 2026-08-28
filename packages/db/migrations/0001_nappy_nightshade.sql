@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "character_claims_player_active_unique" ON "character_claims" USING btree ("game_id","player_id") WHERE "character_claims"."released_at" is null;

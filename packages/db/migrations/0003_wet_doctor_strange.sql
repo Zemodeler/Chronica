@@ -1,0 +1,1 @@
+ALTER TABLE "scenario_versions" ADD COLUMN "initial_world" jsonb NOT NULL;
