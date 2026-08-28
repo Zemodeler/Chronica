@@ -22,14 +22,13 @@ The world is active without waiting for the player. Each turn advances several p
 
 ## Documentation
 
-- [Project orientation](docs/00-project.md)
-- [1.0 vision](docs/01-vision.md)
-- [Player experience](docs/10-player-experience.md)
-- [Orders](docs/14-orders.md)
-- [Turns and Chronicle](docs/15-turns-and-chronicle.md)
-- [Characters](docs/08-characters.md) and [continuity](docs/16-character-continuity.md)
-- [Billing](docs/18-credits-billing-accounts.md) and [authoring](docs/54-authoring-and-world-generation.md)
-- [Current state](docs/50-current-state.md)
-- [Archived pre-1.0 design](docs/archive/pre-1.0/README.md)
+- [Documentation index](docs/README.md)
+- [Project overview](docs/00-project.md)
+- [Core gameplay loop](docs/01-core-gameplay-loop.md)
+- [Implementation roadmap](docs/02-roadmap.md)
+- [AI and game memory](docs/03-ai-and-game-memory.md)
+- [World map](docs/04-world-map.md)
+- [Phase 1 scenario](docs/05-phase-1-scenario.md)
+- [Open decisions](docs/06-open-decisions.md)
 
-The repository still contains a playable foundation built around an earlier, larger specification. This documentation reset describes the intended 1.0 product; it does not claim that the current code already implements it.
+The repository contains a playable foundation. These documents define the intended product and identify where current contracts already support it; they do not claim every documented Phase 1 feature is complete.
