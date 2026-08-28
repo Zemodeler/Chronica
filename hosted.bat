@@ -10,5 +10,6 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo Starting Chronica...
+start "" "http://localhost:3000"
 call npm run dev
 pause
