@@ -1,0 +1,16 @@
+{
+  "name": "@chronica/billing",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts", "./adapters": "./src/adapters/index.ts" },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@chronica/shared": "0.0.0",
+    "@paddle/paddle-node-sdk": "^3.10.0"
+  }
+}
