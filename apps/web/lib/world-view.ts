@@ -7,6 +7,7 @@ import type {
   DialogueChannel,
   GamePhase,
   MaterialWorldViewModel,
+  MapPresentationEvent,
   NewsViewModel,
   ProvinceView,
   ScenarioClock,
@@ -163,6 +164,7 @@ export interface WorldViewMeta {
   readonly totalPlayers: number;
   readonly lowBandwidth?: boolean;
   readonly clock?: ScenarioClock;
+  readonly presentationEvents?: readonly MapPresentationEvent[];
 }
 
 const MONTH_NAMES = [
@@ -296,9 +298,38 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
         terrainId: province.terrainId,
         tier: province.tier,
       })),
-      settlements: [],
-      forces: [],
-      hostileBorders: [],
+      settlements: world.map.provinces.flatMap((province) => province.settlements.map((settlement) => {
+        const capitalPolity = world.map.polities.find((polity) => polity.capitalSettlementId === settlement.id);
+        return {
+          settlementId: settlement.id,
+          provinceId: province.id,
+          anchorFeatureId: settlement.id,
+          name: settlement.name,
+          kind: settlement.kind,
+          controllerPolityId: province.controllerPolityId,
+          capitalPolityId: capitalPolity?.id ?? null,
+          importance: settlement.size,
+          underSiege: false,
+          damaged: false,
+        };
+      })),
+      forces: world.material.forces.map((force) => {
+        const fit = force.personnel.reduce((total, category) => total + category.fit, 0);
+        const unavailable = force.personnel.reduce((total, category) => total + category.unavailable.reduce((sum, entry) => sum + entry.count, 0), 0);
+        const commander = world.characters.find((character) => character.id === force.commanderCharacterId)?.name ?? force.commanderCharacterId;
+        return {
+          forceId: force.id,
+          provinceId: force.locationId,
+          ownerPolityId: force.polityId,
+          name: force.name,
+          commanderLabel: commander,
+          strengthLabel: `${fit + unavailable} total; ${fit} fit`,
+          relation: "unknown" as const,
+          selected: false,
+          movement: null,
+        };
+      }),
+      presentationEvents: [...(meta.presentationEvents ?? [])],
     },
     provinces,
     armies,

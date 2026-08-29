@@ -101,7 +101,6 @@ export const MapVisualConfigSchema = z.object({
     minor: MapBorderStyleSchema,
     regional: MapBorderStyleSchema,
     realm: MapBorderStyleSchema,
-    hostile: MapBorderStyleSchema,
     selected: MapBorderStyleSchema,
     hovered: MapBorderStyleSchema,
   }).strict(),
@@ -138,8 +137,13 @@ export const MapSettlementOverlaySchema = z.object({
   name: z.string().trim().min(1).max(120),
   kind: SettlementKindSchema,
   controllerPolityId: EntityIdSchema.nullable(),
+  /** Present when this settlement is the named capital of the polity. */
+  capitalPolityId: EntityIdSchema.nullable(),
   cultureStyleId: EntityIdSchema.optional(),
   importance: z.number().int().min(0).max(100),
+  /** Current visual state derived from authoritative warfare state when available. */
+  underSiege: z.boolean().default(false),
+  damaged: z.boolean().default(false),
 }).strict();
 export type MapSettlementOverlay = z.infer<typeof MapSettlementOverlaySchema>;
 
@@ -149,7 +153,16 @@ export const MapMovementOverlaySchema = z.object({
   path: z.array(GeoJsonPositionSchema).min(2),
   progressBps: BasisPointsSchema,
   state: z.enum(["moving", "retreating"]),
-}).strict();
+}).strict().superRefine((movement, context) => {
+  const first = movement.path[0];
+  const last = movement.path[movement.path.length - 1];
+  if (first?.[0] !== movement.start[0] || first?.[1] !== movement.start[1]) {
+    context.addIssue({ code: "custom", path: ["path", 0], message: "A movement path must begin at its start coordinate." });
+  }
+  if (last?.[0] !== movement.destination[0] || last?.[1] !== movement.destination[1]) {
+    context.addIssue({ code: "custom", path: ["path", movement.path.length - 1], message: "A movement path must end at its destination coordinate." });
+  }
+});
 export type MapMovementOverlay = z.infer<typeof MapMovementOverlaySchema>;
 
 export const MapForceOverlaySchema = z.object({
@@ -166,13 +179,19 @@ export const MapForceOverlaySchema = z.object({
 }).strict();
 export type MapForceOverlay = z.infer<typeof MapForceOverlaySchema>;
 
-export const MapHostileBorderOverlaySchema = z.object({
-  firstProvinceId: EntityIdSchema,
-  secondProvinceId: EntityIdSchema,
-  kind: z.enum(["hostile", "front"]),
-}).strict().refine((border) => border.firstProvinceId !== border.secondProvinceId, {
-  message: "A hostile border must join two different provinces.",
-});
+export const MapPresentationEventSchema = z.discriminatedUnion("kind", [
+  z.object({
+    id: EntityIdSchema,
+    kind: z.literal("battle"),
+    coordinate: GeoJsonPositionSchema,
+    participantForceIds: z.array(EntityIdSchema).min(1),
+  }).strict(),
+  z.object({ id: EntityIdSchema, kind: z.literal("siege"), settlementId: EntityIdSchema }).strict(),
+  z.object({ id: EntityIdSchema, kind: z.literal("occupation"), provinceId: EntityIdSchema }).strict(),
+  z.object({ id: EntityIdSchema, kind: z.literal("conquest"), provinceId: EntityIdSchema }).strict(),
+  z.object({ id: EntityIdSchema, kind: z.literal("settlement_damage"), settlementId: EntityIdSchema }).strict(),
+]);
+export type MapPresentationEvent = z.infer<typeof MapPresentationEventSchema>;
 
 export const DynamicMapOverlaySchema = z.object({
   revision: z.number().int().nonnegative(),
@@ -188,6 +207,13 @@ export const DynamicMapOverlaySchema = z.object({
   provinces: z.array(MapProvinceOverlaySchema),
   settlements: z.array(MapSettlementOverlaySchema),
   forces: z.array(MapForceOverlaySchema),
-  hostileBorders: z.array(MapHostileBorderOverlaySchema),
+  /** One-shot effects committed with the latest resolved turn. */
+  presentationEvents: z.array(MapPresentationEventSchema).default([]).superRefine((events, context) => {
+    const ids = new Set<string>();
+    for (const [index, event] of events.entries()) {
+      if (ids.has(event.id)) context.addIssue({ code: "custom", path: [index, "id"], message: "A map overlay may include each presentation event only once." });
+      ids.add(event.id);
+    }
+  }),
 }).strict();
 export type DynamicMapOverlay = z.infer<typeof DynamicMapOverlaySchema>;

@@ -9,7 +9,7 @@ const map: GeoJsonMap = { type: "FeatureCollection", features: [
   { type: "Feature", id: "east", geometry: { type: "Polygon", coordinates: [[[2, 0], [4, 0], [4, 2], [2, 2], [2, 0]]] }, properties: { kind: "province", name: "East" } },
   { type: "Feature", id: "island", geometry: { type: "Polygon", coordinates: [[[20, 0], [21, 0], [21, 1], [20, 1], [20, 0]]] }, properties: { kind: "province", name: "Island" } },
 ] };
-function overlay(provinces: DynamicMapOverlay["provinces"]): DynamicMapOverlay { return { revision: 1, polities: [{ polityId: "rome", name: "Roman Republic" }], provinces, settlements: [], forces: [], hostileBorders: [] }; }
+function overlay(provinces: DynamicMapOverlay["provinces"]): DynamicMapOverlay { return { revision: 1, polities: [{ polityId: "rome", name: "Roman Republic" }], provinces, settlements: [], forces: [], presentationEvents: [] }; }
 
 describe("political map derivation", () => {
   it("builds static adjacency and shared boundaries once", () => {

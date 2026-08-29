@@ -590,14 +590,15 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
   .geo-map-road { fill: none; stroke: #c6ad76; stroke-linecap: round; stroke-dasharray: 2 1.5; opacity: .78; vector-effect: non-scaling-stroke; }
   .geo-map-road-major, .geo-map-road-roman { stroke-width: .8; opacity: .9; }
   .geo-map-road-trade_route { stroke: #dfc47d; stroke-width: .9; stroke-dasharray: 3 1.25; }
-  .geo-map-movement-path { fill: none; stroke: #f4cf68; stroke-width: 1.3; stroke-dasharray: 3 2; opacity: .92; vector-effect: non-scaling-stroke; pointer-events: none; }
 .geo-map-country-border { fill: none; stroke: rgb(7 15 17 / 92%); stroke-width: 1.35; vector-effect: non-scaling-stroke; pointer-events: none; }
   .geo-map-region { fill: transparent; stroke: transparent; stroke-width: 2; vector-effect: non-scaling-stroke; }
   .geo-map-region:hover { fill: rgb(255 255 255 / 7%); stroke: #dce8e5; stroke-width: 1.15; }
   .geo-map-region[data-selected="true"] { fill: rgb(244 207 104 / 11%); stroke: #f4cf68; stroke-width: 2.25; }
   .geo-map-region:focus { outline: none; }
   .geo-map-region:focus { stroke: white; stroke-width: 2; }
-  .map-army-token { fill: #6b7280; stroke: #10151f; stroke-width: .25; }
+  .map-army-token { cursor: pointer; }
+  .map-army-token:focus { outline: none; }
+  .map-army-token:focus image { filter: drop-shadow(0 0 2px #f4cf68); }
 
 /* ─── Map: base image ──────────────────────────────────────────── */
 .geo-map-base-image { pointer-events: none; }
@@ -607,13 +608,28 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .map-force-label { fill: #dce8e5; font: 600 0.5px system-ui, sans-serif; pointer-events: none; paint-order: stroke; stroke: rgb(10 15 20 / 70%); stroke-width: 0.12px; }
 .map-political-label, .map-settlement-label { font-family: "Times New Roman", Times, serif; }
 .map-political-label { fill: #f4f0df; font-weight: 700; pointer-events: none; paint-order: stroke; stroke: rgb(10 15 20 / 78%); stroke-linejoin: round; }
+.map-settlement[data-damaged="true"] circle:last-of-type { stroke: #dd745b; }
+.map-settlement[data-under-siege="true"] { filter: drop-shadow(0 0 2px #e79573); }
+.map-presentation-effect { fill: none; stroke: #f4cf68; stroke-width: .28; vector-effect: non-scaling-stroke; pointer-events: none; animation: map-effect-pulse 2.8s ease-out both; }
+.map-presentation-effect-battle { stroke: #ef8d68; animation: none; }
+.map-presentation-effect-siege { stroke: #e9b75e; }
+.map-presentation-effect-occupation, .map-presentation-effect-conquest { stroke: #dce8e5; }
+.map-presentation-effect-settlement_damage { stroke: #dc725d; }
+@keyframes map-effect-pulse { from { opacity: 1; } to { opacity: 0; transform: scale(2); } }
 
 /* ─── Map: zoom-band visibility ────────────────────────────────── */
-[data-zoom="far"] .layer-settlements { display: none; }
 [data-zoom="far"] .layer-forces { display: none; }
 [data-zoom="far"] .layer-rivers { display: none; }
-[data-zoom="medium"] .map-settlement-village { display: none; }
-[data-zoom="medium"] .map-settlement-label { display: none; }
+[data-zoom="far"] .map-settlement:not(.map-settlement-capital) { display: none; }
+[data-zoom="far"] .map-settlement-label { display: none; }
+[data-zoom="far"] .map-presentation-effect:not(.map-presentation-effect-battle) { display: none; }
+[data-zoom="medium"] .map-settlement-town, [data-zoom="medium"] .map-settlement-village, [data-zoom="medium"] .map-settlement-fort, [data-zoom="medium"] .map-settlement-port { display: none; }
+[data-zoom="medium"] .map-settlement:not(.map-settlement-capital) .map-settlement-label { display: none; }
+
+.map-force-details { position: absolute; right: 1rem; bottom: 1rem; z-index: 3; display: grid; gap: .35rem; min-width: 15rem; padding: .9rem 2.2rem .9rem .9rem; color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-card); background: rgb(12 20 31 / 94%); box-shadow: 0 12px 28px rgb(0 0 0 / 28%); }
+.map-force-details strong { font-family: "Times New Roman", Times, serif; font-size: 1.1rem; }
+.map-force-details span { color: var(--text-muted); font-size: .86rem; }
+.map-force-details-close { position: absolute; top: .35rem; right: .5rem; padding: 0; color: var(--text-muted); border: 0; background: transparent; font-size: 1.3rem; line-height: 1; cursor: pointer; }
 
 .shell-contact-list { list-style: none; padding: 0; display: grid; gap: .6rem; }
 .shell-contact-list li { display: grid; gap: .15rem; }
