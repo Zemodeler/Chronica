@@ -22,4 +22,4 @@ Use Node.js 22+ and npm 11+, then run:
 npm run dev
 ```
 
-This starts the web application on localhost. No additional development scripts are introduced by this documentation set.
+This starts the web application on localhost. For a local launcher, use `hosted.sh` on macOS/Linux or `hosted.bat` on Windows; both start the same development server.

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   GameCreationSchema,
-  InviteAcceptanceSchema,
   LiveGameEventSchema,
   CredentialLoginSchema,
   CredentialRegistrationSchema,
@@ -63,11 +62,6 @@ describe("web boundary contracts", () => {
     expect(EmailAttachmentSchema.safeParse({ email: "host@example.test" }).success).toBe(true);
     expect(EmailAttachmentSchema.safeParse({ email: "not-an-address" }).success).toBe(false);
     expect(LiveGameEventSchema.safeParse({ id: "13:collecting:2", kind: "submission_count", announcement: "2 of 5 players submitted." }).success).toBe(true);
-  });
-
-  it("bounds invitation tokens before database lookup", () => {
-    expect(InviteAcceptanceSchema.safeParse({ token: "a-secure-token-value" }).success).toBe(true);
-    expect(InviteAcceptanceSchema.safeParse({ token: "short" }).success).toBe(false);
   });
 
   it("accepts only bundled avatars and normalized profile usernames", () => {

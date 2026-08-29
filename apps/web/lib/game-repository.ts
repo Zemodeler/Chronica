@@ -51,7 +51,6 @@ import {
   getPlayerGameUiState,
   getPlayerOrderForOpenTurn,
   getWorldView,
-  leaveGame as leaveGameQuery,
   listDialogueThreads,
   listHostedGames as listHostedGamesQuery,
   listJoinedGames as listJoinedGamesQuery,
@@ -70,14 +69,7 @@ import {
 import { demoMaterialView } from "./demo-material-view";
 import { demoSicilyGeoJson } from "./demo-map-geojson";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
-import { GUEST_COOKIE_NAME, readGuestSessionValue } from "./guest-session";
 import { projectConversationsView, projectNewsView, projectWorldView } from "./world-view";
-import {
-  PRIVATE_DEMO_SCENARIO_ID,
-  PRIVATE_ITALIAN_WAR_DEMO_SCENARIO_ID,
-  loadPrivateScenarioMap,
-  privateHostingEnabled,
-} from "./private-worlds";
 
 export const DEMO_GAME_ID = "demo-game";
 export const DEMO_PLAYER_ID = "player-host";
@@ -100,7 +92,7 @@ const fixtureViewer: Viewer = {
 
 const initialWorld = WorldViewModelSchema.parse({
   gameId: DEMO_GAME_ID,
-  gameTitle: "The Sicilian Crisis",
+  gameTitle: "The Numidian Decision",
   phase: "collecting",
   turnIndex: 1,
   elapsedStepLabel: "spring, 264 BCE",
@@ -111,11 +103,11 @@ const initialWorld = WorldViewModelSchema.parse({
     {
       id: "drepanum",
       name: "Drepanum",
-      controller: "Kingdom of Sicily",
+      controller: "Roman Republic",
       terrain: "Coastal plain",
       tier: "focus",
-      controlLabel: "Contested royal control",
-      garrisonLabel: "Royal host: 4,310 people",
+      controlLabel: "Contested Roman control",
+      garrisonLabel: "Roman army: 4,310 people",
       unrestLabel: "High unrest along the western road",
       knowledgeLabel: "Current report from your own station",
       x: 110,
@@ -132,10 +124,10 @@ const initialWorld = WorldViewModelSchema.parse({
     {
       id: "palermo",
       name: "Palermo",
-      controller: "Kingdom of Sicily",
+      controller: "Roman Republic",
       terrain: "Hills and harbour",
       tier: "focus",
-      controlLabel: "Firm royal control",
+      controlLabel: "Firm Roman control",
       garrisonLabel: "City watch and harbour guard",
       unrestLabel: "Low unrest",
       knowledgeLabel: "Current parliamentary reports",
@@ -153,10 +145,10 @@ const initialWorld = WorldViewModelSchema.parse({
     {
       id: "agrigentum",
       name: "Agrigentum",
-      controller: "Rebel league",
+      controller: "Carthage",
       terrain: "Dry uplands",
       tier: "near",
-      controlLabel: "Reported rebel control",
+      controlLabel: "Reported Carthaginian control",
       garrisonLabel: "Strength uncertain",
       unrestLabel: "Reports of requisitioning",
       knowledgeLabel: "Report is one step old",
@@ -174,10 +166,10 @@ const initialWorld = WorldViewModelSchema.parse({
     {
       id: "messina",
       name: "Messina",
-      controller: "Kingdom of Sicily",
+      controller: "Roman Republic",
       terrain: "Mountain strait",
       tier: "far",
-      controlLabel: "Last known royal control",
+      controlLabel: "Last known Roman control",
       garrisonLabel: "No current strength report",
       unrestLabel: "Unknown",
       knowledgeLabel: "Last confirmed three steps ago",
@@ -209,7 +201,7 @@ const initialWorld = WorldViewModelSchema.parse({
 
 const initialLobby = LobbyViewModelSchema.parse({
   gameId: DEMO_GAME_ID,
-  title: "The Sicilian Crisis",
+  title: "The Numidian Decision",
   hostName: fixtureViewer.displayName,
   startingSeatCount: 5,
   occupiedSeatCount: 0,
@@ -405,7 +397,7 @@ const createState = (): StoreState => ({
   uiState: { selectedThreadId: null, chronicleReadSequence: -1 },
   submittedBatch: null,
   characterDeclaration: { status: "none" },
-  scenarioId: PRIVATE_DEMO_SCENARIO_ID,
+  scenarioId: "first-punic-war-demo",
 });
 
 const storeHolder = globalThis as typeof globalThis & { chronicaFixtureStore?: StoreState };
@@ -417,7 +409,7 @@ function fixtureConnectedPlayerCount(): number {
   return Math.max(1, state.lobby.characters.filter((character) => character.claimedByPlayerId !== null).length);
 }
 
-const PRIVATE_DEMO_POLITY_NAMES: Readonly<Record<string, string>> = {
+const DEMO_POLITY_NAMES: Readonly<Record<string, string>> = {
   rome: "Roman Republic",
   carthage: "Carthaginian Empire",
   syracuse: "Kingdom of Syracuse",
@@ -442,17 +434,17 @@ const PRIVATE_DEMO_POLITY_NAMES: Readonly<Record<string, string>> = {
 };
 
 const DEMO_OVERLAY_PROVINCES: DynamicMapOverlay["provinces"] = [
-  { provinceId: "drepanum", controllerPolityId: "syracuse", controlFirmnessBps: 6000, terrainId: "coastal-plain", tier: "focus" },
-  { provinceId: "palermo", controllerPolityId: "syracuse", controlFirmnessBps: 8500, terrainId: "hills", tier: "focus" },
+  { provinceId: "drepanum", controllerPolityId: "rome", controlFirmnessBps: 6000, terrainId: "coastal-plain", tier: "focus" },
+  { provinceId: "palermo", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "hills", tier: "focus" },
   { provinceId: "agrigentum", controllerPolityId: "carthage", controlFirmnessBps: 4000, terrainId: "dry-uplands", tier: "near" },
-  { provinceId: "messina", controllerPolityId: "syracuse", controlFirmnessBps: 5000, terrainId: "mountain-strait", tier: "far" },
+  { provinceId: "messina", controllerPolityId: "rome", controlFirmnessBps: 5000, terrainId: "mountain-strait", tier: "far" },
 ];
 
 function demoMapOverlay(revision: number): DynamicMapOverlay {
   const polityIds = new Set(DEMO_OVERLAY_PROVINCES.flatMap((p) => p.controllerPolityId === null ? [] : [p.controllerPolityId]));
   return {
     revision,
-    polities: [...polityIds].map((polityId) => ({ polityId, name: PRIVATE_DEMO_POLITY_NAMES[polityId] ?? polityId })),
+    polities: [...polityIds].map((polityId) => ({ polityId, name: DEMO_POLITY_NAMES[polityId] ?? polityId })),
     provinces: DEMO_OVERLAY_PROVINCES,
     settlements: [],
     forces: [],
@@ -463,27 +455,19 @@ function demoMapOverlay(revision: number): DynamicMapOverlay {
 export type { GameSummaryRow };
 export type { PublicScenarioSummary };
 
-const TEMPORARY_DEMO_SCENARIOS: readonly PublicScenarioSummary[] = [
+const LOCAL_DEMO_SCENARIOS: readonly PublicScenarioSummary[] = [
   {
-    scenarioId: PRIVATE_DEMO_SCENARIO_ID,
+    scenarioId: "first-punic-war-demo",
     version: 1,
-    title: "DEMO world",
+    title: "The Numidian Decision",
     period: "264 BCE · First Punic War",
-    authorName: "Local developer fixture",
-    recommendedPlayers: 6,
-  },
-  {
-    scenarioId: PRIVATE_ITALIAN_WAR_DEMO_SCENARIO_ID,
-    version: 1,
-    title: "The Italian War, 1494 — DEMO",
-    period: "1494 · Charles VIII's Italian campaign",
-    authorName: "Local developer fixture",
-    recommendedPlayers: 5,
+    authorName: "Chronica",
+    recommendedPlayers: 1,
   },
 ];
 
 function findTemporaryDemoScenario(scenarioId: string): PublicScenarioSummary | null {
-  return TEMPORARY_DEMO_SCENARIOS.find((scenario) => scenario.scenarioId === scenarioId) ?? null;
+  return LOCAL_DEMO_SCENARIOS.find((scenario) => scenario.scenarioId === scenarioId) ?? null;
 }
 
 /**
@@ -545,7 +529,6 @@ export interface GameRepository {
   createGift(grantCredits: number, maxRedemptions: number, note: string): Promise<string>;
   consumeCreatedGift(): Promise<string | null>;
   endGame(gameId: string): Promise<void>;
-  leaveGame(gameId: string): Promise<void>;
 }
 
 export const fixtureGameRepository: GameRepository = {
@@ -559,16 +542,14 @@ export const fixtureGameRepository: GameRepository = {
     };
   },
   async listPublicScenarios() {
-    // The local DEMO fixture is deliberately discoverable from the same catalogue
-    // used to start a save. The development switch prevents it reaching production.
-    return privateHostingEnabled() ? TEMPORARY_DEMO_SCENARIOS : [];
+    return LOCAL_DEMO_SCENARIOS;
   },
   async getPublicScenario(scenarioId) {
-    return privateHostingEnabled() ? findTemporaryDemoScenario(scenarioId) : null;
+    return findTemporaryDemoScenario(scenarioId);
   },
   async createGame(input) {
     const parsed = GameCreationSchema.parse(input);
-    if (!privateHostingEnabled() || findTemporaryDemoScenario(parsed.scenarioId) === null) throw new Error("Private hosting is not enabled.");
+    if (findTemporaryDemoScenario(parsed.scenarioId) === null) throw new Error("Unknown local scenario.");
     state.lobby = LobbyViewModelSchema.parse({
       ...state.lobby,
       title: parsed.title,
@@ -652,9 +633,7 @@ export const fixtureGameRepository: GameRepository = {
       totalPlayers: connectedPlayers,
       submittedPlayers: Math.min(state.world.submittedPlayers, connectedPlayers),
     };
-    const mapGeoJson = privateHostingEnabled()
-      ? await loadPrivateScenarioMap(state.scenarioId)
-      : demoSicilyGeoJson;
+    const mapGeoJson = demoSicilyGeoJson;
     const mapOverlay = demoMapOverlay(state.revision);
     return omitGeo ? { ...world, mapOverlay } : { ...world, mapGeoJson, mapOverlay };
   },
@@ -872,9 +851,6 @@ export const fixtureGameRepository: GameRepository = {
   async endGame(gameId) {
     if (gameId === DEMO_GAME_ID) Object.assign(state, createState());
   },
-  async leaveGame() {
-    // Fixture: no-op — demo mode has no seat to vacate.
-  },
 };
 
 // A single-player-per-game Postgres implementation (docs/03, docs/04, docs/14).
@@ -895,21 +871,13 @@ async function resolveViewerUserId(): Promise<string | null> {
   return session?.user.id ?? null;
 }
 
-/** Resolves the signed-in or signed-guest viewer to their active player row. */
+/** Resolves the signed-in player to their active player row. */
 async function resolvePlayer(gameId: string): Promise<{ db: ReturnType<typeof createDatabase>["db"]; close: () => Promise<void>; playerId: string } | null> {
   const userId = await resolveViewerUserId();
+  if (userId === null) return null;
   const { db, close } = createDatabase(requiredDatabaseUrl());
   try {
-    if (userId !== null) {
-      const [player] = await db.select({ id: schema.players.id }).from(schema.players).where(and(eq(schema.players.gameId, gameId), eq(schema.players.userId, userId), eq(schema.players.status, "active"))).limit(1);
-      if (player === undefined) { await close(); return null; }
-      return { db, close, playerId: player.id };
-    }
-    const rawGuest = (await cookies()).get(GUEST_COOKIE_NAME)?.value;
-    const secret = process.env.CHRONICA_SESSION_SECRET?.trim();
-    const guest = rawGuest && secret ? readGuestSessionValue(rawGuest, secret, new Date()) : null;
-    if (guest === null || guest.gameId !== gameId) { await close(); return null; }
-    const [player] = await db.select({ id: schema.players.id }).from(schema.players).where(and(eq(schema.players.id, guest.playerId), eq(schema.players.gameId, gameId), eq(schema.players.guestSessionVersion, guest.guestSessionVersion), eq(schema.players.status, "active"))).limit(1);
+    const [player] = await db.select({ id: schema.players.id }).from(schema.players).where(and(eq(schema.players.gameId, gameId), eq(schema.players.userId, userId), eq(schema.players.status, "active"))).limit(1);
     if (player === undefined) { await close(); return null; }
     return { db, close, playerId: player.id };
   } catch (error) {
@@ -965,16 +933,14 @@ export const postgresGameRepository: GameRepository = {
     const { db, close } = createDatabase(requiredDatabaseUrl());
     try {
       const scenarios = await listPublicScenariosQuery(db, userId);
-      return privateHostingEnabled() ? [...TEMPORARY_DEMO_SCENARIOS, ...scenarios] : scenarios;
+    return [...LOCAL_DEMO_SCENARIOS, ...scenarios];
     } finally {
       await close();
     }
   },
   async getPublicScenario(scenarioId) {
-    if (privateHostingEnabled()) {
-      const temporaryScenario = findTemporaryDemoScenario(scenarioId);
-      if (temporaryScenario !== null) return temporaryScenario;
-    }
+    const temporaryScenario = findTemporaryDemoScenario(scenarioId);
+    if (temporaryScenario !== null) return temporaryScenario;
     const userId = await resolveViewerUserId();
     if (userId === null) return null;
     const { db, close } = createDatabase(requiredDatabaseUrl());
@@ -988,7 +954,7 @@ export const postgresGameRepository: GameRepository = {
     const parsed = GameCreationSchema.parse(input);
     const userId = await resolveViewerUserId();
     if (userId === null) throw new Error("An account is required to host a saved game.");
-    if (privateHostingEnabled() && findTemporaryDemoScenario(parsed.scenarioId) !== null) return fixtureGameRepository.createGame(parsed);
+    if (findTemporaryDemoScenario(parsed.scenarioId) !== null) return fixtureGameRepository.createGame(parsed);
 
     const { db, close } = createDatabase(requiredDatabaseUrl());
     try {
@@ -1008,7 +974,7 @@ export const postgresGameRepository: GameRepository = {
     }
   },
   async needsCharacterDeclaration(gameId) {
-    if (privateHostingEnabled() && gameId === DEMO_GAME_ID) return fixtureGameRepository.needsCharacterDeclaration(gameId);
+    if (gameId === DEMO_GAME_ID) return fixtureGameRepository.needsCharacterDeclaration(gameId);
     const resolved = await resolvePlayer(gameId);
     if (resolved === null) throw new Error("This account or guest session cannot access the save.");
     const { db, close, playerId } = resolved;
@@ -1031,7 +997,7 @@ export const postgresGameRepository: GameRepository = {
     }
   },
   async getLobby(gameId) {
-    if (privateHostingEnabled() && gameId === DEMO_GAME_ID) return fixtureGameRepository.getLobby(gameId);
+    if (gameId === DEMO_GAME_ID) return fixtureGameRepository.getLobby(gameId);
     const resolved = await resolvePlayer(gameId);
     if (resolved === null) throw new Error("This account or guest session cannot access the save.");
     const { db, close } = resolved;
@@ -1072,7 +1038,7 @@ export const postgresGameRepository: GameRepository = {
     }
   },
   async requestCharacterDeclaration(gameId, declaration) {
-    if (privateHostingEnabled() && gameId === DEMO_GAME_ID) {
+    if (gameId === DEMO_GAME_ID) {
       return fixtureGameRepository.requestCharacterDeclaration(gameId, declaration);
     }
     const resolved = await resolvePlayer(gameId);
@@ -1090,7 +1056,7 @@ export const postgresGameRepository: GameRepository = {
     }
   },
   async getCharacterDeclarationStatus(gameId) {
-    if (privateHostingEnabled() && gameId === DEMO_GAME_ID) {
+    if (gameId === DEMO_GAME_ID) {
       return fixtureGameRepository.getCharacterDeclarationStatus(gameId);
     }
     const resolved = await resolvePlayer(gameId);
@@ -1117,7 +1083,7 @@ export const postgresGameRepository: GameRepository = {
     }
   },
   async getWorld(gameId, lowBandwidth = false, omitGeo = false) {
-    if (privateHostingEnabled() && gameId === DEMO_GAME_ID) return fixtureGameRepository.getWorld(gameId, lowBandwidth, omitGeo);
+    if (gameId === DEMO_GAME_ID) return fixtureGameRepository.getWorld(gameId, lowBandwidth, omitGeo);
     const resolved = await currentViewerCharacter(gameId);
     if (resolved === null) throw new Error("This account or guest session cannot access the save.");
     const { db, close, characterId } = resolved;
@@ -1139,20 +1105,20 @@ export const postgresGameRepository: GameRepository = {
     }
   },
   async getGameRevision(gameId) {
-    if (privateHostingEnabled() && gameId === DEMO_GAME_ID) return fixtureGameRepository.getGameRevision(gameId);
+    if (gameId === DEMO_GAME_ID) return fixtureGameRepository.getGameRevision(gameId);
     const databaseUrl = process.env.DATABASE_URL?.trim();
     if (databaseUrl === undefined || databaseUrl === "") return fixtureGameRepository.getGameRevision(gameId);
     return getGameRevisionQuery(getSharedDatabase(databaseUrl), gameId);
   },
   async getLatestTurnEventMeta(gameId) {
-    if (privateHostingEnabled() && gameId === DEMO_GAME_ID) return fixtureGameRepository.getLatestTurnEventMeta(gameId);
+    if (gameId === DEMO_GAME_ID) return fixtureGameRepository.getLatestTurnEventMeta(gameId);
     const databaseUrl = process.env.DATABASE_URL?.trim();
     if (databaseUrl === undefined || databaseUrl === "") return fixtureGameRepository.getLatestTurnEventMeta(gameId);
     const meta = await getLatestTurnEventMetaQuery(getSharedDatabase(databaseUrl), gameId);
     return meta ?? null;
   },
   async submitOrders(gameId, batch) {
-    if (privateHostingEnabled() && gameId === DEMO_GAME_ID) {
+    if (gameId === DEMO_GAME_ID) {
       await fixtureGameRepository.submitOrders(gameId, batch);
       return;
     }
@@ -1173,7 +1139,7 @@ export const postgresGameRepository: GameRepository = {
     }
   },
   async getOrdersStatus(gameId) {
-    if (privateHostingEnabled() && gameId === DEMO_GAME_ID) return fixtureGameRepository.getOrdersStatus(gameId);
+    if (gameId === DEMO_GAME_ID) return fixtureGameRepository.getOrdersStatus(gameId);
     const resolved = await resolvePlayer(gameId);
     if (resolved === null) throw new Error("This account or guest session cannot access the save.");
     const { db, close, playerId } = resolved;
@@ -1193,7 +1159,7 @@ export const postgresGameRepository: GameRepository = {
     }
   },
   async getNews(gameId) {
-    if (privateHostingEnabled() && gameId === DEMO_GAME_ID) return fixtureGameRepository.getNews(gameId);
+    if (gameId === DEMO_GAME_ID) return fixtureGameRepository.getNews(gameId);
     const resolved = await resolvePlayer(gameId);
     if (resolved === null) throw new Error("This account or guest session cannot access the save.");
     const { db, close, playerId } = resolved;
@@ -1421,16 +1387,6 @@ export const postgresGameRepository: GameRepository = {
     const { db, close } = createDatabase(requiredDatabaseUrl());
     try {
       await requestGameEnd(db, gameId, userId);
-    } finally {
-      await close();
-    }
-  },
-  async leaveGame(gameId) {
-    const userId = await resolveViewerUserId();
-    if (userId === null) throw new Error("An account is required to leave an account-owned save.");
-    const { db, close } = createDatabase(requiredDatabaseUrl());
-    try {
-      await leaveGameQuery(db, gameId, userId);
     } finally {
       await close();
     }

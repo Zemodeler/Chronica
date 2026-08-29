@@ -1,15 +1,20 @@
 @echo off
+setlocal
 cd /d "%~dp0"
 
-echo Installing dependencies...
-call npm install
-if %ERRORLEVEL% neq 0 (
-    echo npm install failed.
-    pause
-    exit /b %ERRORLEVEL%
+where npm >nul 2>nul
+if errorlevel 1 (
+    echo npm is required. Install Node.js 22 or newer, then run this script again.
+    exit /b 1
 )
 
-echo Starting Chronica...
+if not exist node_modules (
+    echo Installing dependencies...
+    call npm ci
+    if errorlevel 1 exit /b %ERRORLEVEL%
+)
+
+echo Starting Chronica at http://localhost:3000
+echo Press Ctrl-C to stop the local server.
 start "" "http://localhost:3000"
 call npm run dev
-pause

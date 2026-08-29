@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import { redirect } from "next/navigation";
-import { deleteSaveSlot, leaveGame } from "./actions";
+import { deleteSaveSlot } from "./actions";
 import { StatusMessage } from "./components/status-message";
 import { gameRepository } from "../lib/game-repository";
 
@@ -20,14 +20,14 @@ export default async function HomePage({
     }
     throw error;
   }
-  const { hosted, joined } = saves;
+  const { hosted } = saves;
   const featured = hosted[0] ?? null;
   const atCap = hosted.length >= 3;
 
   return (
     <main id="main-content" className="dashboard-shell">
       {params.status === "left" && (
-        <StatusMessage id="status">You have left the game. Your seat may be claimed by another player.</StatusMessage>
+        <StatusMessage id="status">The save is no longer open.</StatusMessage>
       )}
       {params.status === "deleted" && (
         <StatusMessage id="status">The save was deleted and its host slot is available again.</StatusMessage>
@@ -44,7 +44,7 @@ export default async function HomePage({
           <div className="featured-content">
             <h2 className="featured-title">{featured.title}</h2>
             <p className="featured-meta">
-              {featured.status === "lobby" ? "In lobby · waiting for players" : "Active · turn in progress"}
+              {featured.status === "lobby" ? "Preparing your character" : "Active · turn in progress"}
             </p>
             <div className="featured-actions">
               <a className="button" href={`/games/${featured.gameId}`}>Continue</a>
@@ -53,7 +53,7 @@ export default async function HomePage({
         </section>
       )}
 
-      <section aria-label="Hosted game slots">
+      <section aria-label="Your saves">
         <div className="slot-rail">
           {hosted.map((game, i) => (
             <article key={game.gameId} className="slot-card">
@@ -64,7 +64,7 @@ export default async function HomePage({
               <div className="slot-body">
                 <h3 className="slot-title">{game.title}</h3>
                 <p className="slot-meta">
-                  {game.status === "lobby" ? "In lobby" : "Active"}
+                  {game.status === "lobby" ? "Preparing your character" : "Active"}
                 </p>
                 <div className="slot-actions">
                   <a className="button sm" href={`/games/${game.gameId}`}>Continue</a>
@@ -82,7 +82,7 @@ export default async function HomePage({
                 <span className="slot-number">{String(hosted.length + 1).padStart(2, "0")}</span>
               </div>
               <div className="slot-body">
-                <h3 className="slot-title">New host slot</h3>
+                <h3 className="slot-title">New save</h3>
                 <p className="slot-meta">Start a world</p>
                 <div className="slot-actions">
                   <a className="button sm" href="/worlds">Find a world</a>
@@ -92,31 +92,6 @@ export default async function HomePage({
           )}
         </div>
       </section>
-
-      {joined.length > 0 && (
-        <section className="joined-section" aria-label="Games you have joined">
-          <p className="section-label">Joined games</p>
-          <ul className="joined-list">
-            {joined.map((game) => (
-              <li key={game.gameId} className="joined-item">
-                <div className="joined-info">
-                  <span className="joined-title">{game.title}</span>
-                  <span className="joined-meta">
-                    {game.status === "lobby" ? "In lobby" : "Active"}
-                  </span>
-                </div>
-                <div className="joined-actions">
-                  <a className="button sm" href={`/games/${game.gameId}`}>Continue</a>
-                  <form action={leaveGame} style={{ display: "contents" }}>
-                    <input type="hidden" name="gameId" value={game.gameId} />
-                    <button className="button sm secondary" type="submit">Leave</button>
-                  </form>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
 
     </main>
   );

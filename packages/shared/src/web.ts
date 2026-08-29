@@ -31,11 +31,6 @@ export type EmailAttachment = z.infer<typeof EmailAttachmentSchema>;
 export const PasswordResetRequestSchema = z.object({ email: EmailAddressSchema }).strict();
 export type PasswordResetRequest = z.infer<typeof PasswordResetRequestSchema>;
 
-export const InviteAcceptanceSchema = z
-  .object({ token: z.string().trim().min(12).max(256) })
-  .strict();
-export type InviteAcceptance = z.infer<typeof InviteAcceptanceSchema>;
-
 export const GameCreationSchema = z
   .object({
     title: z.string().trim().min(3).max(120),
