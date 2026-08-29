@@ -1,401 +1,52 @@
 "use client";
 
-import { useMemo, useCallback, type PointerEvent, type KeyboardEvent } from "react";
-import type { GeoJsonMap, GeoJsonMapFeature, DynamicMapOverlay } from "@chronica/shared";
-import {
-  geometryToSvgPath,
-  computeViewBox,
-  projectCoordinate,
-  polityColorWithAlpha,
-} from "./geo-projection";
+import { useMemo, useCallback, type KeyboardEvent, type PointerEvent } from "react";
+import type { DynamicMapOverlay, GeoJsonMap } from "@chronica/shared";
+import { computeViewBox, polityColorWithAlpha, projectCoordinate } from "./geo-projection";
 import { derivePoliticalLabels } from "./political-labels";
+import { derivePoliticalMapState, type PoliticalOverlayInput } from "./political-geometry";
+import { prepareStaticWorldGeometry } from "./world-geometry";
 
 type ZoomBand = "far" | "medium" | "close";
+interface GeoMapProps { readonly geoJson: GeoJsonMap; readonly overlay: DynamicMapOverlay | null; readonly selectedProvinceId: string | null; readonly zoomBand: ZoomBand; readonly scale: number; readonly baseImageUrl: string | undefined; readonly detailImageUrl?: string | undefined; readonly onProvinceHover: (provinceId: string | null, event?: PointerEvent) => void; readonly onProvinceClick: (provinceId: string) => void; }
 
-interface GeoMapProps {
-  readonly geoJson: GeoJsonMap;
-  readonly overlay: DynamicMapOverlay | null;
-  readonly selectedProvinceId: string | null;
-  readonly zoomBand: ZoomBand;
-  readonly scale: number;
-  readonly baseImageUrl: string | undefined;
-  readonly detailImageUrl?: string | undefined;
-  readonly onProvinceHover: (
-    provinceId: string | null,
-    event?: PointerEvent,
-  ) => void;
-  readonly onProvinceClick: (provinceId: string) => void;
-}
+function settlementRadius(type: string): number { return type === "capital" ? .8 : type === "city" ? .7 : type === "town" ? .45 : type === "fort" || type === "port" ? .5 : .3; }
+function politicalIdentity(overlay: DynamicMapOverlay | null) { return overlay === null ? "" : `${overlay.polities.map((polity) => `${polity.polityId}:${polity.name}`).sort().join("|")}#${overlay.provinces.map((province) => `${province.provinceId}:${province.controllerPolityId ?? ""}`).sort().join("|")}`; }
 
-interface PreparedFeatures {
-  provinces: { feature: GeoJsonMapFeature; path: string }[];
-  rivers: { feature: GeoJsonMapFeature; path: string }[];
-  settlements: { feature: GeoJsonMapFeature; x: number; y: number }[];
-}
-
-function prepareFeatures(map: GeoJsonMap): PreparedFeatures {
-  const provinces: PreparedFeatures["provinces"] = [];
-  const rivers: PreparedFeatures["rivers"] = [];
-  const settlements: PreparedFeatures["settlements"] = [];
-
-  for (const feature of map.features) {
-    switch (feature.properties.kind) {
-      case "province": {
-        const path = geometryToSvgPath(feature.geometry);
-        if (path) provinces.push({ feature, path });
-        break;
-      }
-      case "river": {
-        const path = geometryToSvgPath(feature.geometry);
-        if (path) rivers.push({ feature, path });
-        break;
-      }
-      case "settlement": {
-        if (feature.geometry.type === "Point") {
-          const [x, y] = projectCoordinate(
-            feature.geometry.coordinates[0],
-            feature.geometry.coordinates[1],
-          );
-          settlements.push({ feature, x, y });
-        }
-        break;
-      }
-    }
-  }
-
-  return { provinces, rivers, settlements };
-}
-
-function settlementRadius(type: string): number {
-  switch (type) {
-    case "capital":
-      return 0.8;
-    case "city":
-      return 0.7;
-    case "town":
-      return 0.45;
-    case "fort":
-      return 0.5;
-    case "port":
-      return 0.5;
-    default:
-      return 0.3;
-  }
-}
-
-export function GeoMap({
-  geoJson,
-  overlay,
-  selectedProvinceId,
-  zoomBand,
-  scale,
-  baseImageUrl,
-  detailImageUrl,
-  onProvinceHover,
-  onProvinceClick,
-}: GeoMapProps) {
+/** SVG view over immutable world geometry and derived political/dynamic map data. */
+export function GeoMap({ geoJson, overlay, selectedProvinceId, zoomBand, scale, baseImageUrl, detailImageUrl, onProvinceHover, onProvinceClick }: GeoMapProps) {
   const invScale = 1 / scale;
   const viewBox = useMemo(() => computeViewBox(geoJson), [geoJson]);
-  const prepared = useMemo(() => prepareFeatures(geoJson), [geoJson]);
+  const world = useMemo(() => prepareStaticWorldGeometry(geoJson), [geoJson]);
+  const politicsKey = politicalIdentity(overlay);
+  const politicalInput = useMemo<PoliticalOverlayInput | null>(() => overlay === null ? null : ({ polities: overlay.polities, provinces: overlay.provinces }), [politicsKey]);
+  const political = useMemo(() => derivePoliticalMapState(world, politicalInput), [world, politicalInput]);
+  const politicalLabels = useMemo(() => derivePoliticalLabels(political, zoomBand), [political, zoomBand]);
+  const settlementOverlay = useMemo(() => new Map(overlay?.settlements.map((settlement) => [settlement.settlementId, settlement]) ?? []), [overlay]);
+  const countryBorders = useMemo(() => political.borderSegments.filter((border) => border.classification === "country_border").map((border) => border.svgPath).join(""), [political]);
 
-  type ProvinceOverlayEntry = DynamicMapOverlay["provinces"][number];
-  type SettlementOverlayEntry = DynamicMapOverlay["settlements"][number];
+  const handlePointerEnter = useCallback((event: PointerEvent<SVGPathElement>) => { const id = event.currentTarget.dataset.provinceId; if (id) onProvinceHover(id, event); }, [onProvinceHover]);
+  const handlePointerLeave = useCallback(() => onProvinceHover(null), [onProvinceHover]);
+  const handleClick = useCallback((event: React.MouseEvent<SVGPathElement>) => { const id = event.currentTarget.dataset.provinceId; if (id) onProvinceClick(id); }, [onProvinceClick]);
+  const handleKeyDown = useCallback((event: KeyboardEvent<SVGPathElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); const id = event.currentTarget.dataset.provinceId; if (id) onProvinceClick(id); } }, [onProvinceClick]);
 
-  const provinceOverlay = useMemo(() => {
-    if (!overlay) return new Map<string, ProvinceOverlayEntry>();
-    return new Map(overlay.provinces.map((p) => [p.provinceId, p]));
-  }, [overlay]);
+  const forceMarkers = useMemo(() => (overlay?.forces ?? []).map((force) => {
+    if (force.coordinate) { const [x, y] = projectCoordinate(force.coordinate[0], force.coordinate[1]); return { ...force, x, y }; }
+    const province = world.provinceById.get(force.provinceId); const [x, y] = province ? projectCoordinate(province.centroid[0], province.centroid[1]) : [0, 0];
+    return { ...force, x, y };
+  }), [overlay?.forces, world]);
 
-  const settlementOverlay = useMemo(() => {
-    if (!overlay) return new Map<string, SettlementOverlayEntry>();
-    return new Map(overlay.settlements.map((s) => [s.settlementId, s]));
-  }, [overlay]);
-
-  const politicalLabels = useMemo(
-    () => derivePoliticalLabels(geoJson, overlay),
-    [geoJson, overlay],
-  );
-
-  const handlePointerEnter = useCallback(
-    (e: PointerEvent<SVGPathElement>) => {
-      const id = e.currentTarget.dataset.provinceId;
-      if (id) onProvinceHover(id, e);
-    },
-    [onProvinceHover],
-  );
-
-  const handlePointerLeave = useCallback(() => {
-    onProvinceHover(null);
-  }, [onProvinceHover]);
-
-  const handleClick = useCallback(
-    (e: React.MouseEvent<SVGPathElement>) => {
-      const id = e.currentTarget.dataset.provinceId;
-      if (id) onProvinceClick(id);
-    },
-    [onProvinceClick],
-  );
-
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent<SVGPathElement>) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        const id = e.currentTarget.dataset.provinceId;
-        if (id) onProvinceClick(id);
-      }
-    },
-    [onProvinceClick],
-  );
-
-  const forceMarkers = useMemo(() => {
-    if (!overlay) return [];
-    return overlay.forces.map((force) => {
-      if (force.coordinate) {
-        const [x, y] = projectCoordinate(force.coordinate[0], force.coordinate[1]);
-        return { ...force, x, y };
-      }
-      const province = prepared.provinces.find(
-        (r) => r.feature.id === force.provinceId,
-      );
-      if (province && province.feature.geometry.type !== "Point") {
-        const coords =
-          province.feature.geometry.type === "Polygon"
-            ? province.feature.geometry.coordinates[0]
-            : province.feature.geometry.type === "MultiPolygon"
-              ? province.feature.geometry.coordinates[0]?.[0]
-              : undefined;
-        if (coords && coords.length > 0) {
-          let cx = 0;
-          let cy = 0;
-          const n = coords.length - 1;
-          for (let i = 0; i < n; i++) {
-            cx += coords[i]![0];
-            cy += coords[i]![1];
-          }
-          const [x, y] = projectCoordinate(cx / n, cy / n);
-          return { ...force, x, y };
-        }
-      }
-      return { ...force, x: 0, y: 0 };
-    });
-  }, [overlay, prepared.provinces]);
-
-  return (
-    <svg
-      viewBox={viewBox}
-      xmlns="http://www.w3.org/2000/svg"
-      data-zoom={zoomBand}
-      preserveAspectRatio="xMidYMid meet"
-    >
-      {/* Layer 1: Water background (fallback when no base image) */}
-      <rect
-        x="-180"
-        y="-90"
-        width="360"
-        height="180"
-        className="geo-map-water"
-      />
-
-      {/* Layer 2: Base image (full-world ocean/terrain background) */}
-      {baseImageUrl && (
-        <image
-          href={baseImageUrl}
-          x="-180"
-          y="-90"
-          width="360"
-          height="180"
-          preserveAspectRatio="none"
-          className="geo-map-base-image"
-        />
-      )}
-
-      {/* Layer 2b: Regional detail image (Europe + North Africa, lon -25..60, lat 15..72) */}
-      {detailImageUrl && (
-        <image
-          href={detailImageUrl}
-          x="-25"
-          y="-72"
-          width="85"
-          height="57"
-          preserveAspectRatio="none"
-          className="geo-map-base-image"
-        />
-      )}
-
-      {/* Layer 3: Terrain polygons */}
-      <g className="map-layer-terrain">
-        {prepared.provinces.map(({ feature, path }) => (
-          <path key={feature.id} d={path} />
-        ))}
-      </g>
-
-      {/* Layer 4: Rivers */}
-      <g className="layer-rivers">
-        {prepared.rivers.map(({ feature, path }) => {
-          const cls =
-            feature.properties.kind === "river"
-              ? `geo-map-river geo-map-river-${feature.properties.class}`
-              : "geo-map-river";
-          return <path key={feature.id} d={path} className={cls} />;
-        })}
-      </g>
-
-      {/* Layer 5: Political overlays */}
-      <g className="map-layer-political">
-        {prepared.provinces.map(({ feature, path }) => {
-          const prov = provinceOverlay.get(feature.id);
-          if (!prov?.controllerPolityId) return null;
-          const fill = polityColorWithAlpha(prov.controllerPolityId, 0.45);
-          return <path key={feature.id} d={path} fill={fill} />;
-        })}
-      </g>
-
-      {/* Layer 6: Province borders */}
-      <g className="layer-borders">
-        {prepared.provinces.map(({ feature, path }) => (
-          <path
-            key={feature.id}
-            d={path}
-            className="geo-map-minor-border"
-          />
-        ))}
-      </g>
-
-      {/* Layer 7: Interactive hit areas */}
-      <g className="layer-hit-areas">
-        {prepared.provinces.map(({ feature, path }) => {
-          const name =
-            feature.properties.kind === "province"
-              ? feature.properties.name
-              : feature.id;
-          return (
-            <path
-              key={feature.id}
-              d={path}
-              className="geo-map-region"
-              data-province-id={feature.id}
-              data-selected={
-                selectedProvinceId === feature.id ? "true" : undefined
-              }
-              tabIndex={0}
-              role="button"
-              aria-label={name}
-              onPointerEnter={handlePointerEnter}
-              onPointerLeave={handlePointerLeave}
-              onClick={handleClick}
-              onKeyDown={handleKeyDown}
-            />
-          );
-        })}
-      </g>
-
-      {/* Layer 8: Primary political labels */}
-      {zoomBand !== "close" && (
-        <g className="layer-political-labels">
-          {politicalLabels.map((label) => {
-            const [x, y] = projectCoordinate(label.coordinate[0], label.coordinate[1]);
-            return (
-              <text
-                key={label.polityId}
-                x={x}
-                y={y}
-                textAnchor="middle"
-                className="map-political-label"
-                style={{
-                  fontSize: `${3.5 * invScale}px`,
-                  letterSpacing: `${0.45 * invScale}px`,
-                  strokeWidth: `${0.18 * invScale}px`,
-                }}
-              >
-                {label.name.toUpperCase()}
-              </text>
-            );
-          })}
-        </g>
-      )}
-
-      {/* Layer 9: Settlement markers */}
-      <g className="layer-settlements">
-        {prepared.settlements.map(({ feature, x, y }) => {
-          const props = feature.properties;
-          if (props.kind !== "settlement") return null;
-          const r = settlementRadius(props.type) * invScale;
-          const so = settlementOverlay.get(feature.id);
-          const fill = so?.controllerPolityId
-            ? polityColorWithAlpha(so.controllerPolityId, 0.9)
-            : "#c8b88a";
-          const labelOffset = 0.8 * invScale;
-          const fontSize = 0.55 * invScale;
-          const labelStroke = 0.12 * invScale;
-          return (
-            <g key={feature.id} className={`map-settlement map-settlement-${props.type}`}>
-              <circle cx={x} cy={y} r={r} fill={fill} stroke="#10151f" strokeWidth={0.15 * invScale} />
-              <text
-                x={x}
-                y={y + r + labelOffset}
-                textAnchor="middle"
-                className="map-settlement-label"
-                style={{
-                  fill: "#dce8e5",
-                  font: `500 ${fontSize}px system-ui, sans-serif`,
-                  pointerEvents: "none",
-                  paintOrder: "stroke",
-                  stroke: "rgb(10 15 20 / 70%)",
-                  strokeWidth: `${labelStroke}px`,
-                }}
-              >
-                {props.name}
-              </text>
-            </g>
-          );
-        })}
-      </g>
-
-      {/* Layer 10: Force markers */}
-      <g className="layer-forces">
-        {forceMarkers.map((force) => {
-          const fill = polityColorWithAlpha(force.ownerPolityId, 0.9);
-          return (
-            <g key={force.forceId}>
-              {force.movement && (
-                <path
-                  className="geo-map-movement-path"
-                  d={force.movement.path
-                    .map((pos, i) => {
-                      const [px, py] = projectCoordinate(pos[0], pos[1]);
-                      return i === 0 ? `M${px} ${py}` : `L${px} ${py}`;
-                    })
-                    .join("")}
-                />
-              )}
-              <rect
-                x={force.x - 0.8 * invScale}
-                y={force.y - 0.5 * invScale}
-                width={1.6 * invScale}
-                height={invScale}
-                rx={0.15 * invScale}
-                className="map-army-token"
-                fill={fill}
-              />
-              <text
-                x={force.x}
-                y={force.y + 1.3 * invScale}
-                textAnchor="middle"
-                style={{
-                  fill: "#dce8e5",
-                  font: `600 ${0.5 * invScale}px system-ui, sans-serif`,
-                  pointerEvents: "none",
-                  paintOrder: "stroke",
-                  stroke: "rgb(10 15 20 / 70%)",
-                  strokeWidth: `${0.12 * invScale}px`,
-                }}
-              >
-                {force.strengthLabel}
-              </text>
-            </g>
-          );
-        })}
-      </g>
-    </svg>
-  );
+  return <svg viewBox={viewBox} xmlns="http://www.w3.org/2000/svg" data-zoom={zoomBand} preserveAspectRatio="xMidYMid meet">
+    <rect x="-180" y="-90" width="360" height="180" className="geo-map-water" />
+    {baseImageUrl && <image href={baseImageUrl} x="-180" y="-90" width="360" height="180" preserveAspectRatio="none" className="geo-map-base-image" />}
+    {detailImageUrl && <image href={detailImageUrl} x="-25" y="-72" width="85" height="57" preserveAspectRatio="none" className="geo-map-base-image" />}
+    <g className="map-layer-terrain">{world.provinces.map((province) => <path key={province.id} d={province.svgPath} />)}</g>
+    <g className="layer-rivers">{world.rivers.map((river) => <path key={river.id} d={river.svgPath} className={`geo-map-river geo-map-river-${river.className}`} />)}</g>
+    <g className="map-layer-political">{world.provinces.map((province) => { const owner = political.ownerByProvince.get(province.id); return owner ? <path key={province.id} d={province.svgPath} fill={polityColorWithAlpha(owner, .45)} /> : null; })}</g>
+    {political.territories.length > 0 && <g className="layer-political-borders"><path d={countryBorders} className="geo-map-country-border" /></g>}
+    <g className="layer-dynamic-selection">{world.provinces.map((province) => <path key={province.id} d={province.svgPath} className="geo-map-region" data-province-id={province.id} data-selected={selectedProvinceId === province.id ? "true" : undefined} tabIndex={0} role="button" aria-label={province.name} onPointerEnter={handlePointerEnter} onPointerLeave={handlePointerLeave} onClick={handleClick} onKeyDown={handleKeyDown} />)}</g>
+    <g className="layer-political-labels">{politicalLabels.map((label) => <text key={label.polityId} x={label.x} y={label.y} transform={`rotate(${label.angle} ${label.x} ${label.y})`} textAnchor="middle" className="map-political-label" style={{ fontSize: `${label.fontSize}px`, letterSpacing: `${label.letterSpacing}px`, strokeWidth: ".16px" }}>{label.name.toUpperCase()}</text>)}</g>
+    <g className="layer-settlements">{world.settlements.map((settlement) => { const radius = settlementRadius(settlement.type) * invScale; const state = settlementOverlay.get(settlement.id); const fill = state?.controllerPolityId ? polityColorWithAlpha(state.controllerPolityId, .9) : "#c8b88a"; return <g key={settlement.id} className={`map-settlement map-settlement-${settlement.type}`}><circle cx={settlement.projected[0]} cy={settlement.projected[1]} r={radius} fill={fill} stroke="#10151f" strokeWidth={.15 * invScale} /><text x={settlement.projected[0]} y={settlement.projected[1] + radius + .8 * invScale} textAnchor="middle" className="map-settlement-label" style={{ fontSize: ".55px", strokeWidth: ".12px" }}>{settlement.name}</text></g>; })}</g>
+    <g className="layer-forces">{forceMarkers.map((force) => { const fill = polityColorWithAlpha(force.ownerPolityId, .9); return <g key={force.forceId}>{force.movement && <path className="geo-map-movement-path" d={force.movement.path.map((position, index) => { const [x, y] = projectCoordinate(position[0], position[1]); return index === 0 ? `M${x} ${y}` : `L${x} ${y}`; }).join("")} />}<rect x={force.x - .8 * invScale} y={force.y - .5 * invScale} width={1.6 * invScale} height={invScale} rx={.15 * invScale} className="map-army-token" fill={fill} /><text x={force.x} y={force.y + 1.3 * invScale} textAnchor="middle" className="map-force-label" style={{ fontSize: `${.5 * invScale}px`, strokeWidth: `${.12 * invScale}px` }}>{force.strengthLabel}</text></g>; })}</g>
+  </svg>;
 }
