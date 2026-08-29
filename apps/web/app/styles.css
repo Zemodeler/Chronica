@@ -591,7 +591,7 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
   .geo-map-road-major, .geo-map-road-roman { stroke-width: .8; opacity: .9; }
   .geo-map-road-trade_route { stroke: #dfc47d; stroke-width: .9; stroke-dasharray: 3 1.25; }
   .geo-map-movement-path { fill: none; stroke: #f4cf68; stroke-width: 1.3; stroke-dasharray: 3 2; opacity: .92; vector-effect: non-scaling-stroke; pointer-events: none; }
-.geo-map-minor-border { fill: none; stroke: rgb(13 25 26 / 70%); stroke-width: .55; vector-effect: non-scaling-stroke; pointer-events: none; }
+.geo-map-country-border { fill: none; stroke: rgb(7 15 17 / 92%); stroke-width: 1.35; vector-effect: non-scaling-stroke; pointer-events: none; }
   .geo-map-region { fill: transparent; stroke: transparent; stroke-width: 2; vector-effect: non-scaling-stroke; }
   .geo-map-region:hover { fill: rgb(255 255 255 / 7%); stroke: #dce8e5; stroke-width: 1.15; }
   .geo-map-region[data-selected="true"] { fill: rgb(244 207 104 / 11%); stroke: #f4cf68; stroke-width: 2.25; }
@@ -605,9 +605,10 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 /* ─── Map: settlement and force labels ─────────────────────────── */
 .map-settlement-label { fill: #dce8e5; font: 500 0.55px system-ui, sans-serif; pointer-events: none; paint-order: stroke; stroke: rgb(10 15 20 / 70%); stroke-width: 0.12px; }
 .map-force-label { fill: #dce8e5; font: 600 0.5px system-ui, sans-serif; pointer-events: none; paint-order: stroke; stroke: rgb(10 15 20 / 70%); stroke-width: 0.12px; }
+.map-political-label, .map-settlement-label { font-family: "Times New Roman", Times, serif; }
+.map-political-label { fill: #f4f0df; font-weight: 700; pointer-events: none; paint-order: stroke; stroke: rgb(10 15 20 / 78%); stroke-linejoin: round; }
 
 /* ─── Map: zoom-band visibility ────────────────────────────────── */
-[data-zoom="far"] .layer-borders { display: none; }
 [data-zoom="far"] .layer-settlements { display: none; }
 [data-zoom="far"] .layer-forces { display: none; }
 [data-zoom="far"] .layer-rivers { display: none; }
