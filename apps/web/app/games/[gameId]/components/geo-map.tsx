@@ -8,6 +8,7 @@ import {
   projectCoordinate,
   polityColorWithAlpha,
 } from "./geo-projection";
+import { derivePoliticalLabels } from "./political-labels";
 
 type ZoomBand = "far" | "medium" | "close";
 
@@ -109,6 +110,11 @@ export function GeoMap({
     if (!overlay) return new Map<string, SettlementOverlayEntry>();
     return new Map(overlay.settlements.map((s) => [s.settlementId, s]));
   }, [overlay]);
+
+  const politicalLabels = useMemo(
+    () => derivePoliticalLabels(geoJson, overlay),
+    [geoJson, overlay],
+  );
 
   const handlePointerEnter = useCallback(
     (e: PointerEvent<SVGPathElement>) => {
@@ -283,7 +289,32 @@ export function GeoMap({
         })}
       </g>
 
-      {/* Layer 8: Settlement markers */}
+      {/* Layer 8: Primary political labels */}
+      {zoomBand !== "close" && (
+        <g className="layer-political-labels">
+          {politicalLabels.map((label) => {
+            const [x, y] = projectCoordinate(label.coordinate[0], label.coordinate[1]);
+            return (
+              <text
+                key={label.polityId}
+                x={x}
+                y={y}
+                textAnchor="middle"
+                className="map-political-label"
+                style={{
+                  fontSize: `${3.5 * invScale}px`,
+                  letterSpacing: `${0.45 * invScale}px`,
+                  strokeWidth: `${0.18 * invScale}px`,
+                }}
+              >
+                {label.name.toUpperCase()}
+              </text>
+            );
+          })}
+        </g>
+      )}
+
+      {/* Layer 9: Settlement markers */}
       <g className="layer-settlements">
         {prepared.settlements.map(({ feature, x, y }) => {
           const props = feature.properties;
@@ -303,6 +334,7 @@ export function GeoMap({
                 x={x}
                 y={y + r + labelOffset}
                 textAnchor="middle"
+                className="map-settlement-label"
                 style={{
                   fill: "#dce8e5",
                   font: `500 ${fontSize}px system-ui, sans-serif`,
@@ -319,7 +351,7 @@ export function GeoMap({
         })}
       </g>
 
-      {/* Layer 9: Force markers */}
+      {/* Layer 10: Force markers */}
       <g className="layer-forces">
         {forceMarkers.map((force) => {
           const fill = polityColorWithAlpha(force.ownerPolityId, 0.9);

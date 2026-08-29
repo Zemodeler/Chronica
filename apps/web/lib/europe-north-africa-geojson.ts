@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { GeoJsonMap } from "@chronica/shared";
+import { romeCalibrationSettlement } from "./calibration-map-features";
 
 /**
  * Europe and Northern Africa ADM1 boundaries from geoBoundaries gbOpen.
@@ -8,4 +9,9 @@ import type { GeoJsonMap } from "@chronica/shared";
  * Source metadata: https://www.geoboundaries.org/api/current/gbOpen/ALL/ADM1/
  */
 const mapPath = join(process.cwd(), "public", "maps", "europe-north-africa-adm1.geojson");
-export const europeNorthAfricaGeoJson = JSON.parse(readFileSync(mapPath, "utf8")) as GeoJsonMap;
+const regionalMap = JSON.parse(readFileSync(mapPath, "utf8")) as GeoJsonMap;
+
+export const europeNorthAfricaGeoJson: GeoJsonMap = {
+  ...regionalMap,
+  features: [...regionalMap.features, romeCalibrationSettlement],
+};
