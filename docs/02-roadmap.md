@@ -6,9 +6,10 @@ Goal: a playable single-player prototype in which a player-created character act
 
 1. Character prompt, AI-generated context, light player confirmation, and single-player game start.
 2. Scenario loading, base image, aligned GeoJSON, map overlays, zoom, and read-only hover/focus behavior.
-3. Conversations, natural-language orders, flexible turn clock, and rules-backed military resolution.
-4. Persistent snapshots, event log, autosave, map changes, and Chronicle presentation.
-5. First Punic War demo scenario for testing only; no game behavior is hardcoded to it.
+3. NPC search and chat: generate three circumstance-based contacts at game start, let the player find existing NPCs by role or name, and create a persistent, scenario-appropriate NPC when the requested role has no holder.
+4. Conversations, natural-language orders, flexible turn clock, and rules-backed military resolution.
+5. Persistent snapshots, event log, autosave, map changes, and Chronicle presentation.
+6. First Punic War demo scenario for testing only; no game behavior is hardcoded to it.
 
 Phase 1 is complete when a valid scenario visibly represents political control, settlements, forces, and the consequences of war without turning the map into a detailed management interface.
 

@@ -12,6 +12,8 @@ Structured, versioned world state plus an immutable event log are authoritative.
 
 This means a generated sentence cannot create an army, transfer a province, or contradict a committed event. If generated prose conflicts with state, state wins and the prose is regenerated or corrected.
 
+An AI-created NPC is not disposable chat text. Once a role search creates one, the game persists a character record with a stable ID, name, role, location, applicable scenario facts, and personality context. Future chats and turn resolution use that record. See [NPC conversations](06-npc-conversations.md).
+
 ## Turn pipeline
 
 1. Load the saved scenario version and current world snapshot.
