@@ -29,6 +29,8 @@ The world is active without waiting for the player. Each turn advances several p
 - [AI and game memory](docs/03-ai-and-game-memory.md)
 - [World map](docs/04-world-map.md)
 - [Phase 1 scenario](docs/05-phase-1-scenario.md)
-- [Open decisions](docs/06-open-decisions.md)
+- [NPC conversations](docs/06-npc-conversations.md)
+- [Billing and coins](docs/07-billing-and-coins.md)
+- [Open decisions](docs/08-open-decisions.md)
 
 The repository contains a playable foundation. These documents define the intended product and identify where current contracts already support it; they do not claim every documented Phase 1 feature is complete.

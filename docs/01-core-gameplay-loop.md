@@ -3,7 +3,7 @@
 ## One turn
 
 1. **Orient.** The player reads the map, current status, prior Chronicle entries, and available conversations.
-2. **Converse.** The player asks AI-controlled characters about facts, risks, resources, or political support. Conversation can create knowledge and history, but material commitments require an order.
+2. **Converse.** The player opens or searches for any NPC conversation, then asks AI-controlled characters about facts, risks, resources, or political support. Conversation can create knowledge and history, but material commitments require an order.
 3. **Order.** The player writes one or more natural-language orders with priorities and conditions.
 4. **Validate and resolve.** The game converts viable intent into rules-backed actions. It applies movement, forces, supply, morale, terrain, control, and other material limits before AI produces bounded political and narrative consequences.
 5. **Persist.** The game commits the next structured world snapshot and immutable turn events, then autosaves.

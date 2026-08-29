@@ -13,6 +13,7 @@ These are questions to resolve with the project owner. They are not commitments.
 - What model, budget per turn, latency target, and failure/retry behavior are acceptable for the OpenAI integration?
 - Should historical lookup remain model/scenario knowledge only, or later use approved external sources? If so, which sources, citations, and cache policy are acceptable?
 - What safety, privacy, and retention policy applies to player-authored character descriptions and conversation history?
+- What limits, if any, should apply to newly created NPCs per game or per turn?
 
 ## Simulation and experience
 
@@ -20,6 +21,7 @@ These are questions to resolve with the project owner. They are not commitments.
 - How large should a scenario be in realms, provinces, settlements, and active forces?
 - Which information belongs in each left-edge panel, and which must remain visible on the map?
 - Should the latest-turn autosave later expand to named saves, rewind, or replay controls?
+- Should players see an estimate or confirmation before an AI operation spends coins?
 
 ## Future phases
 
