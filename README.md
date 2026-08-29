@@ -34,3 +34,7 @@ The world is active without waiting for the player. Each turn advances several p
 - [Open decisions](docs/08-open-decisions.md)
 
 The repository contains a playable foundation. These documents define the intended product and identify where current contracts already support it; they do not claim every documented Phase 1 feature is complete.
+
+## Run locally
+
+On macOS or Linux, run `./hosted.sh`. On Windows, run `hosted.bat`. Each launcher installs the locked dependencies when needed and starts the website at http://localhost:3000. Stop the server with `Ctrl-C`.

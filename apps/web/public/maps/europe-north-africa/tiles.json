@@ -1,0 +1,89 @@
+{
+  "name": "Natural Earth II \u2014 Europe and North Africa",
+  "format": "webp",
+  "scheme": "xyz",
+  "projection": "Web Mercator (EPSG:3857)",
+  "bounds": [
+    -25.0,
+    15.0,
+    60.0,
+    72.0
+  ],
+  "minZoom": 0,
+  "maxZoom": 6,
+  "tileSize": 256,
+  "levels": [
+    {
+      "zoom": 0,
+      "tileBounds": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "tileCount": 1
+    },
+    {
+      "zoom": 1,
+      "tileBounds": [
+        0,
+        0,
+        1,
+        0
+      ],
+      "tileCount": 2
+    },
+    {
+      "zoom": 2,
+      "tileBounds": [
+        1,
+        0,
+        2,
+        1
+      ],
+      "tileCount": 4
+    },
+    {
+      "zoom": 3,
+      "tileBounds": [
+        3,
+        1,
+        5,
+        3
+      ],
+      "tileCount": 9
+    },
+    {
+      "zoom": 4,
+      "tileBounds": [
+        6,
+        3,
+        10,
+        7
+      ],
+      "tileCount": 25
+    },
+    {
+      "zoom": 5,
+      "tileBounds": [
+        13,
+        6,
+        21,
+        14
+      ],
+      "tileCount": 81
+    },
+    {
+      "zoom": 6,
+      "tileBounds": [
+        27,
+        13,
+        42,
+        29
+      ],
+      "tileCount": 272
+    }
+  ],
+  "source": "Natural Earth II with Shaded Relief, Water, and Drainages",
+  "license": "Public domain"
+}

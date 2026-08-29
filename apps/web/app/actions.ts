@@ -7,18 +7,15 @@ import {
   EmailAttachmentSchema,
   GameCreationSchema,
   GiftRedemptionSchema,
-  InviteAcceptanceSchema,
   PasswordResetRequestSchema,
   ProductSelectionSchema,
   ProfileUpdateSchema,
 } from "@chronica/shared";
 import { redirect } from "next/navigation";
 import { cookies, headers } from "next/headers";
-import { createHash, randomUUID } from "node:crypto";
-import { consumeGameInvite, createDatabase } from "@chronica/db";
+import { randomUUID } from "node:crypto";
 import { getAuthentication, isAuthenticationConfigured } from "../lib/authentication";
 import { gameRepository } from "../lib/game-repository";
-import { createGuestSessionValue, GUEST_COOKIE_NAME } from "../lib/guest-session";
 import { createGift, redeemGift as redeemAccountGift, resolveAccount, revokeGift, saveAccountProfile } from "../lib/account-service";
 
 const textValue = (formData: FormData, key: string): string => {
@@ -87,45 +84,13 @@ export async function requestPasswordReset(formData: FormData): Promise<never> {
   redirect("/forgot-password?status=sent#status");
 }
 
-export async function acceptGuestInvitation(formData: FormData): Promise<never> {
-  const parsed = InviteAcceptanceSchema.safeParse({ token: textValue(formData, "token") });
-  if (!parsed.success) redirect("/join/unavailable?status=unavailable#status");
-
-  const databaseUrl = process.env.DATABASE_URL?.trim();
-  const sessionSecret = process.env.CHRONICA_SESSION_SECRET?.trim();
-  if (databaseUrl && sessionSecret) {
-    const database = createDatabase(databaseUrl);
-    try {
-      const tokenHash = createHash("sha256").update(parsed.data.token, "utf8").digest("hex");
-      const account = await resolveAccount(await headers());
-      const consumed = await consumeGameInvite(database.db, { tokenHash, consumedAt: new Date(), ...(account === null ? {} : { userId: account.id }) });
-      if (consumed === null) redirect(`/join/${encodeURIComponent(parsed.data.token)}?status=unavailable#status`);
-      if (!consumed.accountAttached) {
-        const cookieStore = await cookies();
-        cookieStore.set(GUEST_COOKIE_NAME, createGuestSessionValue(consumed, sessionSecret, new Date()), {
-          httpOnly: true,
-          sameSite: "lax",
-          secure: process.env.NODE_ENV === "production",
-          maxAge: 30 * 24 * 60 * 60,
-          path: "/",
-        });
-      }
-      redirect(gamePath(consumed.gameId, "?status=joined"));
-    } finally {
-      await database.close();
-    }
-  }
-
-  redirect(gamePath("demo-game", "?status=joined"));
-}
-
 export async function createGame(formData: FormData): Promise<never> {
   const parsed = GameCreationSchema.safeParse({
     title: textValue(formData, "title"),
     scenarioId: textValue(formData, "scenarioId"),
     continuity: {
-      startingSeatCount: Number(textValue(formData, "startingSeatCount")),
-      extraPrincipalsPerPlayer: Number(textValue(formData, "extraPrincipalsPerPlayer")),
+      startingSeatCount: 1,
+      extraPrincipalsPerPlayer: 0,
     },
     newsTimeoutSeconds: 60,
     coinCap: textValue(formData, "coinCap"),
@@ -160,12 +125,6 @@ export async function deleteSaveSlot(formData: FormData): Promise<never> {
   const gameId = textValue(formData, "gameId");
   await gameRepository.endGame(gameId);
   redirect("/?status=deleted#status");
-}
-
-export async function leaveGame(formData: FormData): Promise<never> {
-  const gameId = textValue(formData, "gameId");
-  await gameRepository.leaveGame(gameId);
-  redirect("/?status=left#status");
 }
 
 export async function redeemGift(formData: FormData): Promise<never> {
