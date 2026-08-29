@@ -13,6 +13,8 @@ Natural Earth data is public domain. Source pages:
 - https://github.com/nvkelso/natural-earth-vector
 - https://www.shadedrelief.com/NE2/
 
+`roman-spqr-banner.svg` is the Roman SPQR banner by Ssolbergj, downloaded from Wikimedia Commons and used under CC BY 3.0: https://commons.wikimedia.org/wiki/File:Roman_SPQR_banner.svg
+
 These are source assets, not a ready-to-load Chronica scenario. Before use in
 the game, derive the required `region` features and stable Chronica IDs from
 the country geometry; do not use this country layer as an authoritative

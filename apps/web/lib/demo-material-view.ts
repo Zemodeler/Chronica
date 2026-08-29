@@ -23,7 +23,7 @@ export const demoMaterialView: MaterialWorldViewModel = {
   forces: [
     {
       id: "force-royal-host",
-      name: "Royal host",
+      name: "Roman expeditionary force",
       authorizedStrength: 4000,
       totalHeadcount: 3200,
       fitStrength: 3200,

@@ -88,11 +88,11 @@ type ArmyMapState = {
 
 Current GeoJSON uses a `region` feature where this document says province; its feature `id` is the stable province ID, and `terrainId`, `tier`, `controllerPolityId`, and `controlFirmnessBps` live in its properties. A `settlement_anchor` point maps to `SettlementProperties`; current kinds are `city`, `town`, `village`, `fortress`, and `port`, while a capital is represented by its polity's `capitalSettlementId` rather than a settlement kind.
 
-`DynamicMapOverlay` is the current delivery shape: `provinces` maps to live controller/control information, `settlements` maps to settlement identity and controller, and `forces` maps to an army's owner, province, optional coordinate, strength label, and movement. The target `ownerRealmId`, `occupied`, `underSiege`, `damaged`, numeric `soldiers`, and `besieging` status remain useful simulation concepts, but are not all fields of the current overlay. They must be derived from or added to authoritative state before presentation—never inferred from pixels.
+`DynamicMapOverlay` is the current delivery shape: `provinces` maps to live controller/control information, `settlements` maps to settlement identity, controller, capital membership, siege, and damage state, and `forces` maps to an army's owner, province, optional coordinate, strength label, and movement. Capital membership derives from a polity's `capitalSettlementId`; it is not a separate simulation settlement kind. These values must be derived from authoritative state before presentation—never inferred from pixels.
 
 ## Interaction and events
 
-Use small realm-colored flags or icons for forces. Brief effects communicate movement, battle, siege, city damage, occupation, and conquest color changes. Avoid persistent animations, excessive labels, outlines, or visual noise. After each AI-resolved turn, patch the overlay from committed state; save and restore it independently of the static PNG and GeoJSON.
+Use small realm-colored flags or icons for forces. Movement uses its explicit path and progress to place the marker and show only its travelled route. Brief effects communicate battle, siege, city damage, occupation, and conquest color changes through typed committed presentation events: battles have a semantic coordinate; other effects target stable province or settlement IDs. Replay an event once per browser session, then retain only committed state (control, active movement, siege, and damage). Avoid persistent animations, excessive labels, outlines, or visual noise. After each AI-resolved turn, patch the overlay from committed state; save and restore it independently of the static PNG and GeoJSON.
 
 ## Validation and milestones
 

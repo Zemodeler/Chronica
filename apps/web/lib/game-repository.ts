@@ -31,7 +31,7 @@ import {
   type WorldViewModel,
 } from "@chronica/shared";
 import { MICRO_UNITS_PER_COIN } from "@chronica/billing";
-import { cookies, headers } from "next/headers";
+import { headers } from "next/headers";
 import { and, eq } from "drizzle-orm";
 import {
   acknowledgeTurnNews,
@@ -187,8 +187,8 @@ const initialWorld = WorldViewModelSchema.parse({
   ],
   armies: [
     {
-      id: "army-royal-host",
-      name: "Royal host",
+      id: "force-royal-host",
+      name: "Roman expeditionary force",
       location: "Messina",
       commander: "Marcus Atilius",
       strengthLabel: "3,200 total; 3,200 fit",
@@ -453,9 +453,67 @@ function demoMapOverlay(revision: number): DynamicMapOverlay {
     revision,
     polities: [...polityIds].map((polityId) => ({ polityId, name: DEMO_POLITY_NAMES[polityId] ?? polityId })),
     provinces: DEMO_OVERLAY_PROVINCES,
-    settlements: [],
-    forces: [],
-    hostileBorders: [],
+    settlements: [
+      {
+        settlementId: "settlement-rome",
+        provinceId: "ita-72843720b863019116732",
+        anchorFeatureId: "settlement-rome",
+        name: "Rome",
+        kind: "city",
+        controllerPolityId: "rome",
+        capitalPolityId: "rome",
+        importance: 100,
+        underSiege: false,
+        damaged: false,
+      },
+      {
+        settlementId: "settlement-naples",
+        provinceId: "ita-72843720b88210905209841",
+        anchorFeatureId: "settlement-naples",
+        name: "Naples",
+        kind: "city",
+        controllerPolityId: "rome",
+        capitalPolityId: null,
+        importance: 80,
+        underSiege: false,
+        damaged: false,
+      },
+      {
+        settlementId: "settlement-syracuse",
+        provinceId: "ita-72843720b81376294924159-sicily",
+        anchorFeatureId: "settlement-syracuse",
+        name: "Syracuse",
+        kind: "city",
+        controllerPolityId: "rome",
+        capitalPolityId: null,
+        importance: 80,
+        underSiege: false,
+        damaged: false,
+      },
+    ],
+    forces: [{
+      forceId: demoMaterialView.forces[0]!.id,
+      provinceId: "ita-72843720b863019116732",
+      ownerPolityId: "rome",
+      name: demoMaterialView.forces[0]!.name,
+      commanderLabel: "Roman commander",
+      strengthLabel: `${demoMaterialView.forces[0]!.totalHeadcount.toLocaleString()} total; ${demoMaterialView.forces[0]!.fitStrength.toLocaleString()} fit`,
+      relation: "friendly",
+      selected: false,
+      movement: {
+        start: [12.4964, 41.9028],
+        destination: [15.3, 38.2],
+        path: [[12.4964, 41.9028], [13.9, 40.3], [15.3, 38.2]],
+        progressBps: 4_500,
+        state: "moving",
+      },
+    }],
+    presentationEvents: [{
+      id: "first-punic-battle-off-sicily",
+      kind: "battle",
+      coordinate: [15.2, 38.1],
+      participantForceIds: [demoMaterialView.forces[0]!.id],
+    }],
   };
 }
 
@@ -1105,6 +1163,7 @@ export const postgresGameRepository: GameRepository = {
         submittedPlayers: view.submittedPlayers,
         totalPlayers: view.totalPlayers,
         lowBandwidth,
+        presentationEvents: view.presentationEvents,
         ...(view.scenarioClock === undefined ? {} : { clock: view.scenarioClock }),
       }, characterId);
     } finally {
