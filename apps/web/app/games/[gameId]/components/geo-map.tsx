@@ -2,9 +2,9 @@
 
 import { useMemo, useCallback, type KeyboardEvent, type PointerEvent } from "react";
 import type { DynamicMapOverlay, GeoJsonMap } from "@chronica/shared";
-import { computeViewBox, polityColorWithAlpha, projectCoordinate } from "./geo-projection";
+import { computeViewBox, projectCoordinate } from "./geo-projection";
 import { derivePoliticalLabels } from "./political-labels";
-import { derivePoliticalMapState, type PoliticalOverlayInput } from "./political-geometry";
+import { derivePoliticalMapState, politicalColourWithAlpha, type PoliticalOverlayInput } from "./political-geometry";
 import { prepareStaticWorldGeometry } from "./world-geometry";
 
 type ZoomBand = "far" | "medium" | "close";
@@ -42,11 +42,19 @@ export function GeoMap({ geoJson, overlay, selectedProvinceId, zoomBand, scale, 
     {detailImageUrl && <image href={detailImageUrl} x="-25" y="-72" width="85" height="57" preserveAspectRatio="none" className="geo-map-base-image" />}
     <g className="map-layer-terrain">{world.provinces.map((province) => <path key={province.id} d={province.svgPath} />)}</g>
     <g className="layer-rivers">{world.rivers.map((river) => <path key={river.id} d={river.svgPath} className={`geo-map-river geo-map-river-${river.className}`} />)}</g>
-    <g className="map-layer-political">{world.provinces.map((province) => { const owner = political.ownerByProvince.get(province.id); return owner ? <path key={province.id} d={province.svgPath} fill={polityColorWithAlpha(owner, .45)} /> : null; })}</g>
+    <g className="map-layer-political">{world.provinces.map((province) => { const owner = political.ownerByProvince.get(province.id); return owner ? <path key={province.id} d={province.svgPath} fill={politicalColourWithAlpha(owner, .45)} /> : null; })}</g>
     {political.territories.length > 0 && <g className="layer-political-borders"><path d={countryBorders} className="geo-map-country-border" /></g>}
     <g className="layer-dynamic-selection">{world.provinces.map((province) => <path key={province.id} d={province.svgPath} className="geo-map-region" data-province-id={province.id} data-selected={selectedProvinceId === province.id ? "true" : undefined} tabIndex={0} role="button" aria-label={province.name} onPointerEnter={handlePointerEnter} onPointerLeave={handlePointerLeave} onClick={handleClick} onKeyDown={handleKeyDown} />)}</g>
-    <g className="layer-political-labels">{politicalLabels.map((label) => <text key={label.polityId} x={label.x} y={label.y} transform={`rotate(${label.angle} ${label.x} ${label.y})`} textAnchor="middle" className="map-political-label" style={{ fontSize: `${label.fontSize}px`, letterSpacing: `${label.letterSpacing}px`, strokeWidth: ".16px" }}>{label.name.toUpperCase()}</text>)}</g>
-    <g className="layer-settlements">{world.settlements.map((settlement) => { const radius = settlementRadius(settlement.type) * invScale; const state = settlementOverlay.get(settlement.id); const fill = state?.controllerPolityId ? polityColorWithAlpha(state.controllerPolityId, .9) : "#c8b88a"; return <g key={settlement.id} className={`map-settlement map-settlement-${settlement.type}`}><circle cx={settlement.projected[0]} cy={settlement.projected[1]} r={radius} fill={fill} stroke="#10151f" strokeWidth={.15 * invScale} /><text x={settlement.projected[0]} y={settlement.projected[1] + radius + .8 * invScale} textAnchor="middle" className="map-settlement-label" style={{ fontSize: ".55px", strokeWidth: ".12px" }}>{settlement.name}</text></g>; })}</g>
-    <g className="layer-forces">{forceMarkers.map((force) => { const fill = polityColorWithAlpha(force.ownerPolityId, .9); return <g key={force.forceId}>{force.movement && <path className="geo-map-movement-path" d={force.movement.path.map((position, index) => { const [x, y] = projectCoordinate(position[0], position[1]); return index === 0 ? `M${x} ${y}` : `L${x} ${y}`; }).join("")} />}<rect x={force.x - .8 * invScale} y={force.y - .5 * invScale} width={1.6 * invScale} height={invScale} rx={.15 * invScale} className="map-army-token" fill={fill} /><text x={force.x} y={force.y + 1.3 * invScale} textAnchor="middle" className="map-force-label" style={{ fontSize: `${.5 * invScale}px`, strokeWidth: `${.12 * invScale}px` }}>{force.strengthLabel}</text></g>; })}</g>
+    <g className="layer-political-labels">
+      <defs>{politicalLabels.map((label) => {
+        const start = projectCoordinate(label.pathPoints[0][0], label.pathPoints[0][1]);
+        const control = projectCoordinate(label.pathPoints[1][0], label.pathPoints[1][1]);
+        const end = projectCoordinate(label.pathPoints[2][0], label.pathPoints[2][1]);
+        return <path key={label.id} id={`political-label-path-${label.id}`} d={`M${start[0]} ${start[1]}Q${control[0]} ${control[1]} ${end[0]} ${end[1]}`} />;
+      })}</defs>
+      {politicalLabels.map((label) => <text key={label.id} textAnchor="middle" textLength={label.usableLength} lengthAdjust="spacing" className="map-political-label" style={{ fontSize: `${label.fontSize}px`, strokeWidth: `${.045 * invScale}px` }}><textPath href={`#political-label-path-${label.id}`} startOffset="50%">{label.name.toUpperCase()}</textPath></text>)}
+    </g>
+    <g className="layer-settlements">{world.settlements.map((settlement) => { const radius = settlementRadius(settlement.type) * invScale; const state = settlementOverlay.get(settlement.id); const fill = state?.controllerPolityId ? politicalColourWithAlpha(state.controllerPolityId, .9) : "#c8b88a"; return <g key={settlement.id} className={`map-settlement map-settlement-${settlement.type}`}><circle cx={settlement.projected[0]} cy={settlement.projected[1]} r={radius} fill={fill} stroke="#10151f" strokeWidth={.15 * invScale} /><text x={settlement.projected[0]} y={settlement.projected[1] + radius + .8 * invScale} textAnchor="middle" className="map-settlement-label" style={{ fontSize: ".48px", strokeWidth: ".12px" }}>{settlement.name}</text></g>; })}</g>
+    <g className="layer-forces">{forceMarkers.map((force) => { const fill = politicalColourWithAlpha(force.ownerPolityId, .9); return <g key={force.forceId}>{force.movement && <path className="geo-map-movement-path" d={force.movement.path.map((position, index) => { const [x, y] = projectCoordinate(position[0], position[1]); return index === 0 ? `M${x} ${y}` : `L${x} ${y}`; }).join("")} />}<rect x={force.x - .8 * invScale} y={force.y - .5 * invScale} width={1.6 * invScale} height={invScale} rx={.15 * invScale} className="map-army-token" fill={fill} /><text x={force.x} y={force.y + 1.3 * invScale} textAnchor="middle" className="map-force-label" style={{ fontSize: `${.5 * invScale}px`, strokeWidth: `${.12 * invScale}px` }}>{force.strengthLabel}</text></g>; })}</g>
   </svg>;
 }

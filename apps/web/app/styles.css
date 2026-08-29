@@ -605,7 +605,8 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 /* ─── Map: settlement and force labels ─────────────────────────── */
 .map-settlement-label { fill: #dce8e5; font: 500 0.55px system-ui, sans-serif; pointer-events: none; paint-order: stroke; stroke: rgb(10 15 20 / 70%); stroke-width: 0.12px; }
 .map-force-label { fill: #dce8e5; font: 600 0.5px system-ui, sans-serif; pointer-events: none; paint-order: stroke; stroke: rgb(10 15 20 / 70%); stroke-width: 0.12px; }
-.map-political-label { fill: #f4f0df; font-family: system-ui, sans-serif; font-weight: 700; pointer-events: none; paint-order: stroke; stroke: rgb(10 15 20 / 78%); stroke-linejoin: round; }
+.map-political-label, .map-settlement-label { font-family: "Times New Roman", Times, serif; }
+.map-political-label { fill: #f4f0df; font-weight: 700; pointer-events: none; paint-order: stroke; stroke: rgb(10 15 20 / 78%); stroke-linejoin: round; }
 
 /* ─── Map: zoom-band visibility ────────────────────────────────── */
 [data-zoom="far"] .layer-settlements { display: none; }

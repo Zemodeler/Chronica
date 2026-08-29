@@ -27,6 +27,7 @@ describe("political map derivation", () => {
     expect(state.territories[0]?.components).toHaveLength(2);
     expect(state.territories[0]?.primaryComponent.provinceIds).toEqual(["east", "west"]);
     expect(state.territories[0]?.label.anchor[0]).toBeLessThan(5);
+    expect(derivePoliticalLabels(state, "close").filter((label) => label.polityId === "rome")).toHaveLength(2);
   });
   it("classifies owner changes as country borders", () => {
     const state = derivePoliticalMapState(prepareStaticWorldGeometry(map), overlay([
@@ -35,9 +36,13 @@ describe("political map derivation", () => {
     ]));
     expect(state.borderSegments.some((border) => border.classification === "country_border")).toBe(true);
   });
-  it("keeps compact territory labels horizontal and applies LOD", () => {
+  it("fits every component label to 85 percent of its selected path", () => {
     const state = derivePoliticalMapState(prepareStaticWorldGeometry(map), overlay([{ provinceId: "west", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain", tier: "focus" }]));
-    expect(state.territories[0]?.label.angle).toBe(0);
-    expect(derivePoliticalLabels(state, "close")[0]?.name).toBe("Roman Republic");
+    const label = derivePoliticalLabels(state, "close")[0];
+    expect(label?.name).toBe("Roman Republic");
+    expect(label?.usableLength).toBeCloseTo((label?.pathLength ?? 0) * .85);
+    expect(label?.fontSize).toBeGreaterThan(0);
+    const [start, , end] = label?.pathPoints ?? [[0, 0], [0, 0], [0, 0]];
+    expect(Math.hypot(end[0] - start[0], end[1] - start[1])).toBeGreaterThan(2.7);
   });
 });
