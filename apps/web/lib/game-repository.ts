@@ -490,6 +490,18 @@ function demoMapOverlay(revision: number): DynamicMapOverlay {
         underSiege: false,
         damaged: false,
       },
+      {
+        settlementId: "settlement-agrigentum-fort",
+        provinceId: "ita-72843720b81376294924159-sicily",
+        anchorFeatureId: "settlement-agrigentum-fort",
+        name: "Fort Agrigentum",
+        kind: "fortress",
+        controllerPolityId: "carthage",
+        capitalPolityId: null,
+        importance: 50,
+        underSiege: false,
+        damaged: false,
+      },
     ],
     forces: [{
       forceId: demoMaterialView.forces[0]!.id,
