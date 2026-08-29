@@ -6,7 +6,7 @@ export interface StaticProvince { readonly id: string; readonly name: string; re
 export interface SharedBoundary { readonly provinceA: string; readonly provinceB: string | null; readonly points: readonly [GeoJsonPosition, GeoJsonPosition]; readonly svgPath: string; }
 export interface StaticSettlement { readonly id: string; readonly name: string; readonly type: string; readonly provinceId: string; readonly coordinate: GeoJsonPosition; readonly projected: readonly [number, number]; }
 export interface StaticRiver { readonly id: string; readonly className: string; readonly svgPath: string; }
-export interface StaticWorldGeometry { readonly provinces: readonly StaticProvince[]; readonly provinceById: ReadonlyMap<string, StaticProvince>; readonly sharedBoundaries: readonly SharedBoundary[]; readonly settlements: readonly StaticSettlement[]; readonly rivers: readonly StaticRiver[]; }
+export interface StaticWorldGeometry { readonly provinces: readonly StaticProvince[]; readonly provinceById: ReadonlyMap<string, StaticProvince>; readonly sharedBoundaries: readonly SharedBoundary[]; readonly boundariesByProvince: ReadonlyMap<string, readonly SharedBoundary[]>; readonly settlements: readonly StaticSettlement[]; readonly rivers: readonly StaticRiver[]; }
 interface BoundaryOccurrence { readonly provinceId: string; readonly points: readonly [GeoJsonPosition, GeoJsonPosition]; }
 
 function ringCentroid(ring: readonly GeoJsonPosition[]) {
@@ -54,8 +54,13 @@ export function prepareStaticWorldGeometry(map: GeoJsonMap): StaticWorldGeometry
     if (other) { neighbors.get(first.provinceId)?.add(other.provinceId); neighbors.get(other.provinceId)?.add(first.provinceId); }
     sharedBoundaries.push({ provinceA: first.provinceId, provinceB: other?.provinceId ?? null, points: first.points, svgPath: boundaryPath(first.points) });
   }
+  const boundariesByProvince = new Map(preliminary.map((province) => [province.id, [] as SharedBoundary[]]));
+  for (const boundary of sharedBoundaries) {
+    boundariesByProvince.get(boundary.provinceA)?.push(boundary);
+    if (boundary.provinceB !== null) boundariesByProvince.get(boundary.provinceB)?.push(boundary);
+  }
   const provinces = preliminary.map((province) => ({ ...province, neighborIds: [...(neighbors.get(province.id) ?? [])].sort() }));
-  return { provinces, provinceById: new Map(provinces.map((province) => [province.id, province])), sharedBoundaries, settlements, rivers };
+  return { provinces, provinceById: new Map(provinces.map((province) => [province.id, province])), sharedBoundaries, boundariesByProvince, settlements, rivers };
 }
 
 export function provinceContains(province: StaticProvince, point: GeoJsonPosition): boolean {

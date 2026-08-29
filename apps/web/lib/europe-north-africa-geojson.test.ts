@@ -17,4 +17,11 @@ describe("Europe and North Africa map calibration features", () => {
       type: "city",
     });
   });
+
+  it("splits Sicilia from the former combined Italian islands feature", () => {
+    const sicilia = europeNorthAfricaGeoJson.features.find((feature) => feature.id === "ita-72843720b81376294924159-sicily");
+    const remainingIslands = europeNorthAfricaGeoJson.features.find((feature) => feature.id === "ita-72843720b81376294924159");
+    expect(sicilia?.properties).toMatchObject({ kind: "province", name: "Sicilia" });
+    expect(remainingIslands?.properties).toMatchObject({ kind: "province", name: "Sardegna e isole" });
+  });
 });

@@ -439,6 +439,8 @@ const DEMO_OVERLAY_PROVINCES: DynamicMapOverlay["provinces"] = [
   { provinceId: "ita-72843720b863019116732", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "focus" },
   { provinceId: "ita-72843720b88210905209841", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "far" },
   { provinceId: "ita-72843720b81376294924159", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "far" },
+  // Deliberately disconnected holding used to exercise multi-component polity labels.
+  { provinceId: "esp-25490228b88831207743232", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "far" },
   { provinceId: "drepanum", controllerPolityId: "rome", controlFirmnessBps: 6000, terrainId: "coastal-plain", tier: "focus" },
   { provinceId: "palermo", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "hills", tier: "focus" },
   { provinceId: "agrigentum", controllerPolityId: "carthage", controlFirmnessBps: 4000, terrainId: "dry-uplands", tier: "near" },
