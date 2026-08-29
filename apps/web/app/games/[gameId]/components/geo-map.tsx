@@ -16,7 +16,9 @@ interface GeoMapProps {
   readonly overlay: DynamicMapOverlay | null;
   readonly selectedProvinceId: string | null;
   readonly zoomBand: ZoomBand;
+  readonly scale: number;
   readonly baseImageUrl: string | undefined;
+  readonly detailImageUrl?: string | undefined;
   readonly onProvinceHover: (
     provinceId: string | null,
     event?: PointerEvent,
@@ -85,10 +87,13 @@ export function GeoMap({
   overlay,
   selectedProvinceId,
   zoomBand,
+  scale,
   baseImageUrl,
+  detailImageUrl,
   onProvinceHover,
   onProvinceClick,
 }: GeoMapProps) {
+  const invScale = 1 / scale;
   const viewBox = useMemo(() => computeViewBox(geoJson), [geoJson]);
   const prepared = useMemo(() => prepareFeatures(geoJson), [geoJson]);
 
@@ -185,7 +190,7 @@ export function GeoMap({
         className="geo-map-water"
       />
 
-      {/* Layer 2: Base image */}
+      {/* Layer 2: Base image (full-world ocean/terrain background) */}
       {baseImageUrl && (
         <image
           href={baseImageUrl}
@@ -193,6 +198,19 @@ export function GeoMap({
           y="-90"
           width="360"
           height="180"
+          preserveAspectRatio="none"
+          className="geo-map-base-image"
+        />
+      )}
+
+      {/* Layer 2b: Regional detail image (Europe + North Africa, lon -25..60, lat 15..72) */}
+      {detailImageUrl && (
+        <image
+          href={detailImageUrl}
+          x="-25"
+          y="-72"
+          width="85"
+          height="57"
           preserveAspectRatio="none"
           className="geo-map-base-image"
         />
@@ -270,19 +288,29 @@ export function GeoMap({
         {prepared.settlements.map(({ feature, x, y }) => {
           const props = feature.properties;
           if (props.kind !== "settlement") return null;
-          const r = settlementRadius(props.type);
+          const r = settlementRadius(props.type) * invScale;
           const so = settlementOverlay.get(feature.id);
           const fill = so?.controllerPolityId
             ? polityColorWithAlpha(so.controllerPolityId, 0.9)
             : "#c8b88a";
+          const labelOffset = 0.8 * invScale;
+          const fontSize = 0.55 * invScale;
+          const labelStroke = 0.12 * invScale;
           return (
             <g key={feature.id} className={`map-settlement map-settlement-${props.type}`}>
-              <circle cx={x} cy={y} r={r} fill={fill} stroke="#10151f" strokeWidth={0.15} />
+              <circle cx={x} cy={y} r={r} fill={fill} stroke="#10151f" strokeWidth={0.15 * invScale} />
               <text
                 x={x}
-                y={y + r + 0.8}
-                className="map-settlement-label"
+                y={y + r + labelOffset}
                 textAnchor="middle"
+                style={{
+                  fill: "#dce8e5",
+                  font: `500 ${fontSize}px system-ui, sans-serif`,
+                  pointerEvents: "none",
+                  paintOrder: "stroke",
+                  stroke: "rgb(10 15 20 / 70%)",
+                  strokeWidth: `${labelStroke}px`,
+                }}
               >
                 {props.name}
               </text>
@@ -309,19 +337,26 @@ export function GeoMap({
                 />
               )}
               <rect
-                x={force.x - 0.8}
-                y={force.y - 0.5}
-                width={1.6}
-                height={1}
-                rx={0.15}
+                x={force.x - 0.8 * invScale}
+                y={force.y - 0.5 * invScale}
+                width={1.6 * invScale}
+                height={invScale}
+                rx={0.15 * invScale}
                 className="map-army-token"
                 fill={fill}
               />
               <text
                 x={force.x}
-                y={force.y + 1.3}
-                className="map-force-label"
+                y={force.y + 1.3 * invScale}
                 textAnchor="middle"
+                style={{
+                  fill: "#dce8e5",
+                  font: `600 ${0.5 * invScale}px system-ui, sans-serif`,
+                  pointerEvents: "none",
+                  paintOrder: "stroke",
+                  stroke: "rgb(10 15 20 / 70%)",
+                  strokeWidth: `${0.12 * invScale}px`,
+                }}
               >
                 {force.strengthLabel}
               </text>

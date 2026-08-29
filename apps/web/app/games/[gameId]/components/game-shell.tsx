@@ -10,7 +10,7 @@ import { MapControls } from "./map-controls";
 type ZoomBand = "far" | "medium" | "close";
 
 const MIN_SCALE = 1;
-const MAX_SCALE = 10;
+const MAX_SCALE = 80;
 const ZOOM_STEP = 1.35;
 const MEDIUM_THRESHOLD = 2.5;
 const CLOSE_THRESHOLD = 5;
@@ -29,6 +29,7 @@ interface GameShellProps {
   readonly initialGeoJson: GeoJsonMap | undefined;
   readonly initialOverlay: DynamicMapOverlay | undefined;
   readonly baseImageUrl?: string;
+  readonly detailImageUrl?: string;
 }
 
 export function GameShell({
@@ -39,6 +40,7 @@ export function GameShell({
   initialGeoJson,
   initialOverlay,
   baseImageUrl,
+  detailImageUrl,
 }: GameShellProps) {
   const [overlay, setOverlay] = useState<DynamicMapOverlay | null>(
     initialOverlay ?? null,
@@ -166,7 +168,9 @@ export function GameShell({
               overlay={overlay}
               selectedProvinceId={selectedProvinceId}
               zoomBand={zoomBand}
+              scale={viewport.scale}
               baseImageUrl={baseImageUrl}
+              detailImageUrl={detailImageUrl}
               onProvinceHover={handleProvinceHover}
               onProvinceClick={handleProvinceClick}
             />
