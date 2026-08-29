@@ -9,7 +9,7 @@ export const romeDemoSettlement: GeoJsonMapFeature = {
     kind: "settlement",
     name: "Rome",
     provinceId: "ita-72843720b863019116732",
-    type: "city",
+    type: "capital",
   },
 };
 
@@ -34,5 +34,17 @@ export const syracuseDemoSettlement: GeoJsonMapFeature = {
     name: "Syracuse",
     provinceId: "ita-72843720b81376294924159-sicily",
     type: "city",
+  },
+};
+
+export const agrigentumFortDemoSettlement: GeoJsonMapFeature = {
+  type: "Feature",
+  id: "settlement-agrigentum-fort",
+  geometry: { type: "Point", coordinates: [13.5765, 37.311] },
+  properties: {
+    kind: "settlement",
+    name: "Fort Agrigentum",
+    provinceId: "ita-72843720b81376294924159-sicily",
+    type: "fort",
   },
 };

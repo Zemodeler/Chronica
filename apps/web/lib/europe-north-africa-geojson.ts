@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { GeoJsonMap } from "@chronica/shared";
-import { naplesDemoSettlement, romeDemoSettlement, syracuseDemoSettlement } from "./calibration-map-features";
+import { agrigentumFortDemoSettlement, naplesDemoSettlement, romeDemoSettlement, syracuseDemoSettlement } from "./calibration-map-features";
 
 /**
  * Europe and Northern Africa ADM1 boundaries from geoBoundaries gbOpen.
@@ -47,5 +47,5 @@ const splitRegionalMap = splitSicily(regionalMap);
 
 export const europeNorthAfricaGeoJson: GeoJsonMap = {
   ...splitRegionalMap,
-  features: [...splitRegionalMap.features, romeDemoSettlement, naplesDemoSettlement, syracuseDemoSettlement],
+  features: [...splitRegionalMap.features, romeDemoSettlement, naplesDemoSettlement, syracuseDemoSettlement, agrigentumFortDemoSettlement],
 };
