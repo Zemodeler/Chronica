@@ -115,7 +115,8 @@ export function GameShell({
         if (!res.ok) return;
         const data = await res.json();
         if (data.mapOverlay) {
-          setOverlay(data.mapOverlay as DynamicMapOverlay);
+          const next = data.mapOverlay as DynamicMapOverlay;
+          setOverlay((current) => current?.revision === next.revision ? current : next);
         }
       } catch {
         // Silently retry on next interval
