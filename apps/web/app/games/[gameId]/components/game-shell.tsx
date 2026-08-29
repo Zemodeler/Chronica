@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useCallback, useEffect, type PointerEvent } from "react";
-import type { GeoJsonMap, DynamicMapOverlay, GamePhase } from "@chronica/shared";
-import { GeoMap } from "./geo-map";
+import { useState, useCallback, useEffect, useRef, type PointerEvent } from "react";
+import { DynamicMapOverlaySchema, type GeoJsonMap, type DynamicMapOverlay, type GamePhase } from "@chronica/shared";
+import { GeoMap, type ForceMapDetails } from "./geo-map";
 import { MapViewport, type ViewportTransform } from "./map-viewport";
 import { MapTooltip } from "./map-tooltip";
 import { MapControls } from "./map-controls";
@@ -58,8 +58,33 @@ export function GameShell({
     tx: 0,
     ty: 0,
   });
+  const [activePresentationEventIds, setActivePresentationEventIds] = useState<Set<string>>(() => new Set());
+  const [selectedForce, setSelectedForce] = useState<ForceMapDetails | null>(null);
+  const presentationEffectTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const zoomBand = deriveZoomBand(viewport.scale);
+
+  useEffect(() => {
+    for (const event of overlay?.presentationEvents ?? []) {
+      const key = `chronica:map-event:${gameId}:${event.id}`;
+      try {
+        if (window.sessionStorage.getItem(key) !== null) continue;
+        window.sessionStorage.setItem(key, "played");
+      } catch {
+        // Storage may be unavailable; replaying on a later response is harmless.
+      }
+      setActivePresentationEventIds((current) => new Set(current).add(event.id));
+      presentationEffectTimers.current.push(setTimeout(() => {
+        setActivePresentationEventIds((current) => {
+          const next = new Set(current);
+          next.delete(event.id);
+          return next;
+        });
+      }, 2_800));
+    }
+  }, [gameId, overlay?.presentationEvents]);
+
+  useEffect(() => () => presentationEffectTimers.current.forEach(clearTimeout), []);
 
   const regionNames = useState(() => {
     if (!initialGeoJson) return new Map<string, string>();
@@ -109,19 +134,22 @@ export function GameShell({
 
   useEffect(() => {
     if (phase === "finished" || phase === "failed") return;
-    const interval = setInterval(async () => {
+    const refreshOverlay = async () => {
       try {
         const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/overlay`);
         if (!res.ok) return;
-        const data = await res.json();
-        if (data.mapOverlay) {
-          const next = data.mapOverlay as DynamicMapOverlay;
+        const data: unknown = await res.json();
+        const candidate = typeof data === "object" && data !== null && "mapOverlay" in data ? data.mapOverlay : null;
+        const parsed = DynamicMapOverlaySchema.safeParse(candidate);
+        if (parsed.success) {
+          const next = parsed.data;
           setOverlay((current) => current?.revision === next.revision ? current : next);
         }
       } catch {
         // Silently retry on next interval
       }
-    }, 15_000);
+    };
+    const interval = setInterval(() => { void refreshOverlay(); }, 15_000);
     return () => clearInterval(interval);
   }, [gameId, phase]);
 
@@ -172,10 +200,19 @@ export function GameShell({
               scale={viewport.scale}
               baseImageUrl={baseImageUrl}
               detailImageUrl={detailImageUrl}
+              activePresentationEventIds={activePresentationEventIds}
               onProvinceHover={handleProvinceHover}
               onProvinceClick={handleProvinceClick}
+              onForceClick={setSelectedForce}
             />
           </MapViewport>
+          {selectedForce && <aside className="map-force-details" aria-label={`${selectedForce.name} details`}>
+            <button type="button" className="map-force-details-close" onClick={() => setSelectedForce(null)} aria-label="Close army details">×</button>
+            <strong>{selectedForce.name}</strong>
+            <span>Army size: {selectedForce.strengthLabel}</span>
+            <span>Location: {selectedForce.locationLabel}</span>
+            <span>Progress: {selectedForce.progressBps === null ? "Stationary" : `${(selectedForce.progressBps / 100).toFixed(0)}% along route`}</span>
+          </aside>}
           {tooltip && (
             <MapTooltip x={tooltip.x} y={tooltip.y} name={tooltip.name} />
           )}
