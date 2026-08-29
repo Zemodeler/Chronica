@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { BasisPointsSchema, EntityIdSchema } from "../material-state";
-import { CrossingTypeSchema, DetailTierSchema, SettlementKindSchema } from "./map";
+import { EntityIdSchema } from "../material-state";
 
 /**
  * The versioned, immutable geographic interchange format. Dynamic state is
@@ -30,45 +29,21 @@ export const GeoJsonGeometrySchema = z.discriminatedUnion("type", [
 ]);
 export type GeoJsonGeometry = z.infer<typeof GeoJsonGeometrySchema>;
 
-const NeighbourSchema = z.object({ regionId: EntityIdSchema, crossing: CrossingTypeSchema }).strict();
+export const SettlementTypeSchema = z.enum(["capital", "city", "town", "village", "fort", "port"]);
+export type SettlementType = z.infer<typeof SettlementTypeSchema>;
 
-export const GeoJsonRegionPropertiesSchema = z.object({
-  kind: z.literal("region"),
+export const GeoJsonProvincePropertiesSchema = z.object({
+  kind: z.literal("province"),
   name: z.string().trim().min(1).max(120),
-  terrainId: EntityIdSchema,
-  tier: DetailTierSchema,
-  controllerPolityId: EntityIdSchema.nullable(),
-  controlFirmnessBps: BasisPointsSchema,
-  neighbours: z.array(NeighbourSchema),
+  terrain: z.string().trim().min(1).max(120).optional(),
+  regionId: EntityIdSchema.optional(),
 }).strict();
 
-export const GeoJsonCityPropertiesSchema = z.object({
-  kind: z.literal("city"),
+export const GeoJsonSettlementPropertiesSchema = z.object({
+  kind: z.literal("settlement"),
   name: z.string().trim().min(1).max(120),
-  regionId: EntityIdSchema,
-  controllerPolityId: EntityIdSchema.nullable(),
-}).strict();
-
-export const GeoJsonArmyPropertiesSchema = z.object({
-  kind: z.literal("army"),
-  name: z.string().trim().min(1).max(120),
-  regionId: EntityIdSchema,
-  controllerPolityId: EntityIdSchema.nullable(),
-  strengthLabel: z.string().trim().min(1).max(120),
-}).strict();
-
-/**
- * Immutable settlement placement for a scenario. The settlement's mutable
- * controller and material state live in the world snapshot, keyed by settlementId.
- */
-export const GeoJsonSettlementAnchorPropertiesSchema = z.object({
-  kind: z.literal("settlement_anchor"),
-  settlementId: EntityIdSchema,
-  regionId: EntityIdSchema,
-  name: z.string().trim().min(1).max(120),
-  settlementKind: SettlementKindSchema,
-  cultureStyleId: EntityIdSchema.optional(),
-  importance: z.number().int().min(0).max(100).optional(),
+  provinceId: EntityIdSchema,
+  type: SettlementTypeSchema,
 }).strict();
 
 export const RiverClassSchema = z.enum(["minor", "major", "navigable"]);
@@ -90,10 +65,8 @@ export const GeoJsonRoadPropertiesSchema = z.object({
 }).strict();
 
 export const GeoJsonFeaturePropertiesSchema = z.discriminatedUnion("kind", [
-  GeoJsonRegionPropertiesSchema,
-  GeoJsonCityPropertiesSchema,
-  GeoJsonArmyPropertiesSchema,
-  GeoJsonSettlementAnchorPropertiesSchema,
+  GeoJsonProvincePropertiesSchema,
+  GeoJsonSettlementPropertiesSchema,
   GeoJsonRiverPropertiesSchema,
   GeoJsonRoadPropertiesSchema,
 ]);
@@ -105,11 +78,11 @@ export const GeoJsonMapFeatureSchema = z.object({
   geometry: GeoJsonGeometrySchema,
   properties: GeoJsonFeaturePropertiesSchema,
 }).strict().superRefine((feature, context) => {
-  const expected = feature.properties.kind === "region"
+  const expected = feature.properties.kind === "province"
     ? ["Polygon", "MultiPolygon"]
-    : feature.properties.kind === "river" || feature.properties.kind === "road"
-      ? ["LineString", "MultiLineString"]
-      : ["Point"];
+    : feature.properties.kind === "settlement"
+      ? ["Point"]
+      : ["LineString", "MultiLineString"];
   if (!expected.includes(feature.geometry.type)) {
     context.addIssue({ code: "custom", message: `${feature.properties.kind} features have incompatible geometry.` });
   }
@@ -121,17 +94,12 @@ export const GeoJsonMapSchema = z.object({
   features: z.array(GeoJsonMapFeatureSchema).min(1),
 }).strict().superRefine((map, context) => {
   const ids = new Set<string>();
-  const regions = new Set(map.features.filter((feature) => feature.properties.kind === "region").map((feature) => feature.id));
+  const provinces = new Set(map.features.filter((feature) => feature.properties.kind === "province").map((feature) => feature.id));
   for (const [index, feature] of map.features.entries()) {
     if (ids.has(feature.id)) context.addIssue({ code: "custom", path: ["features", index, "id"], message: "Feature ids must be unique." });
     ids.add(feature.id);
-    const regionId = "regionId" in feature.properties ? feature.properties.regionId : undefined;
-    if (regionId !== undefined && !regions.has(regionId)) context.addIssue({ code: "custom", path: ["features", index, "properties", "regionId"], message: "Point features must reference a region." });
-    if (feature.properties.kind === "region") {
-      for (const neighbour of feature.properties.neighbours) {
-        if (!regions.has(neighbour.regionId) || neighbour.regionId === feature.id) context.addIssue({ code: "custom", path: ["features", index, "properties", "neighbours"], message: "Region neighbours must reference another region." });
-      }
-    }
+    const provinceId = "provinceId" in feature.properties ? feature.properties.provinceId : undefined;
+    if (provinceId !== undefined && !provinces.has(provinceId)) context.addIssue({ code: "custom", path: ["features", index, "properties", "provinceId"], message: "Settlement features must reference a province." });
   }
 });
 export type GeoJsonMap = z.infer<typeof GeoJsonMapSchema>;
