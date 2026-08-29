@@ -610,12 +610,15 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .map-political-label { fill: #f4f0df; font-weight: 700; pointer-events: none; paint-order: stroke; stroke: rgb(10 15 20 / 78%); stroke-linejoin: round; }
 .map-settlement[data-damaged="true"] circle:last-of-type { stroke: #dd745b; }
 .map-settlement[data-under-siege="true"] { filter: drop-shadow(0 0 2px #e79573); }
-.map-presentation-effect { fill: none; stroke: #f4cf68; stroke-width: .28; vector-effect: non-scaling-stroke; pointer-events: none; animation: map-effect-pulse 2.8s ease-out both; }
-.map-presentation-effect-battle { stroke: #ef8d68; animation: none; }
+.map-presentation-effect { fill: none; stroke: #f4cf68; stroke-width: .28; vector-effect: non-scaling-stroke; pointer-events: none; }
+.map-presentation-effect.is-entering { animation: map-effect-arrival 2.8s ease-out both; }
+.map-presentation-effect-battle { stroke: #ef8d68; stroke-linecap: round; stroke-linejoin: round; }
+.map-presentation-effect-battle path:first-child { stroke-width: .33; }
+.map-presentation-effect-battle path:last-child { stroke-width: .24; }
 .map-presentation-effect-siege { stroke: #e9b75e; }
 .map-presentation-effect-occupation, .map-presentation-effect-conquest { stroke: #dce8e5; }
 .map-presentation-effect-settlement_damage { stroke: #dc725d; }
-@keyframes map-effect-pulse { from { opacity: 1; } to { opacity: 0; transform: scale(2); } }
+@keyframes map-effect-arrival { 0% { opacity: 0; transform: scale(.45); } 30% { opacity: 1; transform: scale(1.18); } 100% { opacity: 1; transform: scale(1); } }
 
 /* ─── Map: zoom-band visibility ────────────────────────────────── */
 [data-zoom="far"] .layer-forces { display: none; }
@@ -630,6 +633,21 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .map-force-details strong { font-family: "Times New Roman", Times, serif; font-size: 1.1rem; }
 .map-force-details span { color: var(--text-muted); font-size: .86rem; }
 .map-force-details-close { position: absolute; top: .35rem; right: .5rem; padding: 0; color: var(--text-muted); border: 0; background: transparent; font-size: 1.3rem; line-height: 1; cursor: pointer; }
+.map-force-flag-button { margin-top: .45rem; justify-self: start; padding: .42rem .65rem; border: 1px solid #a97f32; border-radius: .35rem; background: #3b2a18; color: #f4cf68; font: 600 .82rem system-ui, sans-serif; cursor: pointer; }
+.map-force-flag-button:hover { background: #57391d; }
+.map-flag-catalog-backdrop { position: absolute; inset: 0; z-index: 10; display: grid; place-items: center; padding: 1rem; background: rgb(6 8 13 / 72%); backdrop-filter: blur(3px); }
+.map-flag-catalog { position: relative; width: min(32rem, 100%); border: 1px solid #a97f32; border-radius: var(--radius-card); background: #101923; color: var(--text); box-shadow: 0 1rem 4rem rgb(0 0 0 / 60%); overflow: hidden; }
+.map-flag-catalog-header { display: flex; align-items: start; gap: 1rem; padding: 1rem 2.5rem 1rem 1.2rem; border-bottom: 1px solid var(--border); }
+.map-flag-catalog-header p { margin: 0 0 .2rem; color: #d6b768; font: 700 .72rem system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase; }
+.map-flag-catalog-header h2 { margin: 0; font: 700 1.2rem "Times New Roman", serif; color: var(--text-title); }
+.map-flag-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; padding: 1.1rem; }
+.map-flag-option { display: grid; gap: .55rem; padding: .6rem; border: 1px solid var(--border); border-radius: .45rem; background: rgb(255 255 255 / 3%); color: var(--text); text-align: left; cursor: pointer; }
+.map-flag-option:hover { border-color: #d6b768; background: rgb(214 183 104 / 10%); }
+.map-flag-option img { width: 100%; height: 5.5rem; object-fit: contain; }
+.map-flag-option span { display: grid; gap: .15rem; }
+.map-flag-option strong { font: 700 .85rem system-ui, sans-serif; }
+.map-flag-option small { color: var(--text-muted); font-size: .72rem; }
+@media (max-width: 560px) { .map-flag-options { grid-template-columns: 1fr; } .map-flag-option { grid-template-columns: 6rem 1fr; align-items: center; } .map-flag-option img { height: 3.5rem; } }
 
 .shell-contact-list { list-style: none; padding: 0; display: grid; gap: .6rem; }
 .shell-contact-list li { display: grid; gap: .15rem; }

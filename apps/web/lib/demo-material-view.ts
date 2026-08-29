@@ -22,8 +22,8 @@ export const demoMaterialView: MaterialWorldViewModel = {
   },
   forces: [
     {
-      id: "force-royal-host",
-      name: "Roman expeditionary force",
+      id: "legio-i-adiutrix",
+      name: "Legio I",
       authorizedStrength: 4000,
       totalHeadcount: 3200,
       fitStrength: 3200,
@@ -32,7 +32,7 @@ export const demoMaterialView: MaterialWorldViewModel = {
       provisionLabel: "Well provisioned",
       provisionedThroughLabel: "Step 20",
       payStatus: "Paid",
-      changeExplanation: "No change recorded yet this turn.",
+      changeExplanation: "Stationed near Naples to secure the Campanian coast.",
     },
   ],
   orderReadback: {

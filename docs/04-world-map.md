@@ -41,6 +41,28 @@ The PNG only supplies coastlines, land texture, subtle relief, terrain, rivers, 
 
 Do not provide roads for Phase 1. Existing code can represent road features for later use, but the Phase 1 renderer and authoring requirement omit them.
 
+### Scenario Designer — Flags
+
+The Scenario Designer includes a **Flags** section. A scenario author may upload any image they have the right to use and add it to that scenario's flag catalogue. Uploaded flags are available as army standards in games created from the scenario.
+
+Each flag entry has a stable `flagAssetId`, display name, image URL, and optional attribution/credit. The Designer accepts common image formats (`PNG`, `JPEG`, `WebP`, and `SVG`); it validates the file type and size, stores the original asset safely, and produces a web-sized preview. Preserve the image's aspect ratio and contain it within the standard marker frame—never crop a banner into a square.
+
+An army may reference one catalogue `flagAssetId`. If it does not, the game uses the scenario's default standard. The in-game army details panel shows the available scenario catalogue when the player changes a standard; it must not offer assets from another scenario. Removing a flag that is in use requires the Designer to choose a replacement/default first, so existing armies never render with a broken image.
+
+```ts
+type ScenarioFlagAsset = {
+  flagAssetId: string
+  name: string
+  imageUrl: string
+  attribution?: string
+}
+
+type ArmyMapState = {
+  // ...existing army fields
+  flagAssetId?: string
+}
+```
+
 ## Target map contracts
 
 The implementation-facing conceptual contract is:
@@ -92,7 +114,7 @@ Current GeoJSON uses a `region` feature where this document says province; its f
 
 ## Interaction and events
 
-Use small realm-colored flags or icons for forces. Movement uses its explicit path and progress to place the marker and show only its travelled route. Brief effects communicate battle, siege, city damage, occupation, and conquest color changes through typed committed presentation events: battles have a semantic coordinate; other effects target stable province or settlement IDs. Replay an event once per browser session, then retain only committed state (control, active movement, siege, and damage). Avoid persistent animations, excessive labels, outlines, or visual noise. After each AI-resolved turn, patch the overlay from committed state; save and restore it independently of the static PNG and GeoJSON.
+Use small scenario-supplied flags or icons for forces. Movement uses its explicit path and progress to place the marker and show only its travelled route. Battle, siege, city damage, occupation, and conquest effects communicate current-turn state through typed committed presentation events: battles have a semantic coordinate; other effects target stable province or settlement IDs. Animate a marker only on its first appearance in a browser session, then retain the marker for the turn without a looping animation. Avoid excessive labels, outlines, or visual noise. After each AI-resolved turn, patch the overlay from committed state; save and restore it independently of the static PNG and GeoJSON.
 
 ## Validation and milestones
 

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 120">
+  <path fill="#7b1820" d="M18 13h125l-14 38 14 38H18z"/>
+  <path fill="#d9ad45" d="M29 18h5v84h-5z"/>
+  <path fill="#f2cf72" d="M80 28l9 15 17-2-11 14 6 17-21-8-21 8 6-17-11-14 17 2z"/>
+  <path fill="#431014" d="M80 47l7 19-7-3-7 3z"/>
+  <text x="80" y="94" fill="#f2cf72" font-family="serif" font-size="17" font-weight="bold" text-anchor="middle">LEGIO</text>
+</svg>
