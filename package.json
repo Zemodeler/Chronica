@@ -18,12 +18,16 @@
     "lint": "eslint .",
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "npm run test:e2e --workspace @chronica/web",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "maps:simplify": "node scripts/simplify-geojson.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@next/eslint-plugin-next": "^15.5.23",
     "eslint": "^9.39.1",
+    "topojson-client": "^3.1.0",
+    "topojson-server": "^3.0.1",
+    "topojson-simplify": "^3.0.3",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.4",
     "vitest": "^4.0.8"
