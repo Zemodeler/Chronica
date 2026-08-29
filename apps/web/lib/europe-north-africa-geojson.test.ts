@@ -2,20 +2,28 @@ import { describe, expect, it } from "vitest";
 import { GeoJsonMapSchema } from "@chronica/shared";
 import { europeNorthAfricaGeoJson } from "./europe-north-africa-geojson";
 
-describe("Europe and North Africa map calibration features", () => {
-  it("contains a schema-valid Rome settlement anchored to Centro", () => {
+describe("Europe and North Africa demo map features", () => {
+  it("contains the schema-valid Rome settlement anchor", () => {
     expect(GeoJsonMapSchema.safeParse(europeNorthAfricaGeoJson).success).toBe(true);
+    expect(europeNorthAfricaGeoJson.features.filter((feature) => feature.properties.kind === "settlement")).toHaveLength(4);
     const rome = europeNorthAfricaGeoJson.features.find((feature) => feature.id === "settlement-rome");
     expect(rome).toBeDefined();
     if (!rome || rome.geometry.type !== "Point" || rome.properties.kind !== "settlement") {
-      throw new Error("Rome calibration settlement is malformed.");
+      throw new Error("Rome demo settlement is malformed.");
     }
     expect(rome.geometry.coordinates).toEqual([12.4964, 41.9028]);
     expect(rome.properties).toMatchObject({
       name: "Rome",
       provinceId: "ita-72843720b863019116732",
-      type: "city",
+      type: "capital",
     });
+  });
+
+  it("adds Naples and Syracuse as city anchors on the active map", () => {
+    const cities = europeNorthAfricaGeoJson.features.filter((feature) => feature.properties.kind === "settlement");
+    expect(cities.map((feature) => feature.properties.name).sort()).toEqual(["Fort Agrigentum", "Naples", "Rome", "Syracuse"]);
+    expect(cities.find((feature) => feature.id === "settlement-rome")?.properties).toMatchObject({ type: "capital" });
+    expect(cities.find((feature) => feature.id === "settlement-agrigentum-fort")?.properties).toMatchObject({ type: "fort" });
   });
 
   it("splits Sicilia from the former combined Italian islands feature", () => {

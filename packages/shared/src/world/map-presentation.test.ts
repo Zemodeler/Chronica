@@ -30,7 +30,6 @@ const visualConfig = {
     minor: border,
     regional: { ...border, width: 1.5 },
     realm: { ...border, width: 2 },
-    hostile: { ...border, colour: "#b53b32", width: 3 },
     selected: { ...border, colour: "#f1d87a", width: 3 },
     hovered: { ...border, colour: "#fff1bd", width: 2 },
   },
@@ -82,6 +81,7 @@ describe("map presentation contracts", () => {
         name: "Roma",
         kind: "city",
         controllerPolityId: "ROM",
+        capitalPolityId: "ROM",
         cultureStyleId: "roman",
         importance: 100,
       }],
@@ -101,14 +101,14 @@ describe("map presentation contracts", () => {
           state: "moving",
         },
       }],
-      hostileBorders: [{ firstProvinceId: "latium", secondProvinceId: "campania", kind: "front" }],
+      presentationEvents: [{ id: "battle-latium", kind: "battle", coordinate: [12.5, 41.9], participantForceIds: ["legio-i"] }],
     });
 
     expect(result.success).toBe(true);
     if (result.success) expect(result.data.forces[0]?.selected).toBe(false);
   });
 
-  it("rejects invalid movement and self-referencing fronts", () => {
+  it("rejects invalid movement paths", () => {
     expect(DynamicMapOverlaySchema.safeParse({
       revision: 0,
       polities: [],
@@ -125,12 +125,12 @@ describe("map presentation contracts", () => {
         movement: {
           start: [0, 0],
           destination: [1, 1],
-          path: [[0, 0]],
+          path: [[0, 0], [1, 0]],
           progressBps: 10_001,
           state: "moving",
         },
       }],
-      hostileBorders: [{ firstProvinceId: "province", secondProvinceId: "province", kind: "hostile" }],
+      presentationEvents: [],
     }).success).toBe(false);
   });
 
@@ -141,7 +141,21 @@ describe("map presentation contracts", () => {
       provinces: [],
       settlements: [],
       forces: [],
-      hostileBorders: [],
+      presentationEvents: [],
+    }).success).toBe(false);
+  });
+
+  it("rejects duplicate presentation events", () => {
+    expect(DynamicMapOverlaySchema.safeParse({
+      revision: 0,
+      polities: [],
+      provinces: [],
+      settlements: [],
+      forces: [],
+      presentationEvents: [
+        { id: "event", kind: "occupation", provinceId: "latium" },
+        { id: "event", kind: "conquest", provinceId: "latium" },
+      ],
     }).success).toBe(false);
   });
 });
