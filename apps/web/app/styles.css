@@ -574,7 +574,7 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .map-frame-interactive svg { touch-action: none; cursor: grab; }
 .map-tooltip { position: absolute; pointer-events: none; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--border); border-radius: var(--radius-control); color: var(--text); font: 500 .78rem system-ui, sans-serif; padding: .25rem .5rem; white-space: nowrap; z-index: 5; backdrop-filter: blur(6px); }
 .map-frame-interactive svg:active { cursor: grabbing; }
-.geo-map-region:focus-visible { outline: none; stroke: #fff; stroke-width: 2px; vector-effect: non-scaling-stroke; }
+.geo-map-region:focus-visible { outline: none; stroke: #fff; stroke-width: 0.75px; vector-effect: non-scaling-stroke; }
 .map-controls { position: absolute; right: .75rem; bottom: 2.25rem; display: flex; gap: .35rem; padding: .35rem; border: 1px solid var(--border); border-radius: var(--radius-control); background: color-mix(in srgb, var(--surface) 92%, transparent); }
 .map-controls button { min-width: 2.25rem; min-height: 2.25rem; border: 1px solid var(--border); border-radius: .25rem; background: var(--surface-raised); color: var(--text); font: inherit; cursor: pointer; }
 .map-controls button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
@@ -590,12 +590,12 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
   .geo-map-road { fill: none; stroke: #c6ad76; stroke-linecap: round; stroke-dasharray: 2 1.5; opacity: .78; vector-effect: non-scaling-stroke; }
   .geo-map-road-major, .geo-map-road-roman { stroke-width: .8; opacity: .9; }
   .geo-map-road-trade_route { stroke: #dfc47d; stroke-width: .9; stroke-dasharray: 3 1.25; }
-.geo-map-country-border { fill: none; stroke: rgb(7 15 17 / 92%); stroke-width: 1.35; vector-effect: non-scaling-stroke; pointer-events: none; }
-  .geo-map-region { fill: transparent; stroke: transparent; stroke-width: 2; vector-effect: non-scaling-stroke; }
-  .geo-map-region:hover { fill: rgb(255 255 255 / 7%); stroke: #dce8e5; stroke-width: 1.15; }
-  .geo-map-region[data-selected="true"] { fill: rgb(244 207 104 / 11%); stroke: #f4cf68; stroke-width: 2.25; }
+.geo-map-country-border { fill: none; stroke: rgb(7 15 17 / 92%); stroke-width: 0.6; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .geo-map-region { fill: transparent; stroke: transparent; stroke-width: 0.5; vector-effect: non-scaling-stroke; }
+  .geo-map-region:hover { fill: rgb(255 255 255 / 7%); stroke: #dce8e5; stroke-width: 0.5; }
+  .geo-map-region[data-selected="true"] { fill: rgb(244 207 104 / 11%); stroke: #f4cf68; stroke-width: 0.75; }
   .geo-map-region:focus { outline: none; }
-  .geo-map-region:focus { stroke: white; stroke-width: 2; }
+  .geo-map-region:focus { stroke: white; stroke-width: 0.75; }
   .map-army-token { cursor: pointer; }
   .map-army-token:focus { outline: none; }
   .map-army-token:focus image { filter: drop-shadow(0 0 2px #f4cf68); }
