@@ -22,7 +22,7 @@ import {
   type DialogueMessage,
   type DynamicMapOverlay,
   type GameCreation,
-  type GeoJsonMap,
+
   type LobbyViewModel,
   type NewsViewModel,
   type OrderBatch,
@@ -68,6 +68,7 @@ import {
   type PublicScenarioSummary,
 } from "@chronica/db";
 import { demoMaterialView } from "./demo-material-view";
+import { demoSicilyGeoJson } from "./demo-map-geojson";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { GUEST_COOKIE_NAME, readGuestSessionValue } from "./guest-session";
 import { projectConversationsView, projectNewsView, projectWorldView } from "./world-view";
@@ -440,24 +441,19 @@ const PRIVATE_DEMO_POLITY_NAMES: Readonly<Record<string, string>> = {
   naples: "Kingdom of Naples",
 };
 
-function privateDemoMapOverlay(map: GeoJsonMap, revision: number): DynamicMapOverlay {
-  const provinces = map.features.flatMap((feature) => {
-    if (feature.properties.kind !== "region") return [];
-    const properties = feature.properties;
-    return [{
-      provinceId: feature.id,
-      controllerPolityId: properties.controllerPolityId,
-      controlFirmnessBps: properties.controlFirmnessBps,
-      terrainId: properties.terrainId,
-      tier: properties.tier,
-    }];
-  });
-  const polityIds = new Set(provinces.flatMap((province) => province.controllerPolityId === null ? [] : [province.controllerPolityId]));
+const DEMO_OVERLAY_PROVINCES: DynamicMapOverlay["provinces"] = [
+  { provinceId: "drepanum", controllerPolityId: "syracuse", controlFirmnessBps: 6000, terrainId: "coastal-plain", tier: "focus" },
+  { provinceId: "palermo", controllerPolityId: "syracuse", controlFirmnessBps: 8500, terrainId: "hills", tier: "focus" },
+  { provinceId: "agrigentum", controllerPolityId: "carthage", controlFirmnessBps: 4000, terrainId: "dry-uplands", tier: "near" },
+  { provinceId: "messina", controllerPolityId: "syracuse", controlFirmnessBps: 5000, terrainId: "mountain-strait", tier: "far" },
+];
 
+function demoMapOverlay(revision: number): DynamicMapOverlay {
+  const polityIds = new Set(DEMO_OVERLAY_PROVINCES.flatMap((p) => p.controllerPolityId === null ? [] : [p.controllerPolityId]));
   return {
     revision,
     polities: [...polityIds].map((polityId) => ({ polityId, name: PRIVATE_DEMO_POLITY_NAMES[polityId] ?? polityId })),
-    provinces,
+    provinces: DEMO_OVERLAY_PROVINCES,
     settlements: [],
     forces: [],
     hostileBorders: [],
@@ -656,15 +652,10 @@ export const fixtureGameRepository: GameRepository = {
       totalPlayers: connectedPlayers,
       submittedPlayers: Math.min(state.world.submittedPlayers, connectedPlayers),
     };
-    // The ordinary fixture remains available to web tests and local shell work.
-    // GeoJSON geography is an opt-in, ignored developer asset under ADR-0042.
-    if (!privateHostingEnabled()) return world;
-    // The dedicated fixture is used when present; a small built-in map keeps a
-    // fresh checkout playable until the optional Europe source is installed.
-    // `mapOverlay` is derived from it either way -- only the (heavier,
-    // client-cached) `mapGeoJson` field is skipped when `omitGeo` is set.
-    const mapGeoJson = await loadPrivateScenarioMap(state.scenarioId);
-    const mapOverlay = privateDemoMapOverlay(mapGeoJson, state.revision);
+    const mapGeoJson = privateHostingEnabled()
+      ? await loadPrivateScenarioMap(state.scenarioId)
+      : demoSicilyGeoJson;
+    const mapOverlay = demoMapOverlay(state.revision);
     return omitGeo ? { ...world, mapOverlay } : { ...world, mapGeoJson, mapOverlay };
   },
   async getGameRevision(gameId) {

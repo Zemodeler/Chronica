@@ -580,7 +580,7 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .map-controls button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .map-controls button:disabled { cursor: not-allowed; opacity: .55; }
   .geo-map-water { fill: #09233a; }
-  .map-layer-terrain path { vector-effect: non-scaling-stroke; }
+  .map-layer-terrain path { fill: rgb(58 72 56 / 35%); vector-effect: non-scaling-stroke; }
   .geo-map-relief { fill: none; stroke: #ebe1bd; stroke-width: 1.2; stroke-opacity: .18; filter: drop-shadow(1px 1px 0 rgb(17 24 20 / 28%)); }
   .map-layer-political path { mix-blend-mode: color; }
   .geo-map-river { fill: none; stroke: #84b4ca; stroke-linecap: round; vector-effect: non-scaling-stroke; }
@@ -598,6 +598,22 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
   .geo-map-region:focus { outline: none; }
   .geo-map-region:focus { stroke: white; stroke-width: 2; }
   .map-army-token { fill: #6b7280; stroke: #10151f; stroke-width: .25; }
+
+/* ─── Map: base image ──────────────────────────────────────────── */
+.geo-map-base-image { pointer-events: none; }
+
+/* ─── Map: settlement and force labels ─────────────────────────── */
+.map-settlement-label { fill: #dce8e5; font: 500 0.55px system-ui, sans-serif; pointer-events: none; paint-order: stroke; stroke: rgb(10 15 20 / 70%); stroke-width: 0.12px; }
+.map-force-label { fill: #dce8e5; font: 600 0.5px system-ui, sans-serif; pointer-events: none; paint-order: stroke; stroke: rgb(10 15 20 / 70%); stroke-width: 0.12px; }
+
+/* ─── Map: zoom-band visibility ────────────────────────────────── */
+[data-zoom="far"] .layer-borders { display: none; }
+[data-zoom="far"] .layer-settlements { display: none; }
+[data-zoom="far"] .layer-forces { display: none; }
+[data-zoom="far"] .layer-rivers { display: none; }
+[data-zoom="medium"] .map-settlement-village { display: none; }
+[data-zoom="medium"] .map-settlement-label { display: none; }
+
 .shell-contact-list { list-style: none; padding: 0; display: grid; gap: .6rem; }
 .shell-contact-list li { display: grid; gap: .15rem; }
 .shell-contact-list span { color: var(--text-muted); font-size: .8rem; }

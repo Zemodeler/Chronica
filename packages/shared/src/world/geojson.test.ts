@@ -2,30 +2,27 @@ import { describe, expect, it } from "vitest";
 import { GeoJsonMapSchema } from "./geojson";
 
 const ring = [[0, 0], [1, 0], [1, 1], [0, 0]];
-const region = { type: "Feature", id: "A", geometry: { type: "Polygon", coordinates: [ring] }, properties: { kind: "region", name: "A", terrainId: "land", tier: "focus", controllerPolityId: null, controlFirmnessBps: 0, neighbours: [] } };
+const province = { type: "Feature", id: "A", geometry: { type: "Polygon", coordinates: [ring] }, properties: { kind: "province", name: "A" } };
 
 describe("GeoJSON map contract", () => {
-  it("accepts region, city, and army features in one map", () => {
-    expect(GeoJsonMapSchema.safeParse({ type: "FeatureCollection", features: [region, { type: "Feature", id: "city-a", geometry: { type: "Point", coordinates: [0.5, 0.5] }, properties: { kind: "city", name: "A city", regionId: "A", controllerPolityId: null } }, { type: "Feature", id: "army-a", geometry: { type: "Point", coordinates: [0.6, 0.5] }, properties: { kind: "army", name: "A army", regionId: "A", controllerPolityId: null, strengthLabel: "100 people" } }] }).success).toBe(true);
+  it("accepts province and settlement features in one map", () => {
+    expect(GeoJsonMapSchema.safeParse({ type: "FeatureCollection", features: [province, { type: "Feature", id: "settlement-a", geometry: { type: "Point", coordinates: [0.5, 0.5] }, properties: { kind: "settlement", name: "A city", provinceId: "A", type: "city" } }] }).success).toBe(true);
   });
 
-  it("accepts immutable settlement anchors and vector river and road layers", () => {
+  it("accepts settlements and vector river and road layers", () => {
     const result = GeoJsonMapSchema.safeParse({
       type: "FeatureCollection",
       features: [
-        region,
+        province,
         {
           type: "Feature",
-          id: "settlement-anchor-a",
+          id: "settlement-a",
           geometry: { type: "Point", coordinates: [0.5, 0.5] },
           properties: {
-            kind: "settlement_anchor",
-            settlementId: "settlement-a",
-            regionId: "A",
+            kind: "settlement",
             name: "A city",
-            settlementKind: "city",
-            cultureStyleId: "roman",
-            importance: 80,
+            provinceId: "A",
+            type: "capital",
           },
         },
         {
@@ -46,11 +43,21 @@ describe("GeoJSON map contract", () => {
     expect(result.success).toBe(true);
   });
 
-  it("keeps legacy city and army points valid while enforcing new feature geometry", () => {
+  it("accepts optional terrain and regionId on provinces", () => {
+    const result = GeoJsonMapSchema.safeParse({
+      type: "FeatureCollection",
+      features: [
+        { ...province, properties: { kind: "province", name: "B", terrain: "hills", regionId: "group-1" } },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects geometry mismatches and missing province references", () => {
     expect(GeoJsonMapSchema.safeParse({
       type: "FeatureCollection",
       features: [
-        region,
+        province,
         {
           type: "Feature",
           id: "river-point",
@@ -62,26 +69,25 @@ describe("GeoJSON map contract", () => {
     expect(GeoJsonMapSchema.safeParse({
       type: "FeatureCollection",
       features: [
-        region,
+        province,
         {
           type: "Feature",
           id: "settlement-missing",
           geometry: { type: "Point", coordinates: [0.5, 0.5] },
           properties: {
-            kind: "settlement_anchor",
-            settlementId: "settlement-missing",
-            regionId: "missing",
+            kind: "settlement",
             name: "Nowhere",
-            settlementKind: "village",
+            provinceId: "missing",
+            type: "village",
           },
         },
       ],
     }).success).toBe(false);
   });
 
-  it("rejects broken rings, duplicate ids, and markers outside regions", () => {
-    expect(GeoJsonMapSchema.safeParse({ type: "FeatureCollection", features: [{ ...region, geometry: { type: "Polygon", coordinates: [[[0, 0], [1, 0], [1, 1], [2, 2]]] } }] }).success).toBe(false);
-    expect(GeoJsonMapSchema.safeParse({ type: "FeatureCollection", features: [region, { ...region }] }).success).toBe(false);
-    expect(GeoJsonMapSchema.safeParse({ type: "FeatureCollection", features: [region, { type: "Feature", id: "city-b", geometry: { type: "Point", coordinates: [0.5, 0.5] }, properties: { kind: "city", name: "B", regionId: "missing", controllerPolityId: null } }] }).success).toBe(false);
+  it("rejects broken rings, duplicate ids, and settlements outside provinces", () => {
+    expect(GeoJsonMapSchema.safeParse({ type: "FeatureCollection", features: [{ ...province, geometry: { type: "Polygon", coordinates: [[[0, 0], [1, 0], [1, 1], [2, 2]]] } }] }).success).toBe(false);
+    expect(GeoJsonMapSchema.safeParse({ type: "FeatureCollection", features: [province, { ...province }] }).success).toBe(false);
+    expect(GeoJsonMapSchema.safeParse({ type: "FeatureCollection", features: [province, { type: "Feature", id: "settlement-b", geometry: { type: "Point", coordinates: [0.5, 0.5] }, properties: { kind: "settlement", name: "B", provinceId: "missing", type: "town" } }] }).success).toBe(false);
   });
 });
