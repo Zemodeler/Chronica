@@ -6,6 +6,7 @@ These are questions to resolve with the project owner. They are not commitments.
 
 - What is the final geographical and political scope of the first playable First Punic War scenario?
 - What fidelity and delivery workflow should follow the first author-supplied PNG and GeoJSON pair?
+- **Resolved — map alignment:** regional province geometry is now WGS84 and clipped to the same Europe/North Africa extent as the equirectangular base image. Do not reintroduce a Web Mercator detail raster unless it is reprojected before rendering.
 - Which other historical periods or curated scenarios should follow the demo?
 
 ## AI and operations

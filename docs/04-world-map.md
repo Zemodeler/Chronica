@@ -19,6 +19,16 @@ Base-world image
 
 At far zoom show the base image, realm overlays/borders, and capitals. At medium zoom add provinces, major cities, visible forces, and active war effects. At close zoom add towns, villages, forts, local forces, and additional labels.
 
+## Planned label behaviour
+
+Keep labels separate from the immutable base image and GeoJSON boundaries, so they can react to zoom, ownership, and the historical scenario.
+
+1. At far zoom, show only realm and major sea/geographic-feature labels. Prefer a realm's visual centre and suppress a label when it would collide with another higher-priority label.
+2. At medium zoom, add province labels and capital names. Province labels use the polygon's visual centre (or an author-provided anchor when the centre falls outside a concave or coastal polygon).
+3. At close zoom, add cities, towns, forts, ports, and local geographic-feature labels. Settlement labels use their point feature as the anchor.
+4. Resolve collisions by the existing rule priority, then by importance; hide lower-priority labels rather than allowing overlap. Realm, capital, and currently selected labels take precedence.
+5. Keep label content and typography presentation-only: the GeoJSON supplies feature names and anchors, while `MapVisualConfig.labels` supplies zoom bands, priority, and casing. Do not bake labels into the raster map.
+
 ## Scenario assets
 
 Every scenario supplies immutable visual geography and mutable state separately:

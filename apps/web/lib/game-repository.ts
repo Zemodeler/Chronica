@@ -67,7 +67,7 @@ import {
   type PublicScenarioSummary,
 } from "@chronica/db";
 import { demoMaterialView } from "./demo-material-view";
-import { demoSicilyGeoJson } from "./demo-map-geojson";
+import { europeNorthAfricaGeoJson } from "./europe-north-africa-geojson";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { projectConversationsView, projectNewsView, projectWorldView } from "./world-view";
 
@@ -633,7 +633,7 @@ export const fixtureGameRepository: GameRepository = {
       totalPlayers: connectedPlayers,
       submittedPlayers: Math.min(state.world.submittedPlayers, connectedPlayers),
     };
-    const mapGeoJson = demoSicilyGeoJson;
+    const mapGeoJson = europeNorthAfricaGeoJson;
     const mapOverlay = demoMapOverlay(state.revision);
     return omitGeo ? { ...world, mapOverlay } : { ...world, mapGeoJson, mapOverlay };
   },

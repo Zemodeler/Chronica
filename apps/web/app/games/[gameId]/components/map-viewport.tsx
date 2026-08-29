@@ -10,7 +10,7 @@ import {
 } from "react";
 
 const MIN_SCALE = 1;
-const MAX_SCALE = 10;
+const MAX_SCALE = 80;
 const ZOOM_STEP = 1.35;
 const PAN_PX = 40;
 
