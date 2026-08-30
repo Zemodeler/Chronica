@@ -3,8 +3,11 @@ import { and, count, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-or
 import { ScenarioDefinitionSchema } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
 import { users } from "../schema/auth";
-import { characterClaims, gameInvites, games, players, scenarioVersions, scenarios, turnNewsReadiness, turns } from "../schema/game";
+import { characterClaims, gameInvites, games, players, scenarioMapAssets, scenarioVersions, scenarios, turnNewsReadiness, turns } from "../schema/game";
 import { CHRONICA_SYSTEM_USER_ID, FIRST_PUNIC_WAR_SCENARIO_ID, FIRST_PUNIC_WAR_SLUG, firstPunicWarScenario } from "../built-in-scenarios";
+
+/** The built-in Numidian map is a scenario-owned copy of the DEMO geography. */
+export const FIRST_PUNIC_WAR_MAP_ASSET_ID = "00000000-0000-4000-8000-000000000201";
 
 export type PublicScenarioSummary = Readonly<{
   scenarioId: string;
@@ -19,8 +22,24 @@ export type PublicScenarioSummary = Readonly<{
 export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void> {
   await db.transaction(async (tx) => {
     await tx.insert(users).values({ id: CHRONICA_SYSTEM_USER_ID, name: "Chronica", email: "scenarios@chronica.local", username: "chronica", role: "admin" }).onConflictDoNothing();
+    await tx.insert(scenarioMapAssets).values({
+      id: FIRST_PUNIC_WAR_MAP_ASSET_ID,
+      ownerId: CHRONICA_SYSTEM_USER_ID,
+      objectKey: "built-in/numidian-decision-demo-map-v1.geojson",
+      mimeType: "application/geo+json",
+      byteSize: BigInt(1),
+      checksum: "built-in-numidian-decision-demo-map-v1",
+      featureCount: 889,
+      boundingBox: [-25, 20, 45, 72],
+      rightsConfirmedAt: new Date(),
+    }).onConflictDoNothing();
     await tx.insert(scenarios).values({ id: FIRST_PUNIC_WAR_SCENARIO_ID, slug: FIRST_PUNIC_WAR_SLUG, title: "The Numidian Decision", period: "264 BCE · First Punic War", authorId: CHRONICA_SYSTEM_USER_ID, visibility: "public", currentVersion: 1 }).onConflictDoNothing();
-    await tx.insert(scenarioVersions).values({ scenarioId: FIRST_PUNIC_WAR_SCENARIO_ID, version: 1, definition: firstPunicWarScenario.definition, initialWorld: firstPunicWarScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "Built-in copy of the DEMO opening." }).onConflictDoNothing();
+    await tx.insert(scenarioVersions).values({ scenarioId: FIRST_PUNIC_WAR_SCENARIO_ID, version: 1, mapAssetId: FIRST_PUNIC_WAR_MAP_ASSET_ID, definition: firstPunicWarScenario.definition, initialWorld: firstPunicWarScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "Built-in scenario with its own copy of the DEMO opening map." }).onConflictDoUpdate({
+      target: [scenarioVersions.scenarioId, scenarioVersions.version],
+      // Existing game snapshots remain immutable; this refreshes the opening
+      // position only for saves created after the built-in scenario is seeded.
+      set: { mapAssetId: FIRST_PUNIC_WAR_MAP_ASSET_ID, definition: firstPunicWarScenario.definition, initialWorld: firstPunicWarScenario.initialWorld },
+    });
   });
 }
 

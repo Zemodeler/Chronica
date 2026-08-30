@@ -27,12 +27,24 @@ describe("Europe and North Africa demo map features", () => {
     expect(cities.find((feature) => feature.id === "settlement-caralis")?.properties).toMatchObject({ provinceId: "ita-72843720b81376294924159", type: "city" });
   });
 
-  it("splits Sicilia into western and eastern provinces", () => {
-    const westernSicily = europeNorthAfricaGeoJson.features.find((feature) => feature.id === "ita-72843720b81376294924159-sicily-west");
-    const easternSicily = europeNorthAfricaGeoJson.features.find((feature) => feature.id === "ita-72843720b81376294924159-sicily-east");
+  it("splits Sicilia into five playable provinces", () => {
+    const sicily = europeNorthAfricaGeoJson.features.filter((feature) => feature.id.startsWith("ita-72843720b81376294924159-sicily-"));
     const remainingIslands = europeNorthAfricaGeoJson.features.find((feature) => feature.id === "ita-72843720b81376294924159");
-    expect(westernSicily?.properties).toMatchObject({ kind: "province", name: "Sicilia occidentale" });
-    expect(easternSicily?.properties).toMatchObject({ kind: "province", name: "Sicilia orientale" });
+    expect(sicily).toHaveLength(5);
+    expect(sicily.map((feature) => feature.id).sort()).toEqual([
+      "ita-72843720b81376294924159-sicily-central",
+      "ita-72843720b81376294924159-sicily-northeast",
+      "ita-72843720b81376294924159-sicily-northwest",
+      "ita-72843720b81376294924159-sicily-southeast",
+      "ita-72843720b81376294924159-sicily-west",
+    ]);
+    expect(sicily.map((feature) => feature.properties.name).sort()).toEqual([
+      "Agrigentum and the south-west",
+      "Lilybaeum and western Sicily",
+      "Messana and the strait",
+      "Panormus and the north-west",
+      "Syracuse and the south-east",
+    ]);
     expect(remainingIslands?.properties).toMatchObject({ kind: "province", name: "Sardegna e isole" });
   });
 });

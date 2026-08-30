@@ -80,9 +80,6 @@ export function CharacterDeclareClient({ gameId, gameTitle }: Props) {
                 <p style={{ color: "var(--text-meta)", margin: 0, fontSize: "0.95rem" }}>
                   Describe any character — a real historical figure, an invented person, or just a role. The more you write, the better.
                 </p>
-                <p style={{ color: "var(--text-muted)", margin: "0.4rem 0 0", fontSize: "0.83rem" }}>
-                  Examples: <em>"Appius Claudius Caudex"</em> · <em>"ANTUVI, a fierce warrior"</em> · <em>"A grain merchant in Alexandria"</em>
-                </p>
               </div>
 
               <textarea

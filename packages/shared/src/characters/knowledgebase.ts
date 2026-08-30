@@ -36,6 +36,8 @@ export const CharacterKnowledgebaseSchema = z
 
     // Historical and cultural context
     period: z.string().trim().min(1).max(200),
+    /** The scenario-map region in which the character is present at the opening. */
+    locationProvinceId: EntityIdSchema.nullable().default(null),
     culture: z.string().trim().min(1).max(120),
     faith: z.string().trim().min(1).max(120).nullable(),
     /** 200–600 words. Dense prose, optimised for repeated AI reads. */

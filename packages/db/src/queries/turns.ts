@@ -35,6 +35,7 @@ export interface WorldViewSource {
   readonly submittedPlayers: number;
   readonly totalPlayers: number;
   readonly world: WorldState;
+  readonly mapAssetId: string | null;
   readonly scenarioClock?: ScenarioClock;
 }
 
@@ -315,7 +316,7 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
   }
 
   const [svRow] = await db
-    .select({ definition: scenarioVersions.definition, initialWorld: scenarioVersions.initialWorld })
+    .select({ definition: scenarioVersions.definition, initialWorld: scenarioVersions.initialWorld, mapAssetId: scenarioVersions.mapAssetId })
     .from(scenarioVersions)
     .where(and(eq(scenarioVersions.scenarioId, game.scenarioId), eq(scenarioVersions.version, game.scenarioVersion)))
     .limit(1);
@@ -340,6 +341,7 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
     submittedPlayers,
     totalPlayers,
     world: renderedWorld,
+    mapAssetId: svRow?.mapAssetId ?? null,
     ...(scenarioClock !== undefined ? { scenarioClock } : {}),
   };
 }

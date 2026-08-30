@@ -70,6 +70,8 @@ import {
 } from "@chronica/db";
 import { demoMaterialView } from "./demo-material-view";
 import { europeNorthAfricaGeoJson } from "./europe-north-africa-geojson";
+import { FIRST_PUNIC_CARTHAGINIAN_OVERLAY, FIRST_PUNIC_SICILY_OVERLAY } from "./first-punic-map-territory";
+import { builtInScenarioMap } from "./built-in-scenario-maps";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { projectConversationsView, projectNewsView, projectWorldView } from "./world-view";
 
@@ -441,28 +443,13 @@ const DEMO_POLITY_NAMES: Readonly<Record<string, string>> = {
   naples: "Kingdom of Naples",
 };
 
-const CARTHAGINIAN_HEARTLAND_PROVINCE_IDS = [
-  "tun-13205935b88806172084765", "tun-13205935b75715054307065", "tun-13205935b49538157477352", "tun-13205935b49970022939178",
-  "tun-13205935b27259873852948", "tun-13205935b57742642676849", "tun-13205935b9888826763551", "tun-13205935b52637504718586",
-  "tun-13205935b953488337212", "tun-13205935b47286197858453", "tun-13205935b988461082754", "tun-13205935b11721331776240",
-  "tun-13205935b67114336122672", "tun-13205935b85172640982228", "tun-13205935b69181748376292", "tun-13205935b29646166511918",
-  "tun-13205935b58390004509121", "tun-13205935b21712567795690", "tun-13205935b50453639335401", "tun-13205935b74205220895681",
-  "tun-13205935b3129194497982", "tun-13205935b54080015312342", "tun-13205935b11392830158982", "tun-13205935b95771050896452",
-] as const;
-
 const DEMO_OVERLAY_PROVINCES: DynamicMapOverlay["provinces"] = [
   { provinceId: "ita-72843720b99597932318450", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "far" },
   { provinceId: "ita-72843720b59566147937015", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "far" },
   { provinceId: "ita-72843720b863019116732", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "focus" },
   { provinceId: "ita-72843720b88210905209841", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "far" },
-  // Carthage's 264 BCE heartland and western Mediterranean possessions.
-  ...CARTHAGINIAN_HEARTLAND_PROVINCE_IDS.map((provinceId) => ({ provinceId, controllerPolityId: "carthage" as const, controlFirmnessBps: 8500, terrainId: "coastal-plain", tier: "far" as const })),
-  { provinceId: "ita-72843720b81376294924159", controllerPolityId: "carthage", controlFirmnessBps: 8500, terrainId: "calibration", tier: "far" },
-  { provinceId: "ita-72843720b81376294924159-sicily-west", controllerPolityId: "carthage", controlFirmnessBps: 6500, terrainId: "coastal-plain", tier: "focus" },
-  { provinceId: "ita-72843720b81376294924159-sicily-east", controllerPolityId: "rome", controlFirmnessBps: 6500, terrainId: "coastal-plain", tier: "focus" },
-  { provinceId: "fra-19338628b22604203385446", controllerPolityId: "carthage", controlFirmnessBps: 8500, terrainId: "mountain", tier: "far" },
-  { provinceId: "esp-25490228b88831207743232", controllerPolityId: "carthage", controlFirmnessBps: 7000, terrainId: "coastal-plain", tier: "far" },
-  { provinceId: "esp-25490228b26609846683583", controllerPolityId: "carthage", controlFirmnessBps: 7000, terrainId: "coastal-plain", tier: "far" },
+  ...FIRST_PUNIC_CARTHAGINIAN_OVERLAY,
+  ...FIRST_PUNIC_SICILY_OVERLAY,
 ];
 
 function demoMapOverlay(revision: number): DynamicMapOverlay {
@@ -498,12 +485,12 @@ function demoMapOverlay(revision: number): DynamicMapOverlay {
       },
       {
         settlementId: "settlement-syracuse",
-        provinceId: "ita-72843720b81376294924159-sicily-east",
+        provinceId: "ita-72843720b81376294924159-sicily-southeast",
         anchorFeatureId: "settlement-syracuse",
         name: "Syracuse",
         kind: "city",
-        controllerPolityId: "rome",
-        capitalPolityId: null,
+        controllerPolityId: "syracuse",
+        capitalPolityId: "syracuse",
         importance: 80,
         underSiege: false,
         damaged: false,
@@ -1219,13 +1206,19 @@ export const postgresGameRepository: GameRepository = {
   },
   async getWorld(gameId, lowBandwidth = false, omitGeo = false) {
     if (gameId === DEMO_GAME_ID) return fixtureGameRepository.getWorld(gameId, lowBandwidth, omitGeo);
-    const resolved = await currentViewerCharacter(gameId);
+    const resolved = await resolvePlayer(gameId);
     if (resolved === null) throw new Error("This account or guest session cannot access the save.");
-    const { db, close, characterId } = resolved;
+    const { db, close, playerId } = resolved;
     try {
       const view = await getWorldView(db, gameId);
       if (view === undefined) return null;
-      return projectWorldView(view.world, {
+      const [player] = await db
+        .select({ characterId: schema.players.characterId })
+        .from(schema.players)
+        .where(eq(schema.players.id, playerId))
+        .limit(1);
+      const characterId = player?.characterId ?? view.world.characters[0]?.id ?? "";
+      const world = projectWorldView(view.world, {
         gameId: view.gameId,
         gameTitle: view.gameTitle,
         turnIndex: view.turnIndex,
@@ -1235,6 +1228,8 @@ export const postgresGameRepository: GameRepository = {
         lowBandwidth,
         ...(view.scenarioClock === undefined ? {} : { clock: view.scenarioClock }),
       }, characterId);
+      const mapGeoJson = omitGeo ? undefined : builtInScenarioMap(view.mapAssetId);
+      return mapGeoJson === undefined ? world : { ...world, mapGeoJson };
     } finally {
       await close();
     }

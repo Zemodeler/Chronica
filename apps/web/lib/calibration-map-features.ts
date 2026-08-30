@@ -32,7 +32,7 @@ export const syracuseDemoSettlement: GeoJsonMapFeature = {
   properties: {
     kind: "settlement",
     name: "Syracuse",
-    provinceId: "ita-72843720b81376294924159-sicily-east",
+    provinceId: "ita-72843720b81376294924159-sicily-southeast",
     type: "city",
   },
 };

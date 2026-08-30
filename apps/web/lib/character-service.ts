@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createAiAdapter, callWithCoinGate, InsufficientCoinsError } from "@chronica/ai";
+import { createAiAdapter, callWithCoinGate, InsufficientCoinsError, AiParseError } from "@chronica/ai";
 import {
   createDatabase,
   getCharacterKnowledgebase,
@@ -8,9 +8,10 @@ import {
 } from "@chronica/db";
 import {
   CharacterKnowledgebaseSchema,
+  WorldStateSchema,
   type CharacterKnowledgebase,
 } from "@chronica/shared";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { schema } from "@chronica/db";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { headers } from "next/headers";
@@ -55,25 +56,50 @@ async function resolvePlayerInGame(db: ReturnType<typeof createDatabase>["db"], 
   return player?.id ?? null;
 }
 
-async function getScenarioPeriod(db: ReturnType<typeof createDatabase>["db"], gameId: string): Promise<string> {
-  const [row] = await db
-    .select({ period: schema.scenarios.period })
-    .from(schema.games)
-    .innerJoin(schema.scenarios, eq(schema.games.scenarioId, schema.scenarios.id))
-    .where(eq(schema.games.id, gameId))
-    .limit(1);
-  return row?.period ?? "an unspecified historical period";
+type ScenarioContext = Readonly<{
+  period: string;
+  timelineStartYear: number | null;
+  regions: readonly { id: string; name: string }[];
+}>;
+
+function astronomicalYear(year: number, era: "BCE" | "CE" | undefined): number {
+  return (era ?? "CE") === "BCE" ? 1 - year : year;
 }
 
-function buildDeclareSystemPrompt(period: string): string {
-  return `You are a historical research assistant for a strategy game set in ${period}. Your task is to create or research a character for the player.
+async function getScenarioContext(db: ReturnType<typeof createDatabase>["db"], gameId: string): Promise<ScenarioContext> {
+  const [row] = await db
+    .select({ period: schema.scenarios.period, initialWorld: schema.scenarioVersions.initialWorld })
+    .from(schema.games)
+    .innerJoin(schema.scenarios, eq(schema.games.scenarioId, schema.scenarios.id))
+    .innerJoin(schema.scenarioVersions, and(eq(schema.scenarioVersions.scenarioId, schema.games.scenarioId), eq(schema.scenarioVersions.version, schema.games.scenarioVersion)))
+    .where(eq(schema.games.id, gameId))
+    .limit(1);
+  const world = WorldStateSchema.safeParse(row?.initialWorld);
+  // The clock belongs to the definition, not to the initial state. The built-in
+  // scenario period is still used as a fallback if a custom world lacks it.
+  const match = /(?:^|\s)(\d{1,4})\s*BCE\b/i.exec(row?.period ?? "");
+  const timelineStartYear = match === null ? null : astronomicalYear(Number(match[1]), "BCE");
+  return {
+    period: row?.period ?? "an unspecified historical period",
+    timelineStartYear,
+    regions: world.success ? world.data.map.provinces.map(({ id, name }) => ({ id, name })) : [],
+  };
+}
+
+function buildDeclareSystemPrompt(context: ScenarioContext): string {
+  const start = context.timelineStartYear === null ? "the scenario opening" : `${context.timelineStartYear <= 0 ? `${1 - context.timelineStartYear} BCE` : context.timelineStartYear}`;
+  const regions = context.regions.length === 0 ? "No map regions are available." : context.regions.map((region) => `- ${region.id}: ${region.name}`).join("\n");
+  return `You are a historical research assistant for a strategy game set in ${context.period}. The timeline begins at ${start}. Your task is to create or research a character for the player.
 
 The player will describe who they want to play as. You must interpret their intent and produce a character, then ask for confirmation.
 
 Rules:
-- If the player names a real historical figure: research them from your knowledge. Use what you know about their life, role, culture, and relationships.
+- If the player names a real historical figure: use them ONLY if they were already born and alive at the scenario opening (${start}). Never select, mention as the player character, or extend a historical person born after that date. If the requested or suggested figure does not yet exist, create an invented period-appropriate character instead and set origin to "invented".
 - If the player gives a fictional/ambiguous name or just a role description: invent a culturally authentic character appropriate to the period. If their name is not historically accurate for the period, use it as a nickname and generate an accurate canonical name.
 - Be strict about historical authenticity (culture, faith, names, roles).
+- For historical and hybrid characters, birthYearApprox and deathYearApprox must be known enough to prove that the person was alive at the scenario opening. Use negative years for BCE. For invented characters, make a plausible adult already alive at the opening.
+- Choose locationProvinceId from this exact opening-map list. It must be a region where the character can plausibly be present at the opening:
+${regions}
 - Skills are on a 0–100 scale and represent innate talent plus experience. A 50 is average for the era's population. A 75+ is exceptional. Skills: martial, intrigue, learning, piety, stewardship, diplomacy, body.
 - Sub-skills are more granular. Only assign sub-skills the character would realistically have.
 
@@ -85,6 +111,7 @@ Output ONLY a valid JSON object matching this schema (no markdown fences, no com
   "deathYearApprox": "number | null — approximate death year or null if unknown",
   "origin": "historical | invented | hybrid",
   "period": "string — e.g. 'First Punic War, 264–241 BC'",
+  "locationProvinceId": "string — exact opening-map region id",
   "culture": "string — e.g. 'Roman Patrician'",
   "faith": "string | null",
   "biography": "string — 200–500 words, dense prose optimised for AI re-reads",
@@ -106,11 +133,23 @@ Output ONLY a valid JSON object matching this schema (no markdown fences, no com
     { "name": "string", "relationship": "string", "historical": true|false, "notes": "string" }
   ],
   "confirmationDraft": "string — a readable summary shown to the player asking them to confirm. Include: who this character is, their role, a brief teaser of their situation. 150–300 words. Friendly, second-person ('You are...')."
-}`;
 }
 
-function buildConfirmSystemPrompt(period: string): string {
-  return `You are a historical research assistant for a strategy game set in ${period}. You previously generated a character and the player has provided additional information or corrections. Update the character accordingly and produce a new confirmation draft.
+CRITICAL for subSkills: only use these EXACT key names (all lowercase, no punctuation):
+  Martial: strategist, authority
+  Intrigue: espionage, manipulation
+  Diplomacy: rhetoric, arbitration
+  Stewardship: logistics, taxation
+  Learning: theology, scholarship
+  Piety: devotion, rites
+  Body: endurance, prowess
+Include only sub-skills relevant to this character. Any other key name will break validation.`;
+}
+
+function buildConfirmSystemPrompt(context: ScenarioContext): string {
+  return `${buildDeclareSystemPrompt(context)}
+
+You previously generated a character and the player has provided additional information or corrections. Update the character accordingly and produce a new confirmation draft.
 
 Output ONLY a valid JSON object in the same schema as before. Incorporate the player's feedback faithfully.`;
 }
@@ -119,23 +158,35 @@ function parseAiKnowledgebase(
   raw: string,
   gameId: string,
   playerId: string,
+  context: ScenarioContext,
 ): CharacterKnowledgebase | null {
+  // Strip markdown code fences if the model wrapped the JSON.
+  const stripped = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(stripped);
   } catch {
     return null;
   }
 
+  // Spread AI values first so our programmatic fields always win.
   const result = CharacterKnowledgebaseSchema.safeParse({
+    ...(parsed as Record<string, unknown>),
     version: 1,
     characterId: `declared-${playerId}`,
     gameId,
     confirmedByPlayer: false,
-    ...(parsed as Record<string, unknown>),
   });
 
-  return result.success ? result.data : null;
+  if (!result.success) return null;
+  const knowledgebase = result.data;
+  if (knowledgebase.origin !== "invented") {
+    if (context.timelineStartYear === null || knowledgebase.birthYearApprox === null || knowledgebase.deathYearApprox === null) return null;
+    if (knowledgebase.birthYearApprox > context.timelineStartYear || knowledgebase.deathYearApprox < context.timelineStartYear) return null;
+  }
+  if (knowledgebase.locationProvinceId !== null && !context.regions.some((region) => region.id === knowledgebase.locationProvinceId)) return null;
+  return knowledgebase;
 }
 
 export async function declareCharacter(gameId: string, playerInput: string): Promise<CharacterDeclarationResult> {
@@ -148,21 +199,23 @@ export async function declareCharacter(gameId: string, playerInput: string): Pro
     const playerId = await resolvePlayerInGame(db, gameId, userId);
     if (playerId === null) return { status: "error", message: "You are not an active player in this game." };
 
-    const period = await getScenarioPeriod(db, gameId);
+    const context = await getScenarioContext(db, gameId);
     const adapter = createAiAdapter();
 
     let result;
     try {
-      result = await callWithCoinGate(db, userId, gameId, "declare_character", adapter, {
-        system: buildDeclareSystemPrompt(period),
-        user: playerInput,
-      });
+      result = await callWithCoinGate(
+        db, userId, gameId, "declare_character", adapter,
+        { system: buildDeclareSystemPrompt(context), user: playerInput },
+        (content) => parseAiKnowledgebase(content, gameId, playerId, context) !== null,
+      );
     } catch (error) {
       if (error instanceof InsufficientCoinsError) return { status: "insufficient_coins" };
+      if (error instanceof AiParseError) return { status: "error", message: "The AI returned an unexpected response. Please try again." };
       throw error;
     }
 
-    const knowledgebase = parseAiKnowledgebase(result.content, gameId, playerId);
+    const knowledgebase = parseAiKnowledgebase(result.content, gameId, playerId, context);
     if (knowledgebase === null) {
       return { status: "error", message: "The AI returned an unexpected response. Please try again." };
     }
@@ -198,25 +251,27 @@ export async function reviseDeclaredCharacter(gameId: string, revision: string):
     if (playerId === null) return { status: "error", message: "You are not an active player in this game." };
 
     const existing = await getCharacterKnowledgebase(db, gameId, playerId);
-    const period = await getScenarioPeriod(db, gameId);
+    const context = await getScenarioContext(db, gameId);
     const adapter = createAiAdapter();
 
-    const context = existing
+    const revisionContext = existing
       ? `Current character draft:\n${JSON.stringify(existing, null, 2)}\n\nPlayer revision: ${revision}`
       : revision;
 
     let result;
     try {
-      result = await callWithCoinGate(db, userId, gameId, "confirm_character", adapter, {
-        system: buildConfirmSystemPrompt(period),
-        user: context,
-      });
+      result = await callWithCoinGate(
+        db, userId, gameId, "confirm_character", adapter,
+        { system: buildConfirmSystemPrompt(context), user: revisionContext },
+        (content) => parseAiKnowledgebase(content, gameId, playerId, context) !== null,
+      );
     } catch (error) {
       if (error instanceof InsufficientCoinsError) return { status: "insufficient_coins" };
+      if (error instanceof AiParseError) return { status: "error", message: "The AI returned an unexpected response. Please try again." };
       throw error;
     }
 
-    const knowledgebase = parseAiKnowledgebase(result.content, gameId, playerId);
+    const knowledgebase = parseAiKnowledgebase(result.content, gameId, playerId, context);
     if (knowledgebase === null) {
       return { status: "error", message: "The AI returned an unexpected response. Please try again." };
     }
@@ -252,14 +307,35 @@ export async function confirmDeclaredCharacter(gameId: string): Promise<Characte
     const confirmed: CharacterKnowledgebase = { ...existing, confirmedByPlayer: true, confirmationDraft: null };
     await upsertCharacterKnowledgebase(db, { gameId, playerId, characterId: `declared-${playerId}`, knowledgebase: confirmed });
 
-    // Mark the character claim as resolved in the character_claims table.
-    await db
-      .update(schema.characterClaims)
-      .set({
-        resolvedRole: { characterName: existing.canonicalName, roleLabel: existing.role },
+    const characterId = `declared-${playerId}`;
+    const resolvedRole = { characterName: existing.canonicalName, roleLabel: existing.role };
+    const [claim] = await db
+      .select({ id: schema.characterClaims.id })
+      .from(schema.characterClaims)
+      .where(and(
+        eq(schema.characterClaims.gameId, gameId),
+        eq(schema.characterClaims.playerId, playerId),
+        isNull(schema.characterClaims.releasedAt),
+      ))
+      .limit(1);
+
+    // Drafting stores the profile but does not create a claim. Confirmation
+    // resolves that claim and replaces the provisional seat id, letting the
+    // game page render the scenario map instead of routing back here.
+    if (claim === undefined) {
+      await db.insert(schema.characterClaims).values({
+        gameId,
+        playerId,
+        characterId,
+        origin: "declared",
+        declaration: existing.canonicalName,
+        resolvedRole,
         resolvedAt: new Date(),
-      })
-      .where(and(eq(schema.characterClaims.gameId, gameId), eq(schema.characterClaims.playerId, playerId)));
+      });
+    } else {
+      await db.update(schema.characterClaims).set({ resolvedRole, resolvedAt: new Date() }).where(eq(schema.characterClaims.id, claim.id));
+    }
+    await db.update(schema.players).set({ characterId }).where(and(eq(schema.players.id, playerId), eq(schema.players.gameId, gameId)));
 
     return { status: "confirmed" };
   } finally {

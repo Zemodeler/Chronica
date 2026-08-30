@@ -35,9 +35,10 @@ function boundsFor(provinces: readonly StaticProvince[]): WorldBounds { return p
 function componentFor(startId: string, available: Set<string>, world: StaticWorldGeometry): TerritorialComponent { const queue = [startId]; available.delete(startId); const provinceIds: string[] = []; while (queue.length) { const id = queue.pop()!; provinceIds.push(id); for (const neighbor of world.provinceById.get(id)?.neighborIds ?? []) if (available.delete(neighbor)) queue.push(neighbor); } const provinces = provinceIds.map((id) => world.provinceById.get(id)!).filter(Boolean); const totalArea = provinces.reduce((sum, province) => sum + province.area, 0); return { provinceIds: provinceIds.sort(), totalArea, weightedCentroid: [provinces.reduce((sum, province) => sum + province.centroid[0] * province.area, 0) / totalArea, provinces.reduce((sum, province) => sum + province.centroid[1] * province.area, 0) / totalArea], bounds: boundsFor(provinces) }; }
 function weightedQuantile(samples: readonly { value: number; weight: number }[], quantile: number) { const sorted = [...samples].sort((a, b) => a.value - b.value); const threshold = sorted.reduce((sum, sample) => sum + sample.weight, 0) * quantile; let cumulative = 0; for (const sample of sorted) { cumulative += sample.weight; if (cumulative >= threshold) return sample.value; } return sorted.at(-1)?.value ?? 0; }
 const ROMAN_REPUBLIC_RED = "#b21f2d";
-const CARTHAGINIAN_BLUE_GREY = "#93afb0";
-export function politicalColourFromId(polityId: string) { return polityId === "rome" ? ROMAN_REPUBLIC_RED : polityId === "carthage" ? CARTHAGINIAN_BLUE_GREY : polityColorFromId(polityId); }
-export function politicalColourWithAlpha(polityId: string, alpha: number) { const colour = polityId === "rome" ? ROMAN_REPUBLIC_RED : polityId === "carthage" ? CARTHAGINIAN_BLUE_GREY : null; return colour === null ? polityColorWithAlpha(polityId, alpha) : `${colour}${Math.round(alpha * 255).toString(16).padStart(2, "0")}`; }
+const CARTHAGINIAN_PURPLE_BLUE = "#2e245f";
+const SYRACUSAN_EARTH = "#80512f";
+export function politicalColourFromId(polityId: string) { return polityId === "rome" ? ROMAN_REPUBLIC_RED : polityId === "carthage" ? CARTHAGINIAN_PURPLE_BLUE : polityId === "syracuse" ? SYRACUSAN_EARTH : polityColorFromId(polityId); }
+export function politicalColourWithAlpha(polityId: string, alpha: number) { const colour = polityId === "rome" ? ROMAN_REPUBLIC_RED : polityId === "carthage" ? CARTHAGINIAN_PURPLE_BLUE : polityId === "syracuse" ? SYRACUSAN_EARTH : null; return colour === null ? polityColorWithAlpha(polityId, alpha) : `${colour}${Math.round(alpha * 255).toString(16).padStart(2, "0")}`; }
 const LABEL_PATH_COVERAGE = .85;
 const MAX_BOUNDARY_SAMPLES = 48;
 const PATH_SAMPLES = 30;

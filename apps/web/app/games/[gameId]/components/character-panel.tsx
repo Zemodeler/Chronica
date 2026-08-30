@@ -15,9 +15,12 @@ export interface CharacterPanelProps {
   readonly culture: string;
   readonly relations: readonly CharacterRelation[];
   readonly origin: string;
+  readonly moneyLabel: string;
+  readonly authority: number;
+  readonly skills: Readonly<{ martial: number; diplomacy: number; stewardship: number; intrigue: number }>;
 }
 
-export function CharacterPanel({ characterName, role, locationLabel, culture, relations, origin }: CharacterPanelProps) {
+export function CharacterPanel({ characterName, role, locationLabel, culture, relations, origin, moneyLabel, authority, skills }: CharacterPanelProps) {
   const [open, setOpen] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -110,6 +113,18 @@ export function CharacterPanel({ characterName, role, locationLabel, culture, re
           <span style={{ color: "var(--text)" }}>{culture}</span>
         </Section>
 
+        <Section label="Money">
+          <span style={{ color: "var(--text)" }}>{moneyLabel}</span>
+        </Section>
+
+        <Section label="Authority">
+          <span style={{ color: "var(--text)" }}>{authority}/100</span>
+        </Section>
+
+        <Section label="Core abilities">
+          <span style={{ color: "var(--text)" }}>Martial {skills.martial} · Diplomacy {skills.diplomacy} · Stewardship {skills.stewardship} · Intrigue {skills.intrigue}</span>
+        </Section>
+
         {/* Origin badge */}
         <Section label="Origin">
           <span style={{
@@ -139,10 +154,6 @@ export function CharacterPanel({ characterName, role, locationLabel, culture, re
           </Section>
         )}
 
-        {/* Future sections placeholder */}
-        <p style={{ marginTop: "1rem", color: "var(--text-muted)", fontSize: "0.78rem", fontStyle: "italic" }}>
-          Money, authority, and more will appear in a future update.
-        </p>
       </dialog>
 
       {/* Backdrop — closes the panel on outside click */}
