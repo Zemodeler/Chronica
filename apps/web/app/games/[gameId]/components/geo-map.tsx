@@ -12,7 +12,12 @@ import { armyStandardBounds, armyStandardHitBounds } from "./army-standard";
 
 type ZoomBand = "far" | "medium" | "close";
 export interface ForceMapDetails { readonly forceId: string; readonly name: string; readonly commanderLabel: string | null; readonly statusLabel: string; readonly strengthLabel: string; readonly locationLabel: string; readonly destinationLabel: string; readonly progressBps: number | null; readonly movementState: "moving" | "retreating" | null; }
-export interface ForceFlagAsset { readonly url: string; readonly aspectRatio: number; }
+export interface ForceFlagAsset {
+  readonly url: string;
+  readonly aspectRatio: number;
+  /** The artwork's opaque bounds, expressed as fractions of the image canvas. */
+  readonly contentBounds?: Readonly<{ x: number; y: number; width: number; height: number }>;
+}
 interface GeoMapProps { readonly geoJson: GeoJsonMap; readonly overlay: DynamicMapOverlay | null; readonly selectedProvinceId: string | null; readonly zoomBand: ZoomBand; readonly scale: number; readonly baseImageUrl: string | undefined; readonly detailImageUrl?: string | undefined; readonly forceFlagUrls: ReadonlyMap<string, ForceFlagAsset>; readonly onProvinceHover: (provinceId: string | null, event?: PointerEvent) => void; readonly onProvinceClick: (provinceId: string) => void; readonly onForceClick: (details: ForceMapDetails) => void; readonly onMapPointerDown: () => void; }
 
 function settlementRadius(type: string): number { return type === "capital" ? .06 : type === "city" ? .035 : type === "town" ? .015 : type === "fort" || type === "port" ? .04 : .020; }
@@ -24,9 +29,9 @@ function coordinateLabel([longitude, latitude]: GeoJsonPosition) { return `${lat
 
 function ArmyStandard({ asset, x, y, conflictClass, onActivate }: { readonly asset: ForceFlagAsset; readonly x: number; readonly y: number; readonly conflictClass: "combat" | "siege-attacker" | "siege-defender" | null; readonly onActivate: () => void }) {
   const bounds = armyStandardBounds(asset, x, y);
-  const hitBounds = armyStandardHitBounds(asset, x, y);
+  const hitBounds = armyStandardHitBounds(asset, x, y, conflictClass !== null);
   return <>
-    <rect className="map-army-hit-target" x={hitBounds.x} y={hitBounds.y} width={hitBounds.width} height={hitBounds.height} fill="transparent" pointerEvents="all" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onActivate(); }} />
+    <rect className="map-army-hit-target" x={hitBounds.x} y={hitBounds.y} width={hitBounds.width} height={hitBounds.height} pointerEvents="all" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onActivate(); }} />
     {conflictClass && <rect className={`map-army-conflict map-army-conflict-${conflictClass}`} x={bounds.x + .002} y={bounds.y + .002} width={bounds.width - .004} height={bounds.height - .004} rx={.006} pointerEvents="none" />}
     <image
       href={asset.url}

@@ -3,8 +3,8 @@ import type { ForceFlagAsset } from "./geo-map";
 // The conflict treatment is deliberately excluded: this is the exact painted
 // flag rectangle, which is the only pointer target that may open army details.
 export const ARMY_STANDARD_WIDTH = .18;
-/** Keeps the pulsing combat/siege frame outside the clickable flag area. */
-export const ARMY_STANDARD_HIT_INSET = .012;
+/** The interaction area starts just inside the painted combat/siege frame. */
+export const ARMY_STANDARD_CONFLICT_FRAME_INSET = .004;
 
 export interface ArmyStandardBounds {
   readonly x: number;
@@ -23,12 +23,21 @@ export function armyStandardBounds(asset: ForceFlagAsset, centreX: number, centr
   };
 }
 
-export function armyStandardHitBounds(asset: ForceFlagAsset, centreX: number, centreY: number): ArmyStandardBounds {
+export function armyStandardHitBounds(asset: ForceFlagAsset, centreX: number, centreY: number, useConflictFrame: boolean): ArmyStandardBounds {
   const flag = armyStandardBounds(asset, centreX, centreY);
+  if (useConflictFrame) {
+    return {
+      x: flag.x + ARMY_STANDARD_CONFLICT_FRAME_INSET,
+      y: flag.y + ARMY_STANDARD_CONFLICT_FRAME_INSET,
+      width: flag.width - ARMY_STANDARD_CONFLICT_FRAME_INSET * 2,
+      height: flag.height - ARMY_STANDARD_CONFLICT_FRAME_INSET * 2,
+    };
+  }
+  const content = asset.contentBounds ?? { x: 0, y: 0, width: 1, height: 1 };
   return {
-    x: flag.x + ARMY_STANDARD_HIT_INSET,
-    y: flag.y + ARMY_STANDARD_HIT_INSET,
-    width: flag.width - ARMY_STANDARD_HIT_INSET * 2,
-    height: flag.height - ARMY_STANDARD_HIT_INSET * 2,
+    x: flag.x + flag.width * content.x,
+    y: flag.y + flag.height * content.y,
+    width: flag.width * content.width,
+    height: flag.height * content.height,
   };
 }

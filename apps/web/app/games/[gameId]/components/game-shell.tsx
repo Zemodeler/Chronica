@@ -16,10 +16,13 @@ const MEDIUM_THRESHOLD = 2.5;
 const CLOSE_THRESHOLD = 5;
 
 const FLAG_CATALOG = [
-  { id: "legio-i-adiutrix", name: "Legio I Adiutrix", description: "Capricorn standard of the First Legion", url: "/maps/legio-i-adiutrix-standard.png", aspectRatio: 1 },
-  { id: "spqr", name: "SPQR standard", description: "The Roman Senate and People", url: "/maps/roman-spqr-banner.png", aspectRatio: 4 / 3 },
-  { id: "eagle", name: "Legion eagle", description: "Gold eagle on crimson", url: "/maps/roman-eagle-banner.png", aspectRatio: 4 / 3 },
-  { id: "laurel", name: "Laurel standard", description: "Victory wreath on deep red", url: "/maps/roman-laurel-banner.png", aspectRatio: 4 / 3 },
+  { id: "legio-i-adiutrix", name: "Legio I Adiutrix", description: "Capricorn standard of the First Legion", url: "/maps/legio-i-adiutrix-standard.png", aspectRatio: 1, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "spqr", name: "SPQR standard", description: "The Roman Senate and People", url: "/maps/roman-spqr-banner.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  // These PNGs have transparent padding.  The same normalized rectangle is
+  // used for rendering and pointer hit-testing, so their combat outline can
+  // never activate army details.
+  { id: "eagle", name: "Legion eagle", description: "Gold eagle on crimson", url: "/maps/roman-eagle-banner.png", aspectRatio: 4 / 3, contentBounds: { x: 18 / 160, y: 13 / 120, width: 125 / 160, height: 89 / 120 } },
+  { id: "laurel", name: "Laurel standard", description: "Victory wreath on deep red", url: "/maps/roman-laurel-banner.png", aspectRatio: 4 / 3, contentBounds: { x: 18 / 160, y: 13 / 120, width: 125 / 160, height: 89 / 120 } },
 ] as const;
 type FlagId = (typeof FLAG_CATALOG)[number]["id"];
 
@@ -81,7 +84,7 @@ export function GameShell({
         // Storage is optional; the scenario's current standard still renders.
       }
       const flag = FLAG_CATALOG.find((candidate) => candidate.id === (savedId ?? force.flagAssetId));
-      if (flag) savedFlags.set(force.forceId, { url: flag.url, aspectRatio: flag.aspectRatio });
+      if (flag) savedFlags.set(force.forceId, { url: flag.url, aspectRatio: flag.aspectRatio, contentBounds: flag.contentBounds });
     }
     setForceFlagUrls(savedFlags);
   }, [gameId, overlay?.forces]);
@@ -90,7 +93,7 @@ export function GameShell({
     if (!flagCatalogForce) return;
     const flag = FLAG_CATALOG.find((candidate) => candidate.id === flagId);
     if (!flag) return;
-    setForceFlagUrls((current) => new Map(current).set(flagCatalogForce.forceId, { url: flag.url, aspectRatio: flag.aspectRatio }));
+    setForceFlagUrls((current) => new Map(current).set(flagCatalogForce.forceId, { url: flag.url, aspectRatio: flag.aspectRatio, contentBounds: flag.contentBounds }));
     try {
       window.sessionStorage.setItem(`chronica:force-flag:${gameId}:${flagCatalogForce.forceId}`, flag.id);
     } catch {
