@@ -20,9 +20,12 @@ function coordinateLabel([longitude, latitude]: GeoJsonPosition) { return `${lat
 
 /** Render the same HTML image used in the picker, avoiding SVG <image> decoding differences. */
 function ArmyStandard({ source, x, y }: { readonly source: string; readonly x: number; readonly y: number }) {
-  return <foreignObject x={x - .09} y={y - .09} width=".18" height=".18" pointerEvents="none">
-    <img src={source} alt="" decoding="sync" style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} />
-  </foreignObject>;
+  return <>
+    <rect x={x - .09} y={y - .09} width=".18" height=".18" fill="transparent" pointerEvents="all" />
+    <foreignObject x={x - .09} y={y - .09} width=".18" height=".18" pointerEvents="none">
+      <img src={source} alt="" decoding="sync" style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} />
+    </foreignObject>
+  </>;
 }
 
 /** SVG view over immutable world geometry and derived political/dynamic map data. */
