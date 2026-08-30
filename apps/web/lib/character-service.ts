@@ -156,21 +156,25 @@ You previously generated a character and the player has provided additional info
 Output ONLY a valid JSON object in the same schema as before. Incorporate the player's feedback faithfully.`;
 }
 
+function extractJson(raw: string): unknown | null {
+  // Strip markdown code fences if the model wrapped the JSON.
+  let text = raw.replace(/^```(?:json)?\s*/im, "").replace(/\s*```\s*$/m, "").trim();
+  // Try a direct parse first.
+  try { return JSON.parse(text); } catch { /* fall through */ }
+  // If the model added prose before/after, extract the first top-level {...} block.
+  const match = /\{[\s\S]*\}/.exec(text);
+  if (!match) return null;
+  try { return JSON.parse(match[0]); } catch { return null; }
+}
+
 function parseAiKnowledgebase(
   raw: string,
   gameId: string,
   playerId: string,
   context: ScenarioContext,
 ): CharacterKnowledgebase | null {
-  // Strip markdown code fences if the model wrapped the JSON.
-  const stripped = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stripped);
-  } catch {
-    return null;
-  }
+  const parsed = extractJson(raw);
+  if (parsed === null) return null;
 
   // Spread AI values first so our programmatic fields always win.
   const result = CharacterKnowledgebaseSchema.safeParse({
@@ -181,12 +185,21 @@ function parseAiKnowledgebase(
     confirmedByPlayer: false,
   });
 
-  if (!result.success) return null;
-  const knowledgebase = result.data;
-  if (knowledgebase.origin !== "invented") {
-    if (context.timelineStartYear === null || knowledgebase.birthYearApprox === null || knowledgebase.deathYearApprox === null) return null;
-    if (knowledgebase.birthYearApprox > context.timelineStartYear || knowledgebase.deathYearApprox < context.timelineStartYear) return null;
+  if (!result.success) {
+    console.warn("[ai] knowledgebase schema validation failed:", result.error.flatten());
+    return null;
   }
+
+  const knowledgebase = result.data;
+
+  if (knowledgebase.origin !== "invented") {
+    // Birth year must be known and before the scenario start.
+    if (knowledgebase.birthYearApprox === null) return null;
+    if (context.timelineStartYear !== null && knowledgebase.birthYearApprox > context.timelineStartYear) return null;
+    // If a death year is known, the character must not have died before the scenario start.
+    if (context.timelineStartYear !== null && knowledgebase.deathYearApprox !== null && knowledgebase.deathYearApprox < context.timelineStartYear) return null;
+  }
+
   if (knowledgebase.locationProvinceId === null || !context.regions.some((region) => region.id === knowledgebase.locationProvinceId)) return null;
   return knowledgebase;
 }
