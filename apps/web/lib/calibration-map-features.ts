@@ -48,3 +48,16 @@ export const agrigentumFortDemoSettlement: GeoJsonMapFeature = {
     type: "fort",
   },
 };
+
+/** Carthaginian-held Sardinian city used to exercise the active siege overlay. */
+export const caralisDemoSettlement: GeoJsonMapFeature = {
+  type: "Feature",
+  id: "settlement-caralis",
+  geometry: { type: "Point", coordinates: [9.1217, 39.2238] },
+  properties: {
+    kind: "settlement",
+    name: "Caralis",
+    provinceId: "ita-72843720b81376294924159",
+    type: "city",
+  },
+};
