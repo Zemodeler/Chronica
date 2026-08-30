@@ -512,6 +512,18 @@ function demoMapOverlay(revision: number): DynamicMapOverlay {
         underSiege: false,
         damaged: false,
       },
+      {
+        settlementId: "settlement-caralis",
+        provinceId: "ita-72843720b81376294924159",
+        anchorFeatureId: "settlement-caralis",
+        name: "Caralis",
+        kind: "city",
+        controllerPolityId: "carthage",
+        capitalPolityId: null,
+        importance: 65,
+        underSiege: true,
+        damaged: false,
+      },
     ],
     forces: [
       {
@@ -541,11 +553,11 @@ function demoMapOverlay(revision: number): DynamicMapOverlay {
       },
       {
         forceId: demoMaterialView.forces[1]!.id,
-        provinceId: "fra-19338628b22604203385446",
-        coordinate: [9.15, 42.15],
+        provinceId: "ita-72843720b81376294924159",
+        coordinate: [9.18, 39.28],
         ownerPolityId: "rome",
         name: demoMaterialView.forces[1]!.name,
-        commanderLabel: "Corsican commander",
+        commanderLabel: "Roman siege commander",
         strengthLabel: `${demoMaterialView.forces[1]!.totalHeadcount.toLocaleString()} total; ${demoMaterialView.forces[1]!.fitStrength.toLocaleString()} fit`,
         relation: "friendly",
         flagAssetId: "eagle",
@@ -558,7 +570,7 @@ function demoMapOverlay(revision: number): DynamicMapOverlay {
         battleId: "first-punic-battle-in-sicily",
         participantForceIds: [demoMaterialView.forces[0]!.id, "carthaginian-army-sicily"],
       }],
-      sieges: [],
+      sieges: [{ settlementId: "settlement-caralis", invadingForceIds: [demoMaterialView.forces[1]!.id], defendingForceIds: [] }],
       wars: [{ polityAId: "carthage", polityBId: "rome" }],
     },
   };
