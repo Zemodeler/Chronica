@@ -17,7 +17,7 @@ import { headers } from "next/headers";
 
 // The fixture demo game uses a plain string ID, not a UUID, so no DB queries
 // are valid against it. All service functions return early for this ID.
-const DEMO_GAME_ID = "demo-game";
+const DEMO_GAME_ID = "DEMO";
 
 function requiredDatabaseUrl(): string {
   const value = process.env.DATABASE_URL?.trim();

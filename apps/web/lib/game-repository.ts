@@ -39,6 +39,8 @@ import {
   countActiveHostedGames,
   createDatabase,
   createGame as createGameQuery,
+  ensureBuiltInScenarios,
+  FIRST_PUNIC_WAR_SCENARIO_ID as PERSISTED_FIRST_PUNIC_WAR_SCENARIO_ID,
   findOrOpenDialogueThread,
   openProvisionalContactThread,
   findPublicScenario,
@@ -71,8 +73,14 @@ import { europeNorthAfricaGeoJson } from "./europe-north-africa-geojson";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { projectConversationsView, projectNewsView, projectWorldView } from "./world-view";
 
-export const DEMO_GAME_ID = "demo-game";
+/**
+ * The preserved, resettable product demo.  This is deliberately distinct from
+ * the First Punic War scenario below: the latter can be hosted as a game,
+ * while this remains a stable place for trying the interface.
+ */
+export const DEMO_GAME_ID = "DEMO";
 export const DEMO_PLAYER_ID = "player-host";
+export const FIRST_PUNIC_WAR_SCENARIO_ID = PERSISTED_FIRST_PUNIC_WAR_SCENARIO_ID;
 
 export type Viewer = Readonly<{
   userId: string;
@@ -92,7 +100,7 @@ const fixtureViewer: Viewer = {
 
 const initialWorld = WorldViewModelSchema.parse({
   gameId: DEMO_GAME_ID,
-  gameTitle: "The Numidian Decision",
+  gameTitle: "DEMO",
   phase: "collecting",
   turnIndex: 1,
   elapsedStepLabel: "spring, 264 BCE",
@@ -201,7 +209,7 @@ const initialWorld = WorldViewModelSchema.parse({
 
 const initialLobby = LobbyViewModelSchema.parse({
   gameId: DEMO_GAME_ID,
-  title: "The Numidian Decision",
+  title: "DEMO",
   hostName: fixtureViewer.displayName,
   startingSeatCount: 5,
   occupiedSeatCount: 0,
@@ -397,7 +405,7 @@ const createState = (): StoreState => ({
   uiState: { selectedThreadId: null, chronicleReadSequence: -1 },
   submittedBatch: null,
   characterDeclaration: { status: "none" },
-  scenarioId: "first-punic-war-demo",
+  scenarioId: FIRST_PUNIC_WAR_SCENARIO_ID,
 });
 
 const storeHolder = globalThis as typeof globalThis & { chronicaFixtureStore?: StoreState };
@@ -579,9 +587,14 @@ function demoMapOverlay(revision: number): DynamicMapOverlay {
 export type { GameSummaryRow };
 export type { PublicScenarioSummary };
 
-const LOCAL_DEMO_SCENARIOS: readonly PublicScenarioSummary[] = [
+/**
+ * Built-in scenarios are the production-facing copies of fixture material.
+ * They must not carry the demo name or identifier: a hosted game is a real
+ * scenario run, even when this local adapter is used without Postgres.
+ */
+const BUILT_IN_SCENARIOS: readonly PublicScenarioSummary[] = [
   {
-    scenarioId: "first-punic-war-demo",
+    scenarioId: FIRST_PUNIC_WAR_SCENARIO_ID,
     version: 1,
     title: "The Numidian Decision",
     period: "264 BCE · First Punic War",
@@ -590,8 +603,8 @@ const LOCAL_DEMO_SCENARIOS: readonly PublicScenarioSummary[] = [
   },
 ];
 
-function findTemporaryDemoScenario(scenarioId: string): PublicScenarioSummary | null {
-  return LOCAL_DEMO_SCENARIOS.find((scenario) => scenario.scenarioId === scenarioId) ?? null;
+function findBuiltInScenario(scenarioId: string): PublicScenarioSummary | null {
+  return BUILT_IN_SCENARIOS.find((scenario) => scenario.scenarioId === scenarioId) ?? null;
 }
 
 /**
@@ -666,14 +679,14 @@ export const fixtureGameRepository: GameRepository = {
     };
   },
   async listPublicScenarios() {
-    return LOCAL_DEMO_SCENARIOS;
+    return BUILT_IN_SCENARIOS;
   },
   async getPublicScenario(scenarioId) {
-    return findTemporaryDemoScenario(scenarioId);
+    return findBuiltInScenario(scenarioId);
   },
   async createGame(input) {
     const parsed = GameCreationSchema.parse(input);
-    if (findTemporaryDemoScenario(parsed.scenarioId) === null) throw new Error("Unknown local scenario.");
+    if (findBuiltInScenario(parsed.scenarioId) === null) throw new Error("Unknown built-in scenario.");
     state.lobby = LobbyViewModelSchema.parse({
       ...state.lobby,
       title: parsed.title,
@@ -1056,19 +1069,18 @@ export const postgresGameRepository: GameRepository = {
     if (userId === null) return [];
     const { db, close } = createDatabase(requiredDatabaseUrl());
     try {
-      const scenarios = await listPublicScenariosQuery(db, userId);
-    return [...LOCAL_DEMO_SCENARIOS, ...scenarios];
+      await ensureBuiltInScenarios(db);
+      return await listPublicScenariosQuery(db, userId);
     } finally {
       await close();
     }
   },
   async getPublicScenario(scenarioId) {
-    const temporaryScenario = findTemporaryDemoScenario(scenarioId);
-    if (temporaryScenario !== null) return temporaryScenario;
     const userId = await resolveViewerUserId();
     if (userId === null) return null;
     const { db, close } = createDatabase(requiredDatabaseUrl());
     try {
+      await ensureBuiltInScenarios(db);
       return await findPublicScenario(db, scenarioId, userId) ?? null;
     } finally {
       await close();
@@ -1078,10 +1090,9 @@ export const postgresGameRepository: GameRepository = {
     const parsed = GameCreationSchema.parse(input);
     const userId = await resolveViewerUserId();
     if (userId === null) throw new Error("An account is required to host a saved game.");
-    if (findTemporaryDemoScenario(parsed.scenarioId) !== null) return fixtureGameRepository.createGame(parsed);
-
     const { db, close } = createDatabase(requiredDatabaseUrl());
     try {
+      await ensureBuiltInScenarios(db);
       const activeCount = await countActiveHostedGames(db, userId);
       if (activeCount >= 3) throw new SlotCapError(userId);
       return await createGameQuery(db, {
