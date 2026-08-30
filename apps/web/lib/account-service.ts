@@ -103,9 +103,10 @@ export async function saveAccountProfile(requestHeaders: Headers, profile: Profi
   }
 }
 
-export async function createGift(requestHeaders: Headers, input: DeveloperGiftCreate): Promise<string | null> {
+export async function createGift(requestHeaders: Headers, input: DeveloperGiftCreate): Promise<{ code: string } | null | "unavailable"> {
   const account = await resolveFreshDeveloper(requestHeaders);
   if (account === null) return null;
+  if (!isGiftCodeConfigurationAvailable()) return "unavailable";
   const rawCode = `CHR-${randomBytes(18).toString("base64url").toUpperCase()}`;
   const database = createDatabase(requiredDatabaseUrl());
   try {
@@ -115,11 +116,13 @@ export async function createGift(requestHeaders: Headers, input: DeveloperGiftCr
       grantMicroUnits: parseCoins(input.grantCoins),
       codeExpiresAt: input.codeExpiresAt ? new Date(input.codeExpiresAt) : null,
       grantedCoinsExpireAt: input.grantedCoinsExpireAt ? new Date(input.grantedCoinsExpireAt) : null,
-      maxRedemptions: input.maxRedemptions,
-      perAccountLimit: input.perAccountLimit,
+      // Gift codes are intentionally single-use. A successful redemption
+      // changes their state to "redeemed" in the same database transaction.
+      maxRedemptions: 1,
+      perAccountLimit: 1,
       auditNote: input.auditNote,
     });
-    return rawCode;
+    return { code: rawCode };
   } finally {
     await database.close();
   }
@@ -128,6 +131,7 @@ export async function createGift(requestHeaders: Headers, input: DeveloperGiftCr
 export async function redeemGift(requestHeaders: Headers, rawCode: string) {
   const account = await resolveAccount(requestHeaders);
   if (account === null) return "unauthorized" as const;
+  if (!isGiftCodeConfigurationAvailable()) return "unavailable" as const;
   const database = createDatabase(requiredDatabaseUrl());
   try {
     return await redeemDeveloperGiftCode(database.db, { userId: account.id, codeHash: hashGiftCode(rawCode), redeemedAt: new Date() });
@@ -187,6 +191,10 @@ function hashGiftCode(rawCode: string): string {
   const pepper = process.env.CHRONICA_GIFT_CODE_PEPPER?.trim();
   if (!pepper) throw new Error("CHRONICA_GIFT_CODE_PEPPER is required for gift codes.");
   return createHmac("sha256", pepper).update(rawCode.trim().toUpperCase()).digest("hex");
+}
+
+function isGiftCodeConfigurationAvailable(): boolean {
+  return Boolean(process.env.CHRONICA_GIFT_CODE_PEPPER?.trim());
 }
 
 async function resolveFreshDeveloper(headers: Headers) {

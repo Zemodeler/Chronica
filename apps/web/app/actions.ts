@@ -16,7 +16,7 @@ import { cookies, headers } from "next/headers";
 import { randomUUID } from "node:crypto";
 import { getAuthentication, isAuthenticationConfigured } from "../lib/authentication";
 import { gameRepository } from "../lib/game-repository";
-import { createGift, redeemGift as redeemAccountGift, resolveAccount, revokeGift, saveAccountProfile } from "../lib/account-service";
+import { createGift, redeemGift as redeemAccountGift, revokeGift, saveAccountProfile } from "../lib/account-service";
 import { confirmDeclaredCharacter, declareCharacter, reviseDeclaredCharacter } from "../lib/character-service";
 
 const textValue = (formData: FormData, key: string): string => {
@@ -157,16 +157,15 @@ export async function resumeGame(formData: FormData): Promise<never> {
 export async function createAdminGift(formData: FormData): Promise<never> {
   const parsed = DeveloperGiftCreateSchema.safeParse({
     grantCoins: textValue(formData, "grantCoins"),
-    maxRedemptions: textValue(formData, "maxRedemptions"),
-    perAccountLimit: textValue(formData, "perAccountLimit"),
     codeExpiresAt: textValue(formData, "codeExpiresAt"),
     grantedCoinsExpireAt: textValue(formData, "grantedCoinsExpireAt"),
     auditNote: textValue(formData, "auditNote"),
   });
   if (!parsed.success) redirect("/admin?developer=invalid#developer-status");
   const code = await createGift(await headers(), parsed.data);
+  if (code === "unavailable") redirect("/admin?developer=unavailable#developer-status");
   if (code === null) redirect("/admin?developer=reauth#developer-status");
-  (await cookies()).set("chronica_created_gift", code, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 300, path: "/account" });
+  (await cookies()).set("chronica_created_gift", code.code, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 300, path: "/account" });
   redirect("/account/gift-created");
 }
 
@@ -180,16 +179,15 @@ export async function updateProfile(formData: FormData): Promise<never> {
 export async function createDeveloperGift(formData: FormData): Promise<never> {
   const parsed = DeveloperGiftCreateSchema.safeParse({
     grantCoins: textValue(formData, "grantCoins"),
-    maxRedemptions: textValue(formData, "maxRedemptions"),
-    perAccountLimit: textValue(formData, "perAccountLimit"),
     codeExpiresAt: textValue(formData, "codeExpiresAt"),
     grantedCoinsExpireAt: textValue(formData, "grantedCoinsExpireAt"),
     auditNote: textValue(formData, "auditNote"),
   });
   if (!parsed.success) redirect("/account?developer=invalid#developer-status");
   const code = await createGift(await headers(), parsed.data);
+  if (code === "unavailable") redirect("/account?developer=unavailable#developer-status");
   if (code === null) redirect("/account?developer=reauth#developer-status");
-  (await cookies()).set("chronica_created_gift", code, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 300, path: "/account" });
+  (await cookies()).set("chronica_created_gift", code.code, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 300, path: "/account" });
   redirect("/account/gift-created");
 }
 

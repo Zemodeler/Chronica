@@ -32,8 +32,6 @@ export type ProfileUpdate = z.infer<typeof ProfileUpdateSchema>;
 
 export const DeveloperGiftCreateSchema = z.object({
   grantCoins: CoinAmountStringSchema,
-  maxRedemptions: z.coerce.number().int().min(1).max(100_000),
-  perAccountLimit: z.coerce.number().int().min(1).max(100),
   codeExpiresAt: z.string().datetime({ offset: true }).optional().or(z.literal("")),
   grantedCoinsExpireAt: z.string().datetime({ offset: true }).optional().or(z.literal("")),
   auditNote: z.string().trim().min(3).max(500),
