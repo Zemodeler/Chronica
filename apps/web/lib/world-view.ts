@@ -304,7 +304,7 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
           anchorFeatureId: settlement.id,
           name: settlement.name,
           kind: settlement.kind,
-          controllerPolityId: province.controllerPolityId,
+          controllerPolityId: settlement.controllerPolityId,
           capitalPolityId: capitalPolity?.id ?? null,
           importance: settlement.size,
           underSiege: false,

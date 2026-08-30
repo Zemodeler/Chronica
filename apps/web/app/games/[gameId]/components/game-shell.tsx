@@ -217,6 +217,7 @@ export function GameShell({
               onProvinceHover={handleProvinceHover}
               onProvinceClick={handleProvinceClick}
               onForceClick={setSelectedForce}
+              onMapPointerDown={() => setSelectedForce(null)}
             />
           </MapViewport>
           {selectedForce && <aside className="map-force-details" aria-label={`${selectedForce.name} details`}>

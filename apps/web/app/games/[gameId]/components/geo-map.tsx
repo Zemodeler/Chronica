@@ -8,11 +8,12 @@ import { derivePoliticalMapState, deriveWarBorderPaths, politicalColourWithAlpha
 import { prepareStaticWorldGeometry, provinceContains } from "./world-geometry";
 import { resolveForceMapPosition } from "./map-dynamic-geometry";
 import { deriveForceConflictStatuses } from "./map-conflict-state";
+import { armyStandardBounds, armyStandardHitBounds } from "./army-standard";
 
 type ZoomBand = "far" | "medium" | "close";
 export interface ForceMapDetails { readonly forceId: string; readonly name: string; readonly commanderLabel: string | null; readonly statusLabel: string; readonly strengthLabel: string; readonly locationLabel: string; readonly destinationLabel: string; readonly progressBps: number | null; readonly movementState: "moving" | "retreating" | null; }
 export interface ForceFlagAsset { readonly url: string; readonly aspectRatio: number; }
-interface GeoMapProps { readonly geoJson: GeoJsonMap; readonly overlay: DynamicMapOverlay | null; readonly selectedProvinceId: string | null; readonly zoomBand: ZoomBand; readonly scale: number; readonly baseImageUrl: string | undefined; readonly detailImageUrl?: string | undefined; readonly forceFlagUrls: ReadonlyMap<string, ForceFlagAsset>; readonly onProvinceHover: (provinceId: string | null, event?: PointerEvent) => void; readonly onProvinceClick: (provinceId: string) => void; readonly onForceClick: (details: ForceMapDetails) => void; }
+interface GeoMapProps { readonly geoJson: GeoJsonMap; readonly overlay: DynamicMapOverlay | null; readonly selectedProvinceId: string | null; readonly zoomBand: ZoomBand; readonly scale: number; readonly baseImageUrl: string | undefined; readonly detailImageUrl?: string | undefined; readonly forceFlagUrls: ReadonlyMap<string, ForceFlagAsset>; readonly onProvinceHover: (provinceId: string | null, event?: PointerEvent) => void; readonly onProvinceClick: (provinceId: string) => void; readonly onForceClick: (details: ForceMapDetails) => void; readonly onMapPointerDown: () => void; }
 
 function settlementRadius(type: string): number { return type === "capital" ? .06 : type === "city" ? .035 : type === "town" ? .015 : type === "fort" || type === "port" ? .04 : .020; }
 function diamondPoints(x: number, y: number, radius: number): string { return `${x},${y - radius} ${x + radius},${y} ${x},${y + radius} ${x - radius},${y}`; }
@@ -21,23 +22,18 @@ function politicalIdentity(overlay: DynamicMapOverlay | null) { return overlay =
 
 function coordinateLabel([longitude, latitude]: GeoJsonPosition) { return `${latitude.toFixed(1)}°N, ${longitude.toFixed(1)}°E`; }
 
-// Map-coordinate side length for both the visible army flag and its click target.
-const ARMY_STANDARD_SIZE = .18;
-
 function ArmyStandard({ asset, x, y, conflictClass, onActivate }: { readonly asset: ForceFlagAsset; readonly x: number; readonly y: number; readonly conflictClass: "combat" | "siege-attacker" | "siege-defender" | null; readonly onActivate: () => void }) {
-  const width = ARMY_STANDARD_SIZE;
-  const height = width / asset.aspectRatio;
-  const halfWidth = width / 2;
-  const halfHeight = height / 2;
+  const bounds = armyStandardBounds(asset, x, y);
+  const hitBounds = armyStandardHitBounds(asset, x, y);
   return <>
-    <rect x={x - halfWidth} y={y - halfHeight} width={width} height={height} fill="transparent" pointerEvents="all" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onActivate(); }} />
-    {conflictClass && <rect className={`map-army-conflict map-army-conflict-${conflictClass}`} x={x - halfWidth + .002} y={y - halfHeight + .002} width={width - .004} height={height - .004} rx={.006} pointerEvents="none" />}
+    <rect className="map-army-hit-target" x={hitBounds.x} y={hitBounds.y} width={hitBounds.width} height={hitBounds.height} fill="transparent" pointerEvents="all" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onActivate(); }} />
+    {conflictClass && <rect className={`map-army-conflict map-army-conflict-${conflictClass}`} x={bounds.x + .002} y={bounds.y + .002} width={bounds.width - .004} height={bounds.height - .004} rx={.006} pointerEvents="none" />}
     <image
       href={asset.url}
-      x={x - halfWidth}
-      y={y - halfHeight}
-      width={width}
-      height={height}
+      x={bounds.x}
+      y={bounds.y}
+      width={bounds.width}
+      height={bounds.height}
       preserveAspectRatio="xMidYMid meet"
       pointerEvents="none"
     />
@@ -45,7 +41,7 @@ function ArmyStandard({ asset, x, y, conflictClass, onActivate }: { readonly ass
 }
 
 /** SVG view over immutable world geometry and derived political/dynamic map data. */
-export function GeoMap({ geoJson, overlay, selectedProvinceId, zoomBand, scale, baseImageUrl, detailImageUrl, forceFlagUrls, onProvinceHover, onProvinceClick, onForceClick }: GeoMapProps) {
+export function GeoMap({ geoJson, overlay, selectedProvinceId, zoomBand, scale, baseImageUrl, detailImageUrl, forceFlagUrls, onProvinceHover, onProvinceClick, onForceClick, onMapPointerDown }: GeoMapProps) {
   const invScale = 1 / scale;
   const viewBox = useMemo(() => computeViewBox(geoJson), [geoJson]);
   const world = useMemo(() => prepareStaticWorldGeometry(geoJson), [geoJson]);
@@ -68,7 +64,7 @@ export function GeoMap({ geoJson, overlay, selectedProvinceId, zoomBand, scale, 
   const conflictByForceId = useMemo(() => deriveForceConflictStatuses(overlay), [overlay]);
   const besiegedSettlementIds = useMemo(() => new Set(overlay?.conflicts.sieges.map((siege) => siege.settlementId) ?? []), [overlay?.conflicts.sieges]);
 
-  return <svg viewBox={viewBox} xmlns="http://www.w3.org/2000/svg" data-zoom={zoomBand} preserveAspectRatio="xMidYMid meet">
+  return <svg className="geo-map" viewBox={viewBox} xmlns="http://www.w3.org/2000/svg" data-zoom={zoomBand} preserveAspectRatio="xMidYMid meet" onPointerDown={onMapPointerDown}>
     <rect x="-180" y="-90" width="360" height="180" className="geo-map-water" />
     {baseImageUrl && <image href={baseImageUrl} x="-180" y="-90" width="360" height="180" preserveAspectRatio="none" className="geo-map-base-image" />}
     {detailImageUrl && <image href={detailImageUrl} x="-25" y="-72" width="85" height="57" preserveAspectRatio="none" className="geo-map-base-image" />}

@@ -24,6 +24,8 @@ export const SettlementSchema = z
     id: EntityIdSchema,
     name: z.string().trim().min(1).max(120),
     kind: SettlementKindSchema,
+    /** Explicit local control; a siege may change a city before its province changes hands. */
+    controllerPolityId: EntityIdSchema.nullable().default(null),
     /** Relative size in scenario units. Populations are coarse on purpose. */
     size: z.number().int().nonnegative().safe(),
     fortificationLevel: z.number().int().min(0).max(10),
@@ -106,7 +108,17 @@ export const ProvinceGraphSchema = z
     edges: z.array(ProvinceEdgeSchema),
     polities: z.array(PolitySchema),
   })
-  .strict();
+  .strict()
+  .superRefine((graph, context) => {
+    const polityIds = new Set(graph.polities.map((polity) => polity.id));
+    for (const [provinceIndex, province] of graph.provinces.entries()) {
+      for (const [settlementIndex, settlement] of province.settlements.entries()) {
+        if (settlement.controllerPolityId !== null && !polityIds.has(settlement.controllerPolityId)) {
+          context.addIssue({ code: "custom", path: ["provinces", provinceIndex, "settlements", settlementIndex, "controllerPolityId"], message: "A settlement controller must be a polity in the province graph." });
+        }
+      }
+    }
+  });
 export type ProvinceGraph = z.infer<typeof ProvinceGraphSchema>;
 
 /**
