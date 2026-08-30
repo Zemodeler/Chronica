@@ -15,6 +15,10 @@ import { schema } from "@chronica/db";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { headers } from "next/headers";
 
+// The fixture demo game uses a plain string ID, not a UUID, so no DB queries
+// are valid against it. All service functions return early for this ID.
+const DEMO_GAME_ID = "demo-game";
+
 function requiredDatabaseUrl(): string {
   const value = process.env.DATABASE_URL?.trim();
   if (value === undefined || value === "") throw new Error("DATABASE_URL is required.");
@@ -135,6 +139,7 @@ function parseAiKnowledgebase(
 }
 
 export async function declareCharacter(gameId: string, playerInput: string): Promise<CharacterDeclarationResult> {
+  if (gameId === DEMO_GAME_ID) return { status: "error", message: "AI character creation is not available in demo mode." };
   const userId = await resolveUserId();
   if (userId === null) return { status: "unauthenticated" };
 
@@ -183,6 +188,7 @@ export async function declareCharacter(gameId: string, playerInput: string): Pro
 }
 
 export async function reviseDeclaredCharacter(gameId: string, revision: string): Promise<CharacterDeclarationResult> {
+  if (gameId === DEMO_GAME_ID) return { status: "error", message: "AI character creation is not available in demo mode." };
   const userId = await resolveUserId();
   if (userId === null) return { status: "unauthenticated" };
 
@@ -231,6 +237,7 @@ export async function reviseDeclaredCharacter(gameId: string, revision: string):
 }
 
 export async function confirmDeclaredCharacter(gameId: string): Promise<CharacterDeclarationResult> {
+  if (gameId === DEMO_GAME_ID) return { status: "error", message: "AI character creation is not available in demo mode." };
   const userId = await resolveUserId();
   if (userId === null) return { status: "unauthenticated" };
 
@@ -261,6 +268,7 @@ export async function confirmDeclaredCharacter(gameId: string): Promise<Characte
 }
 
 export async function getCharacterPanelData(gameId: string): Promise<CharacterKnowledgebase | null> {
+  if (gameId === DEMO_GAME_ID) return null;
   const userId = await resolveUserId();
   if (userId === null) return null;
 

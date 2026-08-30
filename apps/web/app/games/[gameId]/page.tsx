@@ -20,7 +20,9 @@ export default async function GamePage({
 }: Readonly<{ params: Promise<{ gameId: string }> }>) {
   const { gameId } = await params;
 
-  if (await gameRepository.needsCharacterDeclaration(gameId)) {
+  // The demo game uses a fixture lobby with pre-defined characters, not AI.
+  const isDemoGame = gameId === "demo-game";
+  if (!isDemoGame && await gameRepository.needsCharacterDeclaration(gameId)) {
     redirect(`/games/${encodeURIComponent(gameId)}/declare`);
   }
 
