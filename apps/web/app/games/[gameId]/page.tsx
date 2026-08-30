@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { gameRepository } from "../../../lib/game-repository";
-import { getCharacterPanelData } from "../../../lib/character-service";
+import { ageAtScenarioStart, getCharacterPanelData, getScenarioTimelineStartYear } from "../../../lib/character-service";
 import { GameShell } from "./components/game-shell";
 import type { CharacterPanelProps } from "./components/character-panel";
 
@@ -26,9 +26,10 @@ export default async function GamePage({
     redirect(`/games/${encodeURIComponent(gameId)}/declare`);
   }
 
-  const [world, knowledgebase] = await Promise.all([
+  const [world, knowledgebase, timelineStartYear] = await Promise.all([
     gameRepository.getWorld(gameId),
     getCharacterPanelData(gameId),
+    getScenarioTimelineStartYear(gameId),
   ]);
 
   if (world === null) notFound();
@@ -45,9 +46,15 @@ export default async function GamePage({
       role: knowledgebase.role,
       locationLabel,
       culture: knowledgebase.culture,
-      relations: knowledgebase.relations.slice(0, 6),
+      relations: knowledgebase.relations,
       origin: knowledgebase.origin,
       moneyLabel: `${world.material.personalAccount.balance.toLocaleString()} ${world.material.currencyName}`,
+      moneyBalance: world.material.personalAccount.balance,
+      moneyChanges: world.material.personalAccount.recentChanges,
+      birthYearApprox: knowledgebase.birthYearApprox,
+      ageAtStart: ageAtScenarioStart(knowledgebase.birthYearApprox, timelineStartYear),
+      biography: knowledgebase.biography,
+      notableEvents: knowledgebase.notableEvents,
       authority: knowledgebase.authority ?? [],
     };
   }

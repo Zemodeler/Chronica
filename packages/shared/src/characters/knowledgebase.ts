@@ -9,14 +9,32 @@ import { CharacterSkillsSchema } from "./character";
 // Skill values are always present; skill rationale is for AI context only.
 // Invisible to the player entirely.
 
+const NonPersonRelationPattern = /\b(army|navy|fleet|legion|senate|council|assembly|republic|empire|kingdom|state|tribe|dynasty|house)\b/i;
+
 export const KnowledgebaseRelationSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
     relationship: z.string().trim().min(1).max(80),
     historical: z.boolean(),
     notes: z.string().trim().min(1).max(300),
+    /** Relations are always individually named people, never organisations or forces. */
+    kind: z.literal("person"),
+    category: z.enum(["family", "other"]),
+    /** Placement in the compact family view; not applicable to other NPCs. */
+    familyRole: z.enum(["parent", "partner", "sibling", "child", "other_relative"]).nullable(),
   })
-  .strict();
+  .strict()
+  .superRefine((relation, context) => {
+    if (NonPersonRelationPattern.test(relation.name)) {
+      context.addIssue({ code: "custom", path: ["name"], message: "A key relation must be an individually named person, not an institution or force." });
+    }
+    if (relation.category === "family" && relation.familyRole === null) {
+      context.addIssue({ code: "custom", path: ["familyRole"], message: "Family relations require a family-tree role." });
+    }
+    if (relation.category === "other" && relation.familyRole !== null) {
+      context.addIssue({ code: "custom", path: ["familyRole"], message: "Only family relations may have a family-tree role." });
+    }
+  });
 export type KnowledgebaseRelation = z.infer<typeof KnowledgebaseRelationSchema>;
 
 export const CharacterKnowledgebaseSchema = z
@@ -55,7 +73,14 @@ export const CharacterKnowledgebaseSchema = z
     skillRationale: z.record(z.string(), z.string().trim().min(1).max(200)),
 
     // Seed relations
-    relations: z.array(KnowledgebaseRelationSchema),
+    relations: z.array(KnowledgebaseRelationSchema).min(4).max(8).superRefine((relations, context) => {
+      if (!relations.some((relation) => relation.category === "family")) {
+        context.addIssue({ code: "custom", message: "At least one family relation is required." });
+      }
+      if (!relations.some((relation) => relation.category === "other")) {
+        context.addIssue({ code: "custom", message: "At least one non-family relation is required." });
+      }
+    }),
 
     // Confirmation state
     confirmedByPlayer: z.boolean(),
