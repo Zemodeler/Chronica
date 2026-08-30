@@ -377,11 +377,11 @@ function projectMaterialView(world: WorldState, viewerCharacterId: string): Mate
       permissions: personalAccess?.permissions ?? [],
       status: personalAccount?.status ?? "active",
       recentChanges: world.material.transactions
-        .filter((transaction) => transaction.destinationAccountId === personalAccount?.id)
+        .filter((transaction) => transaction.destinationAccountId === personalAccount?.id || transaction.sourceAccountId === personalAccount?.id)
         .map((transaction) => ({
           id: transaction.id,
           label: transaction.cause.explanation,
-          amount: transaction.amount,
+          amount: transaction.destinationAccountId === personalAccount?.id ? transaction.amount : -transaction.amount,
           whenLabel: `Step ${transaction.atStep}`,
         })),
     },
