@@ -39,9 +39,9 @@ const initialWorld: WorldState = WorldStateSchema.parse({
   map: {
     // These IDs deliberately match the delivered geographic map asset. A
     // political overlay can therefore paint the real regions at turn zero.
-    polities: [{ id: "carthage", name: "Carthage", capitalSettlementId: "carthage-city" }, { id: "rome", name: "Roman Republic", capitalSettlementId: "rome-city" }, { id: "syracuse", name: "Kingdom of Syracuse", capitalSettlementId: "syracuse-city" }],
+    polities: [{ id: "carthage", name: "Carthage", capitalSettlementId: "carthage-city" }, { id: "rome", name: "Roman Republic", capitalSettlementId: "settlement-rome" }, { id: "syracuse", name: "Kingdom of Syracuse", capitalSettlementId: "syracuse-city" }],
     provinces: [
-      { id: "ita-72843720b863019116732", name: "Latium", formerNames: [], terrainId: "coastal-plain", settlements: [{ id: "rome-city", name: "Rome", kind: "city", controllerPolityId: "rome", size: 100, fortificationLevel: 6 }], controllerPolityId: "rome", controlFirmnessBps: 9_000, tier: "far" },
+      { id: "ita-72843720b863019116732", name: "Latium", formerNames: [], terrainId: "coastal-plain", settlements: [{ id: "settlement-rome", name: "Rome", kind: "city", controllerPolityId: "rome", size: 100, fortificationLevel: 6 }], controllerPolityId: "rome", controlFirmnessBps: 9_000, tier: "far" },
       { id: "tun-13205935b88806172084765", name: "Carthaginian heartland", formerNames: [], terrainId: "coastal-plain", settlements: [{ id: "carthage-city", name: "Carthage", kind: "city", controllerPolityId: "carthage", size: 100, fortificationLevel: 6 }], controllerPolityId: "carthage", controlFirmnessBps: 9_000, tier: "far" },
       { id: "ita-72843720b81376294924159-sicily-west", name: "Western Sicily", formerNames: [], terrainId: "coastal-plain", settlements: [{ id: "drepanum-city", name: "Drepanum", kind: "port", controllerPolityId: "carthage", size: 55, fortificationLevel: 3 }], controllerPolityId: "carthage", controlFirmnessBps: 8_000, tier: "focus" },
       { id: "ita-72843720b81376294924159-sicily-northwest", name: "North-western Sicily", formerNames: [], terrainId: "hills", settlements: [{ id: "palermo-city", name: "Panormus", kind: "city", controllerPolityId: "carthage", size: 65, fortificationLevel: 2 }], controllerPolityId: "carthage", controlFirmnessBps: 7_500, tier: "focus" },

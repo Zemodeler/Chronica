@@ -16,11 +16,11 @@ export interface CharacterPanelProps {
   readonly relations: readonly CharacterRelation[];
   readonly origin: string;
   readonly moneyLabel: string;
-  readonly authority: number;
-  readonly skills: Readonly<{ martial: number; diplomacy: number; stewardship: number; intrigue: number }>;
+  /** Older saved characters may not have this field yet. */
+  readonly authority?: readonly string[];
 }
 
-export function CharacterPanel({ characterName, role, locationLabel, culture, relations, origin, moneyLabel, authority, skills }: CharacterPanelProps) {
+export function CharacterPanel({ characterName, role, locationLabel, culture, relations, origin, moneyLabel, authority }: CharacterPanelProps) {
   const [open, setOpen] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -35,6 +35,7 @@ export function CharacterPanel({ characterName, role, locationLabel, culture, re
   }
 
   const significantRelations = relations.filter((r) => r.historical || relations.length <= 4);
+  const authorityHoldings = authority ?? [];
 
   return (
     <>
@@ -118,11 +119,11 @@ export function CharacterPanel({ characterName, role, locationLabel, culture, re
         </Section>
 
         <Section label="Authority">
-          <span style={{ color: "var(--text)" }}>{authority}/100</span>
-        </Section>
-
-        <Section label="Core abilities">
-          <span style={{ color: "var(--text)" }}>Martial {skills.martial} · Diplomacy {skills.diplomacy} · Stewardship {skills.stewardship} · Intrigue {skills.intrigue}</span>
+          {authorityHoldings.length > 0 ? (
+            <ul style={{ margin: 0, padding: "0 0 0 1rem", listStyle: "disc" }}>
+              {authorityHoldings.map((holding) => <li key={holding} style={{ marginBottom: "0.25rem", fontSize: "0.88rem", color: "var(--text)" }}>{holding}</li>)}
+            </ul>
+          ) : <span style={{ color: "var(--text)" }}>{role}</span>}
         </Section>
 
         {/* Origin badge */}

@@ -46,6 +46,8 @@ export const CharacterKnowledgebaseSchema = z
 
     // Position
     role: z.string().trim().min(1).max(160),
+    /** Concrete offices, commands, or holdings through which the character acts. */
+    authority: z.array(z.string().trim().min(1).max(200)).max(12).default([]),
     socioEconomicClass: z.string().trim().min(1).max(80),
 
     // Skills — always assigned; rationale is AI context only, never shown to player

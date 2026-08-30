@@ -48,13 +48,7 @@ export default async function GamePage({
       relations: knowledgebase.relations.slice(0, 6),
       origin: knowledgebase.origin,
       moneyLabel: `${world.material.personalAccount.balance.toLocaleString()} ${world.material.currencyName}`,
-      authority: knowledgebase.skills.subSkills.authority ?? 0,
-      skills: {
-        martial: knowledgebase.skills.martial,
-        diplomacy: knowledgebase.skills.diplomacy,
-        stewardship: knowledgebase.skills.stewardship,
-        intrigue: knowledgebase.skills.intrigue,
-      },
+      authority: knowledgebase.authority ?? [],
     };
   }
 
