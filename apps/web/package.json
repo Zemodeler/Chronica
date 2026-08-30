@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@chronica/ai": "0.0.0",
     "@chronica/billing": "0.0.0",
     "@chronica/db": "0.0.0",
     "@chronica/shared": "0.0.0",

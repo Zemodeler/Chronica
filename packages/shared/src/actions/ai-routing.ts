@@ -24,6 +24,9 @@ export const AiOperationSchema = z.enum([
   "resolve_contact",
   "dialogue_ordinary",
   "dialogue_principal",
+  // Character creation operations — executed locally in the web server (not worker).
+  "declare_character",
+  "confirm_character",
 ]);
 export type AiOperation = z.infer<typeof AiOperationSchema>;
 
