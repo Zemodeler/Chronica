@@ -14,6 +14,7 @@ const STANDARD_TIER_OPERATIONS = new Set<AiOperation>([
   "adjudicate",
   "narrate",
   "resolve_solo_turn",
+  "propose_near_events",
 ]);
 
 function resolveModel(operation: AiOperation): string {

@@ -28,6 +28,12 @@ export const AiOperationSchema = z.enum([
   // Character creation operations — executed locally in the web server (not worker).
   "declare_character",
   "confirm_character",
+  // Orders pipeline — three-step chain: interpret → assess → adjudicate.
+  "interpret_order",
+  // World simulation — Near (player's polity), Far (adjacent polities), Coarse (distant polities).
+  "propose_near_events",
+  "propose_far_events",
+  "propose_coarse_events",
 ]);
 export type AiOperation = z.infer<typeof AiOperationSchema>;
 
