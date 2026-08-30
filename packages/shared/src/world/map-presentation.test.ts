@@ -101,7 +101,7 @@ describe("map presentation contracts", () => {
           state: "moving",
         },
       }],
-      presentationEvents: [{ id: "battle-latium", kind: "battle", coordinate: [12.5, 41.9], participantForceIds: ["legio-i"] }],
+      conflicts: { battles: [], sieges: [], wars: [] },
     });
 
     expect(result.success).toBe(true);
@@ -130,7 +130,7 @@ describe("map presentation contracts", () => {
           state: "moving",
         },
       }],
-      presentationEvents: [],
+      conflicts: { battles: [], sieges: [], wars: [] },
     }).success).toBe(false);
   });
 
@@ -141,21 +141,36 @@ describe("map presentation contracts", () => {
       provinces: [],
       settlements: [],
       forces: [],
-      presentationEvents: [],
+      conflicts: { battles: [], sieges: [], wars: [] },
     }).success).toBe(false);
   });
 
-  it("rejects duplicate presentation events", () => {
+  it("rejects conflicts that reference absent overlay entities", () => {
     expect(DynamicMapOverlaySchema.safeParse({
       revision: 0,
-      polities: [],
+      polities: [{ polityId: "ROM", name: "Rome" }],
       provinces: [],
       settlements: [],
       forces: [],
-      presentationEvents: [
-        { id: "event", kind: "occupation", provinceId: "latium" },
-        { id: "event", kind: "conquest", provinceId: "latium" },
-      ],
+      conflicts: { battles: [{ battleId: "battle", participantForceIds: ["missing-a", "missing-b"] }], sieges: [], wars: [] },
     }).success).toBe(false);
+  });
+
+  it("accepts persistent battle, siege, and war state", () => {
+    expect(DynamicMapOverlaySchema.safeParse({
+      revision: 0,
+      polities: [{ polityId: "CAR", name: "Carthage" }, { polityId: "ROM", name: "Rome" }],
+      provinces: [],
+      settlements: [{ settlementId: "lilybaeum", provinceId: "sicily", anchorFeatureId: "anchor", name: "Lilybaeum", kind: "port", controllerPolityId: "CAR", capitalPolityId: null, importance: 80 }],
+      forces: [
+        { forceId: "rome-army", provinceId: "sicily", ownerPolityId: "ROM", name: "Roman army", commanderLabel: "Scipio", strengthLabel: "3,000", relation: "friendly", movement: null },
+        { forceId: "carthage-army", provinceId: "sicily", ownerPolityId: "CAR", name: "Carthaginian army", commanderLabel: "Hanno", strengthLabel: "3,000", relation: "hostile", movement: null },
+      ],
+      conflicts: {
+        battles: [{ battleId: "sicily-battle", participantForceIds: ["rome-army", "carthage-army"] }],
+        sieges: [{ settlementId: "lilybaeum", invadingForceIds: ["rome-army"], defendingForceIds: ["carthage-army"] }],
+        wars: [{ polityAId: "CAR", polityBId: "ROM" }],
+      },
+    }).success).toBe(true);
   });
 });

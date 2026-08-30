@@ -20,12 +20,24 @@ export interface PoliticalTerritory { readonly polityId: string; readonly name: 
 export interface PoliticalMapState { readonly ownerByProvince: ReadonlyMap<string, string | null>; readonly territories: readonly PoliticalTerritory[]; readonly borderSegments: readonly PoliticalBorderSegment[]; }
 export interface PoliticalOverlayInput { readonly polities: DynamicMapOverlay["polities"]; readonly provinces: DynamicMapOverlay["provinces"]; }
 
+/** Returns only shared country boundaries belonging to an active war pair. */
+export function deriveWarBorderPaths(state: PoliticalMapState, wars: DynamicMapOverlay["conflicts"]["wars"]): string {
+  const activeWars = new Set(wars.map((war) => `${war.polityAId}:${war.polityBId}`));
+  return state.borderSegments.filter((border) => {
+    if (border.classification !== "country_border" || border.provinceB === null) return false;
+    const a = state.ownerByProvince.get(border.provinceA);
+    const b = state.ownerByProvince.get(border.provinceB);
+    return a !== null && a !== undefined && b !== null && b !== undefined && activeWars.has(a < b ? `${a}:${b}` : `${b}:${a}`);
+  }).map((border) => border.svgPath).join("");
+}
+
 function boundsFor(provinces: readonly StaticProvince[]): WorldBounds { return provinces.reduce<WorldBounds>((bounds, province) => ({ minX: Math.min(bounds.minX, province.bounds.minX), minY: Math.min(bounds.minY, province.bounds.minY), maxX: Math.max(bounds.maxX, province.bounds.maxX), maxY: Math.max(bounds.maxY, province.bounds.maxY) }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }); }
 function componentFor(startId: string, available: Set<string>, world: StaticWorldGeometry): TerritorialComponent { const queue = [startId]; available.delete(startId); const provinceIds: string[] = []; while (queue.length) { const id = queue.pop()!; provinceIds.push(id); for (const neighbor of world.provinceById.get(id)?.neighborIds ?? []) if (available.delete(neighbor)) queue.push(neighbor); } const provinces = provinceIds.map((id) => world.provinceById.get(id)!).filter(Boolean); const totalArea = provinces.reduce((sum, province) => sum + province.area, 0); return { provinceIds: provinceIds.sort(), totalArea, weightedCentroid: [provinces.reduce((sum, province) => sum + province.centroid[0] * province.area, 0) / totalArea, provinces.reduce((sum, province) => sum + province.centroid[1] * province.area, 0) / totalArea], bounds: boundsFor(provinces) }; }
 function weightedQuantile(samples: readonly { value: number; weight: number }[], quantile: number) { const sorted = [...samples].sort((a, b) => a.value - b.value); const threshold = sorted.reduce((sum, sample) => sum + sample.weight, 0) * quantile; let cumulative = 0; for (const sample of sorted) { cumulative += sample.weight; if (cumulative >= threshold) return sample.value; } return sorted.at(-1)?.value ?? 0; }
-const ROMAN_REPUBLIC_RED = "#7d2027";
-export function politicalColourFromId(polityId: string) { return polityId === "rome" ? ROMAN_REPUBLIC_RED : polityColorFromId(polityId); }
-export function politicalColourWithAlpha(polityId: string, alpha: number) { return polityId === "rome" ? `${ROMAN_REPUBLIC_RED}${Math.round(alpha * 255).toString(16).padStart(2, "0")}` : polityColorWithAlpha(polityId, alpha); }
+const ROMAN_REPUBLIC_RED = "#b21f2d";
+const CARTHAGINIAN_WHITE = "#f4f0df";
+export function politicalColourFromId(polityId: string) { return polityId === "rome" ? ROMAN_REPUBLIC_RED : polityId === "carthage" ? CARTHAGINIAN_WHITE : polityColorFromId(polityId); }
+export function politicalColourWithAlpha(polityId: string, alpha: number) { const colour = polityId === "rome" ? ROMAN_REPUBLIC_RED : polityId === "carthage" ? CARTHAGINIAN_WHITE : null; return colour === null ? polityColorWithAlpha(polityId, alpha) : `${colour}${Math.round(alpha * 255).toString(16).padStart(2, "0")}`; }
 const LABEL_PATH_COVERAGE = .85;
 const MAX_BOUNDARY_SAMPLES = 48;
 const PATH_SAMPLES = 30;
