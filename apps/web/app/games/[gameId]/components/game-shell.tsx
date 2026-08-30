@@ -8,6 +8,8 @@ import { MapTooltip } from "./map-tooltip";
 import { MapControls } from "./map-controls";
 import { CharacterPanel, type CharacterPanelProps } from "./character-panel";
 import { ChatPanel } from "./chat-panel";
+import { OrdersPanel } from "./orders-panel";
+import { ChroniclePanel } from "./chronicle-panel";
 
 type ZoomBand = "far" | "medium" | "close";
 
@@ -269,6 +271,33 @@ export function GameShell({
       </div>
       {characterPanel && <CharacterPanel {...characterPanel} />}
       {playerCharacterId && <ChatPanel gameId={gameId} playerCharacterId={playerCharacterId} />}
+      {playerCharacterId && (
+        <OrdersPanel
+          gameId={gameId}
+          onResolutionComplete={() => { /* Chronicle panel listens to phase prop */ }}
+        />
+      )}
+      <ChroniclePanel
+        gameId={gameId}
+        phase={phase}
+        onDisplayPatch={(patch) => {
+          // Apply chronicle display patches to the live overlay
+          // Patches are arrays of { kind, ... } objects written by buildDisplayPatch()
+          if (!Array.isArray(patch)) return;
+          setOverlay((current) => {
+            if (!current) return current;
+            let next = current;
+            for (const p of patch as Array<{ kind: string; provinceId?: string; newControllerPolityId?: string; forceId?: string; newLocationId?: string }>) {
+              if (p.kind === "province_control" && p.provinceId && p.newControllerPolityId) {
+                // Overlay province control changes are reflected in the next poll;
+                // for now just bump the revision so the map re-renders.
+                next = { ...next, revision: next.revision + 1 };
+              }
+            }
+            return next;
+          });
+        }}
+      />
     </>
   );
 }

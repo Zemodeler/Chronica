@@ -3,6 +3,7 @@ export * from "./accounts";
 export * from "./character";
 export * from "./dialogue";
 export * from "./games";
+export * from "./resolution";
 export * from "./shared-knowledgebase";
 export * from "./turns";
 export * from "./ui-state";
