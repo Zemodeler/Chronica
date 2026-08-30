@@ -2,9 +2,6 @@ import "server-only";
 
 import type {
   ChronicleEntryView,
-  ConversationsViewModel,
-  ConversationThreadView,
-  DialogueChannel,
   GamePhase,
   MaterialWorldViewModel,
   NewsViewModel,
@@ -14,13 +11,11 @@ import type {
   WorldViewModel,
 } from "@chronica/shared";
 import {
-  ConversationsViewModelSchema,
-  DialogueMessageSchema,
   DisplayPatchSchema,
   NewsViewModelSchema,
   WorldViewModelSchema,
 } from "@chronica/shared";
-import type { ChronicleView, ContactRow, MessageRow } from "@chronica/db";
+import type { ChronicleView } from "@chronica/db";
 import { FIRST_PUNIC_CARTHAGINIAN_OVERLAY, FIRST_PUNIC_SICILY_OVERLAY } from "./first-punic-map-territory";
 
 // Projects real simulation state into the view-model shapes the pages already
@@ -490,105 +485,3 @@ export function projectNewsView(
   } satisfies NewsViewModel);
 }
 
-const CHANNEL_LABELS: Record<DialogueChannel, string> = {
-  in_person_private: "private conversation in person",
-  in_person_public: "public conversation in person",
-  audience: "formal audience",
-  messenger: "message carried by a messenger",
-  correspondence: "written correspondence",
-};
-
-/** Maps durable worker failure categories to safe, useful player copy. */
-export function dialogueFailureMessage(acts: unknown): string {
-  const reason = typeof acts === "object" && acts !== null && "failureReason" in acts
-    ? (acts as { failureReason?: unknown }).failureReason
-    : undefined;
-  if (typeof reason !== "string") return "The reply service could not deliver a response. You may try again.";
-
-  if (/no longer collecting|turn is resolving|session closed|earlier turn|no longer in the world/iu.test(reason)) {
-    return "This conversation belonged to an earlier turn and cannot receive a reply. Open the contact again in this turn.";
-  }
-  if (/payment|credit/iu.test(reason)) {
-    return "Replies are paused until the host adds funds to this match.";
-  }
-  return "The reply service could not deliver a response. You may try again.";
-}
-
-export function projectConversationsView(
-  gameId: string,
-  playerCharacterId: string,
-  contacts: readonly ContactRow[],
-  active: { readonly threadId: string; readonly npcName: string; readonly roleLabel: string; readonly channel: DialogueChannel; readonly messages: readonly MessageRow[] } | null,
-  /**
-   * Real name/role per npcCharacterId, when known -- from the generated cast
-   * or the current world's characters. A contact whose npcCharacterId isn't
-   * in here (e.g. a stale/legacy thread) falls back to the raw id, same as
-   * before this lookup existed.
-   */
-  identity?: ReadonlyMap<string, { readonly name: string; readonly roleLabel: string }>,
-): ConversationsViewModel {
-  const replyInFlight = active?.messages.some(
-    (message) => message.speakerCharacterId === playerCharacterId && (message.status === "pending" || message.status === "claimed"),
-  ) ?? false;
-  // Only the most recent message matters here: the server (sendPlayerDialogueMessage)
-  // never blocks a new send on a past failure, only on a reply still in flight, so
-  // an old failure must not linger as a notice once a later message went through.
-  const lastMessage = active?.messages.at(-1);
-  const failedMessage = lastMessage?.speakerCharacterId === playerCharacterId && lastMessage.status === "failed"
-    ? lastMessage
-    : undefined;
-  const activeThread: ConversationThreadView | null = active === null ? null : {
-    threadId: active.threadId,
-    knownName: active.npcName,
-    roleLabel: active.roleLabel,
-    channelLabel: CHANNEL_LABELS[active.channel],
-    elapsedStepLabel: "This turn",
-    pending: replyInFlight,
-    // Informational, not a lock: the composer stays open so retrying is just
-    // sending a new message, matching what the server actually enforces.
-    readOnlyReason: failedMessage === undefined ? null : dialogueFailureMessage(failedMessage.acts),
-    messages: active.messages.map((message) => {
-      const parsed = DialogueMessageSchema.safeParse({
-        id: message.id,
-        sessionId: message.sessionId,
-        sequence: message.sequence,
-        speakerCharacterId: message.speakerCharacterId,
-        body: message.body,
-        acts: message.acts,
-        disclosedFactIds: message.disclosedFactIds,
-      });
-      // A malformed legacy payload must not make the conversation unreadable.
-      // It contributes no structured claims until a canonical worker reply does.
-      return parsed.success
-        ? parsed.data
-        : { id: message.id, sessionId: message.sessionId, sequence: message.sequence, speakerCharacterId: message.speakerCharacterId, body: message.body, acts: [], disclosedFactIds: [] };
-    }),
-  };
-
-  return ConversationsViewModelSchema.parse({
-    gameId,
-    playerCharacterId,
-    // A failed message is terminal, so it never blocks a retry. For a prior
-    // turn the send transaction creates a fresh turn-scoped session first.
-    canSend: activeThread !== null && !replyInFlight,
-    contacts: contacts.map((contact) => {
-      const known = contact.npcCharacterId === null ? undefined : identity?.get(contact.npcCharacterId);
-      const isResolving = contact.status === "resolving_contact";
-      return {
-        threadId: contact.threadId,
-        // For resolving_contact sessions, show the original role query as the
-        // contact name while the worker finds the real NPC.
-        knownName: known?.name ?? (isResolving ? contact.roleQuery : null) ?? contact.npcCharacterId ?? "Unknown contact",
-        roleLabel: isResolving
-          ? "Searching..."
-          : contact.status !== "open"
-            ? (contact.status === "closed" ? "Conversation closed" : "Contact unavailable")
-            : known?.roleLabel ?? "Contact",
-        channel: contact.channel,
-        unread: 0,
-        pending: isResolving,
-      };
-    }),
-    activeThread,
-  } satisfies ConversationsViewModel);
-}

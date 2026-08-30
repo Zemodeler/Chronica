@@ -228,24 +228,23 @@ export type NewsViewModel = z.infer<typeof NewsViewModelSchema>;
 
 export const ContactViewSchema = z
   .object({
-    threadId: EntityIdSchema,
+    sessionId: EntityIdSchema,
+    npcCharacterId: z.string(),
     knownName: z.string().trim().min(1),
     roleLabel: z.string().trim().min(1),
     channel: DialogueChannelSchema,
     unread: z.number().int().nonnegative(),
-    pending: z.boolean(),
+    isGroup: z.boolean(),
   })
   .strict();
+export type ContactView = z.infer<typeof ContactViewSchema>;
 
 export const ConversationThreadViewSchema = z
   .object({
-    threadId: EntityIdSchema,
+    sessionId: EntityIdSchema,
     knownName: z.string().trim().min(1),
     roleLabel: z.string().trim().min(1),
     channelLabel: z.string().trim().min(1),
-    elapsedStepLabel: z.string().trim().min(1),
-    pending: z.boolean(),
-    readOnlyReason: z.string().trim().min(1).nullable(),
     messages: z.array(DialogueMessageSchema),
   })
   .strict();
@@ -257,50 +256,31 @@ export const ConversationsViewModelSchema = z
     playerCharacterId: z.string(),
     contacts: z.array(ContactViewSchema),
     activeThread: ConversationThreadViewSchema.nullable(),
-    canSend: z.boolean(),
   })
   .strict();
 export type ConversationsViewModel = z.infer<typeof ConversationsViewModelSchema>;
 
-export const FindContactSchema = z
-  .object({ role: z.string().trim().min(3).max(160) })
-  .strict();
-export const SendDialogueMessageSchema = z
-  .object({ threadId: EntityIdSchema, body: z.string().trim().min(1).max(2_000) })
-  .strict();
-
-export const ChatOverviewResponseSchema = z
-  .object({
-    gameId: EntityIdSchema,
-    playerCharacterId: EntityIdSchema,
-    contacts: z.array(ContactViewSchema),
-    selectedThreadId: EntityIdSchema.nullable(),
-  })
-  .strict();
-export type ChatOverviewResponse = z.infer<typeof ChatOverviewResponseSchema>;
-
 export const ContactDiscoveryResultSchema = z.discriminatedUnion("status", [
-  z.object({ status: z.literal("found"), threadId: EntityIdSchema }).strict(),
-  z.object({ status: z.literal("resolving"), threadId: EntityIdSchema }).strict(),
-  z.object({ status: z.literal("unavailable"), explanation: z.string().trim().min(1).max(300) }).strict(),
+  z.object({ status: z.literal("found"), sessionId: EntityIdSchema, knownName: z.string().trim().min(1) }).strict(),
+  z.object({ status: z.literal("unavailable"), explanation: z.string().trim().min(1).max(400) }).strict(),
 ]);
 export type ContactDiscoveryResult = z.infer<typeof ContactDiscoveryResultSchema>;
 
-export const ChatThreadResponseSchema = z
-  .object({ thread: ConversationThreadViewSchema.nullable() })
+export const DiscoverContactRequestSchema = z
+  .object({ query: z.string().trim().min(1).max(200) })
   .strict();
-export type ChatThreadResponse = z.infer<typeof ChatThreadResponseSchema>;
+export type DiscoverContactRequest = z.infer<typeof DiscoverContactRequestSchema>;
 
 export const SendChatMessageRequestSchema = z
-  .object({
-    body: z.string().trim().min(1).max(2_000),
-    requestId: z.string().trim().min(1).max(120).optional(),
-  })
+  .object({ body: z.string().trim().min(1).max(2_000) })
   .strict();
 export type SendChatMessageRequest = z.infer<typeof SendChatMessageRequestSchema>;
 
 export const SendChatMessageResponseSchema = z
-  .object({ outcome: z.enum(["accepted", "duplicate"]) })
+  .object({
+    playerMessage: DialogueMessageSchema,
+    npcReply: DialogueMessageSchema.nullable(),
+  })
   .strict();
 export type SendChatMessageResponse = z.infer<typeof SendChatMessageResponseSchema>;
 

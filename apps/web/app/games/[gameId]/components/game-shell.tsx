@@ -7,6 +7,7 @@ import { MapViewport, type ViewportTransform } from "./map-viewport";
 import { MapTooltip } from "./map-tooltip";
 import { MapControls } from "./map-controls";
 import { CharacterPanel, type CharacterPanelProps } from "./character-panel";
+import { ChatPanel } from "./chat-panel";
 
 type ZoomBand = "far" | "medium" | "close";
 
@@ -43,6 +44,7 @@ interface GameShellProps {
   readonly baseImageUrl?: string;
   readonly detailImageUrl?: string;
   readonly characterPanel?: CharacterPanelProps | undefined;
+  readonly playerCharacterId?: string | undefined;
 }
 
 export function GameShell({
@@ -55,6 +57,7 @@ export function GameShell({
   baseImageUrl,
   detailImageUrl,
   characterPanel,
+  playerCharacterId,
 }: GameShellProps) {
   const [overlay, setOverlay] = useState<DynamicMapOverlay | null>(
     initialOverlay ?? null,
@@ -265,6 +268,7 @@ export function GameShell({
         </div>
       </div>
       {characterPanel && <CharacterPanel {...characterPanel} />}
+      {playerCharacterId && <ChatPanel gameId={gameId} playerCharacterId={playerCharacterId} />}
     </>
   );
 }

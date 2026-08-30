@@ -4,6 +4,8 @@ import { createAiAdapter, callWithCoinGate, InsufficientCoinsError, AiParseError
 import {
   createDatabase,
   getCharacterKnowledgebase,
+  getOrCreateNpcKnowledgebase,
+  findOrOpenSession,
   upsertCharacterKnowledgebase,
 } from "@chronica/db";
 import {
@@ -193,6 +195,37 @@ function extractJson(raw: string): unknown | null {
   try { return JSON.parse(match[0]); } catch { return null; }
 }
 
+const FAMILY_ROLE_MAP: Record<string, string> = {
+  spouse: "partner", wife: "partner", husband: "partner",
+  father: "parent", mother: "parent",
+  brother: "sibling", sister: "sibling",
+  son: "child", daughter: "child",
+  uncle: "other_relative", aunt: "other_relative",
+  nephew: "other_relative", niece: "other_relative",
+  cousin: "other_relative", grandfather: "other_relative",
+  grandmother: "other_relative", grandson: "other_relative",
+  granddaughter: "other_relative", stepfather: "other_relative",
+  stepmother: "other_relative", stepbrother: "other_relative",
+  stepsister: "other_relative", stepson: "other_relative",
+  stepdaughter: "other_relative",
+};
+
+function normalizeFamilyRole(role: unknown): unknown {
+  if (role === null || role === undefined) return null;
+  if (typeof role !== "string") return role;
+  const lower = role.toLowerCase().trim();
+  return FAMILY_ROLE_MAP[lower] ?? role;
+}
+
+function preprocessAiRelations(relations: unknown): unknown {
+  if (!Array.isArray(relations)) return relations;
+  return relations.map((rel) => {
+    if (rel === null || typeof rel !== "object") return rel;
+    const r = rel as Record<string, unknown>;
+    return { ...r, familyRole: normalizeFamilyRole(r["familyRole"]) };
+  });
+}
+
 function parseAiKnowledgebase(
   raw: string,
   gameId: string,
@@ -202,9 +235,15 @@ function parseAiKnowledgebase(
   const parsed = extractJson(raw);
   if (parsed === null) return null;
 
+  const base = parsed as Record<string, unknown>;
+  const preprocessed = {
+    ...base,
+    relations: preprocessAiRelations(base["relations"]),
+  };
+
   // Spread AI values first so our programmatic fields always win.
   const result = CharacterKnowledgebaseSchema.safeParse({
-    ...(parsed as Record<string, unknown>),
+    ...preprocessed,
     version: 1,
     characterId: `declared-${playerId}`,
     gameId,
@@ -377,6 +416,19 @@ export async function confirmDeclaredCharacter(gameId: string): Promise<Characte
       await db.update(schema.characterClaims).set({ resolvedRole, resolvedAt: new Date() }).where(eq(schema.characterClaims.id, claim.id));
     }
     await db.update(schema.players).set({ characterId }).where(and(eq(schema.players.id, playerId), eq(schema.players.gameId, gameId)));
+
+    // Seed NPC knowledgebases for each person relation from the character declaration.
+    for (const relation of existing.relations) {
+      if (relation.kind !== "person") continue;
+      const npcId = `declared-npc-${relation.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${playerId}`;
+      const relationshipLabel = relation.category === "family" ? "neutral" : "neutral";
+      await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcId, {
+        canonicalName: relation.name,
+        personalitySummary: relation.notes ?? "",
+        relationshipLabel,
+      });
+      await findOrOpenSession(db, gameId, playerId, npcId);
+    }
 
     return { status: "confirmed" };
   } finally {
