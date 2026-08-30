@@ -270,7 +270,10 @@ async function extractAndPropagateKnowledge(
         }
       },
     );
-  } catch {
+  } catch (error) {
+    if (!(error instanceof InsufficientCoinsError)) {
+      console.warn("[extract_knowledge] unexpected error during knowledge extraction:", error);
+    }
     return;
   }
 
