@@ -2,7 +2,7 @@ import type { GeoJsonGeometry, GeoJsonMap, GeoJsonPosition } from "@chronica/sha
 import { geometryToSvgPath, projectCoordinate } from "./geo-projection";
 
 export interface WorldBounds { readonly minX: number; readonly minY: number; readonly maxX: number; readonly maxY: number; }
-export interface StaticProvince { readonly id: string; readonly name: string; readonly geometry: GeoJsonGeometry; readonly svgPath: string; readonly area: number; readonly centroid: GeoJsonPosition; readonly bounds: WorldBounds; readonly neighborIds: readonly string[]; }
+export interface StaticProvince { readonly id: string; readonly name: string; readonly geometry: GeoJsonGeometry; readonly svgPath: string; readonly area: number; readonly centroid: GeoJsonPosition; readonly bounds: WorldBounds; readonly neighborIds: readonly string[]; /** Other provinces close enough to share a single political label. Never use for game adjacency. */ readonly labelNeighborIds: readonly string[]; }
 export interface SharedBoundary { readonly provinceA: string; readonly provinceB: string | null; readonly points: readonly [GeoJsonPosition, GeoJsonPosition]; readonly svgPath: string; }
 export interface StaticSettlement { readonly id: string; readonly name: string; readonly type: string; readonly provinceId: string; readonly coordinate: GeoJsonPosition; readonly projected: readonly [number, number]; }
 export interface StaticRiver { readonly id: string; readonly className: string; readonly svgPath: string; }
@@ -37,9 +37,18 @@ function pointKey([x, y]: GeoJsonPosition) { return `${x},${y}`; }
 function edgeKey(first: GeoJsonPosition, second: GeoJsonPosition) { const a = pointKey(first); const b = pointKey(second); return a < b ? `${a}|${b}` : `${b}|${a}`; }
 function boundaryPath([first, second]: readonly [GeoJsonPosition, GeoJsonPosition]) { const [x1, y1] = projectCoordinate(first[0], first[1]); const [x2, y2] = projectCoordinate(second[0], second[1]); return `M${x1} ${y1}L${x2} ${y2}`; }
 
+// Labels should survive tiny gaps between separately sourced boundaries and
+// narrow straits, without redefining province adjacency for game rules.
+const LABEL_COMPONENT_GAP_DEGREES = .22;
+function boundsDistance(first: WorldBounds, second: WorldBounds) {
+  const dx = Math.max(0, first.minX - second.maxX, second.minX - first.maxX);
+  const dy = Math.max(0, first.minY - second.maxY, second.minY - first.maxY);
+  return Math.hypot(dx, dy);
+}
+
 /** Compiles immutable GeoJSON into reusable world-space map data. */
 export function prepareStaticWorldGeometry(map: GeoJsonMap): StaticWorldGeometry {
-  const preliminary: Omit<StaticProvince, "neighborIds">[] = []; const boundaries = new Map<string, BoundaryOccurrence[]>(); const settlements: StaticSettlement[] = []; const rivers: StaticRiver[] = [];
+  const preliminary: Omit<StaticProvince, "neighborIds" | "labelNeighborIds">[] = []; const boundaries = new Map<string, BoundaryOccurrence[]>(); const settlements: StaticSettlement[] = []; const rivers: StaticRiver[] = [];
   for (const feature of map.features) {
     if (feature.properties.kind === "province") {
       preliminary.push({ id: feature.id, name: feature.properties.name, geometry: feature.geometry, svgPath: geometryToSvgPath(feature.geometry), ...geometryMetrics(feature.geometry) });
@@ -59,7 +68,14 @@ export function prepareStaticWorldGeometry(map: GeoJsonMap): StaticWorldGeometry
     boundariesByProvince.get(boundary.provinceA)?.push(boundary);
     if (boundary.provinceB !== null) boundariesByProvince.get(boundary.provinceB)?.push(boundary);
   }
-  const provinces = preliminary.map((province) => ({ ...province, neighborIds: [...(neighbors.get(province.id) ?? [])].sort() }));
+  const labelNeighbors = new Map(preliminary.map((province) => [province.id, new Set(neighbors.get(province.id) ?? [])]));
+  for (let firstIndex = 0; firstIndex < preliminary.length; firstIndex++) for (let secondIndex = firstIndex + 1; secondIndex < preliminary.length; secondIndex++) {
+    const first = preliminary[firstIndex]!; const second = preliminary[secondIndex]!;
+    if (boundsDistance(first.bounds, second.bounds) > LABEL_COMPONENT_GAP_DEGREES) continue;
+    labelNeighbors.get(first.id)?.add(second.id);
+    labelNeighbors.get(second.id)?.add(first.id);
+  }
+  const provinces = preliminary.map((province) => ({ ...province, neighborIds: [...(neighbors.get(province.id) ?? [])].sort(), labelNeighborIds: [...(labelNeighbors.get(province.id) ?? [])].sort() }));
   return { provinces, provinceById: new Map(provinces.map((province) => [province.id, province])), sharedBoundaries, boundariesByProvince, settlements, rivers };
 }
 

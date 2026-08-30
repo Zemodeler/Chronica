@@ -7,6 +7,7 @@ import { prepareStaticWorldGeometry } from "./world-geometry";
 const map: GeoJsonMap = { type: "FeatureCollection", features: [
   { type: "Feature", id: "west", geometry: { type: "Polygon", coordinates: [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]] }, properties: { kind: "province", name: "West" } },
   { type: "Feature", id: "east", geometry: { type: "Polygon", coordinates: [[[2, 0], [4, 0], [4, 2], [2, 2], [2, 0]]] }, properties: { kind: "province", name: "East" } },
+  { type: "Feature", id: "nearby", geometry: { type: "Polygon", coordinates: [[[4.1, 0], [5.1, 0], [5.1, 1], [4.1, 1], [4.1, 0]]] }, properties: { kind: "province", name: "Nearby" } },
   { type: "Feature", id: "island", geometry: { type: "Polygon", coordinates: [[[20, 0], [21, 0], [21, 1], [20, 1], [20, 0]]] }, properties: { kind: "province", name: "Island" } },
 ] };
 function overlay(provinces: DynamicMapOverlay["provinces"]): DynamicMapOverlay { return { revision: 1, polities: [{ polityId: "rome", name: "Roman Republic" }], provinces, settlements: [], forces: [], conflicts: { battles: [], sieges: [], wars: [] } }; }
@@ -23,6 +24,7 @@ describe("political map derivation", () => {
     const world = prepareStaticWorldGeometry(map);
     expect(world.provinceById.get("west")?.neighborIds).toEqual(["east"]);
     expect(world.provinceById.get("island")?.neighborIds).toEqual([]);
+    expect(world.provinceById.get("east")?.labelNeighborIds).toEqual(["nearby", "west"]);
     expect(world.sharedBoundaries.some((boundary) => boundary.provinceA === "west" && boundary.provinceB === "east")).toBe(true);
   });
   it("keeps disconnected holdings out of the primary label territory", () => {
@@ -35,6 +37,14 @@ describe("political map derivation", () => {
     expect(state.territories[0]?.primaryComponent.provinceIds).toEqual(["east", "west"]);
     expect(state.territories[0]?.label.anchor[0]).toBeLessThan(5);
     expect(derivePoliticalLabels(state, "close").filter((label) => label.polityId === "rome")).toHaveLength(2);
+  });
+  it("uses one label for holdings separated only by a small map gap", () => {
+    const state = derivePoliticalMapState(prepareStaticWorldGeometry(map), overlay([
+      { provinceId: "east", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain", tier: "focus" },
+      { provinceId: "nearby", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain", tier: "focus" },
+    ]));
+    expect(state.territories[0]?.components).toHaveLength(1);
+    expect(derivePoliticalLabels(state, "close").filter((label) => label.polityId === "rome")).toHaveLength(1);
   });
   it("classifies owner changes as country borders", () => {
     const state = derivePoliticalMapState(prepareStaticWorldGeometry(map), overlay([
