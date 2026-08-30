@@ -86,9 +86,9 @@ export async function markEntriesContradicted(
  * pool routing rules per audience type.
  */
 export async function ingestChronicleEntries(
-  _db: ChronicaDatabase,
-  _gameId: string,
-  _entries: readonly {
+  db: ChronicaDatabase,
+  gameId: string,
+  entries: readonly {
     body: string;
     atStep: number;
     audience: "all_players" | "knowledge_scoped";
@@ -96,6 +96,11 @@ export async function ingestChronicleEntries(
     associatedProvinceId?: string;
   }[],
 ): Promise<void> {
-  // TODO: implement once the chronicle system exposes associatedPolityId / associatedProvinceId
-  // on chronicle entries. See docs/shared-knowledgebase-chronicle-integration.md.
+  const publicEntries = entries.filter((e) => e.audience === "all_players");
+  if (publicEntries.length === 0) return;
+
+  for (const entry of publicEntries) {
+    const poolKey = entry.associatedPolityId ?? gameId;
+    await insertSharedEntry(db, gameId, "chronicle", poolKey, entry.body, "", "", entry.atStep);
+  }
 }

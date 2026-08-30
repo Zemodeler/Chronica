@@ -302,6 +302,14 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
   const [latestTurn] = open === undefined
     ? await db.select({ id: turns.id, index: turns.index, status: turns.status }).from(turns).where(eq(turns.gameId, gameId)).orderBy(desc(turns.index)).limit(1)
     : [];
+
+  // If the open turn is collecting but a "news" turn also exists (the previous turn
+  // is pending chronicle read), surface "news" so the game shell shows the chronicle.
+  const [newsTurn] = open?.status === "collecting"
+    ? await db.select({ id: turns.id }).from(turns).where(and(eq(turns.gameId, gameId), eq(turns.status, "news"))).limit(1)
+    : [];
+  const hasPendingNews = newsTurn !== undefined;
+
   const [totalRow] = await db
     .select({ value: count(players.id) })
     .from(players)
@@ -336,7 +344,7 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
     gameStatus: game.status,
     turnId: open?.id ?? latestTurn?.id ?? snapshot?.turnId ?? "initial",
     turnIndex: open?.index ?? latestTurn?.index ?? snapshot?.turnIndex ?? 0,
-    turnStatus: game.status === "finished" ? "finished" : open?.status ?? latestTurn?.status ?? snapshot?.turnStatus ?? "collecting",
+    turnStatus: game.status === "finished" ? "finished" : hasPendingNews ? "news" : open?.status ?? latestTurn?.status ?? snapshot?.turnStatus ?? "collecting",
     submittedPlayers,
     totalPlayers,
     world: renderedWorld,
@@ -383,7 +391,7 @@ export async function getChronicleForLatestTurn(db: ChronicaDatabase, gameId: st
   const [turn] = await db
     .select({ id: turns.id, index: turns.index, elapsedStepEnd: turns.elapsedStepEnd })
     .from(turns)
-    .where(eq(turns.gameId, gameId))
+    .where(and(eq(turns.gameId, gameId), eq(turns.status, "news")))
     .orderBy(desc(turns.index))
     .limit(1);
   if (turn === undefined) return undefined;

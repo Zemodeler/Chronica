@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 interface ChronicleEntry {
   readonly id: string;
@@ -18,18 +18,15 @@ interface ChronicleData {
   readonly entries: readonly ChronicleEntry[];
 }
 
-interface ChronicleDisplayPatch {
-  readonly entries: readonly { readonly displayPatch?: unknown }[];
-}
-
 interface ChroniclePanelProps {
   readonly gameId: string;
   readonly phase: string;
+  readonly forceOpen?: boolean;
+  readonly onForceOpenConsumed?: () => void;
   readonly onDisplayPatch?: (patch: unknown) => void;
 }
 
-export function ChroniclePanel({ gameId, phase, onDisplayPatch }: ChroniclePanelProps) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
+export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, onDisplayPatch }: ChroniclePanelProps) {
   const [open, setOpen] = useState(false);
   const [chronicle, setChronicle] = useState<ChronicleData | null>(null);
   const [cursor, setCursor] = useState(0);
@@ -55,27 +52,21 @@ export function ChroniclePanel({ gameId, phase, onDisplayPatch }: ChroniclePanel
     }
   }, [phase, fetchChronicle]);
 
+  // Open when triggered from outside (e.g. after resolution completes)
   useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (open) {
-      if (!dialog.open) dialog.showModal();
-    } else {
-      if (dialog.open) dialog.close();
+    if (forceOpen) {
+      void fetchChronicle().then(() => setOpen(true));
+      onForceOpenConsumed?.();
     }
-  }, [open]);
+  }, [forceOpen, fetchChronicle, onForceOpenConsumed]);
 
   const advance = useCallback(() => {
     if (!chronicle) return;
-    const nextCursor = cursor + 1;
-
-    // Fire display patch for the entry we just revealed
     const currentEntry = chronicle.entries[cursor];
     if (currentEntry?.displayPatch !== undefined) {
       onDisplayPatch?.(currentEntry.displayPatch);
     }
-
-    setCursor(nextCursor);
+    setCursor((c) => c + 1);
   }, [chronicle, cursor, onDisplayPatch]);
 
   const handleDone = useCallback(async () => {
@@ -92,7 +83,6 @@ export function ChroniclePanel({ gameId, phase, onDisplayPatch }: ChroniclePanel
         return;
       }
       setOpen(false);
-      // Reload the page to reflect the new turn
       window.location.reload();
     } catch {
       setError("Failed to mark chronicle as read.");
@@ -102,7 +92,7 @@ export function ChroniclePanel({ gameId, phase, onDisplayPatch }: ChroniclePanel
 
   const entries = chronicle?.entries ?? [];
   const totalEntries = entries.length;
-  const visibleEntries = entries.slice(0, cursor + 1);
+  const currentEntry = entries[cursor];
   const isAtEnd = cursor >= totalEntries - 1;
   const hasEntries = totalEntries > 0;
 
@@ -121,74 +111,90 @@ export function ChroniclePanel({ gameId, phase, onDisplayPatch }: ChroniclePanel
         </button>
       )}
 
-      <dialog
-        ref={dialogRef}
-        className="chat-panel-dialog"
-        aria-label="Chronicle"
-        onClose={() => setOpen(false)}
-      >
-        <div className="chat-panel-header">
-          <h2 className="chat-panel-title">Chronicle</h2>
-          <button
-            type="button"
-            className="chat-panel-close"
-            onClick={() => setOpen(false)}
-            aria-label="Close chronicle"
-          >
-            ×
-          </button>
-        </div>
-
+      {open && (
         <div
-          className="chat-panel-body"
-          style={{ flexDirection: "column", gap: "1rem", overflowY: "auto", padding: "1rem" }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(6, 8, 13, 0.97)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          aria-modal="true"
+          aria-label="Chronicle"
         >
-          {!hasEntries && (
-            <p style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>
-              Loading chronicle…
-            </p>
-          )}
-
-          {visibleEntries.map((entry, idx) => (
-            <article
-              key={entry.id}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "2rem",
+              maxWidth: "36rem",
+              width: "calc(100% - 3rem)",
+            }}
+          >
+            <p
               style={{
-                borderLeft: "2px solid var(--border-subtle)",
-                paddingLeft: "0.75rem",
-                opacity: idx < visibleEntries.length - 1 ? 0.7 : 1,
+                fontSize: "0.7rem",
+                color: "var(--text-muted)",
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                margin: 0,
               }}
             >
-              <p style={{ fontSize: "0.9375rem", lineHeight: 1.6, margin: 0 }}>{entry.body}</p>
-            </article>
-          ))}
+              Chronicle — {hasEntries ? `${cursor + 1} / ${totalEntries}` : "Loading…"}
+            </p>
 
-          {error && (
-            <p style={{ color: "var(--text-error, #e53e3e)", fontSize: "0.875rem" }}>{error}</p>
-          )}
-
-          <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end", marginTop: "auto", paddingTop: "0.5rem" }}>
-            {hasEntries && !isAtEnd && (
-              <button
-                type="button"
-                className="chat-message-send"
-                onClick={advance}
-              >
-                Continue ›
-              </button>
+            {!hasEntries && (
+              <p style={{ color: "var(--text-muted)", fontSize: "0.9375rem", margin: 0 }}>
+                Loading chronicle…
+              </p>
             )}
-            {isAtEnd && hasEntries && (
-              <button
-                type="button"
-                className="chat-message-send"
-                onClick={() => { void handleDone(); }}
-                disabled={marking}
-              >
-                {marking ? "Closing…" : "Done reading"}
-              </button>
+
+            {currentEntry && (
+              <article style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+                <p
+                  style={{
+                    fontSize: "1.125rem",
+                    lineHeight: 1.7,
+                    margin: 0,
+                    color: "var(--text)",
+                  }}
+                >
+                  {currentEntry.body}
+                </p>
+
+                {error && (
+                  <p style={{ color: "var(--text-error, #e53e3e)", fontSize: "0.875rem", margin: 0 }}>{error}</p>
+                )}
+
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  {!isAtEnd && (
+                    <button
+                      type="button"
+                      className="chat-message-send"
+                      onClick={advance}
+                    >
+                      Continue ›
+                    </button>
+                  )}
+                  {isAtEnd && (
+                    <button
+                      type="button"
+                      className="chat-message-send"
+                      onClick={() => { void handleDone(); }}
+                      disabled={marking}
+                    >
+                      {marking ? "Closing…" : "Done reading"}
+                    </button>
+                  )}
+                </div>
+              </article>
             )}
           </div>
         </div>
-      </dialog>
+      )}
     </>
   );
 }

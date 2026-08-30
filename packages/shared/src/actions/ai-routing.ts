@@ -34,6 +34,8 @@ export const AiOperationSchema = z.enum([
   "propose_near_events",
   "propose_far_events",
   "propose_coarse_events",
+  // Post-chronicle narrator pass — rewrites raw workflow summaries as prose.
+  "chronicle_narrator",
 ]);
 export type AiOperation = z.infer<typeof AiOperationSchema>;
 

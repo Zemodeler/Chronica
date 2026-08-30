@@ -132,25 +132,38 @@ export function buildNearEventsSystemPrompt(world: WorldState, polityId: string)
   const provinces = world.map.provinces.filter((p) => p.controllerPolityId === polityId);
   const forces = world.material.forces.filter((f) => f.polityId === polityId);
   const characters = world.characters.filter((c) => c.polityId === polityId && c.alive);
+  const activeWars = world.conflicts.wars.filter((w) => w.polityAId === polityId || w.polityBId === polityId);
+  const activeSieges = world.conflicts.sieges.filter((s) =>
+    forces.some((f) => s.invadingForceIds.includes(f.id) || s.defendingForceIds.includes(f.id)),
+  );
+
+  const characterLines = characters.map((c) => {
+    const parts = [c.name];
+    if (c.officeId) parts.push(`(office: ${c.officeId})`);
+    return parts.join(" ");
+  });
 
   return `You are a world simulation engine for Chronica. Generate plausible world events happening within the player's own polity (${polity?.name ?? polityId}) this season.
 
-POLITY TERRITORY: ${provinces.map((p) => p.name).join(", ")}
-POLITY FORCES: ${forces.map((f) => `${f.name} (${f.personnel.reduce((n, p) => n + p.fit, 0)} troops)`).join(", ")}
-POLITY CHARACTERS: ${characters.map((c) => c.name).join(", ")}
-ONGOING CONFLICTS: ${world.conflicts.wars.length} wars, ${world.conflicts.battles.length} battles, ${world.conflicts.sieges.length} sieges
+POLITY: ${polity?.name ?? polityId} (id: ${polityId})
+TERRITORY (${provinces.length} provinces): ${provinces.map((p) => `${p.name} (id: ${p.id})`).join(", ")}
+FORCES: ${forces.map((f) => `${f.name} (id: ${f.id}, ${f.personnel.reduce((n, p) => n + p.fit, 0)} fit troops, location: ${f.locationId})`).join(", ") || "none"}
+KEY CHARACTERS: ${characterLines.join(", ") || "none"}
+ACTIVE WARS: ${activeWars.length > 0 ? activeWars.map((w) => `vs ${w.polityAId === polityId ? w.polityBId : w.polityAId}`).join("; ") : "none"}
+ACTIVE SIEGES: ${activeSieges.length > 0 ? activeSieges.map((s) => `siege at ${s.settlementId}`).join("; ") : "none"}
+SEASON: step ${world.elapsedStep + 1}
 
-Generate 2-4 events. Each event is an EventProposal:
+Generate 3-6 events that cover a MIX of categories — military, political, economic, and character-level. More variety = richer chronicle. Each event is an EventProposal:
 - triggerId: a short unique id (e.g. "near-revolt-1")
-- causeFactIds: IDs of causal entities (province IDs, character IDs, force IDs)
+- causeFactIds: IDs of causal entities (province IDs, character IDs, force IDs from above)
 - affectedScopeIds: IDs affected (province IDs, character IDs)
 - visibility: "public" | "polity" | "private"
-- salience: 0-1000 (importance)
-- actions: 1-2 ProposedInvocations from the workflow registry, e.g. { actionId: "move_force", actorId: "...", parameters: {...} }
+- salience: 0-1000 (importance — major battles: 800+, political shifts: 600-800, local unrest: 400-600, minor logistics: 0-400)
+- actions: 1-2 ProposedInvocations from the workflow registry
 
 ${buildWorkflowCatalog()}
 
-Focus on internal politics, local unrest, economic developments, and military logistics within the polity. World events must use real entity IDs from above.
+IMPORTANT: Use only real entity IDs listed above. Mix event types: troop movements, supply issues, political maneuvering, character relationships, economic strain, local disputes.
 
 Respond as JSON: { "events": [...] }`;
 }
@@ -159,46 +172,56 @@ export function buildFarEventsSystemPrompt(world: WorldState, polityId: string):
   const polity = world.map.polities.find((p) => p.id === polityId);
   const provinces = world.map.provinces.filter((p) => p.controllerPolityId === polityId);
   const forces = world.material.forces.filter((f) => f.polityId === polityId);
+  const characters = world.characters.filter((c) => c.polityId === polityId && c.alive);
+  const activeWars = world.conflicts.wars.filter((w) => w.polityAId === polityId || w.polityBId === polityId);
 
-  return `You are a world simulation engine for Chronica. Generate plausible events in the neighboring polity ${polity?.name ?? polityId}.
+  return `You are a world simulation engine for Chronica. Generate plausible events in the neighboring polity ${polity?.name ?? polityId} (id: ${polityId}).
 
-TERRITORY: ${provinces.map((p) => p.name).join(", ")}
-FORCES: ${forces.map((f) => f.name).join(", ")}
-CURRENT STEP: ${world.elapsedStep}
+TERRITORY: ${provinces.map((p) => `${p.name} (id: ${p.id})`).join(", ") || "unknown"}
+FORCES: ${forces.map((f) => `${f.name} (id: ${f.id})`).join(", ") || "none"}
+KEY CHARACTERS: ${characters.map((c) => c.name).join(", ") || "none"}
+ACTIVE WARS: ${activeWars.length > 0 ? activeWars.map((w) => `${w.polityAId} vs ${w.polityBId}`).join("; ") : "none"}
+CURRENT STEP: ${world.elapsedStep + 1}
 
-Generate 1-2 events (fewer than Near events — this polity is less detailed). Each event:
+Generate 1-3 events covering at least 2 different categories (military, political, economic, or character-level). Each event:
 - triggerId: short unique id (e.g. "far-${polityId}-1")
-- causeFactIds: entity IDs
-- affectedScopeIds: entity IDs
+- causeFactIds: entity IDs from above
+- affectedScopeIds: entity IDs from above
 - visibility: "polity" or "public"
-- salience: 0-600 (lower than Near events)
+- salience: 0-600 (neighboring polity — significant but less granular than Near events)
 - actions: 1 ProposedInvocation from the workflow registry
 
 ${buildWorkflowCatalog()}
 
-Focus on major developments: wars, political changes, military movements. Skip minor details.
+Focus on developments the player's polity would plausibly hear about: military movements, political coups, sieges, treaties.
 
 Respond as JSON: { "events": [...] }`;
 }
 
 export function buildCoarseEventsSystemPrompt(world: WorldState, distantPolityIds: string[]): string {
   const polities = world.map.polities.filter((p) => distantPolityIds.includes(p.id));
+  const activeWarsInvolving = world.conflicts.wars.filter((w) =>
+    distantPolityIds.includes(w.polityAId) || distantPolityIds.includes(w.polityBId),
+  );
 
-  return `You are a world simulation engine for Chronica. Generate distant background events for these far-off polities: ${polities.map((p) => p.name).join(", ")}.
+  return `You are a world simulation engine for Chronica. Generate distant background events for these far-off polities: ${polities.map((p) => `${p.name} (id: ${p.id})`).join(", ")}.
 
-These are very distant — generate 1-3 events total across all of them, coarse and imprecise.
+ACTIVE WARS INVOLVING THESE POLITIES: ${activeWarsInvolving.length > 0 ? activeWarsInvolving.map((w) => `${w.polityAId} vs ${w.polityBId}`).join("; ") : "none"}
+CURRENT STEP: ${world.elapsedStep + 1}
+
+Generate 1-3 events total across all of them, coarse and imprecise. Include a MIX of event types — at least one political and one military event if possible.
 
 Each event:
 - triggerId: short unique id (e.g. "coarse-event-1")
-- causeFactIds: polity IDs as strings
+- causeFactIds: polity IDs as strings (from the list above)
 - affectedScopeIds: polity IDs
 - visibility: "public"
-- salience: 0-300 (very low — background noise)
-- actions: 1 ProposedInvocation (typically start_war, end_war, give_territory, or kill_character)
+- salience: 0-300 (very low — distant background rumours)
+- actions: 1 ProposedInvocation (typically start_war, end_war, give_territory, or kill_character — use polity IDs, not province IDs)
 
 ${buildWorkflowCatalog()}
 
-Focus on large-scale geopolitical shifts. These events should feel distant and incomplete — the player's character only hears rumours.
+These events are rumours and hearsay — they should feel incomplete and geopolitically distant. The player's character hears of them second-hand.
 
 Respond as JSON: { "events": [...] }`;
 }

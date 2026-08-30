@@ -81,6 +81,7 @@ export function GameShell({
   const [forceFlagUrls, setForceFlagUrls] = useState<ReadonlyMap<string, ForceFlagAsset>>(() => new Map());
   const [flagCatalogForce, setFlagCatalogForce] = useState<ForceMapDetails | null>(null);
   const [coins, setCoins] = useState<string | null>(null);
+  const [chronicleOpen, setChronicleOpen] = useState(false);
   const zoomBand = deriveZoomBand(viewport.scale);
 
   useEffect(() => {
@@ -196,9 +197,15 @@ export function GameShell({
           </a>
           <div className="shell-top-bar-center">
             <span className="shell-game-title">{gameTitle}</span>
-            <span className="shell-turn-meta">{elapsedStepLabel}</span>
           </div>
-          <a className="shell-coin-chip" href="/account" aria-label="Open coin wallet">◉ {coins ?? "—"} coins</a>
+          <div className="shell-top-bar-right">
+            <div className="shell-date-chip" aria-label="Current date">
+              <span className="shell-date-arrow" aria-hidden="true">‹</span>
+              <span>{elapsedStepLabel}</span>
+              <span className="shell-date-arrow" aria-hidden="true">›</span>
+            </div>
+            <a className="shell-coin-chip" href="/account" aria-label="Open coin wallet">◉ {coins ?? "—"} coins</a>
+          </div>
         </header>
         <div className="game-shell">
           <div className="game-shell-map">
@@ -219,9 +226,15 @@ export function GameShell({
         </a>
         <div className="shell-top-bar-center">
           <span className="shell-game-title">{gameTitle}</span>
-          <span className="shell-turn-meta">{elapsedStepLabel}</span>
         </div>
-        <a className="shell-coin-chip" href="/account" aria-label="Open coin wallet">◉ {coins ?? "—"} coins</a>
+        <div className="shell-top-bar-right">
+          <div className="shell-date-chip" aria-label="Current date">
+            <span className="shell-date-arrow" aria-hidden="true">‹</span>
+            <span>{elapsedStepLabel}</span>
+            <span className="shell-date-arrow" aria-hidden="true">›</span>
+          </div>
+          <a className="shell-coin-chip" href="/account" aria-label="Open coin wallet">◉ {coins ?? "—"} coins</a>
+        </div>
       </header>
       <div className="game-shell">
         <div className="game-shell-map">
@@ -274,12 +287,14 @@ export function GameShell({
       {playerCharacterId && (
         <OrdersPanel
           gameId={gameId}
-          onResolutionComplete={() => { /* Chronicle panel listens to phase prop */ }}
+          onResolutionComplete={() => { setChronicleOpen(true); }}
         />
       )}
       <ChroniclePanel
         gameId={gameId}
         phase={phase}
+        forceOpen={chronicleOpen}
+        onForceOpenConsumed={() => setChronicleOpen(false)}
         onDisplayPatch={(patch) => {
           // Apply chronicle display patches to the live overlay
           // Patches are arrays of { kind, ... } objects written by buildDisplayPatch()

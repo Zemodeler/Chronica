@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { randomUUID } from "node:crypto";
 import { EntityIdSchema } from "../../material-state";
 import type { AnyWorkflowDefinition } from "../types";
+
+const randomUUID = () => globalThis.crypto.randomUUID();
 
 export const economicWorkflows: AnyWorkflowDefinition[] = [
   {

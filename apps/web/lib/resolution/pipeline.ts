@@ -15,6 +15,7 @@ import {
   OrderInterpretationSchema,
   OrderAssessmentSchema,
   VerdictSchema,
+  EventProposalSchema,
   executeWorkflows,
   buildWorkflowCatalog,
 } from "@chronica/shared";
@@ -31,6 +32,7 @@ import {
   buildNearEventsSystemPrompt,
   buildFarEventsSystemPrompt,
   buildCoarseEventsSystemPrompt,
+  buildChronicleNarratorPrompt,
 } from "./prompts";
 
 export type ProgressCallback = (progress: ResolutionProgress) => void;
@@ -84,56 +86,58 @@ function buildChronicleEntries(
   atStep: number,
   displayPatchByInvocation: Map<string, unknown>,
 ): ChronicleEntryInput[] {
-  const entries: ChronicleEntryInput[] = [];
-  let seq = 0;
+  interface RawEntry {
+    sortKey: number;
+    input: Omit<ChronicleEntryInput, "sequence">;
+  }
+  const raw: RawEntry[] = [];
 
-  // Player action entries from verdicts
+  // Player action entries — fixed salience of 600, interleaves with near-events (up to 1000)
+  // and above far/coarse events (0–600).
   for (const verdict of verdicts) {
     const interpretation = interpretations.find((i) => i.directiveId === verdict.directiveId);
     const body = interpretation
       ? `${interpretation.intent} — ${verdict.rationale}`
       : verdict.rationale;
-
-    entries.push({
-      sequence: seq++,
-      scope: "directive",
-      scopeRef: verdict.directiveId,
-      audience: verdict.knowledgeVisibility === "private" ? "knowledge_scoped" : "all_players",
-      body,
-      atStep,
-      materialConsequence: verdict.deltas.length > 0,
-      playerInvolvement: verdict.playerInvolvement,
+    raw.push({
+      sortKey: 600,
+      input: {
+        scope: "directive",
+        scopeRef: verdict.directiveId,
+        audience: verdict.knowledgeVisibility === "private" ? "knowledge_scoped" : "all_players",
+        body,
+        atStep,
+        materialConsequence: verdict.deltas.length > 0,
+        playerInvolvement: verdict.playerInvolvement,
+      },
     });
   }
 
-  // World sim event entries
+  // World sim event entries — use event.salience as the sort key so near events
+  // (salience 0–1000) interleave with player actions and far/coarse events sit below.
   for (const event of events) {
     for (const action of event.actions) {
       const log = workflowLog.find((l) => l.invocation.actionId === action.actionId);
       const body = log?.outcome.result?.summary ?? `World event: ${action.actionId}`;
-      entries.push({
-        sequence: seq++,
-        scope: "world_event",
-        scopeRef: event.triggerId,
-        audience: "all_players",
-        body,
-        atStep,
-        materialConsequence: log?.outcome.ok ?? false,
-        displayPatch: displayPatchByInvocation.get(action.actionId),
+      raw.push({
+        sortKey: event.salience,
+        input: {
+          scope: "world_event",
+          scopeRef: event.triggerId,
+          audience: "all_players",
+          body,
+          atStep,
+          materialConsequence: log?.outcome.ok ?? false,
+          displayPatch: displayPatchByInvocation.get(action.actionId),
+        },
       });
     }
   }
 
-  // Workflow result entries (successful map-changing workflows get a display patch)
-  for (const { invocation, outcome } of workflowLog) {
-    if (!outcome.ok) continue;
-    // territory-changing workflows get a display patch
-    if (["change_province_control", "give_territory", "end_siege"].includes(invocation.actionId)) {
-      // patch is applied by the chronicle panel client
-    }
-  }
+  // Sort descending: most salient/prominent events appear first in the chronicle.
+  raw.sort((a, b) => b.sortKey - a.sortKey);
 
-  return entries;
+  return raw.map((r, i) => ({ ...r.input, sequence: i }));
 }
 
 /** Build a displayPatch from the world-state diff for map-relevant changes. */
@@ -343,8 +347,9 @@ export async function resolveTurn(
         const result = await adapter.call("propose_near_events", nearPrompt, `Generate events for season ${world.elapsedStep + 1}.`);
         const parsed = JSON.parse(result.content) as { events?: unknown[] };
         if (Array.isArray(parsed.events)) {
-          for (const event of parsed.events.slice(0, 4)) {
-            worldEvents.push(event as EventProposal);
+          for (const raw of parsed.events.slice(0, 6)) {
+            const validated = EventProposalSchema.safeParse(raw);
+            if (validated.success) worldEvents.push(validated.data);
           }
         }
       } catch { /* world sim is best-effort */ }
@@ -357,8 +362,9 @@ export async function resolveTurn(
         const result = await adapter.call("propose_far_events", farPrompt, `Generate events for season ${world.elapsedStep + 1}.`);
         const parsed = JSON.parse(result.content) as { events?: unknown[] };
         if (Array.isArray(parsed.events)) {
-          for (const event of parsed.events.slice(0, 2)) {
-            worldEvents.push(event as EventProposal);
+          for (const raw of parsed.events.slice(0, 3)) {
+            const validated = EventProposalSchema.safeParse(raw);
+            if (validated.success) worldEvents.push(validated.data);
           }
         }
       } catch { /* world sim is best-effort */ }
@@ -371,8 +377,9 @@ export async function resolveTurn(
         const result = await adapter.call("propose_coarse_events", coarsePrompt, `Generate background events for season ${world.elapsedStep + 1}.`);
         const parsed = JSON.parse(result.content) as { events?: unknown[] };
         if (Array.isArray(parsed.events)) {
-          for (const event of parsed.events.slice(0, 3)) {
-            worldEvents.push(event as EventProposal);
+          for (const raw of parsed.events.slice(0, 3)) {
+            const validated = EventProposalSchema.safeParse(raw);
+            if (validated.success) worldEvents.push(validated.data);
           }
         }
       } catch { /* world sim is best-effort */ }
@@ -407,6 +414,29 @@ export async function resolveTurn(
       const lastIdx = chronicleInputs.length - 1;
       chronicleInputs[lastIdx] = { ...chronicleInputs[lastIdx]!, displayPatch };
     }
+
+    // Narrator pass: rewrite raw workflow summaries as vivid historical prose.
+    // Best-effort — failures fall back to the original bodies without interrupting resolution.
+    try {
+      const narratorEntries = chronicleInputs.map((e) => ({
+        body: e.body,
+        isPlayerAction: e.scope === "directive",
+      }));
+      const narratorSystemPrompt = buildChronicleNarratorPrompt(narratorEntries, world);
+      const narratorResult = await adapter.call("chronicle_narrator", narratorSystemPrompt, "Rewrite the events as chronicle prose.");
+      const narratorParsed = JSON.parse(narratorResult.content) as { entries?: { body: string; isPlayerAction: boolean }[] };
+      if (Array.isArray(narratorParsed.entries) && narratorParsed.entries.length === chronicleInputs.length) {
+        for (let i = 0; i < chronicleInputs.length; i++) {
+          const rewritten = narratorParsed.entries[i]?.body;
+          if (rewritten && typeof rewritten === "string") {
+            chronicleInputs[i] = { ...chronicleInputs[i]!, body: rewritten };
+          }
+        }
+      }
+    } catch {
+      // Keep original bodies if narrator pass fails.
+    }
+
     emit(onProgress, "chronicle", true);
 
     // ── Step 7: Commit ───────────────────────────────────────────────────────

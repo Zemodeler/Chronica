@@ -1021,6 +1021,17 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 }
 .shell-coin-chip:hover { border-color: var(--accent); color: var(--text); }
 
+/* ─── Game shell date chip ───────────────────────────────────────── */
+.shell-date-chip {
+  display: flex; align-items: center; gap: 0.3rem;
+  background: rgba(0,0,0,0.55); backdrop-filter: blur(4px);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 999px; padding: 0.25rem 0.75rem;
+  font-size: 0.78rem; color: #e8dfc8; letter-spacing: 0.02em;
+  white-space: nowrap; user-select: none;
+}
+.shell-date-arrow { opacity: 0.4; font-size: 0.85rem; line-height: 1; }
+
 /* ─── Character sheet master/detail ─────────────────────────────── */
 .character-avatar-button { position: fixed; top: 4.5rem; left: 1rem; z-index: 30; display: grid; width: 44px; height: 44px; place-items: center; border: 2px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--text-title); box-shadow: 0 2px 8px rgb(0 0 0 / 40%); cursor: pointer; font-size: 1.1rem; }
 .character-avatar-button:hover { border-color: var(--accent); }
@@ -1087,7 +1098,18 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 /* ─── Chat panel ─────────────────────────────────────────────────── */
 .chat-open-button { position: fixed; top: 8rem; left: 1rem; z-index: 30; display: grid; width: 44px; height: 44px; place-items: center; border: 2px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--text-title); box-shadow: 0 2px 8px rgb(0 0 0 / 40%); cursor: pointer; font-size: 1.1rem; }
 .chat-open-button:hover { border-color: var(--accent); }
+.chat-panel-toggle { position: fixed; bottom: 5.5rem; z-index: 30; display: grid; width: 44px; height: 44px; place-items: center; border: 2px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--text-title); box-shadow: 0 2px 8px rgb(0 0 0 / 40%); cursor: pointer; font-size: 1.1rem; }
+.orders-panel-toggle { top: calc(8rem + 44px + .75rem); bottom: auto; left: 1rem; }
+.chat-panel-toggle:hover { border-color: var(--accent); }
 .chat-panel-dialog { position: fixed; top: 4.5rem; left: 1rem; width: min(52rem, calc(100vw - 2rem)); height: calc(100dvh - 6rem); margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--text); box-shadow: 0 8px 32px rgb(0 0 0 / 55%); overflow: hidden; }
+.chat-panel-dialog[open] { display: flex; flex-direction: column; }
+.chat-panel-header { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
+.chat-panel-title { font: 700 1rem system-ui, sans-serif; color: var(--text-title); margin: 0; }
+.chat-panel-close { display: grid; place-items: center; width: 28px; height: 28px; border: none; border-radius: 50%; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.1rem; }
+.chat-panel-close:hover { background: var(--surface-raised); color: var(--text); }
+.chat-panel-body { flex: 1; display: flex; padding: 1rem; min-height: 0; }
+.chat-message-send { padding: 0.45rem 0.9rem; border: 1px solid var(--accent); border-radius: 0.45rem; background: var(--accent); color: #fff; cursor: pointer; font-size: 0.85rem; font-weight: 600; }
+.chat-message-send:disabled { opacity: 0.5; cursor: default; }
 .chat-panel-dialog::backdrop { background: rgb(6 8 13 / 72%); backdrop-filter: blur(3px); }
 .chat-panel-layout { display: grid; grid-template-columns: 13rem 1fr; height: 100%; min-height: 0; }
 .chat-contact-list { display: flex; flex-direction: column; border-right: 1px solid var(--border-subtle); background: var(--surface-raised); min-height: 0; }

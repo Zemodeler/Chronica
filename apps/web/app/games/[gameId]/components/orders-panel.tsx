@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback, type FormEvent } from "react";
+import { useRef, useState, useEffect, useCallback, type FormEvent, type KeyboardEvent } from "react";
 
 interface ResolutionStep {
   readonly step: string;
@@ -26,13 +26,14 @@ interface OrdersPanelProps {
 export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [open, setOpen] = useState(false);
-  const [orderText, setOrderText] = useState("");
+  const [orderInput, setOrderInput] = useState("");
+  const [orders, setOrders] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [steps, setSteps] = useState<ResolutionStep[]>([]);
   const [currentStep, setCurrentStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [currentOrder, setCurrentOrder] = useState<{ rawText: string; submittedAt?: string } | null>(null);
+  const [currentOrder, setCurrentOrder] = useState<{ rawText: string } | null>(null);
   const [turnStatus, setTurnStatus] = useState<string | null>(null);
   const sseRef = useRef<EventSource | null>(null);
 
@@ -40,7 +41,7 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
     try {
       const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/orders`, { cache: "no-store" });
       if (!res.ok) return;
-      const data = await res.json() as { order: { rawText: string; submittedAt?: string } | null; turnStatus: string | null };
+      const data = await res.json() as { order: { rawText: string } | null; turnStatus: string | null };
       setCurrentOrder(data.order);
       setTurnStatus(data.turnStatus);
     } catch {
@@ -85,7 +86,6 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
       if (data.step === "done") {
         setResolving(false);
         sse.close();
-        setOpen(false);
         onResolutionComplete?.();
         return;
       }
@@ -108,16 +108,35 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
     };
   }, [gameId, onResolutionComplete]);
 
+  const addOrder = useCallback(() => {
+    const trimmed = orderInput.trim();
+    if (!trimmed) return;
+    setOrders((prev) => [...prev, trimmed]);
+    setOrderInput("");
+  }, [orderInput]);
+
+  const handleInputKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addOrder();
+    }
+  }, [addOrder]);
+
+  const removeOrder = useCallback((idx: number) => {
+    setOrders((prev) => prev.filter((_, i) => i !== idx));
+  }, []);
+
   const handleSubmit = useCallback(async (event: FormEvent) => {
     event.preventDefault();
-    const lines = orderText.split("\n").map((l) => l.trim()).filter(Boolean);
-    if (lines.length === 0) return;
+    const pending = orderInput.trim();
+    const allOrders = pending ? [...orders, pending] : orders;
+    if (allOrders.length === 0) return;
 
     setSubmitting(true);
     setError(null);
 
     try {
-      const directives = lines.map((text) => ({ kind: "new" as const, text }));
+      const directives = allOrders.map((text) => ({ kind: "new" as const, text }));
       const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/orders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -129,20 +148,21 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
         setSubmitting(false);
         return;
       }
-      setOrderText("");
+      setOrderInput("");
+      setOrders([]);
       setSubmitting(false);
-      // If the turn was enqueued (all players submitted), start resolution stream
+      setOpen(false);
       if (data.enqueued) {
         startSseStream();
       } else {
-        setCurrentOrder({ rawText: lines.join("\n") });
+        setCurrentOrder({ rawText: allOrders.join("\n") });
         setTurnStatus("queued");
       }
     } catch {
       setError("Failed to submit orders.");
       setSubmitting(false);
     }
-  }, [gameId, orderText, startSseStream]);
+  }, [gameId, orderInput, orders, startSseStream]);
 
   // If the turn becomes queued (polled from another tab), auto-start resolution
   useEffect(() => {
@@ -155,15 +175,16 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
     return () => { sseRef.current?.close(); };
   }, []);
 
-  const canSubmit = orderText.trim().length > 0 && !submitting && !resolving;
+  const canSubmit = (orders.length > 0 || orderInput.trim().length > 0) && !submitting && !resolving;
   const isCollecting = turnStatus === "collecting" || turnStatus === null;
+
+  const resolutionDone = !resolving && steps.length > 0;
 
   return (
     <>
       <button
         type="button"
-        className="chat-panel-toggle"
-        style={{ right: "calc(4rem + 3.5rem + 1rem)" }}
+        className="chat-panel-toggle orders-panel-toggle"
         onClick={() => setOpen((v) => !v)}
         aria-label="Open orders panel"
         title="Orders"
@@ -191,69 +212,104 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
 
         <div className="chat-panel-body" style={{ flexDirection: "column", gap: "1rem", overflowY: "auto" }}>
 
-          {/* Active order display */}
+          {/* Already-submitted order display */}
           {currentOrder && (
             <section style={{ padding: "0.75rem", background: "var(--surface-raised)", borderRadius: "0.375rem" }}>
-              <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem" }}>
+              <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.5rem" }}>
                 Orders submitted
               </p>
-              <p style={{ fontSize: "0.875rem", whiteSpace: "pre-wrap" }}>{currentOrder.rawText}</p>
+              {currentOrder.rawText.split("\n").map((line, i) => (
+                <p key={i} style={{ fontSize: "0.875rem", margin: "0 0 0.25rem" }}>{line}</p>
+              ))}
             </section>
           )}
-
-          {/* Resolution progress */}
-          {resolving || steps.length > 0 ? (
-            <section>
-              <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.5rem" }}>
-                {resolving ? "Resolving your orders…" : "Resolution complete"}
-              </p>
-              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.375rem" }}>
-                {ALL_STEPS.map(({ step, label }) => {
-                  const stepState = steps.find((s) => s.step === step);
-                  const isActive = currentStep === step && !stepState?.done;
-                  const isDone = stepState?.done;
-                  const isPending = !stepState && !isActive;
-
-                  return (
-                    <li key={step} style={{ display: "flex", alignItems: "center", gap: "0.5rem", opacity: isPending ? 0.4 : 1 }}>
-                      <span style={{ width: "1rem", textAlign: "center", fontSize: "0.75rem" }}>
-                        {isDone ? "✓" : isActive ? "⟳" : "○"}
-                      </span>
-                      <span style={{ fontSize: "0.875rem" }}>{label}</span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          ) : null}
 
           {error && (
             <p style={{ color: "var(--text-error, #e53e3e)", fontSize: "0.875rem" }}>{error}</p>
           )}
 
-          {/* Order composer — shown only when the turn is still collecting */}
+          {/* Order composer */}
           {isCollecting && !resolving && (
-            <form onSubmit={(e) => { void handleSubmit(e); }} style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-              <label style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                Write your orders (one per line)
-              </label>
-              <textarea
-                value={orderText}
-                onChange={(e) => setOrderText(e.target.value)}
-                rows={4}
-                placeholder={"March the legion toward Carthage's position\nBuild a granary in Rhegium"}
-                style={{
-                  resize: "vertical",
-                  fontFamily: "inherit",
-                  fontSize: "0.875rem",
-                  padding: "0.5rem",
-                  borderRadius: "0.25rem",
-                  border: "1px solid var(--border-subtle)",
-                  background: "var(--surface-base)",
-                  color: "var(--text-body)",
-                }}
-                disabled={submitting}
-              />
+            <form onSubmit={(e) => { void handleSubmit(e); }} style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+              {/* Ordered list of added orders */}
+              {orders.length > 0 && (
+                <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {orders.map((order, idx) => (
+                    <li
+                      key={idx}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.5rem",
+                        background: "var(--surface-raised)",
+                        borderRadius: "0.375rem",
+                        padding: "0.625rem 0.75rem",
+                      }}
+                    >
+                      <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: "1.25rem" }}>
+                        {idx + 1}.
+                      </span>
+                      <span style={{ fontSize: "0.875rem", flex: 1 }}>{order}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeOrder(idx)}
+                        aria-label={`Remove order ${idx + 1}`}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "var(--text-muted)",
+                          cursor: "pointer",
+                          padding: "0 0.25rem",
+                          fontSize: "1rem",
+                          lineHeight: 1,
+                        }}
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* New order input */}
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <input
+                  type="text"
+                  value={orderInput}
+                  onChange={(e) => setOrderInput(e.target.value)}
+                  onKeyDown={handleInputKeyDown}
+                  placeholder="Type an order and press Enter…"
+                  disabled={submitting}
+                  style={{
+                    flex: 1,
+                    fontFamily: "inherit",
+                    fontSize: "0.875rem",
+                    padding: "0.5rem 0.625rem",
+                    borderRadius: "0.25rem",
+                    border: "1px solid var(--border-subtle)",
+                    background: "var(--surface-base, var(--surface))",
+                    color: "var(--text-body, var(--text))",
+                    outline: "none",
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={addOrder}
+                  disabled={!orderInput.trim() || submitting}
+                  style={{
+                    padding: "0.5rem 0.75rem",
+                    borderRadius: "0.25rem",
+                    border: "1px solid var(--border-subtle)",
+                    background: "var(--surface-raised)",
+                    color: "var(--text-muted)",
+                    cursor: orderInput.trim() ? "pointer" : "default",
+                    fontSize: "0.875rem",
+                  }}
+                >
+                  +
+                </button>
+              </div>
+
               <button
                 type="submit"
                 className="chat-message-send"
@@ -264,13 +320,78 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
             </form>
           )}
 
-          {!isCollecting && !resolving && steps.length === 0 && (
+          {!isCollecting && !resolving && (
             <p style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>
               {turnStatus === "news" ? "The chronicle is ready to read." : "Orders are locked for this turn."}
             </p>
           )}
         </div>
       </dialog>
+
+      {/* Full-screen resolution overlay */}
+      {(resolving || resolutionDone) && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(6, 8, 13, 0.96)",
+            zIndex: 9998,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          aria-live="polite"
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.5rem",
+              minWidth: "20rem",
+            }}
+          >
+            <p
+              style={{
+                fontSize: "0.75rem",
+                color: "var(--text-muted)",
+                marginBottom: "0.75rem",
+                letterSpacing: "0.05em",
+                textTransform: "uppercase",
+              }}
+            >
+              {resolving ? "Resolving your orders…" : "Resolution complete"}
+            </p>
+            <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              {ALL_STEPS.map(({ step, label }) => {
+                const stepState = steps.find((s) => s.step === step);
+                const isActive = currentStep === step && !stepState?.done;
+                const isDone = stepState?.done;
+                const isPending = !stepState && !isActive;
+
+                return (
+                  <li
+                    key={step}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.625rem",
+                      opacity: isPending ? 0.35 : 1,
+                      transition: "opacity 0.2s",
+                    }}
+                  >
+                    <span style={{ width: "1rem", textAlign: "center", fontSize: "0.75rem", color: isDone ? "var(--success)" : "var(--text-muted)" }}>
+                      {isDone ? "✓" : isActive ? "⟳" : "○"}
+                    </span>
+                    <span style={{ fontSize: "0.9375rem", color: isDone ? "var(--text)" : isActive ? "var(--text)" : "var(--text-muted)" }}>
+                      {label}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </div>
+      )}
     </>
   );
 }
