@@ -10,7 +10,8 @@ import { resolveForceMapPosition } from "./map-dynamic-geometry";
 
 type ZoomBand = "far" | "medium" | "close";
 export interface ForceMapDetails { readonly forceId: string; readonly name: string; readonly strengthLabel: string; readonly locationLabel: string; readonly destinationLabel: string; readonly progressBps: number | null; readonly movementState: "moving" | "retreating" | null; }
-interface GeoMapProps { readonly geoJson: GeoJsonMap; readonly overlay: DynamicMapOverlay | null; readonly selectedProvinceId: string | null; readonly zoomBand: ZoomBand; readonly scale: number; readonly baseImageUrl: string | undefined; readonly detailImageUrl?: string | undefined; readonly forceFlagUrls: ReadonlyMap<string, string>; readonly activePresentationEventIds: ReadonlySet<string>; readonly onProvinceHover: (provinceId: string | null, event?: PointerEvent) => void; readonly onProvinceClick: (provinceId: string) => void; readonly onForceClick: (details: ForceMapDetails) => void; }
+export interface ForceFlagAsset { readonly url: string; readonly aspectRatio: number; }
+interface GeoMapProps { readonly geoJson: GeoJsonMap; readonly overlay: DynamicMapOverlay | null; readonly selectedProvinceId: string | null; readonly zoomBand: ZoomBand; readonly scale: number; readonly baseImageUrl: string | undefined; readonly detailImageUrl?: string | undefined; readonly forceFlagUrls: ReadonlyMap<string, ForceFlagAsset>; readonly activePresentationEventIds: ReadonlySet<string>; readonly onProvinceHover: (provinceId: string | null, event?: PointerEvent) => void; readonly onProvinceClick: (provinceId: string) => void; readonly onForceClick: (details: ForceMapDetails) => void; }
 
 function settlementRadius(type: string): number { return type === "capital" ? .06 : type === "city" ? .035 : type === "town" ? .015 : type === "fort" || type === "port" ? .04 : .020; }
 function diamondPoints(x: number, y: number, radius: number): string { return `${x},${y - radius} ${x + radius},${y} ${x},${y + radius} ${x - radius},${y}`; }
@@ -18,13 +19,25 @@ function starPoints(x: number, y: number, radius: number): string { return Array
 function politicalIdentity(overlay: DynamicMapOverlay | null) { return overlay === null ? "" : `${overlay.polities.map((polity) => `${polity.polityId}:${polity.name}`).sort().join("|")}#${overlay.provinces.map((province) => `${province.provinceId}:${province.controllerPolityId ?? ""}`).sort().join("|")}`; }
 function coordinateLabel([longitude, latitude]: GeoJsonPosition) { return `${latitude.toFixed(1)}°N, ${longitude.toFixed(1)}°E`; }
 
-/** Render the same HTML image used in the picker, avoiding SVG <image> decoding differences. */
-function ArmyStandard({ source, x, y }: { readonly source: string; readonly x: number; readonly y: number }) {
+// Map-coordinate side length for both the visible army flag and its click target.
+const ARMY_STANDARD_SIZE = .18;
+
+function ArmyStandard({ asset, x, y }: { readonly asset: ForceFlagAsset; readonly x: number; readonly y: number }) {
+  const width = ARMY_STANDARD_SIZE;
+  const height = width / asset.aspectRatio;
+  const halfWidth = width / 2;
+  const halfHeight = height / 2;
   return <>
-    <rect x={x - .09} y={y - .09} width=".18" height=".18" fill="transparent" pointerEvents="all" />
-    <foreignObject x={x - .09} y={y - .09} width=".18" height=".18" pointerEvents="none">
-      <img src={source} alt="" decoding="sync" style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} />
-    </foreignObject>
+    <rect x={x - halfWidth} y={y - halfHeight} width={width} height={height} fill="transparent" pointerEvents="all" />
+    <image
+      href={asset.url}
+      x={x - halfWidth}
+      y={y - halfHeight}
+      width={width}
+      height={height}
+      preserveAspectRatio="xMidYMid meet"
+      pointerEvents="none"
+    />
   </>;
 }
 
@@ -89,12 +102,12 @@ export function GeoMap({ geoJson, overlay, selectedProvinceId, zoomBand, scale, 
       const destination = force.movement?.destination;
       const destinationLabel = destination === undefined ? "Holding position" : world.provinces.find((province) => provinceContains(province, destination))?.name ?? coordinateLabel(destination);
       const details: ForceMapDetails = { forceId: force.forceId, name: force.name, strengthLabel: force.strengthLabel, locationLabel, destinationLabel, progressBps: force.movement?.progressBps ?? null, movementState: force.movement?.state ?? null };
-      const flagUrl = forceFlagUrls.get(force.forceId) ?? "/maps/roman-spqr-banner.svg";
+      const flagAsset = forceFlagUrls.get(force.forceId) ?? { url: "/maps/roman-spqr-banner.png", aspectRatio: 4 / 3 };
       const activate = () => onForceClick(details);
       const activateImmediately = (event: PointerEvent<SVGGElement>) => { event.stopPropagation(); activate(); };
       return <g key={force.forceId} className="map-army-token" role="button" tabIndex={0} aria-label={`View ${force.name}`} onPointerDown={activateImmediately} onClick={activate} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); } }}>
         <title>{force.name}</title>
-        <ArmyStandard source={flagUrl} x={force.x} y={force.y} />
+        <ArmyStandard asset={flagAsset} x={force.x} y={force.y} />
       </g>;
     })}</g>
     <g className="layer-presentation-effects">{activeEffects.map((effect) => {
