@@ -100,6 +100,7 @@ Rules:
 - For historical and hybrid characters, birthYearApprox and deathYearApprox must be known enough to prove that the person was alive at the scenario opening. Use negative years for BCE. For invented characters, make a plausible adult already alive at the opening.
 - Choose locationProvinceId from this exact opening-map list. It must be a region where the character can plausibly be present at the opening:
 ${regions}
+- locationProvinceId is REQUIRED at the scenario opening. Never return null or an unknown region ID.
 - Skills are on a 0–100 scale and represent innate talent plus experience. A 50 is average for the era's population. A 75+ is exceptional. Skills: martial, intrigue, learning, piety, stewardship, diplomacy, body.
 - Sub-skills are more granular. Only assign sub-skills the character would realistically have.
 
@@ -111,12 +112,13 @@ Output ONLY a valid JSON object matching this schema (no markdown fences, no com
   "deathYearApprox": "number | null — approximate death year or null if unknown",
   "origin": "historical | invented | hybrid",
   "period": "string — e.g. 'First Punic War, 264–241 BC'",
-  "locationProvinceId": "string — exact opening-map region id",
+  "locationProvinceId": "string — required exact opening-map region id",
   "culture": "string — e.g. 'Roman Patrician'",
   "faith": "string | null",
   "biography": "string — 200–500 words, dense prose optimised for AI re-reads",
   "notableEvents": ["array of short strings, key life events"],
-  "role": "string — current position/job, e.g. 'Consul of Rome, 264 BC'",
+  "role": "string — current position/job, using the historically accurate title for the era (e.g. 'Consul of the Roman Republic, commanding the Roman field army' rather than 'General of the Roman Army' in the Republican era)",
+  "authority": ["array of concrete offices, commanded forces, and controlled territories; e.g. 'Consul of the Roman Republic', 'Command of the Roman field army in Sicily'. Never use scores, ranks, or abstract influence labels."],
   "socioEconomicClass": "string — e.g. 'Senatorial aristocracy'",
   "skills": {
     "martial": 0–100,
@@ -185,7 +187,7 @@ function parseAiKnowledgebase(
     if (context.timelineStartYear === null || knowledgebase.birthYearApprox === null || knowledgebase.deathYearApprox === null) return null;
     if (knowledgebase.birthYearApprox > context.timelineStartYear || knowledgebase.deathYearApprox < context.timelineStartYear) return null;
   }
-  if (knowledgebase.locationProvinceId !== null && !context.regions.some((region) => region.id === knowledgebase.locationProvinceId)) return null;
+  if (knowledgebase.locationProvinceId === null || !context.regions.some((region) => region.id === knowledgebase.locationProvinceId)) return null;
   return knowledgebase;
 }
 

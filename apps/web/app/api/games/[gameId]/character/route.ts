@@ -1,9 +1,23 @@
 import { getCharacterPanelData } from "../../../../../lib/character-service";
 
-/** Internal player-scoped profile export; no map-screen control links to it. */
+/** Player-facing character profile. AI-only skill data must never cross this boundary. */
 export async function GET(_request: Request, { params }: { params: Promise<{ gameId: string }> }) {
   const { gameId } = await params;
   const character = await getCharacterPanelData(gameId);
   if (character === null) return Response.json({ error: "Character file not found." }, { status: 404 });
-  return Response.json(character, { headers: { "Cache-Control": "private, no-store" } });
+  return Response.json({
+    canonicalName: character.canonicalName,
+    nickname: character.nickname,
+    origin: character.origin,
+    period: character.period,
+    locationProvinceId: character.locationProvinceId,
+    culture: character.culture,
+    faith: character.faith,
+    biography: character.biography,
+    notableEvents: character.notableEvents,
+    role: character.role,
+    authority: character.authority,
+    socioEconomicClass: character.socioEconomicClass,
+    relations: character.relations,
+  }, { headers: { "Cache-Control": "private, no-store" } });
 }
