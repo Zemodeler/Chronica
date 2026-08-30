@@ -29,6 +29,9 @@ export function politicalColourWithAlpha(polityId: string, alpha: number) { retu
 const LABEL_PATH_COVERAGE = .85;
 const MAX_BOUNDARY_SAMPLES = 48;
 const PATH_SAMPLES = 30;
+// A country name may extend outside its territorial component for at most 5% of
+// the sampled route, preserving a natural curve without visibly crossing borders.
+const MAX_LABEL_OUTSIDE_BORDER_RATIO = .05;
 
 function componentContains(component: TerritorialComponent, world: StaticWorldGeometry, point: GeoJsonPosition) {
   return component.provinceIds.some((id) => {
@@ -108,7 +111,7 @@ function longestUsablePath(component: TerritorialComponent, world: StaticWorldGe
     const candidate = gentleCurve(samples[first]!, samples[second]!, anchor);
     let inside = 0;
     for (let index = 1; index < PATH_SAMPLES; index++) if (componentContains(component, world, quadraticPoint(candidate, index / PATH_SAMPLES))) inside++;
-    if (inside / (PATH_SAMPLES - 1) < .9) continue;
+    if (inside / (PATH_SAMPLES - 1) < 1 - MAX_LABEL_OUTSIDE_BORDER_RATIO) continue;
     const length = quadraticLength(candidate);
     if (length > winnerLength) { winner = candidate; winnerLength = length; }
   }
