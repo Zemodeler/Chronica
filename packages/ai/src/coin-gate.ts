@@ -25,6 +25,13 @@ export class InsufficientCoinsError extends Error {
   }
 }
 
+export class AiParseError extends Error {
+  constructor() {
+    super("AI response could not be parsed — coins were not charged.");
+    this.name = "AiParseError";
+  }
+}
+
 export async function callWithCoinGate(
   db: ChronicaDatabase,
   userId: string,
@@ -32,6 +39,7 @@ export async function callWithCoinGate(
   operation: AiOperation,
   adapter: AiAdapter,
   prompts: { system: string; user: string },
+  validate?: (content: string) => boolean,
 ): Promise<AiCallResult> {
   // Fast pre-check: refuse immediately if wallet is empty (before touching holds).
   const snapshot = await getCoinWalletSnapshot(db, userId);
@@ -61,6 +69,11 @@ export async function callWithCoinGate(
   } catch (error) {
     await releaseCoinHold(db, holdId).catch(() => { /* best effort */ });
     throw error;
+  }
+
+  if (validate !== undefined && !validate(result.content)) {
+    await releaseCoinHold(db, holdId).catch(() => { /* best effort */ });
+    throw new AiParseError();
   }
 
   // Use gpt-4o-mini actual rates for settlement.

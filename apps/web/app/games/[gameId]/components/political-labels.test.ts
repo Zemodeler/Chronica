@@ -16,7 +16,8 @@ describe("political map derivation", () => {
     expect(politicalColourFromId("rome")).toBe("#b21f2d");
   });
   it("uses the Carthaginian blue-grey for territory", () => {
-    expect(politicalColourFromId("carthage")).toBe("#93afb0");
+    expect(politicalColourFromId("carthage")).toBe("#2e245f");
+    expect(politicalColourFromId("syracuse")).toBe("#80512f");
   });
   it("builds static adjacency and shared boundaries once", () => {
     const world = prepareStaticWorldGeometry(map);

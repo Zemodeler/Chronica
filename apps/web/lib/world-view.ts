@@ -21,6 +21,7 @@ import {
   WorldViewModelSchema,
 } from "@chronica/shared";
 import type { ChronicleView, ContactRow, MessageRow } from "@chronica/db";
+import { FIRST_PUNIC_CARTHAGINIAN_OVERLAY, FIRST_PUNIC_SICILY_OVERLAY } from "./first-punic-map-territory";
 
 // Projects real simulation state into the view-model shapes the pages already
 // render (packages/shared/src/web.ts), in place of apps/web/lib/game-repository.ts's
@@ -42,6 +43,18 @@ const TURN_STATUS_TO_PHASE: Record<string, GamePhase> = {
 function toPhase(turnStatus: string): GamePhase {
   return TURN_STATUS_TO_PHASE[turnStatus] ?? "collecting";
 }
+
+/**
+ * Opening saves created before the geographic-ID migration still contain four
+ * abstract Sicilian regions. Keep those snapshots immutable, but render their
+ * opening politics on the current five-region map until their first resolved
+ * turn creates a newer snapshot.
+ */
+const LEGACY_FIRST_PUNIC_OPENING_OVERLAY = [
+  { provinceId: "ita-72843720b863019116732", controllerPolityId: "rome", controlFirmnessBps: 9_000, terrainId: "coastal-plain", tier: "far" as const },
+  ...FIRST_PUNIC_CARTHAGINIAN_OVERLAY,
+  ...FIRST_PUNIC_SICILY_OVERLAY,
+] as const;
 
 /** Mulberry32 seeded PRNG — deterministic replacement for Math.random(). */
 function mulberry32(seed: number): () => number {
@@ -206,6 +219,13 @@ export function projectDateLabel(elapsedStep: number, clock: ScenarioClock): str
 
 export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerCharacterId: string): WorldViewModel {
   const polityNames = new Map(world.map.polities.map((polity) => [polity.id, polity.name]));
+  const usesLegacyFirstPunicOpening = world.map.provinces.some((province) => province.id === "drepanum");
+  const isFirstPunicOpening = world.pins.scenarioId === "00000000-0000-4000-8000-000000000101" && world.elapsedStep === 0;
+  const displayProvinces = usesLegacyFirstPunicOpening
+    ? [...LEGACY_FIRST_PUNIC_OPENING_OVERLAY]
+    : isFirstPunicOpening
+      ? [...new Map([...FIRST_PUNIC_CARTHAGINIAN_OVERLAY, ...FIRST_PUNIC_SICILY_OVERLAY, ...world.map.provinces.map((province) => ({ provinceId: province.id, controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier }))].map((province) => [province.provinceId, province])).values()]
+      : world.map.provinces.map((province) => ({ provinceId: province.id, controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier }));
 
   const edgeSet = new Set<string>();
   const provinceIds = world.map.provinces.map((p) => p.id);
@@ -288,14 +308,10 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
     lowBandwidth: meta.lowBandwidth ?? false,
     mapOverlay: {
       revision: meta.turnIndex,
-      polities: world.map.polities.map((polity) => ({ polityId: polity.id, name: polity.name })),
-      provinces: world.map.provinces.map((province) => ({
-        provinceId: province.id,
-        controllerPolityId: province.controllerPolityId,
-        controlFirmnessBps: province.controlFirmnessBps,
-        terrainId: province.terrainId,
-        tier: province.tier,
-      })),
+      polities: usesLegacyFirstPunicOpening
+        ? [{ polityId: "rome", name: "Roman Republic" }, { polityId: "carthage", name: "Carthage" }, { polityId: "syracuse", name: "Kingdom of Syracuse" }]
+        : world.map.polities.map((polity) => ({ polityId: polity.id, name: polity.name })),
+      provinces: displayProvinces,
       settlements: world.map.provinces.flatMap((province) => province.settlements.map((settlement) => {
         const capitalPolity = world.map.polities.find((polity) => polity.capitalSettlementId === settlement.id);
         return {

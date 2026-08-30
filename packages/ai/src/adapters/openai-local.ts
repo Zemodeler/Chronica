@@ -6,7 +6,7 @@ import type { AiAdapter, AiCallResult } from "../adapter";
 const TIER_MODELS: Record<AiTier, string> = {
   basic: process.env.CHRONICA_AI_MODEL_BASIC ?? "gpt-4o-mini",
   standard: process.env.CHRONICA_AI_MODEL_STANDARD ?? "gpt-4o",
-  premium: process.env.CHRONICA_AI_MODEL_PREMIUM ?? "gpt-4o",
+  premium: process.env.CHRONICA_AI_MODEL_PREMIUM ?? "gpt-5.6-luna",
 };
 
 // Operations that use standard tier (everything else is basic).
@@ -22,16 +22,19 @@ function resolveModel(operation: AiOperation): string {
 }
 
 export function createOpenAiLocalAdapter(): AiAdapter {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey?.trim()) {
-    throw new Error("OPENAI_API_KEY is required for the local AI adapter.");
+  let client: OpenAI | undefined;
+
+  function getClient(): OpenAI {
+    if (!client) {
+      client = new OpenAI();
+    }
+    return client;
   }
-  const client = new OpenAI({ apiKey });
 
   return {
     async call(operation, systemPrompt, userMessage): Promise<AiCallResult> {
       const model = resolveModel(operation);
-      const response = await client.chat.completions.create({
+      const response = await getClient().chat.completions.create({
         model,
         messages: [
           { role: "system", content: systemPrompt },

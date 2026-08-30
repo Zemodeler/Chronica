@@ -75,7 +75,17 @@ export function GameShell({
   const [selectedForce, setSelectedForce] = useState<ForceMapDetails | null>(null);
   const [forceFlagUrls, setForceFlagUrls] = useState<ReadonlyMap<string, ForceFlagAsset>>(() => new Map());
   const [flagCatalogForce, setFlagCatalogForce] = useState<ForceMapDetails | null>(null);
+  const [coins, setCoins] = useState<string | null>(null);
   const zoomBand = deriveZoomBand(viewport.scale);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/account/coins", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() as Promise<{ coins: string | null }> : null)
+      .then((data) => { if (!cancelled && data?.coins !== null && data !== null) setCoins(data.coins); })
+      .catch(() => { /* An unauthenticated map remains usable. */ });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     const savedFlags = new Map<string, ForceFlagAsset>();
@@ -183,7 +193,7 @@ export function GameShell({
             <span className="shell-game-title">{gameTitle}</span>
             <span className="shell-turn-meta">{elapsedStepLabel}</span>
           </div>
-          <div />
+          <a className="shell-coin-chip" href="/account" aria-label="Open coin wallet">◉ {coins ?? "—"} coins</a>
         </header>
         <div className="game-shell">
           <div className="game-shell-map">
@@ -206,7 +216,7 @@ export function GameShell({
           <span className="shell-game-title">{gameTitle}</span>
           <span className="shell-turn-meta">{elapsedStepLabel}</span>
         </div>
-        <div />
+        <a className="shell-coin-chip" href="/account" aria-label="Open coin wallet">◉ {coins ?? "—"} coins</a>
       </header>
       <div className="game-shell">
         <div className="game-shell-map">

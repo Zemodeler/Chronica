@@ -35,13 +35,26 @@ export default async function GamePage({
 
   let characterPanel: CharacterPanelProps | undefined;
   if (knowledgebase !== null && knowledgebase.confirmedByPlayer) {
+    const locationLabel = knowledgebase.locationProvinceId === null
+      ? "Location not yet established"
+      : world.provinces.find((province) => province.id === knowledgebase.locationProvinceId)?.name
+        ?? world.mapGeoJson?.features.find((feature) => feature.id === knowledgebase.locationProvinceId && feature.properties.kind === "province")?.properties.name
+        ?? knowledgebase.locationProvinceId;
     characterPanel = {
       characterName: knowledgebase.canonicalName,
       role: knowledgebase.role,
-      locationLabel: knowledgebase.period,
+      locationLabel,
       culture: knowledgebase.culture,
       relations: knowledgebase.relations.slice(0, 6),
       origin: knowledgebase.origin,
+      moneyLabel: `${world.material.personalAccount.balance.toLocaleString()} ${world.material.currencyName}`,
+      authority: knowledgebase.skills.subSkills.authority ?? 0,
+      skills: {
+        martial: knowledgebase.skills.martial,
+        diplomacy: knowledgebase.skills.diplomacy,
+        stewardship: knowledgebase.skills.stewardship,
+        intrigue: knowledgebase.skills.intrigue,
+      },
     };
   }
 
