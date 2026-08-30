@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, ne, or } from "drizzle-orm";
-import type { DialogueChannel, MapPresentationEvent, OrderBatch, ScenarioClock, WorldState } from "@chronica/shared";
-import { MapPresentationEventSchema, ScenarioDefinitionSchema, WorldStateSchema } from "@chronica/shared";
+import type { DialogueChannel, OrderBatch, ScenarioClock, WorldState } from "@chronica/shared";
+import { ScenarioDefinitionSchema, WorldStateSchema } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
 import { dialogueMessages, dialogueSessions } from "../schema/dialogue";
 import {
@@ -36,7 +36,6 @@ export interface WorldViewSource {
   readonly totalPlayers: number;
   readonly world: WorldState;
   readonly scenarioClock?: ScenarioClock;
-  readonly presentationEvents: readonly MapPresentationEvent[];
 }
 
 /** The scenario row a slug resolves to, so createGame can pin a game to it. */
@@ -331,25 +330,6 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
     ? (fallbackWorld?.success ? fallbackWorld.data : undefined)
     : WorldStateSchema.parse(snapshot.state);
   if (renderedWorld === undefined) return undefined;
-  const presentationEvents: MapPresentationEvent[] = [];
-  const presentationEventIds = new Set<string>();
-  if (snapshot !== undefined) {
-    const rows = await db.select({ facts: chronicleEntries.facts }).from(chronicleEntries).where(eq(chronicleEntries.turnId, snapshot.turnId));
-    for (const row of rows) {
-      const facts = row.facts;
-      if (typeof facts !== "object" || facts === null || Array.isArray(facts)) continue;
-      const events = (facts as { mapPresentationEvents?: unknown }).mapPresentationEvents;
-      if (!Array.isArray(events)) continue;
-      for (const event of events) {
-        const parsed = MapPresentationEventSchema.safeParse(event);
-        if (parsed.success && !presentationEventIds.has(parsed.data.id)) {
-          presentationEventIds.add(parsed.data.id);
-          presentationEvents.push(parsed.data);
-        }
-      }
-    }
-  }
-
   return {
     gameId: game.id,
     gameTitle: game.title,
@@ -360,7 +340,6 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
     submittedPlayers,
     totalPlayers,
     world: renderedWorld,
-    presentationEvents,
     ...(scenarioClock !== undefined ? { scenarioClock } : {}),
   };
 }

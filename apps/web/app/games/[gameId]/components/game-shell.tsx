@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef, type PointerEvent } from "react";
+import { useState, useCallback, useEffect, type PointerEvent } from "react";
 import { DynamicMapOverlaySchema, type GeoJsonMap, type DynamicMapOverlay, type GamePhase } from "@chronica/shared";
 import { GeoMap, type ForceFlagAsset, type ForceMapDetails } from "./geo-map";
 import { MapViewport, type ViewportTransform } from "./map-viewport";
@@ -66,35 +66,10 @@ export function GameShell({
     tx: 0,
     ty: 0,
   });
-  const [activePresentationEventIds, setActivePresentationEventIds] = useState<Set<string>>(() => new Set());
   const [selectedForce, setSelectedForce] = useState<ForceMapDetails | null>(null);
   const [forceFlagUrls, setForceFlagUrls] = useState<ReadonlyMap<string, ForceFlagAsset>>(() => new Map());
   const [flagCatalogForce, setFlagCatalogForce] = useState<ForceMapDetails | null>(null);
-  const presentationEffectTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
-
   const zoomBand = deriveZoomBand(viewport.scale);
-
-  useEffect(() => {
-    for (const event of overlay?.presentationEvents ?? []) {
-      const key = `chronica:map-event:${gameId}:${event.id}`;
-      try {
-        if (window.sessionStorage.getItem(key) !== null) continue;
-        window.sessionStorage.setItem(key, "played");
-      } catch {
-        // Storage may be unavailable; replaying on a later response is harmless.
-      }
-      setActivePresentationEventIds((current) => new Set(current).add(event.id));
-      presentationEffectTimers.current.push(setTimeout(() => {
-        setActivePresentationEventIds((current) => {
-          const next = new Set(current);
-          next.delete(event.id);
-          return next;
-        });
-      }, 2_800));
-    }
-  }, [gameId, overlay?.presentationEvents]);
-
-  useEffect(() => () => presentationEffectTimers.current.forEach(clearTimeout), []);
 
   useEffect(() => {
     const savedFlags = new Map<string, ForceFlagAsset>();
@@ -239,7 +214,6 @@ export function GameShell({
               baseImageUrl={baseImageUrl}
               detailImageUrl={detailImageUrl}
               forceFlagUrls={forceFlagUrls}
-              activePresentationEventIds={activePresentationEventIds}
               onProvinceHover={handleProvinceHover}
               onProvinceClick={handleProvinceClick}
               onForceClick={setSelectedForce}
@@ -248,6 +222,8 @@ export function GameShell({
           {selectedForce && <aside className="map-force-details" aria-label={`${selectedForce.name} details`}>
             <button type="button" className="map-force-details-close" onClick={() => setSelectedForce(null)} aria-label="Close army details">×</button>
             <strong>{selectedForce.name}</strong>
+            <span>Commander: {selectedForce.commanderLabel ?? "Unknown"}</span>
+            <span>Combat status: {selectedForce.statusLabel}</span>
             <span>Army size: {selectedForce.strengthLabel}</span>
             <span>Current region: {selectedForce.locationLabel}</span>
             <span>Going to: {selectedForce.destinationLabel}</span>

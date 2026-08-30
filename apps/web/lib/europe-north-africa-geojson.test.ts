@@ -26,10 +26,12 @@ describe("Europe and North Africa demo map features", () => {
     expect(cities.find((feature) => feature.id === "settlement-agrigentum-fort")?.properties).toMatchObject({ type: "fort" });
   });
 
-  it("splits Sicilia from the former combined Italian islands feature", () => {
-    const sicilia = europeNorthAfricaGeoJson.features.find((feature) => feature.id === "ita-72843720b81376294924159-sicily");
+  it("splits Sicilia into western and eastern provinces", () => {
+    const westernSicily = europeNorthAfricaGeoJson.features.find((feature) => feature.id === "ita-72843720b81376294924159-sicily-west");
+    const easternSicily = europeNorthAfricaGeoJson.features.find((feature) => feature.id === "ita-72843720b81376294924159-sicily-east");
     const remainingIslands = europeNorthAfricaGeoJson.features.find((feature) => feature.id === "ita-72843720b81376294924159");
-    expect(sicilia?.properties).toMatchObject({ kind: "province", name: "Sicilia" });
+    expect(westernSicily?.properties).toMatchObject({ kind: "province", name: "Sicilia occidentale" });
+    expect(easternSicily?.properties).toMatchObject({ kind: "province", name: "Sicilia orientale" });
     expect(remainingIslands?.properties).toMatchObject({ kind: "province", name: "Sardegna e isole" });
   });
 });

@@ -5,6 +5,7 @@ import { CharacterSchema } from "../characters/character";
 import { CharacterContinuitySchema, EncounterMemorySchema } from "../continuity/continuity";
 import { WorldPinsSchema } from "./clock";
 import { ProvinceGraphSchema } from "./map";
+import { MapConflictsOverlaySchema } from "./map-presentation";
 import { WorldStorylineSchema } from "./storylines";
 
 /**
@@ -63,6 +64,8 @@ export const WorldStateSchema = z
     encounters: z.array(EncounterMemorySchema),
     /** Active 1.0 world threads. Optional keeps archived snapshots readable. */
     storylines: z.array(WorldStorylineSchema).optional(),
+    /** Current authoritative combat, siege, and war state for map projection. */
+    conflicts: MapConflictsOverlaySchema.default({ battles: [], sieges: [], wars: [] }),
     material: MaterialWorldStateSchema,
   })
   .strict();
