@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EntityIdSchema } from "../material-state";
+import { ElapsedStepSchema, EntityIdSchema } from "../material-state";
 
 // Character dialogue (docs/17, ADR-0025).
 //
@@ -68,6 +68,21 @@ export const NpcChatKnowledgebaseSchema = z
   })
   .strict();
 export type NpcChatKnowledgebase = z.infer<typeof NpcChatKnowledgebaseSchema>;
+
+export const SharedKnowledgebaseEntrySchema = z
+  .object({
+    id: EntityIdSchema,
+    gameId: EntityIdSchema,
+    poolType: z.enum(["polity", "province", "dynasty"]),
+    poolKey: z.string(),
+    body: z.string().max(400),
+    sourceNpcCharacterId: z.string(),
+    stepOccurred: ElapsedStepSchema,
+    isContradicted: z.boolean(),
+    contradictsIds: z.array(z.string()),
+  })
+  .strict();
+export type SharedKnowledgebaseEntry = z.infer<typeof SharedKnowledgebaseEntrySchema>;
 
 /**
  * A role the scenario declares people can be found in.

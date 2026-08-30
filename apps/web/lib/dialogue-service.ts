@@ -8,9 +8,12 @@ import {
   getOrCreateNpcKnowledgebase,
   getNpcKnowledgebase,
   getWorldView,
+  insertSharedEntry,
   listNpcKnowledgebases,
+  listPoolEntries,
   listSessionMessages,
   listSessions,
+  markEntriesContradicted,
   recordInteraction,
   schema,
   touchSession,
@@ -18,6 +21,7 @@ import {
   type KnowledgebaseRow,
   type MessageRow,
   type SessionRow,
+  type SharedEntryRow,
 } from "@chronica/db";
 import type { ConversationConsequence, ConversationMemoryEntry, NpcChatKnowledgebase } from "@chronica/shared";
 import { randomUUID } from "node:crypto";
@@ -44,7 +48,41 @@ export interface WorldCharacterRef {
   readonly dynastyId: string | null;
   readonly polityId: string | null;
   readonly officeId: string | null;
+  readonly locationProvinceId: string | null;
   readonly alive: boolean;
+}
+
+// ── Shared knowledgebase pool computation ────────────────────────────────────
+
+interface PoolSpec {
+  readonly poolType: "polity" | "province" | "dynasty";
+  readonly poolKey: string;
+}
+
+function computeNpcPools(
+  npcCharacterId: string,
+  kb: KnowledgebaseRow,
+  worldCharacters: readonly WorldCharacterRef[],
+): PoolSpec[] {
+  const specs: PoolSpec[] = [];
+  const wc = worldCharacters.find((c) => c.id === npcCharacterId);
+  if (wc?.polityId) specs.push({ poolType: "polity", poolKey: wc.polityId });
+  if (wc?.dynastyId) specs.push({ poolType: "dynasty", poolKey: wc.dynastyId });
+  const provinceId = wc?.locationProvinceId ?? kb.locationProvinceId;
+  if (provinceId) specs.push({ poolType: "province", poolKey: provinceId });
+  return specs;
+}
+
+function buildSharedKnowledgeSection(entries: readonly SharedEntryRow[]): string {
+  const current = entries.filter((e) => !e.isContradicted);
+  const conflicting = entries.filter((e) => e.isContradicted);
+  if (current.length === 0 && conflicting.length === 0) return "";
+  let section = "";
+  if (current.length > 0)
+    section += `\n\nThings your network knows:\n${current.map((e) => `- ${e.body}`).join("\n")}`;
+  if (conflicting.length > 0)
+    section += `\n\nConflicting reports you have heard (accuracy uncertain):\n${conflicting.map((e) => `- ${e.body}`).join("\n")}`;
+  return section;
 }
 
 function buildKnownCharactersSection(
@@ -75,6 +113,7 @@ function buildDialogueSystemPrompt(
   period: string,
   recentMessages: readonly MessageRow[],
   worldCharacters: readonly WorldCharacterRef[],
+  sharedEntries: readonly SharedEntryRow[],
 ): string {
   const channelCtx = CHANNEL_LABELS[channel] ?? "by correspondence";
   const memory = kb.conversationMemory.slice(-6);
@@ -93,12 +132,13 @@ function buildDialogueSystemPrompt(
     : "";
 
   const knownCharacters = buildKnownCharactersSection(kb.npcCharacterId, playerCharacterId, worldCharacters);
+  const networkKnowledge = buildSharedKnowledgeSection(sharedEntries);
 
   return `You are ${kb.canonicalName}, speaking ${channelCtx} with ${playerCharacterName} in ${period}.
 
 ${kb.personalitySummary || `You are a person of the time, with your own interests, loyalties, and knowledge.`}
 
-${relationship}${events}${memorySection}${knownCharacters}${recentCtx}
+${relationship}${events}${networkKnowledge}${memorySection}${knownCharacters}${recentCtx}
 
 Rules you must follow without exception:
 - Always stay fully in character. Never refer to yourself as an AI or acknowledge this is a game.
@@ -181,6 +221,86 @@ function detectConsequences(
   return found;
 }
 
+// ── Knowledge extraction ────────────────────────────────────────────────────
+
+const EXTRACT_KNOWLEDGE_SYSTEM = `You analyze NPC dialogue replies in a historical strategy game and extract factual knowledge claims worth sharing with other NPCs in the same social network.
+
+Extract only statements the NPC presents as information about the world: facts, rumours, plots, events, or news. Do NOT extract opinions, feelings, personal relationship commentary, or general historical observations.
+
+Each extracted entry must be self-contained (1–2 sentences, max 400 characters) and expressed as a third-person statement.
+
+Respond ONLY with JSON matching this schema:
+{ "entries": [ { "body": "...", "contradicts": ["entry-id", ...] } ] }
+Return { "entries": [] } if the reply contains nothing worth recording.`;
+
+interface ExtractedKnowledgeEntry {
+  body: string;
+  contradicts: string[];
+}
+
+async function extractAndPropagateKnowledge(
+  db: ChronicaDatabase,
+  userId: string,
+  gameId: string,
+  npcCharacterId: string,
+  sessionId: string,
+  npcReply: string,
+  existingEntries: readonly SharedEntryRow[],
+  pools: readonly PoolSpec[],
+  stepOccurred: number,
+): Promise<void> {
+  if (pools.length === 0 || npcReply.length < 40) return;
+
+  const entriesContext = existingEntries.length > 0
+    ? `\n\nExisting pool entries (check for contradictions):\n${existingEntries.map((e) => `[${e.id}] ${e.body}`).join("\n")}`
+    : "";
+
+  const adapter = createAiAdapter();
+  let result: Awaited<ReturnType<typeof callWithCoinGate>>;
+  try {
+    result = await callWithCoinGate(
+      db, userId, gameId, "extract_knowledge", adapter,
+      { system: EXTRACT_KNOWLEDGE_SYSTEM, user: `NPC reply: ${npcReply}${entriesContext}` },
+      (content) => {
+        try {
+          const parsed: unknown = JSON.parse(content);
+          return typeof parsed === "object" && parsed !== null && "entries" in parsed;
+        } catch {
+          return false;
+        }
+      },
+    );
+  } catch {
+    return;
+  }
+
+  let parsed: { entries: ExtractedKnowledgeEntry[] };
+  try {
+    parsed = JSON.parse(result.content) as typeof parsed;
+  } catch {
+    return;
+  }
+
+  for (const entry of parsed.entries) {
+    const body = String(entry.body ?? "").trim().slice(0, 400);
+    if (!body) continue;
+
+    const contradictIds = (entry.contradicts ?? []).filter((id) =>
+      existingEntries.some((e) => e.id === id),
+    );
+    if (contradictIds.length > 0) {
+      await markEntriesContradicted(db, contradictIds);
+    }
+
+    for (const pool of pools) {
+      await insertSharedEntry(
+        db, gameId, pool.poolType, pool.poolKey,
+        body, npcCharacterId, sessionId, stepOccurred,
+      );
+    }
+  }
+}
+
 // ── Main dialogue call ──────────────────────────────────────────────────────
 
 interface DialogueCallInput {
@@ -239,8 +359,14 @@ export async function generateDialogueReply(input: DialogueCallInput): Promise<D
     };
   }
 
+  // Resolve shared knowledge pools for this NPC and fetch existing entries
+  const pools = computeNpcPools(npcCharacterId, kb, worldCharacters);
+  const sharedEntries = await listPoolEntries(db, gameId, pools);
+
   const recentMessages = await listSessionMessages(db, sessionId, 20);
-  const systemPrompt = buildDialogueSystemPrompt(kb, playerCharacterName, playerCharacterId, channel, period, recentMessages, worldCharacters);
+  const systemPrompt = buildDialogueSystemPrompt(
+    kb, playerCharacterName, playerCharacterId, channel, period, recentMessages, worldCharacters, sharedEntries,
+  );
   const operation = continuityTier === "ordinary" ? "dialogue_ordinary" : "dialogue_principal";
 
   const adapter = createAiAdapter();
@@ -254,7 +380,7 @@ export async function generateDialogueReply(input: DialogueCallInput): Promise<D
   const npcMsg = await appendMessage(db, sessionId, npcCharacterId, false, npcBody);
   await touchSession(db, sessionId);
 
-  // Detect consequences and update knowledgebase
+  // Detect consequences and update per-player knowledgebase
   const newConsequences = detectConsequences(npcBody, playerMessageBody, npcCharacterId, playerCharacterId, currentStep);
   const updatedMemory = buildUpdatedMemory(kb.conversationMemory, playerMessageBody, npcBody, currentStep);
   const relevancyDelta = 5 + (newConsequences.length > 0 ? 10 : 0) + (kb.relationshipScore < 0 ? 15 : 0);
@@ -264,6 +390,12 @@ export async function generateDialogueReply(input: DialogueCallInput): Promise<D
     consequences: [...kb.consequences, ...newConsequences],
   });
   await recordInteraction(db, kb.id, relevancyDelta);
+
+  // Extract and propagate shared knowledge in the background — does not block the response
+  void extractAndPropagateKnowledge(
+    db, userId, gameId, npcCharacterId, sessionId,
+    npcBody, sharedEntries, pools, currentStep,
+  );
 
   return {
     playerMessage: toMsgShape(playerMsg),
@@ -451,6 +583,7 @@ export async function resolveDialogueContext(gameId: string): Promise<DialogueCo
       dynastyId: c.dynastyId,
       polityId: c.polityId,
       officeId: c.officeId,
+      locationProvinceId: c.locationProvinceId,
       alive: c.alive,
     }));
 
