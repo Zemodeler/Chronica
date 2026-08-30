@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef, type PointerEvent } from "react";
 import { DynamicMapOverlaySchema, type GeoJsonMap, type DynamicMapOverlay, type GamePhase } from "@chronica/shared";
-import { GeoMap, type ForceMapDetails } from "./geo-map";
+import { GeoMap, type ForceFlagAsset, type ForceMapDetails } from "./geo-map";
 import { MapViewport, type ViewportTransform } from "./map-viewport";
 import { MapTooltip } from "./map-tooltip";
 import { MapControls } from "./map-controls";
@@ -16,10 +16,10 @@ const MEDIUM_THRESHOLD = 2.5;
 const CLOSE_THRESHOLD = 5;
 
 const FLAG_CATALOG = [
-  { id: "legio-i-adiutrix", name: "Legio I Adiutrix", description: "Capricorn standard of the First Legion", url: "/maps/legio-i-adiutrix-banner.png" },
-  { id: "spqr", name: "SPQR standard", description: "The Roman Senate and People", url: "/maps/roman-spqr-banner.svg" },
-  { id: "eagle", name: "Legion eagle", description: "Gold eagle on crimson", url: "/maps/roman-eagle-banner.svg" },
-  { id: "laurel", name: "Laurel standard", description: "Victory wreath on deep red", url: "/maps/roman-laurel-banner.svg" },
+  { id: "legio-i-adiutrix", name: "Legio I Adiutrix", description: "Capricorn standard of the First Legion", url: "/maps/legio-i-adiutrix-standard.png", aspectRatio: 1 },
+  { id: "spqr", name: "SPQR standard", description: "The Roman Senate and People", url: "/maps/roman-spqr-banner.png", aspectRatio: 4 / 3 },
+  { id: "eagle", name: "Legion eagle", description: "Gold eagle on crimson", url: "/maps/roman-eagle-banner.png", aspectRatio: 4 / 3 },
+  { id: "laurel", name: "Laurel standard", description: "Victory wreath on deep red", url: "/maps/roman-laurel-banner.png", aspectRatio: 4 / 3 },
 ] as const;
 type FlagId = (typeof FLAG_CATALOG)[number]["id"];
 
@@ -68,7 +68,7 @@ export function GameShell({
   });
   const [activePresentationEventIds, setActivePresentationEventIds] = useState<Set<string>>(() => new Set());
   const [selectedForce, setSelectedForce] = useState<ForceMapDetails | null>(null);
-  const [forceFlagUrls, setForceFlagUrls] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [forceFlagUrls, setForceFlagUrls] = useState<ReadonlyMap<string, ForceFlagAsset>>(() => new Map());
   const [flagCatalogForce, setFlagCatalogForce] = useState<ForceMapDetails | null>(null);
   const presentationEffectTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -97,7 +97,7 @@ export function GameShell({
   useEffect(() => () => presentationEffectTimers.current.forEach(clearTimeout), []);
 
   useEffect(() => {
-    const savedFlags = new Map<string, string>();
+    const savedFlags = new Map<string, ForceFlagAsset>();
     for (const force of overlay?.forces ?? []) {
       let savedId: string | null = null;
       try {
@@ -106,7 +106,7 @@ export function GameShell({
         // Storage is optional; the scenario's current standard still renders.
       }
       const flag = FLAG_CATALOG.find((candidate) => candidate.id === (savedId ?? force.flagAssetId));
-      if (flag) savedFlags.set(force.forceId, flag.url);
+      if (flag) savedFlags.set(force.forceId, { url: flag.url, aspectRatio: flag.aspectRatio });
     }
     setForceFlagUrls(savedFlags);
   }, [gameId, overlay?.forces]);
@@ -115,7 +115,7 @@ export function GameShell({
     if (!flagCatalogForce) return;
     const flag = FLAG_CATALOG.find((candidate) => candidate.id === flagId);
     if (!flag) return;
-    setForceFlagUrls((current) => new Map(current).set(flagCatalogForce.forceId, flag.url));
+    setForceFlagUrls((current) => new Map(current).set(flagCatalogForce.forceId, { url: flag.url, aspectRatio: flag.aspectRatio }));
     try {
       window.sessionStorage.setItem(`chronica:force-flag:${gameId}:${flagCatalogForce.forceId}`, flag.id);
     } catch {
