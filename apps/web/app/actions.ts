@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 import { getAuthentication, isAuthenticationConfigured } from "../lib/authentication";
 import { gameRepository } from "../lib/game-repository";
 import { createGift, redeemGift as redeemAccountGift, resolveAccount, revokeGift, saveAccountProfile } from "../lib/account-service";
+import { confirmDeclaredCharacter, declareCharacter, reviseDeclaredCharacter } from "../lib/character-service";
 
 const textValue = (formData: FormData, key: string): string => {
   const value = formData.get(key);
@@ -200,4 +201,34 @@ export async function revokeDeveloperGift(formData: FormData): Promise<never> {
 export async function signOut(): Promise<never> {
   if (isAuthenticationConfigured()) await getAuthentication().api.signOut({ headers: await headers() });
   redirect("/login?status=signed-out#status");
+}
+
+export async function submitCharacterDeclaration(formData: FormData): Promise<{ status: string; confirmationDraft?: string; canonicalName?: string; origin?: string; error?: string }> {
+  const gameId = textValue(formData, "gameId");
+  const playerInput = textValue(formData, "playerInput");
+  if (gameId === "" || playerInput.trim().length < 2) return { status: "invalid" };
+  const result = await declareCharacter(gameId, playerInput);
+  if (result.status === "draft") {
+    return { status: "draft", confirmationDraft: result.draft.confirmationDraft, canonicalName: result.draft.canonicalName, origin: result.draft.origin };
+  }
+  if (result.status === "error") return { status: result.status, error: result.message };
+  return { status: result.status };
+}
+
+export async function reviseCharacterDeclaration(formData: FormData): Promise<{ status: string; confirmationDraft?: string; canonicalName?: string; origin?: string; error?: string }> {
+  const gameId = textValue(formData, "gameId");
+  const revision = textValue(formData, "revision");
+  if (gameId === "") return { status: "invalid" };
+  const result = await reviseDeclaredCharacter(gameId, revision);
+  if (result.status === "draft") {
+    return { status: "draft", confirmationDraft: result.draft.confirmationDraft, canonicalName: result.draft.canonicalName, origin: result.draft.origin };
+  }
+  if (result.status === "error") return { status: result.status, error: result.message };
+  return { status: result.status };
+}
+
+export async function confirmCharacterDeclaration(formData: FormData): Promise<never> {
+  const gameId = textValue(formData, "gameId");
+  if (gameId !== "") await confirmDeclaredCharacter(gameId);
+  redirect(`/games/${encodeURIComponent(gameId)}`);
 }

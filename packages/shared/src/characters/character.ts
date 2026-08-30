@@ -62,14 +62,49 @@ export const AmbitionSchema = z
   .strict();
 export type Ambition = z.infer<typeof AmbitionSchema>;
 
+/**
+ * Sub-skills are invisible to the player at all times.
+ * AI assigns only the sub-skills relevant to the character's knowledgebase;
+ * .partial() allows omitting irrelevant ones.
+ */
+export const CharacterSubSkillsSchema = z
+  .object({
+    // Martial
+    strategist: z.number().int().min(0).max(100),
+    authority: z.number().int().min(0).max(100),
+    // Intrigue
+    espionage: z.number().int().min(0).max(100),
+    manipulation: z.number().int().min(0).max(100),
+    // Diplomacy
+    rhetoric: z.number().int().min(0).max(100),
+    arbitration: z.number().int().min(0).max(100),
+    // Stewardship
+    logistics: z.number().int().min(0).max(100),
+    taxation: z.number().int().min(0).max(100),
+    // Learning
+    theology: z.number().int().min(0).max(100),
+    scholarship: z.number().int().min(0).max(100),
+    // Piety
+    devotion: z.number().int().min(0).max(100),
+    rites: z.number().int().min(0).max(100),
+    // Body
+    endurance: z.number().int().min(0).max(100),
+    prowess: z.number().int().min(0).max(100),
+  })
+  .partial()
+  .strict();
+export type CharacterSubSkills = z.infer<typeof CharacterSubSkillsSchema>;
+
 export const CharacterSkillsSchema = z
   .object({
-    administration: z.number().int().min(0).max(100),
-    diplomacy: z.number().int().min(0).max(100),
-    war: z.number().int().min(0).max(100),
+    martial: z.number().int().min(0).max(100),
     intrigue: z.number().int().min(0).max(100),
     learning: z.number().int().min(0).max(100),
+    piety: z.number().int().min(0).max(100),
     stewardship: z.number().int().min(0).max(100),
+    diplomacy: z.number().int().min(0).max(100),
+    body: z.number().int().min(0).max(100),
+    subSkills: CharacterSubSkillsSchema,
   })
   .strict();
 export type CharacterSkills = z.infer<typeof CharacterSkillsSchema>;

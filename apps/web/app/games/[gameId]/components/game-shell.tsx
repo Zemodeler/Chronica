@@ -6,6 +6,7 @@ import { GeoMap, type ForceFlagAsset, type ForceMapDetails } from "./geo-map";
 import { MapViewport, type ViewportTransform } from "./map-viewport";
 import { MapTooltip } from "./map-tooltip";
 import { MapControls } from "./map-controls";
+import { CharacterPanel, type CharacterPanelProps } from "./character-panel";
 
 type ZoomBand = "far" | "medium" | "close";
 
@@ -41,6 +42,7 @@ interface GameShellProps {
   readonly initialOverlay: DynamicMapOverlay | undefined;
   readonly baseImageUrl?: string;
   readonly detailImageUrl?: string;
+  readonly characterPanel?: CharacterPanelProps | undefined;
 }
 
 export function GameShell({
@@ -52,6 +54,7 @@ export function GameShell({
   initialOverlay,
   baseImageUrl,
   detailImageUrl,
+  characterPanel,
 }: GameShellProps) {
   const [overlay, setOverlay] = useState<DynamicMapOverlay | null>(
     initialOverlay ?? null,
@@ -251,6 +254,7 @@ export function GameShell({
           />
         </div>
       </div>
+      {characterPanel && <CharacterPanel {...characterPanel} />}
     </>
   );
 }

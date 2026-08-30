@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { gameRepository } from "../../../lib/game-repository";
+import { getCharacterPanelData } from "../../../lib/character-service";
 import { GameShell } from "./components/game-shell";
+import type { CharacterPanelProps } from "./components/character-panel";
 
 export async function generateMetadata({
   params,
@@ -17,8 +19,29 @@ export default async function GamePage({
   params,
 }: Readonly<{ params: Promise<{ gameId: string }> }>) {
   const { gameId } = await params;
-  const world = await gameRepository.getWorld(gameId);
+
+  if (await gameRepository.needsCharacterDeclaration(gameId)) {
+    redirect(`/games/${encodeURIComponent(gameId)}/declare`);
+  }
+
+  const [world, knowledgebase] = await Promise.all([
+    gameRepository.getWorld(gameId),
+    getCharacterPanelData(gameId),
+  ]);
+
   if (world === null) notFound();
+
+  let characterPanel: CharacterPanelProps | undefined;
+  if (knowledgebase !== null && knowledgebase.confirmedByPlayer) {
+    characterPanel = {
+      characterName: knowledgebase.canonicalName,
+      role: knowledgebase.role,
+      locationLabel: knowledgebase.period,
+      culture: knowledgebase.culture,
+      relations: knowledgebase.relations.slice(0, 6),
+      origin: knowledgebase.origin,
+    };
+  }
 
   return (
     <GameShell
@@ -29,6 +52,7 @@ export default async function GamePage({
       initialGeoJson={world.mapGeoJson}
       initialOverlay={world.mapOverlay}
       baseImageUrl="/maps/natural-earth-ii-blue-oceans.png"
+      characterPanel={characterPanel}
     />
   );
 }
