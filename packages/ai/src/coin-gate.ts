@@ -40,6 +40,7 @@ export async function callWithCoinGate(
   adapter: AiAdapter,
   prompts: { system: string; user: string },
   validate?: (content: string) => boolean,
+  options?: { maxRetries?: number },
 ): Promise<AiCallResult> {
   // Fast pre-check: refuse immediately if wallet is empty (before touching holds).
   const snapshot = await getCoinWalletSnapshot(db, userId);
@@ -52,59 +53,69 @@ export async function callWithCoinGate(
     cacheWriteTokens: 0,
   }).coinChargeMicroUnits;
 
-  const workId = randomUUID();
-  const idempotencyKey = `${operation}:${gameId}:${workId}`;
+  const maxRetries = options?.maxRetries ?? 2;
 
-  let holdId: string;
-  try {
-    const hold = await authorizeCoinHold(db, { gameId, workId, maximumMicroUnits: maxHold, idempotencyKey });
-    holdId = hold.holdId;
-  } catch {
-    throw new InsufficientCoinsError();
-  }
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const workId = randomUUID();
+    const idempotencyKey = `${operation}:${gameId}:${workId}`;
 
-  let result: AiCallResult;
-  try {
-    result = await adapter.call(operation, prompts.system, prompts.user);
-  } catch (error) {
-    await releaseCoinHold(db, holdId).catch(() => { /* best effort */ });
-    throw error;
-  }
+    let holdId: string;
+    try {
+      const hold = await authorizeCoinHold(db, { gameId, workId, maximumMicroUnits: maxHold, idempotencyKey });
+      holdId = hold.holdId;
+    } catch {
+      throw new InsufficientCoinsError();
+    }
 
-  if (validate !== undefined && !validate(result.content)) {
-    await releaseCoinHold(db, holdId).catch(() => { /* best effort */ });
-    throw new AiParseError();
-  }
+    let result: AiCallResult;
+    try {
+      result = await adapter.call(operation, prompts.system, prompts.user);
+    } catch (error) {
+      await releaseCoinHold(db, holdId).catch(() => { /* best effort */ });
+      throw error;
+    }
 
-  // Use gpt-4o-mini actual rates for settlement.
-  const actualRate = {
-    inputMicroUnitsPerMillionTokens: 150n,
-    outputMicroUnitsPerMillionTokens: 600n,
-    cacheReadMicroUnitsPerMillionTokens: 75n,
-    cacheWriteMicroUnitsPerMillionTokens: 150n,
-  };
-  const { providerCostMicroUnits, coinChargeMicroUnits } = calculateCoinUsage(actualRate, {
-    inputTokens: result.inputTokens,
-    outputTokens: result.outputTokens,
-    cacheReadTokens: result.cacheReadTokens,
-    cacheWriteTokens: result.cacheWriteTokens,
-  });
+    if (validate !== undefined && !validate(result.content)) {
+      await releaseCoinHold(db, holdId).catch(() => { /* best effort */ });
+      if (attempt < maxRetries) {
+        console.warn(`[ai] parse validation failed on attempt ${attempt + 1}/${maxRetries + 1} for ${operation} — retrying`);
+        continue;
+      }
+      throw new AiParseError();
+    }
 
-  await settleCoinHold(db, {
-    holdId,
-    callId: `${workId}:settled`,
-    operation,
-    routingProfileVersion: 1,
-    usage: {
+    // Use gpt-4o-mini actual rates for settlement.
+    const actualRate = {
+      inputMicroUnitsPerMillionTokens: 150n,
+      outputMicroUnitsPerMillionTokens: 600n,
+      cacheReadMicroUnitsPerMillionTokens: 75n,
+      cacheWriteMicroUnitsPerMillionTokens: 150n,
+    };
+    const { providerCostMicroUnits, coinChargeMicroUnits } = calculateCoinUsage(actualRate, {
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
       cacheReadTokens: result.cacheReadTokens,
       cacheWriteTokens: result.cacheWriteTokens,
-    },
-    providerCostMicroUnits,
-    coinChargeMicroUnits,
-  });
+    });
 
-  logDevAiCost(operation, result);
-  return result;
+    await settleCoinHold(db, {
+      holdId,
+      callId: `${workId}:settled`,
+      operation,
+      routingProfileVersion: 1,
+      usage: {
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        cacheReadTokens: result.cacheReadTokens,
+        cacheWriteTokens: result.cacheWriteTokens,
+      },
+      providerCostMicroUnits,
+      coinChargeMicroUnits,
+    });
+
+    logDevAiCost(operation, result);
+    return result;
+  }
+
+  throw new AiParseError();
 }
