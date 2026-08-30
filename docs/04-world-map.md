@@ -17,7 +17,7 @@ Base-world image
 → temporary war and event effects
 ```
 
-At far zoom show the base image, realm overlays/borders, and capitals. At medium zoom add provinces, major cities, visible forces, and active war effects. At close zoom add towns, villages, forts, local forces, and additional labels.
+At far zoom show the base image, realm overlays, capitals, and active war borders. At medium zoom add provinces, major cities, visible forces, and persistent conflict state. At close zoom add towns, villages, forts, local forces, and additional labels.
 
 ## Planned label behaviour
 
@@ -106,15 +106,21 @@ type ArmyMapState = {
 }
 ```
 
-## Current-contract mapping
+## Legacy contract mapping
 
 Current GeoJSON uses a `region` feature where this document says province; its feature `id` is the stable province ID, and `terrainId`, `tier`, `controllerPolityId`, and `controlFirmnessBps` live in its properties. A `settlement_anchor` point maps to `SettlementProperties`; current kinds are `city`, `town`, `village`, `fortress`, and `port`, while a capital is represented by its polity's `capitalSettlementId` rather than a settlement kind.
 
 `DynamicMapOverlay` is the current delivery shape: `provinces` maps to live controller/control information, `settlements` maps to settlement identity, controller, capital membership, siege, and damage state, and `forces` maps to an army's owner, province, optional coordinate, strength label, and movement. Capital membership derives from a polity's `capitalSettlementId`; it is not a separate simulation settlement kind. These values must be derived from authoritative state before presentation—never inferred from pixels.
 
-## Interaction and events
+## Legacy interaction and events
 
 Use small scenario-supplied flags or icons for forces. Movement uses its explicit path and progress to place the marker and show only its travelled route. Battle, siege, city damage, occupation, and conquest effects communicate current-turn state through typed committed presentation events: battles have a semantic coordinate; other effects target stable province or settlement IDs. Animate a marker only on its first appearance in a browser session, then retain the marker for the turn without a looping animation. Avoid excessive labels, outlines, or visual noise. After each AI-resolved turn, patch the overlay from committed state; save and restore it independently of the static PNG and GeoJSON.
+
+## Persistent conflict state
+
+The map overlay carries a `conflicts` section containing active battles, sieges, and ordered pairs of warring polities. This state is derived from the authoritative world snapshot, not from Chronicle events. Battle participants and siege attackers receive a pulsing red outline; siege defenders receive a pulsing green outline; every besieged settlement receives the red outline. The outline ends immediately when its conflict state is removed.
+
+No normal political borders are drawn. A red shared boundary is shown only where the two province controllers are an active war pair. Clicking an army opens its details panel, including commander and current combat status. Temporary battle, occupation, conquest, damage, and arrival markers are not rendered.
 
 ## Validation and milestones
 
@@ -125,5 +131,5 @@ Before a scenario loads, require unique IDs, schema-valid geometry, valid settle
 3. Render borders and ownership tints.
 4. Add capital/city markers and zoom visibility.
 5. Add dynamic force markers and province-name hover.
-6. Add battle, siege, occupation, and city-damage effects.
+6. Add persistent battle, siege, and wartime-border state.
 7. Patch the map after turn resolution and restore saved dynamic state.

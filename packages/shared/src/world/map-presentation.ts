@@ -181,19 +181,32 @@ export const MapForceOverlaySchema = z.object({
 }).strict();
 export type MapForceOverlay = z.infer<typeof MapForceOverlaySchema>;
 
-export const MapPresentationEventSchema = z.discriminatedUnion("kind", [
-  z.object({
-    id: EntityIdSchema,
-    kind: z.literal("battle"),
-    coordinate: GeoJsonPositionSchema,
-    participantForceIds: z.array(EntityIdSchema).min(1),
-  }).strict(),
-  z.object({ id: EntityIdSchema, kind: z.literal("siege"), settlementId: EntityIdSchema }).strict(),
-  z.object({ id: EntityIdSchema, kind: z.literal("occupation"), provinceId: EntityIdSchema }).strict(),
-  z.object({ id: EntityIdSchema, kind: z.literal("conquest"), provinceId: EntityIdSchema }).strict(),
-  z.object({ id: EntityIdSchema, kind: z.literal("settlement_damage"), settlementId: EntityIdSchema }).strict(),
-]);
-export type MapPresentationEvent = z.infer<typeof MapPresentationEventSchema>;
+const MapWarSchema = z.object({
+  polityAId: EntityIdSchema,
+  polityBId: EntityIdSchema,
+}).strict().refine((war) => war.polityAId < war.polityBId, {
+  message: "War polity IDs must be distinct and ordered.",
+  path: ["polityBId"],
+});
+
+const MapBattleConflictSchema = z.object({
+  battleId: EntityIdSchema,
+  participantForceIds: z.array(EntityIdSchema).min(2),
+}).strict();
+
+const MapSiegeConflictSchema = z.object({
+  settlementId: EntityIdSchema,
+  invadingForceIds: z.array(EntityIdSchema).min(1),
+  defendingForceIds: z.array(EntityIdSchema).default([]),
+}).strict();
+
+/** Persistent current warfare state rendered directly on the map. */
+export const MapConflictsOverlaySchema = z.object({
+  battles: z.array(MapBattleConflictSchema).default([]),
+  sieges: z.array(MapSiegeConflictSchema).default([]),
+  wars: z.array(MapWarSchema).default([]),
+}).strict();
+export type MapConflictsOverlay = z.infer<typeof MapConflictsOverlaySchema>;
 
 export const DynamicMapOverlaySchema = z.object({
   revision: z.number().int().nonnegative(),
@@ -209,13 +222,31 @@ export const DynamicMapOverlaySchema = z.object({
   provinces: z.array(MapProvinceOverlaySchema),
   settlements: z.array(MapSettlementOverlaySchema),
   forces: z.array(MapForceOverlaySchema),
-  /** One-shot effects committed with the latest resolved turn. */
-  presentationEvents: z.array(MapPresentationEventSchema).default([]).superRefine((events, context) => {
-    const ids = new Set<string>();
-    for (const [index, event] of events.entries()) {
-      if (ids.has(event.id)) context.addIssue({ code: "custom", path: [index, "id"], message: "A map overlay may include each presentation event only once." });
-      ids.add(event.id);
-    }
-  }),
-}).strict();
+  conflicts: MapConflictsOverlaySchema.default({ battles: [], sieges: [], wars: [] }),
+}).strict().superRefine((overlay, context) => {
+  const forceIds = new Set(overlay.forces.map((force) => force.forceId));
+  const settlementIds = new Set(overlay.settlements.map((settlement) => settlement.settlementId));
+  const polityIds = new Set(overlay.polities.map((polity) => polity.polityId));
+  const battleIds = new Set<string>();
+  const siegeSettlements = new Set<string>();
+  const warPairs = new Set<string>();
+
+  for (const [index, battle] of overlay.conflicts.battles.entries()) {
+    if (battleIds.has(battle.battleId)) context.addIssue({ code: "custom", path: ["conflicts", "battles", index, "battleId"], message: "A map overlay may include each battle only once." });
+    battleIds.add(battle.battleId);
+    for (const forceId of battle.participantForceIds) if (!forceIds.has(forceId)) context.addIssue({ code: "custom", path: ["conflicts", "battles", index], message: "A battle participant must be present in the map overlay." });
+  }
+  for (const [index, siege] of overlay.conflicts.sieges.entries()) {
+    if (siegeSettlements.has(siege.settlementId)) context.addIssue({ code: "custom", path: ["conflicts", "sieges", index, "settlementId"], message: "A map overlay may include each besieged settlement only once." });
+    siegeSettlements.add(siege.settlementId);
+    if (!settlementIds.has(siege.settlementId)) context.addIssue({ code: "custom", path: ["conflicts", "sieges", index, "settlementId"], message: "A siege target must be present in the map overlay." });
+    for (const forceId of [...siege.invadingForceIds, ...siege.defendingForceIds]) if (!forceIds.has(forceId)) context.addIssue({ code: "custom", path: ["conflicts", "sieges", index], message: "A siege participant must be present in the map overlay." });
+  }
+  for (const [index, war] of overlay.conflicts.wars.entries()) {
+    const key = `${war.polityAId}:${war.polityBId}`;
+    if (warPairs.has(key)) context.addIssue({ code: "custom", path: ["conflicts", "wars", index], message: "A map overlay may include each war only once." });
+    warPairs.add(key);
+    if (!polityIds.has(war.polityAId) || !polityIds.has(war.polityBId)) context.addIssue({ code: "custom", path: ["conflicts", "wars", index], message: "War polities must be present in the map overlay." });
+  }
+});
 export type DynamicMapOverlay = z.infer<typeof DynamicMapOverlaySchema>;

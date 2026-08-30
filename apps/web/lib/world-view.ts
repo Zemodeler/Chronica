@@ -7,7 +7,6 @@ import type {
   DialogueChannel,
   GamePhase,
   MaterialWorldViewModel,
-  MapPresentationEvent,
   NewsViewModel,
   ProvinceView,
   ScenarioClock,
@@ -164,7 +163,6 @@ export interface WorldViewMeta {
   readonly totalPlayers: number;
   readonly lowBandwidth?: boolean;
   readonly clock?: ScenarioClock;
-  readonly presentationEvents?: readonly MapPresentationEvent[];
 }
 
 const MONTH_NAMES = [
@@ -329,7 +327,7 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
           movement: null,
         };
       }),
-      presentationEvents: [...(meta.presentationEvents ?? [])],
+      conflicts: world.conflicts,
     },
     provinces,
     armies,
