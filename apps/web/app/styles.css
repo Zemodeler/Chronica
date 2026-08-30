@@ -590,7 +590,7 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
   .geo-map-road { fill: none; stroke: #c6ad76; stroke-linecap: round; stroke-dasharray: 2 1.5; opacity: .78; vector-effect: non-scaling-stroke; }
   .geo-map-road-major, .geo-map-road-roman { stroke-width: .8; opacity: .9; }
   .geo-map-road-trade_route { stroke: #dfc47d; stroke-width: .9; stroke-dasharray: 3 1.25; }
-.geo-map-country-border { fill: none; stroke: rgb(7 15 17 / 92%); stroke-width: 0.6; vector-effect: non-scaling-stroke; pointer-events: none; }
+.geo-map-country-border { fill: none; stroke: #dc5d5d; stroke-width: .7; stroke-dasharray: 1.5 2; vector-effect: non-scaling-stroke; pointer-events: none; }
   .geo-map-region { fill: transparent; stroke: transparent; stroke-width: 0.5; vector-effect: non-scaling-stroke; }
   .geo-map-region:hover { fill: rgb(255 255 255 / 7%); stroke: #dce8e5; stroke-width: 0.5; }
   .geo-map-region[data-selected="true"] { fill: rgb(244 207 104 / 11%); stroke: #f4cf68; stroke-width: 0.75; }
@@ -608,24 +608,17 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .map-force-label { fill: #dce8e5; font: 600 0.5px system-ui, sans-serif; pointer-events: none; paint-order: stroke; stroke: rgb(10 15 20 / 70%); stroke-width: 0.12px; }
 .map-political-label, .map-settlement-label { font-family: "Times New Roman", Times, serif; }
 .map-political-label { fill: #f4f0df; font-weight: 700; pointer-events: none; paint-order: stroke; stroke: rgb(10 15 20 / 78%); stroke-linejoin: round; }
-.map-settlement[data-damaged="true"] circle:last-of-type { stroke: #dd745b; }
-.map-settlement[data-under-siege="true"] { filter: drop-shadow(0 0 2px #e79573); }
-.map-presentation-effect { fill: none; stroke: #f4cf68; stroke-width: .28; vector-effect: non-scaling-stroke; pointer-events: none; }
-.map-presentation-effect.is-entering { animation: map-effect-arrival 2.8s ease-out both; }
-.map-presentation-effect-battle { stroke: #ef8d68; stroke-linecap: round; stroke-linejoin: round; }
-.map-presentation-effect-battle path:first-child { stroke-width: .33; }
-.map-presentation-effect-battle path:last-child { stroke-width: .24; }
-.map-presentation-effect-siege { stroke: #e9b75e; }
-.map-presentation-effect-occupation, .map-presentation-effect-conquest { stroke: #dce8e5; }
-.map-presentation-effect-settlement_damage { stroke: #dc725d; }
-@keyframes map-effect-arrival { 0% { opacity: 0; transform: scale(.45); } 30% { opacity: 1; transform: scale(1.18); } 100% { opacity: 1; transform: scale(1); } }
+.map-army-conflict { fill: none; stroke-width: .4; vector-effect: non-scaling-stroke; animation: map-conflict-pulse 1.8s ease-in-out infinite; }
+.map-army-conflict-combat, .map-army-conflict-siege-attacker { stroke: #dc5d5d; }
+.map-army-conflict-siege-defender { stroke: #72c783; }
+.map-settlement[data-under-siege="true"] > :is(circle, rect, polygon) { stroke: #dc5d5d; stroke-width: .12; vector-effect: non-scaling-stroke; animation: map-conflict-pulse 1.8s ease-in-out infinite; }
+@keyframes map-conflict-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
 
 /* ─── Map: zoom-band visibility ────────────────────────────────── */
 [data-zoom="far"] .layer-forces { display: none; }
 [data-zoom="far"] .layer-rivers { display: none; }
 [data-zoom="far"] .map-settlement:not(.map-settlement-capital) { display: none; }
 [data-zoom="far"] .map-settlement-label { display: none; }
-[data-zoom="far"] .map-presentation-effect:not(.map-presentation-effect-battle) { display: none; }
 [data-zoom="medium"] .map-settlement-town, [data-zoom="medium"] .map-settlement-village, [data-zoom="medium"] .map-settlement-fort, [data-zoom="medium"] .map-settlement-port { display: none; }
 [data-zoom="medium"] .map-settlement:not(.map-settlement-capital) .map-settlement-label { display: none; }
 

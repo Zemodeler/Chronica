@@ -433,19 +433,28 @@ const DEMO_POLITY_NAMES: Readonly<Record<string, string>> = {
   naples: "Kingdom of Naples",
 };
 
+const CARTHAGINIAN_HEARTLAND_PROVINCE_IDS = [
+  "tun-13205935b88806172084765", "tun-13205935b75715054307065", "tun-13205935b49538157477352", "tun-13205935b49970022939178",
+  "tun-13205935b27259873852948", "tun-13205935b57742642676849", "tun-13205935b9888826763551", "tun-13205935b52637504718586",
+  "tun-13205935b953488337212", "tun-13205935b47286197858453", "tun-13205935b988461082754", "tun-13205935b11721331776240",
+  "tun-13205935b67114336122672", "tun-13205935b85172640982228", "tun-13205935b69181748376292", "tun-13205935b29646166511918",
+  "tun-13205935b58390004509121", "tun-13205935b21712567795690", "tun-13205935b50453639335401", "tun-13205935b74205220895681",
+  "tun-13205935b3129194497982", "tun-13205935b54080015312342", "tun-13205935b11392830158982", "tun-13205935b95771050896452",
+] as const;
+
 const DEMO_OVERLAY_PROVINCES: DynamicMapOverlay["provinces"] = [
   { provinceId: "ita-72843720b99597932318450", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "far" },
   { provinceId: "ita-72843720b59566147937015", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "far" },
   { provinceId: "ita-72843720b863019116732", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "focus" },
   { provinceId: "ita-72843720b88210905209841", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "far" },
-  { provinceId: "ita-72843720b81376294924159", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "far" },
-  { provinceId: "fra-19338628b22604203385446", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "mountain", tier: "far" },
-  // Deliberately disconnected holding used to exercise multi-component polity labels.
-  { provinceId: "esp-25490228b88831207743232", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "far" },
-  { provinceId: "drepanum", controllerPolityId: "rome", controlFirmnessBps: 6000, terrainId: "coastal-plain", tier: "focus" },
-  { provinceId: "palermo", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "hills", tier: "focus" },
-  { provinceId: "agrigentum", controllerPolityId: "carthage", controlFirmnessBps: 4000, terrainId: "dry-uplands", tier: "near" },
-  { provinceId: "messina", controllerPolityId: "rome", controlFirmnessBps: 5000, terrainId: "mountain-strait", tier: "far" },
+  // Carthage's 264 BCE heartland and western Mediterranean possessions.
+  ...CARTHAGINIAN_HEARTLAND_PROVINCE_IDS.map((provinceId) => ({ provinceId, controllerPolityId: "carthage" as const, controlFirmnessBps: 8500, terrainId: "coastal-plain", tier: "far" as const })),
+  { provinceId: "ita-72843720b81376294924159", controllerPolityId: "carthage", controlFirmnessBps: 8500, terrainId: "calibration", tier: "far" },
+  { provinceId: "ita-72843720b81376294924159-sicily-west", controllerPolityId: "carthage", controlFirmnessBps: 6500, terrainId: "coastal-plain", tier: "focus" },
+  { provinceId: "ita-72843720b81376294924159-sicily-east", controllerPolityId: "rome", controlFirmnessBps: 6500, terrainId: "coastal-plain", tier: "focus" },
+  { provinceId: "fra-19338628b22604203385446", controllerPolityId: "carthage", controlFirmnessBps: 8500, terrainId: "mountain", tier: "far" },
+  { provinceId: "esp-25490228b88831207743232", controllerPolityId: "carthage", controlFirmnessBps: 7000, terrainId: "coastal-plain", tier: "far" },
+  { provinceId: "esp-25490228b26609846683583", controllerPolityId: "carthage", controlFirmnessBps: 7000, terrainId: "coastal-plain", tier: "far" },
 ];
 
 function demoMapOverlay(revision: number): DynamicMapOverlay {
@@ -481,7 +490,7 @@ function demoMapOverlay(revision: number): DynamicMapOverlay {
       },
       {
         settlementId: "settlement-syracuse",
-        provinceId: "ita-72843720b81376294924159-sicily",
+        provinceId: "ita-72843720b81376294924159-sicily-east",
         anchorFeatureId: "settlement-syracuse",
         name: "Syracuse",
         kind: "city",
@@ -493,7 +502,7 @@ function demoMapOverlay(revision: number): DynamicMapOverlay {
       },
       {
         settlementId: "settlement-agrigentum-fort",
-        provinceId: "ita-72843720b81376294924159-sicily",
+        provinceId: "ita-72843720b81376294924159-sicily-west",
         anchorFeatureId: "settlement-agrigentum-fort",
         name: "Fort Agrigentum",
         kind: "fortress",
@@ -507,14 +516,26 @@ function demoMapOverlay(revision: number): DynamicMapOverlay {
     forces: [
       {
         forceId: demoMaterialView.forces[0]!.id,
-        provinceId: "ita-72843720b88210905209841",
-        coordinate: [14.25, 40.93],
+        provinceId: "ita-72843720b81376294924159-sicily-west",
+        coordinate: [14.1, 37.45],
         ownerPolityId: "rome",
         name: demoMaterialView.forces[0]!.name,
         commanderLabel: "Roman commander",
         strengthLabel: `${demoMaterialView.forces[0]!.totalHeadcount.toLocaleString()} total; ${demoMaterialView.forces[0]!.fitStrength.toLocaleString()} fit`,
         relation: "friendly",
         flagAssetId: "legio-i-adiutrix",
+        selected: false,
+        movement: null,
+      },
+      {
+        forceId: "carthaginian-army-sicily",
+        provinceId: "ita-72843720b81376294924159-sicily-west",
+        coordinate: [14.28, 37.38],
+        ownerPolityId: "carthage",
+        name: "Carthaginian Army of Sicily",
+        commanderLabel: "Hanno",
+        strengthLabel: "3,000 total; 2,850 fit",
+        relation: "hostile",
         selected: false,
         movement: null,
       },
@@ -532,12 +553,14 @@ function demoMapOverlay(revision: number): DynamicMapOverlay {
         movement: null,
       },
     ],
-    presentationEvents: [{
-      id: "first-punic-battle-off-sicily",
-      kind: "battle",
-      coordinate: [15.2, 38.1],
-      participantForceIds: [demoMaterialView.forces[0]!.id],
-    }],
+    conflicts: {
+      battles: [{
+        battleId: "first-punic-battle-in-sicily",
+        participantForceIds: [demoMaterialView.forces[0]!.id, "carthaginian-army-sicily"],
+      }],
+      sieges: [],
+      wars: [{ polityAId: "carthage", polityBId: "rome" }],
+    },
   };
 }
 
@@ -1187,7 +1210,6 @@ export const postgresGameRepository: GameRepository = {
         submittedPlayers: view.submittedPlayers,
         totalPlayers: view.totalPlayers,
         lowBandwidth,
-        presentationEvents: view.presentationEvents,
         ...(view.scenarioClock === undefined ? {} : { clock: view.scenarioClock }),
       }, characterId);
     } finally {

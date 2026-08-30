@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DynamicMapOverlay, GeoJsonMap } from "@chronica/shared";
 import { derivePoliticalLabels } from "./political-labels";
-import { derivePoliticalMapState } from "./political-geometry";
+import { derivePoliticalMapState, deriveWarBorderPaths, politicalColourFromId } from "./political-geometry";
 import { prepareStaticWorldGeometry } from "./world-geometry";
 
 const map: GeoJsonMap = { type: "FeatureCollection", features: [
@@ -9,9 +9,15 @@ const map: GeoJsonMap = { type: "FeatureCollection", features: [
   { type: "Feature", id: "east", geometry: { type: "Polygon", coordinates: [[[2, 0], [4, 0], [4, 2], [2, 2], [2, 0]]] }, properties: { kind: "province", name: "East" } },
   { type: "Feature", id: "island", geometry: { type: "Polygon", coordinates: [[[20, 0], [21, 0], [21, 1], [20, 1], [20, 0]]] }, properties: { kind: "province", name: "Island" } },
 ] };
-function overlay(provinces: DynamicMapOverlay["provinces"]): DynamicMapOverlay { return { revision: 1, polities: [{ polityId: "rome", name: "Roman Republic" }], provinces, settlements: [], forces: [], presentationEvents: [] }; }
+function overlay(provinces: DynamicMapOverlay["provinces"]): DynamicMapOverlay { return { revision: 1, polities: [{ polityId: "rome", name: "Roman Republic" }], provinces, settlements: [], forces: [], conflicts: { battles: [], sieges: [], wars: [] } }; }
 
 describe("political map derivation", () => {
+  it("uses a saturated red for Roman territory", () => {
+    expect(politicalColourFromId("rome")).toBe("#b21f2d");
+  });
+  it("uses the Carthaginian blue-grey for territory", () => {
+    expect(politicalColourFromId("carthage")).toBe("#93afb0");
+  });
   it("builds static adjacency and shared boundaries once", () => {
     const world = prepareStaticWorldGeometry(map);
     expect(world.provinceById.get("west")?.neighborIds).toEqual(["east"]);
@@ -35,6 +41,18 @@ describe("political map derivation", () => {
       { provinceId: "east", controllerPolityId: null, controlFirmnessBps: 0, terrainId: "plain", tier: "focus" },
     ]));
     expect(state.borderSegments.some((border) => border.classification === "country_border")).toBe(true);
+    expect(deriveWarBorderPaths(state, [])).toBe("");
+  });
+  it("draws only borders shared by active war pairs", () => {
+    const state = derivePoliticalMapState(prepareStaticWorldGeometry(map), {
+      polities: [{ polityId: "carthage", name: "Carthage" }, { polityId: "rome", name: "Rome" }],
+      provinces: [
+        { provinceId: "west", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain", tier: "focus" },
+        { provinceId: "east", controllerPolityId: "carthage", controlFirmnessBps: 8500, terrainId: "plain", tier: "focus" },
+      ],
+    });
+    expect(deriveWarBorderPaths(state, [])).toBe("");
+    expect(deriveWarBorderPaths(state, [{ polityAId: "carthage", polityBId: "rome" }])).not.toBe("");
   });
   it("fits every component label to 85 percent of its selected path", () => {
     const state = derivePoliticalMapState(prepareStaticWorldGeometry(map), overlay([{ provinceId: "west", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain", tier: "focus" }]));
