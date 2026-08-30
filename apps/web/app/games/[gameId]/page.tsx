@@ -21,7 +21,7 @@ export default async function GamePage({
   const { gameId } = await params;
 
   // The demo game uses a fixture lobby with pre-defined characters, not AI.
-  const isDemoGame = gameId === "demo-game";
+  const isDemoGame = gameId === "DEMO";
   if (!isDemoGame && await gameRepository.needsCharacterDeclaration(gameId)) {
     redirect(`/games/${encodeURIComponent(gameId)}/declare`);
   }

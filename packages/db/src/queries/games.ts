@@ -4,6 +4,7 @@ import { ScenarioDefinitionSchema } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
 import { users } from "../schema/auth";
 import { characterClaims, gameInvites, games, players, scenarioVersions, scenarios, turnNewsReadiness, turns } from "../schema/game";
+import { CHRONICA_SYSTEM_USER_ID, FIRST_PUNIC_WAR_SCENARIO_ID, FIRST_PUNIC_WAR_SLUG, firstPunicWarScenario } from "../built-in-scenarios";
 
 export type PublicScenarioSummary = Readonly<{
   scenarioId: string;
@@ -13,6 +14,15 @@ export type PublicScenarioSummary = Readonly<{
   authorName: string;
   recommendedPlayers: number;
 }>;
+
+/** Ensures the First Punic War copy exists as a normal, versioned public scenario. */
+export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.insert(users).values({ id: CHRONICA_SYSTEM_USER_ID, name: "Chronica", email: "scenarios@chronica.local", username: "chronica", role: "admin" }).onConflictDoNothing();
+    await tx.insert(scenarios).values({ id: FIRST_PUNIC_WAR_SCENARIO_ID, slug: FIRST_PUNIC_WAR_SLUG, title: "The Numidian Decision", period: "264 BCE · First Punic War", authorId: CHRONICA_SYSTEM_USER_ID, visibility: "public", currentVersion: 1 }).onConflictDoNothing();
+    await tx.insert(scenarioVersions).values({ scenarioId: FIRST_PUNIC_WAR_SCENARIO_ID, version: 1, definition: firstPunicWarScenario.definition, initialWorld: firstPunicWarScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "Built-in copy of the DEMO opening." }).onConflictDoNothing();
+  });
+}
 
 /**
  * The playable catalogue is intentionally derived from persisted, author-owned
