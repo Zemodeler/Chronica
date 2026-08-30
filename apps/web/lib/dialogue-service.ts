@@ -38,12 +38,43 @@ const CHANNEL_LABELS: Record<string, string> = {
   correspondence: "by letter",
 };
 
+export interface WorldCharacterRef {
+  readonly id: string;
+  readonly name: string;
+  readonly dynastyId: string | null;
+  readonly polityId: string | null;
+  readonly officeId: string | null;
+  readonly alive: boolean;
+}
+
+function buildKnownCharactersSection(
+  npcCharacterId: string,
+  playerCharacterId: string,
+  worldCharacters: readonly WorldCharacterRef[],
+): string {
+  const npc = worldCharacters.find((c) => c.id === npcCharacterId);
+  if (npc === undefined) return "";
+
+  const relevant = worldCharacters.filter((c) => {
+    if (!c.alive) return false;
+    if (c.id === npcCharacterId) return false;
+    if (c.id === playerCharacterId) return false;
+    if (npc.dynastyId !== null && c.dynastyId === npc.dynastyId) return true;
+    return false;
+  });
+
+  if (relevant.length === 0) return "";
+  return `\n\nOther people you personally know:\n${relevant.map((c) => `- ${c.name}`).join("\n")}`;
+}
+
 function buildDialogueSystemPrompt(
   kb: KnowledgebaseRow,
   playerCharacterName: string,
+  playerCharacterId: string,
   channel: string,
   period: string,
   recentMessages: readonly MessageRow[],
+  worldCharacters: readonly WorldCharacterRef[],
 ): string {
   const channelCtx = CHANNEL_LABELS[channel] ?? "by correspondence";
   const memory = kb.conversationMemory.slice(-6);
@@ -61,11 +92,13 @@ function buildDialogueSystemPrompt(
       ).join("\n")}`
     : "";
 
+  const knownCharacters = buildKnownCharactersSection(kb.npcCharacterId, playerCharacterId, worldCharacters);
+
   return `You are ${kb.canonicalName}, speaking ${channelCtx} with ${playerCharacterName} in ${period}.
 
 ${kb.personalitySummary || `You are a person of the time, with your own interests, loyalties, and knowledge.`}
 
-${relationship}${events}${memorySection}${recentCtx}
+${relationship}${events}${memorySection}${knownCharacters}${recentCtx}
 
 Rules you must follow without exception:
 - Always stay fully in character. Never refer to yourself as an AI or acknowledge this is a game.
@@ -164,6 +197,7 @@ interface DialogueCallInput {
   period: string;
   currentStep: number;
   continuityTier: "ordinary" | "remembered" | "principal";
+  worldCharacters: readonly WorldCharacterRef[];
 }
 
 export interface DialogueCallResult {
@@ -190,6 +224,7 @@ export async function generateDialogueReply(input: DialogueCallInput): Promise<D
   const {
     db, userId, gameId, playerId, playerCharacterId, playerCharacterName,
     npcCharacterId, sessionId, channel, playerMessageBody, period, currentStep, continuityTier,
+    worldCharacters,
   } = input;
 
   const kb = await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcCharacterId);
@@ -205,7 +240,7 @@ export async function generateDialogueReply(input: DialogueCallInput): Promise<D
   }
 
   const recentMessages = await listSessionMessages(db, sessionId, 20);
-  const systemPrompt = buildDialogueSystemPrompt(kb, playerCharacterName, channel, period, recentMessages);
+  const systemPrompt = buildDialogueSystemPrompt(kb, playerCharacterName, playerCharacterId, channel, period, recentMessages, worldCharacters);
   const operation = continuityTier === "ordinary" ? "dialogue_ordinary" : "dialogue_principal";
 
   const adapter = createAiAdapter();
@@ -376,6 +411,7 @@ export interface DialogueContext {
   period: string;
   currentStep: number;
   continuityTier: "ordinary" | "remembered" | "principal";
+  worldCharacters: readonly WorldCharacterRef[];
 }
 
 export async function resolveDialogueContext(gameId: string): Promise<DialogueContext | null> {
@@ -409,7 +445,16 @@ export async function resolveDialogueContext(gameId: string): Promise<DialogueCo
     const tier = (continuity?.tier ?? "ordinary") as "ordinary" | "remembered" | "principal";
     const currentStep = world.elapsedStep ?? 0;
 
-    return { db, close, userId, playerId: player.id, characterId, characterName, locationProvinceId, roleLabel, period, currentStep, continuityTier: tier };
+    const worldCharacters: WorldCharacterRef[] = world.characters.map((c) => ({
+      id: c.id,
+      name: c.name,
+      dynastyId: c.dynastyId,
+      polityId: c.polityId,
+      officeId: c.officeId,
+      alive: c.alive,
+    }));
+
+    return { db, close, userId, playerId: player.id, characterId, characterName, locationProvinceId, roleLabel, period, currentStep, continuityTier: tier, worldCharacters };
   } catch (error) {
     await close();
     throw error;
