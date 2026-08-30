@@ -66,6 +66,12 @@ function astronomicalYear(year: number, era: "BCE" | "CE" | undefined): number {
   return (era ?? "CE") === "BCE" ? 1 - year : year;
 }
 
+/** Approximate age at the scenario opening; dates use astronomical years internally. */
+export function ageAtScenarioStart(birthYearApprox: number | null, timelineStartYear: number | null): number | null {
+  if (birthYearApprox === null || timelineStartYear === null) return null;
+  return Math.max(0, timelineStartYear - birthYearApprox);
+}
+
 async function getScenarioContext(db: ReturnType<typeof createDatabase>["db"], gameId: string): Promise<ScenarioContext> {
   const [row] = await db
     .select({ period: schema.scenarios.period, initialWorld: schema.scenarioVersions.initialWorld })
@@ -86,6 +92,17 @@ async function getScenarioContext(db: ReturnType<typeof createDatabase>["db"], g
   };
 }
 
+/** The opening year is intentionally supplied separately from player-facing knowledgebase data. */
+export async function getScenarioTimelineStartYear(gameId: string): Promise<number | null> {
+  if (gameId === DEMO_GAME_ID) return null;
+  const { db, close } = createDatabase(requiredDatabaseUrl());
+  try {
+    return (await getScenarioContext(db, gameId)).timelineStartYear;
+  } finally {
+    await close();
+  }
+}
+
 function buildDeclareSystemPrompt(context: ScenarioContext): string {
   const start = context.timelineStartYear === null ? "the scenario opening" : `${context.timelineStartYear <= 0 ? `${1 - context.timelineStartYear} BCE` : context.timelineStartYear}`;
   const regions = context.regions.length === 0 ? "No map regions are available." : context.regions.map((region) => `- ${region.id}: ${region.name}`).join("\n");
@@ -103,6 +120,7 @@ ${regions}
 - locationProvinceId is REQUIRED at the scenario opening. Never return null or an unknown region ID.
 - Skills are on a 0–100 scale and represent innate talent plus experience. A 50 is average for the era's population. A 75+ is exceptional. Skills: martial, intrigue, learning, piety, stewardship, diplomacy, body.
 - Sub-skills are more granular. Only assign sub-skills the character would realistically have.
+- Create exactly 4 to 8 key relations. Every relation must be an individually named human being; never include an institution, dynasty, army, navy, office, or other collective. Include at least one family member and at least one significant non-family NPC. Family relations need a familyRole; non-family relations must use null for familyRole.
 
 Output ONLY a valid JSON object matching this schema (no markdown fences, no commentary):
 {
@@ -132,7 +150,15 @@ Output ONLY a valid JSON object matching this schema (no markdown fences, no com
   },
   "skillRationale": { "martial": "reason", ... },
   "relations": [
-    { "name": "string", "relationship": "string", "historical": true|false, "notes": "string" }
+    {
+      "name": "string — an individually named person, never an institution, army, office, dynasty, or group",
+      "relationship": "string",
+      "historical": true|false,
+      "notes": "string",
+      "kind": "person",
+      "category": "family | other",
+      "familyRole": "parent | partner | sibling | child | other_relative | null"
+    }
   ],
   "confirmationDraft": "string — a readable summary shown to the player asking them to confirm. Include: who this character is, their role, a brief teaser of their situation. 150–300 words. Friendly, second-person ('You are...')."
 }
