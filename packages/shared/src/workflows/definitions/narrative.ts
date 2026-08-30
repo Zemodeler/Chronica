@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { randomUUID } from "node:crypto";
 import { EntityIdSchema, VisibilitySchema } from "../../material-state";
 import type { AnyWorkflowDefinition } from "../types";
 
