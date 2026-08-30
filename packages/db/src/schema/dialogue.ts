@@ -1,32 +1,21 @@
-import { boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
-import { games, players, turns } from "./game";
-
-export const dialogueSessionStatus = pgEnum("dialogue_session_status", ["resolving_contact", "open", "unavailable", "closed", "merged", "discarded"]);
-export const dialogueMessageStatus = pgEnum("dialogue_message_status", ["pending", "claimed", "ready", "templated", "failed"]);
+import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import type { ConversationConsequence, ConversationMemoryEntry } from "@chronica/shared";
+import { games, players } from "./game";
 
 export const dialogueSessions = pgTable("dialogue_sessions", {
   id: uuid("id").defaultRandom().primaryKey(),
-  threadId: uuid("thread_id").notNull(),
   gameId: uuid("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
-  turnId: uuid("turn_id").notNull().references(() => turns.id, { onDelete: "cascade" }),
-  playerId: uuid("player_id").notNull().references(() => players.id),
+  playerId: uuid("player_id").notNull().references(() => players.id, { onDelete: "cascade" }),
   npcCharacterId: text("npc_character_id"),
-  provisional: boolean("provisional").notNull().default(false),
-  roleQuery: text("role_query"),
-  baseStateHash: text("base_state_hash").notNull(),
-  channel: text("channel").notNull(),
-  visibility: jsonb("visibility").notNull().$type<unknown>(),
-  threadContext: jsonb("thread_context").notNull().$type<unknown>(),
-  overlay: jsonb("overlay").notNull().$type<unknown>(),
-  status: dialogueSessionStatus("status").notNull(),
-  claimedBy: text("claimed_by"),
-  claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
+  isGroup: boolean("is_group").notNull().default(false),
+  participantIds: jsonb("participant_ids").$type<string[]>().notNull().default([]),
+  channel: text("channel").notNull().default("correspondence"),
+  isClosed: boolean("is_closed").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  closedAt: timestamp("closed_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
-  uniqueIndex("dialogue_turn_player_npc_unique").on(table.turnId, table.playerId, table.npcCharacterId),
-  index("dialogue_sessions_claim_idx").on(table.status, table.claimExpiresAt),
-  index("dialogue_sessions_thread_idx").on(table.threadId, table.createdAt),
+  uniqueIndex("dialogue_sessions_player_npc_unique").on(table.gameId, table.playerId, table.npcCharacterId),
+  index("dialogue_sessions_game_player_idx").on(table.gameId, table.playerId),
 ]);
 
 export const dialogueMessages = pgTable("dialogue_messages", {
@@ -34,17 +23,33 @@ export const dialogueMessages = pgTable("dialogue_messages", {
   sessionId: uuid("session_id").notNull().references(() => dialogueSessions.id, { onDelete: "cascade" }),
   sequence: integer("sequence").notNull(),
   speakerCharacterId: text("speaker_character_id").notNull(),
+  isPlayerMessage: boolean("is_player_message").notNull(),
   body: text("body").notNull(),
-  acts: jsonb("acts").notNull().$type<unknown>(),
-  disclosedFactIds: jsonb("disclosed_fact_ids").notNull().$type<unknown>(),
-  clientRequestId: text("client_request_id"),
-  status: dialogueMessageStatus("status").notNull(),
-  aiCallId: uuid("ai_call_id"),
-  claimedBy: text("claimed_by"),
-  claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
-  uniqueIndex("dialogue_messages_session_sequence_unique").on(table.sessionId, table.sequence),
-  uniqueIndex("dialogue_messages_session_request_unique").on(table.sessionId, table.clientRequestId),
-  index("dialogue_messages_claim_idx").on(table.status, table.claimExpiresAt),
+  uniqueIndex("dialogue_messages_session_seq_unique").on(table.sessionId, table.sequence),
+  index("dialogue_messages_session_idx").on(table.sessionId),
+]);
+
+export const npcChatKnowledgebases = pgTable("npc_chat_knowledgebases", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  gameId: uuid("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+  playerId: uuid("player_id").notNull().references(() => players.id, { onDelete: "cascade" }),
+  npcCharacterId: text("npc_character_id").notNull(),
+  canonicalName: text("canonical_name").notNull(),
+  personalitySummary: text("personality_summary").notNull().default(""),
+  relationshipLabel: text("relationship_label").notNull().default("neutral"),
+  relationshipScore: integer("relationship_score").notNull().default(0),
+  conversationMemory: jsonb("conversation_memory").$type<ConversationMemoryEntry[]>().notNull().default([]),
+  significantEvents: jsonb("significant_events").$type<string[]>().notNull().default([]),
+  consequences: jsonb("consequences").$type<ConversationConsequence[]>().notNull().default([]),
+  relevancyScore: integer("relevancy_score").notNull().default(0),
+  interactionCount: integer("interaction_count").notNull().default(0),
+  locationProvinceId: text("location_province_id"),
+  isAvailable: boolean("is_available").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("npc_chat_kb_player_npc_unique").on(table.gameId, table.playerId, table.npcCharacterId),
+  index("npc_chat_kb_game_player_idx").on(table.gameId, table.playerId),
 ]);

@@ -4,9 +4,7 @@ import "server-only";
 
 import {
   AccountDashboardViewModelSchema,
-  ChatOverviewResponseSchema,
   CharacterClaimSchema,
-  ConversationsViewModelSchema,
   GameCreationSchema,
   LobbyViewModelSchema,
   NewsViewModelSchema,
@@ -15,14 +13,9 @@ import {
   ResolvedRoleSchema,
   WorldViewModelSchema,
   type AccountDashboardViewModel,
-  type ChatOverviewResponse,
   type CharacterClaim,
-  type ContactDiscoveryResult,
-  type ConversationsViewModel,
-  type DialogueMessage,
   type DynamicMapOverlay,
   type GameCreation,
-
   type LobbyViewModel,
   type NewsViewModel,
   type OrderBatch,
@@ -41,8 +34,6 @@ import {
   createGame as createGameQuery,
   ensureBuiltInScenarios,
   FIRST_PUNIC_WAR_SCENARIO_ID as PERSISTED_FIRST_PUNIC_WAR_SCENARIO_ID,
-  findOrOpenDialogueThread,
-  openProvisionalContactThread,
   findPublicScenario,
   getAccountProfile,
   getActiveCharacterClaimForPlayer,
@@ -53,15 +44,12 @@ import {
   getPlayerGameUiState,
   getPlayerOrderForOpenTurn,
   getWorldView,
-  listDialogueThreads,
   listHostedGames as listHostedGamesQuery,
   listJoinedGames as listJoinedGamesQuery,
   listPublicScenarios as listPublicScenariosQuery,
-  listThreadMessages,
   requestGameEnd,
   resumePaymentPausedGame,
   schema,
-  sendPlayerDialogueMessage,
   SlotCapError,
   submitPlayerOrder,
   upsertPlayerGameUiState,
@@ -73,7 +61,7 @@ import { europeNorthAfricaGeoJson } from "./europe-north-africa-geojson";
 import { FIRST_PUNIC_CARTHAGINIAN_OVERLAY, FIRST_PUNIC_SICILY_OVERLAY } from "./first-punic-map-territory";
 import { builtInScenarioMap } from "./built-in-scenario-maps";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
-import { projectConversationsView, projectNewsView, projectWorldView } from "./world-view";
+import { projectNewsView, projectWorldView } from "./world-view";
 
 /**
  * The preserved, resettable product demo.  This is deliberately distinct from
@@ -276,58 +264,6 @@ const initialNews = NewsViewModelSchema.parse({
   ],
 });
 
-const initialConversations = ConversationsViewModelSchema.parse({
-  gameId: DEMO_GAME_ID,
-  playerCharacterId: "marcus-atilius",
-  canSend: true,
-  contacts: [
-    {
-      threadId: "thread-captain",
-      knownName: "Captain Lucia Ferrante",
-      roleLabel: "Captain of the Drepanum gate",
-      channel: "in_person_private",
-      unread: 1,
-      pending: false,
-    },
-    {
-      threadId: "thread-chancellor",
-      knownName: "Chancellor Ruggero",
-      roleLabel: "Royal chancellor",
-      channel: "correspondence",
-      unread: 0,
-      pending: false,
-    },
-  ],
-  activeThread: {
-    threadId: "thread-captain",
-    knownName: "Captain Lucia Ferrante",
-    roleLabel: "Captain of the Drepanum gate",
-    channelLabel: "Private conversation in person",
-    elapsedStepLabel: "Step 13",
-    pending: false,
-    readOnlyReason: null,
-    messages: [
-      {
-        id: "message-1",
-        sessionId: "session-captain-13",
-        sequence: 0,
-        speakerCharacterId: "marcus-atilius",
-        body: "Which road is the least exposed after dusk?",
-        acts: [],
-        disclosedFactIds: [],
-      },
-      {
-        id: "message-2",
-        sessionId: "session-captain-13",
-        sequence: 1,
-        speakerCharacterId: "captain-lucia",
-        body: "The salt road is watched, my lord. The vineyard track is slower, but my patrol returned from it before dawn.",
-        acts: [],
-        disclosedFactIds: ["fact-vineyard-patrol"],
-      },
-    ],
-  },
-});
 
 const initialAccount = AccountDashboardViewModelSchema.parse({
   displayName: fixtureViewer.displayName,
@@ -370,19 +306,10 @@ type StoreState = {
   world: WorldViewModel;
   lobby: LobbyViewModel;
   news: NewsViewModel;
-  conversations: ConversationsViewModel;
-  /**
-   * Per-thread message history, keyed by threadId. `conversations.activeThread`
-   * is only ever a snapshot of whichever thread was last requested -- storing
-   * messages there and nowhere else meant selecting a different contact threw
-   * away the one just left, since there was only one slot for all of them.
-   */
-  messagesByThreadId: Record<string, DialogueMessage[]>;
   account: AccountDashboardViewModel;
   createdGift: string | null;
   hostedDemo: boolean;
   revision: number;
-  dialogueRequestIds: string[];
   /** In-memory analogue of `player_game_ui_state` -- durable only for the process lifetime. */
   uiState: { selectedThreadId: string | null; chronicleReadSequence: number };
   /** The last order batch submitted for the currently-open turn, cleared when a new turn opens. */
@@ -395,15 +322,10 @@ const createState = (): StoreState => ({
   world: structuredClone(initialWorld),
   lobby: structuredClone(initialLobby),
   news: structuredClone(initialNews),
-  conversations: structuredClone(initialConversations),
-  messagesByThreadId: initialConversations.activeThread === null ? {} : {
-    [initialConversations.activeThread.threadId]: structuredClone(initialConversations.activeThread.messages),
-  },
   account: structuredClone(initialAccount),
   createdGift: null,
   hostedDemo: false,
   revision: initialWorld.turnIndex,
-  dialogueRequestIds: [],
   uiState: { selectedThreadId: null, chronicleReadSequence: -1 },
   submittedBatch: null,
   characterDeclaration: { status: "none" },
@@ -607,7 +529,7 @@ export type CharacterDeclarationStatus =
   | { readonly status: "pending" }
   | {
       readonly status: "ready";
-      readonly cast: readonly { readonly threadId: string; readonly knownName: string; readonly roleLabel: string }[];
+      readonly cast: readonly { readonly npcCharacterId: string; readonly knownName: string; readonly roleLabel: string }[];
       readonly openingEvent: { readonly title: string; readonly body: string };
     }
   | { readonly status: "failed"; readonly reason: string };
@@ -639,12 +561,6 @@ export interface GameRepository {
   getOrdersStatus(gameId: string): Promise<OrdersStatusResponse | null>;
   getNews(gameId: string): Promise<NewsViewModel | null>;
   acknowledgeNews(gameId: string): Promise<void>;
-  getConversations(gameId: string, threadId?: string): Promise<ConversationsViewModel | null>;
-  findContact(gameId: string, role: string): Promise<string>;
-  sendDialogue(gameId: string, threadId: string, body: string, requestId?: string): Promise<void>;
-  getChatOverview(gameId: string): Promise<ChatOverviewResponse | null>;
-  discoverContact(gameId: string, role: string): Promise<ContactDiscoveryResult>;
-  sendChatMessage(gameId: string, threadId: string, body: string, requestId?: string): Promise<"accepted" | "duplicate">;
   patchUiState(gameId: string, patch: PatchUiStateRequest): Promise<void>;
   getAccount(): Promise<AccountDashboardViewModel>;
   redeemGift(code: string): Promise<"redeemed" | "invalid">;
@@ -722,22 +638,12 @@ export const fixtureGameRepository: GameRepository = {
     if (gameId !== DEMO_GAME_ID) return { status: "pending" };
     state.characterDeclaration = { status: "pending" };
     state.revision += 1;
-    // Mirrors the real worker's async role-resolution queue (§2c): the caller
-    // polls GET .../character-declaration until this flips to "ready". The
-    // fixture reuses the DEMO game's already-seeded contacts as the generated
-    // cast rather than inventing new characters, since nothing here needs to
-    // be materialized into world.characters the way the real cast does.
     setTimeout(() => {
       if (state.characterDeclaration.status !== "pending") return;
-      const cast = state.conversations.contacts.map((contact) => ({
-        threadId: contact.threadId,
-        knownName: contact.knownName,
-        roleLabel: contact.roleLabel,
-      }));
       const summary = `Word of your arrival spreads: "${declaration.trim().slice(0, 200)}"`;
       state.characterDeclaration = {
         status: "ready",
-        cast,
+        cast: [],
         openingEvent: { title: deriveOpeningTitle(summary), body: summary },
       };
       state.revision += 1;
@@ -829,113 +735,6 @@ export const fixtureGameRepository: GameRepository = {
       }
       state.revision += 1;
     }
-  },
-  async getConversations(gameId, threadId) {
-    if (gameId !== DEMO_GAME_ID) return null;
-    if (threadId !== undefined) {
-      const contact = state.conversations.contacts.find((candidate) => candidate.threadId === threadId);
-      if (contact === undefined) return null;
-      // Every thread keeps its own message history in messagesByThreadId; this
-      // just projects the requested one, so switching contacts never discards
-      // whichever thread was open before.
-      state.conversations.activeThread = {
-        threadId,
-        knownName: contact.knownName,
-        roleLabel: contact.roleLabel,
-        channelLabel: contact.channel.replaceAll("_", " "),
-        elapsedStepLabel: state.world.elapsedStepLabel,
-        pending: contact.pending,
-        readOnlyReason: null,
-        messages: state.messagesByThreadId[threadId] ?? [],
-      };
-    }
-    const result = structuredClone(state.conversations);
-    // A delivery failure is informational: the next send either retries this
-    // session or reopens it against the current collecting turn.
-    result.canSend = result.activeThread !== null && !result.activeThread.pending;
-    return ConversationsViewModelSchema.parse(result);
-  },
-  async findContact(gameId, role) {
-    if (gameId !== DEMO_GAME_ID) return "unavailable";
-    const threadId = `thread-role-${state.conversations.contacts.length + 1}`;
-    const knownName = /^the\s+/i.test(role) ? role : `The ${role}`;
-    state.conversations.contacts.push({
-      threadId,
-      knownName,
-      roleLabel: role,
-      channel: "in_person_private",
-      unread: 0,
-      pending: false,
-    });
-    state.messagesByThreadId[threadId] = [];
-    state.revision += 1;
-    return threadId;
-  },
-  async sendDialogue(gameId, threadId, body, requestId) {
-    if (gameId !== DEMO_GAME_ID) return;
-    const contact = state.conversations.contacts.find((candidate) => candidate.threadId === threadId);
-    if (contact === undefined) return;
-    const requestKey = requestId === undefined ? null : `${threadId}:${requestId}`;
-    if (requestKey !== null && state.dialogueRequestIds.includes(requestKey)) return;
-    if (contact.pending) throw new Error("A reply to your previous message is still pending.");
-    if (requestKey !== null) state.dialogueRequestIds.push(requestKey);
-    const messages = state.messagesByThreadId[threadId] ?? (state.messagesByThreadId[threadId] = []);
-    messages.push({
-      id: `message-${threadId}-${messages.length + 1}`,
-      sessionId: `session-${threadId}`,
-      sequence: messages.length,
-      speakerCharacterId: state.conversations.playerCharacterId,
-      body,
-      acts: [],
-      disclosedFactIds: [],
-    });
-    // The fixture follows the real queue's visible contract: a player message
-    // is first pending, then a worker reply arrives later. Keeping this
-    // asynchronous catches UI code that accidentally keys pending state off a
-    // message count rather than the lifecycle it represents. There is no CLI
-    // in fixture mode -- this canned line is what stands in for one until a
-    // real worker (with DATABASE_URL configured) is running.
-    contact.pending = true;
-    state.revision += 1;
-    setTimeout(() => {
-      const replyMessages = state.messagesByThreadId[threadId];
-      if (replyMessages === undefined) return;
-      replyMessages.push({
-        id: `message-${threadId}-${replyMessages.length + 1}`,
-        sessionId: `session-${threadId}`,
-        sequence: replyMessages.length,
-        speakerCharacterId: threadId,
-        body: "I have heard you. If you want material action, include it among your ordinary orders.",
-        acts: [],
-        disclosedFactIds: [],
-      });
-      const pendingContact = state.conversations.contacts.find((candidate) => candidate.threadId === threadId);
-      if (pendingContact !== undefined) pendingContact.pending = false;
-      state.revision += 1;
-    }, 250);
-  },
-  async getChatOverview(gameId) {
-    if (gameId !== DEMO_GAME_ID) return null;
-    return ChatOverviewResponseSchema.parse({
-      gameId,
-      playerCharacterId: state.conversations.playerCharacterId,
-      contacts: state.conversations.contacts,
-      selectedThreadId: state.uiState.selectedThreadId,
-    });
-  },
-  async discoverContact(gameId, role) {
-    const result = await fixtureGameRepository.findContact(gameId, role);
-    return result === "unavailable"
-      ? { status: "unavailable", explanation: `No one matching "${role}" could be found nearby.` }
-      : { status: "found", threadId: result };
-  },
-  async sendChatMessage(gameId, threadId, body, requestId) {
-    if (gameId === DEMO_GAME_ID && requestId !== undefined) {
-      const requestKey = `${threadId}:${requestId}`;
-      if (state.dialogueRequestIds.includes(requestKey)) return "duplicate";
-    }
-    await fixtureGameRepository.sendDialogue(gameId, threadId, body, requestId);
-    return "accepted";
   },
   async patchUiState(gameId, patch) {
     if (gameId !== DEMO_GAME_ID) return;
@@ -1190,14 +989,11 @@ export const postgresGameRepository: GameRepository = {
       if (claim.resolvedRole === null || claim.resolvedRole === undefined) return { status: "pending" };
       const parsedRole = ResolvedRoleSchema.safeParse(claim.resolvedRole);
       if (!parsedRole.success) return { status: "failed", reason: "The generated cast could not be read." };
-      // The threads for these contacts were already opened by the worker's role
-      // queue (goal §2c step 6, findOrOpenDialogueThread) before resolvedRole was
-      // persisted -- this only looks them up, it never opens one itself.
-      const threads = await listDialogueThreads(db, gameId, playerId);
-      const cast = parsedRole.data.contacts.map((contact) => {
-        const thread = threads.find((candidate) => candidate.npcCharacterId === contact.characterId);
-        return { threadId: thread?.threadId ?? contact.characterId, knownName: contact.name, roleLabel: contact.roleLabel };
-      });
+      const cast = parsedRole.data.contacts.map((contact) => ({
+        npcCharacterId: contact.characterId,
+        knownName: contact.name,
+        roleLabel: contact.roleLabel,
+      }));
       const summary = parsedRole.data.immediateEvent.summary;
       return { status: "ready", cast, openingEvent: { title: deriveOpeningTitle(summary), body: summary } };
     } finally {
@@ -1344,136 +1140,6 @@ export const postgresGameRepository: GameRepository = {
       await close();
     }
   },
-  async getConversations(gameId, threadId) {
-    const resolved = await currentViewerCharacter(gameId);
-    if (resolved === null) throw new Error("This account or guest session cannot access the save.");
-    const { db, close, playerId, characterId: playerCharacterId, world } = resolved;
-    try {
-      const contacts = await listDialogueThreads(db, gameId, playerId);
-      const uiState = await getPlayerGameUiState(db, gameId, playerId);
-      const identity = buildContactIdentity(world, uiState?.generatedCast);
-      if (threadId === undefined) return projectConversationsView(gameId, playerCharacterId, contacts, null, identity);
-      const contact = contacts.find((candidate) => candidate.threadId === threadId);
-      if (contact === undefined) return null;
-      const messages = await listThreadMessages(db, threadId);
-      const known = contact.npcCharacterId === null ? undefined : identity.get(contact.npcCharacterId);
-      return projectConversationsView(gameId, playerCharacterId, contacts, {
-        threadId,
-        npcName: known?.name ?? contact.npcCharacterId ?? "Unknown contact",
-        roleLabel: known?.roleLabel ?? "Contact",
-        channel: contact.channel,
-        messages,
-      }, identity);
-    } finally {
-      await close();
-    }
-  },
-  async findContact(gameId, role) {
-    const resolved = await currentViewerCharacter(gameId);
-    if (resolved === null) throw new Error("This account or guest session cannot access the save.");
-    const { db, close, playerId, characterId, world } = resolved;
-    try {
-      const actor = world.characters.find((candidate) => candidate.id === characterId);
-      if (actor === undefined || !actor.alive) return "unavailable";
-      const terms = role.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-      // This is a deliberately conservative deterministic first pass: only
-      // people in the actor's current locality can be matched, so a role query
-      // cannot become a world-wide character oracle. The M2 resolver can add
-      // Focus/institution templates and the metered novel-role fallback once
-      // the scenario projection is available to this repository.
-      const matches = world.characters.filter((candidate) => {
-        if (candidate.id === characterId || !candidate.alive || candidate.locationProvinceId !== actor.locationProvinceId) return false;
-        const identity = `${candidate.name} ${candidate.officeId ?? ""}`.toLocaleLowerCase();
-        return terms.length > 0 && terms.every((term) => identity.includes(term));
-      });
-      // Do not silently pick an ambiguous office-holder. Until the choice view
-      // is persisted, the same non-revealing unavailable response is safer.
-      if (matches.length !== 1) return "unavailable";
-      const npc = matches[0];
-      if (npc === undefined) return "unavailable";
-      return await findOrOpenDialogueThread(db, { gameId, playerId, playerCharacterId: characterId, npcCharacterId: npc.id });
-    } finally {
-      await close();
-    }
-  },
-  async sendDialogue(gameId, threadId, body, requestId) {
-    const resolved = await currentViewerCharacter(gameId);
-    if (resolved === null) throw new Error("This account or guest session cannot access the save.");
-    const { close, characterId } = resolved;
-    try {
-      await sendPlayerDialogueMessage(resolved.db, {
-        threadId,
-        playerId: resolved.playerId,
-        speakerCharacterId: characterId,
-        body,
-        ...(requestId === undefined ? {} : { requestId }),
-      });
-    } finally {
-      await close();
-    }
-  },
-  async getChatOverview(gameId) {
-    const resolved = await currentViewerCharacter(gameId);
-    if (resolved === null) throw new Error("This account or guest session cannot access the save.");
-    const { db, close, playerId, characterId: playerCharacterId, world } = resolved;
-    try {
-      const contacts = await listDialogueThreads(db, gameId, playerId);
-      const uiState = await getPlayerGameUiState(db, gameId, playerId);
-      const identity = buildContactIdentity(world, uiState?.generatedCast);
-      // Reuses the same contact projection getConversations does, rather than
-      // re-deriving ContactView fields from ContactRow a second time here.
-      const view = projectConversationsView(gameId, playerCharacterId, contacts, null, identity);
-      return ChatOverviewResponseSchema.parse({
-        gameId,
-        playerCharacterId,
-        contacts: view.contacts,
-        selectedThreadId: uiState?.selectedThreadId ?? null,
-      });
-    } finally {
-      await close();
-    }
-  },
-  async discoverContact(gameId, role) {
-    const result = await postgresGameRepository.findContact(gameId, role);
-    if (result !== "unavailable") return { status: "found", threadId: result };
-
-    // No deterministic match: enqueue a worker-side resolve_contact AI operation
-    // and return "resolving" immediately so the UI can show a pending state.
-    const resolved = await currentViewerCharacter(gameId);
-    if (resolved === null) {
-      return { status: "unavailable", explanation: "This account cannot access the save." };
-    }
-    const { db, close, playerId, characterId } = resolved;
-    try {
-      const threadId = await openProvisionalContactThread(db, {
-        gameId,
-        playerId,
-        playerCharacterId: characterId,
-        roleQuery: role,
-      });
-      return { status: "resolving", threadId };
-    } catch {
-      return { status: "unavailable", explanation: `No one known as "${role}" could be found nearby.` };
-    } finally {
-      await close();
-    }
-  },
-  async sendChatMessage(gameId, threadId, body, requestId) {
-    const resolved = await currentViewerCharacter(gameId);
-    if (resolved === null) throw new Error("This account or guest session cannot access the save.");
-    const { db, close, playerId, characterId } = resolved;
-    try {
-      return await sendPlayerDialogueMessage(db, {
-        threadId,
-        playerId,
-        speakerCharacterId: characterId,
-        body,
-        ...(requestId === undefined ? {} : { requestId }),
-      });
-    } finally {
-      await close();
-    }
-  },
   async patchUiState(gameId, patch) {
     const resolved = await resolvePlayer(gameId);
     if (resolved === null) throw new Error("This account or guest session cannot access the save.");
@@ -1522,33 +1188,6 @@ export const postgresGameRepository: GameRepository = {
     }
   },
 };
-
-/**
- * Real name/role per npcCharacterId, for chat contact display.
- *
- * `dialogue_sessions.npc_character_id` is just an id -- the readable name and
- * role live on the world's materialized Character (once applyCharacterIntroductions
- * has run) and, before that turn resolves, on the freshly generated cast
- * (player_game_ui_state.generatedCast). The generated cast wins when both are
- * present since its roleLabel is the specific one the player was shown at
- * declaration time, not a bare officeId.
- */
-function buildContactIdentity(
-  world: { readonly characters: readonly { readonly id: string; readonly name: string; readonly officeId: string | null }[] },
-  generatedCast: unknown,
-): ReadonlyMap<string, { readonly name: string; readonly roleLabel: string }> {
-  const identity = new Map<string, { name: string; roleLabel: string }>();
-  for (const character of world.characters) {
-    identity.set(character.id, { name: character.name, roleLabel: character.officeId ?? "Contact" });
-  }
-  const parsed = ResolvedRoleSchema.safeParse(generatedCast);
-  if (parsed.success) {
-    for (const contact of parsed.data.contacts) {
-      identity.set(contact.characterId, { name: contact.name, roleLabel: contact.roleLabel });
-    }
-  }
-  return identity;
-}
 
 /** The signed-in viewer's player row and claimed character for one game, or null in fixture/demo mode. */
 async function currentViewerCharacter(gameId: string) {

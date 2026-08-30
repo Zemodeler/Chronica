@@ -59,6 +59,8 @@ export default async function GamePage({
     };
   }
 
+  const playerCharacterId = knowledgebase?.confirmedByPlayer ? knowledgebase.characterId : undefined;
+
   return (
     <GameShell
       gameId={world.gameId}
@@ -69,6 +71,7 @@ export default async function GamePage({
       initialOverlay={world.mapOverlay}
       baseImageUrl="/maps/natural-earth-ii-blue-oceans.png"
       characterPanel={characterPanel}
+      playerCharacterId={playerCharacterId}
     />
   );
 }
