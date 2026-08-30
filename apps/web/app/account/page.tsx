@@ -20,7 +20,6 @@ export default async function AccountPage({
   const gifts: SerializedGift[] = rawGifts.map((g) => ({
     id: g.id,
     grantCoins: formatGiftAmount(g.grantMicroUnits),
-    maxRedemptions: g.maxRedemptions,
     state: g.state,
     codeExpiresAt: g.codeExpiresAt?.toISOString() ?? null,
     createdAt: g.createdAt.toISOString(),

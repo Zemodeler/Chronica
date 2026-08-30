@@ -191,6 +191,9 @@ export async function redeemDeveloperGiftCode(
       balanceAfterMicrocredits: wallet.availableMicrocredits + availableGrant,
       reason: "Developer gift redeemed",
     });
+    // Codes are single-use, even if old rows from before that policy contain
+    // a larger redemption allowance.
+    await tx.update(giftCodes).set({ state: "redeemed" }).where(eq(giftCodes.id, gift.id));
     return "redeemed";
   });
 }

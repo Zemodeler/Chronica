@@ -18,7 +18,6 @@ const AVATARS = ["laurel", "owl", "lion", "horse", "ship", "tower"] as const;
 export type SerializedGift = {
   id: string;
   grantCoins: string;
-  maxRedemptions: number;
   state: string;
   codeExpiresAt: string | null;
   createdAt: string;
@@ -115,7 +114,9 @@ export function AccountDashboard({
       {(params.gift === "invalid" || params.gift === "unauthorized") && (
         <p className="error acct-status">This gift code cannot be redeemed.</p>
       )}
+      {params.gift === "unavailable" && <p className="error acct-status">Gift codes are temporarily unavailable. Please try again later.</p>}
       {params.developer === "reauth" && <p className="error acct-status">Request a fresh sign-in link before changing gifts.</p>}
+      {params.developer === "unavailable" && <p className="error acct-status">Gift-code setup is incomplete. Configure the server secret and try again.</p>}
       {params.developer === "revoked" && <p className="notice acct-status">Gift revoked.</p>}
       {params.email === "sent" && <p className="notice acct-status">Check your inbox for a verification link.</p>}
       {params.email === "invalid" && <p className="error acct-status">We could not send that verification email.</p>}
@@ -385,14 +386,6 @@ function DeveloperDialog({ gifts, onClose }: { gifts: SerializedGift[]; onClose:
               <label htmlFor="grantCoins">Coins per redemption</label>
               <input id="grantCoins" name="grantCoins" inputMode="decimal" pattern="[0-9]+(\.[0-9]{1,6})?" required placeholder="e.g. 10" />
             </div>
-            <div>
-              <label htmlFor="maxRedemptions">Max redemptions</label>
-              <input id="maxRedemptions" name="maxRedemptions" type="number" min="1" max="100000" defaultValue="1" required />
-            </div>
-            <div>
-              <label htmlFor="perAccountLimit">Per-account limit</label>
-              <input id="perAccountLimit" name="perAccountLimit" type="number" min="1" max="100" defaultValue="1" required />
-            </div>
           </div>
           <label htmlFor="codeExpiresAt_picker">Code expiry (optional, UTC)</label>
           <input
@@ -424,7 +417,7 @@ function DeveloperDialog({ gifts, onClose }: { gifts: SerializedGift[]; onClose:
                   <tr>
                     <th>Created</th>
                     <th>Coins</th>
-                    <th>Uses</th>
+                    <th>Use</th>
                     <th>Expires</th>
                     <th>State</th>
                     <th>Action</th>
@@ -435,7 +428,7 @@ function DeveloperDialog({ gifts, onClose }: { gifts: SerializedGift[]; onClose:
                     <tr key={gift.id}>
                       <td>{gift.createdAt.slice(0, 10)}</td>
                       <td>{gift.grantCoins}</td>
-                      <td>{gift.redemptionCount}/{gift.maxRedemptions}</td>
+                      <td>{gift.redemptionCount === 0 ? "Unused" : "Used"}</td>
                       <td>{gift.codeExpiresAt ? gift.codeExpiresAt.slice(0, 16).replace("T", " ") : "Never"}</td>
                       <td>{gift.state}</td>
                       <td>

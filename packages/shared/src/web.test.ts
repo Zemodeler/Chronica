@@ -4,6 +4,7 @@ import {
   LiveGameEventSchema,
   CredentialLoginSchema,
   CredentialRegistrationSchema,
+  DeveloperGiftCreateSchema,
   EmailAttachmentSchema,
   OrderBatchSchema,
   ProfileUpdateSchema,
@@ -69,5 +70,21 @@ describe("web boundary contracts", () => {
     expect(valid.success).toBe(true);
     if (valid.success) expect(valid.data.username).toBe("zemodeler");
     expect(ProfileUpdateSchema.safeParse({ displayName: "A", username: "bad name", avatarKey: "https://example.test/a.png" }).success).toBe(false);
+  });
+
+  it("accepts only single-use gift-code creation inputs", () => {
+    expect(DeveloperGiftCreateSchema.safeParse({
+      grantCoins: "10",
+      codeExpiresAt: "",
+      grantedCoinsExpireAt: "",
+      auditNote: "Developer grant",
+    }).success).toBe(true);
+    expect(DeveloperGiftCreateSchema.safeParse({
+      grantCoins: "10",
+      maxRedemptions: "2",
+      codeExpiresAt: "",
+      grantedCoinsExpireAt: "",
+      auditNote: "Developer grant",
+    }).success).toBe(false);
   });
 });
