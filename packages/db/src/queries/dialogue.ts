@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Character, ConversationConsequence, ConversationMemoryEntry, NpcChatKnowledgebase } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
-import { dialogueMessages, dialogueSessions, gameNpcRecords, npcChatKnowledgebases } from "../schema/dialogue";
+import { dialogueMessages, dialogueSessions, gameNpcRecords, npcChatKnowledgebases, npcCommitments } from "../schema/dialogue";
 
 // ── Session management ──────────────────────────────────────────────────────
 
@@ -310,6 +310,18 @@ export async function listGameNpcRecords(db: ChronicaDatabase, gameId: string): 
 
 export async function insertGameNpcRecord(db: ChronicaDatabase, gameId: string, character: Character, roleLabel: string): Promise<void> {
   await db.insert(gameNpcRecords).values({ gameId, characterId: character.id, character, roleLabel });
+}
+
+export interface NpcCommitmentRow { readonly id: string; readonly playerCharacterId: string; readonly npcCharacterId: string; readonly promiseType: string; readonly promisedResult: string; readonly conditions: string; readonly rationale: string; readonly status: string; }
+export async function createNpcCommitment(db: ChronicaDatabase, input: { gameId: string; sessionId: string; npcMessageId: string; playerCharacterId: string; npcCharacterId: string; promiseType: string; promisedResult: string; conditions: string; rationale: string; createdAtStep: number }): Promise<void> {
+  await db.insert(npcCommitments).values(input).onConflictDoNothing();
+}
+export async function listPendingNpcCommitments(db: ChronicaDatabase, gameId: string): Promise<readonly NpcCommitmentRow[]> {
+  return (await db.select().from(npcCommitments).where(and(eq(npcCommitments.gameId, gameId), eq(npcCommitments.status, "pending")))) as NpcCommitmentRow[];
+}
+export async function resolveNpcCommitments(db: ChronicaDatabase, ids: readonly string[], status: "fulfilled" | "partially_fulfilled" | "deferred" | "failed" | "cancelled", atStep: number, reason: string): Promise<void> {
+  if (ids.length === 0) return;
+  await db.update(npcCommitments).set({ status, resolvedAtStep: atStep, resolutionReason: reason }).where(inArray(npcCommitments.id, [...ids]));
 }
 
 /** Increments interactionCount and updates relevancyScore by delta. */
