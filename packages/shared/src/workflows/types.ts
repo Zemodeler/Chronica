@@ -27,6 +27,12 @@ export interface WorkflowApplyContext {
   readonly atStep: number;
 }
 
+/** Which AI sources are permitted to invoke a workflow (skills framing, ADR-0032). */
+export type WorkflowInvokerAuthority = "player" | "world_director" | "character_director" | "system";
+
+/** World Director scope tiers, narrowest first. */
+export type WorkflowScopeLimit = "near" | "far" | "coarse";
+
 export interface WorkflowDefinition<TParams extends z.ZodTypeAny = z.ZodTypeAny> {
   /** Stable identifier used by AI proposals. */
   readonly id: string;
@@ -34,6 +40,17 @@ export interface WorkflowDefinition<TParams extends z.ZodTypeAny = z.ZodTypeAny>
   readonly description: string;
   /** Category for grouping in registry documentation. */
   readonly category: "military" | "political" | "economic" | "character" | "narrative" | "map";
+  /**
+   * Which invoker kinds may propose this workflow (skill authority).
+   * Omit to allow any invoker. Used by the Workflow Manager policy validator.
+   */
+  readonly invokerAuthority?: readonly WorkflowInvokerAuthority[];
+  /**
+   * For world_director invokers: the broadest scope tier allowed to propose this.
+   * "near" = only Near events; "far" = Near or Far; "coarse" = any tier.
+   * Omit to place no scope restriction.
+   */
+  readonly scopeLimit?: WorkflowScopeLimit;
   /** Zod schema validating the raw `parameters` record. */
   readonly parametersSchema: TParams;
   /**

@@ -235,6 +235,7 @@ Generate 3-6 events that cover a MIX of categories — military, political, econ
 - visibility: "public" | "polity" | "private"
 - salience: 0-1000 (importance — major battles: 800+, political shifts: 600-800, local unrest: 400-600, minor logistics: 0-400)
 - actions: 1-2 ProposedInvocations from the workflow registry
+- summary: one sentence describing what this event means in the world narrative (used by the Workflow Manager)
 
 ${buildWorkflowCatalog()}
 
@@ -265,6 +266,7 @@ Generate 1-3 events covering at least 2 different categories (military, politica
 - visibility: "polity" or "public"
 - salience: 0-600 (neighboring polity — significant but less granular than Near events)
 - actions: 1 ProposedInvocation from the workflow registry
+- summary: one sentence describing what this event means in the world narrative (used by the Workflow Manager)
 
 ${buildWorkflowCatalog()}
 
@@ -293,6 +295,7 @@ Each event:
 - visibility: "public"
 - salience: 0-300 (very low — distant background rumours)
 - actions: 1 ProposedInvocation (typically start_war, end_war, give_territory, or kill_character — use polity IDs, not province IDs)
+- summary: one sentence describing what this event means in the world narrative (used by the Workflow Manager)
 
 ${buildWorkflowCatalog()}
 

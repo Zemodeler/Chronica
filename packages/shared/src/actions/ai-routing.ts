@@ -39,6 +39,8 @@ export const AiOperationSchema = z.enum([
   "chronicle_narrator",
   // Character Director — evaluates selected characters and proposes goals, plots, and actions.
   "character_director",
+  // Workflow Manager — reviews every AI-proposed workflow before world mutation.
+  "workflow_manager",
 ]);
 export type AiOperation = z.infer<typeof AiOperationSchema>;
 

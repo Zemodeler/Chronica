@@ -24,7 +24,7 @@ export type SerializedGift = {
   redemptionCount: number;
 };
 
-type DialogKey = "profile" | "email" | "wallet" | "redeem" | "saves" | "developer" | null;
+type DialogKey = "profile" | "email" | "wallet" | "redeem" | "saves" | "developer" | "workflow_proposals" | null;
 
 type Params = {
   gift?: string;
@@ -38,10 +38,12 @@ export function AccountDashboard({
   account,
   gifts,
   params,
+  pendingProposalCount = 0,
 }: {
   account: AccountDashboardViewModel;
   gifts: SerializedGift[];
   params: Params;
+  pendingProposalCount?: number;
 }) {
   const [openDialog, setOpenDialog] = useState<DialogKey>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -173,6 +175,17 @@ export function AccountDashboard({
             <span className="account-card-action">Manage →</span>
           </button>
         )}
+
+        {canManageGifts && (
+          <button type="button" className="account-card account-card--dev" onClick={() => setOpenDialog("workflow_proposals")}>
+            <span className="account-card-icon">🔬</span>
+            <span className="account-card-title">Workflow Proposals</span>
+            <span className="account-card-meta">
+              {pendingProposalCount} pending review
+            </span>
+            <span className="account-card-action">Review →</span>
+          </button>
+        )}
       </div>
 
       <dialog
@@ -187,6 +200,7 @@ export function AccountDashboard({
         {openDialog === "redeem" && <RedeemDialog onClose={close} />}
         {openDialog === "saves" && <SavesDialog account={account} onClose={close} />}
         {openDialog === "developer" && <DeveloperDialog gifts={gifts} onClose={close} />}
+        {openDialog === "workflow_proposals" && <WorkflowProposalsDialog onClose={close} />}
       </dialog>
     </>
   );
@@ -447,6 +461,123 @@ function DeveloperDialog({ gifts, onClose }: { gifts: SerializedGift[]; onClose:
             </div>
           </>
         )}
+      </div>
+    </>
+  );
+}
+
+type ProposalRow = {
+  id: string;
+  turnId: string;
+  gameId: string;
+  status: string;
+  intent: string;
+  targetEntityIds: string[];
+  estimatedMutationDescription: string;
+  source: string;
+  sourceRef: string;
+  createdAt: string;
+};
+
+function WorkflowProposalsDialog({ onClose }: { onClose: () => void }) {
+  const [proposals, setProposals] = useState<ProposalRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [scaffoldContent, setScaffoldContent] = useState<{ id: string; text: string } | null>(null);
+  const [reviewNote, setReviewNote] = useState<Record<string, string>>({});
+  const [working, setWorking] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    void fetch("/api/admin/workflow-proposals?status=pending&limit=20")
+      .then((r) => r.json() as Promise<{ proposals: ProposalRow[] }>)
+      .then((data) => { setProposals(data.proposals); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const review = async (id: string, decision: "approved" | "rejected") => {
+    setWorking((w) => ({ ...w, [id]: true }));
+    try {
+      await fetch(`/api/admin/workflow-proposals/${id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision, note: reviewNote[id] ?? "" }),
+      });
+      setProposals((p) => p.filter((x) => x.id !== id));
+    } finally {
+      setWorking((w) => ({ ...w, [id]: false }));
+    }
+  };
+
+  const viewScaffold = async (id: string) => {
+    const r = await fetch(`/api/admin/workflow-proposals/${id}/scaffold`);
+    const text = await r.text();
+    setScaffoldContent({ id, text });
+  };
+
+  return (
+    <>
+      <DialogHeader title="Workflow Proposals" onClose={onClose} />
+      <div className="dialog-body">
+        <p className="dialog-lede">
+          These actions were flagged by the Workflow Manager as needing a new skill.
+          Review each proposal and implement the corresponding workflow, then approve or reject.
+        </p>
+
+        {loading && <p>Loading…</p>}
+
+        {!loading && proposals.length === 0 && (
+          <p className="dialog-empty">No pending proposals.</p>
+        )}
+
+        {proposals.map((p) => (
+          <div key={p.id} style={{ borderTop: "1px solid var(--border)", paddingTop: "1rem", marginTop: "1rem" }}>
+            <p><strong>Intent:</strong> {p.intent}</p>
+            <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>
+              <strong>Estimated mutation:</strong> {p.estimatedMutationDescription}
+            </p>
+            <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>
+              Source: <code>{p.source}</code> · ref: <code>{p.sourceRef}</code> · turn: <code>{p.turnId.slice(0, 8)}</code>
+            </p>
+            {p.targetEntityIds.length > 0 && (
+              <p style={{ fontSize: "0.875rem" }}>Targets: {p.targetEntityIds.join(", ")}</p>
+            )}
+
+            {scaffoldContent?.id === p.id && (
+              <pre style={{ fontSize: "0.75rem", overflowX: "auto", background: "var(--surface-alt)", padding: "0.5rem", borderRadius: "4px" }}>
+                {scaffoldContent.text}
+              </pre>
+            )}
+
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
+              <button type="button" className="button sm secondary" onClick={() => viewScaffold(p.id)}>
+                View Scaffold
+              </button>
+              <input
+                type="text"
+                placeholder="Review note (optional)"
+                value={reviewNote[p.id] ?? ""}
+                onChange={(e) => setReviewNote((n) => ({ ...n, [p.id]: e.target.value }))}
+                className="input sm"
+                style={{ flex: 1, minWidth: "180px" }}
+              />
+              <button
+                type="button"
+                className="button sm"
+                disabled={working[p.id]}
+                onClick={() => void review(p.id, "approved")}
+              >
+                Approve
+              </button>
+              <button
+                type="button"
+                className="button sm secondary"
+                disabled={working[p.id]}
+                onClick={() => void review(p.id, "rejected")}
+              >
+                Reject
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
     </>
   );

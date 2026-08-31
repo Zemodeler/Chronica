@@ -157,6 +157,8 @@ export const turns = pgTable("turns", {
   stopReason: text("stop_reason"),
   /** Provinces whose controllerPolityId changed while resolving this turn. */
   changedRegionIds: text("changed_region_ids").array().notNull().default(sql`'{}'::text[]`),
+  /** Durable audit blob from the Workflow Manager stage (Issue #6). */
+  workflowAudit: jsonb("workflow_audit").$type<import("@chronica/shared").WorkflowAuditBlob>(),
 }, (table) => [
   uniqueIndex("turns_game_index_unique").on(table.gameId, table.index),
   index("turns_claimable_idx").on(table.status, table.claimExpiresAt),
@@ -220,4 +222,27 @@ export const characterClaims = pgTable("character_claims", {
 }, (table) => [
   uniqueIndex("character_claims_active_unique").on(table.gameId, table.characterId).where(sql`${table.releasedAt} is null`),
   uniqueIndex("character_claims_player_active_unique").on(table.gameId, table.playerId).where(sql`${table.releasedAt} is null`),
+]);
+
+// Workflow Manager — novel action proposals (Issue #6).
+export const workflowProposalStatus = pgEnum("workflow_proposal_status", ["pending", "approved", "rejected"]);
+
+export const pendingWorkflowProposals = pgTable("pending_workflow_proposals", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  turnId: uuid("turn_id").notNull().references(() => turns.id, { onDelete: "cascade" }),
+  gameId: uuid("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+  status: workflowProposalStatus("status").notNull().default("pending"),
+  /** One-sentence description of the action the manager wanted to take. */
+  intent: text("intent").notNull(),
+  targetEntityIds: jsonb("target_entity_ids").notNull().$type<string[]>(),
+  estimatedMutationDescription: text("estimated_mutation_description").notNull(),
+  source: text("source").notNull(),
+  sourceRef: text("source_ref").notNull(),
+  reviewedBy: uuid("reviewed_by").references(() => users.id, { onDelete: "set null" }),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  reviewNote: text("review_note"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("pending_workflow_proposals_game_idx").on(table.gameId),
+  index("pending_workflow_proposals_status_idx").on(table.status),
 ]);

@@ -7,4 +7,5 @@ export * from "./resolution";
 export * from "./shared-knowledgebase";
 export * from "./turns";
 export * from "./ui-state";
+export * from "./workflow-proposals";
 export * from "../built-in-scenarios";
