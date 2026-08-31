@@ -57,6 +57,8 @@ export const NpcChatKnowledgebaseSchema = z
     canonicalName: z.string().trim().min(1),
     personalitySummary: z.string().max(600),
     relationshipLabel: z.enum(["ally", "rival", "neutral", "suspicious", "superior", "subordinate"]),
+    declaredConnection: z.string().trim().min(1).max(160),
+    declaredConnectionNotes: z.string().max(600),
     relationshipScore: z.number().int().min(-100).max(100),
     conversationMemory: z.array(ConversationMemoryEntrySchema),
     significantEvents: z.array(z.string()),
@@ -73,7 +75,7 @@ export const SharedKnowledgebaseEntrySchema = z
   .object({
     id: EntityIdSchema,
     gameId: EntityIdSchema,
-    poolType: z.enum(["polity", "province", "dynasty"]),
+    poolType: z.enum(["game", "polity", "province", "dynasty"]),
     poolKey: z.string(),
     body: z.string().max(400),
     sourceNpcCharacterId: z.string(),
