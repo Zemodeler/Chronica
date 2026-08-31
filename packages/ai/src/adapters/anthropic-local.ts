@@ -16,6 +16,7 @@ const JSON_MODE_OPERATIONS = new Set<AiOperation>([
   "enrich_npc_profile",
   "resolve_contact",
   "extract_knowledge",
+  "workflow_manager",
 ]);
 
 const TIER_MODELS: Record<AiTier, string> = {
@@ -31,6 +32,7 @@ const STANDARD_TIER_OPERATIONS = new Set<AiOperation>([
   "propose_near_events",
   "chronicle_narrator",
   "character_director",
+  "workflow_manager",
 ]);
 
 function resolveModel(operation: AiOperation): string {

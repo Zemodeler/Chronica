@@ -6,6 +6,7 @@ import { isAuthenticationConfigured } from "../../lib/authentication";
 import { gameRepository } from "../../lib/game-repository";
 import { redeemGift } from "../actions";
 import { AccountDashboard, type SerializedGift } from "./account-dialogs";
+import { createDatabase, listPendingWorkflowProposals } from "@chronica/db";
 
 export const metadata: Metadata = { title: "Account and coins" };
 
@@ -16,7 +17,8 @@ export default async function AccountPage({
   const account = persistedAccount ?? (!isAuthenticationConfigured() && process.env.NODE_ENV !== "production" ? await gameRepository.getAccount() : null);
   if (account === null) redirect("/login?returnTo=%2Faccount");
 
-  const rawGifts = (account.role === "developer" || account.role === "admin") ? await developerGiftList(await headers()) : [];
+  const isDev = account.role === "developer" || account.role === "admin";
+  const rawGifts = isDev ? await developerGiftList(await headers()) : [];
   const gifts: SerializedGift[] = rawGifts.map((g) => ({
     id: g.id,
     grantCoins: formatGiftAmount(g.grantMicroUnits),
@@ -26,9 +28,20 @@ export default async function AccountPage({
     redemptionCount: g.redemptionCount,
   }));
 
+  let pendingProposalCount = 0;
+  if (isDev && process.env.DATABASE_URL) {
+    const { db, close } = createDatabase(process.env.DATABASE_URL);
+    try {
+      const pending = await listPendingWorkflowProposals(db, { status: "pending", limit: 50 });
+      pendingProposalCount = pending.length;
+    } catch { /* non-critical */ } finally {
+      await close();
+    }
+  }
+
   return (
     <main id="main-content" className="shell">
-      <AccountDashboard account={account} gifts={gifts} params={params} />
+      <AccountDashboard account={account} gifts={gifts} params={params} pendingProposalCount={pendingProposalCount} />
       <noscript>
         <section className="panel account-noscript" aria-labelledby="redeem-gift-without-javascript">
           <h2 id="redeem-gift-without-javascript">Redeem a gift</h2>

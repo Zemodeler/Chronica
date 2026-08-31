@@ -24,6 +24,7 @@ import {
   buildWorkflowCatalog,
   selectRelevantCharacters,
 } from "@chronica/shared";
+import { collectScopedCandidates, runWorkflowManager } from "./workflow-manager";
 
 // The AI does not know the pipeline-assigned directiveId. Strip it from the
 // schemas before parse so the AI response doesn't have to include it.
@@ -104,34 +105,6 @@ async function safeParseJson<T>(
     console.error(`${tag()} [parse-fail:${label}] raw AI content (first 800 chars):`, text.slice(0, 800));
     return null;
   }
-}
-
-function extractInvocations(
-  verdicts: readonly Verdict[],
-  events: readonly EventProposal[],
-  characterDecisions: readonly CharacterDecision[],
-): ProposedInvocation[] {
-  const invocations: ProposedInvocation[] = [];
-  for (const verdict of verdicts) {
-    for (const delta of verdict.deltas) {
-      if (delta.kind === "workflow") {
-        invocations.push(delta.invocation);
-      }
-    }
-  }
-  for (const event of events) {
-    for (const action of event.actions) {
-      invocations.push(action);
-    }
-  }
-  // Character Director proposals — only from decisions that involve concrete action
-  for (const decision of characterDecisions) {
-    if (decision.kind === "wait" || decision.kind === "prepare") continue;
-    for (const inv of decision.workflowInvocations) {
-      invocations.push(inv);
-    }
-  }
-  return invocations;
 }
 
 function buildChronicleEntries(
@@ -490,7 +463,9 @@ export async function resolveTurn(
 
     // ── Step 4: World simulation ─────────────────────────────────────────────
     emit(onProgress, "world_sim");
-    const worldEvents: EventProposal[] = [];
+    const nearWorldEvents: EventProposal[] = [];
+    const farWorldEvents: EventProposal[] = [];
+    const coarseWorldEvents: EventProposal[] = [];
 
     // Determine polity tiers
     const playerPolityId = world.characters.find((c) => c.id === actorCharacterId)?.polityId ?? "";
@@ -524,7 +499,7 @@ export async function resolveTurn(
         if (Array.isArray(parsed.events)) {
           for (const raw of parsed.events.slice(0, 6)) {
             const validated = EventProposalSchema.safeParse(raw);
-            if (validated.success) worldEvents.push(validated.data);
+            if (validated.success) nearWorldEvents.push(validated.data);
           }
         }
       } catch { /* world sim is best-effort */ }
@@ -539,7 +514,7 @@ export async function resolveTurn(
         if (Array.isArray(parsed.events)) {
           for (const raw of parsed.events.slice(0, 3)) {
             const validated = EventProposalSchema.safeParse(raw);
-            if (validated.success) worldEvents.push(validated.data);
+            if (validated.success) farWorldEvents.push(validated.data);
           }
         }
       } catch { /* world sim is best-effort */ }
@@ -554,7 +529,7 @@ export async function resolveTurn(
         if (Array.isArray(parsed.events)) {
           for (const raw of parsed.events.slice(0, 3)) {
             const validated = EventProposalSchema.safeParse(raw);
-            if (validated.success) worldEvents.push(validated.data);
+            if (validated.success) coarseWorldEvents.push(validated.data);
           }
         }
       } catch { /* world sim is best-effort */ }
@@ -595,10 +570,28 @@ export async function resolveTurn(
       }
     }
 
+    // ── Step 4c: Workflow Manager ────────────────────────────────────────────
+    emit(onProgress, "manage");
+    const atStep = world.elapsedStep + 1;
+    const allCandidates = collectScopedCandidates(
+      verdicts,
+      nearWorldEvents,
+      farWorldEvents,
+      coarseWorldEvents,
+      characterDecisions,
+    );
+    console.log(`${tag()} [manage] ${allCandidates.length} candidate(s) collected`);
+    const managerResult = await runWorkflowManager(adapter, world, allCandidates, atStep);
+    if (managerResult.managerFailed) {
+      console.warn(`${tag()} [manage] failed closed — no AI-proposed workflows will execute this turn`);
+    } else {
+      console.log(`${tag()} [manage] ${managerResult.acceptedInvocations.length} invocation(s) accepted`);
+    }
+    emit(onProgress, "manage", true);
+
     // ── Step 5: Execute workflows ────────────────────────────────────────────
     emit(onProgress, "execute");
-    const allInvocations = extractInvocations(verdicts, worldEvents, characterDecisions);
-    const atStep = world.elapsedStep + 1;
+    const allInvocations = managerResult.acceptedInvocations;
     console.log(`${tag()} [execute] ${allInvocations.length} total invocation(s) queued`);
     for (const inv of allInvocations) {
       console.log(`${tag()} [execute:queued] actionId=${inv.actionId} actorId=${inv.actorId} params=${JSON.stringify(inv.parameters)}`);
@@ -660,7 +653,7 @@ export async function resolveTurn(
     let chronicleInputs = buildChronicleEntries(
       verdicts,
       interpretations,
-      worldEvents,
+      [...nearWorldEvents, ...farWorldEvents, ...coarseWorldEvents],
       characterDecisions,
       workflowLog as any,
       atStep,
@@ -708,6 +701,8 @@ export async function resolveTurn(
       elapsedStepEnd: atStep,
       chronicleEntries: chronicleInputs,
       stopReason: "player_decision",
+      workflowAudit: managerResult.auditBlob,
+      novelActionProposals: managerResult.auditBlob.novelActionProposals,
     });
     await resolveNpcCommitments(db, fulfilledCommitmentIds, "fulfilled", atStep, "Validated and fulfilled during turn resolution.");
     await resolveNpcCommitments(db, deferredCommitmentIds, "deferred", atStep, "Conditions, availability, or reachability require a later turn.");

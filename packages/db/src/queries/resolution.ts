@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { WorldStateSchema } from "@chronica/shared";
-import type { WorldState } from "@chronica/shared";
+import type { WorldState, WorkflowAuditBlob, NovelActionProposal } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
-import { chronicleEntries, games, players, turns, worldSnapshots } from "../schema/game";
+import { chronicleEntries, games, players, pendingWorkflowProposals, turns, worldSnapshots } from "../schema/game";
+import { insertNovelActionProposals } from "./workflow-proposals";
 
 // Persistence for the resolution pipeline.
 //
@@ -31,6 +32,10 @@ export interface CommitResolutionInput {
   readonly elapsedStepEnd: number;
   readonly chronicleEntries: readonly ChronicleEntryInput[];
   readonly stopReason: string;
+  /** Workflow Manager audit blob; stored as JSONB on the turn row for offline review. */
+  readonly workflowAudit?: WorkflowAuditBlob;
+  /** Novel action proposals emitted by the Workflow Manager; persisted for developer review. */
+  readonly novelActionProposals?: readonly NovelActionProposal[];
 }
 
 export interface CommitResolutionResult {
@@ -58,6 +63,7 @@ export async function commitResolution(
         elapsedStepEnd: input.elapsedStepEnd,
         stopReason: input.stopReason,
         resolutionCommittedAt: new Date(),
+        ...(input.workflowAudit !== undefined ? { workflowAudit: input.workflowAudit } : {}),
       })
       .where(eq(turns.id, input.turnId));
 
@@ -89,6 +95,11 @@ export async function commitResolution(
           },
         })),
       );
+    }
+
+    // Persist novel action proposals for developer review
+    if (input.novelActionProposals && input.novelActionProposals.length > 0) {
+      await insertNovelActionProposals(tx as unknown as ChronicaDatabase, input.novelActionProposals, input.turnId, input.gameId);
     }
 
     // Look up active players to seed news-readiness rows

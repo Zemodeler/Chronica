@@ -185,6 +185,8 @@ export const EventProposalSchema = z
     salience: SalienceSchema,
     /** Workflow proposals only. There is deliberately no state-delta field. */
     actions: z.array(ProposedInvocationSchema).min(1).max(2),
+    /** One-sentence narrative summary for the Workflow Manager to evaluate this event's intent. */
+    summary: z.string().trim().max(300).optional(),
   })
   .strict();
 export type EventProposal = z.infer<typeof EventProposalSchema>;

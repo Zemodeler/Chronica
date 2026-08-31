@@ -9,6 +9,7 @@ export type ResolutionStep =
   | "assess"
   | "adjudicate"
   | "world_sim"
+  | "manage"
   | "execute"
   | "chronicle"
   | "commit";
@@ -24,6 +25,7 @@ export const STEP_LABELS: Record<ResolutionStep, string> = {
   assess: "Assessing feasibility…",
   adjudicate: "Calculating consequences…",
   world_sim: "Simulating the world…",
+  manage: "Reviewing proposed actions…",
   execute: "Applying changes…",
   chronicle: "Writing the chronicle…",
   commit: "Saving the new world…",

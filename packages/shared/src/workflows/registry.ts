@@ -32,9 +32,17 @@ export const WORKFLOW_REGISTRY: ReadonlyMap<string, AnyWorkflowDefinition> = new
 /** All registered workflow IDs, for inclusion in AI system prompts. */
 export const WORKFLOW_IDS: readonly string[] = allWorkflows.map((w) => w.id);
 
-/** Compact registry description for injection into AI prompts. */
+/**
+ * Compact registry description for injection into AI prompts.
+ * Each entry includes authority and scope metadata so the Workflow Manager
+ * knows which invokers may use each skill.
+ */
 export function buildWorkflowCatalog(): string {
-  const lines: string[] = ["Available workflow actions (use the exact id and parameter names shown):"];
+  const lines: string[] = [
+    "Available workflow skills (invoke by exact id and parameter names shown):",
+    "Authority key — [P]=player [W]=world_director [C]=character_director [S]=system",
+    "Scope key (world_director only) — near|far|coarse (coarse = any tier)",
+  ];
   for (const category of ["military", "political", "economic", "character", "narrative", "map"] as const) {
     lines.push(`\n[${category.toUpperCase()}]`);
     for (const w of allWorkflows.filter((x) => x.category === category)) {
@@ -42,7 +50,17 @@ export function buildWorkflowCatalog(): string {
       const shape = typeof rawShape === "function" ? rawShape() : rawShape;
       const paramKeys = shape ? Object.keys(shape).join(", ") : "";
       const paramHint = paramKeys ? ` | params: ${paramKeys}` : "";
-      lines.push(`  ${w.id}: ${w.description}${paramHint}`);
+      const authorityMap: Record<string, string> = {
+        player: "P",
+        world_director: "W",
+        character_director: "C",
+        system: "S",
+      };
+      const authHint = w.invokerAuthority
+        ? ` | authority: ${w.invokerAuthority.map((a) => authorityMap[a] ?? a).join("")}`
+        : "";
+      const scopeHint = w.scopeLimit ? ` | scope≤${w.scopeLimit}` : "";
+      lines.push(`  ${w.id}: ${w.description}${paramHint}${authHint}${scopeHint}`);
     }
   }
   return lines.join("\n");
