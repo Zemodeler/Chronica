@@ -36,6 +36,7 @@ import { getAuthentication, isAuthenticationConfigured } from "./authentication"
 import { headers } from "next/headers";
 import { buildDialogueSystemPrompt, type WorldCharacterRef } from "./dialogue-prompt";
 import { extractDialogueCommitment } from "./dialogue-commitment";
+import { clampRelationshipScore, relationshipLabelForScore, scoreForDeclaredConnection } from "./relationship-score";
 
 export type { WorldCharacterRef } from "./dialogue-prompt";
 
@@ -144,8 +145,10 @@ Extract only statements the NPC presents as information about the world: facts, 
 
 Each extracted entry must be self-contained (1–2 sentences, max 400 characters) and expressed as a third-person statement.
 
+Also evaluate the NPC's opinion of the player after this exchange. Only change it when the player's message or the NPC's response gives a concrete reason: generosity, fulfilled help, respect, insult, threat, deception, betrayal, or a broken promise. Use small changes for ordinary courtesy and larger changes only for consequential acts. Do not change it merely because they spoke.
+
 Respond ONLY with JSON matching this schema:
-{ "entries": [ { "body": "...", "contradicts": ["entry-id", ...] } ] }
+{ "entries": [ { "body": "...", "contradicts": ["entry-id", ...] } ], "relationship": { "scoreDelta": number, "reason": string } | null }
 Return { "entries": [] } if the reply contains nothing worth recording.`;
 
 interface ExtractedKnowledgeEntry {
@@ -153,6 +156,10 @@ interface ExtractedKnowledgeEntry {
   contradicts: string[];
 }
 
+interface RelationshipAssessment {
+  scoreDelta: number;
+  reason: string;
+}
 
 async function extractAndPropagateKnowledge(
   db: ChronicaDatabase,
@@ -161,11 +168,14 @@ async function extractAndPropagateKnowledge(
   npcCharacterId: string,
   sessionId: string,
   npcReply: string,
+  playerMessage: string,
   existingEntries: readonly SharedEntryRow[],
   pools: readonly PoolSpec[],
   stepOccurred: number,
+  knowledgebaseId: string,
+  currentRelationshipScore: number,
 ): Promise<void> {
-  if (pools.length === 0 || npcReply.length < 40) return;
+  if (pools.length === 0) return;
 
   const entriesContext = existingEntries.length > 0
     ? `\n\nExisting pool entries (check for contradictions):\n${existingEntries.map((e) => `[${e.id}] ${e.body}`).join("\n")}`
@@ -176,7 +186,7 @@ async function extractAndPropagateKnowledge(
   try {
     result = await callWithCoinGate(
       db, userId, gameId, "extract_knowledge", adapter,
-      { system: EXTRACT_KNOWLEDGE_SYSTEM, user: `NPC reply: ${npcReply}${entriesContext}` },
+      { system: EXTRACT_KNOWLEDGE_SYSTEM, user: `Player message: ${playerMessage}\nNPC reply: ${npcReply}${entriesContext}` },
       (content) => {
         try {
           const parsed: unknown = JSON.parse(content);
@@ -193,11 +203,22 @@ async function extractAndPropagateKnowledge(
     return;
   }
 
-  let parsed: { entries: ExtractedKnowledgeEntry[] };
+  let parsed: { entries: ExtractedKnowledgeEntry[]; relationship?: RelationshipAssessment | null };
   try {
     parsed = JSON.parse(result.content) as typeof parsed;
   } catch {
     return;
+  }
+
+  const relationship = parsed.relationship;
+  if (relationship !== null && relationship !== undefined && Number.isFinite(relationship.scoreDelta)) {
+    const nextScore = clampRelationshipScore(currentRelationshipScore + Math.max(-20, Math.min(20, relationship.scoreDelta)));
+    if (nextScore !== currentRelationshipScore) {
+      await updateNpcKnowledgebase(db, knowledgebaseId, {
+        relationshipScore: nextScore,
+        relationshipLabel: relationshipLabelForScore(nextScore),
+      });
+    }
   }
 
   for (const entry of parsed.entries) {
@@ -217,6 +238,113 @@ async function extractAndPropagateKnowledge(
         body, npcCharacterId, sessionId, stepOccurred,
       );
     }
+  }
+}
+
+// ── NPC profile enrichment ──────────────────────────────────────────────────
+
+const NPC_PROFILE_SYSTEM = `You generate a concise identity profile for a historical NPC. Respond ONLY with a JSON object matching this exact schema — no other text:
+{
+  "biography": string,        // 80–400 chars: prose identity — who they are, their station, a key trait
+  "culture": string,          // culture or ethnicity, e.g. "Roman", "Carthaginian", "Greek"
+  "faith": string | null,     // religion if relevant, else null
+  "socioEconomicClass": string, // e.g. "plebeian", "equites", "senatorial", "merchant"
+  "role": string,             // occupation or function, e.g. "grain merchant", "army tribune"
+  "skills": {
+    "martial": number,        // 0–100
+    "intrigue": number,
+    "learning": number,
+    "piety": number,
+    "stewardship": number,
+    "diplomacy": number,
+    "body": number,
+    "subSkills": {}
+  },
+  "goals": string[],          // 1–3 plain-text motivations, max 240 chars each
+  "backstory": string[]       // 2–4 notable life events before the scenario, max 400 chars each
+  "relationshipScore": number // -100 to 100: their starting opinion of the player, based on the relationship and notes
+}
+
+Match the culture, class, and skills to the period and the stated relationship. Keep biography grounded and specific — avoid vague platitudes.`;
+
+export interface NpcProfilePatch {
+  biography: string | null;
+  culture: string | null;
+  faith: string | null;
+  socioEconomicClass: string | null;
+  role: string | null;
+  skills: import("@chronica/shared").CharacterSkills | null;
+  goals: string[];
+  backstory: string[];
+  relationshipScore?: number;
+  relationshipLabel?: string;
+}
+
+export async function enrichNpcProfileViaAi(
+  userId: string,
+  gameId: string,
+  input: {
+    npcName: string;
+    declaredConnection: string;
+    connectionNotes: string;
+    period: string;
+    playerCulture: string;
+  },
+): Promise<NpcProfilePatch | null> {
+  const { db, close } = createDatabase(requiredDatabaseUrl());
+  try {
+    const userPrompt = `NPC name: ${input.npcName}
+Relationship to player: ${input.declaredConnection}
+Notes: ${input.connectionNotes || "none"}
+Period: ${input.period}
+Player's culture: ${input.playerCulture}`;
+
+    const adapter = createAiAdapter();
+    let result: Awaited<ReturnType<typeof callWithCoinGate>>;
+    try {
+      result = await callWithCoinGate(
+        db, userId, gameId, "enrich_npc_profile", adapter,
+        { system: NPC_PROFILE_SYSTEM, user: userPrompt },
+        (content) => {
+          try {
+            const parsed: unknown = JSON.parse(content);
+            return typeof parsed === "object" && parsed !== null && "biography" in parsed && "skills" in parsed;
+          } catch {
+            return false;
+          }
+        },
+      );
+    } catch {
+      return null;
+    }
+
+    let parsed: NpcProfilePatch;
+    try {
+      const raw = JSON.parse(result.content) as Record<string, unknown>;
+      const relationshipScore = typeof raw.relationshipScore === "number" && Number.isFinite(raw.relationshipScore)
+        ? clampRelationshipScore(raw.relationshipScore)
+        : undefined;
+      parsed = {
+        biography: typeof raw.biography === "string" ? raw.biography.slice(0, 600) : null,
+        culture: typeof raw.culture === "string" ? raw.culture.slice(0, 120) : null,
+        faith: typeof raw.faith === "string" ? raw.faith.slice(0, 120) : null,
+        socioEconomicClass: typeof raw.socioEconomicClass === "string" ? raw.socioEconomicClass.slice(0, 120) : null,
+        role: typeof raw.role === "string" ? raw.role.slice(0, 200) : null,
+        skills: typeof raw.skills === "object" && raw.skills !== null ? raw.skills as import("@chronica/shared").CharacterSkills : null,
+        goals: Array.isArray(raw.goals) ? (raw.goals as unknown[]).filter((g): g is string => typeof g === "string").map((g) => g.slice(0, 240)).slice(0, 4) : [],
+        backstory: Array.isArray(raw.backstory) ? (raw.backstory as unknown[]).filter((b): b is string => typeof b === "string").map((b) => b.slice(0, 400)).slice(0, 6) : [],
+        ...(relationshipScore === undefined ? {} : {
+          relationshipScore,
+          relationshipLabel: relationshipLabelForScore(relationshipScore),
+        }),
+      };
+    } catch {
+      return null;
+    }
+
+    return parsed;
+  } finally {
+    await close();
   }
 }
 
@@ -267,7 +395,24 @@ export async function generateDialogueReply(input: DialogueCallInput & { readonl
     worldCharacters,
   } = input;
 
-  const kb = await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcCharacterId);
+  let kb = await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcCharacterId);
+
+  // Backfill pre-enrichment contacts that were created with a meaningful
+  // relationship label but the old neutral score default.
+  if (kb.relationshipScore === 0 && kb.relationshipLabel !== "neutral") {
+    const initialScore = scoreForDeclaredConnection(kb.declaredConnection, kb.declaredConnectionNotes);
+    if (initialScore !== 0) {
+      kb = {
+        ...kb,
+        relationshipScore: initialScore,
+        relationshipLabel: relationshipLabelForScore(initialScore),
+      };
+      await updateNpcKnowledgebase(db, kb.id, {
+        relationshipScore: kb.relationshipScore,
+        relationshipLabel: kb.relationshipLabel,
+      });
+    }
+  }
 
   if (!kb.isAvailable) {
     const playerMsg = input.appendPlayerMessage === false ? null : await appendMessage(db, sessionId, playerCharacterId, true, playerMessageBody);
@@ -315,11 +460,16 @@ export async function generateDialogueReply(input: DialogueCallInput & { readonl
     gameId, sessionId, npcMessageId: npcMsg.id, playerCharacterId, npcCharacterId, createdAtStep: currentStep, ...commitment,
   });
 
-  // Keep the request connection alive until extraction has completed. Failures are logged internally.
-  await extractAndPropagateKnowledge(
-    db, userId, gameId, npcCharacterId, sessionId,
-    npcBody, sharedEntries, pools, currentStep,
-  );
+  // Keep the request connection alive until extraction has completed. A
+  // propagation failure must not discard an otherwise valid dialogue reply.
+  try {
+    await extractAndPropagateKnowledge(
+      db, userId, gameId, npcCharacterId, sessionId,
+      npcBody, playerMessageBody, sharedEntries, pools, currentStep, kb.id, kb.relationshipScore,
+    );
+  } catch (error) {
+    console.warn("[extract_knowledge] failed to persist propagated knowledge:", error);
+  }
 
   return {
     playerMessage: playerMsg === null ? { id: "", sessionId, sequence: -1, speakerCharacterId: playerCharacterId, isPlayerMessage: true, body: playerMessageBody } : toMsgShape(playerMsg),
@@ -481,13 +631,25 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
     traits: [], healthBps: 8_000, prestigeBps: 3_000, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null,
   };
   await insertGameNpcRecord(db, gameId, character, parsed.roleLabel);
-  await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcCharacterId, {
+  const newKb = await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcCharacterId, {
     canonicalName: parsed.name,
     personalitySummary: parsed.personalitySummary,
+    role: parsed.roleLabel,
     locationProvinceId: parsed.locationProvinceId,
     relationshipLabel: "neutral",
   });
   const session = await findOrOpenSession(db, gameId, playerId, npcCharacterId, "correspondence");
+
+  if (newKb.biography === null) {
+    const profile = await enrichNpcProfileViaAi(userId, gameId, {
+      npcName: parsed.name,
+      declaredConnection: parsed.roleLabel,
+      connectionNotes: parsed.personalitySummary,
+      period,
+      playerCulture: "local",
+    });
+    if (profile !== null) await updateNpcKnowledgebase(db, newKb.id, profile);
+  }
 
   return { status: "found", sessionId: session.id, knownName: parsed.name };
 }
