@@ -18,12 +18,13 @@ export async function POST(
     const result = await discoverContact({
       db, userId, gameId, playerId, playerCharacterId: characterId, playerCharacterName: characterName,
       playerLocationProvinceId: locationProvinceId, playerRoleLabel: roleLabel, period,
-      query: parsed.data.query,
+      query: parsed.data.query, ...(parsed.data.characterId === undefined ? {} : { characterId: parsed.data.characterId }),
     });
 
     if (result.status === "unavailable") {
       return Response.json({ status: "unavailable", explanation: result.explanation });
     }
+    if (result.status === "choice") return Response.json(result);
     return Response.json({ status: "found", sessionId: result.sessionId, knownName: result.knownName });
   } catch (error) {
     if (error instanceof InsufficientCoinsError) {

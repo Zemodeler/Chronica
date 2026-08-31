@@ -28,6 +28,7 @@ interface ChatPanelProps {
 export function ChatPanel({ gameId, playerCharacterId }: ChatPanelProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const discoverDialogRef = useRef<HTMLDialogElement>(null);
+  const groupDialogRef = useRef<HTMLDialogElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [contacts, setContacts] = useState<readonly ContactView[]>([]);
@@ -38,6 +39,8 @@ export function ChatPanel({ gameId, playerCharacterId }: ChatPanelProps) {
   const [discoverQuery, setDiscoverQuery] = useState("");
   const [discovering, setDiscovering] = useState(false);
   const [discoverError, setDiscoverError] = useState<string | null>(null);
+  const [groupParticipantIds, setGroupParticipantIds] = useState<string[]>([]);
+  const [creatingGroup, setCreatingGroup] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
 
   const activeContact = contacts.find((c) => c.sessionId === activeSessionId) ?? null;
@@ -130,6 +133,17 @@ export function ChatPanel({ gameId, playerCharacterId }: ChatPanelProps) {
     discoverDialogRef.current?.close();
   }
 
+  function openGroup() { setGroupParticipantIds([]); groupDialogRef.current?.showModal(); }
+  async function createGroup() {
+    if (groupParticipantIds.length < 2 || creatingGroup) return;
+    setCreatingGroup(true);
+    try {
+      const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/conversations/group`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ participantIds: groupParticipantIds }) });
+      const data = await res.json() as { sessionId?: string };
+      if (res.ok && data.sessionId) { groupDialogRef.current?.close(); await fetchContacts(); await selectContact(data.sessionId); }
+    } finally { setCreatingGroup(false); }
+  }
+
   async function handleDiscover(event: FormEvent) {
     event.preventDefault();
     const query = discoverQuery.trim();
@@ -163,6 +177,7 @@ export function ChatPanel({ gameId, playerCharacterId }: ChatPanelProps) {
   }
 
   void open;
+  void playerCharacterId;
 
   return (
     <>
@@ -174,6 +189,7 @@ export function ChatPanel({ gameId, playerCharacterId }: ChatPanelProps) {
           <aside className="chat-contact-list">
             <div className="chat-contact-list-header">
               <span className="chat-contact-list-title">Contacts</span>
+              <button type="button" className="chat-add-contact-button" onClick={openGroup} aria-label="Create group chat">◉</button>
               <button type="button" className="chat-add-contact-button" onClick={openDiscover} aria-label="Add contact">+</button>
             </div>
             {contacts.length === 0 && (
@@ -245,6 +261,15 @@ export function ChatPanel({ gameId, playerCharacterId }: ChatPanelProps) {
             )}
           </div>
         </div>
+      </dialog>
+
+      <dialog ref={groupDialogRef} className="chat-discover-dialog">
+        <div className="chat-discover-header"><h2 className="chat-discover-title">New Group Chat</h2><button type="button" onClick={() => groupDialogRef.current?.close()} aria-label="Close">×</button></div>
+        <p className="chat-discover-hint">Choose at least two existing contacts.</p>
+        {contacts.filter((contact) => !contact.isGroup).map((contact) => (
+          <label key={contact.sessionId} className="chat-discover-hint"><input type="checkbox" checked={groupParticipantIds.includes(contact.npcCharacterId)} onChange={(event) => setGroupParticipantIds((ids) => event.target.checked ? [...ids, contact.npcCharacterId] : ids.filter((id) => id !== contact.npcCharacterId))} /> {contact.knownName}</label>
+        ))}
+        <div className="chat-discover-actions"><button type="button" className="btn-secondary" onClick={() => groupDialogRef.current?.close()}>Cancel</button><button type="button" className="btn-primary" onClick={() => { void createGroup(); }} disabled={creatingGroup || groupParticipantIds.length < 2}>{creatingGroup ? "Creating…" : "Create"}</button></div>
       </dialog>
 
       {/* Add contact dialog */}

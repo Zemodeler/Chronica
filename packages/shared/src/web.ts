@@ -262,12 +262,13 @@ export type ConversationsViewModel = z.infer<typeof ConversationsViewModelSchema
 
 export const ContactDiscoveryResultSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("found"), sessionId: EntityIdSchema, knownName: z.string().trim().min(1) }).strict(),
+  z.object({ status: z.literal("choice"), candidates: z.array(z.object({ characterId: z.string(), name: z.string(), roleLabel: z.string() }).strict()).min(2).max(8) }).strict(),
   z.object({ status: z.literal("unavailable"), explanation: z.string().trim().min(1).max(400) }).strict(),
 ]);
 export type ContactDiscoveryResult = z.infer<typeof ContactDiscoveryResultSchema>;
 
 export const DiscoverContactRequestSchema = z
-  .object({ query: z.string().trim().min(1).max(200) })
+  .object({ query: z.string().trim().min(1).max(200), characterId: z.string().trim().min(1).optional() })
   .strict();
 export type DiscoverContactRequest = z.infer<typeof DiscoverContactRequestSchema>;
 

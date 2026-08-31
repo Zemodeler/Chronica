@@ -1,5 +1,5 @@
 import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
-import type { ConversationConsequence, ConversationMemoryEntry } from "@chronica/shared";
+import type { ConversationConsequence, ConversationMemoryEntry, Character } from "@chronica/shared";
 import { games, players } from "./game";
 
 export const dialogueSessions = pgTable("dialogue_sessions", {
@@ -39,6 +39,8 @@ export const npcChatKnowledgebases = pgTable("npc_chat_knowledgebases", {
   canonicalName: text("canonical_name").notNull(),
   personalitySummary: text("personality_summary").notNull().default(""),
   relationshipLabel: text("relationship_label").notNull().default("neutral"),
+  declaredConnection: text("declared_connection").notNull().default("contact"),
+  declaredConnectionNotes: text("declared_connection_notes").notNull().default(""),
   relationshipScore: integer("relationship_score").notNull().default(0),
   conversationMemory: jsonb("conversation_memory").$type<ConversationMemoryEntry[]>().notNull().default([]),
   significantEvents: jsonb("significant_events").$type<string[]>().notNull().default([]),
@@ -52,4 +54,17 @@ export const npcChatKnowledgebases = pgTable("npc_chat_knowledgebases", {
 }, (table) => [
   uniqueIndex("npc_chat_kb_player_npc_unique").on(table.gameId, table.playerId, table.npcCharacterId),
   index("npc_chat_kb_game_player_idx").on(table.gameId, table.playerId),
+]);
+
+/** Durable, game-local NPCs created during contact discovery. */
+export const gameNpcRecords = pgTable("game_npc_records", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  gameId: uuid("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+  characterId: text("character_id").notNull(),
+  character: jsonb("character").$type<Character>().notNull(),
+  roleLabel: text("role_label").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("game_npc_records_game_character_unique").on(table.gameId, table.characterId),
+  index("game_npc_records_game_idx").on(table.gameId),
 ]);

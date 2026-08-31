@@ -96,11 +96,12 @@ export async function ingestChronicleEntries(
     associatedProvinceId?: string;
   }[],
 ): Promise<void> {
-  const publicEntries = entries.filter((e) => e.audience === "all_players");
-  if (publicEntries.length === 0) return;
-
-  for (const entry of publicEntries) {
-    const poolKey = entry.associatedPolityId ?? gameId;
-    await insertSharedEntry(db, gameId, "chronicle", poolKey, entry.body, null, null, entry.atStep);
+  for (const entry of entries) {
+    if (entry.audience === "all_players") {
+      await insertSharedEntry(db, gameId, "game", gameId, entry.body, null, null, entry.atStep);
+      continue;
+    }
+    if (entry.associatedPolityId) await insertSharedEntry(db, gameId, "polity", entry.associatedPolityId, entry.body, null, null, entry.atStep);
+    if (entry.associatedProvinceId) await insertSharedEntry(db, gameId, "province", entry.associatedProvinceId, entry.body, null, null, entry.atStep);
   }
 }

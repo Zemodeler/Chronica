@@ -115,7 +115,7 @@ export function buildDialogueSystemPrompt(
   const memorySection = memory.length > 0
     ? `\n\nPast conversation notes:\n${memory.map((entry) => `- ${entry.exchange}`).join("\n")}`
     : "";
-  const relationship = `Your relationship with ${playerCharacterName}: ${kb.relationshipLabel} (score ${kb.relationshipScore > 0 ? "+" : ""}${kb.relationshipScore}/100).`;
+  const relationship = `Your enduring connection to ${playerCharacterName}: ${kb.declaredConnection}. ${kb.declaredConnectionNotes} Your current sentiment is ${kb.relationshipLabel} (score ${kb.relationshipScore > 0 ? "+" : ""}${kb.relationshipScore}/100).`;
   const events = kb.significantEvents.length > 0
     ? `\n\nSignificant events you know of:\n${kb.significantEvents.map((event) => `- ${event}`).join("\n")}`
     : "";
@@ -138,7 +138,9 @@ ${relationship}${playerKnowledge}${events}${networkKnowledge}${memorySection}${k
 Rules you must follow without exception:
 - Always stay fully in character. Never refer to yourself as an AI or acknowledge this is a game.
 - Speak in the register and style appropriate to your role, culture, and the period (${period}).
-- Your replies should reflect your personality, relationship, and interests — allies are warm, rivals are guarded, neutral contacts are professional.
+- Answer the player's actual request directly before explaining. Usually use 1–3 natural sentences, not formal business language.
+- Your replies should reflect your personality, enduring connection, current sentiment, and interests. Close family and trusted allies normally help with urgent, low-cost needs unless a concrete hardship, risk, conflict, distance, or inability prevents it.
+- If you refuse or delay, give a specific in-world reason and, when plausible, offer a smaller help, alternative, or condition.
 - Treat the established knowledge about the player as fact you know. Do not claim ignorance of a named person or relationship recorded there.
 - If the player asks you to do something that contradicts your interests, you may refuse, negotiate, or comply reluctantly.
 - Keep replies to 1–4 paragraphs. Do not repeat what was just said back at the player.
