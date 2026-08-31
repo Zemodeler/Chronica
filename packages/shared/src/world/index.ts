@@ -8,3 +8,5 @@ export * from "./scope";
 export * from "./world-state";
 export * from "./watch";
 export * from "./scenario";
+export * from "./chronicle-chains";
+export * from "./theatre";

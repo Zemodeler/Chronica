@@ -14,6 +14,9 @@ export const WorkflowCandidateSourceSchema = z.enum([
   "near_event",
   "far_event",
   "coarse_event",
+  "reaction_director",
+  "simulator",
+  "world_director_synthesis",
 ]);
 export type WorkflowCandidateSource = z.infer<typeof WorkflowCandidateSourceSchema>;
 
@@ -92,3 +95,97 @@ export interface WorkflowAuditBlob {
   readonly managerFailed: boolean;
   readonly atStep: number;
 }
+
+// ── Director proposal schemas ─────────────────────────────────────────────────
+
+/** A reaction proposed by the Reaction Director after player execution. */
+export const ReactionProposalSchema = z
+  .object({
+    reactorId: z.string().trim().min(1).max(120),
+    reactionKind: z.enum(["military", "political", "economic", "diplomatic", "social"]),
+    proposedWorkflows: z.array(ProposedInvocationSchema).max(3),
+    rationale: z.string().trim().max(400),
+    visibility: z.enum(["public", "polity", "private"]),
+    salience: z.number().int().min(0).max(10),
+    causalVerdictId: z.string().trim().max(120),
+  })
+  .strict();
+export type ReactionProposal = z.infer<typeof ReactionProposalSchema>;
+
+export const ReactionProposalBatchSchema = z
+  .object({
+    proposals: z.array(ReactionProposalSchema).max(8),
+  })
+  .strict();
+export type ReactionProposalBatch = z.infer<typeof ReactionProposalBatchSchema>;
+
+/** A simulator event/storyline proposal. */
+export const SimulatorProposalSchema = z
+  .object({
+    kind: z.enum(["new_event", "advance_storyline", "create_storyline", "resolve_storyline"]),
+    storylineId: z.string().trim().max(120).nullable().default(null),
+    proposedStorylineTitle: z.string().trim().max(160).nullable().default(null),
+    proposedWorkflows: z.array(ProposedInvocationSchema).max(4),
+    scopeTag: z.enum(["star", "near", "far", "coarse"]),
+    summary: z.string().trim().max(480),
+    visibility: z.enum(["public", "polity", "private"]),
+    salience: z.number().int().min(0).max(10),
+  })
+  .strict();
+export type SimulatorProposal = z.infer<typeof SimulatorProposalSchema>;
+
+export const SimulatorProposalBatchSchema = z
+  .object({
+    proposals: z.array(SimulatorProposalSchema).max(16),
+  })
+  .strict();
+export type SimulatorProposalBatch = z.infer<typeof SimulatorProposalBatchSchema>;
+
+/** A consolidated proposal (deduped, ranked) for the World Director. */
+export const ConsolidatedProposalSchema = z
+  .object({
+    id: z.string().uuid(),
+    sources: z.array(z.enum(["character_director", "reaction_director", "simulator"])),
+    kind: z.string().trim().max(80),
+    mergedRationale: z.string().trim().max(600),
+    proposedWorkflows: z.array(ProposedInvocationSchema).max(4),
+    salience: z.number().int().min(0).max(100),
+    scopeTag: z.enum(["star", "near", "far", "coarse"]),
+    dedupeGroup: z.string().trim().max(120).optional(),
+  })
+  .strict();
+export type ConsolidatedProposal = z.infer<typeof ConsolidatedProposalSchema>;
+
+export const ConsolidatedProposalPackageSchema = z
+  .object({
+    proposals: z.array(ConsolidatedProposalSchema).max(32),
+    conflicts: z
+      .array(
+        z.object({
+          proposalIds: z.array(z.string()).max(4),
+          description: z.string().trim().max(240),
+        }),
+      )
+      .max(8),
+    totalSalience: z.number().int().min(0),
+  })
+  .strict();
+export type ConsolidatedProposalPackage = z.infer<typeof ConsolidatedProposalPackageSchema>;
+
+/** World Director decision on a consolidated proposal. */
+export const WorldDirectorDecisionSchema = z
+  .object({
+    proposalId: z.string().trim().max(120),
+    decision: z.enum(["approve", "modify", "defer", "reject"]),
+    rationale: z.string().trim().max(400),
+    finalWorkflows: z.array(ProposedInvocationSchema).max(4),
+  })
+  .strict();
+export type WorldDirectorDecision = z.infer<typeof WorldDirectorDecisionSchema>;
+
+export const WorldDirectorDecisionBatchSchema = z
+  .object({
+    decisions: z.array(WorldDirectorDecisionSchema).max(24),
+  })
+  .strict();
+export type WorldDirectorDecisionBatch = z.infer<typeof WorldDirectorDecisionBatchSchema>;

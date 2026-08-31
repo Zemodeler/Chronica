@@ -30,6 +30,9 @@ const SOURCE_TO_INVOKER: Record<WorkflowCandidateSource, string> = {
   near_event: "world_director",
   far_event: "world_director",
   coarse_event: "world_director",
+  reaction_director: "world_director",
+  simulator: "world_director",
+  world_director_synthesis: "world_director",
 };
 
 /** Numeric rank for scope tiers — lower = narrower. */
@@ -40,6 +43,9 @@ const SOURCE_TO_SCOPE: Partial<Record<WorkflowCandidateSource, string>> = {
   near_event: "near",
   far_event: "far",
   coarse_event: "coarse",
+  reaction_director: "near",
+  simulator: "coarse",
+  world_director_synthesis: "coarse",
 };
 
 /**

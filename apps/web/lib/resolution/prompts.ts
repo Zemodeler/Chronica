@@ -4,13 +4,56 @@ import type { WorldState } from "@chronica/shared";
 import { buildWorkflowCatalog } from "@chronica/shared";
 import type { CharacterKnowledgebase } from "@chronica/shared";
 
+/** Durable player context supplied to every director during turn resolution. */
+export interface ResolutionPlayerContext {
+  readonly knowledgebase: CharacterKnowledgebase | null;
+  readonly pendingCommitments: readonly {
+    npcCharacterId: string;
+    promiseType: string;
+    promisedResult: string;
+    conditions: string;
+    rationale: string;
+  }[];
+}
+
+/**
+ * A compact, factual context block. It is deliberately built server-side so
+ * every director sees the same player identity and outstanding commitments.
+ */
+export function buildPlayerResolutionContext(
+  world: WorldState,
+  context: ResolutionPlayerContext | undefined,
+): string {
+  if (!context) return "";
+
+  const lines: string[] = [];
+  const kb = context.knowledgebase;
+  if (kb) {
+    lines.push("\nPLAYER KNOWLEDGEBASE (authoritative personal context):");
+    lines.push(`  Identity: ${kb.canonicalName} — ${kb.role}`);
+    lines.push(`  Authority: ${kb.authority.join("; ") || "none recorded"}`);
+    lines.push(`  Background: ${kb.biography.slice(0, 1_000)}`);
+    lines.push(`  Key relations: ${kb.relations.map((r) => `${r.name} (${r.relationship}: ${r.notes})`).join("; ")}`);
+  }
+
+  if (context.pendingCommitments.length > 0) {
+    lines.push("\nPENDING DIALOGUE COMMITMENTS (treat as live pressures, not fulfilled facts):");
+    for (const commitment of context.pendingCommitments.slice(0, 8)) {
+      const npcName = world.characters.find((c) => c.id === commitment.npcCharacterId)?.name ?? commitment.npcCharacterId;
+      lines.push(`  ${npcName} [id: ${commitment.npcCharacterId}] promised ${commitment.promiseType}: ${commitment.promisedResult}. Conditions: ${commitment.conditions}. Basis: ${commitment.rationale}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 // Prompt builders for the three-step resolution chain.
 //
 // Each prompt receives a snapshot of the game world and the player's character
 // so the AI has enough context to make grounded decisions. Prompts are
 // intentionally concise: the AI should read them in full before answering.
 
-function worldContext(world: WorldState, actorId: string): string {
+function worldContext(world: WorldState, actorId: string, context?: ResolutionPlayerContext): string {
   const actor = world.characters.find((c) => c.id === actorId);
   const location = actor
     ? world.map.provinces.find((p) => p.id === actor.locationProvinceId)
@@ -31,6 +74,8 @@ function worldContext(world: WorldState, actorId: string): string {
     lines.push(`Health: ${(actor.healthBps / 100).toFixed(0)}% | Prestige: ${(actor.prestigeBps / 100).toFixed(0)}%`);
     if (actor.officeId) lines.push(`Office: ${actor.officeId}`);
   }
+  const playerContext = buildPlayerResolutionContext(world, context);
+  if (playerContext) lines.push(playerContext);
 
   lines.push(`\nPOLITIES:`);
   for (const p of world.map.polities) {
@@ -117,10 +162,10 @@ function worldContext(world: WorldState, actorId: string): string {
   return lines.join("\n");
 }
 
-export function buildInterpretSystemPrompt(world: WorldState, actorId: string): string {
+export function buildInterpretSystemPrompt(world: WorldState, actorId: string, context?: ResolutionPlayerContext): string {
   return `You are a historian and game master for Chronica, a strategy game set in the ancient world. Your task is to interpret a player's free-text order into structured intent.
 
-${worldContext(world, actorId)}
+${worldContext(world, actorId, context)}
 
 Parse the order into:
 - intent: a clear one-sentence summary of what the player wants to achieve (max 600 chars)
@@ -136,10 +181,10 @@ Be grounded: use actual province names, character names, and force names from th
 Respond as a JSON object with exactly these fields.`;
 }
 
-export function buildAssessSystemPrompt(world: WorldState, actorId: string): string {
+export function buildAssessSystemPrompt(world: WorldState, actorId: string, context?: ResolutionPlayerContext): string {
   return `You are an arbiter for Chronica, a strategy game set in the ancient world. Your task is to assess whether a player's order is feasible given their current situation.
 
-${worldContext(world, actorId)}
+${worldContext(world, actorId, context)}
 
 ${buildWorkflowCatalog()}
 
@@ -164,10 +209,10 @@ IMPORTANT: feasibility is informational. Even an "impossible" assessment goes to
 Respond as a JSON object with exactly these fields.`;
 }
 
-export function buildAdjudicateSystemPrompt(world: WorldState, actorId: string): string {
+export function buildAdjudicateSystemPrompt(world: WorldState, actorId: string, context?: ResolutionPlayerContext): string {
   return `You are a consequence engine for Chronica, a strategy game set in the ancient world. Given an interpreted and assessed player order, decide its outcome.
 
-${worldContext(world, actorId)}
+${worldContext(world, actorId, context)}
 
 ${buildWorkflowCatalog()}
 
@@ -195,7 +240,8 @@ For the order, produce a verdict:
 - timeCost: { min, max } in seasons
 - rationale: explain the decisive factor (max 1200 chars)
 - knowledgeVisibility: "public" | "polity" | "private"
-- playerInvolvement: [{ playerId, characterId, role: "actor"|"target"|"materially_affected" }]
+
+Do not output playerInvolvement. The server records the submitting player and actor after validating your verdict.
 
 The AI's role is to determine consequences, not to grant wishes. Always name at least one real obstacle. A success can still have costs. If you use a workflow, ensure ALL parameter IDs are taken from the world context above — do not invent IDs.
 
@@ -304,8 +350,16 @@ These events are rumours and hearsay — they should feel incomplete and geopoli
 Respond as JSON: { "events": [...] }`;
 }
 
+export interface NarratorEntry {
+  readonly body: string;
+  readonly isPlayerAction: boolean;
+  readonly chainPosition?: "root" | "reaction" | "spread" | "distant" | "pressure" | null | undefined;
+  readonly chainId?: string | null | undefined;
+  readonly sourceDirector?: string | undefined;
+}
+
 export function buildChronicleNarratorPrompt(
-  entries: readonly { body: string; isPlayerAction: boolean }[],
+  entries: readonly NarratorEntry[],
   world: WorldState,
   actorId: string,
   knowledgebase: CharacterKnowledgebase | null,
@@ -332,12 +386,43 @@ export function buildChronicleNarratorPrompt(
     .filter(Boolean)
     .join("\n");
 
-  return `You are the chronicler of Chronica. Rewrite raw event summaries as grounded, historically-flavoured prose for the official chronicle.
+  // Group entries by chain for context — entries in the same chain get a header note
+  const chainMap = new Map<string, number[]>();
+  for (let i = 0; i < entries.length; i++) {
+    const cid = entries[i]?.chainId;
+    if (cid) {
+      const arr = chainMap.get(cid) ?? [];
+      arr.push(i);
+      chainMap.set(cid, arr);
+    }
+  }
+
+  const positionLabel = (pos: string | null | undefined): string => {
+    switch (pos) {
+      case "root": return "CAUSE";
+      case "reaction": return "REACTION";
+      case "spread": return "SPREAD";
+      case "distant": return "DISTANT ECHO";
+      case "pressure": return "OPEN PRESSURE";
+      default: return "EVENT";
+    }
+  };
+
+  const eventLines = entries.map((e, i) => {
+    const chainGroup = e.chainId ? chainMap.get(e.chainId) : undefined;
+    const chainNote = chainGroup && chainGroup.length > 1
+      ? ` [chain: ${e.chainId?.slice(0, 8)} · entry ${(chainGroup.indexOf(i) + 1)}/${chainGroup.length}]`
+      : "";
+    const kind = e.isPlayerAction ? "PLAYER ACTION" : positionLabel(e.chainPosition);
+    return `${i + 1}. [${kind}${chainNote}] ${e.body}`;
+  });
+
+  return `You are the chronicler of Chronica. Rewrite raw event summaries as grounded, historically-flavoured prose for the official chronicle. Events within the same chain [chain: ...] are causally linked — write them so they flow as a coherent sequence. Each entry still stands alone as a paragraph.
 
 ${characterBlock}
 
 EVENTS (${entries.length} total):
-${entries.map((e, i) => `${i + 1}. [${e.isPlayerAction ? "PLAYER ACTION" : "WORLD EVENT"}] ${e.body}`).join("\n")}
+${eventLines.join("\n")}
 
 Rewrite each event as one paragraph of chronicle prose. Return EXACTLY ${entries.length} entries, one per input — do not add or remove entries.
 
@@ -350,6 +435,8 @@ Rules:
 - Each entry max 300 words
 - Do not invent facts beyond what the raw summary gives you; use the character background for tone and cultural colour only
 - The chronicle must reflect the ACTUAL outcome stated in the raw summary — do not upgrade a failure to a success or vice versa
+- For REACTION and SPREAD entries: acknowledge what caused them without restating the root event in full
+- For OPEN PRESSURE entries: end with something in motion — a question unanswered, a threat not yet resolved
 
 Respond as JSON: { "entries": [{ "body": "...", "isPlayerAction": true/false }] }`;
 }

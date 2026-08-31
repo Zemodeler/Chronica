@@ -122,9 +122,96 @@ export const DEFAULT_NEMESIS_STATE: NemesisState = {
   deactivationReason: null,
 };
 
-// Character Director decision output — what the AI proposes for each selected character.
-// privateRationale is stripped before Chronicle construction and must never reach players.
+/** Multi-slot Nemesis entry — one entry per antagonist. */
+export const NemesisEntrySchema = z
+  .object({
+    characterId: EntityIdSchema,
+    active: z.boolean(),
+    assignedAtStep: ElapsedStepSchema,
+    reason: z.string().trim().max(320),
+    deactivatedAtStep: ElapsedStepSchema.nullable().default(null),
+    deactivationReason: z.string().trim().max(320).nullable().default(null),
+  })
+  .strict();
+export type NemesisEntry = z.infer<typeof NemesisEntrySchema>;
 
+/** Chronicle-appearance scoring entry for character relevance decay. */
+export const CharacterAppearanceSchema = z
+  .object({
+    atStep: ElapsedStepSchema,
+    role: z.enum(["protagonist", "antagonist", "participant", "mentioned"]),
+  })
+  .strict();
+
+export const CharacterRelevanceEntrySchema = z
+  .object({
+    characterId: EntityIdSchema,
+    chronicleAppearances: z.array(CharacterAppearanceSchema).max(20),
+    lastAppearanceStep: ElapsedStepSchema.nullable().default(null),
+  })
+  .strict();
+export type CharacterRelevanceEntry = z.infer<typeof CharacterRelevanceEntrySchema>;
+
+// Character Director suggestion output — advisor-only, no workflow invocations.
+export const CharacterSuggestionKindSchema = z.enum([
+  "create_goal",
+  "update_goal",
+  "create_plot",
+  "advance_plot",
+  "resolve_plot",
+  "react",
+  "develop_relationship",
+]);
+export type CharacterSuggestionKind = z.infer<typeof CharacterSuggestionKindSchema>;
+
+const CharacterGoalInputSchema = z
+  .object({
+    objective: z.string().trim().min(1).max(240),
+    category: CharacterGoalCategorySchema,
+    targetEntityIds: z.array(EntityIdSchema).max(8),
+    priority: z.number().int().min(1).max(5),
+    visibility: VisibilitySchema,
+  })
+  .strict();
+
+const CharacterPlotInputForSuggestionSchema = z
+  .object({
+    goalId: EntityIdSchema,
+    objective: z.string().trim().min(1).max(320),
+    participantIds: z.array(EntityIdSchema).max(12),
+    targetIds: z.array(EntityIdSchema).max(8),
+    visibility: VisibilitySchema,
+    stakes: z.string().trim().min(1).max(320),
+    currentObstacle: z.string().trim().min(1).max(320).nullable(),
+  })
+  .strict();
+
+export const CharacterSuggestionSchema = z
+  .object({
+    characterId: EntityIdSchema,
+    suggestionKind: CharacterSuggestionKindSchema,
+    goalId: EntityIdSchema.nullable().default(null),
+    plotId: EntityIdSchema.nullable().default(null),
+    proposedGoal: CharacterGoalInputSchema.nullable().default(null),
+    proposedPlot: CharacterPlotInputForSuggestionSchema.nullable().default(null),
+    rationale: z.string().trim().max(400),
+    causalFactIds: z.array(EntityIdSchema).max(8).default([]),
+    affectedEntityIds: z.array(EntityIdSchema).max(12).default([]),
+    storylineId: EntityIdSchema.nullable().default(null),
+    visibility: VisibilitySchema,
+    salience: z.number().int().min(0).max(10),
+  })
+  .strict();
+export type CharacterSuggestion = z.infer<typeof CharacterSuggestionSchema>;
+
+export const CharacterSuggestionBatchSchema = z
+  .object({
+    suggestions: z.array(CharacterSuggestionSchema).max(16),
+  })
+  .strict();
+export type CharacterSuggestionBatch = z.infer<typeof CharacterSuggestionBatchSchema>;
+
+// Legacy Character Director decision output — kept for backward compat; new pipeline uses CharacterSuggestion.
 export const CharacterDecisionKindSchema = z.enum([
   "wait",
   "prepare",
@@ -139,16 +226,6 @@ export const CharacterDecisionKindSchema = z.enum([
   "resolve",
 ]);
 export type CharacterDecisionKind = z.infer<typeof CharacterDecisionKindSchema>;
-
-const CharacterGoalInputSchema = z
-  .object({
-    objective: z.string().trim().min(1).max(240),
-    category: CharacterGoalCategorySchema,
-    targetEntityIds: z.array(EntityIdSchema).max(8),
-    priority: z.number().int().min(1).max(5),
-    visibility: VisibilitySchema,
-  })
-  .strict();
 
 const CharacterPlotInputSchema = z
   .object({

@@ -23,6 +23,15 @@ export interface ChronicleEntryInput {
   readonly materialConsequence: boolean;
   readonly displayPatch?: unknown;
   readonly playerInvolvement?: unknown;
+  // Extended Chronicle fields (all optional for backward compat).
+  readonly eventDate?: string | null;
+  readonly location?: string | null;
+  readonly chainId?: string | null;
+  readonly chainPosition?: "root" | "reaction" | "spread" | "distant" | "pressure" | null;
+  readonly directConsequences?: Array<{ kind: string; label: string; entityId: string | null; quantified: boolean }>;
+  readonly causalFactIds?: readonly string[];
+  readonly sourceDirector?: "player" | "character_director" | "reaction_director" | "simulator" | "world_director";
+  readonly openPressure?: boolean;
 }
 
 export interface CommitResolutionInput {
@@ -92,6 +101,18 @@ export async function commitResolution(
             atStep: entry.atStep,
             materialConsequence: entry.materialConsequence,
             ...(entry.displayPatch !== undefined ? { displayPatch: entry.displayPatch } : {}),
+            ...(entry.eventDate != null ? { eventDate: entry.eventDate } : {}),
+            ...(entry.location != null ? { location: entry.location } : {}),
+            ...(entry.chainId != null ? { chainId: entry.chainId } : {}),
+            ...(entry.chainPosition != null ? { chainPosition: entry.chainPosition } : {}),
+            ...(entry.sourceDirector != null ? { sourceDirector: entry.sourceDirector } : {}),
+            ...(entry.openPressure ? { openPressure: true } : {}),
+            ...(entry.directConsequences && entry.directConsequences.length > 0
+              ? { directConsequences: entry.directConsequences }
+              : {}),
+            ...(entry.causalFactIds && entry.causalFactIds.length > 0
+              ? { causalFactIds: [...entry.causalFactIds] }
+              : {}),
           },
         })),
       );

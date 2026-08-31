@@ -5,6 +5,7 @@ import { characterWorkflows } from "./definitions/character";
 import { narrativeWorkflows } from "./definitions/narrative";
 import { mapWorkflows } from "./definitions/map";
 import { characterAgencyWorkflows } from "./definitions/character-agency";
+import { worldCreationWorkflows } from "./definitions/world-creation";
 import type { AnyWorkflowDefinition } from "./types";
 
 // Workflow registry (docs/14, ADR-0032).
@@ -22,6 +23,7 @@ const allWorkflows: AnyWorkflowDefinition[] = [
   ...narrativeWorkflows,
   ...mapWorkflows,
   ...characterAgencyWorkflows,
+  ...worldCreationWorkflows,
 ];
 
 /** Immutable registry map: actionId → WorkflowDefinition. */

@@ -249,7 +249,7 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
 
   {
     id: "assign_nemesis",
-    description: "Assign a character as the player's Nemesis. The Nemesis receives consideration every turn and may form long-term hostile plots.",
+    description: "Assign a character as the player's Nemesis. Must emerge organically — only assign when the character has active opposition and significant recent Chronicle presence.",
     category: "character" as const,
     parametersSchema: z.object({
       characterId: EntityIdSchema,
@@ -259,7 +259,24 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
       const character = world.characters.find((c) => c.id === params.characterId);
       if (!character || !character.alive) return null;
 
-      const nemesis = {
+      // Guard: max 2 active nemeses simultaneously.
+      const activeNemeses = (world.nemeses ?? []).filter((n) => n.active);
+      if (activeNemeses.length >= 2) return null;
+
+      // Guard: character must not already be an active nemesis.
+      if (activeNemeses.some((n) => n.characterId === params.characterId)) return null;
+
+      const newEntry = {
+        characterId: params.characterId,
+        active: true,
+        assignedAtStep: context.atStep,
+        reason: params.reason,
+        deactivatedAtStep: null,
+        deactivationReason: null,
+      };
+
+      // Also update legacy single-slot field for backward compat.
+      const legacyNemesis = {
         characterId: params.characterId,
         active: true,
         assignedAtStep: context.atStep,
@@ -269,7 +286,11 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
       };
 
       return {
-        world: { ...world, nemesis },
+        world: {
+          ...world,
+          nemeses: [...(world.nemeses ?? []), newEntry],
+          nemesis: legacyNemesis,
+        },
         result: {
           summary: `${character.name} becomes the player's Nemesis.`,
           applied: true,
@@ -280,23 +301,32 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
 
   {
     id: "clear_nemesis",
-    description: "Deactivate the current Nemesis role (e.g., because the Nemesis died or became permanently irrelevant).",
+    description: "Deactivate a Nemesis (e.g., because they died or the conflict was resolved).",
     category: "character" as const,
     parametersSchema: z.object({
+      characterId: EntityIdSchema,
       reason: z.string().trim().min(1).max(320),
     }).strict(),
     apply(world, params, context) {
-      if (!world.nemesis?.active) return null;
-      const nemesis = {
-        ...world.nemesis,
-        active: false,
-        deactivatedAtStep: context.atStep,
-        deactivationReason: params.reason,
-      };
+      const nemeses = world.nemeses ?? [];
+      const target = nemeses.find((n) => n.characterId === params.characterId && n.active);
+      if (!target) return null;
+
+      const updatedNemeses = nemeses.map((n) =>
+        n.characterId === params.characterId && n.active
+          ? { ...n, active: false, deactivatedAtStep: context.atStep, deactivationReason: params.reason }
+          : n,
+      );
+
+      // Update legacy field if matching
+      const legacyNemesis = world.nemesis?.characterId === params.characterId
+        ? { ...world.nemesis, active: false, deactivatedAtStep: context.atStep, deactivationReason: params.reason }
+        : world.nemesis;
+
       return {
-        world: { ...world, nemesis },
+        world: { ...world, nemeses: updatedNemeses, nemesis: legacyNemesis },
         result: {
-          summary: `The Nemesis role has been cleared: ${params.reason}`,
+          summary: `${params.characterId} is no longer the Nemesis: ${params.reason}`,
           applied: true,
         },
       };
