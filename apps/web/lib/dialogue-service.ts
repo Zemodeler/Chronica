@@ -5,6 +5,7 @@ import {
   appendMessage,
   createDatabase,
   findOrOpenSession,
+  getCharacterKnowledgebase,
   getOrCreateNpcKnowledgebase,
   getNpcKnowledgebase,
   getWorldView,
@@ -23,34 +24,19 @@ import {
   type SessionRow,
   type SharedEntryRow,
 } from "@chronica/db";
-import type { ConversationConsequence, ConversationMemoryEntry, NpcChatKnowledgebase } from "@chronica/shared";
+import type { CharacterKnowledgebase, ConversationConsequence, ConversationMemoryEntry, NpcChatKnowledgebase } from "@chronica/shared";
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { ChronicaDatabase } from "@chronica/db";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { headers } from "next/headers";
+import { buildDialogueSystemPrompt, type WorldCharacterRef } from "./dialogue-prompt";
+
+export type { WorldCharacterRef } from "./dialogue-prompt";
 
 export { InsufficientCoinsError };
 
 // ── Prompt building ─────────────────────────────────────────────────────────
-
-const CHANNEL_LABELS: Record<string, string> = {
-  in_person_private: "in private",
-  in_person_public: "in public",
-  audience: "in a formal audience",
-  messenger: "via messenger",
-  correspondence: "by letter",
-};
-
-export interface WorldCharacterRef {
-  readonly id: string;
-  readonly name: string;
-  readonly dynastyId: string | null;
-  readonly polityId: string | null;
-  readonly officeId: string | null;
-  readonly locationProvinceId: string | null;
-  readonly alive: boolean;
-}
 
 // ── Shared knowledgebase pool computation ────────────────────────────────────
 
@@ -71,83 +57,6 @@ function computeNpcPools(
   const provinceId = wc?.locationProvinceId ?? kb.locationProvinceId;
   if (provinceId) specs.push({ poolType: "province", poolKey: provinceId });
   return specs;
-}
-
-function buildSharedKnowledgeSection(entries: readonly SharedEntryRow[]): string {
-  const current = entries.filter((e) => !e.isContradicted);
-  const conflicting = entries.filter((e) => e.isContradicted);
-  if (current.length === 0 && conflicting.length === 0) return "";
-  let section = "";
-  if (current.length > 0)
-    section += `\n\nThings your network knows:\n${current.map((e) => `- ${e.body}`).join("\n")}`;
-  if (conflicting.length > 0)
-    section += `\n\nConflicting reports you have heard (accuracy uncertain):\n${conflicting.map((e) => `- ${e.body}`).join("\n")}`;
-  return section;
-}
-
-function buildKnownCharactersSection(
-  npcCharacterId: string,
-  playerCharacterId: string,
-  worldCharacters: readonly WorldCharacterRef[],
-): string {
-  const npc = worldCharacters.find((c) => c.id === npcCharacterId);
-  if (npc === undefined) return "";
-
-  const relevant = worldCharacters.filter((c) => {
-    if (!c.alive) return false;
-    if (c.id === npcCharacterId) return false;
-    if (c.id === playerCharacterId) return false;
-    if (npc.dynastyId !== null && c.dynastyId === npc.dynastyId) return true;
-    return false;
-  });
-
-  if (relevant.length === 0) return "";
-  return `\n\nOther people you personally know:\n${relevant.map((c) => `- ${c.name}`).join("\n")}`;
-}
-
-function buildDialogueSystemPrompt(
-  kb: KnowledgebaseRow,
-  playerCharacterName: string,
-  playerCharacterId: string,
-  channel: string,
-  period: string,
-  recentMessages: readonly MessageRow[],
-  worldCharacters: readonly WorldCharacterRef[],
-  sharedEntries: readonly SharedEntryRow[],
-): string {
-  const channelCtx = CHANNEL_LABELS[channel] ?? "by correspondence";
-  const memory = kb.conversationMemory.slice(-6);
-  const memorySection = memory.length > 0
-    ? `\n\nPast conversation notes:\n${memory.map((m) => `- ${m.exchange}`).join("\n")}`
-    : "";
-  const relationship = `Your relationship with ${playerCharacterName}: ${kb.relationshipLabel} (score ${kb.relationshipScore > 0 ? "+" : ""}${kb.relationshipScore}/100).`;
-  const events = kb.significantEvents.length > 0
-    ? `\n\nSignificant events you know of:\n${kb.significantEvents.map((e) => `- ${e}`).join("\n")}`
-    : "";
-
-  const recentCtx = recentMessages.length > 0
-    ? `\n\nRecent messages in this conversation:\n${recentMessages.slice(-10).map(
-        (m) => `${m.isPlayerMessage ? playerCharacterName : kb.canonicalName}: ${m.body}`,
-      ).join("\n")}`
-    : "";
-
-  const knownCharacters = buildKnownCharactersSection(kb.npcCharacterId, playerCharacterId, worldCharacters);
-  const networkKnowledge = buildSharedKnowledgeSection(sharedEntries);
-
-  return `You are ${kb.canonicalName}, speaking ${channelCtx} with ${playerCharacterName} in ${period}.
-
-${kb.personalitySummary || `You are a person of the time, with your own interests, loyalties, and knowledge.`}
-
-${relationship}${events}${networkKnowledge}${memorySection}${knownCharacters}${recentCtx}
-
-Rules you must follow without exception:
-- Always stay fully in character. Never refer to yourself as an AI or acknowledge this is a game.
-- Speak in the register and style appropriate to your role, culture, and the period (${period}).
-- Your replies should reflect your personality, relationship, and interests — allies are warm, rivals are guarded, neutral contacts are professional.
-- If the player asks you to do something that contradicts your interests, you may refuse, negotiate, or comply reluctantly.
-- Keep replies to 1–4 paragraphs. Do not repeat what was just said back at the player.
-- Do not use modern idioms, anachronisms, or fourth-wall references.
-- Respond only as ${kb.canonicalName}.`;
 }
 
 function buildGuardrailsSystemPrompt(
@@ -313,6 +222,7 @@ interface DialogueCallInput {
   playerId: string;
   playerCharacterId: string;
   playerCharacterName: string;
+  playerKnowledgebase: CharacterKnowledgebase | null;
   npcCharacterId: string;
   sessionId: string;
   channel: string;
@@ -345,7 +255,7 @@ export interface DialogueCallResult {
 
 export async function generateDialogueReply(input: DialogueCallInput): Promise<DialogueCallResult> {
   const {
-    db, userId, gameId, playerId, playerCharacterId, playerCharacterName,
+    db, userId, gameId, playerId, playerCharacterId, playerCharacterName, playerKnowledgebase,
     npcCharacterId, sessionId, channel, playerMessageBody, period, currentStep, continuityTier,
     worldCharacters,
   } = input;
@@ -368,7 +278,7 @@ export async function generateDialogueReply(input: DialogueCallInput): Promise<D
 
   const recentMessages = await listSessionMessages(db, sessionId, 20);
   const systemPrompt = buildDialogueSystemPrompt(
-    kb, playerCharacterName, playerCharacterId, channel, period, recentMessages, worldCharacters, sharedEntries,
+    kb, playerCharacterName, playerCharacterId, playerKnowledgebase, channel, period, recentMessages, worldCharacters, sharedEntries,
   );
   const operation = continuityTier === "ordinary" ? "dialogue_ordinary" : "dialogue_principal";
 
@@ -541,6 +451,7 @@ export interface DialogueContext {
   playerId: string;
   characterId: string;
   characterName: string;
+  playerKnowledgebase: CharacterKnowledgebase | null;
   locationProvinceId: string | null;
   roleLabel: string;
   period: string;
@@ -564,7 +475,10 @@ export async function resolveDialogueContext(gameId: string): Promise<DialogueCo
       .limit(1);
     if (player === undefined) { await close(); return null; }
 
-    const worldView = await getWorldView(db, gameId);
+    const [worldView, playerKnowledgebase] = await Promise.all([
+      getWorldView(db, gameId),
+      getCharacterKnowledgebase(db, gameId, player.id),
+    ]);
     if (worldView === undefined) { await close(); return null; }
 
     const world = worldView.world;
@@ -590,7 +504,7 @@ export async function resolveDialogueContext(gameId: string): Promise<DialogueCo
       alive: c.alive,
     }));
 
-    return { db, close, userId, playerId: player.id, characterId, characterName, locationProvinceId, roleLabel, period, currentStep, continuityTier: tier, worldCharacters };
+    return { db, close, userId, playerId: player.id, characterId, characterName, playerKnowledgebase, locationProvinceId, roleLabel, period, currentStep, continuityTier: tier, worldCharacters };
   } catch (error) {
     await close();
     throw error;
