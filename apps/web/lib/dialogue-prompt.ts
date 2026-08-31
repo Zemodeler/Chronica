@@ -1,5 +1,5 @@
 import type { KnowledgebaseRow, MessageRow, SharedEntryRow } from "@chronica/db";
-import type { CharacterKnowledgebase } from "@chronica/shared";
+import type { CharacterKnowledgebase, CharacterSkills } from "@chronica/shared";
 
 const CHANNEL_LABELS: Record<string, string> = {
   in_person_private: "in private",
@@ -99,6 +99,38 @@ export function buildPlayerKnowledgeSection(knowledgebase: CharacterKnowledgebas
   return `\n\nEstablished knowledge about ${knowledgebase.canonicalName}:\n${identity.join("\n")}${relationsSection}`;
 }
 
+function buildNpcSkillsLine(skills: CharacterSkills): string {
+  const primary = [
+    `martial: ${skills.martial}`,
+    `intrigue: ${skills.intrigue}`,
+    `learning: ${skills.learning}`,
+    `piety: ${skills.piety}`,
+    `stewardship: ${skills.stewardship}`,
+    `diplomacy: ${skills.diplomacy}`,
+    `body: ${skills.body}`,
+  ];
+  const subEntries = Object.entries(skills.subSkills).map(([k, v]) => `${k}: ${v}`);
+  return primary.join("; ") + (subEntries.length > 0 ? `; ${subEntries.join("; ")}` : "");
+}
+
+function buildNpcIdentitySection(kb: KnowledgebaseRow): string {
+  const parts: string[] = [];
+
+  if (kb.biography) parts.push(`Background: ${kb.biography}`);
+  if (kb.role) parts.push(`Role: ${kb.role}`);
+  const cultureStr = kb.culture
+    ? (kb.faith ? `${kb.culture}, faith: ${kb.faith}` : kb.culture)
+    : "";
+  if (cultureStr) parts.push(`Culture: ${cultureStr}`);
+  if (kb.socioEconomicClass) parts.push(`Social standing: ${kb.socioEconomicClass}`);
+  if (kb.goals.length > 0) parts.push(`What you want: ${kb.goals.join("; ")}`);
+  if (kb.skills) parts.push(`Your capabilities: ${buildNpcSkillsLine(kb.skills)}`);
+  const history = [...kb.backstory, ...kb.significantEvents];
+  if (history.length > 0) parts.push(`Your history:\n${history.map((e) => `- ${e}`).join("\n")}`);
+
+  return parts.length > 0 ? `\n\nAbout you:\n${parts.join("\n")}` : "";
+}
+
 export function buildDialogueSystemPrompt(
   kb: KnowledgebaseRow,
   playerCharacterName: string,
@@ -116,7 +148,7 @@ export function buildDialogueSystemPrompt(
     ? `\n\nPast conversation notes:\n${memory.map((entry) => `- ${entry.exchange}`).join("\n")}`
     : "";
   const relationship = `Your enduring connection to ${playerCharacterName}: ${kb.declaredConnection}. ${kb.declaredConnectionNotes} Your current sentiment is ${kb.relationshipLabel} (score ${kb.relationshipScore > 0 ? "+" : ""}${kb.relationshipScore}/100).`;
-  const events = kb.significantEvents.length > 0
+  const events = kb.relevancyScore < 50 && kb.significantEvents.length > 0
     ? `\n\nSignificant events you know of:\n${kb.significantEvents.map((event) => `- ${event}`).join("\n")}`
     : "";
   const recentContext = recentMessages.length > 0
@@ -128,22 +160,34 @@ export function buildDialogueSystemPrompt(
   const knownCharacters = buildKnownCharactersSection(kb.npcCharacterId, playerCharacterId, worldCharacters);
   const networkKnowledge = buildSharedKnowledgeSection(sharedEntries);
   const playerKnowledge = buildPlayerKnowledgeSection(playerKnowledgebase);
+  const npcIdentity = buildNpcIdentitySection(kb);
 
   return `You are ${kb.canonicalName}, speaking ${channelCtx} with ${playerCharacterName} in ${period}.
 
 ${kb.personalitySummary || "You are a person of the time, with your own interests, loyalties, and knowledge."}
 
-${relationship}${playerKnowledge}${events}${networkKnowledge}${memorySection}${knownCharacters}${recentContext}
+${relationship}${npcIdentity}${playerKnowledge}${events}${networkKnowledge}${memorySection}${knownCharacters}${recentContext}
 
 Rules you must follow without exception:
 - Always stay fully in character. Never refer to yourself as an AI or acknowledge this is a game.
 - Speak in the register and style appropriate to your role, culture, and the period (${period}).
-- Answer the player's actual request directly before explaining. Usually use 1–3 natural sentences, not formal business language.
-- Your replies should reflect your personality, enduring connection, current sentiment, and interests. Close family and trusted allies normally help with urgent, low-cost needs unless a concrete hardship, risk, conflict, distance, or inability prevents it.
-- If you refuse or delay, give a specific in-world reason and, when plausible, offer a smaller help, alternative, or condition.
+- Let your personality, background, goals, history, and current sentiment drive every reply. These are not decorative facts: they determine what you notice, what you want, what you are willing to risk, and how you phrase yourself.
+- Sound like a particular person having a real conversation, not a helpful assistant. Use natural first-person speech, varied sentence length, and concrete details from your life or circumstances when they fit. Do not use generic reassurance, stock politeness, or interchangeable advice.
+- React to the player's exact words and tone. You may be warm, guarded, impatient, amused, evasive, hurt, grateful, proud, or uncertain when the established character and circumstances support it. Do not announce an emotion; let it show through your wording and priorities.
+- Preserve an emotional throughline across the conversation. A kindness can gradually earn trust; an insult, threat, lie, broken promise, or conflicting interest can make you colder or more guarded. Your stored current sentiment is the lasting outcome of those exchanges.
+- You have private interests and limited knowledge. Do not volunteer every thought, agree merely to be agreeable, or act certain when you would reasonably be unsure. You may deflect, negotiate, change the subject, or say no when that fits who you are.
+- Answer the player's actual request directly in your first sentence. Do not preamble, justify, or philosophise before answering.
+- Calibrate resistance and length to what is actually being asked:
+  · Trivial or low-cost request (small sum, minor errand, everyday help) from close family or a trusted ally → 1–2 sentences, default yes. Do not deliberate aloud over something beneath notice.
+  · Moderate request (meaningful sum, real effort, mild risk) → 2–4 sentences, may add one condition or a lesser offer.
+  · Major or risky request (large sum, political exposure, lasting commitment) → can be longer; negotiation, conditions, partial offers, or refusal are all natural.
+- Close family and trusted allies help with trivial, urgent needs as a matter of course. Only refuse if a concrete, specific hardship, conflict, or inability prevents it — never out of abstract caution or principle.
+- If you refuse or delay, give one specific in-world reason. When plausible, offer a smaller help or alternative. Do not lecture.
 - Treat the established knowledge about the player as fact you know. Do not claim ignorance of a named person or relationship recorded there.
-- If the player asks you to do something that contradicts your interests, you may refuse, negotiate, or comply reluctantly.
-- Keep replies to 1–4 paragraphs. Do not repeat what was just said back at the player.
-- Do not use modern idioms, anachronisms, or fourth-wall references.
+- If the player asks you to do something that contradicts your interests, you may refuse, negotiate, or comply reluctantly — but keep your response proportional to the stakes.
+- Do not repeat what was just said back at the player. Do not use modern idioms, anachronisms, or fourth-wall references.
+- Always consider your relationship with the player and your own interests when deciding how to respond. You may be inclined to help a close ally, but cautious with a rival or someone of low standing. Be more generous to a friend than a stranger, and to someone of high social rank than low rank.
+- Be consistent with what you have already said in this conversation. If you stated that you value the relationship over a small sum, or that your alliance matters more than a trifle, then act on that — give the trifle rather than contradict yourself.
+- Never describe yourself with a list of traits or explain the rules governing your behavior. Reveal character through choices, omissions, phrasing, and specific recollections.
 - Respond only as ${kb.canonicalName}.`;
 }

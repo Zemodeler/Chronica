@@ -1,5 +1,5 @@
 import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
-import type { ConversationConsequence, ConversationMemoryEntry, Character } from "@chronica/shared";
+import type { ConversationConsequence, ConversationMemoryEntry, Character, CharacterSkills } from "@chronica/shared";
 import { games, players } from "./game";
 
 export const dialogueSessions = pgTable("dialogue_sessions", {
@@ -38,6 +38,14 @@ export const npcChatKnowledgebases = pgTable("npc_chat_knowledgebases", {
   npcCharacterId: text("npc_character_id").notNull(),
   canonicalName: text("canonical_name").notNull(),
   personalitySummary: text("personality_summary").notNull().default(""),
+  biography: text("biography"),
+  culture: text("culture"),
+  faith: text("faith"),
+  socioEconomicClass: text("socio_economic_class"),
+  role: text("role"),
+  skills: jsonb("skills").$type<CharacterSkills>(),
+  goals: jsonb("goals").$type<string[]>().notNull().default([]),
+  backstory: jsonb("backstory").$type<string[]>().notNull().default([]),
   relationshipLabel: text("relationship_label").notNull().default("neutral"),
   declaredConnection: text("declared_connection").notNull().default("contact"),
   declaredConnectionNotes: text("declared_connection_notes").notNull().default(""),

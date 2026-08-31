@@ -13,6 +13,9 @@ const JSON_MODE_OPERATIONS = new Set<AiOperation>([
   "propose_coarse_events",
   "character_director",
   "chronicle_narrator",
+  "enrich_npc_profile",
+  "resolve_contact",
+  "extract_knowledge",
 ]);
 
 const TIER_MODELS: Record<AiTier, string> = {
