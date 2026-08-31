@@ -5,6 +5,7 @@ import {
   appendMessage,
   createDatabase,
   createGroupSession,
+  createNpcCommitment,
   findOrOpenSession,
   getCharacterKnowledgebase,
   getOrCreateNpcKnowledgebase,
@@ -34,6 +35,7 @@ import type { ChronicaDatabase } from "@chronica/db";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { headers } from "next/headers";
 import { buildDialogueSystemPrompt, type WorldCharacterRef } from "./dialogue-prompt";
+import { extractDialogueCommitment } from "./dialogue-commitment";
 
 export type { WorldCharacterRef } from "./dialogue-prompt";
 
@@ -150,6 +152,7 @@ interface ExtractedKnowledgeEntry {
   body: string;
   contradicts: string[];
 }
+
 
 async function extractAndPropagateKnowledge(
   db: ChronicaDatabase,
@@ -307,6 +310,10 @@ export async function generateDialogueReply(input: DialogueCallInput & { readonl
     consequences: [...kb.consequences, ...newConsequences],
   });
   await recordInteraction(db, kb.id, relevancyDelta);
+  const commitment = extractDialogueCommitment(npcBody, playerMessageBody);
+  if (commitment) await createNpcCommitment(db, {
+    gameId, sessionId, npcMessageId: npcMsg.id, playerCharacterId, npcCharacterId, createdAtStep: currentStep, ...commitment,
+  });
 
   // Keep the request connection alive until extraction has completed. Failures are logged internally.
   await extractAndPropagateKnowledge(
