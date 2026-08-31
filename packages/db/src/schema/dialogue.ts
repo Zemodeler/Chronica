@@ -1,5 +1,5 @@
 import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
-import type { ConversationConsequence, ConversationMemoryEntry, Character } from "@chronica/shared";
+import type { ConversationConsequence, ConversationMemoryEntry, Character, CharacterSkills } from "@chronica/shared";
 import { games, players } from "./game";
 
 export const dialogueSessions = pgTable("dialogue_sessions", {
@@ -38,6 +38,14 @@ export const npcChatKnowledgebases = pgTable("npc_chat_knowledgebases", {
   npcCharacterId: text("npc_character_id").notNull(),
   canonicalName: text("canonical_name").notNull(),
   personalitySummary: text("personality_summary").notNull().default(""),
+  biography: text("biography"),
+  culture: text("culture"),
+  faith: text("faith"),
+  socioEconomicClass: text("socio_economic_class"),
+  role: text("role"),
+  skills: jsonb("skills").$type<CharacterSkills>(),
+  goals: jsonb("goals").$type<string[]>().notNull().default([]),
+  backstory: jsonb("backstory").$type<string[]>().notNull().default([]),
   relationshipLabel: text("relationship_label").notNull().default("neutral"),
   declaredConnection: text("declared_connection").notNull().default("contact"),
   declaredConnectionNotes: text("declared_connection_notes").notNull().default(""),
@@ -67,4 +75,26 @@ export const gameNpcRecords = pgTable("game_npc_records", {
 }, (table) => [
   uniqueIndex("game_npc_records_game_character_unique").on(table.gameId, table.characterId),
   index("game_npc_records_game_idx").on(table.gameId),
+]);
+
+/** Promises made in dialogue; resolution is the sole authority that fulfils them. */
+export const npcCommitments = pgTable("npc_commitments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  gameId: uuid("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+  sessionId: uuid("session_id").notNull().references(() => dialogueSessions.id, { onDelete: "cascade" }),
+  npcMessageId: uuid("npc_message_id").notNull().references(() => dialogueMessages.id, { onDelete: "cascade" }),
+  playerCharacterId: text("player_character_id").notNull(),
+  npcCharacterId: text("npc_character_id").notNull(),
+  promiseType: text("promise_type").notNull(),
+  promisedResult: text("promised_result").notNull(),
+  conditions: text("conditions").notNull().default(""),
+  rationale: text("rationale").notNull().default(""),
+  status: text("status").notNull().default("pending"),
+  createdAtStep: integer("created_at_step").notNull(),
+  resolvedAtStep: integer("resolved_at_step"),
+  resolutionReason: text("resolution_reason"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("npc_commitments_npc_message_unique").on(table.npcMessageId),
+  index("npc_commitments_game_status_idx").on(table.gameId, table.status),
 ]);

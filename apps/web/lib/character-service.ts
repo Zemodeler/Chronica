@@ -17,6 +17,7 @@ import { eq, and, isNull } from "drizzle-orm";
 import { schema } from "@chronica/db";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { headers } from "next/headers";
+import { relationshipLabelForScore, scoreForDeclaredConnection } from "./relationship-score";
 
 // The fixture demo game uses a plain string ID, not a UUID, so no DB queries
 // are valid against it. All service functions return early for this ID.
@@ -395,6 +396,28 @@ export async function reviseDeclaredCharacter(gameId: string, revision: string):
   }
 }
 
+interface NpcProfileInput {
+  npcName: string;
+  declaredConnection: string;
+  connectionNotes: string;
+  period: string;
+  playerCulture: string;
+}
+
+async function enrichNpcProfile(
+  db: ReturnType<typeof createDatabase>["db"],
+  userId: string,
+  gameId: string,
+  kbId: string,
+  input: NpcProfileInput,
+): Promise<void> {
+  const { updateNpcKnowledgebase } = await import("@chronica/db");
+  const { enrichNpcProfileViaAi } = await import("./dialogue-service");
+  const profile = await enrichNpcProfileViaAi(userId, gameId, input);
+  if (profile === null) return;
+  await updateNpcKnowledgebase(db, kbId, profile);
+}
+
 export async function confirmDeclaredCharacter(gameId: string): Promise<CharacterDeclarationResult> {
   if (gameId === DEMO_GAME_ID) return { status: "error", message: "AI character creation is not available in demo mode." };
   const userId = await resolveUserId();
@@ -442,17 +465,30 @@ export async function confirmDeclaredCharacter(gameId: string): Promise<Characte
     await db.update(schema.players).set({ characterId }).where(and(eq(schema.players.id, playerId), eq(schema.players.gameId, gameId)));
 
     // Seed NPC knowledgebases for each person relation from the character declaration.
+    const scenarioCtx = await getScenarioContext(db, gameId);
+    const period = scenarioCtx.period;
+    const playerCulture = existing.culture ?? "local";
     for (const relation of existing.relations) {
       if (relation.kind !== "person") continue;
       const npcId = `declared-npc-${relation.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${playerId}`;
-      await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcId, {
+      const kb = await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcId, {
         canonicalName: relation.name,
         personalitySummary: relation.notes ?? "",
-        relationshipLabel: "neutral",
+        relationshipLabel: relationshipLabelForScore(scoreForDeclaredConnection(relation.relationship, relation.notes)),
+        relationshipScore: scoreForDeclaredConnection(relation.relationship, relation.notes),
         declaredConnection: relation.relationship,
         declaredConnectionNotes: `${relation.familyRole === null ? "" : `${relation.familyRole}. `}${relation.notes ?? ""}`.trim(),
       });
       await findOrOpenSession(db, gameId, playerId, npcId);
+      if (kb.biography === null) {
+        await enrichNpcProfile(db, userId, gameId, kb.id, {
+          npcName: relation.name,
+          declaredConnection: relation.relationship,
+          connectionNotes: relation.notes ?? "",
+          period,
+          playerCulture,
+        });
+      }
     }
 
     return { status: "confirmed" };

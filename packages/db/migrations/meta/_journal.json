@@ -92,6 +92,27 @@
       "when": 1756598400000,
       "tag": "0012_character_knowledgebases",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787900002000,
+      "tag": "0015_dialogue_connections_and_npcs",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1787900003000,
+      "tag": "0016_npc_commitments",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1787900004000,
+      "tag": "0017_npc_profile_enrichment",
+      "breakpoints": true
     }
   ]
 }
