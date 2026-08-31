@@ -11,6 +11,7 @@ Chronica is a single-player, AI-driven grand strategy game seen through one char
 7. [NPC conversations](06-npc-conversations.md)
 8. [Billing and coins](07-billing-and-coins.md)
 9. [Open decisions](08-open-decisions.md)
+10. [NPC social dialogue and commitments](10-npc-social-dialogue-and-commitments.md)
 
 Confirmed decisions are stated directly. Future possibilities and unresolved choices are kept in the roadmap or open-decisions document.
 

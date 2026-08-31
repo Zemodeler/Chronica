@@ -445,11 +445,12 @@ export async function confirmDeclaredCharacter(gameId: string): Promise<Characte
     for (const relation of existing.relations) {
       if (relation.kind !== "person") continue;
       const npcId = `declared-npc-${relation.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${playerId}`;
-      const relationshipLabel = relation.category === "family" ? "neutral" : "neutral";
       await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcId, {
         canonicalName: relation.name,
         personalitySummary: relation.notes ?? "",
-        relationshipLabel,
+        relationshipLabel: "neutral",
+        declaredConnection: relation.relationship,
+        declaredConnectionNotes: `${relation.familyRole === null ? "" : `${relation.familyRole}. `}${relation.notes ?? ""}`.trim(),
       });
       await findOrOpenSession(db, gameId, playerId, npcId);
     }

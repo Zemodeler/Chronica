@@ -690,9 +690,12 @@ export async function resolveTurn(
     // Ingest chronicle into shared knowledgebase (best-effort).
     // Must be awaited here so the DB connection is still open; the route closes
     // it immediately after resolveTurn returns.
+    const playerProvinceId = world.characters.find((c) => c.id === actorCharacterId)?.locationProvinceId;
     await ingestChronicleEntries(db, gameId, chronicleInputs.map((e) => {
       const base = { body: e.body, atStep: e.atStep, audience: e.audience } as const;
-      return playerPolityId ? { ...base, associatedPolityId: playerPolityId } : base;
+      return e.audience === "knowledge_scoped"
+        ? { ...base, ...(playerPolityId ? { associatedPolityId: playerPolityId } : {}), ...(playerProvinceId ? { associatedProvinceId: playerProvinceId } : {}) }
+        : base;
     })).catch((err: unknown) => {
       console.error("[resolution] ingestChronicleEntries failed", err);
     });
