@@ -316,7 +316,7 @@ export const ForceSchema = z.object({
   fatigueBps: BasisPointsSchema,
   provisionStatus: z.enum(["provisioned", "shortage", "critical"]),
   provisionedThroughStep: ElapsedStepSchema,
-  payObligationId: EntityIdSchema,
+  payObligationId: EntityIdSchema.nullable(),
   payArrearsPeriods: z.number().int().nonnegative(),
   history: z.array(ForcePersonnelEventSchema),
 });
@@ -324,7 +324,7 @@ export type Force = z.infer<typeof ForceSchema>;
 
 export const MaterialEffectProposalSchema = z.object({
   sourceEntityId: EntityIdSchema,
-  recipientEntityId: EntityIdSchema.optional(),
+  recipientEntityId: EntityIdSchema.nullish(),
   magnitude: z.enum(["minor", "meaningful"]),
   rationale: z.string().trim().min(1).max(400),
 });
@@ -392,7 +392,9 @@ export const MaterialWorldStateSchema = z
       requireReference(motionIds.has(record.motionId), ["voteRecords", index, "motionId"], "Vote record must reference an existing motion.");
     });
     state.forces.forEach((force, index) => {
-      requireReference(obligationIds.has(force.payObligationId), ["forces", index, "payObligationId"], "Force pay must reference an existing obligation.");
+      if (force.payObligationId !== null) {
+        requireReference(obligationIds.has(force.payObligationId), ["forces", index, "payObligationId"], "Force pay must reference an existing obligation.");
+      }
     });
   });
 export type MaterialWorldState = z.infer<typeof MaterialWorldStateSchema>;

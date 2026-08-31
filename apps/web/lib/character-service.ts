@@ -34,6 +34,8 @@ export type CharacterDeclarationDraft = {
   confirmationDraft: string;
   canonicalName: string;
   origin: CharacterKnowledgebase["origin"];
+  startingMoney: number;
+  currencyName: string;
 };
 
 export type CharacterDeclarationResult =
@@ -62,6 +64,12 @@ type ScenarioContext = Readonly<{
   period: string;
   timelineStartYear: number | null;
   regions: readonly { id: string; name: string }[];
+  currency: Readonly<{
+    name: string;
+    unitName: string;
+    unitNamePlural: string;
+    symbol: string | undefined;
+  }>;
 }>;
 
 function astronomicalYear(year: number, era: "BCE" | "CE" | undefined): number {
@@ -87,10 +95,19 @@ async function getScenarioContext(db: ReturnType<typeof createDatabase>["db"], g
   // scenario period is still used as a fallback if a custom world lacks it.
   const match = /(?:^|\s)(\d{1,4})\s*BCE\b/i.exec(row?.period ?? "");
   const timelineStartYear = match === null ? null : astronomicalYear(Number(match[1]), "BCE");
+  const currency = world.success
+    ? {
+        name: world.data.material.currency.name,
+        unitName: world.data.material.currency.unitName,
+        unitNamePlural: world.data.material.currency.unitNamePlural,
+        symbol: world.data.material.currency.symbol,
+      }
+    : { name: "Money", unitName: "unit", unitNamePlural: "units", symbol: undefined };
   return {
     period: row?.period ?? "an unspecified historical period",
     timelineStartYear,
     regions: world.success ? world.data.map.provinces.map(({ id, name }) => ({ id, name })) : [],
+    currency,
   };
 }
 
@@ -108,6 +125,7 @@ export async function getScenarioTimelineStartYear(gameId: string): Promise<numb
 function buildDeclareSystemPrompt(context: ScenarioContext): string {
   const start = context.timelineStartYear === null ? "the scenario opening" : `${context.timelineStartYear <= 0 ? `${1 - context.timelineStartYear} BCE` : context.timelineStartYear}`;
   const regions = context.regions.length === 0 ? "No map regions are available." : context.regions.map((region) => `- ${region.id}: ${region.name}`).join("\n");
+  const currency = `${context.currency.name} (${context.currency.unitName}/${context.currency.unitNamePlural}${context.currency.symbol === undefined ? "" : `, symbol ${context.currency.symbol}`})`;
   return `You are a historical research assistant for a strategy game set in ${context.period}. The timeline begins at ${start}. Your task is to create or research a character for the player.
 
 The player will describe who they want to play as. You must interpret their intent and produce a character, then ask for confirmation.
@@ -122,6 +140,7 @@ ${regions}
 - locationProvinceId is REQUIRED at the scenario opening. Never return null or an unknown region ID.
 - Skills are on a 0–100 scale and represent innate talent plus experience. A 50 is average for the era's population. A 75+ is exceptional. Skills: martial, intrigue, learning, piety, stewardship, diplomacy, body.
 - Sub-skills are more granular. Only assign sub-skills the character would realistically have.
+- Decide the character's startingMoney in the scenario currency: ${currency}. It must be a non-negative whole number representing liquid personal funds at the opening, appropriate to the character's role, social class, culture, period, and circumstances. Do not include a state treasury, institutional funds, land, ships, equipment, or other non-cash assets.
 - Create exactly 4 to 8 key relations. Every relation must be an individually named human being; never include an institution, dynasty, army, navy, office, or other collective. Include at least one family member and at least one significant non-family NPC. Family relations need a familyRole; non-family relations must use null for familyRole.
 
 Output ONLY a valid JSON object matching this schema (no markdown fences, no commentary):
@@ -140,6 +159,7 @@ Output ONLY a valid JSON object matching this schema (no markdown fences, no com
   "role": "string — current position/job, using the historically accurate title for the era (e.g. 'Consul of the Roman Republic, commanding the Roman field army' rather than 'General of the Roman Army' in the Republican era)",
   "authority": ["array of concrete offices, commanded forces, and controlled territories; e.g. 'Consul of the Roman Republic', 'Command of the Roman field army in Sicily'. Never use scores, ranks, or abstract influence labels."],
   "socioEconomicClass": "string — e.g. 'Senatorial aristocracy'",
+  "startingMoney": 1200,
   "skills": {
     "martial": 0–100,
     "intrigue": 0–100,
@@ -162,7 +182,7 @@ Output ONLY a valid JSON object matching this schema (no markdown fences, no com
       "familyRole": "parent | partner | sibling | child | other_relative | null"
     }
   ],
-  "confirmationDraft": "string — a readable summary shown to the player asking them to confirm. Include: who this character is, their role, a brief teaser of their situation. 150–300 words. Friendly, second-person ('You are...')."
+  "confirmationDraft": "string — a readable summary shown to the player asking them to confirm. Include: who this character is, their role, their startingMoney with the currency name, and a brief teaser of their situation. 150–300 words. Friendly, second-person ('You are...')."
 }
 
 CRITICAL for subSkills: only use these EXACT key names (all lowercase, no punctuation):
@@ -184,15 +204,15 @@ You previously generated a character and the player has provided additional info
 Output ONLY a valid JSON object in the same schema as before. Incorporate the player's feedback faithfully.`;
 }
 
-function extractJson(raw: string): unknown | null {
+function extractJson(raw: string): unknown {
   // Strip markdown code fences if the model wrapped the JSON.
-  let text = raw.replace(/^```(?:json)?\s*/im, "").replace(/\s*```\s*$/m, "").trim();
+  const text = raw.replace(/^```(?:json)?\s*/im, "").replace(/\s*```\s*$/m, "").trim();
   // Try a direct parse first.
-  try { return JSON.parse(text); } catch { /* fall through */ }
+  try { return JSON.parse(text) as unknown; } catch { /* fall through */ }
   // If the model added prose before/after, extract the first top-level {...} block.
   const match = /\{[\s\S]*\}/.exec(text);
   if (!match) return null;
-  try { return JSON.parse(match[0]); } catch { return null; }
+  try { return JSON.parse(match[0]) as unknown; } catch { return null; }
 }
 
 const FAMILY_ROLE_MAP: Record<string, string> = {
@@ -219,7 +239,7 @@ function normalizeFamilyRole(role: unknown): unknown {
 
 function preprocessAiRelations(relations: unknown): unknown {
   if (!Array.isArray(relations)) return relations;
-  return relations.map((rel) => {
+  return (relations as unknown[]).map((rel: unknown) => {
     if (rel === null || typeof rel !== "object") return rel;
     const r = rel as Record<string, unknown>;
     return { ...r, familyRole: normalizeFamilyRole(r["familyRole"]) };
@@ -313,6 +333,8 @@ export async function declareCharacter(gameId: string, playerInput: string): Pro
         confirmationDraft: knowledgebase.confirmationDraft ?? `You will play as ${knowledgebase.canonicalName}.`,
         canonicalName: knowledgebase.canonicalName,
         origin: knowledgebase.origin,
+        startingMoney: knowledgebase.startingMoney,
+        currencyName: context.currency.name,
       },
     };
   } finally {
@@ -364,6 +386,8 @@ export async function reviseDeclaredCharacter(gameId: string, revision: string):
         confirmationDraft: knowledgebase.confirmationDraft ?? `You will play as ${knowledgebase.canonicalName}.`,
         canonicalName: knowledgebase.canonicalName,
         origin: knowledgebase.origin,
+        startingMoney: knowledgebase.startingMoney,
+        currencyName: context.currency.name,
       },
     };
   } finally {

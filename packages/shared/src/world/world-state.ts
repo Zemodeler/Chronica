@@ -7,6 +7,7 @@ import { WorldPinsSchema } from "./clock";
 import { ProvinceGraphSchema } from "./map";
 import { MapConflictsOverlaySchema } from "./map-presentation";
 import { WorldStorylineSchema } from "./storylines";
+import { CharacterGoalSchema, CharacterPlotSchema, NemesisStateSchema, DEFAULT_NEMESIS_STATE } from "../character-agency/schemas";
 
 /**
  * Bumped when an old snapshot needs upgrading on load.
@@ -67,6 +68,10 @@ export const WorldStateSchema = z
     /** Current authoritative combat, siege, and war state for map projection. */
     conflicts: MapConflictsOverlaySchema.default({ battles: [], sieges: [], wars: [] }),
     material: MaterialWorldStateSchema,
+    // Character Director agency state. Defaulted so archived snapshots load cleanly.
+    characterGoals: z.array(CharacterGoalSchema).default([]),
+    characterPlots: z.array(CharacterPlotSchema).default([]),
+    nemesis: NemesisStateSchema.default(DEFAULT_NEMESIS_STATE),
   })
   .strict();
 export type WorldState = z.infer<typeof WorldStateSchema>;

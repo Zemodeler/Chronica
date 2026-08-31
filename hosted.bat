@@ -14,6 +14,9 @@ if not exist node_modules (
     if errorlevel 1 exit /b %ERRORLEVEL%
 )
 
+echo Freeing ports 3000 through 3010...
+powershell.exe -NoProfile -Command "$processIds = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -ge 3000 -and $_.LocalPort -le 3010 } | Select-Object -ExpandProperty OwningProcess -Unique; if ($processIds) { Stop-Process -Id $processIds -Force -ErrorAction SilentlyContinue }"
+
 echo Starting Chronica at http://localhost:3000
 echo Press Ctrl-C to stop the local server.
 call npm run dev

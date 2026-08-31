@@ -4,6 +4,7 @@ import { economicWorkflows } from "./definitions/economic";
 import { characterWorkflows } from "./definitions/character";
 import { narrativeWorkflows } from "./definitions/narrative";
 import { mapWorkflows } from "./definitions/map";
+import { characterAgencyWorkflows } from "./definitions/character-agency";
 import type { AnyWorkflowDefinition } from "./types";
 
 // Workflow registry (docs/14, ADR-0032).
@@ -20,6 +21,7 @@ const allWorkflows: AnyWorkflowDefinition[] = [
   ...characterWorkflows,
   ...narrativeWorkflows,
   ...mapWorkflows,
+  ...characterAgencyWorkflows,
 ];
 
 /** Immutable registry map: actionId → WorkflowDefinition. */
@@ -32,11 +34,15 @@ export const WORKFLOW_IDS: readonly string[] = allWorkflows.map((w) => w.id);
 
 /** Compact registry description for injection into AI prompts. */
 export function buildWorkflowCatalog(): string {
-  const lines: string[] = ["Available workflow actions (use the exact id in your proposal):"];
+  const lines: string[] = ["Available workflow actions (use the exact id and parameter names shown):"];
   for (const category of ["military", "political", "economic", "character", "narrative", "map"] as const) {
     lines.push(`\n[${category.toUpperCase()}]`);
     for (const w of allWorkflows.filter((x) => x.category === category)) {
-      lines.push(`  ${w.id}: ${w.description}`);
+      const rawShape = (w.parametersSchema as any)?._def?.shape;
+      const shape = typeof rawShape === "function" ? rawShape() : rawShape;
+      const paramKeys = shape ? Object.keys(shape).join(", ") : "";
+      const paramHint = paramKeys ? ` | params: ${paramKeys}` : "";
+      lines.push(`  ${w.id}: ${w.description}${paramHint}`);
     }
   }
   return lines.join("\n");

@@ -2,6 +2,7 @@ import "server-only";
 
 import type { WorldState } from "@chronica/shared";
 import { buildWorkflowCatalog } from "@chronica/shared";
+import type { CharacterKnowledgebase } from "@chronica/shared";
 
 // Prompt builders for the three-step resolution chain.
 //
@@ -23,31 +24,91 @@ function worldContext(world: WorldState, actorId: string): string {
   const sieges = world.conflicts.sieges;
 
   const lines: string[] = [];
+
+  // Include IDs alongside names so AI can form valid workflow parameters.
   if (actor) {
-    lines.push(`ACTOR: ${actor.name} (${polity?.name ?? "unknown polity"}), located in ${location?.name ?? actor.locationProvinceId}`);
+    lines.push(`ACTOR: ${actor.name} [id: ${actor.id}] (${polity?.name ?? "unknown polity"} [id: ${polity?.id ?? "?"}]), located in ${location?.name ?? actor.locationProvinceId} [id: ${actor.locationProvinceId}]`);
     lines.push(`Health: ${(actor.healthBps / 100).toFixed(0)}% | Prestige: ${(actor.prestigeBps / 100).toFixed(0)}%`);
+    if (actor.officeId) lines.push(`Office: ${actor.officeId}`);
   }
-  lines.push(`\nPOLITIES: ${world.map.polities.map((p) => p.name).join(", ")}`);
-  lines.push(`PROVINCES HELD:`);
+
+  lines.push(`\nPOLITIES:`);
+  for (const p of world.map.polities) {
+    lines.push(`  ${p.name} [id: ${p.id}]`);
+  }
+
+  lines.push(`\nPROVINCES HELD (name [id] — controller polity):`);
   for (const polityEntry of world.map.polities) {
     const held = world.map.provinces.filter((p) => p.controllerPolityId === polityEntry.id);
-    if (held.length > 0) {
-      lines.push(`  ${polityEntry.name}: ${held.map((p) => p.name).join(", ")}`);
+    for (const p of held) {
+      lines.push(`  ${p.name} [id: ${p.id}] — ${polityEntry.name}`);
     }
   }
+
+  // Accounts visible to actor (for create_force and economic workflows).
+  // Include: non-private accounts, polity accounts for the actor's polity, and the actor's own character accounts.
+  const actorPolityId = actor?.polityId;
+  const visibleAccounts = world.material.accounts.filter(
+    (a) =>
+      a.visibility !== "private" ||
+      (actorPolityId && a.owner.kind === "polity" && a.owner.id === actorPolityId) ||
+      (actorId && a.owner.kind === "character" && a.owner.id === actorId),
+  );
+  if (visibleAccounts.length > 0) {
+    lines.push(`\nACCOUNTS (use account-id when invoking economic workflows):`);
+    for (const a of visibleAccounts) {
+      const ownerName =
+        a.owner.kind === "character"
+          ? (world.characters.find((c) => c.id === a.owner.id)?.name ?? a.owner.id)
+          : (world.map.polities.find((p) => p.id === a.owner.id)?.name ?? a.owner.id);
+      const isActor = a.owner.kind === "character" && a.owner.id === actorId;
+      lines.push(
+        `  ${ownerName}${isActor ? " (YOU)" : ""} [account-id: ${a.id}] balance: ${a.balance} ${world.material.currency.name} (${a.status})`,
+      );
+    }
+  }
+
   if (forces.length > 0) {
     lines.push(`\nFORCES UNDER COMMAND:`);
     for (const f of forces) {
       const fitTotal = f.personnel.reduce((n, p) => n + p.fit, 0);
       const loc = world.map.provinces.find((p) => p.id === f.locationId);
-      lines.push(`  ${f.name}: ${fitTotal} troops in ${loc?.name ?? f.locationId} | Morale ${(f.moraleBps / 100).toFixed(0)}%`);
+      lines.push(`  ${f.name} [id: ${f.id}]: ${fitTotal} troops in ${loc?.name ?? f.locationId} [id: ${f.locationId}] | Morale ${(f.moraleBps / 100).toFixed(0)}%`);
     }
   }
+
+  // All world forces (for context on potential targets).
+  const otherForces = world.material.forces.filter((f) => !forces.some((uf) => uf.id === f.id));
+  if (otherForces.length > 0) {
+    lines.push(`\nOTHER FORCES IN WORLD:`);
+    for (const f of otherForces.slice(0, 12)) {
+      const loc = world.map.provinces.find((p) => p.id === f.locationId);
+      const polityName = world.map.polities.find((p) => p.id === f.polityId)?.name ?? f.polityId;
+      lines.push(`  ${f.name} [id: ${f.id}] (${polityName}): ${f.personnel.reduce((n, p) => n + p.fit, 0)} troops in ${loc?.name ?? f.locationId} [id: ${f.locationId}]`);
+    }
+  }
+
+  // Key characters with IDs.
+  const keyChars = world.characters.filter((c) => c.alive && c.id !== actorId).slice(0, 16);
+  if (keyChars.length > 0) {
+    lines.push(`\nKEY CHARACTERS:`);
+    for (const c of keyChars) {
+      const cPolity = world.map.polities.find((p) => p.id === c.polityId);
+      const cLoc = world.map.provinces.find((p) => p.id === c.locationProvinceId);
+      lines.push(`  ${c.name} [id: ${c.id}] (${cPolity?.name ?? "?"}), in ${cLoc?.name ?? c.locationProvinceId}${c.officeId ? `, office: ${c.officeId}` : ""}`);
+    }
+  }
+
   if (wars.length > 0) {
-    lines.push(`\nACTIVE WARS: ${wars.map((w) => `${w.polityAId} vs ${w.polityBId}`).join("; ")}`);
+    const warDescs = wars.map((w) => {
+      const pA = world.map.polities.find((p) => p.id === w.polityAId)?.name ?? w.polityAId;
+      const pB = world.map.polities.find((p) => p.id === w.polityBId)?.name ?? w.polityBId;
+      return `${pA} [${w.polityAId}] vs ${pB} [${w.polityBId}]`;
+    });
+    lines.push(`\nACTIVE WARS: ${warDescs.join("; ")}`);
   }
   if (battles.length > 0) {
-    lines.push(`ACTIVE BATTLES: ${battles.map((b) => `${b.participantForceIds.join(" vs ")}`).join("; ")}`);
+    lines.push(`ACTIVE BATTLES: ${battles.map((b) => b.participantForceIds.join(" vs ")).join("; ")}`);
   }
   if (sieges.length > 0) {
     lines.push(`ACTIVE SIEGES: ${sieges.map((s) => s.settlementId).join(", ")}`);
@@ -68,7 +129,7 @@ Parse the order into:
 - conditions: preconditions that must be true for the action to succeed (up to 8, max 240 chars each)
 - proposedSteps: the concrete steps required to carry this out (1-12, max 240 chars each)
 - risks: potential negative outcomes (up to 12, max 240 chars each)
-- duration: estimated min/max number of game seasons this will take
+- duration: estimated duration as a JSON object { "min": N, "max": N } where N is a positive integer (game seasons)
 
 Be grounded: use actual province names, character names, and force names from the world context above. If the player references something that does not exist, note it as a risk.
 
@@ -82,17 +143,19 @@ ${worldContext(world, actorId)}
 
 ${buildWorkflowCatalog()}
 
+PERSONAL / DOMESTIC ACTIONS: If the order is a personal, social, or domestic activity (hosting a dinner, spending time with family, playing a game, personal rituals, leisure, prayer, rest, etc.) with no world-state implications, it is always "feasible" with workflow: null and needsAdjudication: false. Never mark these as "impossible" just because the broader political context is serious.
+
 For each interpreted order, assess:
 - interpretation: restate the intent concisely (max 600 chars)
 - feasibility: one of "feasible" | "conditional" | "unlawful" | "impossible" | "uncertain"
-  * feasible: straightforwardly achievable
+  * feasible: straightforwardly achievable (includes all personal/social/domestic actions)
   * conditional: possible but requires specific conditions to be met
   * unlawful: violates a law, treaty, or institutional constraint
-  * impossible: physically or logically impossible given current world state
+  * impossible: physically or logically impossible given current world state (NOT applicable to personal/domestic activities)
   * uncertain: insufficient information to assess
 - obstacleIds: entity IDs of things that oppose or complicate the action
 - dependencyActionIds: IDs of other ongoing actions this depends on
-- estimatedSteps: min/max seasons this will take to complete
+- estimatedSteps: estimated duration as a JSON object { "min": N, "max": N } where N is a positive integer (game seasons)
 - workflow: if this maps to a registered workflow action, name it as { actionId, parameters }. Use null if genuinely novel or unmappable.
 - needsAdjudication: true if the outcome is uncertain and requires the full adjudication step
 
@@ -108,21 +171,33 @@ ${worldContext(world, actorId)}
 
 ${buildWorkflowCatalog()}
 
+PERSONAL / DOMESTIC ACTIONS — FAST PATH: If the order is a personal, social, or domestic activity (hosting a dinner, spending time with family, playing a game, personal rituals, leisure, prayer, rest, social gathering, etc.) with no world-state implications:
+- Set outcome: "succeeds"
+- Write a warm 2-3 sentence rationale describing what happened in vivid detail (e.g. "The dinner was a pleasant affair — the family gathered around the fire, and the game of Rens proved a lively distraction from the troubles of the day.")
+- obstacles: [{ source: "competing demands", weight: "trivial", reason: "Minor scheduling and domestic logistics." }]
+- deltas: [] (empty — no world state change)
+- knowledgeVisibility: "private"
+Do NOT mark personal activities as "impossible" or "fails" under any circumstances.
+
 For the order, produce a verdict:
 - outcome: "succeeds" | "partially_succeeds" | "fails" | "backfires" | "impossible"
 - obstacles: array of { source, weight: "trivial"|"real"|"decisive", reason } — MUST be non-empty
-- deltas: array of state changes. Each delta is one of:
-  * { kind: "material_effect", effect: { sourceEntityId, recipientEntityId?, magnitude: "minor"|"meaningful", rationale } }
-  * { kind: "relationship_cause", holderCharacterId, subjectCharacterId, label, score: -100..100 }
-  * { kind: "knowledge_grant", characterId, factId }
-  * { kind: "workflow", invocation: { actionId, actorId, parameters } } — use workflow IDs from the catalog above
+- deltas: array of state changes. Rules:
+  * CRITICAL: For any state change that has a matching workflow in the catalog above, you MUST use { kind: "workflow", invocation: { actionId, actorId, parameters } }. For actorId, use the actor character id shown in the ACTOR line above (e.g. "char-abc123") — this field must be a non-empty string, never null. Workflow deltas are the ONLY kind that actually mutate world state. Using material_effect instead of workflow for economic actions is a BUG — it does nothing.
+  * { kind: "material_effect", effect: { sourceEntityId, magnitude: "minor"|"meaningful", rationale } } — use ONLY for reputation or narrative consequences that have NO matching workflow. This does NOT change game state and does NOT add or remove money.
+  * { kind: "relationship_cause", holderCharacterId, subjectCharacterId, label, score: -100..100 } — for opinion shifts.
+  * { kind: "knowledge_grant", characterId, factId } — for information reveals.
+  * For "raise army" / "recruit troops" orders: use actionId "create_force" with polityId, locationProvinceId, name, size, kind ("infantry"|"cavalry"|"siege"|"naval"|"militia"|"mercenary"|"other"), and optionally payerAccountId (use the account-id from the ACCOUNTS section above if one exists; omit the field if no account is available).
+  * For "start battle" / "engage forces" orders: use actionId "start_battle" with attackingForceId and defendingForceId (both from world context) and a newly invented battleId (kebab-case slug, e.g. "battle-rome-carthage-261bc"). The battleId is the only parameter you may invent — all other IDs must come from world context.
+  * For "remove gold" / "spend funds" / "pay" orders: use actionId "remove_gold" with accountId (from the ACCOUNTS section above), amount (integer), and reason (short description of the expenditure, max 240 chars).
+  * ECONOMIC INCOME RULE — applies to ANY order involving: selling, trading, receiving payment, earning income, collecting funds, spoils, gifts, or any money gain: you MUST produce { kind: "workflow", invocation: { actionId: "add_gold", actorId: "<actor-id>", parameters: { accountId: "<actor-account-id>", amount: <plausible integer>, reason: "<brief description>" } } }. Use the account-id marked "(YOU)" in the ACCOUNTS section above. If no account is marked "(YOU)", still use add_gold with any account-id present — never fall back to material_effect for income. Do NOT invoke any military workflow for a peaceful economic transaction.
 - tacticalModifiers: array of tactical modifier proposals (empty if not a battle)
 - timeCost: { min, max } in seasons
 - rationale: explain the decisive factor (max 1200 chars)
 - knowledgeVisibility: "public" | "polity" | "private"
 - playerInvolvement: [{ playerId, characterId, role: "actor"|"target"|"materially_affected" }]
 
-The AI's role is to determine consequences, not to grant wishes. Always name at least one real obstacle. A success can still have costs.
+The AI's role is to determine consequences, not to grant wishes. Always name at least one real obstacle. A success can still have costs. If you use a workflow, ensure ALL parameter IDs are taken from the world context above — do not invent IDs.
 
 Respond as a JSON object with exactly these fields.`;
 }
@@ -138,7 +213,7 @@ export function buildNearEventsSystemPrompt(world: WorldState, polityId: string)
   );
 
   const characterLines = characters.map((c) => {
-    const parts = [c.name];
+    const parts = [`${c.name} (id: ${c.id})`];
     if (c.officeId) parts.push(`(office: ${c.officeId})`);
     return parts.join(" ");
   });
@@ -179,7 +254,7 @@ export function buildFarEventsSystemPrompt(world: WorldState, polityId: string):
 
 TERRITORY: ${provinces.map((p) => `${p.name} (id: ${p.id})`).join(", ") || "unknown"}
 FORCES: ${forces.map((f) => `${f.name} (id: ${f.id})`).join(", ") || "none"}
-KEY CHARACTERS: ${characters.map((c) => c.name).join(", ") || "none"}
+KEY CHARACTERS: ${characters.map((c) => `${c.name} (id: ${c.id})`).join(", ") || "none"}
 ACTIVE WARS: ${activeWars.length > 0 ? activeWars.map((w) => `${w.polityAId} vs ${w.polityBId}`).join("; ") : "none"}
 CURRENT STEP: ${world.elapsedStep + 1}
 
@@ -229,19 +304,49 @@ Respond as JSON: { "events": [...] }`;
 export function buildChronicleNarratorPrompt(
   entries: readonly { body: string; isPlayerAction: boolean }[],
   world: WorldState,
+  actorId: string,
+  knowledgebase: CharacterKnowledgebase | null,
 ): string {
-  return `You are the chronicler of Chronica. Review the raw event summaries below and rewrite them as vivid, historically-flavoured prose for the chronicle (a newspaper-like narrative of what happened this season).
+  const actor = world.characters.find((c) => c.id === actorId);
+  // World-state actor.name is authoritative for the current game; knowledgebase
+  // canonicalName is a setup-time snapshot and can be stale.
+  const actorName = actor?.name ?? knowledgebase?.canonicalName ?? "the player character";
+  const polity = world.map.polities.find((p) => p.id === actor?.polityId);
+  const polityName = polity?.name ?? "their polity";
+
+  const characterBlock = [
+    `PLAYER CHARACTER: ${actorName}`,
+    knowledgebase?.role ? `ROLE: ${knowledgebase.role}` : null,
+    knowledgebase?.culture ? `CULTURE: ${knowledgebase.culture}` : null,
+    knowledgebase?.period ? `PERIOD: ${knowledgebase.period}` : null,
+    knowledgebase?.authority.length ? `AUTHORITY: ${knowledgebase.authority.join("; ")}` : null,
+    `POLITY: ${polityName}`,
+    `CURRENT SEASON: ${world.elapsedStep + 1}`,
+    knowledgebase?.biography
+      ? `\nCHARACTER BACKGROUND (use for tone, titles, and cultural colour):\n${knowledgebase.biography.slice(0, 500)}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return `You are the chronicler of Chronica. Rewrite raw event summaries as grounded, historically-flavoured prose for the official chronicle.
+
+${characterBlock}
 
 EVENTS (${entries.length} total):
 ${entries.map((e, i) => `${i + 1}. [${e.isPlayerAction ? "PLAYER ACTION" : "WORLD EVENT"}] ${e.body}`).join("\n")}
 
-Rewrite each event as one paragraph of chronicle prose. World events must outnumber player-action paragraphs — they should feel like the world is larger than any one player.
+Rewrite each event as one paragraph of chronicle prose. Return EXACTLY ${entries.length} entries, one per input — do not add or remove entries.
 
 Rules:
-- Write in third person, past tense, historical style
+- ALWAYS use proper names: refer to the player character as "${actorName}" (never substitute another name), name their polity "${polityName}", use real place names from the world above
+- NEVER invent character names — if the raw summary does not name someone, use their title or role instead
+- NEVER append meta-commentary to names or nouns (e.g. do NOT write "Gaius — historically accurate name" or "Rome (polity)"; write only the name itself)
+- NEVER use generic placeholders ("an individual", "a person", "the realm") — name everything specifically
+- Write in third person, past tense, historical style appropriate to the period
 - Each entry max 300 words
-- Do not invent details beyond what is given
-- Preserve the order (player actions and world events can be interleaved chronologically)
+- Do not invent facts beyond what the raw summary gives you; use the character background for tone and cultural colour only
+- The chronicle must reflect the ACTUAL outcome stated in the raw summary — do not upgrade a failure to a success or vice versa
 
 Respond as JSON: { "entries": [{ "body": "...", "isPlayerAction": true/false }] }`;
 }

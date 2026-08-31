@@ -20,6 +20,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ gam
     role: character.role,
     authority: character.authority,
     socioEconomicClass: character.socioEconomicClass,
+    startingMoney: character.startingMoney ?? 0,
     relations: character.relations,
   }, { headers: { "Cache-Control": "private, no-store" } });
 }

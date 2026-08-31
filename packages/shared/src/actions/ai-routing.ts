@@ -36,6 +36,8 @@ export const AiOperationSchema = z.enum([
   "propose_coarse_events",
   // Post-chronicle narrator pass — rewrites raw workflow summaries as prose.
   "chronicle_narrator",
+  // Character Director — evaluates selected characters and proposes goals, plots, and actions.
+  "character_director",
 ]);
 export type AiOperation = z.infer<typeof AiOperationSchema>;
 

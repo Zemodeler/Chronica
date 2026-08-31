@@ -201,25 +201,25 @@ export async function signOut(): Promise<never> {
   redirect("/login?status=signed-out#status");
 }
 
-export async function submitCharacterDeclaration(formData: FormData): Promise<{ status: string; confirmationDraft?: string; canonicalName?: string; origin?: string; error?: string }> {
+export async function submitCharacterDeclaration(formData: FormData): Promise<{ status: string; confirmationDraft?: string; canonicalName?: string; origin?: string; startingMoney?: number; currencyName?: string; error?: string }> {
   const gameId = textValue(formData, "gameId");
   const playerInput = textValue(formData, "playerInput");
   if (gameId === "" || playerInput.trim().length < 2) return { status: "invalid" };
   const result = await declareCharacter(gameId, playerInput);
   if (result.status === "draft") {
-    return { status: "draft", confirmationDraft: result.draft.confirmationDraft, canonicalName: result.draft.canonicalName, origin: result.draft.origin };
+    return { status: "draft", confirmationDraft: result.draft.confirmationDraft, canonicalName: result.draft.canonicalName, origin: result.draft.origin, startingMoney: result.draft.startingMoney, currencyName: result.draft.currencyName };
   }
   if (result.status === "error") return { status: result.status, error: result.message };
   return { status: result.status };
 }
 
-export async function reviseCharacterDeclaration(formData: FormData): Promise<{ status: string; confirmationDraft?: string; canonicalName?: string; origin?: string; error?: string }> {
+export async function reviseCharacterDeclaration(formData: FormData): Promise<{ status: string; confirmationDraft?: string; canonicalName?: string; origin?: string; startingMoney?: number; currencyName?: string; error?: string }> {
   const gameId = textValue(formData, "gameId");
   const revision = textValue(formData, "revision");
   if (gameId === "") return { status: "invalid" };
   const result = await reviseDeclaredCharacter(gameId, revision);
   if (result.status === "draft") {
-    return { status: "draft", confirmationDraft: result.draft.confirmationDraft, canonicalName: result.draft.canonicalName, origin: result.draft.origin };
+    return { status: "draft", confirmationDraft: result.draft.confirmationDraft, canonicalName: result.draft.canonicalName, origin: result.draft.origin, startingMoney: result.draft.startingMoney, currencyName: result.draft.currencyName };
   }
   if (result.status === "error") return { status: result.status, error: result.message };
   return { status: result.status };

@@ -10,8 +10,8 @@ export interface SharedEntryRow {
   readonly poolType: string;
   readonly poolKey: string;
   readonly body: string;
-  readonly sourceNpcCharacterId: string;
-  readonly sourceSessionId: string;
+  readonly sourceNpcCharacterId: string | null;
+  readonly sourceSessionId: string | null;
   readonly stepOccurred: number;
   readonly isContradicted: boolean;
   readonly contradictsIds: string[];
@@ -27,8 +27,8 @@ export async function insertSharedEntry(
   poolType: string,
   poolKey: string,
   body: string,
-  sourceNpcCharacterId: string,
-  sourceSessionId: string,
+  sourceNpcCharacterId: string | null,
+  sourceSessionId: string | null,
   stepOccurred: number,
 ): Promise<SharedEntryRow> {
   const [row] = await db
@@ -101,6 +101,6 @@ export async function ingestChronicleEntries(
 
   for (const entry of publicEntries) {
     const poolKey = entry.associatedPolityId ?? gameId;
-    await insertSharedEntry(db, gameId, "chronicle", poolKey, entry.body, "", "", entry.atStep);
+    await insertSharedEntry(db, gameId, "chronicle", poolKey, entry.body, null, null, entry.atStep);
   }
 }
