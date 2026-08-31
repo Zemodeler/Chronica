@@ -14,7 +14,7 @@ export async function POST(
   const parsed = SendChatMessageRequestSchema.safeParse(body);
   if (!parsed.success) return Response.json({ error: "Invalid request body." }, { status: 400 });
 
-  const { db, close, userId, playerId, characterId, characterName, period, currentStep, continuityTier, worldCharacters } = ctx;
+  const { db, close, userId, playerId, characterId, characterName, playerKnowledgebase, period, currentStep, continuityTier, worldCharacters } = ctx;
   try {
     const session = await getSession(db, sessionId, playerId);
     if (session === undefined) return Response.json({ error: "Session not found." }, { status: 404 });
@@ -28,7 +28,7 @@ export async function POST(
       const results = [];
       for (const npcCharacterId of session.participantIds) {
         const result = await generateDialogueReply({
-          db, userId, gameId, playerId, playerCharacterId: characterId, playerCharacterName: characterName,
+          db, userId, gameId, playerId, playerCharacterId: characterId, playerCharacterName: characterName, playerKnowledgebase,
           npcCharacterId, sessionId, channel: session.channel, playerMessageBody: parsed.data.body,
           period, currentStep, continuityTier, worldCharacters,
         });
@@ -38,7 +38,7 @@ export async function POST(
     }
 
     const result = await generateDialogueReply({
-      db, userId, gameId, playerId, playerCharacterId: characterId, playerCharacterName: characterName,
+      db, userId, gameId, playerId, playerCharacterId: characterId, playerCharacterName: characterName, playerKnowledgebase,
       npcCharacterId: session.npcCharacterId!,
       sessionId, channel: session.channel, playerMessageBody: parsed.data.body,
       period, currentStep, continuityTier, worldCharacters,
