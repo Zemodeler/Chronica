@@ -10,7 +10,10 @@ const FIFTEEN_MINUTES_SECONDS = 15 * 60;
 const THIRTY_DAYS_SECONDS = 30 * 24 * 60 * 60;
 
 type ChronicaAuth = ReturnType<typeof buildAuth>;
-let configuredAuth: ChronicaAuth | undefined;
+const authenticationGlobal = globalThis as typeof globalThis & {
+  chronicaAuthentication?: ChronicaAuth;
+};
+let configuredAuth: ChronicaAuth | undefined = authenticationGlobal.chronicaAuthentication;
 
 export function isAuthenticationConfigured(): boolean {
   return Boolean(process.env.DATABASE_URL?.trim() && process.env.BETTER_AUTH_SECRET?.trim());
@@ -25,6 +28,9 @@ export function getAuthentication(): ChronicaAuth {
     throw new Error("Authentication requires DATABASE_URL and BETTER_AUTH_SECRET.");
   }
   configuredAuth ??= buildAuth();
+  // Next.js reloads server modules during development. Retaining the auth
+  // instance prevents each reload from stranding another database pool.
+  authenticationGlobal.chronicaAuthentication = configuredAuth;
   return configuredAuth;
 }
 

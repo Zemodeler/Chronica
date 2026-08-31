@@ -1,5 +1,7 @@
 export * from "./actions/index";
 export * from "./characters/index";
+export * from "./character-agency/schemas";
+export * from "./character-agency/selector";
 export * from "./coins";
 export * from "./continuity/index";
 export * from "./dialogue/index";

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EntityIdSchema } from "../material-state";
+import { EntityIdSchema, MoneyAmountSchema } from "../material-state";
 import { CharacterSkillsSchema } from "./character";
 
 // Character Knowledgebase (character-implementation).
@@ -67,6 +67,8 @@ export const CharacterKnowledgebaseSchema = z
     /** Concrete offices, commands, or holdings through which the character acts. */
     authority: z.array(z.string().trim().min(1).max(200)).max(12).default([]),
     socioEconomicClass: z.string().trim().min(1).max(80),
+    /** Liquid personal funds at the scenario opening, in the scenario currency's base unit. */
+    startingMoney: MoneyAmountSchema,
 
     // Skills — always assigned; rationale is AI context only, never shown to player
     skills: CharacterSkillsSchema,

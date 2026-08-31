@@ -91,8 +91,8 @@ export type Feasibility = z.infer<typeof FeasibilitySchema>;
 
 export const StepRangeSchema = z
   .object({
-    min: z.number().int().positive(),
-    max: z.number().int().positive(),
+    min: z.number().int().nonnegative(),
+    max: z.number().int().nonnegative(),
   })
   .strict()
   .refine((range) => range.max >= range.min, {

@@ -10,8 +10,8 @@ interface Props {
 
 type Step =
   | { kind: "input" }
-  | { kind: "draft"; confirmationDraft: string; canonicalName: string; origin: string }
-  | { kind: "revising"; confirmationDraft: string; canonicalName: string; origin: string }
+  | { kind: "draft"; confirmationDraft: string; canonicalName: string; origin: string; startingMoney: number; currencyName: string }
+  | { kind: "revising"; confirmationDraft: string; canonicalName: string; origin: string; startingMoney: number; currencyName: string }
   | { kind: "confirmed" };
 
 export function CharacterDeclareClient({ gameId, gameTitle }: Props) {
@@ -32,7 +32,7 @@ export function CharacterDeclareClient({ gameId, gameTitle }: Props) {
     startTransition(async () => {
       const result = await submitCharacterDeclaration(formData);
       if (result.status === "draft" && result.confirmationDraft) {
-        setStep({ kind: "draft", confirmationDraft: result.confirmationDraft, canonicalName: result.canonicalName ?? "", origin: result.origin ?? "invented" });
+        setStep({ kind: "draft", confirmationDraft: result.confirmationDraft, canonicalName: result.canonicalName ?? "", origin: result.origin ?? "invented", startingMoney: result.startingMoney ?? 0, currencyName: result.currencyName ?? "money" });
         setCoins(null); // refresh after spending coins
         void fetch("/api/account/coins", { cache: "no-store" }).then((r) => r.json()).then((d: { coins: string | null }) => { if (d.coins !== null) setCoins(d.coins); }).catch(() => {});
       } else if (result.status === "insufficient_coins") {
@@ -48,7 +48,7 @@ export function CharacterDeclareClient({ gameId, gameTitle }: Props) {
     startTransition(async () => {
       const result = await reviseCharacterDeclaration(formData);
       if (result.status === "draft" && result.confirmationDraft) {
-        setStep({ kind: "draft", confirmationDraft: result.confirmationDraft, canonicalName: result.canonicalName ?? "", origin: result.origin ?? "invented" });
+        setStep({ kind: "draft", confirmationDraft: result.confirmationDraft, canonicalName: result.canonicalName ?? "", origin: result.origin ?? "invented", startingMoney: result.startingMoney ?? 0, currencyName: result.currencyName ?? "money" });
         void fetch("/api/account/coins", { cache: "no-store" }).then((r) => r.json()).then((d: { coins: string | null }) => { if (d.coins !== null) setCoins(d.coins); }).catch(() => {});
       } else {
         setError(result.error ?? "Something went wrong. Please try again.");
@@ -147,6 +147,9 @@ export function CharacterDeclareClient({ gameId, gameTitle }: Props) {
                   {step.origin === "historical" ? "Historical figure" : step.origin === "hybrid" ? "Historical figure (extended)" : "Invented character"}
                 </span>
                 <h1 style={{ color: "var(--text-title)", fontSize: "1.4rem", margin: "0 0 0.75rem" }}>{step.canonicalName}</h1>
+                <p style={{ color: "var(--text-meta)", margin: "0 0 0.75rem", fontSize: "0.9rem" }}>
+                  Starting money: <strong style={{ color: "var(--text)" }}>{step.startingMoney.toLocaleString()} {step.currencyName}</strong>
+                </p>
                 <div style={{
                   background: "var(--surface)",
                   border: "1px solid var(--border)",

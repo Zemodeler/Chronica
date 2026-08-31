@@ -2,9 +2,96 @@ import { z } from "zod";
 import { EntityIdSchema, BasisPointsSchema } from "../../material-state";
 import type { AnyWorkflowDefinition } from "../types";
 
+const FORCE_KIND_SCHEMA = z.enum(["infantry", "cavalry", "siege", "naval", "militia", "mercenary", "other"]);
+
 const randomUUID = () => globalThis.crypto.randomUUID();
 
 export const militaryWorkflows: AnyWorkflowDefinition[] = [
+  {
+    id: "create_force",
+    description: "Raise a new military force for a polity at a specified province. Use when a player orders raising an army, recruiting troops, or mustering soldiers. Requires a polity account to fund the obligation.",
+    category: "military",
+    parametersSchema: z.object({
+      polityId: EntityIdSchema,
+      locationProvinceId: EntityIdSchema,
+      name: z.string().trim().min(1).max(120),
+      size: z.number().int().min(100).max(50_000),
+      kind: FORCE_KIND_SCHEMA,
+      payerAccountId: EntityIdSchema.optional(),
+    }).strict(),
+    apply(world, params, context) {
+      const polity = world.map.polities.find((p) => p.id === params.polityId);
+      if (!polity) return null;
+      const province = world.map.provinces.find((p) => p.id === params.locationProvinceId);
+      if (!province) return null;
+      // payerAccountId is optional — obligation is only created when a valid account exists.
+      const account = params.payerAccountId
+        ? world.material.accounts.find((a) => a.id === params.payerAccountId)
+        : undefined;
+
+      const forceId = randomUUID();
+      const categoryId = `cat-${params.kind}-${forceId.slice(0, 8)}`;
+      const summary = `${params.name} (${params.size} ${params.kind}) raised in ${province.name} for ${polity.name}.`;
+
+      const baseForce = {
+        id: forceId,
+        name: params.name,
+        polityId: params.polityId,
+        commanderCharacterId: context.actorId,
+        controllerCharacterId: context.actorId,
+        locationId: params.locationProvinceId,
+        authorizedStrength: params.size,
+        personnel: [{ categoryId, label: params.kind, fit: params.size, unavailable: [] }],
+        moraleBps: 7_000,
+        cohesionBps: 7_000,
+        fatigueBps: 0,
+        provisionStatus: "provisioned" as const,
+        provisionedThroughStep: context.atStep + 8,
+        payArrearsPeriods: 0,
+        history: [],
+      };
+
+      if (account) {
+        const obligationId = randomUUID();
+        const obligation = {
+          id: obligationId,
+          kind: "army_pay" as const,
+          label: `Pay for ${params.name}`,
+          payerAccountId: account.id,
+          amount: Math.max(1, Math.floor(params.size * 2)),
+          cadenceSteps: 4,
+          nextDueStep: context.atStep + 4,
+          priority: 100,
+          arrears: 0,
+          missedPeriods: 0,
+          active: true,
+        };
+        return {
+          world: {
+            ...world,
+            material: {
+              ...world.material,
+              obligations: [...world.material.obligations, obligation],
+              forces: [...world.material.forces, { ...baseForce, payObligationId: obligationId }],
+            },
+          },
+          result: { summary, applied: true },
+        };
+      }
+
+      return {
+        world: {
+          ...world,
+          material: {
+            ...world.material,
+            forces: [...world.material.forces, { ...baseForce, payObligationId: null }],
+          },
+        },
+        result: { summary, applied: true },
+      };
+    },
+  },
+
   {
     id: "move_force",
     description: "Move a military force to a different province. The force's locationId changes immediately.",

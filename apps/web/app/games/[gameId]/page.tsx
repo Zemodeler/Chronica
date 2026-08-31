@@ -41,6 +41,11 @@ export default async function GamePage({
       : world.provinces.find((province) => province.id === knowledgebase.locationProvinceId)?.name
         ?? world.mapGeoJson?.features.find((feature) => feature.id === knowledgebase.locationProvinceId && feature.properties.kind === "province")?.properties.name
         ?? knowledgebase.locationProvinceId;
+    const hasMaterialPersonalAccount = world.material.personalAccount.id !== "no-account";
+    // Older JSONB character files predate startingMoney. Keep those saves
+    // readable while all newly generated drafts are required to provide it.
+    const moneyBalance = hasMaterialPersonalAccount ? world.material.personalAccount.balance : (knowledgebase.startingMoney ?? 0);
+    const moneyChanges = hasMaterialPersonalAccount ? world.material.personalAccount.recentChanges : [];
     characterPanel = {
       characterName: knowledgebase.canonicalName,
       role: knowledgebase.role,
@@ -48,9 +53,9 @@ export default async function GamePage({
       culture: knowledgebase.culture,
       relations: knowledgebase.relations,
       origin: knowledgebase.origin,
-      moneyLabel: `${world.material.personalAccount.balance.toLocaleString()} ${world.material.currencyName}`,
-      moneyBalance: world.material.personalAccount.balance,
-      moneyChanges: world.material.personalAccount.recentChanges,
+      moneyLabel: `${moneyBalance.toLocaleString()} ${world.material.currencyName}`,
+      moneyBalance,
+      moneyChanges,
       birthYearApprox: knowledgebase.birthYearApprox,
       ageAtStart: ageAtScenarioStart(knowledgebase.birthYearApprox, timelineStartYear),
       biography: knowledgebase.biography,

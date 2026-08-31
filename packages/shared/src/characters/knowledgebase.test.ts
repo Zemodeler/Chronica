@@ -9,7 +9,7 @@ function knowledgebase(relations: unknown[]) {
     version: 1 as const, characterId: "declared-player", gameId: "game-id", canonicalName: "Lucius Cornelius", nickname: null,
     birthYearApprox: -300, deathYearApprox: -250, origin: "historical" as const, period: "First Punic War", locationProvinceId: "sicily",
     culture: "Roman", faith: null, biography: "A historically grounded Roman aristocrat whose long biography is sufficient for schema validation and repeated AI context.", notableEvents: ["Held office."],
-    role: "Roman senator", authority: [], socioEconomicClass: "Senatorial aristocracy",
+    role: "Roman senator", authority: [], socioEconomicClass: "Senatorial aristocracy", startingMoney: 1_200,
     skills: { martial: 50, intrigue: 50, learning: 50, piety: 50, stewardship: 50, diplomacy: 50, body: 50, subSkills: {} },
     skillRationale: { martial: "Experienced officer." }, relations, confirmedByPlayer: false, confirmationDraft: "A confirmation draft that is comfortably longer than the minimum required length for the character declaration workflow.",
   };
@@ -31,5 +31,15 @@ describe("character knowledgebase key relations", () => {
     expect(CharacterKnowledgebaseSchema.safeParse(knowledgebase([family, other, { ...other, name: "Publius Claudius" }])).success).toBe(false);
     expect(CharacterKnowledgebaseSchema.safeParse(knowledgebase([family, { ...family, name: "Gaius Cornelius" }, { ...family, name: "Julia Cornelia" }])).success).toBe(false);
     expect(CharacterKnowledgebaseSchema.safeParse(knowledgebase([...valid, { ...other, name: "Marcus Fabius" }, { ...other, name: "Quintus Fabius" }, { ...other, name: "Titus Fabius" }, { ...other, name: "Sextus Fabius" }, { ...other, name: "Gnaeus Fabius" }])).success).toBe(false);
+  });
+
+  it("requires a non-negative integer starting-money sum", () => {
+    const valid = [family, other, { ...other, name: "Publius Claudius" }, { ...family, name: "Julia Cornelia", relationship: "Sister", familyRole: "sibling" as const }];
+    expect(CharacterKnowledgebaseSchema.safeParse(knowledgebase(valid)).success).toBe(true);
+    expect(CharacterKnowledgebaseSchema.safeParse({ ...knowledgebase(valid), startingMoney: -1 }).success).toBe(false);
+    expect(CharacterKnowledgebaseSchema.safeParse({ ...knowledgebase(valid), startingMoney: 12.5 }).success).toBe(false);
+    const withoutStartingMoney: Record<string, unknown> = { ...knowledgebase(valid) };
+    delete withoutStartingMoney["startingMoney"];
+    expect(CharacterKnowledgebaseSchema.safeParse(withoutStartingMoney).success).toBe(false);
   });
 });
