@@ -7,7 +7,8 @@ import { WorldPinsSchema } from "./clock";
 import { ProvinceGraphSchema } from "./map";
 import { MapConflictsOverlaySchema } from "./map-presentation";
 import { WorldStorylineSchema } from "./storylines";
-import { CharacterGoalSchema, CharacterPlotSchema, NemesisStateSchema, DEFAULT_NEMESIS_STATE } from "../character-agency/schemas";
+import { CharacterGoalSchema, CharacterPlotSchema, NemesisStateSchema, DEFAULT_NEMESIS_STATE, NemesisEntrySchema, CharacterRelevanceEntrySchema } from "../character-agency/schemas";
+import { ChronicleChainSchema } from "./chronicle-chains";
 
 /**
  * Bumped when an old snapshot needs upgrading on load.
@@ -72,6 +73,18 @@ export const WorldStateSchema = z
     characterGoals: z.array(CharacterGoalSchema).default([]),
     characterPlots: z.array(CharacterPlotSchema).default([]),
     nemesis: NemesisStateSchema.default(DEFAULT_NEMESIS_STATE),
+    // Multi-slot nemeses (new); old `nemesis` kept for backward compat.
+    nemeses: z.array(NemesisEntrySchema).default([]),
+    // Chronicle-weighted relevance entries for character selector.
+    characterRelevance: z.array(CharacterRelevanceEntrySchema).default([]),
+    // Active chronicle chains for the World Director to see open pressures.
+    chronicleChains: z.array(ChronicleChainSchema).default([]),
+    /**
+     * Compact account of the turn that produced this snapshot.  It is kept in
+     * the snapshot so the following turn's AI calls can use committed history
+     * without having to reconstruct it from Chronicle projections.
+     */
+    lastTurnSummary: z.string().trim().min(1).max(1_800).nullable().default(null),
   })
   .strict();
 export type WorldState = z.infer<typeof WorldStateSchema>;

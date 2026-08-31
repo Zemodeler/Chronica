@@ -27,10 +27,14 @@ export const narrativeWorkflows: AnyWorkflowDefinition[] = [
         provinceId: params.provinceId,
         phase: params.phase,
         stakes: params.stakes,
-        history: [],
+        history: [] as string[],
         nextDevelopment: params.nextDevelopment,
         visibility: params.visibility,
         updatedAtStep: context.atStep,
+        type: "simulator" as const,
+        initialPlan: null,
+        causalEntryIds: [] as string[],
+        turnsActive: 0,
       };
       return {
         world: {

@@ -37,8 +37,14 @@ export const AiOperationSchema = z.enum([
   "propose_coarse_events",
   // Post-chronicle narrator pass — rewrites raw workflow summaries as prose.
   "chronicle_narrator",
-  // Character Director — evaluates selected characters and proposes goals, plots, and actions.
+  // Character Director — advises on character goals and plots (no workflow invocations).
   "character_director",
+  // Reaction Director — proposes NPC/institution reactions after player execution.
+  "reaction_director",
+  // Simulator — generates independent world events and advances storylines.
+  "simulator",
+  // World Director — final authority on which proposals execute this turn.
+  "world_director",
   // Workflow Manager — reviews every AI-proposed workflow before world mutation.
   "workflow_manager",
 ]);

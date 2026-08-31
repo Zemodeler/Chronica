@@ -370,6 +370,14 @@ export interface ChronicleView {
     readonly displayPatch?: unknown;
     /** Simulation step of the event; legacy rows fall back to their turn's end step. */
     readonly atStep: number;
+    // Extended Chronicle fields (all optional — absent on legacy entries).
+    readonly eventDate?: string | null;
+    readonly location?: string | null;
+    readonly chainId?: string | null;
+    readonly chainPosition?: "root" | "reaction" | "spread" | "distant" | "pressure" | null;
+    readonly directConsequences?: Array<{ kind: string; label: string; entityId: string | null; quantified: boolean }>;
+    readonly sourceDirector?: string;
+    readonly openPressure?: boolean;
   }[];
 }
 
@@ -429,6 +437,18 @@ export async function getChronicleForLatestTurn(db: ChronicaDatabase, gameId: st
         !Array.isArray(factsData) &&
         "ids" in factsData;
       const atStep = chronicleAtStep(factsData, turn.elapsedStepEnd ?? 0);
+      type FactsBlob = {
+        materialConsequence?: boolean;
+        displayPatch?: unknown;
+        eventDate?: string | null;
+        location?: string | null;
+        chainId?: string | null;
+        chainPosition?: "root" | "reaction" | "spread" | "distant" | "pressure" | null;
+        directConsequences?: Array<{ kind: string; label: string; entityId: string | null; quantified: boolean }>;
+        sourceDirector?: string;
+        openPressure?: boolean;
+      };
+      const f = isNewFormat ? (factsData as FactsBlob) : null;
       return {
         id: row.id,
         sequence: row.sequence,
@@ -436,12 +456,19 @@ export async function getChronicleForLatestTurn(db: ChronicaDatabase, gameId: st
         audience: row.audience as "all_players" | "knowledge_scoped",
         playerInvolvement: row.playerInvolvement,
         atStep,
-        ...(isNewFormat
+        ...(f !== null
           ? {
-              materialConsequence: Boolean((factsData as { materialConsequence?: boolean }).materialConsequence),
-              ...((factsData as unknown as { displayPatch?: unknown }).displayPatch !== undefined
-                ? { displayPatch: (factsData as unknown as { displayPatch: unknown }).displayPatch }
+              materialConsequence: Boolean(f.materialConsequence),
+              ...(f.displayPatch !== undefined ? { displayPatch: f.displayPatch } : {}),
+              ...(f.eventDate != null ? { eventDate: f.eventDate } : {}),
+              ...(f.location != null ? { location: f.location } : {}),
+              ...(f.chainId != null ? { chainId: f.chainId } : {}),
+              ...(f.chainPosition != null ? { chainPosition: f.chainPosition } : {}),
+              ...(Array.isArray(f.directConsequences) && f.directConsequences.length > 0
+                ? { directConsequences: f.directConsequences }
                 : {}),
+              ...(f.sourceDirector != null ? { sourceDirector: f.sourceDirector } : {}),
+              ...(f.openPressure ? { openPressure: true } : {}),
             }
           : {}),
       };

@@ -12,8 +12,13 @@ const ALL_STEPS = [
   { step: "interpret", label: "Interpreting your orders…" },
   { step: "assess", label: "Assessing feasibility…" },
   { step: "adjudicate", label: "Calculating consequences…" },
-  { step: "world_sim", label: "Simulating the world…" },
-  { step: "execute", label: "Applying changes…" },
+  { step: "execute_player", label: "Applying your actions…" },
+  { step: "reaction", label: "Observing reactions…" },
+  { step: "simulate", label: "Simulating the world…" },
+  { step: "character_advise", label: "Consulting character intentions…" },
+  { step: "consolidate", label: "Consolidating proposals…" },
+  { step: "world_direct", label: "World Director deciding…" },
+  { step: "execute_world", label: "Applying world changes…" },
   { step: "chronicle", label: "Writing the chronicle…" },
   { step: "commit", label: "Saving the new world…" },
 ] as const;
@@ -179,6 +184,17 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
   const isCollecting = turnStatus === "collecting" || turnStatus === null;
 
   const resolutionDone = !resolving && steps.length > 0;
+
+  // Leave the final state visible long enough to acknowledge completion, then
+  // clear it so the overlay does not remain over the game indefinitely.
+  useEffect(() => {
+    if (!resolutionDone) return;
+    const dismissTimeout = window.setTimeout(() => {
+      setSteps([]);
+      setCurrentStep(null);
+    }, 1_500);
+    return () => window.clearTimeout(dismissTimeout);
+  }, [resolutionDone]);
 
   return (
     <>

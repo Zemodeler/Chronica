@@ -13,5 +13,11 @@ export const WorldStorylineSchema = z.object({
   nextDevelopment: z.string().trim().min(1).max(320),
   visibility: VisibilitySchema,
   updatedAtStep: ElapsedStepSchema,
+  // Extended fields — all optional with defaults for backward compat.
+  type: z.enum(["simulator", "character_plot", "player_driven", "reaction"]).default("simulator"),
+  initialPlan: z.string().trim().max(480).nullable().default(null),
+  causalEntryIds: z.array(EntityIdSchema).max(16).default([]),
+  turnsActive: z.number().int().min(0).default(0),
+  sourceDirector: z.enum(["simulator", "character_director", "reaction_director", "world_director", "player"]).optional(),
 }).strict();
 export type WorldStoryline = z.infer<typeof WorldStorylineSchema>;

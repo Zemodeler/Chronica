@@ -2,6 +2,13 @@
 
 import { useState, useEffect, useCallback } from "react";
 
+interface DirectConsequence {
+  readonly kind: string;
+  readonly label: string;
+  readonly entityId: string | null;
+  readonly quantified: boolean;
+}
+
 interface ChronicleEntry {
   readonly id: string;
   readonly sequence: number;
@@ -10,6 +17,14 @@ interface ChronicleEntry {
   readonly atStep: number;
   readonly materialConsequence?: boolean;
   readonly displayPatch?: unknown;
+  // Extended Chronicle fields
+  readonly eventDate?: string | null;
+  readonly location?: string | null;
+  readonly chainId?: string | null;
+  readonly chainPosition?: "root" | "reaction" | "spread" | "distant" | "pressure" | null;
+  readonly directConsequences?: readonly DirectConsequence[];
+  readonly openPressure?: boolean;
+  readonly sourceDirector?: string;
 }
 
 interface ChronicleData {
@@ -24,6 +39,80 @@ interface ChroniclePanelProps {
   readonly forceOpen?: boolean;
   readonly onForceOpenConsumed?: () => void;
   readonly onDisplayPatch?: (patch: unknown) => void;
+}
+
+function EntryHeader({ entry }: { entry: ChronicleEntry }) {
+  const parts: string[] = [];
+  if (entry.eventDate) parts.push(entry.eventDate);
+  if (entry.location) parts.push(entry.location);
+  if (parts.length === 0) return null;
+  return (
+    <p
+      style={{
+        fontSize: "0.7rem",
+        color: "var(--text-muted)",
+        letterSpacing: "0.08em",
+        textTransform: "uppercase",
+        margin: 0,
+      }}
+    >
+      {parts.join(" · ")}
+    </p>
+  );
+}
+
+function DirectConsequencesSection({ consequences }: { consequences: readonly DirectConsequence[] }) {
+  const [open, setOpen] = useState(false);
+  if (consequences.length === 0) return null;
+  return (
+    <details
+      open={open}
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+      style={{ borderTop: "1px solid var(--border, rgba(255,255,255,0.08))", paddingTop: "0.75rem" }}
+    >
+      <summary
+        style={{
+          cursor: "pointer",
+          fontSize: "0.7rem",
+          color: "var(--text-muted)",
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          listStyle: "none",
+          display: "flex",
+          alignItems: "center",
+          gap: "0.4rem",
+          userSelect: "none",
+        }}
+      >
+        <span style={{ transition: "transform 0.15s", display: "inline-block", transform: open ? "rotate(90deg)" : "rotate(0deg)" }}>›</span>
+        Direct consequences
+      </summary>
+      {open && (
+        <ul
+          style={{
+            marginTop: "0.6rem",
+            paddingLeft: "1rem",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.3rem",
+          }}
+        >
+          {consequences.map((c, i) => (
+            <li
+              key={i}
+              style={{
+                fontSize: "0.8125rem",
+                color: "var(--text-secondary, var(--text-muted))",
+                lineHeight: 1.5,
+              }}
+            >
+              {c.label}
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
+  );
 }
 
 export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, onDisplayPatch }: ChroniclePanelProps) {
@@ -45,14 +134,12 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
     }
   }, [gameId]);
 
-  // Auto-open when the turn phase transitions to news
   useEffect(() => {
     if (phase === "news") {
       void fetchChronicle().then(() => setOpen(true));
     }
   }, [phase, fetchChronicle]);
 
-  // Open when triggered from outside (e.g. after resolution completes)
   useEffect(() => {
     if (forceOpen) {
       void fetchChronicle().then(() => setOpen(true));
@@ -95,6 +182,7 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
   const currentEntry = entries[cursor];
   const isAtEnd = cursor >= totalEntries - 1;
   const hasEntries = totalEntries > 0;
+  const hasConsequences = (currentEntry?.directConsequences?.length ?? 0) > 0;
 
   return (
     <>
@@ -153,7 +241,9 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
             )}
 
             {currentEntry && (
-              <article style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+              <article style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <EntryHeader entry={currentEntry} />
+
                 <p
                   style={{
                     fontSize: "1.125rem",
@@ -164,6 +254,24 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
                 >
                   {currentEntry.body}
                 </p>
+
+                {currentEntry.openPressure && (
+                  <p
+                    style={{
+                      fontSize: "0.75rem",
+                      color: "var(--text-muted)",
+                      margin: 0,
+                      fontStyle: "italic",
+                      letterSpacing: "0.04em",
+                    }}
+                  >
+                    ↳ situation unresolved
+                  </p>
+                )}
+
+                {hasConsequences && (
+                  <DirectConsequencesSection consequences={currentEntry.directConsequences!} />
+                )}
 
                 {error && (
                   <p style={{ color: "var(--text-error, #e53e3e)", fontSize: "0.875rem", margin: 0 }}>{error}</p>

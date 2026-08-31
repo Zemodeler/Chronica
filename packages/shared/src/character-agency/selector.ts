@@ -31,10 +31,35 @@ export function selectRelevantCharacters(
   world: WorldState,
   playerCharacterId: string,
   maxCharacters = MAX_CHARACTERS_PER_TURN,
+  priorityCharacterIds: readonly string[] = [],
 ): SelectedCharacter[] {
   const scored: ScoredCharacter[] = [];
-  const nemesisId = world.nemesis?.active ? world.nemesis.characterId : null;
+  // Multi-slot nemeses: all active ones score highly
+  const activeNemesisIds = new Set<string>(
+    [
+      ...(world.nemeses ?? []).filter((n) => n.active).map((n) => n.characterId),
+      // Legacy single-slot fallback
+      ...(world.nemesis?.active && world.nemesis.characterId ? [world.nemesis.characterId] : []),
+    ].filter(Boolean),
+  );
   const currentStep = world.elapsedStep;
+  const priorityCharacterIdSet = new Set(priorityCharacterIds);
+
+  // Chronicle-weighted relevance scoring (recency decay)
+  const roleWeight: Record<string, number> = { protagonist: 100, antagonist: 90, participant: 50, mentioned: 20 };
+  function chronicleScore(characterId: string): number {
+    const entry = (world.characterRelevance ?? []).find((r) => r.characterId === characterId);
+    if (!entry) return 0;
+    let total = 0;
+    const RECENT_TURNS = 5;
+    for (const appearance of entry.chronicleAppearances) {
+      const turnsAgo = Math.max(0, currentStep - appearance.atStep);
+      if (turnsAgo > RECENT_TURNS) continue;
+      const recencyWeight = Math.pow(0.8, turnsAgo);
+      total += (roleWeight[appearance.role] ?? 20) * recencyWeight;
+    }
+    return total;
+  }
 
   // Build a set of encounter participant IDs for the player (recent interactions).
   const recentEncounterPartnerIds = new Set<string>();
@@ -82,11 +107,25 @@ export function selectRelevantCharacters(
     const tier: ScoredCharacter["tier"] = "background";
     const reasons: string[] = [];
 
+    // A pending conversation promise is a direct, durable reason to consider
+    // this character during the same turn's advice phase.
+    if (priorityCharacterIdSet.has(character.id)) {
+      score += 500;
+      reasons.push("pending-dialogue-commitment");
+    }
+
     // Rule 1: Nemesis — always included, top priority.
-    const isNemesis = nemesisId === character.id;
+    const isNemesis = activeNemesisIds.has(character.id);
     if (isNemesis) {
       score += 1000;
       reasons.push("nemesis");
+    }
+
+    // Rule 1b: Chronicle-weighted relevance score.
+    const cScore = chronicleScore(character.id);
+    if (cScore > 0) {
+      score += Math.min(cScore * 2, 600); // cap at 600 so it doesn't dominate nemesis
+      reasons.push(`chronicle-score:${Math.round(cScore)}`);
     }
 
     // Rule 2: Recently interacted with player.

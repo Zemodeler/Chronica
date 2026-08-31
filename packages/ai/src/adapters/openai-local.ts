@@ -10,6 +10,9 @@ const JSON_MODE_OPERATIONS = new Set<AiOperation>([
   "propose_far_events",
   "propose_coarse_events",
   "character_director",
+  "reaction_director",
+  "simulator",
+  "world_director",
   "chronicle_narrator",
   "enrich_npc_profile",
   "resolve_contact",
@@ -32,6 +35,9 @@ const STANDARD_TIER_OPERATIONS = new Set<AiOperation>([
   "propose_near_events",
   "chronicle_narrator",
   "character_director",
+  "reaction_director",
+  "simulator",
+  "world_director",
   "workflow_manager",
 ]);
 
