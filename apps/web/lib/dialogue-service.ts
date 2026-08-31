@@ -4,6 +4,7 @@ import { createAiAdapter, callWithCoinGate, InsufficientCoinsError } from "@chro
 import {
   appendMessage,
   createDatabase,
+  createGroupSession,
   findOrOpenSession,
   getCharacterKnowledgebase,
   getOrCreateNpcKnowledgebase,
@@ -11,6 +12,8 @@ import {
   getWorldView,
   insertSharedEntry,
   listNpcKnowledgebases,
+  listGameNpcRecords,
+  insertGameNpcRecord,
   listPoolEntries,
   listSessionMessages,
   listSessions,
@@ -24,7 +27,7 @@ import {
   type SessionRow,
   type SharedEntryRow,
 } from "@chronica/db";
-import type { CharacterKnowledgebase, ConversationConsequence, ConversationMemoryEntry, NpcChatKnowledgebase } from "@chronica/shared";
+import type { Character, CharacterKnowledgebase, ConversationConsequence, ConversationMemoryEntry, NpcChatKnowledgebase } from "@chronica/shared";
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { ChronicaDatabase } from "@chronica/db";
@@ -41,7 +44,7 @@ export { InsufficientCoinsError };
 // ── Shared knowledgebase pool computation ────────────────────────────────────
 
 interface PoolSpec {
-  readonly poolType: "polity" | "province" | "dynasty";
+  readonly poolType: "game" | "polity" | "province" | "dynasty";
   readonly poolKey: string;
 }
 
@@ -51,6 +54,7 @@ function computeNpcPools(
   worldCharacters: readonly WorldCharacterRef[],
 ): PoolSpec[] {
   const specs: PoolSpec[] = [];
+  specs.push({ poolType: "game", poolKey: kb.gameId });
   const wc = worldCharacters.find((c) => c.id === npcCharacterId);
   if (wc?.polityId) specs.push({ poolType: "polity", poolKey: wc.polityId });
   if (wc?.dynastyId) specs.push({ poolType: "dynasty", poolKey: wc.dynastyId });
@@ -253,7 +257,7 @@ export interface DialogueCallResult {
   unavailableReason: string | null;
 }
 
-export async function generateDialogueReply(input: DialogueCallInput): Promise<DialogueCallResult> {
+export async function generateDialogueReply(input: DialogueCallInput & { readonly appendPlayerMessage?: boolean }): Promise<DialogueCallResult> {
   const {
     db, userId, gameId, playerId, playerCharacterId, playerCharacterName, playerKnowledgebase,
     npcCharacterId, sessionId, channel, playerMessageBody, period, currentStep, continuityTier,
@@ -263,10 +267,10 @@ export async function generateDialogueReply(input: DialogueCallInput): Promise<D
   const kb = await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcCharacterId);
 
   if (!kb.isAvailable) {
-    const playerMsg = await appendMessage(db, sessionId, playerCharacterId, true, playerMessageBody);
+    const playerMsg = input.appendPlayerMessage === false ? null : await appendMessage(db, sessionId, playerCharacterId, true, playerMessageBody);
     await touchSession(db, sessionId);
     return {
-      playerMessage: toMsgShape(playerMsg),
+      playerMessage: playerMsg === null ? { id: "", sessionId, sequence: -1, speakerCharacterId: playerCharacterId, isPlayerMessage: true, body: playerMessageBody } : toMsgShape(playerMsg),
       npcReply: null,
       unavailableReason: `${kb.canonicalName} is not reachable right now.`,
     };
@@ -289,7 +293,7 @@ export async function generateDialogueReply(input: DialogueCallInput): Promise<D
   );
 
   const npcBody = result.content.trim();
-  const playerMsg = await appendMessage(db, sessionId, playerCharacterId, true, playerMessageBody);
+  const playerMsg = input.appendPlayerMessage === false ? null : await appendMessage(db, sessionId, playerCharacterId, true, playerMessageBody);
   const npcMsg = await appendMessage(db, sessionId, npcCharacterId, false, npcBody);
   await touchSession(db, sessionId);
 
@@ -304,14 +308,14 @@ export async function generateDialogueReply(input: DialogueCallInput): Promise<D
   });
   await recordInteraction(db, kb.id, relevancyDelta);
 
-  // Extract and propagate shared knowledge in the background — does not block the response
-  void extractAndPropagateKnowledge(
+  // Keep the request connection alive until extraction has completed. Failures are logged internally.
+  await extractAndPropagateKnowledge(
     db, userId, gameId, npcCharacterId, sessionId,
     npcBody, sharedEntries, pools, currentStep,
   );
 
   return {
-    playerMessage: toMsgShape(playerMsg),
+    playerMessage: playerMsg === null ? { id: "", sessionId, sequence: -1, speakerCharacterId: playerCharacterId, isPlayerMessage: true, body: playerMessageBody } : toMsgShape(playerMsg),
     npcReply: toMsgShape(npcMsg),
     unavailableReason: null,
   };
@@ -360,20 +364,52 @@ interface DiscoverContactInput {
   playerRoleLabel: string;
   period: string;
   query: string;
+  characterId?: string;
 }
 
 interface DiscoverContactOutput {
-  status: "found" | "unavailable";
+  status: "found" | "choice" | "unavailable";
   sessionId?: string;
   knownName?: string;
   explanation?: string;
+  candidates?: { characterId: string; name: string; roleLabel: string }[];
 }
+
+const normalizeContactQuery = (value: string): string => value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 export async function discoverContact(input: DiscoverContactInput): Promise<DiscoverContactOutput> {
   const {
     db, userId, gameId, playerId, playerCharacterId, playerCharacterName,
-    playerLocationProvinceId, playerRoleLabel, period, query,
+    playerLocationProvinceId, playerRoleLabel, period, query, characterId,
   } = input;
+
+  const worldView = await getWorldView(db, gameId);
+  if (!worldView) return { status: "unavailable", explanation: "This world is unavailable." };
+  const registered = await listGameNpcRecords(db, gameId);
+  const candidates = [
+    ...worldView.world.characters.map((character) => ({ character, roleLabel: character.officeId ?? "contact" })),
+    ...registered.map((record) => ({ character: record.character, roleLabel: record.roleLabel })),
+  ];
+  const unique = [...new Map(candidates.map((candidate) => [candidate.character.id, candidate])).values()];
+  if (characterId) {
+    const selected = unique.find((candidate) => candidate.character.id === characterId && candidate.character.alive);
+    if (!selected) return { status: "unavailable", explanation: "That contact is no longer available." };
+    const session = await findOrOpenSession(db, gameId, playerId, selected.character.id);
+    return { status: "found", sessionId: session.id, knownName: selected.character.name };
+  }
+  const normalized = normalizeContactQuery(query);
+  const matches = unique.filter((candidate) => candidate.character.alive && (
+    normalizeContactQuery(candidate.character.name).includes(normalized)
+    || normalized.includes(normalizeContactQuery(candidate.character.name))
+    || normalizeContactQuery(candidate.roleLabel).includes(normalized)
+    || normalized.includes(normalizeContactQuery(candidate.roleLabel))
+  ));
+  if (matches.length === 1) {
+    const match = matches[0]!;
+    const session = await findOrOpenSession(db, gameId, playerId, match.character.id);
+    return { status: "found", sessionId: session.id, knownName: match.character.name };
+  }
+  if (matches.length > 1) return { status: "choice", candidates: matches.slice(0, 8).map((match) => ({ characterId: match.character.id, name: match.character.name, roleLabel: match.roleLabel })) };
 
   const existingKbs = await listNpcKnowledgebases(db, gameId, playerId);
   const existingContactNames = existingKbs.map((kb) => kb.canonicalName);
@@ -419,12 +455,25 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
 
   // Check if this matches an existing contact
   if (parsed.characterId !== null) {
-    const existingSession = await findOrOpenSession(db, gameId, playerId, parsed.characterId);
-    return { status: "found", sessionId: existingSession.id, knownName: parsed.name };
+    const existing = unique.find((candidate) => candidate.character.id === parsed.characterId && candidate.character.alive);
+    if (existing === undefined) return { status: "unavailable", explanation: "That person is not recorded in this world." };
+    const existingSession = await findOrOpenSession(db, gameId, playerId, existing.character.id);
+    return { status: "found", sessionId: existingSession.id, knownName: existing.character.name };
   }
 
   // New character — generate an ID and seed their knowledgebase
   const npcCharacterId = `npc:discovered:${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  const province = worldView.world.map.provinces.find((p) => p.id === parsed.locationProvinceId)
+    ?? worldView.world.map.provinces.find((p) => p.id === playerLocationProvinceId)
+    ?? worldView.world.map.provinces[0];
+  if (!province) return { status: "unavailable", explanation: "No valid location is available for that contact." };
+  const character: Character = {
+    id: npcCharacterId, name: parsed.name, cultureId: "local", faithId: null, dynastyId: null,
+    locationProvinceId: province.id, polityId: province.controllerPolityId, ageYearsAtStart: 35, officeId: null,
+    personalAccountId: `${npcCharacterId}:abstract`, skills: { martial: 35, intrigue: 35, learning: 35, piety: 35, stewardship: 35, diplomacy: 35, body: 50, subSkills: {} },
+    traits: [], healthBps: 8_000, prestigeBps: 3_000, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null,
+  };
+  await insertGameNpcRecord(db, gameId, character, parsed.roleLabel);
   await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcCharacterId, {
     canonicalName: parsed.name,
     personalitySummary: parsed.personalitySummary,
@@ -434,6 +483,15 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
   const session = await findOrOpenSession(db, gameId, playerId, npcCharacterId, "correspondence");
 
   return { status: "found", sessionId: session.id, knownName: parsed.name };
+}
+
+export async function createDialogueGroup(db: ChronicaDatabase, gameId: string, playerId: string, participantIds: string[]) {
+  const ids = [...new Set(participantIds)];
+  if (ids.length < 2) throw new Error("Choose at least two contacts.");
+  const sessions = await listSessions(db, gameId, playerId);
+  const eligible = new Set(sessions.filter((session) => !session.isGroup && session.npcCharacterId !== null).map((session) => session.npcCharacterId!));
+  if (!ids.every((id) => eligible.has(id))) throw new Error("Group participants must be existing contacts.");
+  return createGroupSession(db, gameId, playerId, ids);
 }
 
 // ── Request context resolution (used by API routes) ─────────────────────────
@@ -475,9 +533,10 @@ export async function resolveDialogueContext(gameId: string): Promise<DialogueCo
       .limit(1);
     if (player === undefined) { await close(); return null; }
 
-    const [worldView, playerKnowledgebase] = await Promise.all([
+    const [worldView, playerKnowledgebase, registeredNpcs] = await Promise.all([
       getWorldView(db, gameId),
       getCharacterKnowledgebase(db, gameId, player.id),
+      listGameNpcRecords(db, gameId),
     ]);
     if (worldView === undefined) { await close(); return null; }
 
@@ -494,7 +553,8 @@ export async function resolveDialogueContext(gameId: string): Promise<DialogueCo
     const tier = (continuity?.tier ?? "ordinary") as "ordinary" | "remembered" | "principal";
     const currentStep = world.elapsedStep ?? 0;
 
-    const worldCharacters: WorldCharacterRef[] = world.characters.map((c) => ({
+    const allCharacters = [...world.characters, ...registeredNpcs.map((record) => record.character)];
+    const worldCharacters: WorldCharacterRef[] = allCharacters.map((c) => ({
       id: c.id,
       name: c.name,
       dynastyId: c.dynastyId,

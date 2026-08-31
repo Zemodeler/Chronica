@@ -70,6 +70,8 @@ describe("buildPlayerKnowledgeSection", () => {
       canonicalName: "Marcus Tulia",
       personalitySummary: "A cautious family friend.",
       relationshipLabel: "neutral",
+      declaredConnection: "family friend",
+      declaredConnectionNotes: "Knows the family well.",
       relationshipScore: 0,
       conversationMemory: [],
       significantEvents: [],

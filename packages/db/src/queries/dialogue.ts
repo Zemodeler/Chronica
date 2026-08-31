@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
-import type { ConversationConsequence, ConversationMemoryEntry, NpcChatKnowledgebase } from "@chronica/shared";
+import type { Character, ConversationConsequence, ConversationMemoryEntry, NpcChatKnowledgebase } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
-import { dialogueMessages, dialogueSessions, npcChatKnowledgebases } from "../schema/dialogue";
+import { dialogueMessages, dialogueSessions, gameNpcRecords, npcChatKnowledgebases } from "../schema/dialogue";
 
 // ── Session management ──────────────────────────────────────────────────────
 
@@ -162,6 +162,8 @@ export interface KnowledgebaseRow {
   readonly canonicalName: string;
   readonly personalitySummary: string;
   readonly relationshipLabel: string;
+  readonly declaredConnection: string;
+  readonly declaredConnectionNotes: string;
   readonly relationshipScore: number;
   readonly conversationMemory: ConversationMemoryEntry[];
   readonly significantEvents: string[];
@@ -182,6 +184,8 @@ export async function getOrCreateNpcKnowledgebase(
     personalitySummary?: string;
     locationProvinceId?: string | null;
     relationshipLabel?: string;
+    declaredConnection?: string;
+    declaredConnectionNotes?: string;
   },
 ): Promise<KnowledgebaseRow> {
   return db.transaction(async (tx) => {
@@ -209,6 +213,8 @@ export async function getOrCreateNpcKnowledgebase(
         personalitySummary: seed?.personalitySummary ?? "",
         locationProvinceId: seed?.locationProvinceId ?? null,
         relationshipLabel: seed?.relationshipLabel ?? "neutral",
+        declaredConnection: seed?.declaredConnection ?? "contact",
+        declaredConnectionNotes: seed?.declaredConnectionNotes ?? "",
       })
       .returning();
     if (created === undefined) throw new Error("Failed to create NPC knowledgebase.");
@@ -222,6 +228,8 @@ export async function updateNpcKnowledgebase(
   patch: {
     personalitySummary?: string;
     relationshipLabel?: string;
+    declaredConnection?: string;
+    declaredConnectionNotes?: string;
     relationshipScore?: number;
     conversationMemory?: ConversationMemoryEntry[];
     significantEvents?: string[];
@@ -280,6 +288,8 @@ export function toNpcChatKnowledgebase(row: KnowledgebaseRow): NpcChatKnowledgeb
     canonicalName: row.canonicalName,
     personalitySummary: row.personalitySummary,
     relationshipLabel: row.relationshipLabel as NpcChatKnowledgebase["relationshipLabel"],
+    declaredConnection: row.declaredConnection,
+    declaredConnectionNotes: row.declaredConnectionNotes,
     relationshipScore: row.relationshipScore,
     conversationMemory: row.conversationMemory,
     significantEvents: row.significantEvents,
@@ -289,6 +299,17 @@ export function toNpcChatKnowledgebase(row: KnowledgebaseRow): NpcChatKnowledgeb
     locationProvinceId: row.locationProvinceId,
     isAvailable: row.isAvailable,
   };
+}
+
+export interface GameNpcRecordRow { readonly characterId: string; readonly character: Character; readonly roleLabel: string; }
+
+export async function listGameNpcRecords(db: ChronicaDatabase, gameId: string): Promise<readonly GameNpcRecordRow[]> {
+  return (await db.select({ characterId: gameNpcRecords.characterId, character: gameNpcRecords.character, roleLabel: gameNpcRecords.roleLabel })
+    .from(gameNpcRecords).where(eq(gameNpcRecords.gameId, gameId))) as GameNpcRecordRow[];
+}
+
+export async function insertGameNpcRecord(db: ChronicaDatabase, gameId: string, character: Character, roleLabel: string): Promise<void> {
+  await db.insert(gameNpcRecords).values({ gameId, characterId: character.id, character, roleLabel });
 }
 
 /** Increments interactionCount and updates relevancyScore by delta. */
