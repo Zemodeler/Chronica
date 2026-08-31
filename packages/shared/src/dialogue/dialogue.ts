@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema } from "../material-state";
+import { CharacterSkillsSchema } from "../characters/character";
 
 // Character dialogue (docs/17, ADR-0025).
 //
@@ -56,7 +57,15 @@ export const NpcChatKnowledgebaseSchema = z
     npcCharacterId: z.string(),
     canonicalName: z.string().trim().min(1),
     personalitySummary: z.string().max(600),
-    relationshipLabel: z.enum(["ally", "rival", "neutral", "suspicious", "superior", "subordinate"]),
+    biography: z.string().max(600).nullable(),
+    culture: z.string().max(120).nullable(),
+    faith: z.string().max(120).nullable(),
+    socioEconomicClass: z.string().max(120).nullable(),
+    role: z.string().max(200).nullable(),
+    skills: CharacterSkillsSchema.nullable(),
+    goals: z.array(z.string().max(240)),
+    backstory: z.array(z.string().max(400)),
+    relationshipLabel: z.string().trim().min(1).max(80),
     declaredConnection: z.string().trim().min(1).max(160),
     declaredConnectionNotes: z.string().max(600),
     relationshipScore: z.number().int().min(-100).max(100),

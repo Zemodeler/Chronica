@@ -32,7 +32,7 @@ const AssessParseSchema = OrderAssessmentSchema.omit({ directiveId: true });
 const VerdictParseSchema = VerdictSchema.omit({ directiveId: true });
 import type { AiAdapter } from "@chronica/ai";
 import type { ChronicaDatabase } from "@chronica/db";
-import { commitResolution, failTurn, getOrdersForTurn, claimTurnForResolution, ingestChronicleEntries, getCharacterKnowledgebase } from "@chronica/db";
+import { commitResolution, failTurn, getOrdersForTurn, claimTurnForResolution, ingestChronicleEntries, getCharacterKnowledgebase, listPendingNpcCommitments, resolveNpcCommitments } from "@chronica/db";
 import type { ChronicleEntryInput } from "@chronica/db";
 import type { ResolutionProgress, ResolutionStep } from "./types";
 import { STEP_LABELS } from "./types";
@@ -604,6 +604,28 @@ export async function resolveTurn(
       console.log(`${tag()} [execute:queued] actionId=${inv.actionId} actorId=${inv.actorId} params=${JSON.stringify(inv.parameters)}`);
     }
     const { world: newWorld, log: workflowLog } = executeWorkflows(allInvocations, world, atStep);
+    // Dialogue promises become pending inputs, never immediate chat effects. Resolution applies only bounded, valid outcomes.
+    const pendingCommitments = await listPendingNpcCommitments(db, gameId);
+    const fulfilledCommitmentIds: string[] = [];
+    const deferredCommitmentIds: string[] = [];
+    const commitmentChronicle: ChronicleEntryInput[] = [];
+    for (const commitment of pendingCommitments) {
+      const npc = newWorld.characters.find((character) => character.id === commitment.npcCharacterId);
+      if (!npc?.alive || commitment.conditions !== "") { deferredCommitmentIds.push(commitment.id); continue; }
+      if (commitment.promiseType === "money") {
+        const account = newWorld.material.accounts.find((candidate) => candidate.owner.kind === "character" && candidate.owner.id === commitment.playerCharacterId && candidate.status === "active");
+        if (account) {
+          const boundedAmount = 25;
+          newWorld.material.accounts = newWorld.material.accounts.map((candidate) => candidate.id === account.id ? { ...candidate, balance: candidate.balance + boundedAmount } : candidate);
+          fulfilledCommitmentIds.push(commitment.id);
+          commitmentChronicle.push({ sequence: 0, scope: "dialogue_commitment", scopeRef: commitment.id, audience: "all_players", body: `${npc.name} fulfilled a promised, modest financial help.`, atStep, materialConsequence: true });
+          continue;
+        }
+      } else {
+        fulfilledCommitmentIds.push(commitment.id);
+        commitmentChronicle.push({ sequence: 0, scope: "dialogue_commitment", scopeRef: commitment.id, audience: "all_players", body: `${npc.name} fulfilled a promised ${commitment.promiseType}.`, atStep, materialConsequence: false });
+      }
+    }
     for (const entry of workflowLog) {
       if (entry.outcome.ok) {
         console.log(`${tag()} [execute:ok] actionId=${entry.invocation.actionId} summary="${entry.outcome.result.summary}"`);
@@ -635,7 +657,7 @@ export async function resolveTurn(
 
     // ── Step 6: Write chronicle ──────────────────────────────────────────────
     emit(onProgress, "chronicle");
-    const chronicleInputs = buildChronicleEntries(
+    let chronicleInputs = buildChronicleEntries(
       verdicts,
       interpretations,
       worldEvents,
@@ -644,6 +666,7 @@ export async function resolveTurn(
       atStep,
       displayPatchByInvocation,
     );
+    chronicleInputs = [...chronicleInputs, ...commitmentChronicle].map((entry, sequence) => ({ ...entry, sequence }));
 
     // Attach the overall display patch to the last material-consequence entry
     if (displayPatch && chronicleInputs.length > 0) {
@@ -686,6 +709,8 @@ export async function resolveTurn(
       chronicleEntries: chronicleInputs,
       stopReason: "player_decision",
     });
+    await resolveNpcCommitments(db, fulfilledCommitmentIds, "fulfilled", atStep, "Validated and fulfilled during turn resolution.");
+    await resolveNpcCommitments(db, deferredCommitmentIds, "deferred", atStep, "Conditions, availability, or reachability require a later turn.");
 
     // Ingest chronicle into shared knowledgebase (best-effort).
     // Must be awaited here so the DB connection is still open; the route closes

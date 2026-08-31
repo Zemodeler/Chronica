@@ -22,6 +22,7 @@ export const AiOperationSchema = z.enum([
   "resolve_role",
   "crystallise",
   "resolve_contact",
+  "enrich_npc_profile",
   "dialogue_ordinary",
   "dialogue_principal",
   "extract_knowledge",
