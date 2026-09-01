@@ -286,47 +286,52 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
     .limit(1);
   if (game === undefined) return undefined;
 
-  const [snapshot] = await db
-    .select({
-      turnId: worldSnapshots.turnId,
-      state: worldSnapshots.state,
-      turnIndex: turns.index,
-      turnStatus: turns.status,
-    })
-    .from(worldSnapshots)
-    .innerJoin(turns, eq(turns.id, worldSnapshots.turnId))
-    .where(eq(turns.gameId, gameId))
-    .orderBy(desc(turns.index))
-    .limit(1);
-  const open = await openTurn(db, gameId);
-  const [latestTurn] = open === undefined
-    ? await db.select({ id: turns.id, index: turns.index, status: turns.status }).from(turns).where(eq(turns.gameId, gameId)).orderBy(desc(turns.index)).limit(1)
-    : [];
+  // Queries 2, 3, 6, 8 are all independent — run in parallel after game fetch.
+  const [snapshotRows, open, totalRow, svRows] = await Promise.all([
+    db
+      .select({
+        turnId: worldSnapshots.turnId,
+        state: worldSnapshots.state,
+        turnIndex: turns.index,
+        turnStatus: turns.status,
+      })
+      .from(worldSnapshots)
+      .innerJoin(turns, eq(turns.id, worldSnapshots.turnId))
+      .where(eq(turns.gameId, gameId))
+      .orderBy(desc(turns.index))
+      .limit(1),
+    openTurn(db, gameId),
+    db
+      .select({ value: count(players.id) })
+      .from(players)
+      .where(and(eq(players.gameId, gameId), eq(players.status, "active"))),
+    db
+      .select({ definition: scenarioVersions.definition, initialWorld: scenarioVersions.initialWorld, mapAssetId: scenarioVersions.mapAssetId })
+      .from(scenarioVersions)
+      .where(and(eq(scenarioVersions.scenarioId, game.scenarioId), eq(scenarioVersions.version, game.scenarioVersion)))
+      .limit(1),
+  ]);
+  const [snapshot] = snapshotRows;
+  const [svRow] = svRows;
+  const totalPlayers = totalRow[0]?.value ?? 0;
 
-  // If the open turn is collecting but a "news" turn also exists (the previous turn
-  // is pending chronicle read), surface "news" so the game shell shows the chronicle.
-  const [newsTurn] = open?.status === "collecting"
-    ? await db.select({ id: turns.id }).from(turns).where(and(eq(turns.gameId, gameId), eq(turns.status, "news"))).limit(1)
-    : [];
-  const hasPendingNews = newsTurn !== undefined;
-
-  const [totalRow] = await db
-    .select({ value: count(players.id) })
-    .from(players)
-    .where(and(eq(players.gameId, gameId), eq(players.status, "active")));
-  const totalPlayers = totalRow?.value ?? 0;
-
-  let submittedPlayers = 0;
-  if (open !== undefined) {
-    const submitted = await db.select({ playerId: orders.playerId }).from(orders).where(eq(orders.turnId, open.id));
-    submittedPlayers = submitted.length;
-  }
-
-  const [svRow] = await db
-    .select({ definition: scenarioVersions.definition, initialWorld: scenarioVersions.initialWorld, mapAssetId: scenarioVersions.mapAssetId })
-    .from(scenarioVersions)
-    .where(and(eq(scenarioVersions.scenarioId, game.scenarioId), eq(scenarioVersions.version, game.scenarioVersion)))
-    .limit(1);
+  // Conditional queries depend on `open` — batch them together.
+  const [latestTurnRows, newsTurnRows, submittedRows] = await Promise.all([
+    open === undefined
+      ? db.select({ id: turns.id, index: turns.index, status: turns.status }).from(turns).where(eq(turns.gameId, gameId)).orderBy(desc(turns.index)).limit(1)
+      : Promise.resolve([] as { id: string; index: number; status: string }[]),
+    // If the open turn is collecting but a "news" turn also exists (the previous turn
+    // is pending chronicle read), surface "news" so the game shell shows the chronicle.
+    open?.status === "collecting"
+      ? db.select({ id: turns.id }).from(turns).where(and(eq(turns.gameId, gameId), eq(turns.status, "news"))).limit(1)
+      : Promise.resolve([] as { id: string }[]),
+    open !== undefined
+      ? db.select({ playerId: orders.playerId }).from(orders).where(eq(orders.turnId, open.id))
+      : Promise.resolve([] as { playerId: string }[]),
+  ]);
+  const [latestTurn] = latestTurnRows;
+  const hasPendingNews = newsTurnRows[0] !== undefined;
+  const submittedPlayers = submittedRows.length;
   let scenarioClock: ScenarioClock | undefined;
   if (svRow !== undefined) {
     const parsed = ScenarioDefinitionSchema.safeParse(svRow.definition);
@@ -389,39 +394,45 @@ export interface ChronicleView {
  * (writeFinalSummary) lives on the last turn's chronicle, not a turn of its own.
  */
 export async function getChronicleForLatestTurn(db: ChronicaDatabase, gameId: string): Promise<ChronicleView | undefined> {
-  const [game] = await db
-    .select({ status: games.status, scenarioId: games.scenarioId, scenarioVersion: games.scenarioVersion })
-    .from(games)
-    .where(eq(games.id, gameId))
-    .limit(1);
-  if (game === undefined) return undefined;
+  // game and turn are both independent — fetch in parallel.
+  const [gameRows, turnRows] = await Promise.all([
+    db
+      .select({ status: games.status, scenarioId: games.scenarioId, scenarioVersion: games.scenarioVersion })
+      .from(games)
+      .where(eq(games.id, gameId))
+      .limit(1),
+    db
+      .select({ id: turns.id, index: turns.index, elapsedStepEnd: turns.elapsedStepEnd })
+      .from(turns)
+      .where(and(eq(turns.gameId, gameId), eq(turns.status, "news")))
+      .orderBy(desc(turns.index))
+      .limit(1),
+  ]);
+  const [game] = gameRows;
+  const [turn] = turnRows;
+  if (game === undefined || turn === undefined) return undefined;
 
-  const [turn] = await db
-    .select({ id: turns.id, index: turns.index, elapsedStepEnd: turns.elapsedStepEnd })
-    .from(turns)
-    .where(and(eq(turns.gameId, gameId), eq(turns.status, "news")))
-    .orderBy(desc(turns.index))
-    .limit(1);
-  if (turn === undefined) return undefined;
-
-  const rows = await db
-    .select({
-      id: chronicleEntries.id,
-      sequence: chronicleEntries.sequence,
-      body: chronicleEntries.body,
-      audience: chronicleEntries.audience,
-      playerInvolvement: chronicleEntries.playerInvolvement,
-      facts: chronicleEntries.facts,
-    })
-    .from(chronicleEntries)
-    .where(eq(chronicleEntries.turnId, turn.id))
-    .orderBy(chronicleEntries.sequence);
-
-  const [scenarioVersion] = await db
-    .select({ definition: scenarioVersions.definition })
-    .from(scenarioVersions)
-    .where(and(eq(scenarioVersions.scenarioId, game.scenarioId), eq(scenarioVersions.version, game.scenarioVersion)))
-    .limit(1);
+  // chronicle entries (needs turn.id) and scenario version (needs game.scenarioId) — fetch in parallel.
+  const [rows, scenarioVersionRows] = await Promise.all([
+    db
+      .select({
+        id: chronicleEntries.id,
+        sequence: chronicleEntries.sequence,
+        body: chronicleEntries.body,
+        audience: chronicleEntries.audience,
+        playerInvolvement: chronicleEntries.playerInvolvement,
+        facts: chronicleEntries.facts,
+      })
+      .from(chronicleEntries)
+      .where(eq(chronicleEntries.turnId, turn.id))
+      .orderBy(chronicleEntries.sequence),
+    db
+      .select({ definition: scenarioVersions.definition })
+      .from(scenarioVersions)
+      .where(and(eq(scenarioVersions.scenarioId, game.scenarioId), eq(scenarioVersions.version, game.scenarioVersion)))
+      .limit(1),
+  ]);
+  const [scenarioVersion] = scenarioVersionRows;
   const parsedScenario = scenarioVersion === undefined ? null : ScenarioDefinitionSchema.safeParse(scenarioVersion.definition);
   const scenarioClock = parsedScenario?.success ? parsedScenario.data.clock : undefined;
 
