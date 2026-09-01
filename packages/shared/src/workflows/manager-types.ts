@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ProposedInvocationSchema, type ProposedInvocation } from "../actions/orders";
+import { EntityIdSchema } from "../material-state";
 import { TemporaryWorkflowPatchSchema } from "./temporary-patch";
 
 // Workflow Manager types (Issue #6).
@@ -161,6 +162,8 @@ export const ConsolidatedProposalSchema = z
     salience: z.number().int().min(0).max(100),
     scopeTag: z.enum(["star", "near", "far", "coarse"]),
     dedupeGroup: z.string().trim().max(120).optional(),
+    /** Present only for a Character Director proposal, for approval and Chronicle routing. */
+    characterId: EntityIdSchema.optional(),
   })
   .strict();
 export type ConsolidatedProposal = z.infer<typeof ConsolidatedProposalSchema>;
@@ -181,6 +184,49 @@ export const ConsolidatedProposalPackageSchema = z
   .strict();
 export type ConsolidatedProposalPackage = z.infer<typeof ConsolidatedProposalPackageSchema>;
 
+/** The named NPC who carries an approved political event into Chronicle prose. */
+export const ChronicleCastRoleSchema = z.enum([
+  "supporter",
+  "opponent",
+  "spokesperson",
+  "presiding_official",
+  "witness",
+  "negotiator",
+]);
+export type ChronicleCastRole = z.infer<typeof ChronicleCastRoleSchema>;
+
+const NewChronicleCharacterSchema = z
+  .object({
+    /** A proper name, never a generic title such as \"a senator\". */
+    name: z.string().trim().min(2).max(120),
+    polityId: EntityIdSchema.nullable(),
+    locationProvinceId: EntityIdSchema,
+    officeId: EntityIdSchema.nullable().default(null),
+  })
+  .strict();
+
+/**
+ * A World Director-selected cast member for an event. It may name an existing
+ * character, or introduce exactly one new, grounded NPC through the registered
+ * create_world_character workflow.
+ */
+export const ChronicleCastSchema = z
+  .object({
+    role: ChronicleCastRoleSchema,
+    characterId: EntityIdSchema.optional(),
+    newCharacter: NewChronicleCharacterSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (Boolean(value.characterId) === Boolean(value.newCharacter)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Chronicle cast must specify exactly one of characterId or newCharacter.",
+      });
+    }
+  });
+export type ChronicleCast = z.infer<typeof ChronicleCastSchema>;
+
 /** World Director decision on a consolidated proposal. */
 export const WorldDirectorDecisionSchema = z
   .object({
@@ -188,6 +234,8 @@ export const WorldDirectorDecisionSchema = z
     decision: z.enum(["approve", "modify", "defer", "reject"]),
     rationale: z.string().trim().max(400),
     finalWorkflows: z.array(ProposedInvocationSchema).max(4),
+    /** Required for approved political/institutional events; null otherwise. */
+    chronicleCast: ChronicleCastSchema.nullable().default(null),
   })
   .strict();
 export type WorldDirectorDecision = z.infer<typeof WorldDirectorDecisionSchema>;

@@ -29,6 +29,10 @@ export interface ChronicleEntryInput {
   readonly chainId?: string | null;
   readonly chainPosition?: "root" | "reaction" | "spread" | "distant" | "pressure" | null;
   readonly directConsequences?: Array<{ kind: string; label: string; entityId: string | null; quantified: boolean }>;
+  /** Ephemeral cast supplied to the narrator and relevance system before the prose is persisted. */
+  readonly characterMentions?: readonly { characterId: string; role: string }[];
+  /** Ephemeral Chronicle ordering aid. It is deliberately not persisted as world state. */
+  readonly simulatedDurationDays?: number;
   readonly causalFactIds?: readonly string[];
   readonly sourceDirector?: "player" | "character_director" | "reaction_director" | "simulator" | "world_director";
   readonly openPressure?: boolean;

@@ -144,6 +144,11 @@ export const CharacterSchema = z
     alive: z.boolean(),
     /** Set once, never cleared. Confirmed death is final (docs/08). */
     diedAtStep: ElapsedStepSchema.nullable(),
+
+    /** Provenance for NPCs introduced by the World Director at runtime. */
+    createdByDirector: z.boolean().optional(),
+    createdAtStep: ElapsedStepSchema.optional(),
+    creationReason: z.string().trim().min(1).max(320).optional(),
   })
   .strict()
   .superRefine((character, context) => {

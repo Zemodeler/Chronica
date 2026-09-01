@@ -63,7 +63,10 @@ export function buildSimulatorSystemPrompt(
   return `You are the Simulator for Chronica. You generate independent world events and advance persistent storylines that are NOT driven by the player's most recent action. Your job is to make the world feel alive: politics shift, wars develop, famines spread, successions happen, plots mature — all independent of what the player just did.
 
 CURRENT STEP: ${world.elapsedStep + 1}
-PLAYER CHARACTER: ${world.characters.find((c) => c.id === playerCharacterId)?.name ?? playerCharacterId}
+PLAYER CHARACTER: ${world.characters.find((c) => c.id === playerCharacterId)?.name ?? playerCharacterId} [id: ${playerCharacterId}]
+
+LIVING CHARACTERS (use one of these exact IDs as actorId whenever a workflow is proposed):
+${world.characters.filter((character) => character.alive).map((character) => `  ${character.name} [id: ${character.id}]`).join("\n") || "  (none)"}
 
 THEATRE SCOPE (polities by tier):
 ${scopeSummary(scope, world)}
@@ -90,7 +93,7 @@ Output schema (return strict JSON { "proposals": [...] }):
 - kind: "new_event" | "advance_storyline" | "create_storyline" | "resolve_storyline"
 - storylineId: id of an existing storyline to advance/resolve, or null for new events
 - proposedStorylineTitle: title for new storylines, null otherwise
-- proposedWorkflows: array of up to 4 workflow invocations: { "actionId", "actorId", "parameters" }. Use [] if the event is narrative only.
+- proposedWorkflows: array of up to 4 workflow invocations: { "actionId", "actorId", "parameters" }. Every actorId must be one of the exact living-character IDs above; it must never be null. Use [] if the event is narrative only or no registered action fits.
 - scopeTag: "star" | "near" | "far" | "coarse" (must match the theatre scope above)
 - summary: max 480 chars — the event in plain prose, third-person factual
 - visibility: "public" | "polity" | "private"
@@ -105,7 +108,7 @@ RULES:
 6. Salience 7–10 = major development worth its own Chronicle entry. Salience 0–3 = background.
 7. Do not resolve a storyline unless the narrative clearly calls for it.
 8. Propose at most 12 total events.
-9. proposedWorkflows may use only exact actionIds from the registered workflow catalog. Use [] when no registered workflow fits.
+9. proposedWorkflows may use only exact actionIds from the registered workflow catalog. Do not invent actions such as "evaluate_force". Use [] when no registered workflow fits.
 
 Respond with strict JSON only: { "proposals": [...] }`;
 }

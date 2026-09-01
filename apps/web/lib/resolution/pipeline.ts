@@ -16,6 +16,7 @@ import type {
   CharacterKnowledgebase,
   WorkflowAuditBlob,
   NovelActionProposal,
+  ConsolidatedProposalPackage,
 } from "@chronica/shared";
 import {
   OrderInterpretationSchema,
@@ -29,11 +30,13 @@ import {
   applyTemporaryWorkflowPatch,
   selectRelevantCharacters,
   inferTheatre,
+  WORKFLOW_REGISTRY,
 } from "@chronica/shared";
 import { collectPlayerCandidates, collectWorldCandidates, previewPlayerWorkflows, runWorkflowManager } from "./workflow-manager";
 
 const InterpretParseSchema = OrderInterpretationSchema.omit({ directiveId: true });
 const AssessParseSchema = OrderAssessmentSchema.omit({ directiveId: true });
+const VALID_KNOWLEDGE_VISIBILITIES = new Set(["public", "polity", "private"]);
 // Player ownership is assigned from the authenticated turn, never trusted from
 // a model response. This also prevents a malformed `playerId: null` from
 // discarding an otherwise valid adjudication.
@@ -106,6 +109,131 @@ function stripToJson(text: string): string {
     }
   }
   return s;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Accept the two legacy array forms models have emitted for assessment
+ * workflows, then hand the canonical plural form to the schema. Adjudication
+ * remains the authority on whether these hints actually become state changes.
+ */
+function normalizeAssessmentContent(text: string): string {
+  const raw = JSON.parse(stripToJson(text)) as unknown;
+  if (!isRecord(raw) || !Array.isArray(raw["workflow"])) return JSON.stringify(raw);
+
+  const legacy = raw["workflow"];
+  const workflows = Array.isArray(raw["workflows"]) ? raw["workflows"].filter(isRecord) : [];
+  if (typeof legacy[0] === "string" && isRecord(legacy[1])) {
+    workflows.unshift({ actionId: legacy[0], parameters: legacy[1] });
+  } else {
+    workflows.push(...legacy.filter(isRecord));
+  }
+  raw["workflow"] = null;
+  raw["workflows"] = workflows.slice(0, 4);
+  console.warn(`${tag()} [assess] repaired legacy workflow array into workflows`);
+  return JSON.stringify(raw);
+}
+
+/**
+ * An interpretation with no proposed steps is otherwise complete, and occurs
+ * most often for bracketed GM commands. Preserve the model's grounded intent
+ * and targets by supplying the required generic execution step instead of
+ * discarding the entire interpretation.
+ */
+function normalizeInterpretationContent(text: string): string {
+  const raw = JSON.parse(stripToJson(text)) as unknown;
+  if (!isRecord(raw) || !Array.isArray(raw["proposedSteps"]) || raw["proposedSteps"].length > 0) {
+    return JSON.stringify(raw);
+  }
+
+  raw["proposedSteps"] = ["Execute the order as stated."];
+  console.warn(`${tag()} [interpret] supplied a default proposed step for an otherwise valid interpretation`);
+  return JSON.stringify(raw);
+}
+
+/**
+ * Simulator proposals are optional world colour. Remove only malformed
+ * workflow invocations, preserving the valid narrative proposals rather than
+ * rejecting the entire batch because one model field is unusable.
+ */
+function sanitizeSimulatorContent(text: string, world: WorldState): string {
+  const raw = JSON.parse(stripToJson(text)) as unknown;
+  if (!isRecord(raw) || !Array.isArray(raw["proposals"])) return JSON.stringify(raw);
+
+  const characterIds = new Set(world.characters.filter((character) => character.alive).map((character) => character.id));
+  let removed = 0;
+  raw["proposals"] = (raw["proposals"] as unknown[]).map((proposal: unknown) => {
+    if (!isRecord(proposal) || !Array.isArray(proposal["proposedWorkflows"])) return proposal;
+    const proposedWorkflows = (proposal["proposedWorkflows"] as unknown[]).filter((workflow: unknown) => {
+      if (!isRecord(workflow)) {
+        removed += 1;
+        return false;
+      }
+      const valid = typeof workflow["actionId"] === "string"
+        && WORKFLOW_REGISTRY.has(workflow["actionId"])
+        && typeof workflow["actorId"] === "string"
+        && characterIds.has(workflow["actorId"])
+        && isRecord(workflow["parameters"]);
+      if (!valid) removed += 1;
+      return valid;
+    });
+    return { ...proposal, proposedWorkflows };
+  });
+  if (removed > 0) console.warn(`${tag()} [simulator] discarded ${removed} malformed workflow invocation(s); retaining narrative proposals`);
+  return JSON.stringify(raw);
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (isRecord(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * The World Director occasionally copies a valid proposed workflow but emits
+ * actorId: null. Recover its exact source invocation instead of throwing away
+ * the entire decision batch and all of its narrative decisions.
+ */
+function sanitizeWorldDirectorContent(text: string, pkg: ConsolidatedProposalPackage): string {
+  const raw = JSON.parse(stripToJson(text)) as unknown;
+  if (!isRecord(raw) || !Array.isArray(raw["decisions"])) return JSON.stringify(raw);
+
+  let repaired = 0;
+  let removed = 0;
+  raw["decisions"] = (raw["decisions"] as unknown[]).map((decision) => {
+    if (!isRecord(decision) || typeof decision["proposalId"] !== "string" || !Array.isArray(decision["finalWorkflows"])) return decision;
+    const proposed = pkg.proposals.find((proposal) => proposal.id === decision["proposalId"])?.proposedWorkflows ?? [];
+    const finalWorkflows = (decision["finalWorkflows"] as unknown[]).flatMap((workflow) => {
+      if (!isRecord(workflow) || workflow["actorId"] !== null || typeof workflow["actionId"] !== "string" || !isRecord(workflow["parameters"])) {
+        return [workflow];
+      }
+      const exact = proposed.find((candidate) => candidate.actionId === workflow["actionId"] && stableJson(candidate.parameters) === stableJson(workflow["parameters"]));
+      const sameAction = proposed.filter((candidate) => candidate.actionId === workflow["actionId"]);
+      const replacement = exact ?? (sameAction.length === 1 ? sameAction[0] : undefined);
+      if (!replacement) {
+        removed += 1;
+        return [];
+      }
+      repaired += 1;
+      return [replacement];
+    });
+    return { ...decision, finalWorkflows };
+  });
+  if (repaired > 0 || removed > 0) {
+    console.warn(`${tag()} [world_direct] repaired ${repaired} null actorId workflow(s); discarded ${removed} unmatchable workflow(s)`);
+  }
+  return JSON.stringify(raw);
+}
+
+function assessmentWorkflows(assessment: OrderAssessment) {
+  return assessment.workflows.length > 0
+    ? assessment.workflows
+    : assessment.workflow === null ? [] : [assessment.workflow];
 }
 
 async function safeParseJson<T>(
@@ -244,10 +372,93 @@ function deriveExecutedWorkflowConsequences(
   return consequences;
 }
 
+interface ChronicleCharacterMention {
+  readonly characterId: string;
+  readonly role: string;
+}
+
+type ChronicleCastByProposal = ReadonlyMap<string, ChronicleCharacterMention>;
+
+function isPoliticalChronicleEvent(body: string): boolean {
+  return /\b(senate|senator|council|assembly|debate|motion|vote|voted|decree|faction|political|diplomat|negotiat|treaty|envoy|delegation|spokesperson|office)\b/i.test(body);
+}
+
+function roleForPoliticalBody(body: string): string {
+  if (/\b(oppose|opposed|critic|denounce|rival|against|resist)\b/i.test(body)) return "opponent";
+  if (/\b(support|backed|defend|endorse)\b/i.test(body)) return "supporter";
+  if (/\b(presid|chair|convene)\b/i.test(body)) return "presiding_official";
+  if (/\b(treaty|envoy|delegat|negotiat)\b/i.test(body)) return "negotiator";
+  return "spokesperson";
+}
+
+/** Select an established person when the Director did not explicitly cast one. */
+function selectFallbackChronicleCast(
+  world: WorldState,
+  playerCharacterId: string,
+  body: string,
+): ChronicleCharacterMention | undefined {
+  if (!isPoliticalChronicleEvent(body)) return undefined;
+  const player = world.characters.find((character) => character.id === playerCharacterId);
+  const namedPolity = world.map.polities.find((polity) => new RegExp(`\\b${polity.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(body));
+  const targetPolityId = namedPolity?.id ?? player?.polityId ?? null;
+  const candidates = world.characters
+    .filter((character) => character.alive && character.id !== playerCharacterId && (targetPolityId === null || character.polityId === targetPolityId))
+    .map((character) => {
+      const relevance = (world.characterRelevance ?? []).find((entry) => entry.characterId === character.id);
+      const nameMentioned = new RegExp(`\\b${character.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(body);
+      return {
+        character,
+        score: (nameMentioned ? 500 : 0) + (character.officeId ? 100 : 0) + (relevance?.chronicleAppearances.length ?? 0) * 10,
+      };
+    })
+    .sort((left, right) => right.score - left.score || left.character.id.localeCompare(right.character.id));
+  const selected = candidates[0]?.character;
+  return selected ? { characterId: selected.id, role: roleForPoliticalBody(body) } : undefined;
+}
+
+function proposalCast(
+  pkg: ConsolidatedProposalPackage,
+  casts: ChronicleCastByProposal,
+  source: "reaction_director" | "simulator",
+  kind: string,
+  rationale: string,
+): ChronicleCharacterMention | undefined {
+  const proposal = pkg.proposals.find((candidate) =>
+    candidate.sources.includes(source) && candidate.kind === kind && candidate.mergedRationale === rationale,
+  );
+  return proposal ? casts.get(proposal.id) : undefined;
+}
+
+function applyChronicleCast(
+  input: Omit<ChronicleEntryInput, "sequence">,
+  world: WorldState,
+  cast: ChronicleCharacterMention | undefined,
+  playerCharacterId: string,
+): Omit<ChronicleEntryInput, "sequence"> {
+  const explicitCharacter = cast
+    ? world.characters.find((candidate) => candidate.id === cast.characterId && candidate.alive)
+    : undefined;
+  const selected = explicitCharacter ? cast : selectFallbackChronicleCast(world, playerCharacterId, input.body);
+  if (!selected) return input;
+  const character = explicitCharacter ?? world.characters.find((candidate) => candidate.id === selected.characterId && candidate.alive);
+  if (!character) return input;
+  return {
+    ...input,
+    // This factual line is also the narrator fallback: if the rewrite call
+    // fails, the official Chronicle still identifies the human actor.
+    body: `${input.body} Featured figure: ${character.name}, ${selected.role.replace(/_/g, " ")}.`,
+    characterMentions: [selected],
+  };
+}
+
 function buildChronicleEntries(
+  world: WorldState,
   verdicts: readonly Verdict[],
   interpretations: readonly OrderInterpretation[],
   characterSuggestions: readonly CharacterSuggestion[],
+  approvedCharacterIds: ReadonlySet<string>,
+  consolidatedPackage: ConsolidatedProposalPackage,
+  chronicleCasts: ChronicleCastByProposal,
   reactionProposals: readonly ReactionProposal[],
   simulatorProposals: readonly SimulatorProposal[],
   workflowLog: readonly { invocation: ProposedInvocation; outcome: { ok: boolean; result?: { summary: string } } }[],
@@ -258,6 +469,7 @@ function buildChronicleEntries(
 ): ChronicleEntryInput[] {
   interface RawEntry {
     sortKey: number;
+    simulatedDurationDays: number;
     input: Omit<ChronicleEntryInput, "sequence">;
   }
   const raw: RawEntry[] = [];
@@ -274,7 +486,8 @@ function buildChronicleEntries(
       : verdict.rationale;
     raw.push({
       sortKey: 600,
-      input: {
+      simulatedDurationDays: estimatePlayerEventDurationDays(verdict),
+      input: applyChronicleCast({
         scope: "directive",
         scopeRef: verdict.directiveId,
         audience: verdict.knowledgeVisibility === "private" ? "knowledge_scoped" : "all_players",
@@ -285,6 +498,30 @@ function buildChronicleEntries(
         directConsequences: deriveExecutedWorkflowConsequences(executedWorkflowEntries, workflowLog),
         sourceDirector: "player",
         chainPosition: "root",
+      }, world, undefined, playerId),
+    });
+  }
+
+  // Approved Character Director suggestions are events in their own right.
+  // Some make durable goal/plot changes through a workflow; others are
+  // intentional, non-material developments such as a changed relationship.
+  for (const suggestion of characterSuggestions) {
+    if (!approvedCharacterIds.has(suggestion.characterId) || suggestion.salience === 0) continue;
+    const character = world.characters.find((candidate) => candidate.id === suggestion.characterId);
+    const name = character?.name ?? suggestion.characterId;
+    raw.push({
+      sortKey: suggestion.salience * 70,
+      simulatedDurationDays: 1,
+      input: {
+        scope: "character_event",
+        scopeRef: suggestion.characterId,
+        audience: suggestion.visibility === "private" ? "knowledge_scoped" : "all_players",
+        body: `${name}: ${suggestion.rationale}`,
+        atStep,
+        materialConsequence: false,
+        sourceDirector: "character_director",
+        chainPosition: "pressure",
+        characterMentions: [{ characterId: suggestion.characterId, role: "participant" }],
       },
     });
   }
@@ -298,9 +535,11 @@ function buildChronicleEntries(
     const body = logEntries.length > 0
       ? logEntries.map((l) => l!.outcome.result?.summary ?? "").filter(Boolean).join(". ")
       : `[Reaction] ${rp.reactionKind}: ${rp.rationale.slice(0, 120)}`;
+    const cast = proposalCast(consolidatedPackage, chronicleCasts, "reaction_director", rp.reactionKind, rp.rationale);
     raw.push({
       sortKey: rp.salience * 80,
-      input: {
+      simulatedDurationDays: estimateWorkflowDurationDays(rp.proposedWorkflows),
+      input: applyChronicleCast({
         scope: "reaction",
         scopeRef: rp.reactorId,
         audience: rp.visibility === "private" ? "knowledge_scoped" : "all_players",
@@ -309,7 +548,7 @@ function buildChronicleEntries(
         materialConsequence: logEntries.length > 0,
         sourceDirector: "reaction_director",
         chainPosition: "reaction",
-      },
+      }, world, cast, playerId),
     });
   }
 
@@ -322,9 +561,11 @@ function buildChronicleEntries(
     const body = logEntries.length > 0
       ? logEntries.map((l) => l!.outcome.result?.summary ?? "").filter(Boolean).join(". ")
       : sp.summary;
+    const cast = proposalCast(consolidatedPackage, chronicleCasts, "simulator", sp.kind, sp.summary);
     raw.push({
       sortKey: sp.salience * 60,
-      input: {
+      simulatedDurationDays: estimateWorkflowDurationDays(sp.proposedWorkflows),
+      input: applyChronicleCast({
         scope: "world_event",
         scopeRef: sp.storylineId ?? `sim-${randomUUID().slice(0, 8)}`,
         audience: sp.visibility === "private" ? "knowledge_scoped" : "all_players",
@@ -334,15 +575,51 @@ function buildChronicleEntries(
         sourceDirector: "simulator",
         chainPosition: sp.scopeTag === "star" || sp.scopeTag === "near" ? "spread" : "distant",
         displayPatch: displayPatchByInvocation.get(sp.proposedWorkflows[0]?.actionId ?? ""),
-      },
+      }, world, cast, playerId),
     });
   }
 
-  // Sort descending by sortKey
-  raw.sort((a, b) => b.sortKey - a.sortKey);
+  // Chronicle chronology is a simulated schedule: quick events resolve first,
+  // then longer developments. Salience only breaks ties within a duration.
+  raw.sort((a, b) => a.simulatedDurationDays - b.simulatedDurationDays || b.sortKey - a.sortKey);
 
   // Soft cap at 12 chronicle entries
-  return raw.slice(0, 12).map((r, i) => ({ ...r.input, sequence: i }));
+  return raw.slice(0, 12).map((r, i) => ({ ...r.input, sequence: i, simulatedDurationDays: r.simulatedDurationDays }));
+}
+
+function estimatePlayerEventDurationDays(verdict: Verdict): number {
+  return Math.max(1, verdict.timeCost.max * 30);
+}
+
+function estimateWorkflowDurationDays(workflows: readonly Pick<ProposedInvocation, "actionId">[]): number {
+  const actionDays: Record<string, number> = {
+    add_gold: 1,
+    remove_gold: 1,
+    transfer_gold: 1,
+    appoint_to_office: 2,
+    remove_from_office: 2,
+    raise_morale: 2,
+    lower_morale: 2,
+    move_character: 4,
+    create_force: 7,
+    move_force: 14,
+    start_battle: 14,
+    end_battle: 14,
+    sign_treaty: 21,
+    start_siege: 30,
+    end_siege: 30,
+    start_war: 45,
+    end_war: 45,
+    give_territory: 45,
+    change_province_control: 45,
+  };
+  return Math.max(1, ...workflows.map((workflow) => actionDays[workflow.actionId] ?? 7));
+}
+
+function scheduleChronicleEntries(entries: readonly ChronicleEntryInput[]): ChronicleEntryInput[] {
+  return [...entries]
+    .sort((a, b) => (a.simulatedDurationDays ?? 1) - (b.simulatedDurationDays ?? 1) || a.sequence - b.sequence)
+    .map((entry, sequence) => ({ ...entry, sequence }));
 }
 
 /**
@@ -439,7 +716,11 @@ export async function resolveTurn(
       const userMsg = `Order ${idx + 1}: ${directive.text}\nDirective ID: directive-${idx}`;
       try {
         const result = await coinGatedAdapter.call("interpret_order", systemPrompt, userMsg);
-        const parsed = await safeParseJson(result.content, InterpretParseSchema, `interpret:directive-${idx}`);
+        let interpretContent = result.content;
+        try {
+          interpretContent = normalizeInterpretationContent(interpretContent);
+        } catch { /* preserve the original response for normal parse diagnostics */ }
+        const parsed = await safeParseJson(interpretContent, InterpretParseSchema, `interpret:directive-${idx}`);
         if (parsed) {
           interpretations.push({ ...parsed, directiveId: `directive-${idx}` });
         } else {
@@ -481,7 +762,11 @@ export async function resolveTurn(
       const userMsg = `Directive: ${interpretation.intent}\nProposed steps: ${interpretation.proposedSteps.join("; ")}\nRisks: ${interpretation.risks.join("; ")}`;
       try {
         const result = await coinGatedAdapter.call("assess_orders", assessSystemPrompt, userMsg);
-        const parsed = await safeParseJson(result.content, AssessParseSchema, `assess:${interpretation.directiveId}`);
+        let assessContent = result.content;
+        try {
+          assessContent = normalizeAssessmentContent(assessContent);
+        } catch { /* preserve the original response for normal parse diagnostics */ }
+        const parsed = await safeParseJson(assessContent, AssessParseSchema, `assess:${interpretation.directiveId}`);
         if (parsed) {
           assessments.push({ ...parsed, directiveId: interpretation.directiveId });
         } else {
@@ -493,6 +778,7 @@ export async function resolveTurn(
             dependencyActionIds: [],
             estimatedSteps: interpretation.duration,
             workflow: null,
+            workflows: [],
             needsAdjudication: true,
           });
         }
@@ -506,11 +792,12 @@ export async function resolveTurn(
           dependencyActionIds: [],
           estimatedSteps: interpretation.duration,
           workflow: null,
+          workflows: [],
           needsAdjudication: true,
         });
       }
     }
-    console.log(`${tag()} [assess] OUT: ${assessments.length} assessment(s) — ${assessments.map((a) => `${a.directiveId}:${a.feasibility}${a.workflow ? `+wf(${a.workflow.actionId})` : ""}`).join(", ")}`);
+    console.log(`${tag()} [assess] OUT: ${assessments.length} assessment(s) — ${assessments.map((a) => `${a.directiveId}:${a.feasibility}${assessmentWorkflows(a).length > 0 ? `+wf(${assessmentWorkflows(a).map((workflow) => workflow.actionId).join("+")})` : ""}`).join(", ")}`);
     emit(onProgress, "assess", true);
 
     // ── Step 3: Adjudicate ─────────────────────────────────────────────────
@@ -520,12 +807,21 @@ export async function resolveTurn(
     const adjSystemPrompt = buildAdjudicateSystemPrompt(resolutionWorld, actorCharacterId, resolutionContext);
 
     for (const assessment of assessments) {
-      const userMsg = `Order: ${assessment.interpretation}\nFeasibility: ${assessment.feasibility}\nWorkflow: ${assessment.workflow ? JSON.stringify(assessment.workflow) : "none"}\nNeeds adjudication: ${assessment.needsAdjudication}`;
+      const userMsg = `Order: ${assessment.interpretation}\nFeasibility: ${assessment.feasibility}\nWorkflow hints: ${JSON.stringify(assessmentWorkflows(assessment))}\nNeeds adjudication: ${assessment.needsAdjudication}`;
       try {
         const result = await coinGatedAdapter.call("adjudicate", adjSystemPrompt, userMsg);
         let adjContent = result.content;
         try {
           const raw = JSON.parse(stripToJson(adjContent)) as Record<string, unknown>;
+          if (raw && typeof raw === "object") {
+            // Visibility determines who can learn an outcome. A malformed model
+            // value must never make an outcome more broadly visible, so repair it
+            // to the most restrictive valid value before schema validation.
+            if (typeof raw["knowledgeVisibility"] !== "string" || !VALID_KNOWLEDGE_VISIBILITIES.has(raw["knowledgeVisibility"])) {
+              console.warn(`${tag()} [adjudicate] invalid knowledgeVisibility; defaulting to private`);
+              raw["knowledgeVisibility"] = "private";
+            }
+          }
           if (raw && typeof raw === "object" && Array.isArray(raw["deltas"])) {
             const VALID_DELTA_KINDS = new Set(["material_effect", "relationship_cause", "knowledge_grant", "workflow"]);
             raw["deltas"] = (raw["deltas"] as Record<string, unknown>[]).filter((delta) => {
@@ -540,8 +836,8 @@ export async function resolveTurn(
                 }
               }
             }
-            adjContent = JSON.stringify(raw);
           }
+          if (raw && typeof raw === "object") adjContent = JSON.stringify(raw);
         } catch { /* leave adjContent as-is */ }
 
         const parsed = await safeParseJson(adjContent, VerdictParseSchema, `adjudicate:${assessment.directiveId}`);
@@ -579,9 +875,10 @@ export async function resolveTurn(
             playerInvolvement: [{ playerId, characterId: actorCharacterId, role: "actor" }],
           });
         } else {
-          const fallbackDeltas = assessment.workflow
-            ? [{ kind: "workflow" as const, invocation: { actionId: assessment.workflow.actionId, actorId: actorCharacterId, parameters: assessment.workflow.parameters } }]
-            : [];
+          const fallbackDeltas = assessmentWorkflows(assessment).map((workflow) => ({
+            kind: "workflow" as const,
+            invocation: { actionId: workflow.actionId, actorId: actorCharacterId, parameters: workflow.parameters },
+          }));
           verdicts.push({
             directiveId: assessment.directiveId,
             outcome: assessment.feasibility === "impossible" ? "fails" : "partially_succeeds",
@@ -656,7 +953,11 @@ export async function resolveTurn(
       console.log(`${tag()} [simulate] IN: star=${scope.star.size} near=${scope.near.size} far=${scope.far.size} coarse=${scope.coarse.size} storylines=${(worldAfterPlayer.storylines ?? []).length}`);
       const simPrompt = buildSimulatorSystemPrompt(worldAfterPlayer, scope, actorCharacterId, resolutionContext);
       const simResult = await coinGatedAdapter.call("simulator", simPrompt, `Step ${atStep}: simulate the world.`);
-      const simParsed = await safeParseJson(simResult.content, SimulatorProposalBatchSchema, "simulator");
+      let simContent = simResult.content;
+      try {
+        simContent = sanitizeSimulatorContent(simContent, worldAfterPlayer);
+      } catch { /* preserve the original response for normal parse diagnostics */ }
+      const simParsed = await safeParseJson(simContent, SimulatorProposalBatchSchema, "simulator");
       if (simParsed) {
         simulatorProposals.push(...simParsed.proposals);
       }
@@ -710,10 +1011,16 @@ export async function resolveTurn(
     emit(onProgress, "world_direct");
     console.log(`${tag()} [world_direct] IN: ${consolidatedPackage.proposals.length} proposals openChains=${(worldAfterPlayer.chronicleChains ?? []).filter((c) => !c.resolved).length}`);
     const worldDirectorInvocations: Array<{ invocation: ProposedInvocation; sourceRef: string; sourceRationale: string }> = [];
+    const approvedCharacterIds = new Set<string>();
+    const chronicleCasts = new Map<string, ChronicleCharacterMention>();
     try {
       const wdPrompt = buildWorldDirectorSystemPrompt(worldAfterPlayer, consolidatedPackage, actorCharacterId, resolutionContext);
       const wdResult = await coinGatedAdapter.call("world_director", wdPrompt, `Step ${atStep}: decide on ${consolidatedPackage.proposals.length} proposal(s).`);
-      const wdParsed = await safeParseJson(wdResult.content, WorldDirectorDecisionBatchSchema, "world_director");
+      let wdContent = wdResult.content;
+      try {
+        wdContent = sanitizeWorldDirectorContent(wdContent, consolidatedPackage);
+      } catch { /* retain the original response for normal parse diagnostics */ }
+      const wdParsed = await safeParseJson(wdContent, WorldDirectorDecisionBatchSchema, "world_director");
       if (wdParsed) {
         const decisions = wdParsed.decisions;
         for (const decision of decisions) {
@@ -721,6 +1028,39 @@ export async function resolveTurn(
           console.log(`${tag()} [world_direct] proposal=${decision.proposalId} → ${decision.decision} wfs=${wfs}${wfs > 0 ? ` (${decision.finalWorkflows.map((w) => w.actionId).join(",")})` : ""}`);
           if (decision.decision === "approve" || decision.decision === "modify") {
             const proposal = consolidatedPackage.proposals.find((candidate) => candidate.id === decision.proposalId);
+            if (proposal?.sources.includes("character_director") && proposal.characterId) {
+              approvedCharacterIds.add(proposal.characterId);
+            }
+            if (proposal && decision.chronicleCast?.characterId) {
+              const castCharacter = worldAfterPlayer.characters.find((character) => character.id === decision.chronicleCast?.characterId && character.alive);
+              if (castCharacter) {
+                chronicleCasts.set(proposal.id, { characterId: castCharacter.id, role: decision.chronicleCast.role });
+              }
+            } else if (proposal && decision.chronicleCast?.newCharacter) {
+              const createdCharacterId = `char-cast-${randomUUID().slice(0, 12)}`;
+              const created = decision.chronicleCast.newCharacter;
+              chronicleCasts.set(proposal.id, { characterId: createdCharacterId, role: decision.chronicleCast.role });
+              worldDirectorInvocations.push({
+                invocation: {
+                  actionId: "create_world_character",
+                  actorId: actorCharacterId,
+                  parameters: {
+                    characterId: createdCharacterId,
+                    name: created.name,
+                    polityId: created.polityId,
+                    locationProvinceId: created.locationProvinceId,
+                    officeId: created.officeId,
+                    provenance: {
+                      reason: `Chronicle casting for ${proposal.kind}: ${proposal.mergedRationale}`.slice(0, 320),
+                      storylineId: proposal.dedupeGroup ?? null,
+                      createdByDirector: true,
+                    },
+                  },
+                },
+                sourceRef: proposal.id,
+                sourceRationale: `Chronicle casting introduces ${created.name} as ${decision.chronicleCast.role} for a political event.`,
+              });
+            }
             for (const invocation of decision.finalWorkflows) {
               worldDirectorInvocations.push({
                 invocation,
@@ -797,12 +1137,12 @@ export async function resolveTurn(
         if (account) {
           newWorld.material.accounts = newWorld.material.accounts.map((candidate) => candidate.id === account.id ? { ...candidate, balance: candidate.balance + 25 } : candidate);
           fulfilledCommitmentIds.push(commitment.id);
-          commitmentChronicle.push({ sequence: 0, scope: "dialogue_commitment", scopeRef: commitment.id, audience: "all_players", body: `${npc.name} fulfilled a promised financial help.`, atStep, materialConsequence: true });
+          commitmentChronicle.push({ sequence: 0, scope: "dialogue_commitment", scopeRef: commitment.id, audience: "all_players", body: `${npc.name} fulfilled a promised financial help.`, atStep, materialConsequence: true, simulatedDurationDays: 1 });
           continue;
         }
       } else {
         fulfilledCommitmentIds.push(commitment.id);
-        commitmentChronicle.push({ sequence: 0, scope: "dialogue_commitment", scopeRef: commitment.id, audience: "all_players", body: `${npc.name} fulfilled a promised ${commitment.promiseType}.`, atStep, materialConsequence: false });
+        commitmentChronicle.push({ sequence: 0, scope: "dialogue_commitment", scopeRef: commitment.id, audience: "all_players", body: `${npc.name} fulfilled a promised ${commitment.promiseType}.`, atStep, materialConsequence: false, simulatedDurationDays: 1 });
       }
     }
 
@@ -823,9 +1163,13 @@ export async function resolveTurn(
     // ── Step 11: Chronicle ─────────────────────────────────────────────────
     emit(onProgress, "chronicle");
     let chronicleInputs = buildChronicleEntries(
+      newWorld,
       verdicts,
       interpretations,
       characterSuggestions,
+      approvedCharacterIds,
+      consolidatedPackage,
+      chronicleCasts,
       reactionProposals,
       simulatorProposals,
       allWorkflowLog as never,
@@ -834,7 +1178,7 @@ export async function resolveTurn(
       displayPatchByInvocation,
       playerId,
     );
-    chronicleInputs = [...chronicleInputs, ...commitmentChronicle].map((entry, sequence) => ({ ...entry, sequence }));
+    chronicleInputs = scheduleChronicleEntries([...chronicleInputs, ...commitmentChronicle]);
 
     if (displayPatch && chronicleInputs.length > 0) {
       const lastIdx = chronicleInputs.length - 1;
@@ -852,6 +1196,12 @@ export async function resolveTurn(
         chainPosition: e.chainPosition ?? null,
         chainId: e.chainId ?? null,
         sourceDirector: e.sourceDirector,
+        characterMentions: e.characterMentions
+          ?.map((mention) => {
+            const character = newWorld.characters.find((candidate) => candidate.id === mention.characterId && candidate.alive);
+            return character ? { name: character.name, role: mention.role } : null;
+          })
+          .filter((mention): mention is { name: string; role: string } => mention !== null),
       }));
       const narratorSystemPrompt = buildChronicleNarratorPrompt(narratorEntries, resolutionWorld, actorCharacterId, playerKnowledgebase);
       const narratorResult = await coinGatedAdapter.call("chronicle_narrator", narratorSystemPrompt, "Rewrite the events as chronicle prose.");
@@ -933,6 +1283,14 @@ function updateCharacterRelevance(
   const mentioned = new Map<string, RelevanceRole>();
 
   for (const entry of entries) {
+    for (const mention of entry.characterMentions ?? []) {
+      const role: RelevanceRole = mention.role === "opponent"
+        ? "antagonist"
+        : mention.role === "supporter" || mention.role === "spokesperson" || mention.role === "presiding_official" || mention.role === "negotiator"
+          ? "participant"
+          : "mentioned";
+      mentioned.set(mention.characterId, role);
+    }
     if (entry.scope === "reaction" && entry.scopeRef) {
       mentioned.set(entry.scopeRef, "participant");
     }

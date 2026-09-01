@@ -131,8 +131,13 @@ export const OrderAssessmentSchema = z
     obstacleIds: z.array(z.string().trim().min(1)),
     dependencyActionIds: z.array(EntityIdSchema),
     estimatedSteps: StepRangeSchema,
-    /** Null only when this is genuinely novel or cannot map to the pinned library. */
+    /**
+     * Legacy single workflow hint. New assessment responses use `workflows`,
+     * because one player order can legitimately require several operations.
+     */
     workflow: AssessedWorkflowSchema.nullable().default(null),
+    /** Registered workflow hints for the adjudication step; empty when unmappable. */
+    workflows: z.array(AssessedWorkflowSchema).max(4).default([]),
     needsAdjudication: z.boolean(),
   })
   .strict();

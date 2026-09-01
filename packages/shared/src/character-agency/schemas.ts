@@ -194,6 +194,12 @@ export const CharacterSuggestionSchema = z
     plotId: EntityIdSchema.nullable().default(null),
     proposedGoal: CharacterGoalInputSchema.nullable().default(null),
     proposedPlot: CharacterPlotInputForSuggestionSchema.nullable().default(null),
+    /** Required for a substantive update; null means record the rationale only. */
+    goalStatus: CharacterGoalStatusSchema.nullable().default(null),
+    /** Required to advance an existing plot; the resolver will not guess a stage. */
+    plotStage: CharacterPlotStageSchema.nullable().default(null),
+    /** Required to resolve a plot; only terminal statuses are accepted. */
+    plotResolutionStatus: z.enum(["succeeded", "failed", "abandoned", "exposed", "stalled"]).nullable().default(null),
     rationale: z.string().trim().max(400),
     causalFactIds: z.array(EntityIdSchema).max(8).default([]),
     affectedEntityIds: z.array(EntityIdSchema).max(12).default([]),

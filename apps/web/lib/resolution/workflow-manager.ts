@@ -16,6 +16,7 @@ import type {
 import {
   ManagerDecisionBatchSchema,
   applyTemporaryWorkflowPatch,
+  validateTemporaryWorkflowPatchReferences,
   executeWorkflow,
   validateAllCandidates,
   validateCandidate,
@@ -299,9 +300,14 @@ export async function runWorkflowManager(
   const temporaryPatches: NovelActionProposal[] = [];
   for (const proposal of managerBatch.novelActionProposals) {
     const resolvedPatch = resolveTemporaryPatchIds(proposal.temporaryPatch, dryRunWorld);
+    const referenceIssue = validateTemporaryWorkflowPatchReferences(dryRunWorld, resolvedPatch);
+    if (referenceIssue !== null) {
+      console.warn(`[workflow-manager] Skipping temporary patch "${proposal.intent}": ${referenceIssue}.`);
+      continue;
+    }
     const patched = applyTemporaryWorkflowPatch(dryRunWorld, resolvedPatch, atStep);
     if (patched === null) {
-      console.warn(`[workflow-manager] Skipping temporary patch "${proposal.intent}": one or more referenced entity IDs (actor, province, polity, character) do not exist in the current world state. actorId=${resolvedPatch.actorId}`);
+      console.warn(`[workflow-manager] Skipping temporary patch "${proposal.intent}": it could not be applied safely after reference validation.`);
       continue;
     }
     dryRunWorld = patched.world;
