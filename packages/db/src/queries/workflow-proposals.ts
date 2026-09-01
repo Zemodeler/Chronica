@@ -2,6 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import type { ChronicaDatabase } from "../database";
 import { pendingWorkflowProposals } from "../schema/game";
 import type { NovelActionProposal } from "@chronica/shared";
+import type { TemporaryWorkflowPatch } from "@chronica/shared";
 
 // CRUD for Workflow Manager novel action proposals (Issue #6).
 //
@@ -17,6 +18,8 @@ export interface WorkflowProposalRow {
   readonly intent: string;
   readonly targetEntityIds: string[];
   readonly estimatedMutationDescription: string;
+  readonly temporaryPatch: TemporaryWorkflowPatch | null;
+  readonly implementationReport: string | null;
   readonly source: string;
   readonly sourceRef: string;
   readonly reviewedBy: string | null;
@@ -39,6 +42,8 @@ export async function insertNovelActionProposals(
       intent: p.intent,
       targetEntityIds: p.targetEntityIds,
       estimatedMutationDescription: p.estimatedMutationDescription,
+      temporaryPatch: p.temporaryPatch,
+      implementationReport: p.implementationReport,
       source: p.source,
       sourceRef: p.sourceRef,
     })),
@@ -70,6 +75,8 @@ export async function listPendingWorkflowProposals(
     intent: r.intent,
     targetEntityIds: r.targetEntityIds as string[],
     estimatedMutationDescription: r.estimatedMutationDescription,
+    temporaryPatch: r.temporaryPatch ?? null,
+    implementationReport: r.implementationReport ?? null,
     source: r.source,
     sourceRef: r.sourceRef,
     reviewedBy: r.reviewedBy ?? null,
@@ -97,6 +104,8 @@ export async function getWorkflowProposalById(
     intent: row.intent,
     targetEntityIds: row.targetEntityIds as string[],
     estimatedMutationDescription: row.estimatedMutationDescription,
+    temporaryPatch: row.temporaryPatch ?? null,
+    implementationReport: row.implementationReport ?? null,
     source: row.source,
     sourceRef: row.sourceRef,
     reviewedBy: row.reviewedBy ?? null,

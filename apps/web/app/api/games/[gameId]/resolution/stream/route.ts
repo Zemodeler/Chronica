@@ -10,6 +10,7 @@ import {
 import { createAiAdapter } from "@chronica/ai";
 import { OrderBatchSchema } from "@chronica/shared";
 import { isAuthenticationConfigured, getAuthentication } from "../../../../../../lib/authentication";
+import { resolveAccount } from "../../../../../../lib/account-service";
 import { resolveTurn } from "../../../../../../lib/resolution/pipeline";
 
 function requiredDatabaseUrl(): string {
@@ -29,9 +30,12 @@ export async function GET(
   if (!isAuthenticationConfigured()) {
     return new Response("Authentication not configured.", { status: 503 });
   }
-  const session = await getAuthentication().api.getSession({ headers: await headers() });
+  const requestHeaders = await headers();
+  const session = await getAuthentication().api.getSession({ headers: requestHeaders });
   const userId = session?.user.id;
   if (!userId) return new Response("Unauthorized.", { status: 401 });
+  const account = await resolveAccount(requestHeaders);
+  const mayDownloadWorkflowReports = account?.role === "developer" || account?.role === "admin";
 
   const { db, close } = createDatabase(requiredDatabaseUrl());
   const encoder = new TextEncoder();
@@ -77,7 +81,7 @@ export async function GET(
         const characterId = player.characterId ?? worldView.world.characters[0]?.id ?? "";
         const adapter = createAiAdapter();
 
-        await resolveTurn(
+        const result = await resolveTurn(
           db,
           adapter,
           {
@@ -92,6 +96,10 @@ export async function GET(
             send({ step: progress.step, label: progress.label, done: progress.done });
           },
         );
+
+        if (mayDownloadWorkflowReports && result.workflowDownloads.length > 0) {
+          send({ workflowDownloads: result.workflowDownloads });
+        }
 
         send({ step: "done", label: "Complete", done: true });
       } catch (error) {

@@ -1,75 +1,74 @@
-import type { WorldState } from "@chronica/shared";
+import type { PolicyViolation, WorkflowCandidate, WorldState } from "@chronica/shared";
 import { buildWorkflowCatalog } from "@chronica/shared";
-import type { WorkflowCandidate } from "@chronica/shared";
 
-// Workflow Manager prompt builder (Issue #6).
-//
-// The manager reviews proposed skill invocations before world mutation.
-// It works from the registered skill catalog and the source-stamped candidate list.
+function workflowManagerWorldContext(world: WorldState): string {
+  // IDs are included with the material state the manager needs to repair an
+  // invocation without relying on narrative guesswork.
+  const context = {
+    elapsedStep: world.elapsedStep,
+    characters: world.characters.map((c) => ({ id: c.id, name: c.name, alive: c.alive, polityId: c.polityId, locationProvinceId: c.locationProvinceId, officeId: c.officeId })),
+    polities: world.map.polities.map((p) => ({ id: p.id, name: p.name })),
+    provinces: world.map.provinces.map((p) => ({ id: p.id, name: p.name, controllerPolityId: p.controllerPolityId, firmnessBps: p.controlFirmnessBps })),
+    forces: world.material.forces.map((f) => ({ id: f.id, name: f.name, polityId: f.polityId, locationId: f.locationId, commanderCharacterId: f.commanderCharacterId, controllerCharacterId: f.controllerCharacterId, moraleBps: f.moraleBps })),
+    accounts: world.material.accounts.map((a) => ({ id: a.id, owner: a.owner, balance: a.balance, status: a.status })),
+    accountAccess: world.material.accountAccess.map((a) => ({ characterId: a.characterId, accountId: a.accountId, permissions: a.permissions })),
+    conflicts: world.conflicts,
+    storylines: (world.storylines ?? []).map((s) => ({ id: s.id, title: s.title, phase: s.phase })),
+  };
+  return JSON.stringify(context, null, 2);
+}
 
 export function buildWorkflowManagerSystemPrompt(
   world: WorldState,
-  candidates: WorkflowCandidate[],
+  candidates: readonly WorkflowCandidate[],
+  diagnostics: readonly { correlationId: string; violation: PolicyViolation | null }[],
 ): string {
-  const catalog = buildWorkflowCatalog();
-  const candidateJson = JSON.stringify(candidates, null, 2);
-  const step = world.elapsedStep;
+  return `You are the final Workflow Manager for the Chronica simulation.
 
-  return `You are the Workflow Manager for the Chronica simulation at elapsed step ${step}.
+You review structured AI-produced workflow candidates before any world state is committed. You never receive the player's raw order. Your job is to understand each candidate's stated rationale, preserve its legitimate intent, and make the smallest lawful repair when an existing workflow can achieve it.
 
-Your role is to review every proposed skill invocation and decide whether it is appropriate, well-targeted, and compatible with the current world state before it is applied. You do not have veto power over player directives on grounds of narrative preference — only on grounds of applicability and authority.
+AUTHORITATIVE WORLD STATE:
+${workflowManagerWorldContext(world)}
 
-## Skill Catalog
-The following skills (workflow actions) are the only mechanisms by which world state may be changed. Each entry shows the exact id, a description, required parameters, and authority annotations.
+REGISTERED WORKFLOW CATALOG:
+${buildWorkflowCatalog()}
 
-${catalog}
+PROPOSED WORKFLOW CANDIDATES (in required execution order):
+${JSON.stringify(candidates, null, 2)}
 
-Authority annotations:
-- [P] = player directive only
-- [W] = world_director events only
-- [C] = character_director decisions only
-- [S] = system only (not AI-proposable)
-- scope≤near/far/coarse = world_director events must be within that scope tier
+DETERMINISTIC DIAGNOSTICS FOR THE ORIGINAL REQUESTS:
+${JSON.stringify(diagnostics, null, 2)}
 
-## Candidates
-${candidateJson}
+DECISION RULES:
+1. Return exactly one decision for every candidate correlationId, in the supplied order.
+2. "approve" means the original invocation is already valid and appropriate.
+3. "replace" means use one existing catalog workflow with valid parameters to accomplish the same stated intent. Do not add a new action or broaden the intended effect.
+4. "reject" means the intended effect is not lawful, grounded, or achievable by an existing workflow. "no_action" means no state mutation is warranted.
+5. A known diagnostic is a cue to repair when possible, not a reason to blindly reject. Never approve a request with an unresolved diagnostic.
+6. Replacements must use real entity IDs from the authoritative world state. Do not guess IDs, entities, balances, or military forces.
+7. If no registered workflow accurately fits, reject that candidate and add exactly one novelActionProposal with a bounded temporaryPatch. The patch runs only for this turn; its generated TypeScript is downloaded for developer review and is never executed as code.
+8. A temporaryPatch may use only account_delta, province_control, character_state, or create_storyline operations. Use existing entity IDs and the smallest necessary effect.
+9. Include an implementationReport explaining the unmet need, the temporary patch that was applied, and what a permanent workflow must implement.
+10. The deterministic system will validate and dry-run your selected sequence after you respond.
 
-## Your Task
-For each candidate, return one decision:
-- "approve": the invocation is correct, authorized, and applicable as-is
-- "reject": the invocation is not appropriate (wrong skill, wrong actor, inapplicable, authority violation)
-- "replace": the invocation would work but a better-matching skill exists — provide the replacement
-- "no_action": the situation warrants no world mutation at all
-
-If a candidate describes a needed action that no registered skill can accomplish, emit a NovelActionProposal rather than a decision — describe the intent clearly so a developer can implement the missing skill.
-
-## Rules
-1. Never fabricate a workflow id that is not in the catalog above.
-2. A replacement invocation must use an existing skill id with valid parameter shapes.
-3. Provide a concise reason for every decision (1–2 sentences max).
-4. If a world_director candidate proposes a skill marked [P] (player-only), reject it.
-5. If a character_director candidate proposes a skill marked [W] (world_director-only), reject it.
-6. When in doubt about applicability, approve — the deterministic executor will return null if the action cannot be applied.
-
-## Output Format
-Return a JSON object exactly matching this schema (no prose before or after):
+Return strict JSON only:
 {
-  "decisions": [
-    {
-      "correlationId": "<uuid from candidate>",
-      "decision": "approve" | "reject" | "replace" | "no_action",
-      "reason": "<1-2 sentence explanation>",
-      "replacementInvocation": null | { "actionId": "...", "actorId": "...", "parameters": {...} }
-    }
-  ],
-  "novelActionProposals": [
-    {
-      "intent": "<what the action should accomplish>",
-      "targetEntityIds": ["<id1>", ...],
-      "estimatedMutationDescription": "<what world state would change>",
-      "source": "<source from candidate>",
-      "sourceRef": "<sourceRef from candidate>"
-    }
-  ]
+  "decisions": [{
+    "correlationId": "<candidate uuid>",
+    "decision": "approve" | "reject" | "replace" | "no_action",
+    "reason": "<concise explanation>",
+    "replacementInvocation": null | { "actionId": "...", "actorId": "...", "parameters": {} }
+  }],
+  "novelActionProposals": [{
+    "intent": "<unmet action>",
+    "targetEntityIds": ["<existing ids>"],
+    "estimatedMutationDescription": "<state change>",
+    "source": "<candidate source>",
+    "sourceRef": "<candidate sourceRef>",
+    "temporaryPatch": {
+      "id": "<uuid>", "title": "<title>", "rationale": "<why>", "actorId": "<existing actor id>", "operations": []
+    },
+    "implementationReport": "<what was needed, temporarily implemented, and required permanently>"
+  }]
 }`;
 }

@@ -17,6 +17,8 @@ interface ChronicleEntry {
   readonly atStep: number;
   readonly materialConsequence?: boolean;
   readonly displayPatch?: unknown;
+  /** Calendar date of this action, projected by the chronicle endpoint. */
+  readonly dateLabel: string;
   // Extended Chronicle fields
   readonly eventDate?: string | null;
   readonly location?: string | null;
@@ -43,7 +45,6 @@ interface ChroniclePanelProps {
 
 function EntryHeader({ entry }: { entry: ChronicleEntry }) {
   const parts: string[] = [];
-  if (entry.eventDate) parts.push(entry.eventDate);
   if (entry.location) parts.push(entry.location);
   if (parts.length === 0) return null;
   return (
@@ -232,6 +233,7 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
               }}
             >
               Chronicle — {hasEntries ? `${cursor + 1} / ${totalEntries}` : "Loading…"}
+              {currentEntry && ` · ${currentEntry.dateLabel}`}
             </p>
 
             {!hasEntries && (

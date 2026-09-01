@@ -12,12 +12,13 @@ const ALL_STEPS = [
   { step: "interpret", label: "Interpreting your orders…" },
   { step: "assess", label: "Assessing feasibility…" },
   { step: "adjudicate", label: "Calculating consequences…" },
-  { step: "execute_player", label: "Applying your actions…" },
+  { step: "preview_player", label: "Forecasting immediate effects…" },
   { step: "reaction", label: "Observing reactions…" },
   { step: "simulate", label: "Simulating the world…" },
   { step: "character_advise", label: "Consulting character intentions…" },
   { step: "consolidate", label: "Consolidating proposals…" },
   { step: "world_direct", label: "World Director deciding…" },
+  { step: "manage", label: "Reviewing proposed actions…" },
   { step: "execute_world", label: "Applying world changes…" },
   { step: "chronicle", label: "Writing the chronicle…" },
   { step: "commit", label: "Saving the new world…" },
@@ -26,6 +27,18 @@ const ALL_STEPS = [
 interface OrdersPanelProps {
   readonly gameId: string;
   readonly onResolutionComplete?: () => void;
+}
+
+function downloadWorkflowReport(fileName: string, content: string) {
+  const url = URL.createObjectURL(new Blob([content], { type: "text/markdown;charset=utf-8" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) {
@@ -81,12 +94,15 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
     sseRef.current = sse;
 
     sse.onmessage = (event) => {
-      const data = JSON.parse(event.data as string) as ResolutionStep & { error?: string };
+      const data = JSON.parse(event.data as string) as ResolutionStep & { error?: string; workflowDownloads?: Array<{ fileName: string; content: string }> };
       if (data.error) {
         setError(data.error);
         setResolving(false);
         sse.close();
         return;
+      }
+      for (const report of data.workflowDownloads ?? []) {
+        downloadWorkflowReport(report.fileName, report.content);
       }
       if (data.step === "done") {
         setResolving(false);

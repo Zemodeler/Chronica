@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { ProposedInvocationSchema } from "../actions/orders";
+import { ProposedInvocationSchema, type ProposedInvocation } from "../actions/orders";
+import { TemporaryWorkflowPatchSchema } from "./temporary-patch";
 
 // Workflow Manager types (Issue #6).
 //
@@ -50,14 +51,16 @@ export type ManagerDecision = z.infer<typeof ManagerDecisionSchema>;
 
 /**
  * A novel action the manager needs but no registered skill covers.
- * Persisted to pending_workflow_proposals for developer review.
- * Never applied to world state directly.
+ * It has a bounded temporary patch for this turn and a downloadable developer
+ * report. The generated TypeScript is never executed as code.
  */
 export const NovelActionProposalSchema = z
   .object({
     intent: z.string().trim().min(1).max(600),
     targetEntityIds: z.array(z.string().trim().min(1)).max(10),
     estimatedMutationDescription: z.string().trim().max(600),
+    temporaryPatch: TemporaryWorkflowPatchSchema,
+    implementationReport: z.string().trim().min(1).max(4_000),
     source: WorkflowCandidateSourceSchema,
     sourceRef: z.string().trim().max(200),
   })
@@ -79,10 +82,16 @@ export interface WorkflowAuditEntry {
   readonly source: WorkflowCandidateSource;
   readonly sourceRef: string;
   readonly requestedActionId: string;
+  /** The complete untrusted request, retained so a repair can be audited. */
+  readonly requestedInvocation: ProposedInvocation;
   readonly policyViolation?: { kind: string; message: string };
   readonly managerDecision?: "approve" | "reject" | "replace" | "no_action";
   readonly managerReason?: string;
   readonly replacedActionId?: string;
+  /** Present when the manager repaired the original request. */
+  readonly replacementInvocation?: ProposedInvocation;
+  /** The invocation that passed dry-run and was sent to the executor. */
+  readonly finalInvocation?: ProposedInvocation;
   readonly dryRunOk?: boolean;
   readonly executionOk?: boolean;
   readonly executionReason?: string;

@@ -9,8 +9,9 @@ import { buildPlayerResolutionContext, type ResolutionPlayerContext } from "./pr
 // decisions: approve, modify, defer, or reject. It also has authority to order
 // entity creation and manage storyline lifecycle.
 //
-// This AI call replaces the old WorkflowManager AI call. After the World
-// Director decides, the WorkflowManager validation+dry-run layer still runs.
+// The World Director selects proposed outcomes. The final Workflow Manager
+// then independently repairs, validates, and dry-runs the selected workflow
+// sequence before any state is committed.
 
 export function buildWorldDirectorSystemPrompt(
   world: WorldState,
