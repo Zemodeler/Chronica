@@ -1,8 +1,10 @@
 import { headers } from "next/headers";
+import { after } from "next/server";
 import { eq, and, desc } from "drizzle-orm";
 import { createDatabase, submitPlayerOrder, schema } from "@chronica/db";
 import { OrderBatchSchema } from "@chronica/shared";
 import { isAuthenticationConfigured, getAuthentication } from "../../../../../lib/authentication";
+import { dispatchQueuedTurn } from "../../../../../lib/resolution/dispatch";
 
 function requiredDatabaseUrl(): string {
   const value = process.env.DATABASE_URL?.trim();
@@ -89,6 +91,12 @@ export async function POST(
 
     const result = await submitPlayerOrder(db, { gameId, playerId: player.id, rawText, batch });
     if (!result.accepted) return Response.json({ error: result.reason ?? "Order rejected." }, { status: 409 });
+    if (result.enqueued) {
+      after(async () => {
+        try { await dispatchQueuedTurn(gameId); }
+        catch (error) { console.error("[resolution-dispatch] queued turn failed", error); }
+      });
+    }
     return Response.json({ accepted: true, enqueued: result.enqueued });
   } finally {
     await close();

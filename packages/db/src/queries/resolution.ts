@@ -217,6 +217,12 @@ export async function getQueuedTurn(
   return turn;
 }
 
+/** The account responsible for provider charges incurred while resolving a game. */
+export async function getGamePayerUserId(db: ChronicaDatabase, gameId: string): Promise<string | undefined> {
+  const [game] = await db.select({ payerUserId: games.payerUserId }).from(games).where(eq(games.id, gameId)).limit(1);
+  return game?.payerUserId;
+}
+
 /** Mark news as read for this game: advance news turn → resolved and update game. */
 export async function markChronicleRead(
   db: ChronicaDatabase,
