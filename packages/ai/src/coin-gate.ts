@@ -5,11 +5,38 @@ import { randomUUID } from "node:crypto";
 import type { AiAdapter, AiCallResult } from "./adapter";
 import { logDevAiCost } from "./dev-cost";
 
-// gpt-4o-mini rate in micro-units per million tokens (matches billing rate card structure).
-// Conservative overestimate for the hold — settled to the real amount.
+type ModelTokenRate = Readonly<{
+  inputMicroUnitsPerMillionTokens: bigint;
+  outputMicroUnitsPerMillionTokens: bigint;
+  cacheReadMicroUnitsPerMillionTokens: bigint;
+  cacheWriteMicroUnitsPerMillionTokens: bigint;
+}>;
+
+const MODEL_TOKEN_RATES: Record<string, ModelTokenRate> = {
+  "gpt-5-nano": {
+    inputMicroUnitsPerMillionTokens: 50_000n,
+    outputMicroUnitsPerMillionTokens: 400_000n,
+    cacheReadMicroUnitsPerMillionTokens: 5_000n,
+    cacheWriteMicroUnitsPerMillionTokens: 0n,
+  },
+  "gpt-5.6-luna": {
+    inputMicroUnitsPerMillionTokens: 200_000n,
+    outputMicroUnitsPerMillionTokens: 1_200_000n,
+    cacheReadMicroUnitsPerMillionTokens: 20_000n,
+    cacheWriteMicroUnitsPerMillionTokens: 0n,
+  },
+  "gpt-5.6-sol": {
+    inputMicroUnitsPerMillionTokens: 4_000_000n,
+    outputMicroUnitsPerMillionTokens: 20_000_000n,
+    cacheReadMicroUnitsPerMillionTokens: 400_000n,
+    cacheWriteMicroUnitsPerMillionTokens: 0n,
+  },
+};
+
+// Conservative overestimate for the hold — settled to the actual model's cost.
 const HOLD_RATE = {
-  inputMicroUnitsPerMillionTokens: 300n,   // $0.30/M with 50% markup headroom
-  outputMicroUnitsPerMillionTokens: 1200n, // $1.20/M with 50% markup headroom
+  inputMicroUnitsPerMillionTokens: 4_000_000n,
+  outputMicroUnitsPerMillionTokens: 20_000_000n,
   cacheReadMicroUnitsPerMillionTokens: 0n,
   cacheWriteMicroUnitsPerMillionTokens: 0n,
 };
@@ -84,13 +111,7 @@ export async function callWithCoinGate(
       throw new AiParseError();
     }
 
-    // Use gpt-4o-mini actual rates for settlement.
-    const actualRate = {
-      inputMicroUnitsPerMillionTokens: 150n,
-      outputMicroUnitsPerMillionTokens: 600n,
-      cacheReadMicroUnitsPerMillionTokens: 75n,
-      cacheWriteMicroUnitsPerMillionTokens: 150n,
-    };
+    const actualRate = MODEL_TOKEN_RATES[result.model] ?? MODEL_TOKEN_RATES["gpt-5.6-sol"]!;
     const { providerCostMicroUnits, coinChargeMicroUnits } = calculateCoinUsage(actualRate, {
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
@@ -113,7 +134,7 @@ export async function callWithCoinGate(
       coinChargeMicroUnits,
     });
 
-    logDevAiCost(operation, result);
+    logDevAiCost(operation, result, { providerCostMicroUnits, coinChargeMicroUnits });
     return result;
   }
 

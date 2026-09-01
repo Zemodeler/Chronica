@@ -42,13 +42,16 @@ function adapterWithSequence(...contents: unknown[]): AiAdapter {
 }
 
 describe("AI Workflow Manager", () => {
-  it("approves army spawning, army movement, and gold addition through the final review", async () => {
+  it("approves army spawning, renaming, movement, and gold addition through the final review", async () => {
     const candidates = [
       candidate("00000000-0000-4000-8000-000000000201", "create_force", {
         polityId: "rome", locationProvinceId: DESTINATION_ID, name: "Sicilian Reserves", size: 500, kind: "infantry", payerAccountId: ACCOUNT_ID,
       }),
       candidate("00000000-0000-4000-8000-000000000202", "move_force", {
         forceId: LEGION_ID, destinationProvinceId: DESTINATION_ID,
+      }),
+      candidate("00000000-0000-4000-8000-000000000209", "army_change_name", {
+        forceId: LEGION_ID, newName: "Legio I Victrix",
       }),
       candidate("00000000-0000-4000-8000-000000000203", "add_gold", {
         accountId: ACCOUNT_ID, amount: 75, reason: "Sale of supplies",
@@ -60,10 +63,11 @@ describe("AI Workflow Manager", () => {
     }), world(), candidates, 1);
     const result = executeWorkflows(reviewed.acceptedInvocations, world(), 1);
 
-    expect(reviewed.acceptedInvocations).toHaveLength(3);
+    expect(reviewed.acceptedInvocations).toHaveLength(4);
     expect(result.log.every((entry) => entry.outcome.ok)).toBe(true);
     expect(result.world.material.forces).toHaveLength(world().material.forces.length + 1);
     expect(result.world.material.forces.find((force) => force.id === LEGION_ID)?.locationId).toBe(DESTINATION_ID);
+    expect(result.world.material.forces.find((force) => force.id === LEGION_ID)?.name).toBe("Legio I Victrix");
     expect(result.world.material.accounts.find((account) => account.id === ACCOUNT_ID)?.balance).toBe(1_275);
   });
 

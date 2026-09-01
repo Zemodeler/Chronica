@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { AiOperation, AiTier } from "@chronica/shared";
 import type { AiAdapter, AiCallResult } from "../adapter";
+import { getConfiguredApiKey, getSelectedLocalAiModel } from "../local-key-selection";
 
 const JSON_MODE_OPERATIONS = new Set<AiOperation>([
   "interpret_order",
@@ -24,9 +25,9 @@ const JSON_MODE_OPERATIONS = new Set<AiOperation>([
 
 // Model assignments per tier. Override via env vars if needed.
 const TIER_MODELS: Record<AiTier, string> = {
-  basic: process.env.CHRONICA_AI_MODEL_BASIC ?? "gpt-4o-mini",
-  standard: process.env.CHRONICA_AI_MODEL_STANDARD ?? "gpt-4o",
-  premium: process.env.CHRONICA_AI_MODEL_PREMIUM ?? "gpt-5.6-luna",
+  basic: process.env.CHRONICA_AI_MODEL_BASIC ?? "gpt-5-nano",
+  standard: process.env.CHRONICA_AI_MODEL_STANDARD ?? "gpt-5.6-luna",
+  premium: process.env.CHRONICA_AI_MODEL_PREMIUM ?? "gpt-5.6-sol",
 };
 
 // Operations that use standard tier (everything else is basic).
@@ -44,6 +45,8 @@ const STANDARD_TIER_OPERATIONS = new Set<AiOperation>([
 ]);
 
 function resolveModel(operation: AiOperation): string {
+  const selectedModel = getSelectedLocalAiModel("openai");
+  if (selectedModel !== null) return selectedModel;
   const tier: AiTier = STANDARD_TIER_OPERATIONS.has(operation) ? "standard" : "basic";
   return TIER_MODELS[tier];
 }
@@ -53,7 +56,7 @@ export function createOpenAiLocalAdapter(): AiAdapter {
 
   function getClient(): OpenAI {
     if (!client) {
-      client = new OpenAI();
+      client = new OpenAI({ apiKey: getConfiguredApiKey("openai") });
     }
     return client;
   }
@@ -74,12 +77,17 @@ export function createOpenAiLocalAdapter(): AiAdapter {
       if (choice === undefined) throw new Error("OpenAI returned no choices.");
       const content = choice.message.content ?? "";
       const usage = response.usage;
+      // OpenAI reports prompt_tokens as the total prompt size, including tokens
+      // read from its prompt cache.  The billing model stores mutually exclusive
+      // categories, so remove cached tokens before recording regular input.
+      const cacheReadTokens = usage?.prompt_tokens_details?.cached_tokens ?? 0;
+      const inputTokens = Math.max(0, (usage?.prompt_tokens ?? 0) - cacheReadTokens);
       return {
         content,
         model,
-        inputTokens: usage?.prompt_tokens ?? 0,
+        inputTokens,
         outputTokens: usage?.completion_tokens ?? 0,
-        cacheReadTokens: usage?.prompt_tokens_details?.cached_tokens ?? 0,
+        cacheReadTokens,
         cacheWriteTokens: 0,
       };
     },

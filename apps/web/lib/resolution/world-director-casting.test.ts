@@ -5,6 +5,7 @@ import {
   WorldStateSchema,
   executeWorkflow,
 } from "@chronica/shared";
+import { buildWorldDirectorSystemPrompt } from "./world-director-prompt";
 
 describe("World Director Chronicle casting", () => {
   it("accepts a grounded new NPC cast profile", () => {
@@ -52,5 +53,16 @@ describe("World Director Chronicle casting", () => {
       expect(outcome.world.characters.find((character) => character.id === "char-cast-publius")?.name).toBe("Publius Cornelius");
       expect(WorldStateSchema.safeParse(outcome.world).success).toBe(true);
     }
+  });
+
+  it("instructs the Director to use only schema-valid cast role tokens", () => {
+    const prompt = buildWorldDirectorSystemPrompt(
+      firstPunicWarScenario.initialWorld,
+      { proposals: [], conflicts: [], totalSalience: 0 },
+      "marcus-atilius",
+    );
+
+    expect(prompt).toContain('"role" MUST be exactly one of: "supporter", "opponent", "spokesperson", "presiding_official", "witness", "negotiator"');
+    expect(prompt).toContain("never write a descriptive role or title");
   });
 });

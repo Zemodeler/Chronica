@@ -3,12 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import type { AccountDashboardViewModel } from "@chronica/shared";
+import type { LocalAiProviderConfiguration } from "@chronica/ai";
 import {
   attachEmail,
   createDeveloperGift,
   redeemGift,
   resumeGame,
   revokeDeveloperGift,
+  selectLocalAiProvider,
   signOut,
   updateProfile,
 } from "../actions";
@@ -24,7 +26,7 @@ export type SerializedGift = {
   redemptionCount: number;
 };
 
-type DialogKey = "profile" | "email" | "wallet" | "redeem" | "saves" | "developer" | "workflow_proposals" | null;
+type DialogKey = "profile" | "email" | "wallet" | "redeem" | "saves" | "developer" | "ai_provider" | "workflow_proposals" | null;
 
 type Params = {
   gift?: string;
@@ -32,6 +34,7 @@ type Params = {
   developer?: string;
   email?: string;
   checkout?: string;
+  aiProvider?: string;
 };
 
 export function AccountDashboard({
@@ -39,11 +42,13 @@ export function AccountDashboard({
   gifts,
   params,
   pendingProposalCount = 0,
+  localAiProviderConfiguration,
 }: {
   account: AccountDashboardViewModel;
   gifts: SerializedGift[];
   params: Params;
   pendingProposalCount?: number;
+  localAiProviderConfiguration: LocalAiProviderConfiguration | undefined;
 }) {
   const [openDialog, setOpenDialog] = useState<DialogKey>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -120,6 +125,9 @@ export function AccountDashboard({
       {params.developer === "reauth" && <p className="error acct-status">Request a fresh sign-in link before changing gifts.</p>}
       {params.developer === "unavailable" && <p className="error acct-status">Gift-code setup is incomplete. Configure the server secret and try again.</p>}
       {params.developer === "revoked" && <p className="notice acct-status">Gift revoked.</p>}
+      {params.aiProvider === "updated" && <p id="ai-provider-status" className="notice acct-status">Local AI provider changed.</p>}
+      {(params.aiProvider === "invalid" || params.aiProvider === "unavailable") && <p id="ai-provider-status" className="error acct-status">That local AI provider is not available.</p>}
+      {params.aiProvider === "unauthorized" && <p id="ai-provider-status" className="error acct-status">Request a fresh sign-in link before changing the local AI provider.</p>}
       {params.email === "sent" && <p className="notice acct-status">Check your inbox for a verification link.</p>}
       {params.email === "invalid" && <p className="error acct-status">We could not send that verification email.</p>}
 
@@ -176,6 +184,17 @@ export function AccountDashboard({
           </button>
         )}
 
+        {canManageGifts && localAiProviderConfiguration?.available && (
+          <button type="button" className="account-card account-card--dev" onClick={() => setOpenDialog("ai_provider")}>
+            <span className="account-card-icon">⚙️</span>
+            <span className="account-card-title">Local AI Provider</span>
+            <span className="account-card-meta">
+              {localAiProviderConfiguration.activeProvider === "openai" ? "OpenAI" : "Anthropic"}
+            </span>
+            <span className="account-card-action">Switch →</span>
+          </button>
+        )}
+
         {canManageGifts && (
           <button type="button" className="account-card account-card--dev" onClick={() => setOpenDialog("workflow_proposals")}>
             <span className="account-card-icon">🔬</span>
@@ -200,6 +219,7 @@ export function AccountDashboard({
         {openDialog === "redeem" && <RedeemDialog onClose={close} />}
         {openDialog === "saves" && <SavesDialog account={account} onClose={close} />}
         {openDialog === "developer" && <DeveloperDialog gifts={gifts} onClose={close} />}
+        {openDialog === "ai_provider" && localAiProviderConfiguration && <LocalAiProviderDialog configuration={localAiProviderConfiguration} onClose={close} />}
         {openDialog === "workflow_proposals" && <WorkflowProposalsDialog onClose={close} />}
       </dialog>
     </>
@@ -466,6 +486,47 @@ function DeveloperDialog({ gifts, onClose }: { gifts: SerializedGift[]; onClose:
   );
 }
 
+function LocalAiProviderDialog({ configuration, onClose }: { configuration: LocalAiProviderConfiguration; onClose: () => void }) {
+  const [provider, setProvider] = useState(configuration.activeProvider);
+  const models = provider === "openai" ? configuration.openAiModels : configuration.anthropicModels;
+  const [model, setModel] = useState(configuration.activeModel);
+
+  const changeProvider = (nextProvider: "openai" | "anthropic") => {
+    const nextModels = nextProvider === "openai" ? configuration.openAiModels : configuration.anthropicModels;
+    setProvider(nextProvider);
+    setModel(nextModels[0] ?? "");
+  };
+
+  return (
+    <>
+      <DialogHeader title="Local AI Provider" onClose={onClose} />
+      <div className="dialog-body">
+        <p className="dialog-lede">
+          Choose the AI provider used by this local development server. API keys stay in your local environment file and are never shown here.
+        </p>
+        <form action={selectLocalAiProvider}>
+          <fieldset>
+            <legend>Configured provider</legend>
+            <label>
+              <input type="radio" name="provider" value="openai" checked={provider === "openai"} onChange={() => changeProvider("openai")} disabled={!configuration.openAiConfigured} />
+              OpenAI <code>OPENAI_API_KEY</code>{!configuration.openAiConfigured && " (not configured)"}
+            </label>
+            <label>
+              <input type="radio" name="provider" value="anthropic" checked={provider === "anthropic"} onChange={() => changeProvider("anthropic")} disabled={!configuration.anthropicConfigured} />
+              Anthropic <code>ANTHROPIC_API_KEY</code>{!configuration.anthropicConfigured && " (not configured)"}
+            </label>
+          </fieldset>
+          <label htmlFor="local-ai-model">Model</label>
+          <select id="local-ai-model" name="model" value={models.includes(model) ? model : models[0] ?? ""} onChange={(event) => setModel(event.target.value)}>
+            {models.map((availableModel) => <option key={availableModel} value={availableModel}>{availableModel}</option>)}
+          </select>
+          <button type="submit">Use selected provider</button>
+        </form>
+      </div>
+    </>
+  );
+}
+
 type ProposalRow = {
   id: string;
   turnId: string;
@@ -548,7 +609,7 @@ function WorkflowProposalsDialog({ onClose }: { onClose: () => void }) {
             )}
 
             <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
-              <button type="button" className="button sm secondary" onClick={() => viewScaffold(p.id)}>
+              <button type="button" className="button sm secondary" onClick={() => void viewScaffold(p.id)}>
                 View Scaffold
               </button>
               <input

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { buildWorkflowCatalog, type WorldState, type ScopeAssignment } from "@chronica/shared";
-import { buildPlayerResolutionContext, type ResolutionPlayerContext } from "./prompts";
+import { buildPlayerResolutionContext, WORKFLOW_MUTATION_RULE, type ResolutionPlayerContext } from "./prompts";
 
 // Simulator prompt builder.
 //
@@ -87,6 +87,8 @@ ${buildPlayerResolutionContext(world, context)}
 REGISTERED WORKFLOW CATALOG:
 ${buildWorkflowCatalog()}
 
+${WORKFLOW_MUTATION_RULE}
+
 YOUR TASK: Propose world events and storyline developments that are plausible given the world state. Each proposal must include the concrete workflow invocations that make the event materially real.
 
 Output schema (return strict JSON { "proposals": [...] }):
@@ -108,7 +110,7 @@ RULES:
 6. Salience 7–10 = major development worth its own Chronicle entry. Salience 0–3 = background.
 7. Do not resolve a storyline unless the narrative clearly calls for it.
 8. Propose at most 12 total events.
-9. proposedWorkflows may use only exact actionIds from the registered workflow catalog. Do not invent actions such as "evaluate_force". Use [] when no registered workflow fits.
+9. proposedWorkflows may use only exact actionIds from the registered workflow catalog. Do not invent actions such as "evaluate_force". Use [] only for an event with no world-state mutation, or a clearly identified novel action that cannot be represented by a registered workflow.
 
 Respond with strict JSON only: { "proposals": [...] }`;
 }

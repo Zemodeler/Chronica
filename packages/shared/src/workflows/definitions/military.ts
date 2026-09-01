@@ -8,6 +8,35 @@ const randomUUID = () => globalThis.crypto.randomUUID();
 
 export const militaryWorkflows: AnyWorkflowDefinition[] = [
   {
+    id: "army_change_name",
+    description: "Rename an existing military force, such as an army or legion.",
+    category: "military",
+    parametersSchema: z.object({
+      forceId: EntityIdSchema,
+      newName: z.string().trim().min(1).max(120),
+    }).strict(),
+    apply(world, params) {
+      const force = world.material.forces.find((f) => f.id === params.forceId);
+      if (!force) return null;
+      return {
+        world: {
+          ...world,
+          material: {
+            ...world.material,
+            forces: world.material.forces.map((f) =>
+              f.id === params.forceId ? { ...f, name: params.newName } : f,
+            ),
+          },
+        },
+        result: {
+          summary: `${force.name} is renamed to ${params.newName}.`,
+          applied: true,
+        },
+      };
+    },
+  },
+
+  {
     id: "create_force",
     description: "Raise a new military force for a polity at a specified province. Use when a player orders raising an army, recruiting troops, or mustering soldiers. Requires a polity account to fund the obligation.",
     category: "military",

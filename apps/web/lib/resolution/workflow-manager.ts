@@ -250,7 +250,24 @@ export async function runWorkflowManager(
     violation: originalPolicy.get(candidate.correlationId) ?? null,
   }));
   const prompt = buildWorkflowManagerSystemPrompt(world, candidates, diagnostics);
-  const managerBatch = await requestCompleteDecisions(adapter, prompt, candidates, atStep);
+  let managerBatch: ManagerDecisionBatch;
+  let managerFailed = false;
+  try {
+    managerBatch = await requestCompleteDecisions(adapter, prompt, candidates, atStep);
+  } catch (error) {
+    if (!(error instanceof WorkflowManagerOutputError)) throw error;
+    console.error(`[workflow-manager] AI review failed after retry — auto-approving policy-valid candidates: ${error.message}`);
+    managerFailed = true;
+    managerBatch = {
+      decisions: candidates.map((candidate) => ({
+        correlationId: candidate.correlationId,
+        decision: "approve" as const,
+        reason: "Workflow Manager unavailable — approved by policy validation.",
+        replacementInvocation: null,
+      })),
+      novelActionProposals: [],
+    };
+  }
   const decisions = new Map(managerBatch.decisions.map((decision) => [decision.correlationId, decision]));
 
   const auditEntries: WorkflowAuditEntry[] = [];
@@ -317,6 +334,6 @@ export async function runWorkflowManager(
   return {
     acceptedInvocations,
     temporaryPatches,
-    auditBlob: { candidates: auditEntries, novelActionProposals: temporaryPatches, managerFailed: false, atStep },
+    auditBlob: { candidates: auditEntries, novelActionProposals: temporaryPatches, managerFailed, atStep },
   };
 }

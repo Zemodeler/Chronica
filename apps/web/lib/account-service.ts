@@ -18,6 +18,7 @@ import {
   updateAccountProfile,
 } from "@chronica/db";
 import type { AccountDashboardViewModel, DeveloperGiftCreate, ProfileUpdate } from "@chronica/shared";
+import { selectLocalAiConfiguration, type LocalAiProvider } from "@chronica/ai";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 
 export async function resolveAccount(requestHeaders: Headers) {
@@ -158,6 +159,17 @@ export async function revokeGift(requestHeaders: Headers, giftCodeId: string, au
   const database = createDatabase(requiredDatabaseUrl());
   try { return await revokeDeveloperGiftCode(database.db, account.id, giftCodeId, auditReason); }
   finally { await database.close(); }
+}
+
+export async function selectDeveloperLocalAiConfiguration(requestHeaders: Headers, provider: LocalAiProvider, model: string): Promise<"updated" | "unauthorized" | "unavailable"> {
+  const account = await resolveFreshDeveloper(requestHeaders);
+  if (account === null) return "unauthorized";
+  try {
+    selectLocalAiConfiguration(provider, model);
+    return "updated";
+  } catch {
+    return "unavailable";
+  }
 }
 
 export async function getAvailableCoins(requestHeaders: Headers): Promise<string | null> {

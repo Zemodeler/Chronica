@@ -194,6 +194,83 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
+// ── Entity resolution ─────────────────────────────────────────────────────────
+// Models sometimes emit human-readable names instead of IDs. This resolves
+// string parameter values to the nearest real entity ID using case-insensitive
+// name matching, so workflow execution doesn't silently fail on a bad reference.
+
+function fuzzyMatchEntityId<T extends { id: string }>(
+  value: string,
+  candidates: readonly T[],
+  getName: (item: T) => string,
+): string | null {
+  if (candidates.some((c) => c.id === value)) return null; // already a valid ID
+  const lower = value.toLowerCase().trim();
+  const exact = candidates.find((c) => getName(c).toLowerCase() === lower);
+  if (exact) return exact.id;
+  const partial = candidates.find((c) => {
+    const name = getName(c).toLowerCase();
+    return name.includes(lower) || lower.includes(name);
+  });
+  return partial?.id ?? null;
+}
+
+function resolveInvocationEntities(invocation: ProposedInvocation, world: WorldState): ProposedInvocation {
+  const params = { ...invocation.parameters } as Record<string, unknown>;
+  let changed = false;
+
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value !== "string") continue;
+    const lk = key.toLowerCase();
+    let resolved: string | null = null;
+
+    if (lk.endsWith("provinceid") || lk === "locationid" || lk === "destinationid") {
+      resolved = fuzzyMatchEntityId(value, world.map.provinces, (p) => p.name);
+    } else if (lk.endsWith("polityid")) {
+      resolved = fuzzyMatchEntityId(value, world.map.polities, (p) => p.name);
+    } else if (lk.endsWith("forceid")) {
+      resolved = fuzzyMatchEntityId(value, world.material.forces, (f) => f.name);
+    } else if (lk.endsWith("characterid")) {
+      resolved = fuzzyMatchEntityId(value, world.characters.filter((c) => c.alive), (c) => c.name);
+    } else if (lk.endsWith("accountid")) {
+      if (!world.material.accounts.some((a) => a.id === value)) {
+        const matchChar = world.characters.find(
+          (c) => c.id === value || c.name.toLowerCase() === value.toLowerCase().trim(),
+        );
+        if (matchChar) {
+          const acct = world.material.accounts.find(
+            (a) => a.owner.kind === "character" && a.owner.id === matchChar.id && a.status === "active",
+          );
+          if (acct) resolved = acct.id;
+        }
+      }
+    }
+
+    if (resolved !== null) {
+      console.log(`${tag()} [entity-resolve] ${invocation.actionId}.${key}: "${value}" → "${resolved}"`);
+      params[key] = resolved;
+      changed = true;
+    }
+  }
+
+  return changed ? { ...invocation, parameters: params } : invocation;
+}
+
+const VALID_CAST_ROLES = new Set([
+  "supporter", "opponent", "spokesperson", "presiding_official", "witness", "negotiator",
+]);
+
+function repairChronicleCastRole(role: string): string {
+  if (VALID_CAST_ROLES.has(role)) return role;
+  const lower = role.toLowerCase();
+  if (lower.includes("presid") || lower.includes("chair") || lower.includes("official")) return "presiding_official";
+  if (lower.includes("support") || lower.includes("backer") || lower.includes("ally")) return "supporter";
+  if (lower.includes("oppos") || lower.includes("critic") || lower.includes("rival") || lower.includes("enemy")) return "opponent";
+  if (lower.includes("negotiat") || lower.includes("envoy") || lower.includes("diplomat")) return "negotiator";
+  if (lower.includes("witness") || lower.includes("observer")) return "witness";
+  return "spokesperson";
+}
+
 /**
  * The World Director occasionally copies a valid proposed workflow but emits
  * actorId: null. Recover its exact source invocation instead of throwing away
@@ -222,10 +299,19 @@ function sanitizeWorldDirectorContent(text: string, pkg: ConsolidatedProposalPac
       repaired += 1;
       return [replacement];
     });
-    return { ...decision, finalWorkflows };
+    // Repair invalid chronicleCast.role values — an invalid enum in one decision
+    // previously caused the entire batch to fail schema validation.
+    let repairedCast = decision["chronicleCast"];
+    if (isRecord(repairedCast) && typeof repairedCast["role"] === "string" && !VALID_CAST_ROLES.has(repairedCast["role"])) {
+      const fixedRole = repairChronicleCastRole(repairedCast["role"]);
+      console.warn(`${tag()} [world_direct] repaired chronicleCast.role "${repairedCast["role"]}" → "${fixedRole}"`);
+      repairedCast = { ...repairedCast, role: fixedRole };
+      repaired += 1;
+    }
+    return { ...decision, finalWorkflows, chronicleCast: repairedCast };
   });
   if (repaired > 0 || removed > 0) {
-    console.warn(`${tag()} [world_direct] repaired ${repaired} null actorId workflow(s); discarded ${removed} unmatchable workflow(s)`);
+    console.warn(`${tag()} [world_direct] repaired ${repaired} workflow(s)/role(s); discarded ${removed} unmatchable workflow(s)`);
   }
   return JSON.stringify(raw);
 }
@@ -806,11 +892,24 @@ export async function resolveTurn(
     const verdicts: Verdict[] = [];
     const adjSystemPrompt = buildAdjudicateSystemPrompt(resolutionWorld, actorCharacterId, resolutionContext);
 
+    // Admin directives are GM commands wrapped in [brackets]. They bypass all
+    // feasibility filtering and must always produce a world-state change.
+    const adminDirectiveIds = new Set<string>();
+    for (const [idx, directive] of batch.directives.entries()) {
+      if ((directive.kind === "new" || directive.kind === "revise") && /^\s*\[.*\]\s*$/.test(directive.text)) {
+        adminDirectiveIds.add(`directive-${idx}`);
+        console.log(`${tag()} [adjudicate] directive-${idx} flagged as admin command`);
+      }
+    }
+
     for (const assessment of assessments) {
+      const isAdmin = adminDirectiveIds.has(assessment.directiveId);
       const userMsg = `Order: ${assessment.interpretation}\nFeasibility: ${assessment.feasibility}\nWorkflow hints: ${JSON.stringify(assessmentWorkflows(assessment))}\nNeeds adjudication: ${assessment.needsAdjudication}`;
-      try {
-        const result = await coinGatedAdapter.call("adjudicate", adjSystemPrompt, userMsg);
-        let adjContent = result.content;
+
+      // Extracted parse-and-repair logic so it can run on both the first attempt
+      // and a single retry without duplicating the repair / income-injection code.
+      const parseAdjudicationContent = async (content: string): Promise<Verdict | null> => {
+        let adjContent = content;
         try {
           const raw = JSON.parse(stripToJson(adjContent)) as Record<string, unknown>;
           if (raw && typeof raw === "object") {
@@ -841,67 +940,145 @@ export async function resolveTurn(
         } catch { /* leave adjContent as-is */ }
 
         const parsed = await safeParseJson(adjContent, VerdictParseSchema, `adjudicate:${assessment.directiveId}`);
-        if (parsed) {
-          let finalDeltas: StateDelta[] = parsed.deltas;
+        if (!parsed) return null;
 
-          // Income repair: inject add_gold when economic order has no workflow delta
-          const ECONOMIC_INCOME_RE = /\b(sell|sold|trade|earn|income|profit|wares|goods|cargo|merchandise|revenue|payment|receive|collect|spoils)\b/i;
-          const hasWorkflowDelta = finalDeltas.some((d) => d.kind === "workflow");
-          const isPositiveOutcome = parsed.outcome === "succeeds" || parsed.outcome === "partially_succeeds";
-          if (!hasWorkflowDelta && isPositiveOutcome && ECONOMIC_INCOME_RE.test(assessment.interpretation)) {
-            const actorAccount = resolutionWorld.material.accounts.find(
-              (a) => a.owner.kind === "character" && a.owner.id === actorCharacterId && a.status === "active",
-            );
-            if (actorAccount) {
-              const hasMeaningful = finalDeltas.some((d) => d.kind === "material_effect" && d.effect.magnitude === "meaningful");
-              finalDeltas = [
-                ...finalDeltas,
-                {
-                  kind: "workflow",
-                  invocation: {
-                    actionId: "add_gold",
-                    actorId: actorCharacterId,
-                    parameters: { accountId: actorAccount.id, amount: hasMeaningful ? 200 : 50, reason: assessment.interpretation.slice(0, 240) },
-                  },
+        let finalDeltas: StateDelta[] = parsed.deltas;
+
+        // Income repair: inject add_gold when economic order has no workflow delta
+        const ECONOMIC_INCOME_RE = /\b(sell|sold|trade|earn|income|profit|wares|goods|cargo|merchandise|revenue|payment|receive|collect|spoils)\b/i;
+        const hasWorkflowDelta = finalDeltas.some((d) => d.kind === "workflow");
+        const isPositiveOutcome = parsed.outcome === "succeeds" || parsed.outcome === "partially_succeeds";
+        if (!hasWorkflowDelta && isPositiveOutcome && ECONOMIC_INCOME_RE.test(assessment.interpretation)) {
+          const actorAccount = resolutionWorld.material.accounts.find(
+            (a) => a.owner.kind === "character" && a.owner.id === actorCharacterId && a.status === "active",
+          );
+          if (actorAccount) {
+            const hasMeaningful = finalDeltas.some((d) => d.kind === "material_effect" && d.effect.magnitude === "meaningful");
+            finalDeltas = [
+              ...finalDeltas,
+              {
+                kind: "workflow",
+                invocation: {
+                  actionId: "add_gold",
+                  actorId: actorCharacterId,
+                  parameters: { accountId: actorAccount.id, amount: hasMeaningful ? 200 : 50, reason: assessment.interpretation.slice(0, 240) },
                 },
-              ];
-            }
+              },
+            ];
+          }
+        }
+
+        return {
+          ...parsed,
+          deltas: finalDeltas,
+          directiveId: assessment.directiveId,
+          playerInvolvement: [{ playerId, characterId: actorCharacterId, role: "actor" }],
+        };
+      };
+
+      let verdict: Verdict | null = null;
+      let retryReason: string | null = null;
+
+      try {
+        const result = await coinGatedAdapter.call("adjudicate", adjSystemPrompt, userMsg);
+        verdict = await parseAdjudicationContent(result.content);
+        if (!verdict) {
+          retryReason = "Previous response could not be parsed as a valid verdict. Please return valid JSON.";
+        } else {
+          const isPositive = verdict.outcome === "succeeds" || verdict.outcome === "partially_succeeds";
+          const hasWorkflows = verdict.deltas.some((d) => d.kind === "workflow");
+          const hasHints = assessmentWorkflows(assessment).length > 0;
+          // Semantic failure A: the model said the order succeeds but produced no
+          // workflow to actually implement it. Force a retry with an explicit
+          // instruction so the model fills in the missing workflow delta(s).
+          // Always retry — even when assess produced no hints, the adjudicator
+          // is responsible for selecting the correct workflow from the catalog.
+          if (isPositive && !hasWorkflows) {
+            console.warn(`${tag()} [adjudicate] ${assessment.directiveId}${isAdmin ? " [ADMIN]" : ""}: positive outcome but no workflow deltas — retrying`);
+            const hintSuggestion = hasHints
+              ? ` The assess step suggested: ${assessmentWorkflows(assessment).map((w) => w.actionId).join(", ")}.`
+              : "";
+            const adminNote = isAdmin ? " This is a GM/admin command — it MUST produce at least one workflow delta." : "";
+            retryReason = `Your verdict says the order "${assessment.interpretation.slice(0, 120)}" ${verdict.outcome}, but you did not include any workflow delta to implement the change in world state.${hintSuggestion}${adminNote} You MUST include at least one workflow delta (e.g. create_force, add_gold, move_force, change_province_control, start_war) that concretely changes the world. Return the complete verdict JSON again with the workflow delta(s) included.\n\n${userMsg}`;
+            verdict = null;
           }
 
-          verdicts.push({
-            ...parsed,
-            deltas: finalDeltas,
-            directiveId: assessment.directiveId,
-            playerInvolvement: [{ playerId, characterId: actorCharacterId, role: "actor" }],
-          });
-        } else {
-          const fallbackDeltas = assessmentWorkflows(assessment).map((workflow) => ({
-            kind: "workflow" as const,
-            invocation: { actionId: workflow.actionId, actorId: actorCharacterId, parameters: workflow.parameters },
-          }));
-          verdicts.push({
-            directiveId: assessment.directiveId,
-            outcome: assessment.feasibility === "impossible" ? "fails" : "partially_succeeds",
-            obstacles: [{ source: "Unknown", weight: "trivial", reason: "Could not fully determine outcome." }],
-            deltas: fallbackDeltas,
-            tacticalModifiers: [],
-            timeCost: assessment.estimatedSteps.min > 0 ? assessment.estimatedSteps : { min: 1, max: 1 },
-            rationale: `${assessment.interpretation} — outcome uncertain.`,
-            knowledgeVisibility: "polity",
-            playerInvolvement: [{ playerId, characterId: actorCharacterId, role: "actor" }],
-          });
+          // Semantic failure B: the model overrode a feasible assessment with
+          // "impossible", OR it's an admin command (which can never be impossible).
+          // Retry and ask it to reconsider.
+          else if (
+            verdict.outcome === "impossible" &&
+            (isAdmin || (assessment.feasibility === "feasible" || assessment.feasibility === "conditional"))
+          ) {
+            console.warn(`${tag()} [adjudicate] ${assessment.directiveId}${isAdmin ? " [ADMIN]" : ""}: impossible verdict — retrying`);
+            const adminNote = isAdmin
+              ? "This is a GM/admin command wrapped in []. Admin commands MUST always succeed. Return \"succeeds\" with the appropriate workflow delta(s)."
+              : `The assessment step determined this order is ${assessment.feasibility} and suggested workflow(s): ${assessmentWorkflows(assessment).map((w) => w.actionId).join(", ")}. Please reconsider — only rule an order impossible if there is a concrete, insurmountable world-state constraint.`;
+            retryReason = `${adminNote} If the order can be at least partially executed, return "partially_succeeds" with the appropriate workflow delta(s). Return the complete verdict JSON again.\n\n${userMsg}`;
+            verdict = null;
+          }
         }
       } catch (err) {
         console.error(`${tag()} [adjudicate:error] ${assessment.directiveId}:`, err);
+        retryReason = `[RETRY] Previous attempt failed with error: ${String(err).slice(0, 200)}. Please try again.\n\n${userMsg}`;
+      }
+
+      if (verdict === null && retryReason !== null) {
+        try {
+          const retry = await coinGatedAdapter.call("adjudicate", adjSystemPrompt, retryReason);
+          verdict = await parseAdjudicationContent(retry.content);
+        } catch (retryErr) {
+          console.error(`${tag()} [adjudicate:retry-error] ${assessment.directiveId}:`, retryErr);
+        }
+      }
+
+      // Hard fallback after retry: use assessment workflow hints to ensure the
+      // order produces some world change, regardless of what the model returned.
+      // Admin commands always override impossible verdicts even without hints.
+      if (verdict) {
+        const hasWorkflowsNow = verdict.deltas.some((d) => d.kind === "workflow");
+        const isPositiveNow = verdict.outcome === "succeeds" || verdict.outcome === "partially_succeeds";
+        const isImpossibleOverride =
+          verdict.outcome === "impossible" &&
+          (isAdmin || assessment.feasibility === "feasible" || assessment.feasibility === "conditional");
+        const hintDeltas = assessmentWorkflows(assessment).map((wf) => ({
+          kind: "workflow" as const,
+          invocation: { actionId: wf.actionId, actorId: actorCharacterId, parameters: wf.parameters },
+        }));
+        if (isPositiveNow && !hasWorkflowsNow && hintDeltas.length > 0) {
+          console.warn(`${tag()} [adjudicate] ${assessment.directiveId}: still no workflows after retry — injecting ${hintDeltas.length} assessment hint(s)`);
+          verdict = { ...verdict, deltas: [...verdict.deltas, ...hintDeltas] };
+        } else if (isImpossibleOverride) {
+          if (hintDeltas.length > 0) {
+            console.warn(`${tag()} [adjudicate] ${assessment.directiveId}: still impossible after retry — overriding to partially_succeeds with ${hintDeltas.length} hint(s)`);
+            verdict = { ...verdict, outcome: "partially_succeeds", deltas: [...verdict.deltas, ...hintDeltas] };
+          } else if (isAdmin) {
+            // Admin with no assess hints: keep the positive outcome at minimum — a
+            // chronicled acknowledgement is better than a silent impossible.
+            console.warn(`${tag()} [adjudicate] ${assessment.directiveId} [ADMIN]: impossible with no hints — overriding to partially_succeeds`);
+            verdict = { ...verdict, outcome: "partially_succeeds" };
+          }
+        }
+      }
+
+      if (verdict) {
+        verdicts.push(verdict);
+      } else {
+        // Fallback: use whatever workflow hints the assess step provided.
+        // This always yields at least an attempt rather than a hard zero-delta fail.
+        const fallbackDeltas = assessmentWorkflows(assessment).map((workflow) => ({
+          kind: "workflow" as const,
+          invocation: { actionId: workflow.actionId, actorId: actorCharacterId, parameters: workflow.parameters },
+        }));
         verdicts.push({
           directiveId: assessment.directiveId,
-          outcome: "fails",
-          obstacles: [{ source: "System", weight: "real", reason: "Resolution failed due to an error." }],
-          deltas: [],
+          outcome: assessment.feasibility === "impossible" ? "fails" : "partially_succeeds",
+          obstacles: [{ source: "Unknown", weight: "trivial", reason: "Could not fully determine outcome." }],
+          deltas: fallbackDeltas,
           tacticalModifiers: [],
-          timeCost: { min: 1, max: 1 },
-          rationale: "The action could not be adjudicated.",
-          knowledgeVisibility: "private",
+          timeCost: assessment.estimatedSteps.min > 0 ? assessment.estimatedSteps : { min: 1, max: 1 },
+          rationale: `${assessment.interpretation} — outcome uncertain.`,
+          knowledgeVisibility: "polity",
           playerInvolvement: [{ playerId, characterId: actorCharacterId, role: "actor" }],
         });
       }
@@ -1084,19 +1261,52 @@ export async function resolveTurn(
     emit(onProgress, "manage");
     console.log(`${tag()} [manage] IN: player=${playerCandidates.length} world=${worldDirectorInvocations.length} candidate(s)`);
     const worldCandidates = collectWorldCandidates(worldDirectorInvocations);
-    const finalCandidates = [...playerCandidates, ...worldCandidates];
+    // Resolve entity name references to IDs before the Manager sees them.
+    // Models occasionally emit readable names ("Panormus") instead of UUID-style
+    // IDs; resolving here ensures both the Manager's dry-run and final execution
+    // see valid references.
+    const resolvedPlayerCandidates = playerCandidates.map((c) => ({
+      ...c,
+      requestedInvocation: resolveInvocationEntities(c.requestedInvocation, resolutionWorld),
+    }));
+    const resolvedWorldCandidates = worldCandidates.map((c) => ({
+      ...c,
+      requestedInvocation: resolveInvocationEntities(c.requestedInvocation, resolutionWorld),
+    }));
+    const finalCandidates = [...resolvedPlayerCandidates, ...resolvedWorldCandidates];
     const managerResult = await runWorkflowManager(coinGatedAdapter, resolutionWorld, finalCandidates, atStep);
     console.log(`${tag()} [manage] OUT: ${managerResult.acceptedInvocations.length}/${finalCandidates.length} workflow(s) accepted`);
     emit(onProgress, "manage", true);
 
     emit(onProgress, "execute_world");
-    const executed = executeWorkflows(
-      managerResult.acceptedInvocations,
-      resolutionWorld,
-      atStep,
-    );
+
+    // Battle proximity: if start_battle is in the accepted invocations and the
+    // two forces are currently in different provinces, prepend a move_force so
+    // both appear co-located on the map when the battle begins.
+    const invocationsToExecute = [...managerResult.acceptedInvocations];
+    for (const inv of managerResult.acceptedInvocations) {
+      if (inv.actionId !== "start_battle") continue;
+      const params = inv.parameters as Record<string, unknown>;
+      const atkId = params["attackingForceId"] as string | undefined;
+      const defId = params["defendingForceId"] as string | undefined;
+      if (!atkId || !defId) continue;
+      const atk = resolutionWorld.material.forces.find((f) => f.id === atkId);
+      const def = resolutionWorld.material.forces.find((f) => f.id === defId);
+      if (!atk || !def || atk.locationId === def.locationId) continue;
+      // Move attacker to defender's province before the battle starts.
+      const moveInvocation: ProposedInvocation = {
+        actionId: "move_force",
+        actorId: actorCharacterId,
+        parameters: { forceId: atkId, destinationProvinceId: def.locationId },
+      };
+      const insertIdx = invocationsToExecute.indexOf(inv);
+      invocationsToExecute.splice(insertIdx, 0, moveInvocation);
+      console.log(`${tag()} [battle-proximity] auto-prepended move_force(${atkId} → ${def.locationId}) before start_battle`);
+    }
+
+    const executed = executeWorkflows(invocationsToExecute, resolutionWorld, atStep);
     let newWorld = executed.world;
-    const allWorkflowLog = executed.log;
+    let allWorkflowLog = [...executed.log];
     for (const proposal of managerResult.temporaryPatches) {
       const patched = applyTemporaryWorkflowPatch(newWorld, proposal.temporaryPatch, atStep);
       if (patched === null) throw new Error(`Temporary workflow patch could not be applied: ${proposal.intent}`);
@@ -1110,6 +1320,28 @@ export async function resolveTurn(
         console.error(`${tag()} [execute:fail] actionId=${entry.invocation.actionId} actorId=${entry.invocation.actorId} reason=${entry.outcome.reason}`);
       }
     }
+
+    // Retry failed workflows with fresh entity resolution against the updated world.
+    // Entities created this turn (e.g. a newly raised force) may now resolve
+    // correctly when matched against the post-execution world state.
+    const failedEntries = allWorkflowLog.filter((e) => !e.outcome.ok);
+    if (failedEntries.length > 0) {
+      const retryInvocations: ProposedInvocation[] = [];
+      for (const entry of failedEntries) {
+        const reresolvedInv = resolveInvocationEntities(entry.invocation, newWorld);
+        if (JSON.stringify(reresolvedInv.parameters) !== JSON.stringify(entry.invocation.parameters)) {
+          console.log(`${tag()} [execute:retry-enqueue] ${entry.invocation.actionId} re-resolved — queuing retry`);
+          retryInvocations.push(reresolvedInv);
+        }
+      }
+      if (retryInvocations.length > 0) {
+        const retryExecuted = executeWorkflows(retryInvocations, newWorld, atStep);
+        newWorld = retryExecuted.world;
+        allWorkflowLog = [...allWorkflowLog, ...retryExecuted.log];
+        console.log(`${tag()} [execute:retry] ${retryExecuted.log.filter((e) => e.outcome.ok).length}/${retryInvocations.length} corrected workflow(s) applied`);
+      }
+    }
+
     console.log(`${tag()} [execute_world] OUT: ${allWorkflowLog.filter((e) => e.outcome.ok).length}/${allWorkflowLog.length} workflows applied`);
     const executionByInvocation = new Map(
       allWorkflowLog.map((entry) => [JSON.stringify(entry.invocation), entry.outcome]),
