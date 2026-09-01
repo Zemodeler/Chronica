@@ -102,15 +102,52 @@ export const PolitySchema = z
   .strict();
 export type Polity = z.infer<typeof PolitySchema>;
 
+/**
+ * A declared political tie at the start of a scenario.  It is intentionally
+ * descriptive: resolution does not yet turn an alliance into automatic war
+ * participation or movement rights.
+ */
+export const PolityRelationSchema = z
+  .object({
+    id: EntityIdSchema,
+    kind: z.literal("alliance"),
+    leaderPolityId: EntityIdSchema,
+    memberPolityId: EntityIdSchema,
+    sourceNote: z.string().trim().min(1).max(600),
+  })
+  .strict()
+  .refine((relation) => relation.leaderPolityId !== relation.memberPolityId, {
+    message: "A polity cannot form an alliance with itself.",
+    path: ["memberPolityId"],
+  });
+export type PolityRelation = z.infer<typeof PolityRelationSchema>;
+
 export const ProvinceGraphSchema = z
   .object({
     provinces: z.array(ProvinceSchema),
     edges: z.array(ProvinceEdgeSchema),
     polities: z.array(PolitySchema),
+    politicalRelations: z.array(PolityRelationSchema).default([]),
   })
   .strict()
   .superRefine((graph, context) => {
     const polityIds = new Set(graph.polities.map((polity) => polity.id));
+    const relationIds = new Set<string>();
+    const relationPairs = new Set<string>();
+    for (const [index, relation] of graph.politicalRelations.entries()) {
+      if (relationIds.has(relation.id)) {
+        context.addIssue({ code: "custom", path: ["politicalRelations", index, "id"], message: "A political relation id may be used only once." });
+      }
+      relationIds.add(relation.id);
+      if (!polityIds.has(relation.leaderPolityId) || !polityIds.has(relation.memberPolityId)) {
+        context.addIssue({ code: "custom", path: ["politicalRelations", index], message: "Political relations must reference declared polities." });
+      }
+      const pair = `${relation.kind}:${relation.leaderPolityId}:${relation.memberPolityId}`;
+      if (relationPairs.has(pair)) {
+        context.addIssue({ code: "custom", path: ["politicalRelations", index], message: "A political relation may be declared only once for a polity pair." });
+      }
+      relationPairs.add(pair);
+    }
     for (const [provinceIndex, province] of graph.provinces.entries()) {
       for (const [settlementIndex, settlement] of province.settlements.entries()) {
         if (settlement.controllerPolityId !== null && !polityIds.has(settlement.controllerPolityId)) {

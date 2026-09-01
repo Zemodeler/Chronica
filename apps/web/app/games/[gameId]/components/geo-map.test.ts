@@ -5,6 +5,7 @@ import { deriveForceConflictStatuses } from "./map-conflict-state";
 const overlay: DynamicMapOverlay = {
   revision: 1,
   polities: [{ polityId: "carthage", name: "Carthage" }, { polityId: "rome", name: "Rome" }],
+  politicalRelations: [],
   provinces: [],
   settlements: [{ settlementId: "fort", provinceId: "sicily", anchorFeatureId: "fort", name: "Fort Agrigentum", kind: "fortress", controllerPolityId: "carthage", capitalPolityId: null, importance: 50, underSiege: false, damaged: false }],
   forces: [

@@ -6,9 +6,11 @@ import { users } from "../schema/auth";
 import { characterClaims, gameInvites, games, players, scenarioMapAssets, scenarioVersions, scenarios, turnNewsReadiness, turns } from "../schema/game";
 import { creditHolds, creditLedgerEntries, creditLots, creditWallets } from "../schema/billing";
 import { CHRONICA_SYSTEM_USER_ID, FIRST_PUNIC_WAR_SCENARIO_ID, FIRST_PUNIC_WAR_SLUG, firstPunicWarScenario } from "../built-in-scenarios";
+import { PUNIC_WARS_SCENARIO_ID, PUNIC_WARS_SLUG, punicWarsScenario } from "../punic-wars-scenario";
 
 /** The built-in Numidian map is a scenario-owned copy of the DEMO geography. */
 export const FIRST_PUNIC_WAR_MAP_ASSET_ID = "00000000-0000-4000-8000-000000000201";
+export const PUNIC_WARS_MAP_ASSET_ID = "00000000-0000-4000-8000-000000000202";
 
 export type PublicScenarioSummary = Readonly<{
   scenarioId: string;
@@ -39,6 +41,19 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     // rewrite a published version. Changing a scenario requires an explicit,
     // reviewed versioning/migration operation instead of an ordinary page load.
     await tx.insert(scenarioVersions).values({ scenarioId: FIRST_PUNIC_WAR_SCENARIO_ID, version: 1, mapAssetId: FIRST_PUNIC_WAR_MAP_ASSET_ID, definition: firstPunicWarScenario.definition, initialWorld: firstPunicWarScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "Built-in scenario with its own copy of the DEMO opening map." }).onConflictDoNothing();
+    await tx.insert(scenarioMapAssets).values({
+      id: PUNIC_WARS_MAP_ASSET_ID,
+      ownerId: CHRONICA_SYSTEM_USER_ID,
+      objectKey: "built-in/punic-wars-270-bce-map-v1.geojson",
+      mimeType: "application/geo+json",
+      byteSize: BigInt(1),
+      checksum: "built-in-punic-wars-270-bce-map-v1",
+      featureCount: 966,
+      boundingBox: [-25, 20, 45, 72],
+      rightsConfirmedAt: new Date(),
+    }).onConflictDoNothing();
+    await tx.insert(scenarios).values({ id: PUNIC_WARS_SCENARIO_ID, slug: PUNIC_WARS_SLUG, title: "Punic Wars", period: "270 BCE · Before the Punic Wars", authorId: CHRONICA_SYSTEM_USER_ID, visibility: "public", currentVersion: 1 }).onConflictDoNothing();
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 1, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "270 BCE tense-peace opening with a historical Mediterranean political map and the Messana crisis." }).onConflictDoNothing();
   });
 }
 

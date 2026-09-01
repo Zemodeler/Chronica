@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstPunicWarScenario } from "@chronica/db";
+import { firstPunicWarScenario, punicWarsScenario } from "@chronica/db";
 import { executeWorkflow } from "@chronica/shared";
 import { projectWorldView } from "./world-view";
 
@@ -53,5 +53,24 @@ describe("projectWorldView map conflicts", () => {
     });
 
     expect(view.mapOverlay?.conflicts.sieges).toEqual([]);
+  });
+});
+
+describe("Punic Wars opening map", () => {
+  it("keeps the opening at peace while exposing the historical map and Roman alliances", () => {
+    const view = projectWorldView(punicWarsScenario.initialWorld, {
+      gameId: "punic-wars-game",
+      gameTitle: "Punic Wars",
+      turnIndex: 0,
+      turnStatus: "collecting",
+      submittedPlayers: 0,
+      totalPlayers: 1,
+      clock: punicWarsScenario.definition.clock,
+    }, "gaius-genucius");
+
+    expect(view.mapOverlay?.conflicts.wars).toEqual([]);
+    expect(view.mapOverlay?.politicalRelations).toHaveLength(13);
+    expect(view.mapOverlay?.provinces.some((province) => province.provinceId === "punic-iberia-turdetani" && province.controllerPolityId === "carthage")).toBe(true);
+    expect(view.mapOverlay?.polities.some((polity) => polity.polityId === "mamertines")).toBe(true);
   });
 });

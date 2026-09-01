@@ -10,7 +10,7 @@ const map: GeoJsonMap = { type: "FeatureCollection", features: [
   { type: "Feature", id: "nearby", geometry: { type: "Polygon", coordinates: [[[4.1, 0], [5.1, 0], [5.1, 1], [4.1, 1], [4.1, 0]]] }, properties: { kind: "province", name: "Nearby" } },
   { type: "Feature", id: "island", geometry: { type: "Polygon", coordinates: [[[20, 0], [21, 0], [21, 1], [20, 1], [20, 0]]] }, properties: { kind: "province", name: "Island" } },
 ] };
-function overlay(provinces: DynamicMapOverlay["provinces"]): DynamicMapOverlay { return { revision: 1, polities: [{ polityId: "rome", name: "Roman Republic" }], provinces, settlements: [], forces: [], conflicts: { battles: [], sieges: [], wars: [] } }; }
+function overlay(provinces: DynamicMapOverlay["provinces"]): DynamicMapOverlay { return { revision: 1, polities: [{ polityId: "rome", name: "Roman Republic" }], politicalRelations: [], provinces, settlements: [], forces: [], conflicts: { battles: [], sieges: [], wars: [] } }; }
 
 describe("political map derivation", () => {
   it("uses a saturated red for Roman territory", () => {

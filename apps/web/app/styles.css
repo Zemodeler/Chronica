@@ -573,6 +573,8 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .map-frame-interactive { position: relative; overflow: hidden; }
 .map-frame-interactive svg { touch-action: none; cursor: grab; }
 .map-tooltip { position: absolute; pointer-events: none; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--border); border-radius: var(--radius-control); color: var(--text); font: 500 .78rem system-ui, sans-serif; padding: .25rem .5rem; white-space: nowrap; z-index: 5; backdrop-filter: blur(6px); }
+.map-political-context { position: absolute; left: .8rem; right: 4.8rem; bottom: .75rem; z-index: 4; display: grid; gap: .18rem; max-height: 3.3rem; overflow: hidden; padding: .38rem .55rem; border: 1px solid color-mix(in srgb, var(--border) 86%, transparent); border-radius: var(--radius-control); background: color-mix(in srgb, var(--surface) 92%, transparent); color: var(--text-muted); font: 500 .72rem/1.2 system-ui, sans-serif; backdrop-filter: blur(6px); }
+.map-political-context strong { color: var(--text); font-size: .73rem; }
 .map-frame-interactive svg:active { cursor: grabbing; }
 .geo-map-region:focus-visible { outline: none; stroke: #fff; stroke-width: 0.75px; vector-effect: non-scaling-stroke; }
 .map-controls { position: absolute; right: .75rem; bottom: 2.25rem; display: flex; gap: .35rem; padding: .35rem; border: 1px solid var(--border); border-radius: var(--radius-control); background: color-mix(in srgb, var(--surface) 92%, transparent); }

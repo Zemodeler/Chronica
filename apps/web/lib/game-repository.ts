@@ -380,6 +380,7 @@ function demoMapOverlay(revision: number): DynamicMapOverlay {
   return {
     revision,
     polities: [...polityIds].map((polityId) => ({ polityId, name: DEMO_POLITY_NAMES[polityId] ?? polityId })),
+    politicalRelations: [],
     provinces: DEMO_OVERLAY_PROVINCES,
     settlements: [
       {

@@ -1,5 +1,7 @@
 import { ScenarioDefinitionSchema, WorldStateSchema, type ScenarioDefinition, type WorldState } from "@chronica/shared";
 
+export { PUNIC_WARS_SCENARIO_ID, PUNIC_WARS_SLUG, punicWarsScenario } from "./punic-wars-scenario";
+
 export const CHRONICA_SYSTEM_USER_ID = "00000000-0000-4000-8000-000000000001";
 export const FIRST_PUNIC_WAR_SCENARIO_ID = "00000000-0000-4000-8000-000000000101";
 export const FIRST_PUNIC_WAR_SLUG = "first-punic-war";
