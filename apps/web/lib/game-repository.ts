@@ -1079,9 +1079,11 @@ export const postgresGameRepository: GameRepository = {
     if (resolved === null) throw new Error("This account or guest session cannot access the save.");
     const { db, close, playerId } = resolved;
     try {
-      const view = await getWorldView(db, gameId);
+      const [view, order] = await Promise.all([
+        getWorldView(db, gameId),
+        getPlayerOrderForOpenTurn(db, gameId, playerId),
+      ]);
       if (view === undefined) return null;
-      const order = await getPlayerOrderForOpenTurn(db, gameId, playerId);
       return OrdersStatusResponseSchema.parse({
         gameId,
         turnIndex: order?.turnIndex ?? view.turnIndex,
@@ -1099,9 +1101,11 @@ export const postgresGameRepository: GameRepository = {
     if (resolved === null) throw new Error("This account or guest session cannot access the save.");
     const { db, close, playerId } = resolved;
     try {
-      const chronicle = await getChronicleForLatestTurn(db, gameId);
+      const [chronicle, uiState] = await Promise.all([
+        getChronicleForLatestTurn(db, gameId),
+        getPlayerGameUiState(db, gameId, playerId),
+      ]);
       if (chronicle === undefined) return null;
-      const uiState = await getPlayerGameUiState(db, gameId, playerId);
       return projectNewsView(chronicle, {
         gameId,
         readyPlayers: 0,
