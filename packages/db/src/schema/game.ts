@@ -157,6 +157,8 @@ export const turns = pgTable("turns", {
   stopReason: text("stop_reason"),
   /** Provinces whose controllerPolityId changed while resolving this turn. */
   changedRegionIds: text("changed_region_ids").array().notNull().default(sql`'{}'::text[]`),
+  /** Current pipeline step written by the resolution worker for live polling. */
+  progressStep: text("progress_step"),
   /** Durable audit blob from the Workflow Manager stage (Issue #6). */
   workflowAudit: jsonb("workflow_audit").$type<import("@chronica/shared").WorkflowAuditBlob>(),
 }, (table) => [

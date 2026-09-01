@@ -34,12 +34,10 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
       rightsConfirmedAt: new Date(),
     }).onConflictDoNothing();
     await tx.insert(scenarios).values({ id: FIRST_PUNIC_WAR_SCENARIO_ID, slug: FIRST_PUNIC_WAR_SLUG, title: "The Numidian Decision", period: "264 BCE · First Punic War", authorId: CHRONICA_SYSTEM_USER_ID, visibility: "public", currentVersion: 1 }).onConflictDoNothing();
-    await tx.insert(scenarioVersions).values({ scenarioId: FIRST_PUNIC_WAR_SCENARIO_ID, version: 1, mapAssetId: FIRST_PUNIC_WAR_MAP_ASSET_ID, definition: firstPunicWarScenario.definition, initialWorld: firstPunicWarScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "Built-in scenario with its own copy of the DEMO opening map." }).onConflictDoUpdate({
-      target: [scenarioVersions.scenarioId, scenarioVersions.version],
-      // Existing game snapshots remain immutable; this refreshes the opening
-      // position only for saves created after the built-in scenario is seeded.
-      set: { mapAssetId: FIRST_PUNIC_WAR_MAP_ASSET_ID, definition: firstPunicWarScenario.definition, initialWorld: firstPunicWarScenario.initialWorld },
-    });
+    // Seeding may create the built-in scenario, but it must never silently
+    // rewrite a published version. Changing a scenario requires an explicit,
+    // reviewed versioning/migration operation instead of an ordinary page load.
+    await tx.insert(scenarioVersions).values({ scenarioId: FIRST_PUNIC_WAR_SCENARIO_ID, version: 1, mapAssetId: FIRST_PUNIC_WAR_MAP_ASSET_ID, definition: firstPunicWarScenario.definition, initialWorld: firstPunicWarScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "Built-in scenario with its own copy of the DEMO opening map." }).onConflictDoNothing();
   });
 }
 
@@ -110,7 +108,9 @@ export async function countActiveHostedGames(db: ChronicaDatabase, userId: strin
   const [result] = await db
     .select({ value: count(games.id) })
     .from(games)
-    .where(and(eq(games.createdBy, userId), inArray(games.status, ["lobby", "active"])));
+    // An end-requested save has already released its slot in the dashboard;
+    // count it the same way here so it cannot falsely block a new save.
+    .where(and(eq(games.createdBy, userId), inArray(games.status, ["lobby", "active"]), isNull(games.endRequestedAt)));
   return result?.value ?? 0;
 }
 

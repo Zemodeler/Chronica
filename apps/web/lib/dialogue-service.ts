@@ -243,6 +243,33 @@ async function extractAndPropagateKnowledge(
 
 // ── NPC profile enrichment ──────────────────────────────────────────────────
 
+// Titles that indicate a ruling or senior historical figure worth looking up.
+const NOTABLE_TITLE_RE = /\b(king|queen|emperor|empress|pharaoh|consul|praetor|dictator|censor|tribune|legate|tyrant|archon|strategos|satrap|doge|duke|sultan|caliph|khan|tsar|shogun|daimyo)\b/i;
+
+// Returns a Wikipedia extract for the most likely historical figure, or null.
+async function lookupHistoricalFigure(name: string, role: string, period: string): Promise<string | null> {
+  if (!NOTABLE_TITLE_RE.test(name) && !NOTABLE_TITLE_RE.test(role)) return null;
+  const query = `${name} ${role} ${period}`.trim();
+  try {
+    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&utf8=1&srlimit=1`;
+    const searchRes = await fetch(searchUrl, { headers: { "User-Agent": "Chronica/1.0 (historical-npc-lookup; contact: support@chronica.app)" } });
+    if (!searchRes.ok) return null;
+    const searchData = await searchRes.json() as { query?: { search?: Array<{ title: string }> } };
+    const topTitle = searchData.query?.search?.[0]?.title;
+    if (!topTitle) return null;
+
+    const summaryRes = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(topTitle)}`, {
+      headers: { "User-Agent": "Chronica/1.0 (historical-npc-lookup; contact: support@chronica.app)" },
+    });
+    if (!summaryRes.ok) return null;
+    const summary = await summaryRes.json() as { extract?: string; title?: string };
+    if (!summary.extract) return null;
+    return `Wikipedia — ${summary.title ?? topTitle}:\n${summary.extract.slice(0, 900)}`;
+  } catch {
+    return null;
+  }
+}
+
 const NPC_PROFILE_SYSTEM = `You generate a concise identity profile for a historical NPC. Respond ONLY with a JSON object matching this exact schema — no other text:
 {
   "biography": string,        // 80–400 chars: prose identity — who they are, their station, a key trait
@@ -265,7 +292,9 @@ const NPC_PROFILE_SYSTEM = `You generate a concise identity profile for a histor
   "relationshipScore": number // -100 to 100: their starting opinion of the player, based on the relationship and notes
 }
 
-Match the culture, class, and skills to the period and the stated relationship. Keep biography grounded and specific — avoid vague platitudes.`;
+Match the culture, class, and skills to the period and the stated relationship. Keep biography grounded and specific — avoid vague platitudes.
+
+HISTORICAL ACCURACY: If a "Historical context" section appears in the input, it is a Wikipedia extract for this person. Use it as your primary source of truth for biography, background events, and role. Set skills and relationshipScore to match their historical character. If the extract clearly describes a different person than the NPC, ignore it.`;
 
 export interface NpcProfilePatch {
   biography: string | null;
@@ -289,6 +318,7 @@ export async function enrichNpcProfileViaAi(
     connectionNotes: string;
     period: string;
     playerCulture: string;
+    historicalContext?: string;
   },
 ): Promise<NpcProfilePatch | null> {
   const { db, close } = createDatabase(requiredDatabaseUrl());
@@ -297,7 +327,7 @@ export async function enrichNpcProfileViaAi(
 Relationship to player: ${input.declaredConnection}
 Notes: ${input.connectionNotes || "none"}
 Period: ${input.period}
-Player's culture: ${input.playerCulture}`;
+Player's culture: ${input.playerCulture}${input.historicalContext ? `\n\nHistorical context:\n${input.historicalContext}` : ""}`;
 
     const adapter = createAiAdapter();
     let result: Awaited<ReturnType<typeof callWithCoinGate>>;
@@ -564,6 +594,23 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
   if (matches.length === 1) {
     const match = matches[0]!;
     const session = await findOrOpenSession(db, gameId, playerId, match.character.id);
+    // Lazily enrich world characters that haven't been profiled yet.
+    const existingKb = await getOrCreateNpcKnowledgebase(db, gameId, playerId, match.character.id, {
+      canonicalName: match.character.name,
+      role: match.roleLabel,
+    });
+    if (existingKb.biography === null) {
+      const historicalContext = await lookupHistoricalFigure(match.character.name, match.roleLabel, period);
+      const profile = await enrichNpcProfileViaAi(userId, gameId, {
+        npcName: match.character.name,
+        declaredConnection: match.roleLabel,
+        connectionNotes: existingKb.personalitySummary,
+        period,
+        playerCulture: "local",
+        ...(historicalContext !== null ? { historicalContext } : {}),
+      });
+      if (profile !== null) await updateNpcKnowledgebase(db, existingKb.id, profile);
+    }
     return { status: "found", sessionId: session.id, knownName: match.character.name };
   }
   if (matches.length > 1) return { status: "choice", candidates: matches.slice(0, 8).map((match) => ({ characterId: match.character.id, name: match.character.name, roleLabel: match.roleLabel })) };
@@ -641,12 +688,14 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
   const session = await findOrOpenSession(db, gameId, playerId, npcCharacterId, "correspondence");
 
   if (newKb.biography === null) {
+    const historicalContext = await lookupHistoricalFigure(parsed.name, parsed.roleLabel, period);
     const profile = await enrichNpcProfileViaAi(userId, gameId, {
       npcName: parsed.name,
       declaredConnection: parsed.roleLabel,
       connectionNotes: parsed.personalitySummary,
       period,
       playerCulture: "local",
+      ...(historicalContext !== null ? { historicalContext } : {}),
     });
     if (profile !== null) await updateNpcKnowledgebase(db, newKb.id, profile);
   }

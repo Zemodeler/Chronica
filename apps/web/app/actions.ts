@@ -11,6 +11,7 @@ import {
   ProductSelectionSchema,
   ProfileUpdateSchema,
 } from "@chronica/shared";
+import { SlotCapError } from "@chronica/db";
 import { redirect } from "next/navigation";
 import { cookies, headers } from "next/headers";
 import { randomUUID } from "node:crypto";
@@ -100,7 +101,10 @@ export async function createGame(formData: FormData): Promise<never> {
   let gameId: string;
   try {
     gameId = await gameRepository.createGame(parsed.data);
-  } catch {
+  } catch (error) {
+    if (error instanceof SlotCapError) {
+      redirect(`/games/new?scenario=${encodeURIComponent(parsed.data.scenarioId)}&status=save-limit#status`);
+    }
     redirect(`/games/new?scenario=${encodeURIComponent(parsed.data.scenarioId)}&status=unavailable#status`);
   }
   redirect(gamePath(gameId, "?status=created"));

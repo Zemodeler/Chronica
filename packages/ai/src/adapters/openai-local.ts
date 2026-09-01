@@ -18,6 +18,8 @@ const JSON_MODE_OPERATIONS = new Set<AiOperation>([
   "resolve_contact",
   "extract_knowledge",
   "workflow_manager",
+  "declare_character",
+  "confirm_character",
 ]);
 
 // Model assignments per tier. Override via env vars if needed.

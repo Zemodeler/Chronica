@@ -87,6 +87,67 @@ export function previewPlayerWorkflows(
   return preview;
 }
 
+/**
+ * Tries to resolve entity IDs in a temporary patch that don't exist in the
+ * world by matching them by name (case-insensitive). The model sometimes
+ * writes human-readable names ("Panormus") instead of UUIDs even though
+ * the world state is provided; this pass silently corrects those.
+ */
+function resolveTemporaryPatchIds(
+  patch: NovelActionProposal["temporaryPatch"],
+  world: WorldState,
+): NovelActionProposal["temporaryPatch"] {
+  const resolveCharacterId = (id: string) => {
+    if (world.characters.some((c) => c.id === id)) return id;
+    return world.characters.find((c) => c.name.toLowerCase() === id.toLowerCase())?.id ?? id;
+  };
+  const resolveProvinceId = (id: string) => {
+    if (world.map.provinces.some((p) => p.id === id)) return id;
+    return world.map.provinces.find((p) => p.name.toLowerCase() === id.toLowerCase())?.id ?? id;
+  };
+  const resolvePolityId = (id: string) => {
+    if (world.map.polities.some((p) => p.id === id)) return id;
+    return world.map.polities.find((p) => p.name.toLowerCase() === id.toLowerCase())?.id ?? id;
+  };
+  const resolveAccountId = (id: string) => {
+    if (world.material.accounts.some((a) => a.id === id)) return id;
+    return id;
+  };
+
+  return {
+    ...patch,
+    actorId: resolveCharacterId(patch.actorId),
+    operations: patch.operations.map((op) => {
+      if (op.kind === "account_delta") {
+        return { ...op, accountId: resolveAccountId(op.accountId) };
+      }
+      if (op.kind === "province_control") {
+        return {
+          ...op,
+          provinceId: resolveProvinceId(op.provinceId),
+          controllerPolityId: resolvePolityId(op.controllerPolityId),
+        };
+      }
+      if (op.kind === "character_state") {
+        return {
+          ...op,
+          characterId: resolveCharacterId(op.characterId),
+          ...(op.locationProvinceId ? { locationProvinceId: resolveProvinceId(op.locationProvinceId) } : {}),
+          ...(op.polityId ? { polityId: resolvePolityId(op.polityId) } : {}),
+        };
+      }
+      if (op.kind === "create_storyline") {
+        return {
+          ...op,
+          ...(op.provinceId ? { provinceId: resolveProvinceId(op.provinceId) } : {}),
+          participantIds: op.participantIds.map(resolveCharacterId),
+        };
+      }
+      return op;
+    }),
+  };
+}
+
 function parseManagerOutput(text: string): ManagerDecisionBatch {
   let raw: unknown;
   try {
@@ -237,10 +298,14 @@ export async function runWorkflowManager(
 
   const temporaryPatches: NovelActionProposal[] = [];
   for (const proposal of managerBatch.novelActionProposals) {
-    const patched = applyTemporaryWorkflowPatch(dryRunWorld, proposal.temporaryPatch, atStep);
-    if (patched === null) throw new WorkflowManagerOutputError(`Temporary patch "${proposal.intent}" cannot be applied to the current world.`);
+    const resolvedPatch = resolveTemporaryPatchIds(proposal.temporaryPatch, dryRunWorld);
+    const patched = applyTemporaryWorkflowPatch(dryRunWorld, resolvedPatch, atStep);
+    if (patched === null) {
+      console.warn(`[workflow-manager] Skipping temporary patch "${proposal.intent}": one or more referenced entity IDs (actor, province, polity, character) do not exist in the current world state. actorId=${resolvedPatch.actorId}`);
+      continue;
+    }
     dryRunWorld = patched.world;
-    temporaryPatches.push(proposal);
+    temporaryPatches.push({ ...proposal, temporaryPatch: resolvedPatch });
   }
 
   return {

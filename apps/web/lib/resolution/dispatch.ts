@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createAiAdapter } from "@chronica/ai";
-import { createDatabase, getOrdersForTurn, getQueuedTurn, getWorldView, schema, type ChronicaDatabase } from "@chronica/db";
+import { createDatabase, getOrdersForTurn, getQueuedTurn, getWorldView, schema, updateTurnProgressStep, type ChronicaDatabase } from "@chronica/db";
 import { OrderBatchSchema } from "@chronica/shared";
 import { and, eq } from "drizzle-orm";
 import { resolveTurn, type ResolveTurnResult } from "./pipeline";
@@ -30,10 +30,14 @@ export async function resolveQueuedTurn(
   const [player] = await db.select({ id: schema.players.id, characterId: schema.players.characterId }).from(schema.players)
     .where(and(eq(schema.players.id, playerOrder.playerId), eq(schema.players.gameId, gameId), eq(schema.players.status, "active"))).limit(1);
   if (player === undefined) throw new Error("Queued turn's player is no longer active.");
+  const progressWriter: typeof onProgress = (progress) => {
+    onProgress(progress);
+    void updateTurnProgressStep(db, queuedTurn.id, progress.step).catch(() => {});
+  };
   return resolveTurn(db, createAiAdapter(), {
     gameId, turnId: queuedTurn.id, world: worldView.world, batch: batchParse.data,
     actorCharacterId: player.characterId ?? worldView.world.characters[0]?.id ?? "", playerId: player.id,
-  }, onProgress);
+  }, progressWriter);
 }
 
 /** Server-owned entrypoint used after order submission. */
