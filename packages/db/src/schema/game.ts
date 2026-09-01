@@ -136,7 +136,7 @@ export const gameInvites = pgTable("game_invites", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   claimedAt: timestamp("claimed_at", { withTimezone: true }),
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
-  claimedPlayerId: uuid("claimed_player_id").references(() => players.id),
+  claimedPlayerId: uuid("claimed_player_id").references(() => players.id, { onDelete: "cascade" }),
 }, (table) => [uniqueIndex("game_invites_token_hash_unique").on(table.tokenHash), index("game_invites_game_idx").on(table.gameId)]);
 
 export const turns = pgTable("turns", {
@@ -170,7 +170,7 @@ export const turns = pgTable("turns", {
 export const orders = pgTable("orders", {
   id: uuid("id").defaultRandom().primaryKey(),
   turnId: uuid("turn_id").notNull().references(() => turns.id, { onDelete: "cascade" }),
-  playerId: uuid("player_id").notNull().references(() => players.id),
+  playerId: uuid("player_id").notNull().references(() => players.id, { onDelete: "cascade" }),
   rawText: text("raw_text").notNull(),
   directives: jsonb("directives").notNull().$type<unknown>(),
   intents: jsonb("intents").notNull().$type<unknown>(),
@@ -181,7 +181,7 @@ export const orders = pgTable("orders", {
 
 export const turnNewsReadiness = pgTable("turn_news_readiness", {
   turnId: uuid("turn_id").notNull().references(() => turns.id, { onDelete: "cascade" }),
-  playerId: uuid("player_id").notNull().references(() => players.id),
+  playerId: uuid("player_id").notNull().references(() => players.id, { onDelete: "cascade" }),
   readyAt: timestamp("ready_at", { withTimezone: true }),
   autoReady: boolean("auto_ready").notNull().default(false),
 }, (table) => [uniqueIndex("turn_news_readiness_pk").on(table.turnId, table.playerId)]);
@@ -211,7 +211,7 @@ export const characterClaims = pgTable("character_claims", {
   id: uuid("id").defaultRandom().primaryKey(),
   gameId: uuid("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
   characterId: text("character_id").notNull(),
-  playerId: uuid("player_id").notNull().references(() => players.id),
+  playerId: uuid("player_id").notNull().references(() => players.id, { onDelete: "cascade" }),
   origin: text("origin").notNull(),
   declaration: text("declaration"),
   resolvedRole: jsonb("resolved_role").$type<unknown>(),

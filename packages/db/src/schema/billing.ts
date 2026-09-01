@@ -80,7 +80,8 @@ export const creditLots = pgTable("credit_lots", {
 export const creditHolds = pgTable("credit_holds", {
   id: uuid("id").defaultRandom().primaryKey(),
   walletId: uuid("wallet_id").notNull().references(() => creditWallets.id),
-  gameId: uuid("game_id").references(() => games.id),
+  /** Retained for financial audit after a save is permanently deleted. */
+  gameId: uuid("game_id").references(() => games.id, { onDelete: "set null" }),
   workId: text("work_id").notNull(),
   maximumMicrocredits: bigint("maximum_microcredits", { mode: "bigint" }).notNull(),
   lotAllocation: jsonb("lot_allocation").notNull().$type<unknown>(),
@@ -97,7 +98,8 @@ export const creditLedgerEntries = pgTable("credit_ledger_entries", {
   signedMicrocredits: bigint("signed_microcredits", { mode: "bigint" }).notNull(),
   idempotencyKey: text("idempotency_key").notNull(),
   sourceRef: text("source_ref"),
-  gameId: uuid("game_id").references(() => games.id),
+  /** Retained for financial audit after a save is permanently deleted. */
+  gameId: uuid("game_id").references(() => games.id, { onDelete: "set null" }),
   workId: text("work_id"),
   holdId: uuid("hold_id").references(() => creditHolds.id),
   balanceAfterMicrocredits: bigint("balance_after_microcredits", { mode: "bigint" }).notNull(),
@@ -137,7 +139,8 @@ export const giftRedemptions = pgTable("gift_redemptions", {
 
 export const aiCalls = pgTable("ai_calls", {
   id: uuid("id").defaultRandom().primaryKey(),
-  gameId: uuid("game_id").notNull().references(() => games.id),
+  /** A deleted save leaves its usage audit row intact but unlinked. */
+  gameId: uuid("game_id").references(() => games.id, { onDelete: "set null" }),
   payerUserId: uuid("payer_user_id").notNull().references(() => users.id),
   operation: text("operation").notNull(),
   routingProfileVersion: integer("routing_profile_version").notNull(),

@@ -122,14 +122,11 @@ export async function requestGameEnd(formData: FormData): Promise<never> {
   redirect(gamePath(gameId, "?status=end-requested#status"));
 }
 
-/**
- * A save slot is a host's active game. Deleting it finishes the game and frees
- * the slot, while preserving the match record needed for replay and audit.
- */
 export async function deleteSaveSlot(formData: FormData): Promise<never> {
   const gameId = textValue(formData, "gameId");
-  await gameRepository.endGame(gameId);
-  redirect("/?status=deleted#status");
+  const returnTo = textValue(formData, "returnTo") === "/account" ? "/account" : "/";
+  await gameRepository.deleteSave(gameId);
+  redirect(`${returnTo}?status=deleted#status`);
 }
 
 export async function redeemGift(formData: FormData): Promise<never> {

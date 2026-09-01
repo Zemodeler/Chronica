@@ -32,6 +32,7 @@ import {
   countActiveHostedGames,
   createDatabase,
   createGame as createGameQuery,
+  deleteOwnedGame,
   ensureBuiltInScenarios,
   FIRST_PUNIC_WAR_SCENARIO_ID as PERSISTED_FIRST_PUNIC_WAR_SCENARIO_ID,
   findPublicScenario,
@@ -543,7 +544,7 @@ function deriveOpeningTitle(summary: string): string {
 
 export interface GameRepository {
   getViewer(): Promise<Viewer>;
-  listGames(): Promise<{ hosted: GameSummaryRow[]; joined: GameSummaryRow[] }>;
+  listGames(): Promise<{ hosted: GameSummaryRow[]; joined: GameSummaryRow[]; activeHostedCount: number }>;
   listPublicScenarios(): Promise<readonly PublicScenarioSummary[]>;
   getPublicScenario(scenarioId: string): Promise<PublicScenarioSummary | null>;
   createGame(input: GameCreation): Promise<string>;
@@ -569,6 +570,7 @@ export interface GameRepository {
   createGift(grantCredits: number, maxRedemptions: number, note: string): Promise<string>;
   consumeCreatedGift(): Promise<string | null>;
   endGame(gameId: string): Promise<void>;
+  deleteSave(gameId: string): Promise<boolean>;
 }
 
 export const fixtureGameRepository: GameRepository = {
@@ -579,6 +581,7 @@ export const fixtureGameRepository: GameRepository = {
     return {
       hosted: state.hostedDemo ? [{ gameId: DEMO_GAME_ID, title: state.world.gameTitle, status: "active" }] : [],
       joined: [],
+      activeHostedCount: state.hostedDemo ? 1 : 0,
     };
   },
   async listPublicScenarios() {
@@ -774,6 +777,11 @@ export const fixtureGameRepository: GameRepository = {
   async endGame(gameId) {
     if (gameId === DEMO_GAME_ID) Object.assign(state, createState());
   },
+  async deleteSave(gameId) {
+    if (gameId !== DEMO_GAME_ID) return false;
+    Object.assign(state, createState());
+    return true;
+  },
 };
 
 // A single-player-per-game Postgres implementation (docs/03, docs/04, docs/14).
@@ -841,11 +849,12 @@ export const postgresGameRepository: GameRepository = {
     if (userId === null) throw new Error("An account is required to list saves.");
     const { db, close } = createDatabase(requiredDatabaseUrl());
     try {
-      const [hosted, joined] = await Promise.all([
+      const [hosted, joined, activeHostedCount] = await Promise.all([
         listHostedGamesQuery(db, userId),
         listJoinedGamesQuery(db, userId),
+        countActiveHostedGames(db, userId),
       ]);
-      return { hosted, joined };
+      return { hosted, joined, activeHostedCount };
     } finally {
       await close();
     }
@@ -1183,6 +1192,16 @@ export const postgresGameRepository: GameRepository = {
     const { db, close } = createDatabase(requiredDatabaseUrl());
     try {
       await requestGameEnd(db, gameId, userId);
+    } finally {
+      await close();
+    }
+  },
+  async deleteSave(gameId) {
+    const userId = await resolveViewerUserId();
+    if (userId === null) throw new Error("A save owner account is required.");
+    const { db, close } = createDatabase(requiredDatabaseUrl());
+    try {
+      return await deleteOwnedGame(db, gameId, userId);
     } finally {
       await close();
     }

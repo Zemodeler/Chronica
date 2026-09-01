@@ -13,7 +13,7 @@ export const metadata: Metadata = { title: "Account and coins" };
 
 export default async function AccountPage({
   searchParams,
-}: Readonly<{ searchParams: Promise<{ gift?: string; checkout?: string; profile?: string; developer?: string; email?: string; aiProvider?: string }> }>) {
+}: Readonly<{ searchParams: Promise<{ gift?: string; checkout?: string; profile?: string; developer?: string; email?: string; aiProvider?: string; status?: string }> }>) {
   const [params, persistedAccount] = await Promise.all([searchParams, loadAccountDashboard(await headers())]);
   const account = persistedAccount ?? (!isAuthenticationConfigured() && process.env.NODE_ENV !== "production" ? await gameRepository.getAccount() : null);
   if (account === null) redirect("/login?returnTo=%2Faccount");

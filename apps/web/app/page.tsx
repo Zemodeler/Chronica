@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import { redirect } from "next/navigation";
-import { deleteSaveSlot } from "./actions";
 import { StatusMessage } from "./components/status-message";
+import { DeleteSaveForm } from "./components/delete-save-form";
 import { gameRepository } from "../lib/game-repository";
 
 export const metadata: Metadata = { title: "Chronica" };
@@ -20,9 +20,9 @@ export default async function HomePage({
     }
     throw error;
   }
-  const { hosted } = saves;
-  const featured = hosted[0] ?? null;
-  const atCap = hosted.length >= 3;
+  const { hosted, activeHostedCount } = saves;
+  const featured = hosted.find((game) => game.status === "lobby" || game.status === "active") ?? null;
+  const atCap = activeHostedCount >= 3;
 
   return (
     <main id="main-content" className="dashboard-shell">
@@ -30,7 +30,7 @@ export default async function HomePage({
         <StatusMessage id="status">The save is no longer open.</StatusMessage>
       )}
       {params.status === "deleted" && (
-        <StatusMessage id="status">The save was deleted and its host slot is available again.</StatusMessage>
+        <StatusMessage id="status">The save and all of its game data were permanently deleted.</StatusMessage>
       )}
 
       <div className="dashboard-heading">
@@ -44,7 +44,7 @@ export default async function HomePage({
           <div className="featured-content">
             <h2 className="featured-title">{featured.title}</h2>
             <p className="featured-meta">
-              {featured.status === "lobby" ? "Preparing your character" : "Active · turn in progress"}
+              {saveStatusLabel(featured.status)}
             </p>
             <div className="featured-actions">
               <a className="button" href={`/games/${featured.gameId}`}>Continue</a>
@@ -64,14 +64,11 @@ export default async function HomePage({
               <div className="slot-body">
                 <h3 className="slot-title">{game.title}</h3>
                 <p className="slot-meta">
-                  {game.status === "lobby" ? "Preparing your character" : "Active"}
+                  {saveStatusLabel(game.status)}
                 </p>
                 <div className="slot-actions">
-                  <a className="button sm" href={`/games/${game.gameId}`}>Continue</a>
-                  <form action={deleteSaveSlot}>
-                    <input type="hidden" name="gameId" value={game.gameId} />
-                    <button className="button sm secondary delete-save" type="submit">Delete save</button>
-                  </form>
+                  <a className="button sm" href={`/games/${game.gameId}`}>{game.status === "finished" || game.status === "abandoned" ? "View" : "Continue"}</a>
+                  <DeleteSaveForm gameId={game.gameId} title={game.title} />
                 </div>
               </div>
             </article>
@@ -79,7 +76,7 @@ export default async function HomePage({
           {!atCap && (
             <article className="slot-card slot-card-new">
               <div className="slot-thumb slot-thumb-new">
-                <span className="slot-number">{String(hosted.length + 1).padStart(2, "0")}</span>
+                <span className="slot-number">{String(activeHostedCount + 1).padStart(2, "0")}</span>
               </div>
               <div className="slot-body">
                 <h3 className="slot-title">New save</h3>
@@ -95,4 +92,14 @@ export default async function HomePage({
 
     </main>
   );
+}
+
+function saveStatusLabel(status: string): string {
+  switch (status) {
+    case "lobby": return "Preparing your character";
+    case "active": return "Paused · ready to continue";
+    case "finished": return "Finished";
+    case "abandoned": return "Abandoned";
+    default: return status;
+  }
 }
