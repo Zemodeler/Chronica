@@ -17,6 +17,7 @@ import {
 } from "@chronica/shared";
 import type { ChronicleView } from "@chronica/db";
 import { FIRST_PUNIC_CARTHAGINIAN_OVERLAY, FIRST_PUNIC_SICILY_OVERLAY } from "./first-punic-map-territory";
+import { punicWarsOpeningOverlay } from "./punic-wars-map-territory";
 
 // Projects real simulation state into the view-model shapes the pages already
 // render (packages/shared/src/web.ts), in place of apps/web/lib/game-repository.ts's
@@ -255,8 +256,12 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
   const polityNames = new Map(world.map.polities.map((polity) => [polity.id, polity.name]));
   const usesLegacyFirstPunicOpening = world.map.provinces.some((province) => province.id === "drepanum");
   const isFirstPunicOpening = world.pins.scenarioId === "00000000-0000-4000-8000-000000000101" && world.elapsedStep === 0;
+  const isPunicWars = world.pins.scenarioId === "00000000-0000-4000-8000-000000000102";
+  const punicWarsBaseOverlay = isPunicWars ? punicWarsOpeningOverlay(meta.turnIndex) : null;
   const displayProvinces = usesLegacyFirstPunicOpening
     ? [...LEGACY_FIRST_PUNIC_OPENING_OVERLAY]
+    : punicWarsBaseOverlay !== null
+      ? [...new Map([...punicWarsBaseOverlay.provinces, ...world.map.provinces.map((province) => ({ provinceId: province.id, controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier }))].map((province) => [province.provinceId, province])).values()]
     : isFirstPunicOpening
       ? [...new Map([...FIRST_PUNIC_CARTHAGINIAN_OVERLAY, ...FIRST_PUNIC_SICILY_OVERLAY, ...world.map.provinces.map((province) => ({ provinceId: province.id, controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier }))].map((province) => [province.provinceId, province])).values()]
       : world.map.provinces.map((province) => ({ provinceId: province.id, controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier }));
@@ -346,7 +351,14 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
       revision: meta.turnIndex,
       polities: usesLegacyFirstPunicOpening
         ? [{ polityId: "rome", name: "Roman Republic" }, { polityId: "carthage", name: "Carthage" }, { polityId: "syracuse", name: "Kingdom of Syracuse" }]
+        : punicWarsBaseOverlay !== null
+          ? [...new Map([...punicWarsBaseOverlay.polities, ...world.map.polities.map((polity) => ({ polityId: polity.id, name: polity.name }))].map((polity) => [polity.polityId, polity])).values()]
         : world.map.polities.map((polity) => ({ polityId: polity.id, name: polity.name })),
+      politicalRelations: usesLegacyFirstPunicOpening
+        ? []
+        : punicWarsBaseOverlay !== null
+          ? [...new Map([...punicWarsBaseOverlay.politicalRelations, ...world.map.politicalRelations].map((relation) => [relation.id, relation])).values()]
+          : world.map.politicalRelations,
       provinces: displayProvinces,
       settlements: world.map.provinces.flatMap((province) => province.settlements.map((settlement) => {
         const capitalPolity = world.map.polities.find((polity) => polity.capitalSettlementId === settlement.id);

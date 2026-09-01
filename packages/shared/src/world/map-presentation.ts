@@ -130,6 +130,19 @@ export const MapPolityOverlaySchema = z.object({
 }).strict();
 export type MapPolityOverlay = z.infer<typeof MapPolityOverlaySchema>;
 
+/** Player-visible political context.  This remains descriptive until diplomacy rules consume it. */
+export const MapPolityRelationOverlaySchema = z.object({
+  id: EntityIdSchema,
+  kind: z.literal("alliance"),
+  leaderPolityId: EntityIdSchema,
+  memberPolityId: EntityIdSchema,
+  sourceNote: z.string().trim().min(1).max(600),
+}).strict().refine((relation) => relation.leaderPolityId !== relation.memberPolityId, {
+  path: ["memberPolityId"],
+  message: "A map relation cannot point a polity at itself.",
+});
+export type MapPolityRelationOverlay = z.infer<typeof MapPolityRelationOverlaySchema>;
+
 export const MapSettlementOverlaySchema = z.object({
   settlementId: EntityIdSchema,
   provinceId: EntityIdSchema,
@@ -219,6 +232,7 @@ export const DynamicMapOverlaySchema = z.object({
       ids.add(polity.polityId);
     }
   }),
+  politicalRelations: z.array(MapPolityRelationOverlaySchema).default([]),
   provinces: z.array(MapProvinceOverlaySchema),
   settlements: z.array(MapSettlementOverlaySchema),
   forces: z.array(MapForceOverlaySchema),
@@ -230,6 +244,17 @@ export const DynamicMapOverlaySchema = z.object({
   const battleIds = new Set<string>();
   const siegeSettlements = new Set<string>();
   const warPairs = new Set<string>();
+  const relationIds = new Set<string>();
+  const relationPairs = new Set<string>();
+
+  for (const [index, relation] of overlay.politicalRelations.entries()) {
+    if (relationIds.has(relation.id)) context.addIssue({ code: "custom", path: ["politicalRelations", index, "id"], message: "A map overlay may include each political relation only once." });
+    relationIds.add(relation.id);
+    if (!polityIds.has(relation.leaderPolityId) || !polityIds.has(relation.memberPolityId)) context.addIssue({ code: "custom", path: ["politicalRelations", index], message: "Political relation polities must be present in the map overlay." });
+    const pair = `${relation.kind}:${relation.leaderPolityId}:${relation.memberPolityId}`;
+    if (relationPairs.has(pair)) context.addIssue({ code: "custom", path: ["politicalRelations", index], message: "A map overlay may include each political relation only once for a polity pair." });
+    relationPairs.add(pair);
+  }
 
   for (const [index, battle] of overlay.conflicts.battles.entries()) {
     if (battleIds.has(battle.battleId)) context.addIssue({ code: "custom", path: ["conflicts", "battles", index, "battleId"], message: "A map overlay may include each battle only once." });

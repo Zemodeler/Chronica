@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, type PointerEvent } from "react";
+import { useState, useCallback, useEffect, useMemo, type PointerEvent } from "react";
 import { DynamicMapOverlaySchema, type GeoJsonMap, type DynamicMapOverlay, type GamePhase } from "@chronica/shared";
 import { GeoMap, type ForceFlagAsset, type ForceMapDetails } from "./geo-map";
 import { MapViewport, type ViewportTransform } from "./map-viewport";
@@ -83,6 +83,10 @@ export function GameShell({
   const [coins, setCoins] = useState<string | null>(null);
   const [chronicleOpen, setChronicleOpen] = useState(false);
   const zoomBand = deriveZoomBand(viewport.scale);
+  const allianceLabels = useMemo(() => {
+    const names = new Map(overlay?.polities.map((polity) => [polity.polityId, polity.name]) ?? []);
+    return (overlay?.politicalRelations ?? []).map((relation) => `${names.get(relation.leaderPolityId) ?? relation.leaderPolityId} allied with ${names.get(relation.memberPolityId) ?? relation.memberPolityId}`);
+  }, [overlay]);
 
   useEffect(() => {
     let cancelled = false;
@@ -280,6 +284,10 @@ export function GameShell({
             canZoomIn={viewport.scale < MAX_SCALE}
             canZoomOut={viewport.scale > MIN_SCALE}
           />
+          {allianceLabels.length > 0 && <aside className="map-political-context" aria-label="Political relationships">
+            <strong>Political ties</strong>
+            <span>{allianceLabels.join(" · ")}</span>
+          </aside>}
         </div>
       </div>
       {characterPanel && <CharacterPanel {...characterPanel} />}
