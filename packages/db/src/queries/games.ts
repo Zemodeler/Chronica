@@ -4,6 +4,7 @@ import { ScenarioDefinitionSchema } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
 import { users } from "../schema/auth";
 import { characterClaims, gameInvites, games, players, scenarioMapAssets, scenarioVersions, scenarios, turnNewsReadiness, turns } from "../schema/game";
+import { creditHolds, creditLedgerEntries, creditLots, creditWallets } from "../schema/billing";
 import { CHRONICA_SYSTEM_USER_ID, FIRST_PUNIC_WAR_SCENARIO_ID, FIRST_PUNIC_WAR_SLUG, firstPunicWarScenario } from "../built-in-scenarios";
 
 /** The built-in Numidian map is a scenario-owned copy of the DEMO geography. */
@@ -252,15 +253,12 @@ export interface GameSummaryRow {
   readonly status: "lobby" | "active" | "finished" | "abandoned";
 }
 
-/** Up to 3 active hosted games for the dashboard save-slot rail. */
+/** All saves created by this account, including paused and historical saves. */
 export async function listHostedGames(db: ChronicaDatabase, userId: string): Promise<GameSummaryRow[]> {
   return db
     .select({ gameId: games.id, title: games.title, status: games.status })
     .from(games)
-    // Exclude games where the host already requested an end: they disappear
-    // from the active slot immediately even if the worker hasn't yet closed the
-    // last turn boundary (ADR-0040). The audit record is preserved in the DB.
-    .where(and(eq(games.createdBy, userId), inArray(games.status, ["lobby", "active"]), isNull(games.endRequestedAt)))
+    .where(eq(games.createdBy, userId))
     .orderBy(desc(games.createdAt));
 }
 
@@ -273,6 +271,40 @@ export async function listJoinedGames(db: ChronicaDatabase, userId: string): Pro
     // Exclude games in the process of ending for the same reason as listHostedGames.
     .where(and(ne(games.createdBy, userId), inArray(games.status, ["lobby", "active"]), isNull(games.endRequestedAt)))
     .orderBy(desc(games.createdAt));
+}
+
+type LotAllocation = readonly Readonly<{ lotId: string; microUnits: string }>[];
+
+/**
+ * Permanently removes one account-owned save and all save-scoped data.
+ * Financial and AI audit rows survive through their ON DELETE SET NULL links.
+ */
+export async function deleteOwnedGame(db: ChronicaDatabase, gameId: string, userId: string): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const [game] = await tx.select({ id: games.id, createdBy: games.createdBy }).from(games).where(eq(games.id, gameId)).for("update").limit(1);
+    if (game === undefined) return false;
+    if (game.createdBy !== userId) return false;
+
+    const activeHolds = await tx.select().from(creditHolds)
+      .where(and(eq(creditHolds.gameId, gameId), eq(creditHolds.status, "active")))
+      .for("update");
+    for (const hold of activeHolds) {
+      const [wallet] = await tx.select().from(creditWallets).where(eq(creditWallets.id, hold.walletId)).for("update").limit(1);
+      if (wallet === undefined) throw new Error("Coin wallet missing during save deletion.");
+      for (const item of hold.lotAllocation as LotAllocation) {
+        const amount = BigInt(item.microUnits);
+        const [lot] = await tx.select().from(creditLots).where(eq(creditLots.id, item.lotId)).for("update").limit(1);
+        if (lot !== undefined) await tx.update(creditLots).set({ heldMicrocredits: lot.heldMicrocredits - amount, remainingMicrocredits: lot.remainingMicrocredits + amount }).where(eq(creditLots.id, lot.id));
+      }
+      const availableAfter = wallet.availableMicrocredits + hold.maximumMicrocredits;
+      await tx.update(creditWallets).set({ availableMicrocredits: availableAfter, heldMicrocredits: wallet.heldMicrocredits - hold.maximumMicrocredits, version: wallet.version + 1 }).where(eq(creditWallets.id, wallet.id));
+      await tx.update(creditHolds).set({ status: "released" }).where(eq(creditHolds.id, hold.id));
+      await tx.insert(creditLedgerEntries).values({ walletId: wallet.id, kind: "release", signedMicrocredits: hold.maximumMicrocredits, idempotencyKey: `release:deleted-save:${hold.id}`, gameId, workId: hold.workId, holdId: hold.id, balanceAfterMicrocredits: availableAfter, reason: "Save deleted before AI work completed" });
+    }
+
+    await tx.delete(games).where(eq(games.id, gameId));
+    return true;
+  });
 }
 
 export async function acknowledgeTurnNews(

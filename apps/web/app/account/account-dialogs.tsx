@@ -14,6 +14,7 @@ import {
   signOut,
   updateProfile,
 } from "../actions";
+import { DeleteSaveForm } from "../components/delete-save-form";
 
 const AVATARS = ["laurel", "owl", "lion", "horse", "ship", "tower"] as const;
 
@@ -35,6 +36,7 @@ type Params = {
   email?: string;
   checkout?: string;
   aiProvider?: string;
+  status?: string;
 };
 
 export function AccountDashboard({
@@ -130,6 +132,7 @@ export function AccountDashboard({
       {params.aiProvider === "unauthorized" && <p id="ai-provider-status" className="error acct-status">Request a fresh sign-in link before changing the local AI provider.</p>}
       {params.email === "sent" && <p className="notice acct-status">Check your inbox for a verification link.</p>}
       {params.email === "invalid" && <p className="error acct-status">We could not send that verification email.</p>}
+      {params.status === "deleted" && <p className="notice acct-status">The save and all of its game data were permanently deleted.</p>}
 
       <div className="account-grid">
         <button type="button" className="account-card" onClick={() => setOpenDialog("profile")}>
@@ -384,7 +387,10 @@ function SavesDialog({ account, onClose }: { account: AccountDashboardViewModel;
         ) : (
           <ul>
             {hostedSaves.map((save) => (
-              <li key={save.gameId}><a href={`/games/${save.gameId}`}>{save.title}</a> — {save.status}</li>
+              <li key={save.gameId}>
+                <a href={`/games/${save.gameId}`}>{save.title}</a> — {save.status}
+                <DeleteSaveForm gameId={save.gameId} title={save.title} returnTo="/account" />
+              </li>
             ))}
           </ul>
         )}

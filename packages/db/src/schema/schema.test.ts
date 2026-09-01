@@ -1,8 +1,8 @@
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import { authAccounts, authSessions, authVerifications } from "./auth";
-import { aiCalls, billingEvents, creditLedgerEntries, creditWallets } from "./billing";
-import { characterClaims, gameInvites, games, scenarioMapAssets, scenarioVersions } from "./game";
+import { aiCalls, billingEvents, creditHolds, creditLedgerEntries, creditWallets } from "./billing";
+import { characterClaims, gameInvites, games, orders, scenarioMapAssets, scenarioVersions, turnNewsReadiness } from "./game";
 
 describe("database-enforced M1 boundaries", () => {
   it("keeps authentication and invite tokens unique", () => {
@@ -35,6 +35,18 @@ describe("database-enforced M1 boundaries", () => {
     expect(indexNames(aiCalls)).toContain("ai_calls_idempotency_unique");
   });
 
+  it("keeps financial audit rows when a save is deleted", () => {
+    expect(column(aiCalls, "game_id").notNull).toBe(false);
+    expect(column(creditHolds, "game_id").notNull).toBe(false);
+    expect(column(creditLedgerEntries, "game_id").notNull).toBe(false);
+  });
+
+  it("cascades every player-owned save record", () => {
+    for (const table of [characterClaims, gameInvites, orders, turnNewsReadiness]) {
+      expect(getTableConfig(table).foreignKeys.some((key) => key.onDelete === "cascade")).toBe(true);
+    }
+  });
+
   it("keeps a scenario version's starting world beside its rules, not inside them", () => {
     // `definition` is validated against ScenarioDefinitionSchema (rules only);
     // `initial_world` is what packages/db/src/queries/turns.ts createGame reads to
@@ -54,4 +66,10 @@ describe("database-enforced M1 boundaries", () => {
 
 function indexNames(table: Parameters<typeof getTableConfig>[0]): readonly string[] {
   return getTableConfig(table).indexes.map((index) => index.config.name ?? "");
+}
+
+function column(table: Parameters<typeof getTableConfig>[0], name: string) {
+  const value = getTableConfig(table).columns.find((candidate) => candidate.name === name);
+  if (value === undefined) throw new Error(`Missing column ${name}.`);
+  return value;
 }
