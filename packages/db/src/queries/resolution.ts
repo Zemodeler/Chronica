@@ -194,6 +194,15 @@ export async function claimTurnForResolution(
   return rows.length > 0;
 }
 
+/** Write the current pipeline step so the SSE stream can report live progress. */
+export async function updateTurnProgressStep(
+  db: ChronicaDatabase,
+  turnId: string,
+  step: string,
+): Promise<void> {
+  await db.update(turns).set({ progressStep: step }).where(eq(turns.id, turnId));
+}
+
 /** Mark a turn as failed with an error reason. */
 export async function failTurn(
   db: ChronicaDatabase,

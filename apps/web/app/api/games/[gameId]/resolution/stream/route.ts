@@ -35,8 +35,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ game
       };
       const poll = async () => {
         try {
-          const [turn] = await db.select({ status: schema.turns.status }).from(schema.turns)
-            .where(eq(schema.turns.gameId, gameId)).orderBy(desc(schema.turns.index)).limit(1);
+          // commitResolution marks the resolved turn as news *and* opens the
+          // next collecting turn in one transaction. Looking only at the
+          // highest-indexed turn therefore misses the completed resolution and
+          // leaves this stream open forever. Pending news is the authoritative
+          // completion signal for the turn this stream is observing.
+          const [[newsTurn], [latestTurn]] = await Promise.all([
+            db.select({ status: schema.turns.status, progressStep: schema.turns.progressStep }).from(schema.turns)
+              .where(and(eq(schema.turns.gameId, gameId), eq(schema.turns.status, "news"))).orderBy(desc(schema.turns.index)).limit(1),
+            db.select({ status: schema.turns.status, progressStep: schema.turns.progressStep }).from(schema.turns)
+              .where(eq(schema.turns.gameId, gameId)).orderBy(desc(schema.turns.index)).limit(1),
+          ]);
+          const turn = newsTurn ?? latestTurn;
           if (turn === undefined) { send({ error: "Game not found." }); await finish(); return; }
           if (turn.status === "failed") { send({ error: "Resolution failed." }); await finish(); return; }
           if (turn.status === "news" || turn.status === "resolved") {
@@ -44,7 +54,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ game
             await finish();
             return;
           }
-          send({ step: turn.status, label: turn.status === "queued" ? "Resolution is queued on the server…" : "Resolving on the server…", done: false });
+          if (turn.progressStep) {
+            send({ step: turn.progressStep, label: turn.progressStep, done: false });
+          } else {
+            send({ step: "_waiting", label: turn.status === "queued" ? "Resolution is queued on the server…" : "Resolving on the server…", done: false });
+          }
         } catch (error) {
           send({ error: String(error) });
           await finish();

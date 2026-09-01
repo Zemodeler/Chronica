@@ -171,7 +171,10 @@ Output ONLY a valid JSON object matching this schema (no markdown fences, no com
     "body": 0–100,
     "subSkills": { "strategist?": 0–100, "authority?": 0–100, "espionage?": 0–100, ... }
   },
-  "skillRationale": { "martial": "reason", ... },
+  "skillRationale": {
+    "martial": "Direct plain-text reason for this skill score",
+    "intrigue": "Direct plain-text reason for this skill score"
+  },
   "relations": [
     {
       "name": "string — an individually named person, never an institution, army, office, dynasty, or group",
@@ -185,6 +188,10 @@ Output ONLY a valid JSON object matching this schema (no markdown fences, no com
   ],
   "confirmationDraft": "string — a readable summary shown to the player asking them to confirm. Include: who this character is, their role, their startingMoney with the currency name, and a brief teaser of their situation. 150–300 words. Friendly, second-person ('You are...')."
 }
+
+CRITICAL for skillRationale: it must be one JSON object whose values are DIRECT JSON STRINGS. Never nest an object, array, score, label, or "reason" field inside a skill rationale.
+Correct: "skillRationale": { "martial": "Veteran field commander.", "learning": "Classically educated." }
+Incorrect: "skillRationale": { "martial": { "reason": "Veteran field commander." } }
 
 CRITICAL for subSkills: only use these EXACT key names (all lowercase, no punctuation):
   Martial: strategist, authority
@@ -247,6 +254,25 @@ function preprocessAiRelations(relations: unknown): unknown {
   });
 }
 
+const SKILL_RATIONALE_TEXT_KEYS = ["reason", "rationale", "explanation", "description", "text"] as const;
+
+/**
+ * Models occasionally wrap an otherwise-valid rationale in a named object,
+ * such as { reason: "Veteran field commander." }. The stored schema uses the
+ * compact string form, so safely unwrap only known text fields. Unknown shapes
+ * are deliberately preserved and rejected by schema validation.
+ */
+function preprocessAiSkillRationale(skillRationale: unknown): unknown {
+  if (skillRationale === null || typeof skillRationale !== "object" || Array.isArray(skillRationale)) return skillRationale;
+
+  return Object.fromEntries(Object.entries(skillRationale as Record<string, unknown>).map(([skill, rationale]) => {
+    if (rationale === null || typeof rationale !== "object" || Array.isArray(rationale)) return [skill, rationale];
+    const wrapped = rationale as Record<string, unknown>;
+    const text = SKILL_RATIONALE_TEXT_KEYS.map((key) => wrapped[key]).find((value) => typeof value === "string");
+    return [skill, text ?? rationale];
+  }));
+}
+
 function parseAiKnowledgebase(
   raw: string,
   gameId: string,
@@ -260,6 +286,7 @@ function parseAiKnowledgebase(
   const preprocessed = {
     ...base,
     relations: preprocessAiRelations(base["relations"]),
+    skillRationale: preprocessAiSkillRationale(base["skillRationale"]),
   };
 
   // Spread AI values first so our programmatic fields always win.

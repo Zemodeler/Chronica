@@ -20,6 +20,8 @@ const JSON_MODE_OPERATIONS = new Set<AiOperation>([
   "resolve_contact",
   "extract_knowledge",
   "workflow_manager",
+  "declare_character",
+  "confirm_character",
 ]);
 
 const TIER_MODELS: Record<AiTier, string> = {

@@ -14,6 +14,7 @@ export default async function NewGamePage({ searchParams }: Readonly<{ searchPar
 
   return <main id="main-content" className="shell"><header className="page-header"><p className="eyebrow">Scenario · {scenario.period}</p><h1>Begin {scenario.title}</h1><p className="lede">Create your single-player save and enter the world.</p></header>
     {status === "invalid" && <StatusMessage kind="error">Give the save a title and a coin cap.</StatusMessage>}
+    {status === "save-limit" && <StatusMessage kind="error">You already have three active saves. End or replace one before starting another.</StatusMessage>}
     {status === "unavailable" && <StatusMessage kind="error">That world is no longer available to host.</StatusMessage>}
     <section className="panel" aria-labelledby="settings-heading"><h2 id="settings-heading">Save settings</h2><form action={createGame}>
       <input type="hidden" name="scenarioId" value={scenario.scenarioId} />

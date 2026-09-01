@@ -127,6 +127,34 @@
       "when": 1787900006000,
       "tag": "0019_temporary_workflow_patches",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788249600000,
+      "tag": "0020_lock_built_in_scenario",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788249601000,
+      "tag": "0021_fix_built_in_scenario_lock",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1756742400000,
+      "tag": "0022_turn_progress_step",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788250000000,
+      "tag": "0023_reconcile_turn_progress_step",
+      "breakpoints": true
     }
   ]
 }

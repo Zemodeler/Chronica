@@ -47,7 +47,7 @@ DECISION RULES:
 5. A known diagnostic is a cue to repair when possible, not a reason to blindly reject. Never approve a request with an unresolved diagnostic.
 6. Replacements must use real entity IDs from the authoritative world state. Do not guess IDs, entities, balances, or military forces.
 7. If no registered workflow accurately fits, reject that candidate and add exactly one novelActionProposal with a bounded temporaryPatch. The patch runs only for this turn; its generated TypeScript is downloaded for developer review and is never executed as code.
-8. A temporaryPatch may use only account_delta, province_control, character_state, or create_storyline operations. Use existing entity IDs and the smallest necessary effect.
+8. A temporaryPatch may use ONLY these four operation kinds: account_delta, province_control, character_state, create_storyline. No other kind values exist. Use existing entity IDs and the smallest necessary effect.
 9. Include an implementationReport explaining the unmet need, the temporary patch that was applied, and what a permanent workflow must implement.
 10. The deterministic system will validate and dry-run your selected sequence after you respond.
 
@@ -66,7 +66,13 @@ Return strict JSON only:
     "source": "<candidate source>",
     "sourceRef": "<candidate sourceRef>",
     "temporaryPatch": {
-      "id": "<uuid>", "title": "<title>", "rationale": "<why>", "actorId": "<existing actor id>", "operations": []
+      "id": "<uuid>", "title": "<title>", "rationale": "<why>", "actorId": "<existing actor id>",
+      "operations": [
+        { "kind": "account_delta", "accountId": "<id>", "amount": -100, "reason": "<why>" },
+        { "kind": "province_control", "provinceId": "<id>", "controllerPolityId": "<id>", "firmnessBps": 5000 },
+        { "kind": "character_state", "characterId": "<id>", "healthBps": 8000, "locationProvinceId": "<id>", "polityId": "<id>" },
+        { "kind": "create_storyline", "storylineId": "<new-uuid>", "title": "<title>", "participantIds": ["<id>"], "provinceId": "<id or null>", "phase": "<phase>", "stakes": "<stakes>", "nextDevelopment": "<next>", "visibility": "public" }
+      ]
     },
     "implementationReport": "<what was needed, temporarily implemented, and required permanently>"
   }]
