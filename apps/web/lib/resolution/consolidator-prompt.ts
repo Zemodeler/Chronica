@@ -7,6 +7,7 @@ import type {
   SimulatorProposal,
   ConsolidatedProposal,
   ConsolidatedProposalPackage,
+  ProposedInvocation,
 } from "@chronica/shared";
 
 // Consolidator — deterministic deduplication of director proposals.
@@ -17,6 +18,53 @@ import type {
 
 function proposalFingerprint(actionId: string, actorId: string): string {
   return `${actionId}::${actorId}`;
+}
+
+/** Translate an approved advisory suggestion into its bounded agency workflow. */
+function characterSuggestionWorkflows(suggestion: CharacterSuggestion): ProposedInvocation[] {
+  const actorId = suggestion.characterId;
+  if (suggestion.suggestionKind === "create_goal" && suggestion.proposedGoal) {
+    return [{ actionId: "create_character_goal", actorId, parameters: { characterId: actorId, ...suggestion.proposedGoal } }];
+  }
+  if (suggestion.suggestionKind === "update_goal" && suggestion.goalId) {
+    return [{
+      actionId: "update_character_goal",
+      actorId,
+      parameters: {
+        goalId: suggestion.goalId,
+        ...(suggestion.goalStatus ? { status: suggestion.goalStatus } : {}),
+        ...(suggestion.proposedGoal ? { priority: suggestion.proposedGoal.priority } : {}),
+        note: suggestion.rationale.slice(0, 240),
+      },
+    }];
+  }
+  if (suggestion.suggestionKind === "create_plot" && suggestion.proposedPlot) {
+    return [{
+      actionId: "create_character_plot",
+      actorId,
+      parameters: { characterId: actorId, ...suggestion.proposedPlot, worldStorylineId: suggestion.storylineId },
+    }];
+  }
+  if (suggestion.suggestionKind === "advance_plot" && suggestion.plotId && suggestion.plotStage) {
+    return [{
+      actionId: "advance_character_plot",
+      actorId,
+      parameters: {
+        plotId: suggestion.plotId,
+        newStage: suggestion.plotStage,
+        ...(suggestion.proposedPlot ? { obstacle: suggestion.proposedPlot.currentObstacle } : {}),
+        note: suggestion.rationale.slice(0, 240),
+      },
+    }];
+  }
+  if (suggestion.suggestionKind === "resolve_plot" && suggestion.plotId && suggestion.plotResolutionStatus) {
+    return [{
+      actionId: "resolve_character_plot",
+      actorId,
+      parameters: { plotId: suggestion.plotId, status: suggestion.plotResolutionStatus, note: suggestion.rationale.slice(0, 240) },
+    }];
+  }
+  return [];
 }
 
 /**
@@ -87,7 +135,7 @@ export function consolidateProposals(
     });
   }
 
-  // ── Character Director suggestions (translated to proposals; no workflow invocations) ──
+  // ── Character Director suggestions (translated deterministically to bounded agency workflows) ──
   for (const cs of characterSuggestions) {
     if (cs.salience === 0) continue; // skip background-only suggestions
 
@@ -97,10 +145,11 @@ export function consolidateProposals(
       sources: ["character_director"],
       kind: cs.suggestionKind,
       mergedRationale: cs.rationale,
-      proposedWorkflows: [], // CD suggestions carry no workflow invocations
+      proposedWorkflows: characterSuggestionWorkflows(cs),
       salience: cs.salience * 10,
       scopeTag: "near",
       dedupeGroup: cs.storylineId ?? undefined,
+      characterId: cs.characterId,
     });
   }
 

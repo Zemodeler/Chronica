@@ -26,6 +26,8 @@ export const worldCreationWorkflows: AnyWorkflowDefinition[] = [
     invokerAuthority: ["world_director"] as unknown as never[],
     parametersSchema: z
       .object({
+        /** The pipeline may reserve an ID so a newly cast NPC can be referenced this turn. */
+        characterId: EntityIdSchema.optional(),
         name: z.string().trim().min(1).max(120),
         polityId: EntityIdSchema.nullable().default(null),
         locationProvinceId: EntityIdSchema,
@@ -50,16 +52,40 @@ export const worldCreationWorkflows: AnyWorkflowDefinition[] = [
       const locationProv = world.map.provinces.find((p) => p.id === params.locationProvinceId);
       if (!locationProv) return null;
 
+      const characterId = params.characterId ?? `char-wd-${randomUUID().slice(0, 12)}`;
+      if (world.characters.some((character) => character.id === characterId)) return null;
+
       const newCharacter = {
-        id: `char-wd-${randomUUID().slice(0, 12)}`,
+        id: characterId,
         name: params.name,
+        // World-created figures begin as ordinary adults; scenario-specific
+        // offices and skills can later be assigned through normal workflows.
+        cultureId: "culture-local",
+        faithId: null,
+        dynastyId: null,
         polityId: params.polityId,
         locationProvinceId: params.locationProvinceId,
+        ageYearsAtStart: 35,
         officeId: params.officeId,
+        personalAccountId: `account-${characterId}`,
+        skills: {
+          martial: 35,
+          intrigue: 45,
+          learning: 45,
+          piety: 35,
+          stewardship: 45,
+          diplomacy: 55,
+          body: 45,
+          subSkills: {},
+        },
+        traits: [],
         alive: true,
         healthBps: 10000,
         prestigeBps: 3000,
         relations: [],
+        ambitions: [],
+        heirCharacterId: null,
+        diedAtStep: null,
         createdByDirector: true,
         createdAtStep: context.atStep,
         creationReason: params.provenance.reason,

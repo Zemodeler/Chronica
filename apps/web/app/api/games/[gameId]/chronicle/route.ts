@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { eq, and } from "drizzle-orm";
 import { createDatabase, getChronicleForLatestTurn, schema } from "@chronica/db";
 import { isAuthenticationConfigured, getAuthentication } from "../../../../../lib/authentication";
-import { projectDateLabel } from "../../../../../lib/world-view";
+import { projectChronicleDateLabel } from "../../../../../lib/chronicle-schedule";
 
 function requiredDatabaseUrl(): string {
   const value = process.env.DATABASE_URL?.trim();
@@ -36,11 +36,11 @@ export async function GET(
 
     return Response.json({
       ...chronicle,
-      entries: chronicle.entries.map((entry) => ({
+      entries: chronicle.entries.map((entry, position) => ({
         ...entry,
         dateLabel: entry.eventDate ?? (chronicle.scenarioClock === undefined
           ? `Step ${entry.atStep}`
-          : projectDateLabel(entry.atStep, chronicle.scenarioClock)),
+          : projectChronicleDateLabel(entry, position, chronicle.entries.length, chronicle.scenarioClock)),
       })),
     }, { headers: { "Cache-Control": "private, no-store" } });
   } finally {

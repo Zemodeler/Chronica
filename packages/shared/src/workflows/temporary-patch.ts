@@ -59,13 +59,44 @@ export interface TemporaryPatchResult {
   readonly summary: string;
 }
 
+/** Return a precise invalid-reference reason before a patch is considered for application. */
+export function validateTemporaryWorkflowPatchReferences(
+  world: WorldState,
+  patch: TemporaryWorkflowPatch,
+): string | null {
+  if (!world.characters.some((character) => character.id === patch.actorId && character.alive)) {
+    return `actorId ${patch.actorId} is not a living character`;
+  }
+  for (const operation of patch.operations) {
+    if (operation.kind === "account_delta" && !world.material.accounts.some((account) => account.id === operation.accountId)) {
+      return `accountId ${operation.accountId} does not exist`;
+    }
+    if (operation.kind === "province_control") {
+      if (!world.map.provinces.some((province) => province.id === operation.provinceId)) return `provinceId ${operation.provinceId} does not exist`;
+      if (!world.map.polities.some((polity) => polity.id === operation.controllerPolityId)) return `controllerPolityId ${operation.controllerPolityId} does not exist`;
+    }
+    if (operation.kind === "character_state") {
+      if (!world.characters.some((character) => character.id === operation.characterId)) return `characterId ${operation.characterId} does not exist`;
+      if (operation.locationProvinceId && !world.map.provinces.some((province) => province.id === operation.locationProvinceId)) return `locationProvinceId ${operation.locationProvinceId} does not exist`;
+      if (operation.polityId && !world.map.polities.some((polity) => polity.id === operation.polityId)) return `polityId ${operation.polityId} does not exist`;
+    }
+    if (operation.kind === "create_storyline") {
+      if (world.storylines?.some((storyline) => storyline.id === operation.storylineId)) return `storylineId ${operation.storylineId} already exists`;
+      if (operation.provinceId && !world.map.provinces.some((province) => province.id === operation.provinceId)) return `provinceId ${operation.provinceId} does not exist`;
+      const missingParticipant = operation.participantIds.find((id) => !world.characters.some((character) => character.id === id));
+      if (missingParticipant) return `storyline participant ${missingParticipant} does not exist`;
+    }
+  }
+  return null;
+}
+
 /** Apply a validated patch atomically, or return null when any target is invalid. */
 export function applyTemporaryWorkflowPatch(
   world: WorldState,
   patch: TemporaryWorkflowPatch,
   atStep: number,
 ): TemporaryPatchResult | null {
-  if (!world.characters.some((character) => character.id === patch.actorId && character.alive)) return null;
+  if (validateTemporaryWorkflowPatchReferences(world, patch) !== null) return null;
   let current = world;
 
   for (const operation of patch.operations) {

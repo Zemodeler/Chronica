@@ -346,8 +346,10 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
       defendingForceIds: z.array(EntityIdSchema).default([]),
     }).strict(),
     apply(world, params) {
-      const province = world.map.provinces.find((p) => p.id === params.settlementId);
-      if (!province) return null;
+      const settlementWithProvince = world.map.provinces
+        .flatMap((province) => province.settlements.map((settlement) => ({ settlement, province })))
+        .find(({ settlement }) => settlement.id === params.settlementId);
+      if (!settlementWithProvince) return null;
       const alreadyBesieged = world.conflicts.sieges.some((s) => s.settlementId === params.settlementId);
       if (alreadyBesieged) return null;
       return {
@@ -366,7 +368,7 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
           },
         },
         result: {
-          summary: `A siege begins at ${province.name}.`,
+          summary: `A siege begins at ${settlementWithProvince.settlement.name}.`,
           applied: true,
         },
       };
@@ -398,20 +400,22 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
           map: {
             ...nextWorld.map,
             provinces: nextWorld.map.provinces.map((p) =>
-              p.id === siege.settlementId
+              p.settlements.some((settlement) => settlement.id === siege.settlementId)
                 ? { ...p, controllerPolityId: params.newControllerPolityId!, controlFirmnessBps: 3_000 }
                 : p,
             ),
           },
         };
       }
-      const province = world.map.provinces.find((p) => p.id === siege.settlementId);
+      const settlementWithProvince = world.map.provinces
+        .flatMap((province) => province.settlements.map((settlement) => ({ settlement, province })))
+        .find(({ settlement }) => settlement.id === siege.settlementId);
       return {
         world: nextWorld,
         result: {
           summary: params.successfulCapture
-            ? `Siege of ${province?.name ?? siege.settlementId} succeeds. Province captured.`
-            : `Siege of ${province?.name ?? siege.settlementId} ends without capture.`,
+            ? `Siege of ${settlementWithProvince?.settlement.name ?? siege.settlementId} succeeds. Province captured.`
+            : `Siege of ${settlementWithProvince?.settlement.name ?? siege.settlementId} ends without capture.`,
           applied: true,
         },
       };

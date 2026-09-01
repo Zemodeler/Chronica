@@ -196,12 +196,16 @@ function dayOfYearToDate(doy: number): { month: number; day: number } {
   return { month: 12, day: 31 };
 }
 
-export function projectDateLabel(elapsedStep: number, clock: ScenarioClock): string {
+/**
+ * Project a calendar label from an elapsed simulation-day count. Keeping this
+ * separate from the coarse turn step lets the Chronicle place several events
+ * on distinct days within a season without changing authoritative time.
+ */
+export function projectDateLabelAtElapsedDays(daysElapsed: number, clock: ScenarioClock): string {
   const epoch = clock.epoch;
-  if (epoch === undefined) return `Step ${elapsedStep}`;
+  if (epoch === undefined) return `Step ${Math.floor(daysElapsed * clock.stepsPerYear / 365)}`;
   const epochDoy = MONTH_DAYS.slice(0, epoch.month - 1).reduce((a, b) => a + b, 0) + epoch.day;
-  const daysElapsed = Math.floor(elapsedStep * (365 / clock.stepsPerYear));
-  const totalDoy = epochDoy + daysElapsed;
+  const totalDoy = epochDoy + Math.max(0, Math.floor(daysElapsed));
   const yearsElapsed = Math.floor((totalDoy - 1) / 365);
   const doy = ((totalDoy - 1) % 365) + 1;
   const { month, day } = dayOfYearToDate(doy);
@@ -210,6 +214,41 @@ export function projectDateLabel(elapsedStep: number, clock: ScenarioClock): str
     : epoch.year + yearsElapsed;
   const yearLabel = signedYear <= 0 ? `${1 - signedYear} BCE` : `${signedYear}`;
   return `${ordinal(day)} of ${MONTH_NAMES[month - 1]} ${yearLabel}`;
+}
+
+export function projectDateLabel(elapsedStep: number, clock: ScenarioClock): string {
+  return projectDateLabelAtElapsedDays(Math.floor(elapsedStep * (365 / clock.stepsPerYear)), clock);
+}
+
+/**
+ * Convert authoritative conflict state into a self-consistent map overlay.
+ * Older snapshots may contain a siege keyed by a province rather than a
+ * settlement; render the matching settlement when one exists, and omit
+ * unrecoverable stale records so a historic bad workflow can never crash the
+ * entire game page.
+ */
+function projectMapConflicts(world: WorldState) {
+  const forceIds = new Set(world.material.forces.map((force) => force.id));
+  const polityIds = new Set(world.map.polities.map((polity) => polity.id));
+  const settlements = world.map.provinces.flatMap((province) =>
+    province.settlements.map((settlement) => ({ settlement, province })),
+  );
+  const settlementById = new Map(settlements.map(({ settlement }) => [settlement.id, settlement.id]));
+  const legacyProvinceTarget = new Map(
+    world.map.provinces
+      .filter((province) => province.settlements.length === 1)
+      .map((province) => [province.id, province.settlements[0]!.id]),
+  );
+
+  return {
+    battles: world.conflicts.battles.filter((battle) => battle.participantForceIds.every((forceId) => forceIds.has(forceId))),
+    sieges: world.conflicts.sieges.flatMap((siege) => {
+      const settlementId = settlementById.get(siege.settlementId) ?? legacyProvinceTarget.get(siege.settlementId);
+      if (!settlementId || !siege.invadingForceIds.every((forceId) => forceIds.has(forceId)) || !siege.defendingForceIds.every((forceId) => forceIds.has(forceId))) return [];
+      return [{ ...siege, settlementId }];
+    }),
+    wars: world.conflicts.wars.filter((war) => polityIds.has(war.polityAId) && polityIds.has(war.polityBId)),
+  };
 }
 
 export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerCharacterId: string): WorldViewModel {
@@ -291,6 +330,8 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
       currentOrder: "Awaiting orders",
     };
   });
+  const mapConflicts = projectMapConflicts(world);
+  const besiegedSettlementIds = new Set(mapConflicts.sieges.map((siege) => siege.settlementId));
 
   return WorldViewModelSchema.parse({
     gameId: meta.gameId,
@@ -318,7 +359,7 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
           controllerPolityId: settlement.controllerPolityId,
           capitalPolityId: capitalPolity?.id ?? null,
           importance: settlement.size,
-          underSiege: false,
+          underSiege: besiegedSettlementIds.has(settlement.id),
           damaged: false,
         };
       })),
@@ -338,7 +379,7 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
           movement: null,
         };
       }),
-      conflicts: world.conflicts,
+      conflicts: mapConflicts,
     },
     provinces,
     armies,

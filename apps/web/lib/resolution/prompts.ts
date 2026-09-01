@@ -133,6 +133,16 @@ function worldContext(world: WorldState, actorId: string, context?: ResolutionPl
     }
   }
 
+  const settlements = world.map.provinces.flatMap((province) =>
+    province.settlements.map((settlement) => ({ ...settlement, province })),
+  );
+  if (settlements.length > 0) {
+    lines.push(`\nSETTLEMENTS (use settlement IDs, never province IDs, for siege workflows):`);
+    for (const settlement of settlements) {
+      lines.push(`  ${settlement.name} [id: ${settlement.id}] in ${settlement.province.name} [province-id: ${settlement.province.id}]`);
+    }
+  }
+
   // Key characters with IDs.
   const keyChars = world.characters.filter((c) => c.alive && c.id !== actorId).slice(0, 16);
   if (keyChars.length > 0) {
@@ -178,6 +188,10 @@ Parse the order into:
 
 Be grounded: use actual province names, character names, and force names from the world context above. If the player references something that does not exist, note it as a risk.
 
+BRACKET OVERRIDE SYNTAX: If the directive text is wrapped in square brackets [like this], it is a GM/author command. Parse it literally, set the intent to reflect exactly what was written, and note in the risks array that this is a GM override (no other risks needed). It still MUST have at least one proposedSteps item: use one concise literal execution step such as "Rename the raised army to Legio I." Never return proposedSteps: [].
+
+EXISTING FORCES RULE: If the player's directive refers to any force already listed in FORCES UNDER COMMAND above — by name, pronoun ("my army", "my troops", "the legion"), or clear contextual reference — you MUST include that force's ID in targetIds. Do not treat a reference to an existing force as a request to raise a new one.
+
 Respond as a JSON object with exactly these fields.`;
 }
 
@@ -188,7 +202,7 @@ ${worldContext(world, actorId, context)}
 
 ${buildWorkflowCatalog()}
 
-PERSONAL / DOMESTIC ACTIONS: If the order is a personal, social, or domestic activity (hosting a dinner, spending time with family, playing a game, personal rituals, leisure, prayer, rest, etc.) with no world-state implications, it is always "feasible" with workflow: null and needsAdjudication: false. Never mark these as "impossible" just because the broader political context is serious.
+PERSONAL / DOMESTIC ACTIONS: If the order is a personal, social, or domestic activity (hosting a dinner, spending time with family, playing a game, personal rituals, leisure, prayer, rest, etc.) with no world-state implications, it is always "feasible" with workflows: [] and needsAdjudication: false. Never mark these as "impossible" just because the broader political context is serious.
 
 For each interpreted order, assess:
 - interpretation: restate the intent concisely (max 600 chars)
@@ -201,10 +215,12 @@ For each interpreted order, assess:
 - obstacleIds: entity IDs of things that oppose or complicate the action
 - dependencyActionIds: IDs of other ongoing actions this depends on
 - estimatedSteps: estimated duration as a JSON object { "min": N, "max": N } where N is a positive integer (game seasons)
-- workflow: if this maps to a registered workflow action, name it as { actionId, parameters }. Use null if genuinely novel or unmappable.
+- workflows: an array of 0-4 registered workflow hints, each exactly { "actionId": "<registered action id>", "parameters": { ... } }. Use [] if genuinely novel or unmappable. Never use the singular workflow field, never use a tuple such as ["actionId", parameters], and never put a workflow inside another array.
 - needsAdjudication: true if the outcome is uncertain and requires the full adjudication step
 
 IMPORTANT: feasibility is informational. Even an "impossible" assessment goes to adjudication — you are not blocking the player, you are informing the consequences step.
+
+BRACKET OVERRIDE SYNTAX: If the directive text is wrapped in square brackets [like this], always set feasibility to "feasible" and needsAdjudication to false regardless of circumstances. This is a GM command — skip all obstacle reasoning and do not flag it as impossible or conditional.
 
 Respond as a JSON object with exactly these fields.`;
 }
@@ -232,14 +248,16 @@ For the order, produce a verdict:
   * { kind: "material_effect", effect: { sourceEntityId, magnitude: "minor"|"meaningful", rationale } } — use ONLY for reputation or narrative consequences that have NO matching workflow. This does NOT change game state and does NOT add or remove money.
   * { kind: "relationship_cause", holderCharacterId, subjectCharacterId, label, score: -100..100 } — for opinion shifts.
   * { kind: "knowledge_grant", characterId, factId } — for information reveals.
-  * For "raise army" / "recruit troops" orders: use actionId "create_force" with polityId, locationProvinceId, name, size, kind ("infantry"|"cavalry"|"siege"|"naval"|"militia"|"mercenary"|"other"), and optionally payerAccountId (use the account-id from the ACCOUNTS section above if one exists; omit the field if no account is available).
+  * EXISTING FORCE RULE — CRITICAL: If the player already has forces listed in FORCES UNDER COMMAND and the order refers to one of those forces by name, pronoun ("my army", "my troops", "the legion"), or clear contextual reference, you MUST NOT use create_force. Identify the target force by its ID from the world context and use the matching workflow (merge_forces to combine two forces, move_force to relocate, disband_force to disband, raise_morale for morale boosts). If no workflow covers the specific action (e.g. renaming a force, adding reinforcements when there is no second force to merge), produce no workflow delta and describe the outcome narratively in the rationale instead — do NOT create a new force as a substitute.
+  * For genuinely new "raise army" / "recruit troops" orders where the player has no existing force or is explicitly creating a brand-new one: use actionId "create_force" with polityId, locationProvinceId, name, size, kind ("infantry"|"cavalry"|"siege"|"naval"|"militia"|"mercenary"|"other"), and optionally payerAccountId (use the account-id from the ACCOUNTS section above if one exists; omit the field if no account is available).
+  * BRACKET OVERRIDE SYNTAX: If the directive text is wrapped in square brackets [like this], it is a GM command. Set outcome to "succeeds", execute the action exactly as written using the closest matching workflow, and ignore all feasibility, realism, or world-state constraints. Never return "impossible" for a bracket override.
   * For "start battle" / "engage forces" orders: use actionId "start_battle" with attackingForceId and defendingForceId (both from world context) and a newly invented battleId (kebab-case slug, e.g. "battle-rome-carthage-261bc"). The battleId is the only parameter you may invent — all other IDs must come from world context.
   * For "remove gold" / "spend funds" / "pay" orders: use actionId "remove_gold" with accountId (from the ACCOUNTS section above), amount (integer), and reason (short description of the expenditure, max 240 chars).
   * ECONOMIC INCOME RULE — applies to ANY order involving: selling, trading, receiving payment, earning income, collecting funds, spoils, gifts, or any money gain: you MUST produce { kind: "workflow", invocation: { actionId: "add_gold", actorId: "<actor-id>", parameters: { accountId: "<actor-account-id>", amount: <plausible integer>, reason: "<brief description>" } } }. Use the account-id marked "(YOU)" in the ACCOUNTS section above. If no account is marked "(YOU)", still use add_gold with any account-id present — never fall back to material_effect for income. Do NOT invoke any military workflow for a peaceful economic transaction.
 - tacticalModifiers: array of tactical modifier proposals (empty if not a battle)
 - timeCost: { min, max } in seasons
 - rationale: explain the decisive factor (max 1200 chars)
-- knowledgeVisibility: "public" | "polity" | "private"
+- knowledgeVisibility: choose exactly one of these strings: "public", "polity", or "private". Do not combine values, add qualifiers, or use any other value. When uncertain, use "private".
 
 Do not output playerInvolvement. The server records the submitting player and actor after validating your verdict.
 
@@ -356,6 +374,8 @@ export interface NarratorEntry {
   readonly chainPosition?: "root" | "reaction" | "spread" | "distant" | "pressure" | null | undefined;
   readonly chainId?: string | null | undefined;
   readonly sourceDirector?: string | undefined;
+  /** A server-selected cast. These are authoritative, not names to invent. */
+  readonly characterMentions?: readonly { name: string; role: string }[] | undefined;
 }
 
 export function buildChronicleNarratorPrompt(
@@ -414,7 +434,10 @@ export function buildChronicleNarratorPrompt(
       ? ` [chain: ${e.chainId?.slice(0, 8)} · entry ${(chainGroup.indexOf(i) + 1)}/${chainGroup.length}]`
       : "";
     const kind = e.isPlayerAction ? "PLAYER ACTION" : positionLabel(e.chainPosition);
-    return `${i + 1}. [${kind}${chainNote}] ${e.body}`;
+    const cast = e.characterMentions && e.characterMentions.length > 0
+      ? `\n   CAST: ${e.characterMentions.map((member) => `${member.name} (${member.role})`).join(", ")}`
+      : "";
+    return `${i + 1}. [${kind}${chainNote}] ${e.body}${cast}`;
   });
 
   return `You are the chronicler of Chronica. Rewrite raw event summaries as grounded, historically-flavoured prose for the official chronicle. Events within the same chain [chain: ...] are causally linked — write them so they flow as a coherent sequence. Each entry still stands alone as a paragraph.
@@ -429,6 +452,7 @@ Rewrite each event as one paragraph of chronicle prose. Return EXACTLY ${entries
 Rules:
 - ALWAYS use proper names: refer to the player character as "${actorName}" (never substitute another name), name their polity "${polityName}", use real place names from the world above
 - NEVER invent character names — if the raw summary does not name someone, use their title or role instead
+- When an event has a CAST line, name that exact character in its paragraph and give them the stated dramatic role. Do not replace them with an anonymous senate, council, or faction.
 - NEVER append meta-commentary to names or nouns (e.g. do NOT write "Gaius — historically accurate name" or "Rome (polity)"; write only the name itself)
 - NEVER use generic placeholders ("an individual", "a person", "the realm") — name everything specifically
 - Write in third person, past tense, historical style appropriate to the period

@@ -113,6 +113,9 @@ Output schema (return strict JSON { "suggestions": [...] }):
 - plotId: existing plot id or null
 - proposedGoal: { objective, category: "preserve_power"|"acquire_office"|"discredit_rival"|"alliance"|"revenge"|"resource"|"narrative", targetEntityIds, priority (1-5), visibility } or null
 - proposedPlot: { goalId, objective, participantIds, targetIds, visibility, stakes, currentObstacle } or null
+- goalStatus: "active" | "achieved" | "abandoned" | "failed" when updating a goal, otherwise null
+- plotStage: "forming" | "preparing" | "attempting" | "consequence" | "adapting" when advancing a plot, otherwise null
+- plotResolutionStatus: "succeeded" | "failed" | "abandoned" | "exposed" | "stalled" when resolving a plot, otherwise null
 - rationale: max 400 chars — the character's motivation and reasoning
 - causalFactIds: entity IDs that caused this suggestion
 - affectedEntityIds: entity IDs affected
@@ -127,6 +130,7 @@ RULES:
 4. Prefer continuing existing goals and plots over creating unrelated new ones.
 5. Return suggestions for all ${selectedCharacters.length} characters in the "suggestions" array.
 6. A suggestion of salience 0 means "no meaningful development this turn" — still return it.
+7. For create_goal and create_plot, provide the matching proposedGoal or proposedPlot. For update_goal, advance_plot, and resolve_plot, provide the matching existing ID and the relevant status or stage so the World Director can safely make it durable.
 
 Respond with strict JSON only: { "suggestions": [...] }`;
 }

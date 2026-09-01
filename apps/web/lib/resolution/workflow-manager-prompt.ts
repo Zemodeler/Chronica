@@ -47,9 +47,10 @@ DECISION RULES:
 5. A known diagnostic is a cue to repair when possible, not a reason to blindly reject. Never approve a request with an unresolved diagnostic.
 6. Replacements must use real entity IDs from the authoritative world state. Do not guess IDs, entities, balances, or military forces.
 7. If no registered workflow accurately fits, reject that candidate and add exactly one novelActionProposal with a bounded temporaryPatch. The patch runs only for this turn; its generated TypeScript is downloaded for developer review and is never executed as code.
-8. A temporaryPatch may use ONLY these four operation kinds: account_delta, province_control, character_state, create_storyline. No other kind values exist. Use existing entity IDs and the smallest necessary effect.
-9. Include an implementationReport explaining the unmet need, the temporary patch that was applied, and what a permanent workflow must implement.
-10. The deterministic system will validate and dry-run your selected sequence after you respond.
+8. A temporaryPatch may use ONLY these four operation kinds: account_delta, province_control, character_state, create_storyline. No other kind values exist. Every actor, participant, account, province, polity, and character ID must be copied from AUTHORITATIVE WORLD STATE. Never use an ID from a prior response or invent one.
+9. Never use a temporary patch to imitate a registered workflow. In particular, a proposed force, battle, siege, or character creation must be repaired with the matching catalog workflow or rejected; do not create a storyline as a substitute for a material entity.
+10. Include an implementationReport explaining the unmet need, the temporary patch that was applied, and what a permanent workflow must implement.
+11. The deterministic system will validate and dry-run your selected sequence after you respond.
 
 Return strict JSON only:
 {
