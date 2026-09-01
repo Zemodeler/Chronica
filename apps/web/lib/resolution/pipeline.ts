@@ -14,6 +14,8 @@ import type {
   ReactionProposal,
   SimulatorProposal,
   CharacterKnowledgebase,
+  WorkflowAuditBlob,
+  NovelActionProposal,
 } from "@chronica/shared";
 import {
   OrderInterpretationSchema,
@@ -24,10 +26,11 @@ import {
   SimulatorProposalBatchSchema,
   WorldDirectorDecisionBatchSchema,
   executeWorkflows,
+  applyTemporaryWorkflowPatch,
   selectRelevantCharacters,
   inferTheatre,
 } from "@chronica/shared";
-import { collectPlayerCandidates, collectWorldCandidates, runWorkflowManager } from "./workflow-manager";
+import { collectPlayerCandidates, collectWorldCandidates, previewPlayerWorkflows, runWorkflowManager } from "./workflow-manager";
 
 const InterpretParseSchema = OrderInterpretationSchema.omit({ directiveId: true });
 const AssessParseSchema = OrderAssessmentSchema.omit({ directiveId: true });
@@ -65,12 +68,29 @@ import { buildWorldDirectorSystemPrompt } from "./world-director-prompt";
 
 export type ProgressCallback = (progress: ResolutionProgress) => void;
 
+export interface WorkflowDeveloperDownload {
+  readonly fileName: string;
+  readonly content: string;
+}
+
+export interface ResolveTurnResult {
+  readonly workflowDownloads: readonly WorkflowDeveloperDownload[];
+}
+
 function emit(onProgress: ProgressCallback, step: ResolutionStep, done = false) {
   onProgress({ step, label: STEP_LABELS[step], done });
 }
 
 let _logTurnId = "";
 function tag() { return `[pipeline${_logTurnId ? `:${_logTurnId.slice(0, 8)}` : ""}]`; }
+
+function buildWorkflowDeveloperDownload(proposal: NovelActionProposal): WorkflowDeveloperDownload {
+  const id = proposal.intent.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "temporary_workflow";
+  return {
+    fileName: `${id}_workflow_report.md`,
+    content: `# Temporary workflow: ${proposal.intent}\n\n## AI implementation report\n${proposal.implementationReport}\n\n## Applied for this turn\n\`\`\`json\n${JSON.stringify(proposal.temporaryPatch, null, 2)}\n\`\`\`\n\n## Permanent workflow scaffold\n\`\`\`ts\nimport { z } from "zod";\nimport { defineWorkflow } from "../types";\n\nexport const ${id}Workflow = defineWorkflow({\n  id: "${id}",\n  description: "${proposal.intent.replace(/"/g, '\\"').slice(0, 120)}",\n  category: "narrative", // choose the correct category\n  parametersSchema: z.object({ /* derive from the temporary patch */ }).strict(),\n  apply(world, params, context) {\n    // Replace this temporary patch with a permanent, tested implementation.\n    return null;\n  },\n});\n\`\`\`\n`,
+  };
+}
 
 function stripToJson(text: string): string {
   let s = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
@@ -184,41 +204,39 @@ function materializePlayerCharacter(
   };
 }
 
-/** Derive direct consequences from a verdict's deltas. */
-function deriveDirectConsequences(verdict: Verdict): NonNullable<ChronicleEntryInput["directConsequences"]> {
+/** Derive Chronicle consequences from workflows that actually executed. */
+function deriveExecutedWorkflowConsequences(
+  auditEntries: readonly WorkflowAuditBlob["candidates"][number][],
+  workflowLog: readonly { invocation: ProposedInvocation; outcome: { ok: boolean; result?: { summary: string } } }[],
+): NonNullable<ChronicleEntryInput["directConsequences"]> {
   const consequences: NonNullable<ChronicleEntryInput["directConsequences"]> = [];
-  for (const delta of verdict.deltas) {
-    if (delta.kind === "material_effect") {
-      consequences.push({
-        kind: "material",
-        // The effect rationale is the player-facing description. Magnitude is
-        // an adjudication input, not useful Chronicle copy on its own.
-        label: delta.effect.rationale.slice(0, 120),
-        entityId: delta.effect.sourceEntityId ?? null,
-        quantified: false,
-      });
-    } else if (delta.kind === "workflow" && delta.invocation.actionId === "add_gold") {
-      const amount = (delta.invocation.parameters as Record<string, unknown>)["amount"];
+  for (const entry of auditEntries) {
+    const invocation = entry.finalInvocation;
+    if (!invocation || entry.executionOk !== true) continue;
+    const outcome = workflowLog.find((item) => JSON.stringify(item.invocation) === JSON.stringify(invocation))?.outcome;
+    if (!outcome?.ok) continue;
+    if (invocation.actionId === "add_gold") {
+      const amount = invocation.parameters["amount"];
       consequences.push({
         kind: "material",
         label: `+${amount} gold`,
         entityId: null,
         quantified: true,
       });
-    } else if (delta.kind === "workflow" && delta.invocation.actionId === "spend_gold") {
-      const amount = (delta.invocation.parameters as Record<string, unknown>)["amount"];
+    } else if (invocation.actionId === "remove_gold") {
+      const amount = invocation.parameters["amount"];
       consequences.push({
         kind: "material",
         label: `-${amount} gold`,
         entityId: null,
         quantified: true,
       });
-    } else if (delta.kind === "relationship_cause") {
+    } else {
       consequences.push({
-        kind: "social",
-        label: `${delta.label}: ${delta.score > 0 ? "+" : ""}${delta.score}`,
-        entityId: delta.subjectCharacterId ?? null,
-        quantified: true,
+        kind: "material",
+        label: outcome.result?.summary.slice(0, 120) ?? invocation.actionId,
+        entityId: invocation.actorId,
+        quantified: false,
       });
     }
   }
@@ -232,6 +250,7 @@ function buildChronicleEntries(
   reactionProposals: readonly ReactionProposal[],
   simulatorProposals: readonly SimulatorProposal[],
   workflowLog: readonly { invocation: ProposedInvocation; outcome: { ok: boolean; result?: { summary: string } } }[],
+  workflowAudit: WorkflowAuditBlob,
   atStep: number,
   displayPatchByInvocation: Map<string, unknown>,
   playerId: string,
@@ -244,6 +263,10 @@ function buildChronicleEntries(
 
   // Player action entries
   for (const verdict of verdicts) {
+    const executedWorkflowEntries = workflowAudit.candidates.filter(
+      (entry) => entry.source === "player_directive" && entry.sourceRef === verdict.directiveId && entry.executionOk === true,
+    );
+    const hasExecutedWorkflow = executedWorkflowEntries.length > 0;
     const interpretation = interpretations.find((i) => i.directiveId === verdict.directiveId);
     const body = interpretation
       ? `${interpretation.intent} — ${verdict.rationale}`
@@ -256,9 +279,9 @@ function buildChronicleEntries(
         audience: verdict.knowledgeVisibility === "private" ? "knowledge_scoped" : "all_players",
         body,
         atStep,
-        materialConsequence: verdict.deltas.length > 0,
+        materialConsequence: hasExecutedWorkflow,
         playerInvolvement: verdict.playerInvolvement,
-        directConsequences: deriveDirectConsequences(verdict),
+        directConsequences: deriveExecutedWorkflowConsequences(executedWorkflowEntries, workflowLog),
         sourceDirector: "player",
         chainPosition: "root",
       },
@@ -380,12 +403,12 @@ export async function resolveTurn(
   adapter: AiAdapter,
   input: ResolveTurnInput,
   onProgress: ProgressCallback,
-): Promise<void> {
+): Promise<ResolveTurnResult> {
   const { gameId, turnId, world, batch, actorCharacterId, playerId } = input;
   _logTurnId = turnId;
 
   const claimed = await claimTurnForResolution(db, turnId);
-  if (!claimed) return;
+  if (!claimed) return { workflowDownloads: [] };
 
   try {
     const playerKnowledgebase = await getCharacterKnowledgebase(db, gameId, playerId).catch(() => null);
@@ -585,26 +608,16 @@ export async function resolveTurn(
     console.log(`${tag()} [adjudicate] OUT: ${verdicts.length} verdict(s)`);
     emit(onProgress, "adjudicate", true);
 
-    // ── Step 4: Execute player workflows ──────────────────────────────────
-    emit(onProgress, "execute_player");
+    // ── Step 4: Preview player workflows ──────────────────────────────────
+    // This world is only director context. No player workflow is committed
+    // until the final Workflow Manager reviews the complete turn batch.
+    emit(onProgress, "preview_player");
     const atStep = resolutionWorld.elapsedStep + 1;
-    console.log(`${tag()} [execute_player] IN: atStep=${atStep}`);
+    console.log(`${tag()} [preview_player] IN: atStep=${atStep}`);
     const playerCandidates = collectPlayerCandidates(verdicts);
-    const playerManagerResult = await runWorkflowManager(adapter, resolutionWorld, playerCandidates, atStep);
-    const { world: worldAfterPlayer, log: playerWorkflowLog } = executeWorkflows(
-      playerManagerResult.acceptedInvocations,
-      resolutionWorld,
-      atStep,
-    );
-    for (const entry of playerWorkflowLog) {
-      if (entry.outcome.ok) {
-        console.log(`${tag()} [execute_player:ok] actionId=${entry.invocation.actionId} actorId=${entry.invocation.actorId} summary="${entry.outcome.result.summary}"`);
-      } else {
-        console.error(`${tag()} [execute_player:fail] actionId=${entry.invocation.actionId} actorId=${entry.invocation.actorId} reason=${entry.outcome.reason}`);
-      }
-    }
-    console.log(`${tag()} [execute_player] OUT: ${playerWorkflowLog.filter((e) => e.outcome.ok).length}/${playerWorkflowLog.length} workflows applied`);
-    emit(onProgress, "execute_player", true);
+    const worldAfterPlayer = previewPlayerWorkflows(resolutionWorld, playerCandidates, atStep);
+    console.log(`${tag()} [preview_player] OUT: ${playerCandidates.length} candidate(s) previewed without persistence`);
+    emit(onProgress, "preview_player", true);
 
     // ── Steps 5–7: Reaction Director, Simulator, Character Director (parallel) ──
     // These all run on worldAfterPlayer — post player-execution snapshot.
@@ -688,7 +701,7 @@ export async function resolveTurn(
     // ── Step 9: World Director ─────────────────────────────────────────────
     emit(onProgress, "world_direct");
     console.log(`${tag()} [world_direct] IN: ${consolidatedPackage.proposals.length} proposals openChains=${(worldAfterPlayer.chronicleChains ?? []).filter((c) => !c.resolved).length}`);
-    const worldDirectorInvocations: ProposedInvocation[] = [];
+    const worldDirectorInvocations: Array<{ invocation: ProposedInvocation; sourceRef: string; sourceRationale: string }> = [];
     try {
       const wdPrompt = buildWorldDirectorSystemPrompt(worldAfterPlayer, consolidatedPackage, actorCharacterId, resolutionContext);
       const wdResult = await adapter.call("world_director", wdPrompt, `Step ${atStep}: decide on ${consolidatedPackage.proposals.length} proposal(s).`);
@@ -699,7 +712,14 @@ export async function resolveTurn(
           const wfs = decision.finalWorkflows.length;
           console.log(`${tag()} [world_direct] proposal=${decision.proposalId} → ${decision.decision} wfs=${wfs}${wfs > 0 ? ` (${decision.finalWorkflows.map((w) => w.actionId).join(",")})` : ""}`);
           if (decision.decision === "approve" || decision.decision === "modify") {
-            worldDirectorInvocations.push(...decision.finalWorkflows);
+            const proposal = consolidatedPackage.proposals.find((candidate) => candidate.id === decision.proposalId);
+            for (const invocation of decision.finalWorkflows) {
+              worldDirectorInvocations.push({
+                invocation,
+                sourceRef: decision.proposalId,
+                sourceRationale: `${proposal?.mergedRationale ?? "World Director proposal"} ${decision.rationale}`.slice(0, 400),
+              });
+            }
           }
         }
         const approved = decisions.filter((d) => d.decision === "approve" || d.decision === "modify").length;
@@ -712,25 +732,50 @@ export async function resolveTurn(
     }
     emit(onProgress, "world_direct", true);
 
-    // ── Step 10: Execute world workflows ──────────────────────────────────
+    // ── Step 10: Final AI workflow review and execution ───────────────────
+    emit(onProgress, "manage");
+    console.log(`${tag()} [manage] IN: player=${playerCandidates.length} world=${worldDirectorInvocations.length} candidate(s)`);
+    const worldCandidates = collectWorldCandidates(worldDirectorInvocations);
+    const finalCandidates = [...playerCandidates, ...worldCandidates];
+    const managerResult = await runWorkflowManager(adapter, resolutionWorld, finalCandidates, atStep);
+    console.log(`${tag()} [manage] OUT: ${managerResult.acceptedInvocations.length}/${finalCandidates.length} workflow(s) accepted`);
+    emit(onProgress, "manage", true);
+
     emit(onProgress, "execute_world");
-    console.log(`${tag()} [execute_world] IN: ${worldDirectorInvocations.length} world invocation(s)`);
-    const worldCandidates = collectWorldCandidates(worldDirectorInvocations, "world_director_synthesis");
-    const worldManagerResult = await runWorkflowManager(adapter, worldAfterPlayer, worldCandidates, atStep);
-    const { world: newWorld, log: worldWorkflowLog } = executeWorkflows(
-      worldManagerResult.acceptedInvocations,
-      worldAfterPlayer,
+    const executed = executeWorkflows(
+      managerResult.acceptedInvocations,
+      resolutionWorld,
       atStep,
     );
-    for (const entry of worldWorkflowLog) {
+    let newWorld = executed.world;
+    const allWorkflowLog = executed.log;
+    for (const proposal of managerResult.temporaryPatches) {
+      const patched = applyTemporaryWorkflowPatch(newWorld, proposal.temporaryPatch, atStep);
+      if (patched === null) throw new Error(`Temporary workflow patch could not be applied: ${proposal.intent}`);
+      newWorld = patched.world;
+      console.log(`${tag()} [temporary-workflow:ok] ${proposal.temporaryPatch.id}: ${patched.summary}`);
+    }
+    for (const entry of allWorkflowLog) {
       if (entry.outcome.ok) {
-        console.log(`${tag()} [execute_world:ok] actionId=${entry.invocation.actionId} actorId=${entry.invocation.actorId} summary="${entry.outcome.result.summary}"`);
+        console.log(`${tag()} [execute:ok] actionId=${entry.invocation.actionId} actorId=${entry.invocation.actorId} summary="${entry.outcome.result.summary}"`);
       } else {
-        console.error(`${tag()} [execute_world:fail] actionId=${entry.invocation.actionId} actorId=${entry.invocation.actorId} reason=${entry.outcome.reason}`);
+        console.error(`${tag()} [execute:fail] actionId=${entry.invocation.actionId} actorId=${entry.invocation.actorId} reason=${entry.outcome.reason}`);
       }
     }
-    console.log(`${tag()} [execute_world] OUT: ${worldWorkflowLog.filter((e) => e.outcome.ok).length}/${worldWorkflowLog.length} workflows applied`);
-    const allWorkflowLog = [...playerWorkflowLog, ...worldWorkflowLog];
+    console.log(`${tag()} [execute_world] OUT: ${allWorkflowLog.filter((e) => e.outcome.ok).length}/${allWorkflowLog.length} workflows applied`);
+    const executionByInvocation = new Map(
+      allWorkflowLog.map((entry) => [JSON.stringify(entry.invocation), entry.outcome]),
+    );
+    const finalWorkflowAudit: WorkflowAuditBlob = {
+      ...managerResult.auditBlob,
+      candidates: managerResult.auditBlob.candidates.map((entry) => {
+        if (!entry.finalInvocation) return entry;
+        const outcome = executionByInvocation.get(JSON.stringify(entry.finalInvocation));
+        return outcome
+          ? { ...entry, executionOk: outcome.ok, ...(outcome.ok ? {} : { executionReason: outcome.message }) }
+          : { ...entry, executionOk: false, executionReason: "Approved invocation was not sent to the executor." };
+      }),
+    };
 
     // Commitment resolution
     const fulfilledCommitmentIds: string[] = [];
@@ -776,6 +821,7 @@ export async function resolveTurn(
       reactionProposals,
       simulatorProposals,
       allWorkflowLog as never,
+      finalWorkflowAudit,
       atStep,
       displayPatchByInvocation,
       playerId,
@@ -822,16 +868,7 @@ export async function resolveTurn(
 
     // ── Step 12: Commit ────────────────────────────────────────────────────
     emit(onProgress, "commit");
-    console.log(`${tag()} [commit] IN: step=${atStep} chronicleEntries=${chronicleInputs.length} auditCandidates=${playerManagerResult.auditBlob.candidates.length + worldManagerResult.auditBlob.candidates.length}`);
-    const combinedAudit = {
-      candidates: [
-        ...playerManagerResult.auditBlob.candidates,
-        ...worldManagerResult.auditBlob.candidates,
-      ],
-      novelActionProposals: [],
-      managerFailed: playerManagerResult.managerFailed || worldManagerResult.managerFailed,
-      atStep,
-    };
+    console.log(`${tag()} [commit] IN: step=${atStep} chronicleEntries=${chronicleInputs.length} auditCandidates=${finalWorkflowAudit.candidates.length}`);
 
     // Update character relevance in newWorld before committing
     const updatedRelevance = updateCharacterRelevance(newWorld.characterRelevance ?? [], chronicleInputs, atStep);
@@ -849,8 +886,8 @@ export async function resolveTurn(
       elapsedStepEnd: atStep,
       chronicleEntries: chronicleInputs,
       stopReason: "player_decision",
-      workflowAudit: combinedAudit,
-      novelActionProposals: [],
+      workflowAudit: finalWorkflowAudit,
+      novelActionProposals: managerResult.temporaryPatches,
     });
 
     await resolveNpcCommitments(db, fulfilledCommitmentIds, "fulfilled", atStep, "Validated and fulfilled during turn resolution.");
@@ -867,8 +904,9 @@ export async function resolveTurn(
       console.error("[resolution] ingestChronicleEntries failed", err);
     });
 
-    console.log(`${tag()} ══ RESOLUTION COMPLETE ══ step=${atStep} chronicle=${chronicleInputs.length} playerWfs=${playerWorkflowLog.filter((e) => e.outcome.ok).length} worldWfs=${worldWorkflowLog.filter((e) => e.outcome.ok).length}`);
+    console.log(`${tag()} ══ RESOLUTION COMPLETE ══ step=${atStep} chronicle=${chronicleInputs.length} workflows=${allWorkflowLog.filter((e) => e.outcome.ok).length} temporary=${managerResult.temporaryPatches.length}`);
     emit(onProgress, "commit", true);
+    return { workflowDownloads: managerResult.temporaryPatches.map(buildWorkflowDeveloperDownload) };
   } catch (error) {
     console.error("[resolution] pipeline failed", error);
     await failTurn(db, turnId, String(error));

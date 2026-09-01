@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { eq, and } from "drizzle-orm";
 import { createDatabase, getChronicleForLatestTurn, schema } from "@chronica/db";
 import { isAuthenticationConfigured, getAuthentication } from "../../../../../lib/authentication";
+import { projectDateLabel } from "../../../../../lib/world-view";
 
 function requiredDatabaseUrl(): string {
   const value = process.env.DATABASE_URL?.trim();
@@ -33,7 +34,15 @@ export async function GET(
     const chronicle = await getChronicleForLatestTurn(db, gameId);
     if (!chronicle) return Response.json({ error: "Game not found." }, { status: 404 });
 
-    return Response.json(chronicle, { headers: { "Cache-Control": "private, no-store" } });
+    return Response.json({
+      ...chronicle,
+      entries: chronicle.entries.map((entry) => ({
+        ...entry,
+        dateLabel: entry.eventDate ?? (chronicle.scenarioClock === undefined
+          ? `Step ${entry.atStep}`
+          : projectDateLabel(entry.atStep, chronicle.scenarioClock)),
+      })),
+    }, { headers: { "Cache-Control": "private, no-store" } });
   } finally {
     await close();
   }

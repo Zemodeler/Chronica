@@ -120,6 +120,13 @@
       "when": 1787900005000,
       "tag": "0018_workflow_manager",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1787900006000,
+      "tag": "0019_temporary_workflow_patches",
+      "breakpoints": true
     }
   ]
 }

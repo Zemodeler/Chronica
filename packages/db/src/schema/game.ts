@@ -236,6 +236,10 @@ export const pendingWorkflowProposals = pgTable("pending_workflow_proposals", {
   intent: text("intent").notNull(),
   targetEntityIds: jsonb("target_entity_ids").notNull().$type<string[]>(),
   estimatedMutationDescription: text("estimated_mutation_description").notNull(),
+  /** Bounded one-turn patch proposed by the Workflow Manager, if available. */
+  temporaryPatch: jsonb("temporary_patch").$type<import("@chronica/shared").TemporaryWorkflowPatch>(),
+  /** AI-authored report downloaded for developer implementation. */
+  implementationReport: text("implementation_report"),
   source: text("source").notNull(),
   sourceRef: text("source_ref").notNull(),
   reviewedBy: uuid("reviewed_by").references(() => users.id, { onDelete: "set null" }),

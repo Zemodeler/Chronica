@@ -133,8 +133,8 @@ export function validateCandidate(candidate: WorkflowCandidate, world: WorldStat
     if (typeof spending === "number" && spending > 0) {
       // This is a spending-type operation; verify actor has adequate permission.
       // add_gold and similar income grants don't require actor permission (they're granted).
-      // For operations that require actor authority (spend_gold, transfer_gold), check access.
-      const isSpend = inv.actionId === "spend_gold" || inv.actionId === "transfer_gold";
+      // For operations that require actor authority (remove_gold, transfer_gold), check access.
+      const isSpend = inv.actionId === "remove_gold" || inv.actionId === "transfer_gold";
       if (isSpend) {
         const hasAccess = world.material.accountAccess.some(
           (a) =>

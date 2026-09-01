@@ -8,6 +8,7 @@ export type ResolutionStep =
   | "interpret"
   | "assess"
   | "adjudicate"
+  | "preview_player"
   | "execute_player"
   | "reaction"
   | "simulate"
@@ -32,6 +33,7 @@ export const STEP_LABELS: Record<ResolutionStep, string> = {
   interpret: "Interpreting your orders…",
   assess: "Assessing feasibility…",
   adjudicate: "Calculating consequences…",
+  preview_player: "Forecasting immediate effects…",
   execute_player: "Applying your actions…",
   reaction: "Observing reactions…",
   simulate: "Simulating the world…",
