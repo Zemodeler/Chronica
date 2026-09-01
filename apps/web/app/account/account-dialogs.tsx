@@ -201,9 +201,9 @@ export function AccountDashboard({
         {canManageGifts && (
           <button type="button" className="account-card account-card--dev" onClick={() => setOpenDialog("workflow_proposals")}>
             <span className="account-card-icon">🔬</span>
-            <span className="account-card-title">Workflow Proposals</span>
+            <span className="account-card-title">Invented Workflows</span>
             <span className="account-card-meta">
-              {pendingProposalCount} pending review
+              {pendingProposalCount} saved workflow{pendingProposalCount === 1 ? "" : "s"}
             </span>
             <span className="account-card-action">Review →</span>
           </button>
@@ -533,114 +533,108 @@ function LocalAiProviderDialog({ configuration, onClose }: { configuration: Loca
   );
 }
 
-type ProposalRow = {
+type InventedWorkflowRow = {
   id: string;
-  turnId: string;
   gameId: string;
-  status: string;
+  createdTurnId: string;
+  actionId: string;
   intent: string;
-  targetEntityIds: string[];
-  estimatedMutationDescription: string;
-  source: string;
-  sourceRef: string;
+  description: string;
+  definition: unknown;
+  status: "active" | "disabled";
+  successfulUseCount: number;
+  lastUsedAt: string | null;
   createdAt: string;
 };
 
 function WorkflowProposalsDialog({ onClose }: { onClose: () => void }) {
-  const [proposals, setProposals] = useState<ProposalRow[]>([]);
+  const [workflows, setWorkflows] = useState<InventedWorkflowRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [scaffoldContent, setScaffoldContent] = useState<{ id: string; text: string } | null>(null);
   const [reviewNote, setReviewNote] = useState<Record<string, string>>({});
   const [working, setWorking] = useState<Record<string, boolean>>({});
+  const [useHistory, setUseHistory] = useState<Record<string, unknown[]>>({});
 
   useEffect(() => {
-    void fetch("/api/admin/workflow-proposals?status=pending&limit=20")
-      .then((r) => r.json() as Promise<{ proposals: ProposalRow[] }>)
-      .then((data) => { setProposals(data.proposals); setLoading(false); })
+    void fetch("/api/admin/invented-workflows?limit=50")
+      .then((r) => r.json() as Promise<{ workflows: InventedWorkflowRow[] }>)
+      .then((data) => { setWorkflows(data.workflows); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
 
-  const review = async (id: string, decision: "approved" | "rejected") => {
+  const setStatus = async (id: string, status: "active" | "disabled") => {
     setWorking((w) => ({ ...w, [id]: true }));
     try {
-      await fetch(`/api/admin/workflow-proposals/${id}`, {
+      await fetch(`/api/admin/invented-workflows/${id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision, note: reviewNote[id] ?? "" }),
+        body: JSON.stringify({ status, note: reviewNote[id] ?? "" }),
       });
-      setProposals((p) => p.filter((x) => x.id !== id));
+      setWorkflows((items) => items.map((item) => item.id === id ? { ...item, status } : item));
     } finally {
       setWorking((w) => ({ ...w, [id]: false }));
     }
   };
 
-  const viewScaffold = async (id: string) => {
-    const r = await fetch(`/api/admin/workflow-proposals/${id}/scaffold`);
-    const text = await r.text();
-    setScaffoldContent({ id, text });
+  const viewUseHistory = async (id: string) => {
+    const response = await fetch(`/api/admin/invented-workflows/${id}`);
+    const data = await response.json() as { uses?: unknown[] };
+    setUseHistory((history) => ({ ...history, [id]: data.uses ?? [] }));
   };
 
   return (
     <>
-      <DialogHeader title="Workflow Proposals" onClose={onClose} />
+      <DialogHeader title="Invented Workflows" onClose={onClose} />
       <div className="dialog-body">
         <p className="dialog-lede">
-          These actions were flagged by the Workflow Manager as needing a new skill.
-          Review each proposal and implement the corresponding workflow, then approve or reject.
+          Reusable AI-created game workflows, ranked by successful use. Disabling one removes it from future AI decisions without changing past turns.
         </p>
 
         {loading && <p>Loading…</p>}
 
-        {!loading && proposals.length === 0 && (
-          <p className="dialog-empty">No pending proposals.</p>
+        {!loading && workflows.length === 0 && (
+          <p className="dialog-empty">No invented workflows yet.</p>
         )}
 
-        {proposals.map((p) => (
-          <div key={p.id} style={{ borderTop: "1px solid var(--border)", paddingTop: "1rem", marginTop: "1rem" }}>
-            <p><strong>Intent:</strong> {p.intent}</p>
+        {workflows.map((workflow) => (
+          <div key={workflow.id} style={{ borderTop: "1px solid var(--border)", paddingTop: "1rem", marginTop: "1rem" }}>
+            <p><strong>{workflow.actionId}</strong> · {workflow.status} · {workflow.successfulUseCount} successful use{workflow.successfulUseCount === 1 ? "" : "s"}</p>
+            <p><strong>Intent:</strong> {workflow.intent}</p>
             <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>
-              <strong>Estimated mutation:</strong> {p.estimatedMutationDescription}
+              {workflow.description} · game: <code>{workflow.gameId.slice(0, 8)}</code> · last use: {workflow.lastUsedAt ? new Date(workflow.lastUsedAt).toLocaleString() : "never"}
             </p>
-            <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>
-              Source: <code>{p.source}</code> · ref: <code>{p.sourceRef}</code> · turn: <code>{p.turnId.slice(0, 8)}</code>
-            </p>
-            {p.targetEntityIds.length > 0 && (
-              <p style={{ fontSize: "0.875rem" }}>Targets: {p.targetEntityIds.join(", ")}</p>
-            )}
-
-            {scaffoldContent?.id === p.id && (
+            {useHistory[workflow.id] && (
               <pre style={{ fontSize: "0.75rem", overflowX: "auto", background: "var(--surface-alt)", padding: "0.5rem", borderRadius: "4px" }}>
-                {scaffoldContent.text}
+                {JSON.stringify({ definition: workflow.definition, recentUses: useHistory[workflow.id] }, null, 2)}
               </pre>
             )}
 
             <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
-              <button type="button" className="button sm secondary" onClick={() => void viewScaffold(p.id)}>
-                View Scaffold
+              <button type="button" className="button sm secondary" onClick={() => void viewUseHistory(workflow.id)}>
+                View definition & uses
               </button>
               <input
                 type="text"
                 placeholder="Review note (optional)"
-                value={reviewNote[p.id] ?? ""}
-                onChange={(e) => setReviewNote((n) => ({ ...n, [p.id]: e.target.value }))}
+                value={reviewNote[workflow.id] ?? ""}
+                onChange={(e) => setReviewNote((n) => ({ ...n, [workflow.id]: e.target.value }))}
                 className="input sm"
                 style={{ flex: 1, minWidth: "180px" }}
               />
               <button
                 type="button"
                 className="button sm"
-                disabled={working[p.id]}
-                onClick={() => void review(p.id, "approved")}
+                disabled={working[workflow.id] || workflow.status === "active"}
+                onClick={() => void setStatus(workflow.id, "active")}
               >
-                Approve
+                Enable
               </button>
               <button
                 type="button"
                 className="button sm secondary"
-                disabled={working[p.id]}
-                onClick={() => void review(p.id, "rejected")}
+                disabled={working[workflow.id] || workflow.status === "disabled"}
+                onClick={() => void setStatus(workflow.id, "disabled")}
               >
-                Reject
+                Disable
               </button>
             </div>
           </div>

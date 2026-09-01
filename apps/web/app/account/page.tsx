@@ -6,7 +6,7 @@ import { isAuthenticationConfigured } from "../../lib/authentication";
 import { gameRepository } from "../../lib/game-repository";
 import { redeemGift } from "../actions";
 import { AccountDashboard, type SerializedGift } from "./account-dialogs";
-import { createDatabase, listPendingWorkflowProposals } from "@chronica/db";
+import { createDatabase, listInventedWorkflows } from "@chronica/db";
 import { getLocalAiProviderConfiguration } from "@chronica/ai";
 
 export const metadata: Metadata = { title: "Account and coins" };
@@ -34,8 +34,8 @@ export default async function AccountPage({
   if (isDev && process.env.DATABASE_URL) {
     const { db, close } = createDatabase(process.env.DATABASE_URL);
     try {
-      const pending = await listPendingWorkflowProposals(db, { status: "pending", limit: 50 });
-      pendingProposalCount = pending.length;
+      const workflows = await listInventedWorkflows(db, 50);
+      pendingProposalCount = workflows.length;
     } catch { /* non-critical */ } finally {
       await close();
     }

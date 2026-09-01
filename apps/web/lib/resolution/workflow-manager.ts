@@ -5,8 +5,8 @@ import type { AiAdapter } from "@chronica/ai";
 import type {
   ManagerDecision,
   ManagerDecisionBatch,
-  NovelActionProposal,
   ProposedInvocation,
+  RuntimeInventedWorkflow,
   Verdict,
   WorkflowAuditBlob,
   WorkflowAuditEntry,
@@ -15,11 +15,10 @@ import type {
 } from "@chronica/shared";
 import {
   ManagerDecisionBatchSchema,
-  applyTemporaryWorkflowPatch,
-  validateTemporaryWorkflowPatchReferences,
   executeWorkflow,
   validateAllCandidates,
   validateCandidate,
+  WORKFLOW_REGISTRY,
 } from "@chronica/shared";
 import { buildWorkflowManagerSystemPrompt } from "./workflow-manager-prompt";
 
@@ -28,7 +27,10 @@ import { buildWorkflowManagerSystemPrompt } from "./workflow-manager-prompt";
 
 export interface WorkflowManagerResult {
   readonly acceptedInvocations: ProposedInvocation[];
-  readonly temporaryPatches: NovelActionProposal[];
+  /** Active templates required to execute the accepted invocations this turn. */
+  readonly runtimeInventedWorkflows: RuntimeInventedWorkflow[];
+  /** Newly created templates to persist only after the turn commits successfully. */
+  readonly createdInventedWorkflows: RuntimeInventedWorkflow[];
   readonly auditBlob: WorkflowAuditBlob;
 }
 
@@ -77,76 +79,16 @@ export function previewPlayerWorkflows(
   world: WorldState,
   candidates: readonly WorkflowCandidate[],
   atStep: number,
+  inventedWorkflows: readonly RuntimeInventedWorkflow[] = [],
 ): WorldState {
-  const policy = validateAllCandidates(candidates, world);
+  const policy = validateAllCandidates(candidates, world, inventedWorkflows);
   let preview = world;
   for (const candidate of candidates) {
     if (policy.get(candidate.correlationId) !== null) continue;
-    const outcome = executeWorkflow(candidate.requestedInvocation, preview, atStep);
+    const outcome = executeWorkflow(candidate.requestedInvocation, preview, atStep, inventedWorkflows);
     if (outcome.ok) preview = outcome.world;
   }
   return preview;
-}
-
-/**
- * Tries to resolve entity IDs in a temporary patch that don't exist in the
- * world by matching them by name (case-insensitive). The model sometimes
- * writes human-readable names ("Panormus") instead of UUIDs even though
- * the world state is provided; this pass silently corrects those.
- */
-function resolveTemporaryPatchIds(
-  patch: NovelActionProposal["temporaryPatch"],
-  world: WorldState,
-): NovelActionProposal["temporaryPatch"] {
-  const resolveCharacterId = (id: string) => {
-    if (world.characters.some((c) => c.id === id)) return id;
-    return world.characters.find((c) => c.name.toLowerCase() === id.toLowerCase())?.id ?? id;
-  };
-  const resolveProvinceId = (id: string) => {
-    if (world.map.provinces.some((p) => p.id === id)) return id;
-    return world.map.provinces.find((p) => p.name.toLowerCase() === id.toLowerCase())?.id ?? id;
-  };
-  const resolvePolityId = (id: string) => {
-    if (world.map.polities.some((p) => p.id === id)) return id;
-    return world.map.polities.find((p) => p.name.toLowerCase() === id.toLowerCase())?.id ?? id;
-  };
-  const resolveAccountId = (id: string) => {
-    if (world.material.accounts.some((a) => a.id === id)) return id;
-    return id;
-  };
-
-  return {
-    ...patch,
-    actorId: resolveCharacterId(patch.actorId),
-    operations: patch.operations.map((op) => {
-      if (op.kind === "account_delta") {
-        return { ...op, accountId: resolveAccountId(op.accountId) };
-      }
-      if (op.kind === "province_control") {
-        return {
-          ...op,
-          provinceId: resolveProvinceId(op.provinceId),
-          controllerPolityId: resolvePolityId(op.controllerPolityId),
-        };
-      }
-      if (op.kind === "character_state") {
-        return {
-          ...op,
-          characterId: resolveCharacterId(op.characterId),
-          ...(op.locationProvinceId ? { locationProvinceId: resolveProvinceId(op.locationProvinceId) } : {}),
-          ...(op.polityId ? { polityId: resolvePolityId(op.polityId) } : {}),
-        };
-      }
-      if (op.kind === "create_storyline") {
-        return {
-          ...op,
-          ...(op.provinceId ? { provinceId: resolveProvinceId(op.provinceId) } : {}),
-          participantIds: op.participantIds.map(resolveCharacterId),
-        };
-      }
-      return op;
-    }),
-  };
 }
 
 function parseManagerOutput(text: string): ManagerDecisionBatch {
@@ -207,13 +149,14 @@ async function requestCompleteDecisions(
   const parse = (content: string) => {
     const batch = parseManagerOutput(content);
     assertCompleteDecisionSet(candidates, batch.decisions);
-    for (const proposal of batch.novelActionProposals) {
+    if (batch.novelActionProposals.length > 0) throw new WorkflowManagerOutputError("One-turn temporary patches are retired; use inventedWorkflowProposals.");
+    for (const proposal of batch.inventedWorkflowProposals) {
       const matchingCandidates = candidates.filter((candidate) => candidate.source === proposal.source && candidate.sourceRef === proposal.sourceRef);
-      if (matchingCandidates.length === 0) throw new WorkflowManagerOutputError(`Temporary patch has no matching candidate: ${proposal.source}/${proposal.sourceRef}.`);
       const replacesRejectedCandidate = matchingCandidates.some((candidate) =>
         batch.decisions.find((item) => item.correlationId === candidate.correlationId)?.decision === "reject",
       );
-      if (!replacesRejectedCandidate) throw new WorkflowManagerOutputError("A temporary patch must replace a rejected candidate.");
+      if (!replacesRejectedCandidate) throw new WorkflowManagerOutputError("An invented workflow must replace a rejected candidate.");
+      if (proposal.initialInvocation.actionId !== proposal.workflow.actionId) throw new WorkflowManagerOutputError("Invented workflow initial invocation must use its actionId.");
     }
     return batch;
   };
@@ -239,17 +182,19 @@ export async function runWorkflowManager(
   world: WorldState,
   candidates: WorkflowCandidate[],
   atStep: number,
+  gameId = "",
+  activeInventedWorkflows: readonly RuntimeInventedWorkflow[] = [],
 ): Promise<WorkflowManagerResult> {
   if (candidates.length === 0) {
-    return { acceptedInvocations: [], temporaryPatches: [], auditBlob: { candidates: [], novelActionProposals: [], managerFailed: false, atStep } };
+    return { acceptedInvocations: [], runtimeInventedWorkflows: [...activeInventedWorkflows], createdInventedWorkflows: [], auditBlob: { candidates: [], novelActionProposals: [], managerFailed: false, atStep } };
   }
 
-  const originalPolicy = validateAllCandidates(candidates, world);
+  const originalPolicy = validateAllCandidates(candidates, world, activeInventedWorkflows);
   const diagnostics = candidates.map((candidate) => ({
     correlationId: candidate.correlationId,
     violation: originalPolicy.get(candidate.correlationId) ?? null,
   }));
-  const prompt = buildWorkflowManagerSystemPrompt(world, candidates, diagnostics);
+  const prompt = buildWorkflowManagerSystemPrompt(world, candidates, diagnostics, activeInventedWorkflows);
   let managerBatch: ManagerDecisionBatch;
   let managerFailed = false;
   try {
@@ -266,12 +211,15 @@ export async function runWorkflowManager(
         replacementInvocation: null,
       })),
       novelActionProposals: [],
+      inventedWorkflowProposals: [],
     };
   }
   const decisions = new Map(managerBatch.decisions.map((decision) => [decision.correlationId, decision]));
 
   const auditEntries: WorkflowAuditEntry[] = [];
   const acceptedInvocations: ProposedInvocation[] = [];
+  const runtimeInventedWorkflows = [...activeInventedWorkflows];
+  const createdInventedWorkflows: RuntimeInventedWorkflow[] = [];
   const seen = new Set<string>();
   let dryRunWorld = world;
 
@@ -292,7 +240,7 @@ export async function runWorkflowManager(
 
     const finalInvocation = decision.decision === "replace" ? decision.replacementInvocation! : candidate.requestedInvocation;
     const finalCandidate: WorkflowCandidate = { ...candidate, requestedInvocation: finalInvocation };
-    const policyViolation = validateCandidate(finalCandidate, dryRunWorld);
+    const policyViolation = validateCandidate(finalCandidate, dryRunWorld, runtimeInventedWorkflows);
     const duplicateKey = `${finalInvocation.actionId}:${finalInvocation.actorId}`;
     const duplicateViolation = seen.has(duplicateKey)
       ? { kind: "duplicate", message: `Duplicate final invocation: ${finalInvocation.actionId} by ${finalInvocation.actorId}.` }
@@ -303,7 +251,7 @@ export async function runWorkflowManager(
       continue;
     }
 
-    const outcome = executeWorkflow(finalInvocation, dryRunWorld, atStep);
+    const outcome = executeWorkflow(finalInvocation, dryRunWorld, atStep, runtimeInventedWorkflows);
     if (!outcome.ok) {
       auditEntries.push({ ...entry, finalInvocation, dryRunOk: false, executionReason: outcome.message });
       continue;
@@ -314,26 +262,46 @@ export async function runWorkflowManager(
     auditEntries.push({ ...entry, finalInvocation, dryRunOk: true });
   }
 
-  const temporaryPatches: NovelActionProposal[] = [];
-  for (const proposal of managerBatch.novelActionProposals) {
-    const resolvedPatch = resolveTemporaryPatchIds(proposal.temporaryPatch, dryRunWorld);
-    const referenceIssue = validateTemporaryWorkflowPatchReferences(dryRunWorld, resolvedPatch);
-    if (referenceIssue !== null) {
-      console.warn(`[workflow-manager] Skipping temporary patch "${proposal.intent}": ${referenceIssue}.`);
-      continue;
-    }
-    const patched = applyTemporaryWorkflowPatch(dryRunWorld, resolvedPatch, atStep);
-    if (patched === null) {
-      console.warn(`[workflow-manager] Skipping temporary patch "${proposal.intent}": it could not be applied safely after reference validation.`);
-      continue;
-    }
-    dryRunWorld = patched.world;
-    temporaryPatches.push({ ...proposal, temporaryPatch: resolvedPatch });
+  // Newly invented workflows are valid only when they replace a rejected
+  // candidate and their first, parameterised invocation dry-runs successfully.
+  for (const proposal of managerBatch.inventedWorkflowProposals) {
+    const matchingCandidates = candidates.filter((candidate) => candidate.source === proposal.source && candidate.sourceRef === proposal.sourceRef);
+    const replacesRejectedCandidate = matchingCandidates.some((candidate) => decisions.get(candidate.correlationId)?.decision === "reject");
+    const actionTaken = runtimeInventedWorkflows.some((workflow) => workflow.definition.actionId === proposal.workflow.actionId)
+      || WORKFLOW_REGISTRY.has(proposal.workflow.actionId);
+    if (!replacesRejectedCandidate || actionTaken || proposal.initialInvocation.actionId !== proposal.workflow.actionId || !gameId) continue;
+    const runtime: RuntimeInventedWorkflow = {
+      id: randomUUID(), gameId, definition: proposal.workflow, status: "active",
+    };
+    const initialCandidate: WorkflowCandidate = {
+      correlationId: randomUUID(), source: proposal.source, sourceRef: proposal.sourceRef,
+      sourceRationale: proposal.workflow.intent, requestedInvocation: proposal.initialInvocation,
+    };
+    const violation = validateCandidate(initialCandidate, dryRunWorld, [...runtimeInventedWorkflows, runtime]);
+    const duplicateKey = `${proposal.initialInvocation.actionId}:${proposal.initialInvocation.actorId}`;
+    if (violation || seen.has(duplicateKey)) continue;
+    const outcome = executeWorkflow(proposal.initialInvocation, dryRunWorld, atStep, [...runtimeInventedWorkflows, runtime]);
+    if (!outcome.ok) continue;
+    seen.add(duplicateKey);
+    dryRunWorld = outcome.world;
+    runtimeInventedWorkflows.push(runtime);
+    createdInventedWorkflows.push(runtime);
+    acceptedInvocations.push(proposal.initialInvocation);
+    auditEntries.push({
+      ...auditBase(initialCandidate),
+      managerDecision: "replace",
+      managerReason: `Created reusable invented workflow ${proposal.workflow.actionId}.`,
+      replacedActionId: proposal.workflow.actionId,
+      replacementInvocation: proposal.initialInvocation,
+      finalInvocation: proposal.initialInvocation,
+      dryRunOk: true,
+    });
   }
 
   return {
     acceptedInvocations,
-    temporaryPatches,
-    auditBlob: { candidates: auditEntries, novelActionProposals: temporaryPatches, managerFailed, atStep },
+    runtimeInventedWorkflows,
+    createdInventedWorkflows,
+    auditBlob: { candidates: auditEntries, novelActionProposals: [], managerFailed, atStep },
   };
 }

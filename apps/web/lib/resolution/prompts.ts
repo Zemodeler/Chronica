@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { WorldState } from "@chronica/shared";
-import { buildWorkflowCatalog } from "@chronica/shared";
+import { buildWorkflowCatalog, type RuntimeInventedWorkflow } from "@chronica/shared";
 import type { CharacterKnowledgebase } from "@chronica/shared";
 
 /** Durable player context supplied to every director during turn resolution. */
@@ -200,14 +200,14 @@ Respond as a JSON object with exactly these fields.`;
  * Narrative prose is never allowed to stand in for a mutation: if an event
  * changes WorldState, its matching registered workflow has to be proposed.
  */
-export const WORKFLOW_MUTATION_RULE = `WORKFLOW-MUTATION RULE (applies equally to player orders and AI-directed actions): Any action that changes world state MUST include the matching registered workflow invocation in this response. This includes moving an army or general to another province, creating or changing a force, changing province control, starting or resolving a battle, changing a treasury or any account balance, and creating or changing any other tracked entity. Do not describe one of these effects as narrative-only. Use an empty workflow list only when the event has no world-state effect, or when no registered workflow can possibly represent it; in the latter case, state that it is a novel action rather than claiming the mutation occurred.`;
+export const WORKFLOW_MUTATION_RULE = `WORKFLOW-MUTATION RULE (applies equally to player orders and AI-directed actions): Any action that changes world state MUST include the matching workflow invocation from the catalog in this response. This includes moving an army or general to another province, creating or changing a force, changing province control, starting or resolving a battle, changing a treasury or any account balance, and creating or changing any other tracked entity. Do not describe one of these effects as narrative-only. Use an empty workflow list only when the event has no world-state effect, or when no catalog workflow can represent it; in the latter case, state that it is a novel action rather than claiming the mutation occurred.`;
 
-export function buildAssessSystemPrompt(world: WorldState, actorId: string, context?: ResolutionPlayerContext): string {
+export function buildAssessSystemPrompt(world: WorldState, actorId: string, context?: ResolutionPlayerContext, inventedWorkflows: readonly RuntimeInventedWorkflow[] = []): string {
   return `You are an arbiter for Chronica, a strategy game set in the ancient world. Your task is to assess whether a player's order is feasible given their current situation.
 
 ${worldContext(world, actorId, context)}
 
-${buildWorkflowCatalog()}
+${buildWorkflowCatalog(inventedWorkflows)}
 
 ${WORKFLOW_MUTATION_RULE}
 
@@ -234,12 +234,12 @@ BRACKET OVERRIDE SYNTAX: If the directive text is wrapped in square brackets [li
 Respond as a JSON object with exactly these fields.`;
 }
 
-export function buildAdjudicateSystemPrompt(world: WorldState, actorId: string, context?: ResolutionPlayerContext): string {
+export function buildAdjudicateSystemPrompt(world: WorldState, actorId: string, context?: ResolutionPlayerContext, inventedWorkflows: readonly RuntimeInventedWorkflow[] = []): string {
   return `You are a consequence engine for Chronica, a strategy game set in the ancient world. Given an interpreted and assessed player order, decide its outcome.
 
 ${worldContext(world, actorId, context)}
 
-${buildWorkflowCatalog()}
+${buildWorkflowCatalog(inventedWorkflows)}
 
 ${WORKFLOW_MUTATION_RULE}
 

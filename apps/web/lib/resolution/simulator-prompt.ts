@@ -1,6 +1,6 @@
 import "server-only";
 
-import { buildWorkflowCatalog, type WorldState, type ScopeAssignment } from "@chronica/shared";
+import { buildWorkflowCatalog, type RuntimeInventedWorkflow, type WorldState, type ScopeAssignment } from "@chronica/shared";
 import { buildPlayerResolutionContext, WORKFLOW_MUTATION_RULE, type ResolutionPlayerContext } from "./prompts";
 
 // Simulator prompt builder.
@@ -34,6 +34,7 @@ export function buildSimulatorSystemPrompt(
   scope: ScopeAssignment,
   playerCharacterId: string,
   context?: ResolutionPlayerContext,
+  inventedWorkflows: readonly RuntimeInventedWorkflow[] = [],
 ): string {
   const activeStorylines = (world.storylines ?? [])
     .filter((s) => s.visibility !== "private")
@@ -85,7 +86,7 @@ ${world.lastTurnSummary ?? "  No previous turn has been resolved yet."}
 ${buildPlayerResolutionContext(world, context)}
 
 REGISTERED WORKFLOW CATALOG:
-${buildWorkflowCatalog()}
+${buildWorkflowCatalog(inventedWorkflows)}
 
 ${WORKFLOW_MUTATION_RULE}
 

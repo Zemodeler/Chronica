@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { WorldStateSchema } from "@chronica/shared";
-import type { WorldState, WorkflowAuditBlob, NovelActionProposal } from "@chronica/shared";
+import type { WorldState, WorkflowAuditBlob, NovelActionProposal, RuntimeInventedWorkflow } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
 import { chronicleEntries, games, players, pendingWorkflowProposals, turns, worldSnapshots } from "../schema/game";
 import { insertNovelActionProposals } from "./workflow-proposals";
+import { insertInventedWorkflows, recordInventedWorkflowUses, type InventedWorkflowUseInput } from "./invented-workflows";
 
 // Persistence for the resolution pipeline.
 //
@@ -49,6 +50,10 @@ export interface CommitResolutionInput {
   readonly workflowAudit?: WorkflowAuditBlob;
   /** Novel action proposals emitted by the Workflow Manager; persisted for developer review. */
   readonly novelActionProposals?: readonly NovelActionProposal[];
+  /** Reusable templates that succeeded for the first time during this turn. */
+  readonly inventedWorkflows?: readonly RuntimeInventedWorkflow[];
+  /** Complete runtime-template use audit for this turn. */
+  readonly inventedWorkflowUses?: readonly InventedWorkflowUseInput[];
 }
 
 export interface CommitResolutionResult {
@@ -125,6 +130,12 @@ export async function commitResolution(
     // Persist novel action proposals for developer review
     if (input.novelActionProposals && input.novelActionProposals.length > 0) {
       await insertNovelActionProposals(tx as unknown as ChronicaDatabase, input.novelActionProposals, input.turnId, input.gameId);
+    }
+    if (input.inventedWorkflows && input.inventedWorkflows.length > 0) {
+      await insertInventedWorkflows(tx as unknown as ChronicaDatabase, input.inventedWorkflows, input.turnId);
+    }
+    if (input.inventedWorkflowUses && input.inventedWorkflowUses.length > 0) {
+      await recordInventedWorkflowUses(tx as unknown as ChronicaDatabase, input.inventedWorkflowUses, input.turnId);
     }
 
     // Look up active players to seed news-readiness rows
