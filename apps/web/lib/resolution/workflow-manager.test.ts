@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { AiAdapter } from "@chronica/ai";
-import { applyTemporaryWorkflowPatch, executeWorkflows, type WorkflowCandidate, type WorldState } from "@chronica/shared";
+import { executeWorkflows, type WorkflowCandidate, type WorldState } from "@chronica/shared";
 import { firstPunicWarScenario } from "@chronica/db";
-import { runWorkflowManager, WorkflowManagerOutputError } from "./workflow-manager";
+import { runWorkflowManager } from "./workflow-manager";
 
 const ACTOR_ID = "marcus-atilius";
 const ACCOUNT_ID = "marcus-purse";
@@ -25,8 +25,8 @@ function candidate(correlationId: string, actionId: string, parameters: Record<s
 
 function adapterWith(content: unknown): AiAdapter {
   return {
-    async call() {
-      return { content: JSON.stringify(content), inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, model: "fixture" };
+    call() {
+      return Promise.resolve({ content: JSON.stringify(content), inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, model: "fixture" });
     },
   };
 }
@@ -34,9 +34,9 @@ function adapterWith(content: unknown): AiAdapter {
 function adapterWithSequence(...contents: unknown[]): AiAdapter {
   let callIndex = 0;
   return {
-    async call() {
+    call() {
       const content = contents[Math.min(callIndex++, contents.length - 1)];
-      return { content: JSON.stringify(content), inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, model: "fixture" };
+      return Promise.resolve({ content: JSON.stringify(content), inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, model: "fixture" });
     },
   };
 }
@@ -100,9 +100,9 @@ describe("AI Workflow Manager", () => {
     expect(reviewed.auditBlob.candidates[0]?.executionOk).toBeUndefined();
   });
 
-  it("applies a bounded temporary patch when no registered workflow fits", async () => {
+  it("rejects retired one-turn temporary patches", async () => {
     const input = candidate("00000000-0000-4000-8000-000000000207", "reward_logistics_network", { accountId: ACCOUNT_ID });
-    const reviewed = await runWorkflowManager(adapterWith({
+    await expect(runWorkflowManager(adapterWithSequence({
       decisions: [{ correlationId: input.correlationId, decision: "reject", reason: "No registered logistics-network workflow exists.", replacementInvocation: null }],
       novelActionProposals: [{
         intent: "Reward the established logistics network",
@@ -119,12 +119,11 @@ describe("AI Workflow Manager", () => {
         },
         implementationReport: "A logistics-reward workflow was needed. This turn applied a bounded account credit; a permanent workflow should verify delivery conditions and calculate payment.",
       }],
-    }), world(), [input], 1);
-    const patched = applyTemporaryWorkflowPatch(world(), reviewed.temporaryPatches[0]!.temporaryPatch, 1);
-
-    expect(reviewed.acceptedInvocations).toEqual([]);
-    expect(patched?.world.material.accounts.find((account) => account.id === ACCOUNT_ID)?.balance).toBe(1_230);
-    expect(reviewed.auditBlob.novelActionProposals).toHaveLength(1);
+      inventedWorkflowProposals: [],
+    }, {
+      decisions: [{ correlationId: input.correlationId, decision: "reject", reason: "No registered workflow exists.", replacementInvocation: null }],
+      novelActionProposals: [], inventedWorkflowProposals: [],
+    }), world(), [input], 1)).resolves.toMatchObject({ acceptedInvocations: [] });
   });
 
   it("retries once when the model invents a correlation ID", async () => {
@@ -137,9 +136,44 @@ describe("AI Workflow Manager", () => {
     expect(reviewed.acceptedInvocations).toHaveLength(1);
   });
 
-  it("fails safely when the Manager does not decide every candidate", async () => {
+  it("falls back to policy-valid candidates when the Manager does not decide every candidate", async () => {
     const input = candidate("00000000-0000-4000-8000-000000000205", "add_gold", { accountId: ACCOUNT_ID, amount: 1, reason: "Test" });
-    await expect(runWorkflowManager(adapterWith({ decisions: [], novelActionProposals: [] }), world(), [input], 1))
-      .rejects.toBeInstanceOf(WorkflowManagerOutputError);
+    const reviewed = await runWorkflowManager(adapterWith({ decisions: [], novelActionProposals: [] }), world(), [input], 1);
+    expect(reviewed.auditBlob.managerFailed).toBe(true);
+    expect(reviewed.acceptedInvocations).toHaveLength(1);
+  });
+
+  it("creates a game-local invented workflow after a rejected unknown action, then reuses it", async () => {
+    const input = candidate("00000000-0000-4000-8000-000000000210", "repair_unknown_injury", { characterId: ACTOR_ID, healthBps: 8_500 });
+    const proposal = {
+      workflow: {
+        actionId: "restore_character_health",
+        intent: "Restore a character's health after verified treatment.",
+        description: "Sets a character's health from a verified treatment.",
+        parameters: [{ name: "characterId", type: "entity_id", required: true }, { name: "healthBps", type: "number", required: true }],
+        operations: [{ op: "replace", path: "/characters[id={{characterId}}]/healthBps", value: "{{healthBps}}" }],
+        invokerAuthority: ["player"],
+      },
+      initialInvocation: { actionId: "restore_character_health", actorId: ACTOR_ID, parameters: { characterId: ACTOR_ID, healthBps: 8_500 } },
+      source: "player_directive",
+      sourceRef: "directive-test",
+      implementationReport: "No existing treatment outcome workflow exists.",
+    };
+    const reviewed = await runWorkflowManager(adapterWith({
+      decisions: [{ correlationId: input.correlationId, decision: "reject", reason: "No existing workflow covers treatment recovery.", replacementInvocation: null }],
+      novelActionProposals: [], inventedWorkflowProposals: [proposal],
+    }), world(), [input], 1, "00000000-0000-4000-8000-000000000001");
+    expect(reviewed.createdInventedWorkflows).toHaveLength(1);
+    const initial = executeWorkflows(reviewed.acceptedInvocations, world(), 1, reviewed.runtimeInventedWorkflows);
+    expect(initial.world.characters.find((character) => character.id === ACTOR_ID)?.healthBps).toBe(8_500);
+
+    const reused = candidate("00000000-0000-4000-8000-000000000211", "restore_character_health", { characterId: ACTOR_ID, healthBps: 7_000 });
+    const later = await runWorkflowManager(adapterWith({
+      decisions: [{ correlationId: reused.correlationId, decision: "approve", reason: "Existing invented workflow fits.", replacementInvocation: null }],
+      novelActionProposals: [], inventedWorkflowProposals: [],
+    }), initial.world, [reused], 2, "00000000-0000-4000-8000-000000000001", reviewed.runtimeInventedWorkflows);
+    expect(later.acceptedInvocations).toHaveLength(1);
+    const final = executeWorkflows(later.acceptedInvocations, initial.world, 2, later.runtimeInventedWorkflows);
+    expect(final.world.characters.find((character) => character.id === ACTOR_ID)?.healthBps).toBe(7_000);
   });
 });

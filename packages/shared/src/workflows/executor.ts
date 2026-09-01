@@ -2,6 +2,7 @@ import type { WorldState } from "../world/world-state";
 import type { ProposedInvocation } from "../actions/orders";
 import { WORKFLOW_REGISTRY } from "./registry";
 import { WorkflowNotFoundError, WorkflowParamsError, type WorkflowResult } from "./types";
+import { applyInventedWorkflow, type InventedPatchOperation, type RuntimeInventedWorkflow } from "./invented-workflow";
 
 // Workflow executor (docs/14, ADR-0032).
 //
@@ -15,6 +16,7 @@ export interface ExecutionSuccess {
   readonly ok: true;
   readonly world: WorldState;
   readonly result: WorkflowResult;
+  readonly resolvedInventedPatch?: readonly InventedPatchOperation[];
 }
 
 export interface ExecutionFailure {
@@ -35,9 +37,21 @@ export function executeWorkflow(
   invocation: ProposedInvocation,
   world: WorldState,
   atStep: number,
+  inventedWorkflows: readonly RuntimeInventedWorkflow[] = [],
 ): ExecutionOutcome {
   const definition = WORKFLOW_REGISTRY.get(invocation.actionId);
+  const invented = inventedWorkflows.find((workflow) => workflow.status === "active" && workflow.definition.actionId === invocation.actionId);
   if (!definition) {
+    if (invented) {
+      const appliedInvented = applyInventedWorkflow(invented.definition, world, invocation.parameters);
+      if ("error" in appliedInvented) return { ok: false, reason: "not_applicable", message: appliedInvented.error };
+      return {
+        ok: true,
+        world: appliedInvented.world,
+        result: { summary: invented.definition.description, applied: true },
+        resolvedInventedPatch: appliedInvented.resolvedOperations,
+      };
+    }
     return { ok: false, reason: "not_found", message: `No workflow "${invocation.actionId}".` };
   }
 
@@ -73,12 +87,13 @@ export function executeWorkflows(
   invocations: readonly ProposedInvocation[],
   world: WorldState,
   atStep: number,
+  inventedWorkflows: readonly RuntimeInventedWorkflow[] = [],
 ): { world: WorldState; log: { invocation: ProposedInvocation; outcome: ExecutionOutcome }[] } {
   let current = world;
   const log: { invocation: ProposedInvocation; outcome: ExecutionOutcome }[] = [];
 
   for (const invocation of invocations) {
-    const outcome = executeWorkflow(invocation, current, atStep);
+    const outcome = executeWorkflow(invocation, current, atStep, inventedWorkflows);
     log.push({ invocation, outcome });
     if (outcome.ok) {
       current = outcome.world;

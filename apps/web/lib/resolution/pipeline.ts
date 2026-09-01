@@ -15,7 +15,6 @@ import type {
   SimulatorProposal,
   CharacterKnowledgebase,
   WorkflowAuditBlob,
-  NovelActionProposal,
   ConsolidatedProposalPackage,
 } from "@chronica/shared";
 import {
@@ -27,7 +26,6 @@ import {
   SimulatorProposalBatchSchema,
   WorldDirectorDecisionBatchSchema,
   executeWorkflows,
-  applyTemporaryWorkflowPatch,
   selectRelevantCharacters,
   inferTheatre,
   WORKFLOW_REGISTRY,
@@ -52,6 +50,7 @@ import {
   getGamePayerUserId,
   listPendingNpcCommitments,
   resolveNpcCommitments,
+  listActiveInventedWorkflows,
 } from "@chronica/db";
 import type { ChronicleEntryInput } from "@chronica/db";
 import type { ResolutionProgress, ResolutionStep } from "./types";
@@ -87,14 +86,6 @@ function emit(onProgress: ProgressCallback, step: ResolutionStep, done = false) 
 
 let _logTurnId = "";
 function tag() { return `[pipeline${_logTurnId ? `:${_logTurnId.slice(0, 8)}` : ""}]`; }
-
-function buildWorkflowDeveloperDownload(proposal: NovelActionProposal): WorkflowDeveloperDownload {
-  const id = proposal.intent.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "temporary_workflow";
-  return {
-    fileName: `${id}_workflow_report.md`,
-    content: `# Temporary workflow: ${proposal.intent}\n\n## AI implementation report\n${proposal.implementationReport}\n\n## Applied for this turn\n\`\`\`json\n${JSON.stringify(proposal.temporaryPatch, null, 2)}\n\`\`\`\n\n## Permanent workflow scaffold\n\`\`\`ts\nimport { z } from "zod";\nimport { defineWorkflow } from "../types";\n\nexport const ${id}Workflow = defineWorkflow({\n  id: "${id}",\n  description: "${proposal.intent.replace(/"/g, '\\"').slice(0, 120)}",\n  category: "narrative", // choose the correct category\n  parametersSchema: z.object({ /* derive from the temporary patch */ }).strict(),\n  apply(world, params, context) {\n    // Replace this temporary patch with a permanent, tested implementation.\n    return null;\n  },\n});\n\`\`\`\n`,
-  };
-}
 
 function stripToJson(text: string): string {
   let s = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
@@ -784,6 +775,7 @@ export async function resolveTurn(
     };
     const playerKnowledgebase = await getCharacterKnowledgebase(db, gameId, playerId).catch(() => null);
     const pendingCommitments = await listPendingNpcCommitments(db, gameId);
+    const activeInventedWorkflows = await listActiveInventedWorkflows(db, gameId);
     const resolutionContext: ResolutionPlayerContext = { knowledgebase: playerKnowledgebase, pendingCommitments };
     const resolutionWorld = materializePlayerCharacter(world, actorCharacterId, playerKnowledgebase);
     const actor = resolutionWorld.characters.find((character) => character.id === actorCharacterId)!;
@@ -842,7 +834,7 @@ export async function resolveTurn(
     emit(onProgress, "assess");
     console.log(`${tag()} [assess] IN: ${interpretations.length} interpretation(s)`);
     const assessments: OrderAssessment[] = [];
-    const assessSystemPrompt = buildAssessSystemPrompt(resolutionWorld, actorCharacterId, resolutionContext);
+    const assessSystemPrompt = buildAssessSystemPrompt(resolutionWorld, actorCharacterId, resolutionContext, activeInventedWorkflows);
 
     for (const interpretation of interpretations) {
       const userMsg = `Directive: ${interpretation.intent}\nProposed steps: ${interpretation.proposedSteps.join("; ")}\nRisks: ${interpretation.risks.join("; ")}`;
@@ -890,7 +882,7 @@ export async function resolveTurn(
     emit(onProgress, "adjudicate");
     console.log(`${tag()} [adjudicate] IN: ${assessments.length} assessment(s)`);
     const verdicts: Verdict[] = [];
-    const adjSystemPrompt = buildAdjudicateSystemPrompt(resolutionWorld, actorCharacterId, resolutionContext);
+    const adjSystemPrompt = buildAdjudicateSystemPrompt(resolutionWorld, actorCharacterId, resolutionContext, activeInventedWorkflows);
 
     // Admin directives are GM commands wrapped in [brackets]. They bypass all
     // feasibility filtering and must always produce a world-state change.
@@ -1097,7 +1089,7 @@ export async function resolveTurn(
     const atStep = resolutionWorld.elapsedStep + 1;
     console.log(`${tag()} [preview_player] IN: atStep=${atStep}`);
     const playerCandidates = collectPlayerCandidates(verdicts);
-    const worldAfterPlayer = previewPlayerWorkflows(resolutionWorld, playerCandidates, atStep);
+    const worldAfterPlayer = previewPlayerWorkflows(resolutionWorld, playerCandidates, atStep, activeInventedWorkflows);
     console.log(`${tag()} [preview_player] OUT: ${playerCandidates.length} candidate(s) previewed without persistence`);
     emit(onProgress, "preview_player", true);
 
@@ -1110,7 +1102,7 @@ export async function resolveTurn(
     console.log(`${tag()} [reaction] IN: shouldRun=${shouldReact} verdicts=${verdicts.length}`);
     if (shouldReact) {
       try {
-        const reactionPrompt = buildReactionDirectorSystemPrompt(worldAfterPlayer, verdicts, actorCharacterId, resolutionContext);
+        const reactionPrompt = buildReactionDirectorSystemPrompt(worldAfterPlayer, verdicts, actorCharacterId, resolutionContext, activeInventedWorkflows);
         const reactionResult = await coinGatedAdapter.call("reaction_director", reactionPrompt, `Step ${atStep}: generate reactions.`);
         const reactionParsed = await safeParseJson(reactionResult.content, ReactionProposalBatchSchema, "reaction_director");
         if (reactionParsed) {
@@ -1128,7 +1120,7 @@ export async function resolveTurn(
     try {
       const scope = inferTheatre(worldAfterPlayer, actorCharacterId);
       console.log(`${tag()} [simulate] IN: star=${scope.star.size} near=${scope.near.size} far=${scope.far.size} coarse=${scope.coarse.size} storylines=${(worldAfterPlayer.storylines ?? []).length}`);
-      const simPrompt = buildSimulatorSystemPrompt(worldAfterPlayer, scope, actorCharacterId, resolutionContext);
+      const simPrompt = buildSimulatorSystemPrompt(worldAfterPlayer, scope, actorCharacterId, resolutionContext, activeInventedWorkflows);
       const simResult = await coinGatedAdapter.call("simulator", simPrompt, `Step ${atStep}: simulate the world.`);
       let simContent = simResult.content;
       try {
@@ -1191,7 +1183,7 @@ export async function resolveTurn(
     const approvedCharacterIds = new Set<string>();
     const chronicleCasts = new Map<string, ChronicleCharacterMention>();
     try {
-      const wdPrompt = buildWorldDirectorSystemPrompt(worldAfterPlayer, consolidatedPackage, actorCharacterId, resolutionContext);
+      const wdPrompt = buildWorldDirectorSystemPrompt(worldAfterPlayer, consolidatedPackage, actorCharacterId, resolutionContext, activeInventedWorkflows);
       const wdResult = await coinGatedAdapter.call("world_director", wdPrompt, `Step ${atStep}: decide on ${consolidatedPackage.proposals.length} proposal(s).`);
       let wdContent = wdResult.content;
       try {
@@ -1274,7 +1266,9 @@ export async function resolveTurn(
       requestedInvocation: resolveInvocationEntities(c.requestedInvocation, resolutionWorld),
     }));
     const finalCandidates = [...resolvedPlayerCandidates, ...resolvedWorldCandidates];
-    const managerResult = await runWorkflowManager(coinGatedAdapter, resolutionWorld, finalCandidates, atStep);
+    const managerResult = await runWorkflowManager(
+      coinGatedAdapter, resolutionWorld, finalCandidates, atStep, gameId, activeInventedWorkflows,
+    );
     console.log(`${tag()} [manage] OUT: ${managerResult.acceptedInvocations.length}/${finalCandidates.length} workflow(s) accepted`);
     emit(onProgress, "manage", true);
 
@@ -1304,15 +1298,9 @@ export async function resolveTurn(
       console.log(`${tag()} [battle-proximity] auto-prepended move_force(${atkId} → ${def.locationId}) before start_battle`);
     }
 
-    const executed = executeWorkflows(invocationsToExecute, resolutionWorld, atStep);
+    const executed = executeWorkflows(invocationsToExecute, resolutionWorld, atStep, managerResult.runtimeInventedWorkflows);
     let newWorld = executed.world;
     let allWorkflowLog = [...executed.log];
-    for (const proposal of managerResult.temporaryPatches) {
-      const patched = applyTemporaryWorkflowPatch(newWorld, proposal.temporaryPatch, atStep);
-      if (patched === null) throw new Error(`Temporary workflow patch could not be applied: ${proposal.intent}`);
-      newWorld = patched.world;
-      console.log(`${tag()} [temporary-workflow:ok] ${proposal.temporaryPatch.id}: ${patched.summary}`);
-    }
     for (const entry of allWorkflowLog) {
       if (entry.outcome.ok) {
         console.log(`${tag()} [execute:ok] actionId=${entry.invocation.actionId} actorId=${entry.invocation.actorId} summary="${entry.outcome.result.summary}"`);
@@ -1335,7 +1323,7 @@ export async function resolveTurn(
         }
       }
       if (retryInvocations.length > 0) {
-        const retryExecuted = executeWorkflows(retryInvocations, newWorld, atStep);
+        const retryExecuted = executeWorkflows(retryInvocations, newWorld, atStep, managerResult.runtimeInventedWorkflows);
         newWorld = retryExecuted.world;
         allWorkflowLog = [...allWorkflowLog, ...retryExecuted.log];
         console.log(`${tag()} [execute:retry] ${retryExecuted.log.filter((e) => e.outcome.ok).length}/${retryInvocations.length} corrected workflow(s) applied`);
@@ -1356,6 +1344,18 @@ export async function resolveTurn(
           : { ...entry, executionOk: false, executionReason: "Approved invocation was not sent to the executor." };
       }),
     };
+    const inventedByActionId = new Map(managerResult.runtimeInventedWorkflows.map((workflow) => [workflow.definition.actionId, workflow]));
+    const inventedWorkflowUses = allWorkflowLog.flatMap((entry) => {
+      const workflow = inventedByActionId.get(entry.invocation.actionId);
+      if (!workflow) return [];
+      return [{
+        workflowId: workflow.id,
+        parameters: entry.invocation.parameters,
+        success: entry.outcome.ok,
+        ...(entry.outcome.ok && entry.outcome.resolvedInventedPatch ? { resolvedPatch: entry.outcome.resolvedInventedPatch } : {}),
+        ...(!entry.outcome.ok ? { failureReason: entry.outcome.message } : {}),
+      }];
+    });
 
     // Commitment resolution
     const fulfilledCommitmentIds: string[] = [];
@@ -1477,7 +1477,8 @@ export async function resolveTurn(
       chronicleEntries: chronicleInputs,
       stopReason: "player_decision",
       workflowAudit: finalWorkflowAudit,
-      novelActionProposals: managerResult.temporaryPatches,
+      inventedWorkflows: managerResult.createdInventedWorkflows,
+      inventedWorkflowUses,
     });
 
     await resolveNpcCommitments(db, fulfilledCommitmentIds, "fulfilled", atStep, "Validated and fulfilled during turn resolution.");
@@ -1494,9 +1495,9 @@ export async function resolveTurn(
       console.error("[resolution] ingestChronicleEntries failed", err);
     });
 
-    console.log(`${tag()} ══ RESOLUTION COMPLETE ══ step=${atStep} chronicle=${chronicleInputs.length} workflows=${allWorkflowLog.filter((e) => e.outcome.ok).length} temporary=${managerResult.temporaryPatches.length}`);
+    console.log(`${tag()} ══ RESOLUTION COMPLETE ══ step=${atStep} chronicle=${chronicleInputs.length} workflows=${allWorkflowLog.filter((e) => e.outcome.ok).length} invented=${managerResult.createdInventedWorkflows.length}`);
     emit(onProgress, "commit", true);
-    return { workflowDownloads: managerResult.temporaryPatches.map(buildWorkflowDeveloperDownload) };
+    return { workflowDownloads: [] };
   } catch (error) {
     console.error("[resolution] pipeline failed", error);
     await failTurn(db, turnId, String(error));

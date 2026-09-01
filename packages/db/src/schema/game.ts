@@ -228,6 +228,7 @@ export const characterClaims = pgTable("character_claims", {
 
 // Workflow Manager — novel action proposals (Issue #6).
 export const workflowProposalStatus = pgEnum("workflow_proposal_status", ["pending", "approved", "rejected"]);
+export const inventedWorkflowStatus = pgEnum("invented_workflow_status", ["active", "disabled"]);
 
 export const pendingWorkflowProposals = pgTable("pending_workflow_proposals", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -251,4 +252,41 @@ export const pendingWorkflowProposals = pgTable("pending_workflow_proposals", {
 }, (table) => [
   index("pending_workflow_proposals_game_idx").on(table.gameId),
   index("pending_workflow_proposals_status_idx").on(table.status),
+]);
+
+/** Runtime, game-local workflow templates invented by the Workflow Manager. */
+export const inventedWorkflows = pgTable("invented_workflows", {
+  id: uuid("id").primaryKey(),
+  gameId: uuid("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+  createdTurnId: uuid("created_turn_id").notNull().references(() => turns.id, { onDelete: "cascade" }),
+  actionId: text("action_id").notNull(),
+  intent: text("intent").notNull(),
+  description: text("description").notNull(),
+  definition: jsonb("definition").notNull().$type<import("@chronica/shared").InventedWorkflowDefinition>(),
+  status: inventedWorkflowStatus("status").notNull().default("active"),
+  successfulUseCount: integer("successful_use_count").notNull().default(0),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  disabledBy: uuid("disabled_by").references(() => users.id, { onDelete: "set null" }),
+  disabledAt: timestamp("disabled_at", { withTimezone: true }),
+  disableNote: text("disable_note"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("invented_workflows_game_action_unique").on(table.gameId, table.actionId),
+  index("invented_workflows_game_status_idx").on(table.gameId, table.status),
+  index("invented_workflows_usage_idx").on(table.successfulUseCount, table.lastUsedAt),
+]);
+
+/** Immutable audit of each attempted runtime-workflow application. */
+export const inventedWorkflowUses = pgTable("invented_workflow_uses", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workflowId: uuid("workflow_id").notNull().references(() => inventedWorkflows.id, { onDelete: "cascade" }),
+  turnId: uuid("turn_id").notNull().references(() => turns.id, { onDelete: "cascade" }),
+  parameters: jsonb("parameters").notNull().$type<Record<string, unknown>>(),
+  resolvedPatch: jsonb("resolved_patch").$type<readonly import("@chronica/shared").InventedPatchOperation[]>(),
+  success: boolean("success").notNull(),
+  failureReason: text("failure_reason"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("invented_workflow_uses_workflow_idx").on(table.workflowId, table.createdAt),
+  index("invented_workflow_uses_turn_idx").on(table.turnId),
 ]);

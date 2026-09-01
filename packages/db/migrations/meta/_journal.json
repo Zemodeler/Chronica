@@ -169,6 +169,13 @@
       "when": 1788278401000,
       "tag": "0025_cascade_player_owned_save_data",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788278402000,
+      "tag": "0026_persistent_invented_workflows",
+      "breakpoints": true
     }
   ]
 }

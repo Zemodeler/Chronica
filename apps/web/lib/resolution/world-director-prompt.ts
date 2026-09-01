@@ -1,6 +1,6 @@
 import "server-only";
 
-import { buildWorkflowCatalog, type WorldState, type ConsolidatedProposalPackage } from "@chronica/shared";
+import { buildWorkflowCatalog, type RuntimeInventedWorkflow, type WorldState, type ConsolidatedProposalPackage } from "@chronica/shared";
 import { buildPlayerResolutionContext, WORKFLOW_MUTATION_RULE, type ResolutionPlayerContext } from "./prompts";
 
 // World Director prompt builder.
@@ -18,6 +18,7 @@ export function buildWorldDirectorSystemPrompt(
   pkg: ConsolidatedProposalPackage,
   playerCharacterId: string,
   context?: ResolutionPlayerContext,
+  inventedWorkflows: readonly RuntimeInventedWorkflow[] = [],
 ): string {
   const player = world.characters.find((c) => c.id === playerCharacterId);
 
@@ -87,7 +88,7 @@ ACTIVE WARS: ${world.conflicts.wars.map((w) => {
 ${buildPlayerResolutionContext(world, context)}
 
 REGISTERED WORKFLOW CATALOG:
-${buildWorkflowCatalog()}
+${buildWorkflowCatalog(inventedWorkflows)}
 
 ${WORKFLOW_MUTATION_RULE}
 

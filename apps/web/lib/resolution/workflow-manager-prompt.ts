@@ -1,4 +1,4 @@
-import type { PolicyViolation, WorkflowCandidate, WorldState } from "@chronica/shared";
+import type { PolicyViolation, RuntimeInventedWorkflow, WorkflowCandidate, WorldState } from "@chronica/shared";
 import { buildWorkflowCatalog } from "@chronica/shared";
 
 function workflowManagerWorldContext(world: WorldState): string {
@@ -22,6 +22,7 @@ export function buildWorkflowManagerSystemPrompt(
   world: WorldState,
   candidates: readonly WorkflowCandidate[],
   diagnostics: readonly { correlationId: string; violation: PolicyViolation | null }[],
+  inventedWorkflows: readonly RuntimeInventedWorkflow[] = [],
 ): string {
   return `You are the final Workflow Manager for the Chronica simulation.
 
@@ -32,6 +33,9 @@ ${workflowManagerWorldContext(world)}
 
 REGISTERED WORKFLOW CATALOG:
 ${buildWorkflowCatalog()}
+
+ACTIVE GAME-LOCAL INVENTED WORKFLOWS (reuse one of these before creating another):
+${JSON.stringify(inventedWorkflows.map((workflow) => ({ id: workflow.id, ...workflow.definition })), null, 2)}
 
 PROPOSED WORKFLOW CANDIDATES (in required execution order):
 ${JSON.stringify(candidates, null, 2)}
@@ -46,11 +50,11 @@ DECISION RULES:
 4. "reject" means the intended effect is not lawful, grounded, or achievable by an existing workflow. "no_action" means no state mutation is warranted.
 5. A known diagnostic is a cue to repair when possible, not a reason to blindly reject. Never approve a request with an unresolved diagnostic.
 6. Replacements must use real entity IDs from the authoritative world state. Do not guess IDs, entities, balances, or military forces.
-7. If no registered workflow accurately fits, reject that candidate and add exactly one novelActionProposal with a bounded temporaryPatch. The patch runs only for this turn; its generated TypeScript is downloaded for developer review and is never executed as code.
-8. A temporaryPatch may use ONLY these four operation kinds: account_delta, province_control, character_state, create_storyline. No other kind values exist. Every actor, participant, account, province, polity, and character ID must be copied from AUTHORITATIVE WORLD STATE. Never use an ID from a prior response or invent one.
-9. Never use a temporary patch to imitate a registered workflow. In particular, a proposed force, battle, siege, or character creation must be repaired with the matching catalog workflow or rejected; do not create a storyline as a substitute for a material entity.
-10. Include an implementationReport explaining the unmet need, the temporary patch that was applied, and what a permanent workflow must implement.
-11. The deterministic system will validate and dry-run your selected sequence after you respond.
+7. If no built-in or active invented workflow accurately fits, reject that candidate and add exactly one inventedWorkflowProposal. Its template is active in this game after its first successful use.
+8. Invented operations are generic JSON patches over WORLD STATE only. They may use add, replace, and remove; paths may select array entities with [id={{parameter}}]. Do not target schemaVersion, pins, elapsedStep, lastTurnSummary, source code, or map assets.
+9. A reusable template must use typed parameters and placeholders such as {{characterId}}; do not bake the current turn's entity IDs or values into a supposedly reusable workflow.
+10. The initialInvocation actionId must equal workflow.actionId. It is the first use of the new template and must use real entity IDs from AUTHORITATIVE WORLD STATE where applicable.
+11. Never create an invented workflow merely to duplicate a built-in or active invented workflow. The deterministic system will validate and dry-run your selected sequence after you respond.
 
 Return strict JSON only:
 {
@@ -60,22 +64,18 @@ Return strict JSON only:
     "reason": "<concise explanation>",
     "replacementInvocation": null | { "actionId": "...", "actorId": "...", "parameters": {} }
   }],
-  "novelActionProposals": [{
-    "intent": "<unmet action>",
-    "targetEntityIds": ["<existing ids>"],
-    "estimatedMutationDescription": "<state change>",
+  "novelActionProposals": [],
+  "inventedWorkflowProposals": [{
+    "workflow": {
+      "actionId": "<stable_snake_case_id>", "intent": "<unmet action>", "description": "<short summary>",
+      "parameters": [{ "name": "characterId", "type": "entity_id", "required": true }],
+      "operations": [{ "op": "replace", "path": "/characters[id={{characterId}}]/healthBps", "value": "{{healthBps}}" }],
+      "invokerAuthority": ["player", "world_director"], "scopeLimit": "coarse"
+    },
+    "initialInvocation": { "actionId": "<same stable_snake_case_id>", "actorId": "<existing actor id>", "parameters": {} },
     "source": "<candidate source>",
     "sourceRef": "<candidate sourceRef>",
-    "temporaryPatch": {
-      "id": "<uuid>", "title": "<title>", "rationale": "<why>", "actorId": "<existing actor id>",
-      "operations": [
-        { "kind": "account_delta", "accountId": "<id>", "amount": -100, "reason": "<why>" },
-        { "kind": "province_control", "provinceId": "<id>", "controllerPolityId": "<id>", "firmnessBps": 5000 },
-        { "kind": "character_state", "characterId": "<id>", "healthBps": 8000, "locationProvinceId": "<id>", "polityId": "<id>" },
-        { "kind": "create_storyline", "storylineId": "<new-uuid>", "title": "<title>", "participantIds": ["<id>"], "provinceId": "<id or null>", "phase": "<phase>", "stakes": "<stakes>", "nextDevelopment": "<next>", "visibility": "public" }
-      ]
-    },
-    "implementationReport": "<what was needed, temporarily implemented, and required permanently>"
+    "implementationReport": "<why no catalog workflow fits and what this reusable template does>"
   }]
 }`;
 }

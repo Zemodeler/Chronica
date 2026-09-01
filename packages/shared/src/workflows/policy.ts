@@ -1,6 +1,7 @@
 import type { WorldState } from "../world/world-state";
 import { WORKFLOW_REGISTRY } from "./registry";
 import type { WorkflowCandidate, WorkflowCandidateSource } from "./manager-types";
+import { inventedWorkflowAuthority, inventedWorkflowScope, validateInventedWorkflowParameters, type RuntimeInventedWorkflow } from "./invented-workflow";
 
 // Workflow Manager policy validator (Issue #6).
 //
@@ -55,12 +56,17 @@ const SOURCE_TO_SCOPE: Partial<Record<WorkflowCandidateSource, string>> = {
  * Checks run in order; the first failure is returned immediately.
  * Caller is responsible for duplicate detection (check 8) across the full list.
  */
-export function validateCandidate(candidate: WorkflowCandidate, world: WorldState): PolicyViolation | null {
+export function validateCandidate(
+  candidate: WorkflowCandidate,
+  world: WorldState,
+  inventedWorkflows: readonly RuntimeInventedWorkflow[] = [],
+): PolicyViolation | null {
   const { requestedInvocation: inv, source } = candidate;
 
   // 1. Registered action
   const definition = WORKFLOW_REGISTRY.get(inv.actionId);
-  if (!definition) {
+  const invented = inventedWorkflows.find((workflow) => workflow.status === "active" && workflow.definition.actionId === inv.actionId);
+  if (!definition && !invented) {
     return {
       kind: "unknown_action",
       message: `Workflow "${inv.actionId}" is not registered in the skill catalog.`,
@@ -68,9 +74,10 @@ export function validateCandidate(candidate: WorkflowCandidate, world: WorldStat
   }
 
   // 2. Parameter schema
-  const parsed = definition.parametersSchema.safeParse(inv.parameters);
-  if (!parsed.success) {
-    const issues = parsed.error.issues.map((i: { message: string }) => i.message).join("; ");
+  const parsed = definition?.parametersSchema.safeParse(inv.parameters);
+  const inventedParameterError = invented ? validateInventedWorkflowParameters(invented.definition, inv.parameters) : null;
+  if ((parsed && !parsed.success) || inventedParameterError) {
+    const issues = inventedParameterError ?? parsed?.error.issues.map((i: { message: string }) => i.message).join("; ") ?? "Invalid parameters.";
     return {
       kind: "invalid_params",
       message: `Invalid parameters for "${inv.actionId}": ${issues}`,
@@ -95,26 +102,28 @@ export function validateCandidate(candidate: WorkflowCandidate, world: WorldStat
   }
 
   // 5. invokerAuthority — source must map to an allowed invoker kind
-  if (definition.invokerAuthority && definition.invokerAuthority.length > 0) {
+  const authority = definition?.invokerAuthority ?? (invented ? inventedWorkflowAuthority(invented.definition) : undefined);
+  if (authority && authority.length > 0) {
     const invoker = SOURCE_TO_INVOKER[source];
-    if (!definition.invokerAuthority.includes(invoker as never)) {
+    if (!authority.includes(invoker as never)) {
       return {
         kind: "authority_mismatch",
-        message: `Skill "${inv.actionId}" may only be invoked by [${definition.invokerAuthority.join(", ")}]; source "${source}" maps to "${invoker}".`,
+        message: `Skill "${inv.actionId}" may only be invoked by [${authority.join(", ")}]; source "${source}" maps to "${invoker}".`,
       };
     }
   }
 
   // 6. scopeLimit — world_director invokers must be within the allowed scope tier
-  if (definition.scopeLimit) {
+  const scopeLimit = definition?.scopeLimit ?? (invented ? inventedWorkflowScope(invented.definition) : undefined);
+  if (scopeLimit) {
     const sourceTier = SOURCE_TO_SCOPE[source];
     if (sourceTier !== undefined) {
-      const allowed = SCOPE_RANK[definition.scopeLimit] ?? 2;
+      const allowed = SCOPE_RANK[scopeLimit] ?? 2;
       const actual = SCOPE_RANK[sourceTier] ?? 0;
       if (actual > allowed) {
         return {
           kind: "scope_violation",
-          message: `Skill "${inv.actionId}" requires scope ≤ "${definition.scopeLimit}"; source "${source}" is scope "${sourceTier}".`,
+        message: `Skill "${inv.actionId}" requires scope ≤ "${scopeLimit}"; source "${source}" is scope "${sourceTier}".`,
         };
       }
     }
@@ -126,7 +135,7 @@ export function validateCandidate(candidate: WorkflowCandidate, world: WorldStat
   // TODO: pass scenario offices when scenario is available in the pipeline.
 
   // 8. Treasury permissions — if params reference an accountId, verify the actor has access
-  const params = parsed.data as Record<string, unknown>;
+  const params = (parsed?.success ? parsed.data : inv.parameters) as Record<string, unknown>;
   const paramAccountId = params["accountId"];
   if (typeof paramAccountId === "string") {
     const spending = params["amount"];
@@ -162,12 +171,13 @@ export function validateCandidate(candidate: WorkflowCandidate, world: WorldStat
 export function validateAllCandidates(
   candidates: readonly WorkflowCandidate[],
   world: WorldState,
+  inventedWorkflows: readonly RuntimeInventedWorkflow[] = [],
 ): Map<string, PolicyViolation | null> {
   const results = new Map<string, PolicyViolation | null>();
   const seen = new Map<string, string>(); // "actionId:keyParam" → correlationId
 
   for (const candidate of candidates) {
-    const violation = validateCandidate(candidate, world);
+    const violation = validateCandidate(candidate, world, inventedWorkflows);
     if (violation) {
       results.set(candidate.correlationId, violation);
       continue;

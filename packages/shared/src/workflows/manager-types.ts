@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ProposedInvocationSchema, type ProposedInvocation } from "../actions/orders";
 import { EntityIdSchema } from "../material-state";
 import { TemporaryWorkflowPatchSchema } from "./temporary-patch";
+import { InventedWorkflowDefinitionSchema } from "./invented-workflow";
 
 // Workflow Manager types (Issue #6).
 //
@@ -68,11 +69,22 @@ export const NovelActionProposalSchema = z
   .strict();
 export type NovelActionProposal = z.infer<typeof NovelActionProposalSchema>;
 
+/** A reusable game-local workflow created only when no catalog entry fits. */
+export const InventedWorkflowProposalSchema = z.object({
+  workflow: InventedWorkflowDefinitionSchema,
+  initialInvocation: ProposedInvocationSchema,
+  source: WorkflowCandidateSourceSchema,
+  sourceRef: z.string().trim().max(200),
+  implementationReport: z.string().trim().max(4_000).default(""),
+}).strict();
+export type InventedWorkflowProposal = z.infer<typeof InventedWorkflowProposalSchema>;
+
 /** The full response the workflow_manager operation must return. */
 export const ManagerDecisionBatchSchema = z
   .object({
     decisions: z.array(ManagerDecisionSchema),
     novelActionProposals: z.array(NovelActionProposalSchema).default([]),
+    inventedWorkflowProposals: z.array(InventedWorkflowProposalSchema).default([]),
   })
   .strict();
 export type ManagerDecisionBatch = z.infer<typeof ManagerDecisionBatchSchema>;
