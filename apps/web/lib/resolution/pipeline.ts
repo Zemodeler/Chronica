@@ -1104,72 +1104,83 @@ export async function resolveTurn(
     // ── Steps 5–7: Reaction Director, Simulator, Character Director (parallel) ──
     // These all run on worldAfterPlayer — post player-execution snapshot.
 
-    emit(onProgress, "reaction");
-    const reactionProposals: ReactionProposal[] = [];
-    const shouldReact = shouldRunReactionDirector(verdicts);
-    console.log(`${tag()} [reaction] IN: shouldRun=${shouldReact} verdicts=${verdicts.length}`);
-    if (shouldReact) {
-      try {
-        const reactionPrompt = buildReactionDirectorSystemPrompt(worldAfterPlayer, verdicts, actorCharacterId, resolutionContext);
-        const reactionResult = await coinGatedAdapter.call("reaction_director", reactionPrompt, `Step ${atStep}: generate reactions.`);
-        const reactionParsed = await safeParseJson(reactionResult.content, ReactionProposalBatchSchema, "reaction_director");
-        if (reactionParsed) {
-          reactionProposals.push(...reactionParsed.proposals);
+    const runReaction = async (): Promise<ReactionProposal[]> => {
+      const proposals: ReactionProposal[] = [];
+      const shouldReact = shouldRunReactionDirector(verdicts);
+      console.log(`${tag()} [reaction] IN: shouldRun=${shouldReact} verdicts=${verdicts.length}`);
+      if (shouldReact) {
+        try {
+          const reactionPrompt = buildReactionDirectorSystemPrompt(worldAfterPlayer, verdicts, actorCharacterId, resolutionContext);
+          const reactionResult = await coinGatedAdapter.call("reaction_director", reactionPrompt, `Step ${atStep}: generate reactions.`);
+          const reactionParsed = await safeParseJson(reactionResult.content, ReactionProposalBatchSchema, "reaction_director");
+          if (reactionParsed) proposals.push(...reactionParsed.proposals);
+        } catch (err) {
+          console.error(`${tag()} [reaction:error]`, err);
         }
+      }
+      console.log(`${tag()} [reaction] OUT: ${proposals.length} proposal(s) — ${proposals.map((p) => `${p.reactionKind}(sal:${p.salience})`).join(", ") || "none"}`);
+      return proposals;
+    };
+
+    const runSimulator = async (): Promise<SimulatorProposal[]> => {
+      const proposals: SimulatorProposal[] = [];
+      try {
+        const scope = inferTheatre(worldAfterPlayer, actorCharacterId);
+        console.log(`${tag()} [simulate] IN: star=${scope.star.size} near=${scope.near.size} far=${scope.far.size} coarse=${scope.coarse.size} storylines=${(worldAfterPlayer.storylines ?? []).length}`);
+        const simPrompt = buildSimulatorSystemPrompt(worldAfterPlayer, scope, actorCharacterId, resolutionContext);
+        const simResult = await coinGatedAdapter.call("simulator", simPrompt, `Step ${atStep}: simulate the world.`);
+        let simContent = simResult.content;
+        try {
+          simContent = sanitizeSimulatorContent(simContent, worldAfterPlayer);
+        } catch { /* preserve the original response for normal parse diagnostics */ }
+        const simParsed = await safeParseJson(simContent, SimulatorProposalBatchSchema, "simulator");
+        if (simParsed) proposals.push(...simParsed.proposals);
       } catch (err) {
-        console.error(`${tag()} [reaction:error]`, err);
+        console.error(`${tag()} [simulate:error]`, err);
       }
-    }
-    console.log(`${tag()} [reaction] OUT: ${reactionProposals.length} proposal(s) — ${reactionProposals.map((p) => `${p.reactionKind}(sal:${p.salience})`).join(", ") || "none"}`);
-    emit(onProgress, "reaction", true);
+      console.log(`${tag()} [simulate] OUT: ${proposals.length} proposal(s) — ${proposals.map((p) => `${p.kind}(scope:${p.scopeTag},sal:${p.salience})`).join(", ") || "none"}`);
+      return proposals;
+    };
 
-    emit(onProgress, "simulate");
-    const simulatorProposals: SimulatorProposal[] = [];
-    try {
-      const scope = inferTheatre(worldAfterPlayer, actorCharacterId);
-      console.log(`${tag()} [simulate] IN: star=${scope.star.size} near=${scope.near.size} far=${scope.far.size} coarse=${scope.coarse.size} storylines=${(worldAfterPlayer.storylines ?? []).length}`);
-      const simPrompt = buildSimulatorSystemPrompt(worldAfterPlayer, scope, actorCharacterId, resolutionContext);
-      const simResult = await coinGatedAdapter.call("simulator", simPrompt, `Step ${atStep}: simulate the world.`);
-      let simContent = simResult.content;
-      try {
-        simContent = sanitizeSimulatorContent(simContent, worldAfterPlayer);
-      } catch { /* preserve the original response for normal parse diagnostics */ }
-      const simParsed = await safeParseJson(simContent, SimulatorProposalBatchSchema, "simulator");
-      if (simParsed) {
-        simulatorProposals.push(...simParsed.proposals);
-      }
-    } catch (err) {
-      console.error(`${tag()} [simulate:error]`, err);
-    }
-    console.log(`${tag()} [simulate] OUT: ${simulatorProposals.length} proposal(s) — ${simulatorProposals.map((p) => `${p.kind}(scope:${p.scopeTag},sal:${p.salience})`).join(", ") || "none"}`);
-    emit(onProgress, "simulate", true);
-
-    emit(onProgress, "character_advise");
-    const selectedCharacters: SelectedCharacter[] = selectRelevantCharacters(
-      worldAfterPlayer,
-      actorCharacterId,
-      undefined,
-      pendingCommitments.map((commitment) => commitment.npcCharacterId),
-    );
-    console.log(`${tag()} [character_advise] IN: selectedCharacters=${selectedCharacters.length} — ${selectedCharacters.map((sc) => `${sc.characterId}(tier:${sc.tier})`).join(", ") || "none"}`);
-    const characterSuggestions: CharacterSuggestion[] = [];
-    if (selectedCharacters.length > 0) {
-      try {
-        const charPrompt = buildCharacterDirectorSystemPrompt(worldAfterPlayer, selectedCharacters, actorCharacterId, resolutionContext);
-        const charResult = await coinGatedAdapter.call("character_director", charPrompt, `Step ${atStep}: advise on ${selectedCharacters.length} character(s).`);
-        const charParsed = await safeParseJson(charResult.content, CharacterSuggestionBatchSchema, "character_director");
-        if (charParsed) {
-          for (const suggestion of charParsed.suggestions) {
-            const isSelected = selectedCharacters.some((sc) => sc.characterId === suggestion.characterId);
-            const isAlive = worldAfterPlayer.characters.find((c) => c.id === suggestion.characterId)?.alive ?? false;
-            if (isSelected && isAlive) characterSuggestions.push(suggestion);
+    const runCharacterDirector = async (): Promise<CharacterSuggestion[]> => {
+      const suggestions: CharacterSuggestion[] = [];
+      const selectedCharacters: SelectedCharacter[] = selectRelevantCharacters(
+        worldAfterPlayer,
+        actorCharacterId,
+        undefined,
+        pendingCommitments.map((commitment) => commitment.npcCharacterId),
+      );
+      console.log(`${tag()} [character_advise] IN: selectedCharacters=${selectedCharacters.length} — ${selectedCharacters.map((sc) => `${sc.characterId}(tier:${sc.tier})`).join(", ") || "none"}`);
+      if (selectedCharacters.length > 0) {
+        try {
+          const charPrompt = buildCharacterDirectorSystemPrompt(worldAfterPlayer, selectedCharacters, actorCharacterId, resolutionContext);
+          const charResult = await coinGatedAdapter.call("character_director", charPrompt, `Step ${atStep}: advise on ${selectedCharacters.length} character(s).`);
+          const charParsed = await safeParseJson(charResult.content, CharacterSuggestionBatchSchema, "character_director");
+          if (charParsed) {
+            for (const suggestion of charParsed.suggestions) {
+              const isSelected = selectedCharacters.some((sc) => sc.characterId === suggestion.characterId);
+              const isAlive = worldAfterPlayer.characters.find((c) => c.id === suggestion.characterId)?.alive ?? false;
+              if (isSelected && isAlive) suggestions.push(suggestion);
+            }
           }
+        } catch (err) {
+          console.error(`${tag()} [character_advise:error]`, err);
         }
-      } catch (err) {
-        console.error(`${tag()} [character_advise:error]`, err);
       }
-    }
-    console.log(`${tag()} [character_advise] OUT: ${characterSuggestions.length} suggestion(s) — ${characterSuggestions.map((s) => `${s.characterId}:${s.suggestionKind}(sal:${s.salience})`).join(", ") || "none"}`);
+      console.log(`${tag()} [character_advise] OUT: ${suggestions.length} suggestion(s) — ${suggestions.map((s) => `${s.characterId}:${s.suggestionKind}(sal:${s.salience})`).join(", ") || "none"}`);
+      return suggestions;
+    };
+
+    emit(onProgress, "reaction");
+    emit(onProgress, "simulate");
+    emit(onProgress, "character_advise");
+    const [reactionProposals, simulatorProposals, characterSuggestions] = await Promise.all([
+      runReaction(),
+      runSimulator(),
+      runCharacterDirector(),
+    ]);
+    emit(onProgress, "reaction", true);
+    emit(onProgress, "simulate", true);
     emit(onProgress, "character_advise", true);
 
     // ── Step 8: Consolidate ────────────────────────────────────────────────
