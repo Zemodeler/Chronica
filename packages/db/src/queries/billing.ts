@@ -211,6 +211,7 @@ export async function authorizeCoinHold(db: ChronicaDatabase, input: Readonly<{
     if (existing !== undefined) return { holdId: existing.id, replayed: existing.status !== "active" };
     const [game] = await tx.select().from(games).where(eq(games.id, input.gameId)).for("update").limit(1);
     if (game === undefined) throw new Error("Game not found for coin authorization.");
+    if (game.paymentStatus !== "active") throw new Error("Game payment is paused.");
     await tx.insert(creditWallets).values({ userId: game.payerUserId }).onConflictDoNothing({ target: creditWallets.userId });
     const [wallet] = await tx.select().from(creditWallets).where(eq(creditWallets.userId, game.payerUserId)).for("update").limit(1);
     const [reserved] = await tx.select({ value: sql<bigint>`coalesce(sum(${creditHolds.maximumMicrocredits}), 0)` }).from(creditHolds).where(and(eq(creditHolds.gameId, game.id), eq(creditHolds.status, "active")));

@@ -38,7 +38,7 @@ const AssessParseSchema = OrderAssessmentSchema.omit({ directiveId: true });
 // a model response. This also prevents a malformed `playerId: null` from
 // discarding an otherwise valid adjudication.
 const VerdictParseSchema = VerdictSchema.omit({ directiveId: true, playerInvolvement: true });
-import type { AiAdapter } from "@chronica/ai";
+import { callWithCoinGate, type AiAdapter } from "@chronica/ai";
 import type { ChronicaDatabase } from "@chronica/db";
 import {
   commitResolution,
@@ -46,6 +46,7 @@ import {
   claimTurnForResolution,
   ingestChronicleEntries,
   getCharacterKnowledgebase,
+  getGamePayerUserId,
   listPendingNpcCommitments,
   resolveNpcCommitments,
 } from "@chronica/db";
@@ -411,6 +412,13 @@ export async function resolveTurn(
   if (!claimed) return { workflowDownloads: [] };
 
   try {
+    const payerUserId = await getGamePayerUserId(db, gameId);
+    if (payerUserId === undefined) throw new Error("Game payer not found for resolution.");
+    const coinGatedAdapter: AiAdapter = {
+      call: (operation, systemPrompt, userMessage) => callWithCoinGate(
+        db, payerUserId, gameId, operation, adapter, { system: systemPrompt, user: userMessage },
+      ),
+    };
     const playerKnowledgebase = await getCharacterKnowledgebase(db, gameId, playerId).catch(() => null);
     const pendingCommitments = await listPendingNpcCommitments(db, gameId);
     const resolutionContext: ResolutionPlayerContext = { knowledgebase: playerKnowledgebase, pendingCommitments };
@@ -430,7 +438,7 @@ export async function resolveTurn(
       if (directive.kind !== "new" && directive.kind !== "revise") continue;
       const userMsg = `Order ${idx + 1}: ${directive.text}\nDirective ID: directive-${idx}`;
       try {
-        const result = await adapter.call("interpret_order", systemPrompt, userMsg);
+        const result = await coinGatedAdapter.call("interpret_order", systemPrompt, userMsg);
         const parsed = await safeParseJson(result.content, InterpretParseSchema, `interpret:directive-${idx}`);
         if (parsed) {
           interpretations.push({ ...parsed, directiveId: `directive-${idx}` });
@@ -472,7 +480,7 @@ export async function resolveTurn(
     for (const interpretation of interpretations) {
       const userMsg = `Directive: ${interpretation.intent}\nProposed steps: ${interpretation.proposedSteps.join("; ")}\nRisks: ${interpretation.risks.join("; ")}`;
       try {
-        const result = await adapter.call("assess_orders", assessSystemPrompt, userMsg);
+        const result = await coinGatedAdapter.call("assess_orders", assessSystemPrompt, userMsg);
         const parsed = await safeParseJson(result.content, AssessParseSchema, `assess:${interpretation.directiveId}`);
         if (parsed) {
           assessments.push({ ...parsed, directiveId: interpretation.directiveId });
@@ -514,7 +522,7 @@ export async function resolveTurn(
     for (const assessment of assessments) {
       const userMsg = `Order: ${assessment.interpretation}\nFeasibility: ${assessment.feasibility}\nWorkflow: ${assessment.workflow ? JSON.stringify(assessment.workflow) : "none"}\nNeeds adjudication: ${assessment.needsAdjudication}`;
       try {
-        const result = await adapter.call("adjudicate", adjSystemPrompt, userMsg);
+        const result = await coinGatedAdapter.call("adjudicate", adjSystemPrompt, userMsg);
         let adjContent = result.content;
         try {
           const raw = JSON.parse(stripToJson(adjContent)) as Record<string, unknown>;
@@ -629,7 +637,7 @@ export async function resolveTurn(
     if (shouldReact) {
       try {
         const reactionPrompt = buildReactionDirectorSystemPrompt(worldAfterPlayer, verdicts, actorCharacterId, resolutionContext);
-        const reactionResult = await adapter.call("reaction_director", reactionPrompt, `Step ${atStep}: generate reactions.`);
+        const reactionResult = await coinGatedAdapter.call("reaction_director", reactionPrompt, `Step ${atStep}: generate reactions.`);
         const reactionParsed = await safeParseJson(reactionResult.content, ReactionProposalBatchSchema, "reaction_director");
         if (reactionParsed) {
           reactionProposals.push(...reactionParsed.proposals);
@@ -647,7 +655,7 @@ export async function resolveTurn(
       const scope = inferTheatre(worldAfterPlayer, actorCharacterId);
       console.log(`${tag()} [simulate] IN: star=${scope.star.size} near=${scope.near.size} far=${scope.far.size} coarse=${scope.coarse.size} storylines=${(worldAfterPlayer.storylines ?? []).length}`);
       const simPrompt = buildSimulatorSystemPrompt(worldAfterPlayer, scope, actorCharacterId, resolutionContext);
-      const simResult = await adapter.call("simulator", simPrompt, `Step ${atStep}: simulate the world.`);
+      const simResult = await coinGatedAdapter.call("simulator", simPrompt, `Step ${atStep}: simulate the world.`);
       const simParsed = await safeParseJson(simResult.content, SimulatorProposalBatchSchema, "simulator");
       if (simParsed) {
         simulatorProposals.push(...simParsed.proposals);
@@ -670,7 +678,7 @@ export async function resolveTurn(
     if (selectedCharacters.length > 0) {
       try {
         const charPrompt = buildCharacterDirectorSystemPrompt(worldAfterPlayer, selectedCharacters, actorCharacterId, resolutionContext);
-        const charResult = await adapter.call("character_director", charPrompt, `Step ${atStep}: advise on ${selectedCharacters.length} character(s).`);
+        const charResult = await coinGatedAdapter.call("character_director", charPrompt, `Step ${atStep}: advise on ${selectedCharacters.length} character(s).`);
         const charParsed = await safeParseJson(charResult.content, CharacterSuggestionBatchSchema, "character_director");
         if (charParsed) {
           for (const suggestion of charParsed.suggestions) {
@@ -704,7 +712,7 @@ export async function resolveTurn(
     const worldDirectorInvocations: Array<{ invocation: ProposedInvocation; sourceRef: string; sourceRationale: string }> = [];
     try {
       const wdPrompt = buildWorldDirectorSystemPrompt(worldAfterPlayer, consolidatedPackage, actorCharacterId, resolutionContext);
-      const wdResult = await adapter.call("world_director", wdPrompt, `Step ${atStep}: decide on ${consolidatedPackage.proposals.length} proposal(s).`);
+      const wdResult = await coinGatedAdapter.call("world_director", wdPrompt, `Step ${atStep}: decide on ${consolidatedPackage.proposals.length} proposal(s).`);
       const wdParsed = await safeParseJson(wdResult.content, WorldDirectorDecisionBatchSchema, "world_director");
       if (wdParsed) {
         const decisions = wdParsed.decisions;
@@ -737,7 +745,7 @@ export async function resolveTurn(
     console.log(`${tag()} [manage] IN: player=${playerCandidates.length} world=${worldDirectorInvocations.length} candidate(s)`);
     const worldCandidates = collectWorldCandidates(worldDirectorInvocations);
     const finalCandidates = [...playerCandidates, ...worldCandidates];
-    const managerResult = await runWorkflowManager(adapter, resolutionWorld, finalCandidates, atStep);
+    const managerResult = await runWorkflowManager(coinGatedAdapter, resolutionWorld, finalCandidates, atStep);
     console.log(`${tag()} [manage] OUT: ${managerResult.acceptedInvocations.length}/${finalCandidates.length} workflow(s) accepted`);
     emit(onProgress, "manage", true);
 
@@ -846,7 +854,7 @@ export async function resolveTurn(
         sourceDirector: e.sourceDirector,
       }));
       const narratorSystemPrompt = buildChronicleNarratorPrompt(narratorEntries, resolutionWorld, actorCharacterId, playerKnowledgebase);
-      const narratorResult = await adapter.call("chronicle_narrator", narratorSystemPrompt, "Rewrite the events as chronicle prose.");
+      const narratorResult = await coinGatedAdapter.call("chronicle_narrator", narratorSystemPrompt, "Rewrite the events as chronicle prose.");
       const narratorParsed = JSON.parse(stripToJson(narratorResult.content)) as { entries?: { body: string; isPlayerAction: boolean }[] };
       if (Array.isArray(narratorParsed.entries) && narratorParsed.entries.length === chronicleInputs.length) {
         for (let i = 0; i < chronicleInputs.length; i++) {
