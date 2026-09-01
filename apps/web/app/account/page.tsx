@@ -7,17 +7,19 @@ import { gameRepository } from "../../lib/game-repository";
 import { redeemGift } from "../actions";
 import { AccountDashboard, type SerializedGift } from "./account-dialogs";
 import { createDatabase, listPendingWorkflowProposals } from "@chronica/db";
+import { getLocalAiProviderConfiguration } from "@chronica/ai";
 
 export const metadata: Metadata = { title: "Account and coins" };
 
 export default async function AccountPage({
   searchParams,
-}: Readonly<{ searchParams: Promise<{ gift?: string; checkout?: string; profile?: string; developer?: string; email?: string }> }>) {
+}: Readonly<{ searchParams: Promise<{ gift?: string; checkout?: string; profile?: string; developer?: string; email?: string; aiProvider?: string }> }>) {
   const [params, persistedAccount] = await Promise.all([searchParams, loadAccountDashboard(await headers())]);
   const account = persistedAccount ?? (!isAuthenticationConfigured() && process.env.NODE_ENV !== "production" ? await gameRepository.getAccount() : null);
   if (account === null) redirect("/login?returnTo=%2Faccount");
 
   const isDev = account.role === "developer" || account.role === "admin";
+  const localAiProviderConfiguration = isDev ? getLocalAiProviderConfiguration() : undefined;
   const rawGifts = isDev ? await developerGiftList(await headers()) : [];
   const gifts: SerializedGift[] = rawGifts.map((g) => ({
     id: g.id,
@@ -41,7 +43,7 @@ export default async function AccountPage({
 
   return (
     <main id="main-content" className="shell">
-      <AccountDashboard account={account} gifts={gifts} params={params} pendingProposalCount={pendingProposalCount} />
+      <AccountDashboard account={account} gifts={gifts} params={params} pendingProposalCount={pendingProposalCount} localAiProviderConfiguration={localAiProviderConfiguration} />
       <noscript>
         <section className="panel account-noscript" aria-labelledby="redeem-gift-without-javascript">
           <h2 id="redeem-gift-without-javascript">Redeem a gift</h2>

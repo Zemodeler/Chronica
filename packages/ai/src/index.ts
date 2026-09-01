@@ -3,11 +3,21 @@ export { callWithCoinGate, InsufficientCoinsError, AiParseError } from "./coin-g
 export { createAnthropicLocalAdapter } from "./adapters/anthropic-local";
 export { createOpenAiLocalAdapter } from "./adapters/openai-local";
 export { createMockAdapter } from "./adapters/mock";
+export {
+  getConfiguredApiKey,
+  getLocalAiProviderConfiguration,
+  getSelectedLocalAiProvider,
+  getSelectedLocalAiModel,
+  selectLocalAiConfiguration,
+  type LocalAiProvider,
+  type LocalAiProviderConfiguration,
+} from "./local-key-selection";
 
 import type { AiAdapter } from "./adapter";
 import { createAnthropicLocalAdapter } from "./adapters/anthropic-local";
 import { createOpenAiLocalAdapter } from "./adapters/openai-local";
 import { createMockAdapter } from "./adapters/mock";
+import { getSelectedLocalAiProvider } from "./local-key-selection";
 
 /**
  * Factory — reads CHRONICA_AI_MODE to choose the adapter.
@@ -19,6 +29,11 @@ import { createMockAdapter } from "./adapters/mock";
  */
 export function createAiAdapter(): AiAdapter {
   const mode = process.env.CHRONICA_AI_MODE ?? "openai";
+  if (mode !== "mock") {
+    const localProvider = getSelectedLocalAiProvider();
+    if (localProvider === "openai") return createOpenAiLocalAdapter();
+    if (localProvider === "anthropic") return createAnthropicLocalAdapter();
+  }
   switch (mode) {
     case "mock":
       return createMockAdapter();

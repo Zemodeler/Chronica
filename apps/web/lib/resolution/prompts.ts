@@ -195,12 +195,21 @@ EXISTING FORCES RULE: If the player's directive refers to any force already list
 Respond as a JSON object with exactly these fields.`;
 }
 
+/**
+ * The common mutation boundary for both player orders and director proposals.
+ * Narrative prose is never allowed to stand in for a mutation: if an event
+ * changes WorldState, its matching registered workflow has to be proposed.
+ */
+export const WORKFLOW_MUTATION_RULE = `WORKFLOW-MUTATION RULE (applies equally to player orders and AI-directed actions): Any action that changes world state MUST include the matching registered workflow invocation in this response. This includes moving an army or general to another province, creating or changing a force, changing province control, starting or resolving a battle, changing a treasury or any account balance, and creating or changing any other tracked entity. Do not describe one of these effects as narrative-only. Use an empty workflow list only when the event has no world-state effect, or when no registered workflow can possibly represent it; in the latter case, state that it is a novel action rather than claiming the mutation occurred.`;
+
 export function buildAssessSystemPrompt(world: WorldState, actorId: string, context?: ResolutionPlayerContext): string {
   return `You are an arbiter for Chronica, a strategy game set in the ancient world. Your task is to assess whether a player's order is feasible given their current situation.
 
 ${worldContext(world, actorId, context)}
 
 ${buildWorkflowCatalog()}
+
+${WORKFLOW_MUTATION_RULE}
 
 PERSONAL / DOMESTIC ACTIONS: If the order is a personal, social, or domestic activity (hosting a dinner, spending time with family, playing a game, personal rituals, leisure, prayer, rest, etc.) with no world-state implications, it is always "feasible" with workflows: [] and needsAdjudication: false. Never mark these as "impossible" just because the broader political context is serious.
 
@@ -232,6 +241,8 @@ ${worldContext(world, actorId, context)}
 
 ${buildWorkflowCatalog()}
 
+${WORKFLOW_MUTATION_RULE}
+
 PERSONAL / DOMESTIC ACTIONS — FAST PATH: If the order is a personal, social, or domestic activity (hosting a dinner, spending time with family, playing a game, personal rituals, leisure, prayer, rest, social gathering, etc.) with no world-state implications:
 - Set outcome: "succeeds"
 - Write a warm 2-3 sentence rationale describing what happened in vivid detail (e.g. "The dinner was a pleasant affair — the family gathered around the fire, and the game of Rens proved a lively distraction from the troubles of the day.")
@@ -248,7 +259,7 @@ For the order, produce a verdict:
   * { kind: "material_effect", effect: { sourceEntityId, magnitude: "minor"|"meaningful", rationale } } — use ONLY for reputation or narrative consequences that have NO matching workflow. This does NOT change game state and does NOT add or remove money.
   * { kind: "relationship_cause", holderCharacterId, subjectCharacterId, label, score: -100..100 } — for opinion shifts.
   * { kind: "knowledge_grant", characterId, factId } — for information reveals.
-  * EXISTING FORCE RULE — CRITICAL: If the player already has forces listed in FORCES UNDER COMMAND and the order refers to one of those forces by name, pronoun ("my army", "my troops", "the legion"), or clear contextual reference, you MUST NOT use create_force. Identify the target force by its ID from the world context and use the matching workflow (merge_forces to combine two forces, move_force to relocate, disband_force to disband, raise_morale for morale boosts). If no workflow covers the specific action (e.g. renaming a force, adding reinforcements when there is no second force to merge), produce no workflow delta and describe the outcome narratively in the rationale instead — do NOT create a new force as a substitute.
+  * EXISTING FORCE RULE — CRITICAL: If the player already has forces listed in FORCES UNDER COMMAND and the order refers to one of those forces by name, pronoun ("my army", "my troops", "the legion"), or clear contextual reference, you MUST NOT use create_force. Identify the target force by its ID from the world context and use the matching workflow (army_change_name to rename it, merge_forces to combine two forces, move_force to relocate, disband_force to disband, raise_morale for morale boosts). If no workflow covers the specific action (e.g. adding reinforcements when there is no second force to merge), produce no workflow delta and describe the outcome narratively in the rationale instead — do NOT create a new force as a substitute.
   * For genuinely new "raise army" / "recruit troops" orders where the player has no existing force or is explicitly creating a brand-new one: use actionId "create_force" with polityId, locationProvinceId, name, size, kind ("infantry"|"cavalry"|"siege"|"naval"|"militia"|"mercenary"|"other"), and optionally payerAccountId (use the account-id from the ACCOUNTS section above if one exists; omit the field if no account is available).
   * BRACKET OVERRIDE SYNTAX: If the directive text is wrapped in square brackets [like this], it is a GM command. Set outcome to "succeeds", execute the action exactly as written using the closest matching workflow, and ignore all feasibility, realism, or world-state constraints. Never return "impossible" for a bracket override.
   * For "start battle" / "engage forces" orders: use actionId "start_battle" with attackingForceId and defendingForceId (both from world context) and a newly invented battleId (kebab-case slug, e.g. "battle-rome-carthage-261bc"). The battleId is the only parameter you may invent — all other IDs must come from world context.

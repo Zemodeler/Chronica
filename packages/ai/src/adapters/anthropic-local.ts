@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { AiOperation, AiTier } from "@chronica/shared";
 import type { AiAdapter, AiCallResult } from "../adapter";
+import { getConfiguredApiKey, getSelectedLocalAiModel } from "../local-key-selection";
 
 // Operations that must return raw JSON — we use an assistant prefill of "{" to
 // prevent the model from emitting prose preamble before the JSON object.
@@ -44,6 +45,8 @@ const STANDARD_TIER_OPERATIONS = new Set<AiOperation>([
 ]);
 
 function resolveModel(operation: AiOperation): string {
+  const selectedModel = getSelectedLocalAiModel("anthropic");
+  if (selectedModel !== null) return selectedModel;
   const tier: AiTier = STANDARD_TIER_OPERATIONS.has(operation) ? "standard" : "basic";
   return TIER_MODELS[tier];
 }
@@ -53,7 +56,7 @@ export function createAnthropicLocalAdapter(): AiAdapter {
 
   function getClient(): Anthropic {
     if (!client) {
-      client = new Anthropic();
+      client = new Anthropic({ apiKey: getConfiguredApiKey("anthropic") });
     }
     return client;
   }

@@ -17,7 +17,7 @@ import { cookies, headers } from "next/headers";
 import { randomUUID } from "node:crypto";
 import { getAuthentication, isAuthenticationConfigured } from "../lib/authentication";
 import { gameRepository } from "../lib/game-repository";
-import { createGift, redeemGift as redeemAccountGift, revokeGift, saveAccountProfile } from "../lib/account-service";
+import { createGift, redeemGift as redeemAccountGift, revokeGift, saveAccountProfile, selectDeveloperLocalAiConfiguration } from "../lib/account-service";
 import { confirmDeclaredCharacter, declareCharacter, reviseDeclaredCharacter } from "../lib/character-service";
 
 const textValue = (formData: FormData, key: string): string => {
@@ -198,6 +198,13 @@ export async function createDeveloperGift(formData: FormData): Promise<never> {
 export async function revokeDeveloperGift(formData: FormData): Promise<never> {
   const changed = await revokeGift(await headers(), textValue(formData, "giftCodeId"), textValue(formData, "auditReason"));
   redirect(`/account?developer=${changed ? "revoked" : "reauth"}#developer-status`);
+}
+
+export async function selectLocalAiProvider(formData: FormData): Promise<never> {
+  const value = textValue(formData, "provider");
+  if (value !== "openai" && value !== "anthropic") redirect("/account?aiProvider=invalid#ai-provider-status");
+  const result = await selectDeveloperLocalAiConfiguration(await headers(), value, textValue(formData, "model"));
+  redirect(`/account?aiProvider=${result}#ai-provider-status`);
 }
 
 export async function signOut(): Promise<never> {

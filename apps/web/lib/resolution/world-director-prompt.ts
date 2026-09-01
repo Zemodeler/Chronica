@@ -1,7 +1,7 @@
 import "server-only";
 
 import { buildWorkflowCatalog, type WorldState, type ConsolidatedProposalPackage } from "@chronica/shared";
-import { buildPlayerResolutionContext, type ResolutionPlayerContext } from "./prompts";
+import { buildPlayerResolutionContext, WORKFLOW_MUTATION_RULE, type ResolutionPlayerContext } from "./prompts";
 
 // World Director prompt builder.
 //
@@ -89,6 +89,8 @@ ${buildPlayerResolutionContext(world, context)}
 REGISTERED WORKFLOW CATALOG:
 ${buildWorkflowCatalog()}
 
+${WORKFLOW_MUTATION_RULE}
+
 YOUR TASK: For each proposal decide approve/modify/defer/reject. For approved proposals, select the exact registered workflow invocations already proposed for that proposal. You may omit proposed invocations, but must not create, rename, or alter one.
 
 Output schema (return strict JSON { "decisions": [...] }):
@@ -96,7 +98,7 @@ Output schema (return strict JSON { "decisions": [...] }):
 - decision: "approve" | "modify" | "defer" | "reject"
 - rationale: max 400 chars — your reasoning
 - finalWorkflows: array of workflow invocations to actually execute: { "actionId", "actorId", "parameters" }. Use [] to execute nothing for this proposal.
-- chronicleCast: null for non-political proposals; otherwise { "role", "characterId" } for an existing NPC, OR { "role", "newCharacter": { "name", "polityId", "locationProvinceId", "officeId" } } when no existing NPC fits.
+- chronicleCast: null for non-political proposals; otherwise { "role", "characterId" } for an existing NPC, OR { "role", "newCharacter": { "name", "polityId", "locationProvinceId", "officeId" } } when no existing NPC fits. "role" MUST be exactly one of: "supporter", "opponent", "spokesperson", "presiding_official", "witness", "negotiator".
 
 RULES:
 1. Aim for at most 12 total Chronicle-worthy outcomes (high-salience approved proposals) per turn.
@@ -107,9 +109,9 @@ RULES:
 6. All actor IDs in finalWorkflows must exist in world state.
 7. In conflicts between proposals, prefer the higher-salience one unless the lower-salience is more narratively grounded.
 8. Do not approve both sides of a conflict without explicitly resolving it in the rationale.
-9. finalWorkflows must be a subset of that proposal's listed workflows, with exactly the same actionId, actorId, and parameters. Never invent an actionId; use [] when no listed workflow fits.
+9. finalWorkflows must be a subset of that proposal's listed workflows, with exactly the same actionId, actorId, and parameters. Never invent an actionId. An approved proposal that makes a world-state change must retain the matching proposed workflow; if none was proposed, defer or reject it instead of treating the change as narrative-only.
 10. An approved Character Director proposal is recorded as a Chronicle character event even when its finalWorkflows array is empty. Approve it when the character development itself is grounded and meaningful.
-11. Every approved political, deliberative, diplomatic, or institutional proposal needs a chronicleCast. Select a living NPC from AVAILABLE CHRONICLE CAST whenever one plausibly fits. A senate debate should have a named supporter, opponent, spokesperson, or presiding official — never an anonymous institution.
+11. Every approved political, deliberative, diplomatic, or institutional proposal needs a chronicleCast. Select a living NPC from AVAILABLE CHRONICLE CAST whenever one plausibly fits. A senate debate should have a named supporter, opponent, spokesperson, or presiding official — never an anonymous institution. Use only the six exact role tokens in the output schema; never write a descriptive role or title. For example, an envoy is "negotiator", an observer is "witness", and a military or political advocate is "supporter" or "spokesperson" as appropriate.
 12. If no existing NPC plausibly fits, provide newCharacter with a proper period-appropriate name and a real polity and province ID. The pipeline will automatically invoke the guarded create_world_character workflow; do not put that creation in finalWorkflows. Introduce at most one NPC per proposal and only where the event genuinely needs a human voice.
 13. For a newCharacter, officeId must be null unless a real office ID is known. Never fabricate an office ID.
 

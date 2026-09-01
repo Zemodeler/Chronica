@@ -1,7 +1,7 @@
 import "server-only";
 
 import { buildWorkflowCatalog, type WorldState, type Verdict } from "@chronica/shared";
-import { buildPlayerResolutionContext, type ResolutionPlayerContext } from "./prompts";
+import { buildPlayerResolutionContext, WORKFLOW_MUTATION_RULE, type ResolutionPlayerContext } from "./prompts";
 
 // Reaction Director prompt builder.
 //
@@ -87,6 +87,8 @@ ${buildPlayerResolutionContext(world, context)}
 REGISTERED WORKFLOW CATALOG:
 ${buildWorkflowCatalog()}
 
+${WORKFLOW_MUTATION_RULE}
+
 YOUR TASK: Propose reactions from nearby entities to the player's resolved actions. Each reaction must be caused by something the player actually did (use causalVerdictId). Reactions must be plausible — entities can only react to information they could realistically have received.
 
 Output schema (return strict JSON { "proposals": [...] }):
@@ -105,7 +107,7 @@ RULES:
 4. Each reaction must have at least a brief rationale grounded in the verdict above.
 5. Do not invent new factions, armies, or settlements — use IDs from world state only.
 6. A reaction of salience 7–10 deserves Chronicle mention; lower is background.
-7. proposedWorkflows may use only exact actionIds from the registered workflow catalog. Use [] when no registered workflow fits.
+7. proposedWorkflows may use only exact actionIds from the registered workflow catalog. Use [] only for a reaction with no world-state mutation, or a clearly identified novel action that cannot be represented by a registered workflow.
 
 Respond with strict JSON only: { "proposals": [...] }`;
 }
