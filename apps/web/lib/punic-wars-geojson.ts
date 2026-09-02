@@ -224,6 +224,80 @@ const GALLIC_SITES: readonly HistoricalSite[] = [
   { id: "punic-gaul-cadurci", name: "Cadurci", coordinate: [1.44, 44.45] },
 ];
 
+// These are territorial reconstructions rather than exact frontiers.  They
+// deliberately use broad Iron Age community areas, while keeping every base
+// coastline and external border intact.
+const ILLYRIAN_SITES: readonly HistoricalSite[] = [
+  { id: "punic-illyria-histri", name: "Histri", coordinate: [13.85, 45.10] },
+  { id: "punic-illyria-iapodes", name: "Iapodes", coordinate: [15.85, 44.90] },
+  { id: "punic-illyria-liburni", name: "Liburni", coordinate: [15.30, 44.10] },
+  { id: "punic-illyria-delmatae", name: "Delmatae", coordinate: [16.70, 43.60] },
+  { id: "punic-illyria-daorsi", name: "Daorsi", coordinate: [17.90, 43.35] },
+  { id: "punic-illyria-autariatae", name: "Autariatae", coordinate: [18.60, 43.55] },
+  { id: "punic-illyria-pirustae", name: "Pirustae", coordinate: [19.80, 42.00] },
+  { id: "punic-illyria-ardiaei", name: "Ardiaei", coordinate: [19.00, 42.30] },
+  { id: "punic-illyria-docleatae", name: "Docleatae", coordinate: [19.30, 42.60] },
+  { id: "punic-illyria-labeatae", name: "Labeatae", coordinate: [19.50, 42.20] },
+  { id: "punic-illyria-taulantii", name: "Taulantii", coordinate: [19.50, 41.30] },
+  { id: "punic-illyria-parthini", name: "Parthini", coordinate: [20.10, 41.30] },
+  { id: "punic-illyria-dassaretii", name: "Dassaretii", coordinate: [20.70, 40.70] },
+  { id: "punic-illyria-dardani", name: "Dardani", coordinate: [21.00, 42.70] },
+  { id: "punic-illyria-breuci", name: "Breuci", coordinate: [18.70, 45.10] },
+  { id: "punic-illyria-pannonii", name: "Pannonii", coordinate: [17.70, 45.50] },
+];
+
+const THRACIAN_SITES: readonly HistoricalSite[] = [
+  { id: "punic-thrace-odrysians", name: "Odrysians", coordinate: [26.30, 42.50] },
+  { id: "punic-thrace-bessi", name: "Bessi", coordinate: [24.70, 41.70] },
+  { id: "punic-thrace-maedi", name: "Maedi", coordinate: [23.20, 41.80] },
+  { id: "punic-thrace-dentheletae", name: "Dentheletae", coordinate: [23.40, 42.50] },
+  { id: "punic-thrace-serdi", name: "Serdi", coordinate: [23.30, 42.70] },
+  { id: "punic-thrace-triballi", name: "Triballi", coordinate: [22.10, 44.00] },
+  { id: "punic-thrace-moesi", name: "Moesi", coordinate: [23.00, 43.80] },
+  { id: "punic-thrace-getae", name: "Getae", coordinate: [26.00, 44.60] },
+  { id: "punic-thrace-crobyzi", name: "Crobyzi", coordinate: [28.00, 44.30] },
+  { id: "punic-thrace-tyrizagetae", name: "Tyrizagetae", coordinate: [28.40, 45.00] },
+  { id: "punic-thrace-daci", name: "Daci", coordinate: [25.60, 46.20] },
+  { id: "punic-thrace-carpi", name: "Carpi", coordinate: [27.60, 47.20] },
+  { id: "punic-thrace-costoboci", name: "Costoboci", coordinate: [25.00, 47.30] },
+  { id: "punic-thrace-buri", name: "Buri", coordinate: [22.80, 45.30] },
+  { id: "punic-thrace-scordisci", name: "Scordisci", coordinate: [21.40, 44.70] },
+];
+
+const BELGIC_SITES: readonly HistoricalSite[] = [
+  { id: "punic-belgica-morini", name: "Morini", coordinate: [2.20, 50.80] },
+  { id: "punic-belgica-menapii", name: "Menapii", coordinate: [3.20, 51.00] },
+  { id: "punic-belgica-nervii", name: "Nervii", coordinate: [4.40, 50.40] },
+  { id: "punic-belgica-aduatuci", name: "Aduatuci", coordinate: [5.10, 50.90] },
+  { id: "punic-belgica-eburones", name: "Eburones", coordinate: [5.50, 50.70] },
+];
+
+const LOW_COUNTRIES_SITES: readonly HistoricalSite[] = [
+  { id: "punic-low-countries-frisiavones", name: "Frisiavones", coordinate: [4.40, 51.60] },
+  { id: "punic-low-countries-cananefates", name: "Cananefates", coordinate: [4.50, 52.10] },
+  { id: "punic-low-countries-batavi", name: "Batavi", coordinate: [5.80, 51.90] },
+  { id: "punic-low-countries-chamavi", name: "Chamavi", coordinate: [6.40, 52.30] },
+  { id: "punic-low-countries-tubantes", name: "Tubantes", coordinate: [6.60, 52.30] },
+  { id: "punic-low-countries-frisii", name: "Frisii", coordinate: [5.50, 53.20] },
+];
+
+const GERMANIC_SITES: readonly HistoricalSite[] = [
+  { id: "punic-germania-cimbri", name: "Cimbri", coordinate: [9.80, 54.80] },
+  { id: "punic-germania-teutones", name: "Teutones", coordinate: [10.10, 54.00] },
+  { id: "punic-germania-chauci", name: "Chauci", coordinate: [8.50, 53.20] },
+  { id: "punic-germania-bructeri", name: "Bructeri", coordinate: [7.50, 52.00] },
+  { id: "punic-germania-cherusci", name: "Cherusci", coordinate: [10.50, 52.00] },
+  { id: "punic-germania-langobardi", name: "Langobardi", coordinate: [11.60, 52.70] },
+  { id: "punic-germania-semnones", name: "Semnones", coordinate: [13.00, 52.50] },
+  { id: "punic-germania-chatti", name: "Chatti", coordinate: [9.10, 50.80] },
+  { id: "punic-germania-hermunduri", name: "Hermunduri", coordinate: [11.50, 50.80] },
+  { id: "punic-germania-suebi", name: "Suebi", coordinate: [10.50, 49.80] },
+  { id: "punic-germania-ubii", name: "Ubii", coordinate: [6.80, 50.90] },
+  { id: "punic-germania-treveri", name: "Treveri", coordinate: [6.50, 49.70] },
+  { id: "punic-germania-vindelici", name: "Vindelici", coordinate: [10.80, 48.40] },
+  { id: "punic-germania-boii", name: "Boii of the Danube", coordinate: [12.00, 48.80] },
+];
+
 const IBERIAN_SITES: readonly HistoricalSite[] = [
   { id: "punic-iberia-gallaeci", name: "Gallaeci", coordinate: [-8.41, 42.88] },
   { id: "punic-iberia-astures", name: "Astures", coordinate: [-5.85, 43.36] },
@@ -287,11 +361,21 @@ const italianExcludedIds = new Set(["ita-72843720b81376294924159", ...base.featu
 const italySourceIds = new Set([...provinceIds(base, "ita-")].filter((id) => !italianExcludedIds.has(id)));
 const franceSourceIds = provinceIds(base, "fra-", ["fra-19338628b22604203385446"]);
 const spainSourceIds = provinceIds(base, "esp-", ["esp-25490228b84620027724461", "esp-25490228b18225280299410", "esp-25490228b48808997991554", "esp-25490228b26609846683583"]);
+const illyriaSourceIds = new Set(["alb-", "mne-", "hrv-", "bih-", "svn-", "xkx-"].flatMap((prefix) => [...provinceIds(base, prefix)]));
+const thraceSourceIds = new Set(["bgr-", "rou-", "srb-"].flatMap((prefix) => [...provinceIds(base, prefix)]));
+const belgiumSourceIds = provinceIds(base, "bel-");
+const netherlandsSourceIds = provinceIds(base, "nld-");
+const germaniaSourceIds = provinceIds(base, "deu-");
 
 const withItaly = replaceProvinceGroup(base, italySourceIds, ITALIAN_SITES);
 const withGaul = replaceProvinceGroup(withItaly, franceSourceIds, GALLIC_SITES);
 const withIberia = replaceProvinceGroup(withGaul, spainSourceIds, IBERIAN_SITES);
-const withEngland = replaceProvinceGroup(withIberia, new Set(["gbr-14339913b95766344400054"]), ENGLAND_SITES);
+const withIllyria = replaceProvinceGroup(withIberia, illyriaSourceIds, ILLYRIAN_SITES);
+const withThrace = replaceProvinceGroup(withIllyria, thraceSourceIds, THRACIAN_SITES);
+const withBelgica = replaceProvinceGroup(withThrace, belgiumSourceIds, BELGIC_SITES);
+const withLowCountries = replaceProvinceGroup(withBelgica, netherlandsSourceIds, LOW_COUNTRIES_SITES);
+const withGermania = replaceProvinceGroup(withLowCountries, germaniaSourceIds, GERMANIC_SITES);
+const withEngland = replaceProvinceGroup(withGermania, new Set(["gbr-14339913b95766344400054"]), ENGLAND_SITES);
 const withScotland = replaceProvinceGroup(withEngland, new Set(["gbr-14339913b23556801435424"]), SCOTLAND_SITES);
 const withWales = replaceProvinceGroup(withScotland, new Set(["gbr-14339913b89763821047858"]), WALES_SITES);
 
@@ -370,6 +454,11 @@ export const PUNIC_WARS_REGION_COUNTS = {
   italy: ITALIAN_SITES.length,
   gaul: GALLIC_SITES.length,
   iberia: IBERIAN_SITES.length,
+  illyria: ILLYRIAN_SITES.length,
+  thrace: THRACIAN_SITES.length,
+  belgica: BELGIC_SITES.length,
+  lowCountries: LOW_COUNTRIES_SITES.length,
+  germania: GERMANIC_SITES.length,
   england: ENGLAND_SITES.length,
   scotland: SCOTLAND_SITES.length,
   wales: WALES_SITES.length,

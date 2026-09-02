@@ -15,6 +15,16 @@ Natural Earth data is public domain. Source pages:
 
 `roman-spqr-banner.svg` is the Roman SPQR banner by Ssolbergj, downloaded from Wikimedia Commons and used under CC BY 3.0: https://commons.wikimedia.org/wiki/File:Roman_SPQR_banner.svg
 
+## Army-standard artwork
+
+The `*-standard.svg` assets are original vector reconstructions for the map.
+Ancient cloth flags almost never survive, so these use period-attested military
+and civic motifs rather than claiming to reproduce an individual surviving
+banner: early Roman animal *signa* (wolf and boar), Punic Tanit, horse, palm,
+and celestial imagery, Hellenic and Macedonian civic emblems, and Gallic boar
+and carnyx standards. Their catalogue descriptions identify the underlying
+motif where the flag form itself is reconstructed.
+
 These are source assets, not a ready-to-load Chronica scenario. Before use in
 the game, derive the required `region` features and stable Chronica IDs from
 the country geometry; do not use this country layer as an authoritative
