@@ -1,13 +1,17 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo, type PointerEvent } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef, type PointerEvent } from "react";
 import { DynamicMapOverlaySchema, GeoJsonMapSchema, type GeoJsonMap, type DynamicMapOverlay, type GamePhase } from "@chronica/shared";
 
 // Module-level cache provides geometry immediately during soft navigation; a
 // fresh request below then replaces it if the active scenario map was revised.
 const _geoJsonCache = new Map<string, GeoJsonMap>();
 import { GeoMap, type ForceFlagAsset, type ForceMapDetails } from "./geo-map";
-import { MapViewport, type ViewportTransform } from "./map-viewport";
+import { MapViewport, type ViewportTransform, type MapViewportHandle, type DrawCanvasFn } from "./map-viewport";
+import { computeViewBox } from "./geo-projection";
+import { prepareStaticWorldGeometry } from "./world-geometry";
+import { derivePoliticalMapState, deriveWarBorderPaths, type PoliticalOverlayInput } from "./political-geometry";
+import { drawTerrainToCanvas } from "./map-canvas-terrain";
 import { MapTooltip } from "./map-tooltip";
 import { MapControls } from "./map-controls";
 import { CharacterPanel, type CharacterPanelProps } from "./character-panel";
@@ -140,6 +144,75 @@ export function GameShell({
   const [coins, setCoins] = useState<string | null>(null);
   const [chronicleOpen, setChronicleOpen] = useState(false);
   const zoomBand = deriveZoomBand(viewport.scale);
+
+  // --- Geometry shared between canvas terrain layer and lightweight SVG overlay ---
+
+  const viewBox = useMemo(() => (geoJson ? computeViewBox(geoJson) : ""), [geoJson]);
+  const world = useMemo(() => (geoJson ? prepareStaticWorldGeometry(geoJson) : null), [geoJson]);
+
+  // Stable identity key: only recompute political state when ownership actually changes
+  const politicsKey = useMemo(
+    () => overlay === null
+      ? ""
+      : `${overlay.polities.map((p) => `${p.polityId}:${p.name}`).sort().join("|")}#${overlay.provinces.map((p) => `${p.provinceId}:${p.controllerPolityId ?? ""}`).sort().join("|")}`,
+    [overlay],
+  );
+  const politicalInput = useMemo<PoliticalOverlayInput | null>(
+    () => overlay === null ? null : ({ polities: overlay.polities, provinces: overlay.provinces }),
+    [politicsKey], // intentional: recompute only when ownership changes, not on every overlay tick
+  );
+  const political = useMemo(
+    () => (world ? derivePoliticalMapState(world, politicalInput) : null),
+    [world, politicalInput],
+  );
+  const countryBorderPath = useMemo(
+    () => (political ? deriveWarBorderPaths(political, overlay?.conflicts.wars ?? []) : ""),
+    [political, overlay?.conflicts.wars],
+  );
+
+  // Raster images for the canvas — loaded once per URL, trigger a redraw on load
+  const mapViewportRef = useRef<MapViewportHandle>(null);
+  const baseImageRef = useRef<HTMLImageElement | null>(null);
+  const detailImageRef = useRef<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    if (!baseImageUrl) { baseImageRef.current = null; return; }
+    const img = new Image();
+    img.onload = () => { baseImageRef.current = img; mapViewportRef.current?.redrawCanvas(); };
+    img.src = baseImageUrl;
+    return () => { img.onload = null; };
+  }, [baseImageUrl]);
+
+  useEffect(() => {
+    if (!detailImageUrl) { detailImageRef.current = null; return; }
+    const img = new Image();
+    img.onload = () => { detailImageRef.current = img; mapViewportRef.current?.redrawCanvas(); };
+    img.src = detailImageUrl;
+    return () => { img.onload = null; };
+  }, [detailImageUrl]);
+
+  // The draw function reference is updated during render (safe ref mutation) so
+  // the RAF inside MapViewport always calls the latest version without needing
+  // the callback itself to change (which would cause extra renders).
+  const drawCanvasFnRef = useRef<DrawCanvasFn>(() => { /* awaiting world data */ });
+  if (world && political && viewBox) {
+    const w = world; const p = political; const vb = viewBox; const cbp = countryBorderPath;
+    drawCanvasFnRef.current = (canvas, transform, containerW, containerH) => {
+      drawTerrainToCanvas(canvas, containerW, containerH, transform, vb, w, p, cbp, baseImageRef.current, detailImageRef.current);
+    };
+  }
+
+  // Stable callback — MapViewport stores this in a ref internally, so it never
+  // triggers re-renders even when drawCanvasFnRef.current changes.
+  const onDrawCanvas = useCallback<DrawCanvasFn>((canvas, transform, w, h) => {
+    drawCanvasFnRef.current(canvas, transform, w, h);
+  }, []);
+
+  // Trigger canvas redraw whenever the underlying data changes (new overlay, etc.)
+  useEffect(() => {
+    mapViewportRef.current?.redrawCanvas();
+  }, [world, political, countryBorderPath]);
+
   const allianceLabels = useMemo(() => {
     const names = new Map(overlay?.polities.map((polity) => [polity.polityId, polity.name]) ?? []);
     return (overlay?.politicalRelations ?? []).map((relation) => `${names.get(relation.leaderPolityId) ?? relation.leaderPolityId} allied with ${names.get(relation.memberPolityId) ?? relation.memberPolityId}`);
@@ -325,23 +398,25 @@ export function GameShell({
       </header>
       <div className="game-shell">
         <div className="game-shell-map">
-          <MapViewport transform={viewport} onTransformChange={setViewport}>
-            <GeoMap
-              geoJson={geoJson}
-              overlay={overlay}
-              selectedProvinceId={selectedProvinceId}
-              zoomBand={zoomBand}
-              scale={viewport.scale}
-              tx={viewport.tx}
-              ty={viewport.ty}
-              baseImageUrl={baseImageUrl}
-              detailImageUrl={detailImageUrl}
-              forceFlagUrls={forceFlagUrls}
-              onProvinceHover={handleProvinceHover}
-              onProvinceClick={handleProvinceClick}
-              onForceClick={setSelectedForce}
-              onMapPointerDown={clearSelectedForce}
-            />
+          <MapViewport ref={mapViewportRef} transform={viewport} onTransformChange={setViewport} onDrawCanvas={onDrawCanvas}>
+            {world && political && (
+              <GeoMap
+                world={world}
+                political={political}
+                viewBox={viewBox}
+                overlay={overlay}
+                selectedProvinceId={selectedProvinceId}
+                zoomBand={zoomBand}
+                scale={viewport.scale}
+                tx={viewport.tx}
+                ty={viewport.ty}
+                forceFlagUrls={forceFlagUrls}
+                onProvinceHover={handleProvinceHover}
+                onProvinceClick={handleProvinceClick}
+                onForceClick={setSelectedForce}
+                onMapPointerDown={clearSelectedForce}
+              />
+            )}
           </MapViewport>
           {selectedForce && <aside className="map-force-details" aria-label={`${selectedForce.name} details`}>
             <button type="button" className="map-force-details-close" onClick={() => setSelectedForce(null)} aria-label="Close army details">×</button>
