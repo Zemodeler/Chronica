@@ -11,6 +11,14 @@ const map: GeoJsonMap = { type: "FeatureCollection", features: [
   { type: "Feature", id: "island", geometry: { type: "Polygon", coordinates: [[[20, 0], [21, 0], [21, 1], [20, 1], [20, 0]]] }, properties: { kind: "province", name: "Island" } },
 ] };
 function overlay(provinces: DynamicMapOverlay["provinces"]): DynamicMapOverlay { return { revision: 1, polities: [{ polityId: "rome", name: "Roman Republic" }], politicalRelations: [], provinces, settlements: [], forces: [], conflicts: { battles: [], sieges: [], wars: [] } }; }
+function expectMutedHsl(colour: string) {
+  const [, saturation, lightness] = colour.match(/^hsl\([^ ]+ ([\d.]+)% ([\d.]+)%\)$/) ?? [];
+  expect(colour).toMatch(/^hsl\(/);
+  expect(Number(saturation)).toBeGreaterThanOrEqual(34);
+  expect(Number(saturation)).toBeLessThanOrEqual(65);
+  expect(Number(lightness)).toBeGreaterThanOrEqual(36);
+  expect(Number(lightness)).toBeLessThanOrEqual(62);
+}
 
 describe("political map derivation", () => {
   it("uses a saturated red for Roman territory", () => {
@@ -23,12 +31,19 @@ describe("political map derivation", () => {
   it("gives minor polities distinct shades within their cultural palette", () => {
     const arverni = politicalColourFromId("gaul-arverni");
     const aedui = politicalColourFromId("gaul-aedui");
-    expect(arverni).toMatch(/^hsl\((?:10\d|1[1-5]\d|16[01])(?:\.\d+)? /);
-    expect(aedui).toMatch(/^hsl\((?:10\d|1[1-5]\d|16[01])(?:\.\d+)? /);
+    expectMutedHsl(arverni);
+    expectMutedHsl(aedui);
     expect(aedui).not.toBe(arverni);
-    expect(politicalColourFromId("boii")).toMatch(/^hsl\((?:10\d|1[1-5]\d|16[01])(?:\.\d+)? /);
-    expect(politicalColourFromId("iberia-celtiberians")).toMatch(/^hsl\((?:\d|[1-4]\d|3[3-5]\d)(?:\.\d+)? /);
-    expect(politicalColourFromId("germania-suebi")).toMatch(/^hsl\((?:[5-9]\d|10\d)(?:\.\d+)? /);
+    expectMutedHsl(politicalColourFromId("boii"));
+    expectMutedHsl(politicalColourFromId("iberia-celtiberians"));
+    expectMutedHsl(politicalColourFromId("germania-suebi"));
+  });
+  it("gives Hungarian, Czech, and Polish polities distinct muted lineage shades", () => {
+    const hungarian = politicalColourFromId("kingdom-of-hungary");
+    const czech = politicalColourFromId("kingdom-of-bohemia");
+    const polish = politicalColourFromId("kingdom-of-poland");
+    expect(new Set([hungarian, czech, polish]).size).toBe(3);
+    for (const colour of [hungarian, czech, polish]) expectMutedHsl(colour);
   });
   it("keeps major nations visually distinct from their cultural group", () => {
     expect(politicalColourFromId("macedon")).toBe("#355f91");
