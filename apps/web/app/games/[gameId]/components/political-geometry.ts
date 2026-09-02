@@ -37,8 +37,17 @@ function weightedQuantile(samples: readonly { value: number; weight: number }[],
 const ROMAN_REPUBLIC_RED = "#b21f2d";
 const CARTHAGINIAN_PURPLE_BLUE = "#2e245f";
 const SYRACUSAN_EARTH = "#80512f";
-export function politicalColourFromId(polityId: string) { return polityId === "rome" ? ROMAN_REPUBLIC_RED : polityId === "carthage" ? CARTHAGINIAN_PURPLE_BLUE : polityId === "syracuse" ? SYRACUSAN_EARTH : polityColorFromId(polityId); }
-export function politicalColourWithAlpha(polityId: string, alpha: number) { const colour = polityId === "rome" ? ROMAN_REPUBLIC_RED : polityId === "carthage" ? CARTHAGINIAN_PURPLE_BLUE : polityId === "syracuse" ? SYRACUSAN_EARTH : null; return colour === null ? polityColorWithAlpha(polityId, alpha) : `${colour}${Math.round(alpha * 255).toString(16).padStart(2, "0")}`; }
+const MACEDONIAN_BLUE = "#355f91";
+const PTOLEMAIC_GOLD = "#bd9136";
+const MAJOR_POLITY_COLOURS: Readonly<Record<string, string>> = {
+  rome: ROMAN_REPUBLIC_RED,
+  carthage: CARTHAGINIAN_PURPLE_BLUE,
+  syracuse: SYRACUSAN_EARTH,
+  macedon: MACEDONIAN_BLUE,
+  "ptolemaic-cyrenaica": PTOLEMAIC_GOLD,
+};
+export function politicalColourFromId(polityId: string) { return MAJOR_POLITY_COLOURS[polityId] ?? polityColorFromId(polityId); }
+export function politicalColourWithAlpha(polityId: string, alpha: number) { const colour = MAJOR_POLITY_COLOURS[polityId]; return colour === undefined ? polityColorWithAlpha(polityId, alpha) : `${colour}${Math.round(alpha * 255).toString(16).padStart(2, "0")}`; }
 const LABEL_PATH_COVERAGE = .85;
 const MAX_BOUNDARY_SAMPLES = 48;
 const PATH_SAMPLES = 30;
