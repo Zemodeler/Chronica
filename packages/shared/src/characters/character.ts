@@ -7,6 +7,7 @@ import {
   ReservedPowerCategorySchema,
   SignedScoreSchema,
 } from "../material-state";
+import { CharacterMindSchema, NEUTRAL_MIND } from "./mind";
 
 // Characters (docs/08).
 //
@@ -16,6 +17,26 @@ import {
 //
 // Two guardrails are expressed in these shapes rather than left to convention:
 // every number carries the reason it changed, and confirmed death is final.
+
+/**
+ * A dimension a relation cause can move, beyond the flat legacy score
+ * (character-sim phase 2). Directed like the relation itself: A's trust in B
+ * is independent of B's trust in A.
+ */
+export const RelationDimensionSchema = z.enum(["trust", "affection", "fear", "respect", "obligation", "reputation"]);
+export type RelationDimension = z.infer<typeof RelationDimensionSchema>;
+
+export const RelationDimensionScoresSchema = z
+  .object({
+    trust: SignedScoreSchema,
+    affection: SignedScoreSchema,
+    fear: SignedScoreSchema,
+    respect: SignedScoreSchema,
+    obligation: SignedScoreSchema,
+    reputation: SignedScoreSchema,
+  })
+  .partial()
+  .strict();
 
 /** A reason a relation is what it is. "-30: you executed his brother." */
 export const RelationCauseSchema = z
@@ -33,6 +54,14 @@ export const RelationCauseSchema = z
     decayPerYearBps: BasisPointsSchema,
     /** The encounter this came from, once continuity exists. */
     encounterMemoryId: EntityIdSchema.nullable(),
+    /**
+     * Which dimensions this cause moves and by how much (character-sim phase 2).
+     * Optional so every pre-phase-2 cause stays valid: a cause with no
+     * `dimensions` is read as contributing its bare `score` to `affection`
+     * only, and nothing to any other dimension -- the documented legacy
+     * default (packages/shared/src/characters/relationship-dimensions.ts).
+     */
+    dimensions: RelationDimensionScoresSchema.optional(),
   })
   .strict();
 export type RelationCause = z.infer<typeof RelationCauseSchema>;
@@ -137,6 +166,16 @@ export const CharacterSchema = z
 
     relations: z.array(DirectedRelationSchema),
     ambitions: z.array(AmbitionSchema),
+
+    /**
+     * Private psychology (character-sim phase 2). Defaulted to a
+     * structurally-valid but psychologically inert value so an archived
+     * snapshot from before this field existed still parses; a properly
+     * role-derived mind is computed by `deriveDefaultMind` at every
+     * character-creation site and by the backfill script, never by this
+     * schema-level default alone.
+     */
+    mind: CharacterMindSchema.default(NEUTRAL_MIND),
 
     /** Named heir, where the succession law uses one. */
     heirCharacterId: EntityIdSchema.nullable(),

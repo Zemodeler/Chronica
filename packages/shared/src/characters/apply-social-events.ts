@@ -2,9 +2,14 @@ import type { WorldState } from "../world/world-state";
 import type { Character, DirectedRelation, RelationCause } from "./character";
 import type { CharacterProfile } from "./character-profile";
 import type { CharacterSocialEvent } from "./social-events";
+import type { SocialLink } from "./relationship-dimensions";
+import type { CharacterBelief } from "./beliefs";
+import { KNOWLEDGE_CHANNEL_DEFAULTS, resolveRecipients } from "./beliefs";
+import { createPressure, refreshPressure, resolvePressure } from "./pressures";
 
 // The single point where a proposed social event becomes canonical world
-// state (character-sim phase 1). Pure and deterministic: given the same
+// state (character-sim phase 1, extended in phase 2 with beliefs, pressure
+// changes, and typed social links). Pure and deterministic: given the same
 // world, the same unapplied events, and the same `atStep`, it always produces
 // the same result -- safe to call from inside turn resolution and safe to
 // replay.
@@ -42,9 +47,9 @@ function withAppendedCause(character: Character, targetCharacterId: string, caus
 /**
  * Validates and applies a batch of unapplied `CharacterSocialEvent`s against
  * `world`. Never touches `material`, `officeId`, territories, or any field
- * outside `characters`/`continuity`/`encounters` -- the event schema itself
- * has no field to carry such an effect, so this is structural, not just a
- * runtime check.
+ * outside `characters`/`continuity`/`encounters`/`characterBeliefs`/
+ * `characterPressures`/`socialLinks` -- the event schema itself has no field
+ * to carry any other effect, so this is structural, not just a runtime check.
  */
 export function applySocialEvents(
   world: WorldState,
@@ -52,8 +57,11 @@ export function applySocialEvents(
   atStep: number,
   turnId: string,
 ): ApplySocialEventsOutcome {
-  let characters = world.characters;
+  let characters: readonly Character[] = world.characters;
   let encounters = world.encounters;
+  let characterBeliefs: readonly CharacterBelief[] = world.characterBeliefs;
+  let characterPressures: readonly WorldState["characterPressures"][number][] = world.characterPressures;
+  let socialLinks: readonly SocialLink[] = world.socialLinks;
   const appliedIds: string[] = [];
   const rejectedIds: { id: string; reason: string }[] = [];
   const introducedProfiles: CharacterProfile[] = [];
@@ -84,6 +92,27 @@ export function applySocialEvents(
       continue;
     }
 
+    // Beliefs: every explicit recipient must be a participant/witness of this
+    // event -- a proposal cannot grant knowledge to someone with no plausible
+    // connection to it.
+    const eligibleBeliefRecipients = new Set([...event.participantCharacterIds, ...event.knownByCharacterIds]);
+    const invalidBelief = event.proposedBeliefs.find((belief) =>
+      belief.explicitRecipientCharacterIds.some((id) => !eligibleBeliefRecipients.has(id) && id !== introducing?.id),
+    );
+    if (invalidBelief !== undefined) {
+      rejectedIds.push({ id: event.id, reason: "Belief proposal names a recipient with no connection to this event." });
+      continue;
+    }
+
+    // Pressure changes: only ever about a known participant, never a bystander.
+    const invalidPressureChange = event.pressureChanges.find(
+      (change) => !knownCharacterIds.has(change.characterId) && change.characterId !== introducing?.id,
+    );
+    if (invalidPressureChange !== undefined) {
+      rejectedIds.push({ id: event.id, reason: "Pressure change references an unknown character." });
+      continue;
+    }
+
     // Discovery: append the introduced character (idempotent by id).
     if (introducing !== null && !knownCharacterIds.has(introducing.id)) {
       characters = [...characters, introducing];
@@ -107,10 +136,104 @@ export function applySocialEvents(
         occurredAtStep: atStep,
         decayPerYearBps: cause.decayPerYearBps,
         encounterMemoryId: event.id,
+        ...(cause.dimensions !== undefined ? { dimensions: cause.dimensions } : {}),
       };
       characters = characters.map((c) =>
         c.id === subject.id ? withAppendedCause(c, cause.targetCharacterId, relationCause) : c,
       );
+
+      if (cause.socialLinkKind !== undefined) {
+        const alreadyLinked = socialLinks.some((link) =>
+          link.subjectCharacterId === cause.subjectCharacterId
+          && link.targetCharacterId === cause.targetCharacterId
+          && link.kind === cause.socialLinkKind,
+        );
+        if (!alreadyLinked) {
+          socialLinks = [...socialLinks, {
+            id: `${event.id}:link:${cause.subjectCharacterId}:${cause.targetCharacterId}:${cause.socialLinkKind}`,
+            subjectCharacterId: cause.subjectCharacterId,
+            targetCharacterId: cause.targetCharacterId,
+            kind: cause.socialLinkKind,
+            sourceEventId: event.id,
+            createdAtStep: atStep,
+            visibility: event.visibility,
+          }];
+        }
+      }
+    }
+
+    // Beliefs: resolve recipients per channel and grant/reinforce a belief for each.
+    for (const [beliefIndex, beliefProposal] of event.proposedBeliefs.entries()) {
+      const recipients = resolveRecipients({
+        channel: beliefProposal.channel,
+        participantCharacterIds: event.participantCharacterIds,
+        witnessCharacterIds: event.knownByCharacterIds,
+        sourceCharacterId: event.participantCharacterIds[0] ?? null,
+        sourceSocialLinkTargetIds: [],
+        explicitRecipientIds: beliefProposal.explicitRecipientCharacterIds,
+      });
+      const defaults = KNOWLEDGE_CHANNEL_DEFAULTS[beliefProposal.channel];
+      for (const holderCharacterId of recipients) {
+        const id = `${event.id}:belief:${beliefIndex}:${holderCharacterId}`;
+        const existing = characterBeliefs.find((b) =>
+          b.holderCharacterId === holderCharacterId && b.status === "active"
+          && b.claim === beliefProposal.claim && b.subjectEntityId === beliefProposal.subjectEntityId,
+        );
+        if (existing !== undefined) {
+          const confidence = Math.max(0, Math.min(100, beliefProposal.confidenceOverride ?? defaults.defaultConfidence));
+          characterBeliefs = characterBeliefs.map((b) =>
+            b.id === existing.id ? { ...b, confidence: Math.max(0, Math.min(100, b.confidence + Math.round((confidence - b.confidence) / 2))) } : b,
+          );
+        } else {
+          characterBeliefs = [...characterBeliefs, {
+            id,
+            holderCharacterId,
+            subjectEntityId: beliefProposal.subjectEntityId,
+            claim: beliefProposal.claim,
+            kind: beliefProposal.kind,
+            sourceCharacterId: event.participantCharacterIds.find((p) => p !== holderCharacterId) ?? null,
+            sourceEventId: event.id,
+            confidence: Math.max(0, Math.min(100, beliefProposal.confidenceOverride ?? defaults.defaultConfidence)),
+            visibility: defaults.defaultVisibility,
+            learnedAtStep: atStep,
+            expiresAtStep: beliefProposal.expiresInSteps === null ? null : atStep + beliefProposal.expiresInSteps,
+            supersedesBeliefIds: [],
+            status: "active",
+          }];
+        }
+      }
+    }
+
+    // Pressure changes.
+    for (const [changeIndex, change] of event.pressureChanges.entries()) {
+      const worldSlice = { characters, characterPressures };
+      if (change.action === "create") {
+        if (change.kind === undefined || change.intensity === undefined || change.label === undefined) continue;
+        const result = createPressure(worldSlice, {
+          id: `${event.id}:pressure:${changeIndex}`,
+          characterId: change.characterId,
+          kind: change.kind,
+          intensity: change.intensity,
+          label: change.label,
+          sourceEventId: event.id,
+          atStep,
+          reviewInSteps: change.reviewInSteps,
+          expiresInSteps: change.expiresInSteps,
+          visibility: change.visibility,
+        });
+        characters = result.characters;
+        characterPressures = result.characterPressures;
+      } else {
+        const target = characterPressures.find(
+          (p) => p.characterId === change.characterId && p.status === "active" && (change.kind === undefined || p.kind === change.kind),
+        );
+        if (target === undefined) continue;
+        const result = change.action === "refresh"
+          ? refreshPressure(worldSlice, target.id, atStep, change.intensity ?? 15, change.reviewInSteps)
+          : resolvePressure(worldSlice, target.id);
+        characters = result.characters;
+        characterPressures = result.characterPressures;
+      }
     }
 
     encounters = [
@@ -136,7 +259,14 @@ export function applySocialEvents(
   }
 
   return {
-    world: { ...world, characters, encounters },
+    world: {
+      ...world,
+      characters: [...characters],
+      encounters,
+      characterBeliefs: [...characterBeliefs],
+      characterPressures: [...characterPressures],
+      socialLinks: [...socialLinks],
+    },
     appliedIds,
     rejectedIds,
     introducedProfiles,

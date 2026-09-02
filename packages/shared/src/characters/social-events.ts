@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { BasisPointsSchema, ElapsedStepSchema, EntityIdSchema, VisibilitySchema } from "../material-state";
-import { CharacterSchema } from "./character";
+import { CharacterSchema, RelationDimensionScoresSchema } from "./character";
 import { CharacterProfileSchema } from "./character-profile";
+import { SocialLinkKindSchema } from "./relationship-dimensions";
+import { CharacterPressureKindSchema } from "./pressures";
+import { BeliefKindSchema, KnowledgeChannelSchema } from "./beliefs";
 
 // Character social events (character-sim phase 1).
 //
@@ -38,9 +41,54 @@ export const RelationCauseProposalSchema = z
     /** Clamped to the same ±20 bound the previous ad hoc extraction used. */
     score: z.number().int().min(-20).max(20),
     decayPerYearBps: BasisPointsSchema,
+    /** Character-sim phase 2: which dimensions this cause moves. Omit to keep the legacy affection-only default. */
+    dimensions: RelationDimensionScoresSchema.optional(),
+    /** Optionally also creates a typed social link between the two characters (character-sim phase 2). */
+    socialLinkKind: SocialLinkKindSchema.optional(),
   })
   .strict();
 export type RelationCauseProposal = z.infer<typeof RelationCauseProposalSchema>;
+
+/**
+ * A belief dialogue or a world event may propose for one recipient
+ * (character-sim phase 2). The resolver -- never the proposer -- decides the
+ * final recipient list, confidence, and visibility from the named channel;
+ * `confidenceOverride` only ever narrows, it cannot inflate past what the
+ * channel and the proposer's own standing would support.
+ */
+export const BeliefProposalSchema = z
+  .object({
+    subjectEntityId: EntityIdSchema.nullable(),
+    claim: z.string().trim().min(1).max(400),
+    kind: BeliefKindSchema,
+    channel: KnowledgeChannelSchema,
+    /** Explicit recipients for private_disclosure/intercepted_secret/trusted_report -- never resolved broadly. */
+    explicitRecipientCharacterIds: z.array(EntityIdSchema).max(8).default([]),
+    confidenceOverride: z.number().int().min(0).max(100).optional(),
+    expiresInSteps: z.number().int().positive().max(400).nullable().default(null),
+  })
+  .strict();
+export type BeliefProposal = z.infer<typeof BeliefProposalSchema>;
+
+/** A pressure lifecycle change dialogue or a world event may propose (character-sim phase 2). */
+export const PressureChangeProposalSchema = z
+  .object({
+    characterId: EntityIdSchema,
+    action: z.enum(["create", "refresh", "resolve"]),
+    kind: CharacterPressureKindSchema.optional(),
+    intensity: z.number().int().min(0).max(100).optional(),
+    label: z.string().trim().min(1).max(200).optional(),
+    reviewInSteps: z.number().int().positive().max(100).default(4),
+    expiresInSteps: z.number().int().positive().max(400).nullable().default(null),
+    visibility: VisibilitySchema.default("private"),
+  })
+  .strict()
+  .superRefine((proposal, context) => {
+    if (proposal.action === "create" && (proposal.kind === undefined || proposal.intensity === undefined || proposal.label === undefined)) {
+      context.addIssue({ code: "custom", message: "Creating a pressure requires kind, intensity, and label." });
+    }
+  });
+export type PressureChangeProposal = z.infer<typeof PressureChangeProposalSchema>;
 
 /** A fact worth sharing into a knowledge pool. Informational only -- carries no state mutation. */
 export const KnowledgeClaimProposalSchema = z
@@ -81,6 +129,10 @@ export const CharacterSocialEventSchema = z
     knownByCharacterIds: z.array(EntityIdSchema).max(64),
     relationCauses: z.array(RelationCauseProposalSchema).max(16),
     knowledgeClaims: z.array(KnowledgeClaimProposalSchema).max(8),
+    /** Character-sim phase 2: beliefs this event may grant, one recipient's channel-validated belief each. */
+    proposedBeliefs: z.array(BeliefProposalSchema).max(8).default([]),
+    /** Character-sim phase 2: pressure lifecycle changes this event may trigger. */
+    pressureChanges: z.array(PressureChangeProposalSchema).max(4).default([]),
     commitmentProposal: CommitmentProposalSchema.nullable(),
     /** Set only for kind = "discovery": the character this event introduces. */
     introducedCharacter: CharacterSchema.nullable(),

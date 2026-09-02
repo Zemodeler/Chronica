@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildDialogueSystemPrompt, buildPlayerKnowledgeSection } from "./dialogue-prompt";
 import type { CharacterKnowledgebase } from "@chronica/shared";
+import { NEUTRAL_MIND } from "@chronica/shared";
 import type { KnowledgebaseRow } from "@chronica/db";
 import { extractDialogueCommitment } from "./dialogue-commitment";
 
@@ -100,7 +101,7 @@ describe("buildPlayerKnowledgeSection", () => {
       "First Punic War",
       [],
       [],
-      [],
+      { mind: NEUTRAL_MIND, traits: [], pressures: [], beliefs: [] },
       { score: 0, label: "neutral" },
     );
 

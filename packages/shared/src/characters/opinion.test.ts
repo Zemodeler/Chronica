@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
-import type { WorldState } from "../world/world-state";
 import { computeOpinion } from "./opinion";
 
-const world = () => structuredClone(firstPunicWarScenario.initialWorld) as WorldState;
+const world = () => structuredClone(firstPunicWarScenario.initialWorld);
 
 describe("computeOpinion", () => {
   it("is zero when no relation cause is recorded", () => {

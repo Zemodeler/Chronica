@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import { executeWorkflow } from "../executor";
-import type { WorldState } from "../../world/world-state";
 
-const world = () => structuredClone(firstPunicWarScenario.initialWorld) as WorldState;
+const world = () => structuredClone(firstPunicWarScenario.initialWorld);
 
 describe("grant_holding", () => {
   it("grants a character a holding tied to an existing income source", () => {

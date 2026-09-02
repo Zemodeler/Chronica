@@ -1,8 +1,10 @@
 import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import type {
+  BeliefProposal,
   Character,
   CommitmentProposal,
   KnowledgeClaimProposal,
+  PressureChangeProposal,
   RelationCauseProposal,
   Visibility,
 } from "@chronica/shared";
@@ -53,6 +55,10 @@ export const characterSocialEvents = pgTable("character_social_events", {
   knownByCharacterIds: jsonb("known_by_character_ids").$type<string[]>().notNull().default([]),
   relationCauses: jsonb("relation_causes").$type<RelationCauseProposal[]>().notNull().default([]),
   knowledgeClaims: jsonb("knowledge_claims").$type<KnowledgeClaimProposal[]>().notNull().default([]),
+  /** Character-sim phase 2. */
+  proposedBeliefs: jsonb("proposed_beliefs").$type<BeliefProposal[]>().notNull().default([]),
+  /** Character-sim phase 2. */
+  pressureChanges: jsonb("pressure_changes").$type<PressureChangeProposal[]>().notNull().default([]),
   commitmentProposal: jsonb("commitment_proposal").$type<CommitmentProposal | null>(),
   introducedCharacter: jsonb("introduced_character").$type<Character | null>(),
   introducedProfile: jsonb("introduced_profile").$type<{

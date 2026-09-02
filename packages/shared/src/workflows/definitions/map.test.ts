@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import { executeWorkflow } from "../executor";
-import type { WorldState } from "../../world/world-state";
 
-const world = () => structuredClone(firstPunicWarScenario.initialWorld) as WorldState;
+const world = () => structuredClone(firstPunicWarScenario.initialWorld);
 
 describe("found_settlement", () => {
   it("adds a settlement to an existing province", () => {
