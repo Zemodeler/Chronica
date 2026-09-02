@@ -12,26 +12,12 @@ export type PunicWarsControlRecord = Readonly<{
 }>;
 
 const ITALIAN_CONTROLLERS: Readonly<Record<string, string>> = {
-  "punic-italy-liguria-west": "ligurians", "punic-italy-liguria-genua": "ligurians", "punic-italy-liguria-east": "ligurians",
-  "punic-italy-insubria-ticinum": "insubres", "punic-italy-insubria-mediolanum": "insubres",
-  "punic-italy-boii-rhenus": "boii", "punic-italy-boii-felsina": "boii",
-  "punic-italy-cenomani-brixia": "cenomani", "punic-italy-cenomani-mincius": "cenomani",
-  "punic-italy-veneti-ateste": "veneti", "punic-italy-veneti-patavium": "veneti", "punic-italy-veneti-adria": "veneti",
-  "punic-italy-etruria-north": "etruscan-cities", "punic-italy-etruria-central": "etruscan-cities", "punic-italy-etruria-south": "etruscan-cities",
-  "punic-italy-latium": "rome",
-  "punic-italy-sabines": "rome",
-  "punic-italy-umbrians": "rome",
-  "punic-italy-picentes": "rome",
-  "punic-italy-marsi": "rome",
-  "punic-italy-campania": "rome",
-  "punic-italy-samnium": "rome",
-  "punic-italy-daunians": "rome",
-  "punic-italy-peucetians": "rome",
-  "punic-italy-messapians": "rome",
-  "punic-italy-tarentines": "rome",
-  "punic-italy-lucanians": "rome",
-  "punic-italy-bruttians": "rome",
-  "punic-italy-rhegines": "rome",
+  "punic-italy-ligurian-coast": "ligurians", "punic-italy-upper-padus-and-alpine-gate": "insubres", "punic-italy-insubrian-plain": "insubres",
+  "punic-italy-middle-padus": "boii", "punic-italy-venetian-lagoon": "veneti", "punic-italy-isonzo-gate": "veneti",
+  "punic-italy-etrurian-uplands": "etruscan-cities", "punic-italy-umbrian-valleys": "rome", "punic-italy-picenum-coast": "rome",
+  "punic-italy-latium": "rome", "punic-italy-marsian-highlands": "rome", "punic-italy-samnium": "rome",
+  "punic-italy-campanian-plain": "rome", "punic-italy-apulian-coast": "rome", "punic-italy-lucanian-uplands": "rome", "punic-italy-bruttian-highlands": "rome",
+  "punic-italy-alpine-passes": "noric-communities", "punic-italy-adige-passes": "noric-communities",
 };
 
 const POLITY_NAMES: Record<string, string> = {
@@ -90,13 +76,9 @@ const TRANSREGIONAL_TRIBAL_CONTROLLERS: Readonly<Record<string, string>> = {
 };
 
 const CARTHAGINIAN_IBERIAN_REGIONS = new Set([
-  "punic-iberia-turdetani",
-  "punic-iberia-turduli",
-  "punic-iberia-celtici",
-  "punic-iberia-conii",
-  "punic-iberia-bastetani",
-  "punic-iberia-contestani",
-  "punic-iberia-edetani",
+  "punic-iberia-andalucia",
+  "punic-iberia-region-de-murcia",
+  "punic-iberia-comunitat-valenciana",
   "esp-25490228b26609846683583", // Balearic islands
   "esp-25490228b18225280299410", // Melilla
   "esp-25490228b48808997991554", // Ceuta
@@ -143,6 +125,7 @@ function controllerFor(provinceId: string): string | null {
   if (italian !== undefined) return italian;
   const transregionalTribe = TRANSREGIONAL_TRIBAL_CONTROLLERS[provinceId];
   if (transregionalTribe !== undefined) return transregionalTribe;
+  if (provinceId === "punic-gaul-corse-du-sud" || provinceId === "punic-gaul-haute-corse") return "carthage";
   if (provinceId.startsWith("punic-gaul-")) return `gaul-${provinceId.slice("punic-gaul-".length)}`;
   if (provinceId.startsWith("punic-britain-")) return `britain-${provinceId.slice("punic-britain-".length)}`;
   if (provinceId.startsWith("punic-iberia-")) return CARTHAGINIAN_IBERIAN_REGIONS.has(provinceId) ? "carthage" : `iberia-${provinceId.slice("punic-iberia-".length)}`;
@@ -181,6 +164,19 @@ function confidenceFor(provinceId: string): HistoricalConfidence {
 function nameFor(controllerPolityId: string, provinceName: string): string {
   return POLITY_NAMES[controllerPolityId]
     ?? (controllerPolityId.startsWith("gaul-") || controllerPolityId.startsWith("iberia-") || controllerPolityId.startsWith("britain-") || controllerPolityId.startsWith("illyria-") || controllerPolityId.startsWith("thrace-") || controllerPolityId.startsWith("belgica-") || controllerPolityId.startsWith("low-countries-") || controllerPolityId.startsWith("germania-") || controllerPolityId.startsWith("hungary-") || controllerPolityId.startsWith("czechoslovakia-") ? provinceName : controllerPolityId);
+}
+
+/** Terrain is a local movement description, independent from who rules it. */
+function terrainFor(provinceId: string): string {
+  if (GAETULIAN_PROVINCES.has(provinceId) || GARAMANTIAN_PROVINCES.has(provinceId)) return "desert-steppe";
+  if (provinceId.startsWith("lby-")) return PTOLEMAIC_CYRENAICA_PROVINCES.has(provinceId) ? "coastal-plain" : "desert-steppe";
+  if (provinceId.startsWith("tun-") || CARTHAGINIAN_MAURETANIAN_COAST.has(provinceId)) return "coastal-plain";
+  if (provinceId.startsWith("mar-") || provinceId.startsWith("dza-")) return NUMIDIAN_PROVINCES.has(provinceId) ? "hills-uplands" : "desert-steppe";
+  if (provinceId.startsWith("punic-italy-") || provinceId.startsWith("punic-illyria-") || provinceId.startsWith("punic-thrace-")) return "hills-uplands";
+  if (provinceId.includes("black-forest") || provinceId.includes("jura") || provinceId.includes("harz") || provinceId.includes("erzgebirge") || provinceId.includes("sauerland") || provinceId.includes("uplands") || provinceId.includes("heights") || provinceId.includes("passes")) return "mountain-pass";
+  if (provinceId.startsWith("punic-gaul-arverni") || provinceId.startsWith("punic-gaul-aedui")) return "hills-uplands";
+  if (provinceId.includes("cimbri") || provinceId.includes("coast") || provinceId.includes("mouth") || provinceId.includes("estuary") || provinceId.includes("valley") || provinceId.includes("plain")) return "coastal-plain";
+  return "hills-uplands";
 }
 
 /**
@@ -259,7 +255,7 @@ export function punicWarsOpeningOverlay(revision: number): DynamicMapOverlay {
       provinceId: record.provinceId,
       controllerPolityId: record.controllerPolityId,
       controlFirmnessBps: record.controllerPolityId === "carthage" || record.controllerPolityId === "rome" ? 8_500 : 7_000,
-      terrainId: "coastal-plain",
+      terrainId: terrainFor(record.provinceId),
       tier: "far",
     })),
     settlements: PUNIC_WARS_MAP_SETTLEMENTS,

@@ -607,29 +607,17 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .map-army-token { cursor: pointer; }
 .map-army-hit-target { fill: rgba(238, 241, 239, 0); stroke: #fcfcfc00; stroke-width: .12; vector-effect: non-scaling-stroke; }
 .map-army-token:focus { outline: none; }
-  .map-army-token:focus image { filter: drop-shadow(0 0 2px #f4cf68); }
+  .map-army-token:focus .map-army-hit-target { stroke: #f4cf68; stroke-dasharray: .1; }
 
 /* ─── Map: base image ──────────────────────────────────────────── */
 .geo-map-base-image { pointer-events: none; }
 
-/* ─── Map: settlement and force labels ─────────────────────────── */
-.map-settlement-label { fill: #dce8e5; font: 500 0.55px system-ui, sans-serif; pointer-events: none; paint-order: stroke; stroke: rgb(10 15 20 / 70%); stroke-width: 0.12px; }
-.map-force-label { fill: #dce8e5; font: 600 0.5px system-ui, sans-serif; pointer-events: none; paint-order: stroke; stroke: rgb(10 15 20 / 70%); stroke-width: 0.12px; }
-.map-political-label, .map-settlement-label { font-family: "Times New Roman", Times, serif; }
-.map-political-label { fill: #f4f0df; font-weight: 700; pointer-events: none; paint-order: stroke; stroke: rgb(10 15 20 / 78%); stroke-linejoin: round; }
-.map-army-conflict { fill: none; stroke-width: .4; vector-effect: non-scaling-stroke; animation: map-conflict-pulse 1.8s ease-in-out infinite; }
-.map-army-conflict-combat, .map-army-conflict-siege-attacker { stroke: #dc5d5d; }
-.map-army-conflict-siege-defender { stroke: #72c783; }
-.map-settlement[data-under-siege="true"] > :is(circle, rect, polygon) { stroke: #dc5d5d; stroke-width: .12; vector-effect: non-scaling-stroke; animation: map-conflict-pulse 1.8s ease-in-out infinite; }
-@keyframes map-conflict-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+/* Settlement markers/labels and army standards (including the conflict/siege
+   pulse) are drawn on the terrain canvas now — see map-canvas-entities.ts. */
 
 /* ─── Map: zoom-band visibility ────────────────────────────────── */
 [data-zoom="far"] .layer-forces { display: none; }
 [data-zoom="far"] .layer-rivers { display: none; }
-[data-zoom="far"] .map-settlement:not(.map-settlement-capital) { display: none; }
-[data-zoom="far"] .map-settlement-label { display: none; }
-[data-zoom="medium"] .map-settlement-town, [data-zoom="medium"] .map-settlement-village, [data-zoom="medium"] .map-settlement-fort, [data-zoom="medium"] .map-settlement-port { display: none; }
-[data-zoom="medium"] .map-settlement:not(.map-settlement-capital) .map-settlement-label { display: none; }
 
 .map-force-details { position: absolute; right: 1rem; bottom: 1rem; z-index: 3; display: grid; gap: .35rem; min-width: 15rem; padding: .9rem 2.2rem .9rem .9rem; color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-card); background: rgb(12 20 31 / 94%); box-shadow: 0 12px 28px rgb(0 0 0 / 28%); }
 .map-force-details strong { font-family: "Times New Roman", Times, serif; font-size: 1.1rem; }

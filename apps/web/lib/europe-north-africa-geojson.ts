@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { GeoJsonMap } from "@chronica/shared";
+import type { GeoJsonMap, GeoJsonMapFeature } from "@chronica/shared";
 import { agrigentumFortDemoSettlement, caralisDemoSettlement, naplesDemoSettlement, romeDemoSettlement, syracuseDemoSettlement } from "./calibration-map-features";
 
 /**
@@ -12,8 +12,66 @@ import { agrigentumFortDemoSettlement, caralisDemoSettlement, naplesDemoSettleme
  */
 const mapPath = join(process.cwd(), "public", "maps", "europe-north-africa-adm1.geojson");
 const regionalMap = JSON.parse(readFileSync(mapPath, "utf8")) as GeoJsonMap;
+const franceDepartmentsPath = join(process.cwd(), "public", "maps", "france-adm2-simplified.geojson");
+const franceDepartments = JSON.parse(readFileSync(franceDepartmentsPath, "utf8")) as Readonly<{
+  features: readonly Readonly<{ geometry: GeoJsonMapFeature["geometry"]; properties: Readonly<{ shapeID: string; shapeName: string }> }> [];
+}>;
+const italyRegionsPath = join(process.cwd(), "public", "maps", "italy-adm2-simplified.geojson");
+const italyRegions = JSON.parse(readFileSync(italyRegionsPath, "utf8")) as Readonly<{
+  features: readonly Readonly<{ geometry: GeoJsonMapFeature["geometry"]; properties: Readonly<{ shapeID: string; shapeName: string }> }> [];
+}>;
 
 const ITALIAN_ISLANDS_ID = "ita-72843720b81376294924159";
+
+/**
+ * France's ADM1 areas are too broad for the same local-territory scale used
+ * in Germania.  Replace only that country layer with the matching simplified
+ * 96-area source so its shared borders remain surveyed and exactly aligned.
+ */
+function replaceFranceWithLocalBoundaries(map: GeoJsonMap): GeoJsonMap {
+  let inserted = false;
+  return {
+    ...map,
+    features: map.features.flatMap((feature) => {
+      if (!feature.id.startsWith("fra-")) return [feature];
+      if (inserted) return [];
+      inserted = true;
+      return franceDepartments.features.map((department) => ({
+        type: "Feature" as const,
+        id: `fra-local-${department.properties.shapeID}`,
+        geometry: department.geometry,
+        properties: { kind: "province" as const, name: department.properties.shapeName },
+      }));
+    }),
+  };
+}
+
+/** Keep the purpose-built Sicily split, while replacing mainland Italy's four broad blocks with its local regional source. */
+function replaceItalyWithLocalBoundaries(map: GeoJsonMap): GeoJsonMap {
+  const islands = new Set(["Sardegna", "Sicilia"]);
+  let inserted = false;
+  return {
+    ...map,
+    features: map.features.flatMap((feature) => {
+      if (!feature.id.startsWith("ita-") || feature.id === ITALIAN_ISLANDS_ID) return [feature];
+      if (inserted) return [];
+      inserted = true;
+      return italyRegions.features
+        .filter((region) => !islands.has(region.properties.shapeName))
+        .map((region) => ({
+          type: "Feature" as const,
+          id: `ita-local-${region.properties.shapeID}`,
+          geometry: region.geometry,
+          properties: { kind: "province" as const, name: region.properties.shapeName },
+        }));
+    }),
+  };
+}
+
+function withSettlementProvince(feature: GeoJsonMapFeature, provinceId: string): GeoJsonMapFeature {
+  if (feature.properties.kind !== "settlement") throw new Error("Only settlement anchors can be reattached to a new territory.");
+  return { ...feature, properties: { kind: "settlement", name: feature.properties.name, provinceId, type: feature.properties.type } };
+}
 
 function polygonCenter(polygon: readonly (readonly [number, number][])[]): readonly [number, number] {
   const ring = polygon[0] ?? [];
@@ -95,9 +153,16 @@ function splitSicily(map: GeoJsonMap): GeoJsonMap {
   };
 }
 
-const splitRegionalMap = splitSicily(regionalMap);
+const splitRegionalMap = splitSicily(replaceItalyWithLocalBoundaries(replaceFranceWithLocalBoundaries(regionalMap)));
 
 export const europeNorthAfricaGeoJson: GeoJsonMap = {
   ...splitRegionalMap,
-  features: [...splitRegionalMap.features, romeDemoSettlement, naplesDemoSettlement, syracuseDemoSettlement, agrigentumFortDemoSettlement, caralisDemoSettlement],
+  features: [
+    ...splitRegionalMap.features,
+    withSettlementProvince(romeDemoSettlement, "ita-local-23120603B86473916475875"),
+    withSettlementProvince(naplesDemoSettlement, "ita-local-23120603B14973764900567"),
+    syracuseDemoSettlement,
+    agrigentumFortDemoSettlement,
+    caralisDemoSettlement,
+  ],
 };

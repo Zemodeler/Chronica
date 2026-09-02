@@ -65,7 +65,7 @@ describe("political map derivation", () => {
     expect(state.territories[0]?.components).toHaveLength(2);
     expect(state.territories[0]?.primaryComponent.provinceIds).toEqual(["east", "west"]);
     expect(state.territories[0]?.label.anchor[0]).toBeLessThan(5);
-    expect(derivePoliticalLabels(state, "close").filter((label) => label.polityId === "rome")).toHaveLength(2);
+    expect(derivePoliticalLabels(state).filter((label) => label.polityId === "rome")).toHaveLength(2);
   });
   it("uses one label for holdings separated only by a small map gap", () => {
     const state = derivePoliticalMapState(prepareStaticWorldGeometry(map), overlay([
@@ -73,7 +73,7 @@ describe("political map derivation", () => {
       { provinceId: "nearby", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain", tier: "focus" },
     ]));
     expect(state.territories[0]?.components).toHaveLength(1);
-    expect(derivePoliticalLabels(state, "close").filter((label) => label.polityId === "rome")).toHaveLength(1);
+    expect(derivePoliticalLabels(state).filter((label) => label.polityId === "rome")).toHaveLength(1);
   });
   it("classifies owner changes as country borders", () => {
     const state = derivePoliticalMapState(prepareStaticWorldGeometry(map), overlay([
@@ -96,7 +96,7 @@ describe("political map derivation", () => {
   });
   it("fits every component label to 85 percent of its selected path", () => {
     const state = derivePoliticalMapState(prepareStaticWorldGeometry(map), overlay([{ provinceId: "west", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain", tier: "focus" }]));
-    const label = derivePoliticalLabels(state, "close")[0];
+    const label = derivePoliticalLabels(state)[0];
     expect(label?.name).toBe("Roman Republic");
     expect(label?.usableLength).toBeCloseTo((label?.pathLength ?? 0) * .85);
     expect(label?.fontSize).toBeGreaterThan(0);

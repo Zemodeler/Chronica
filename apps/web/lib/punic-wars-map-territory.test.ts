@@ -15,24 +15,24 @@ describe("Punic Wars opening political map", () => {
 
   it("makes Roman client regions direct territory of the Roman Republic", () => {
     const controller = new Map(PUNIC_WARS_CONTROL_MANIFEST.map((record) => [record.provinceId, record.controllerPolityId]));
-    for (const provinceId of ["punic-italy-samnium", "punic-italy-lucanians", "punic-italy-bruttians", "punic-italy-tarentines"]) {
+    for (const provinceId of ["punic-italy-samnium", "punic-italy-lucanian-uplands", "punic-italy-bruttian-highlands", "punic-italy-apulian-coast"]) {
       expect(controller.get(provinceId)).toBe("rome");
     }
   });
 
   it("uses the added northern Italian local territories without changing their polity", () => {
     const controller = new Map(PUNIC_WARS_CONTROL_MANIFEST.map((record) => [record.provinceId, record.controllerPolityId]));
-    expect(controller.get("punic-italy-liguria-genua")).toBe("ligurians");
-    expect(controller.get("punic-italy-insubria-mediolanum")).toBe("insubres");
-    expect(controller.get("punic-italy-cenomani-brixia")).toBe("cenomani");
-    expect(controller.get("punic-italy-veneti-patavium")).toBe("veneti");
+    expect(controller.get("punic-italy-ligurian-coast")).toBe("ligurians");
+    expect(controller.get("punic-italy-insubrian-plain")).toBe("insubres");
+    expect(controller.get("punic-italy-middle-padus")).toBe("boii");
+    expect(controller.get("punic-italy-venetian-lagoon")).toBe("veneti");
   });
 
-  it("splits the Aulerci into three owned territories rather than retaining one multipart region", () => {
+  it("keeps Gaul's local river-basin territories owned independently of their geometry", () => {
     const controller = new Map(PUNIC_WARS_CONTROL_MANIFEST.map((record) => [record.provinceId, record.controllerPolityId]));
-    expect(controller.get("punic-gaul-aulerci-eburovices")).toBe("gaul-aulerci-eburovices");
-    expect(controller.get("punic-gaul-aulerci-cenomani")).toBe("gaul-aulerci-cenomani");
-    expect(controller.get("punic-gaul-aulerci-diablintes")).toBe("gaul-aulerci-diablintes");
+    expect(controller.get("punic-gaul-paris")).toBe("gaul-paris");
+    expect(controller.get("punic-gaul-moselle")).toBe("gaul-moselle");
+    expect(controller.get("punic-gaul-puy-de-dome")).toBe("gaul-puy-de-dome");
   });
 
   it("gives the newly partitioned northern and Balkan territories distinct community owners", () => {
@@ -46,7 +46,7 @@ describe("Punic Wars opening political map", () => {
     expect(controller.get("punic-hungary-pannonii")).toBe("hungary-pannonii");
     expect(controller.get("punic-czechoslovakia-cotini")).toBe("czechoslovakia-cotini");
     expect(controller.get("punic-luxembourg-treveri")).toBe("germania-treveri");
-    expect(overlay.polities.map((polity) => polity.name)).toEqual(expect.arrayContaining(["Dardani", "Odrysians", "Menapii", "Batavi", "Cherusci", "Pannonii", "Cotini", "Treveri"]));
+    expect(overlay.polities.map((polity) => polity.name)).toEqual(expect.arrayContaining(["Dardani", "Odrysians", "Menapii", "Batavi", "Cheruscan Leine", "Pannonii", "Cotini", "Treveri"]));
   });
 
   it("gives the African and Alpine map actors explicit owners and settlement markers", () => {
@@ -63,9 +63,28 @@ describe("Punic Wars opening political map", () => {
   it("uses the supplied Carthaginian opening extent for its island, African, and southern Iberian holdings", () => {
     const controller = new Map(PUNIC_WARS_CONTROL_MANIFEST.map((record) => [record.provinceId, record.controllerPolityId]));
     expect(controller.get("ita-72843720b81376294924159")).toBe("carthage");
-    expect(controller.get("fra-19338628b22604203385446")).toBe("carthage");
-    expect(controller.get("punic-iberia-turdetani")).toBe("carthage");
-    expect(controller.get("punic-iberia-bastetani")).toBe("carthage");
+    expect(controller.get("punic-gaul-corse-du-sud")).toBe("carthage");
+    expect(controller.get("punic-iberia-andalucia")).toBe("carthage");
+    expect(controller.get("punic-iberia-region-de-murcia")).toBe("carthage");
     expect(PUNIC_WARS_CONTROL_MANIFEST.filter((record) => record.provinceId.startsWith("punic-britain-")).every((record) => record.confidence === "cautious")).toBe(true);
+  });
+
+  it("assigns terrain by local geography and omits the Rhegium city marker", () => {
+    const overlay = punicWarsOpeningOverlay(0);
+    const terrain = new Map(overlay.provinces.map((province) => [province.provinceId, province.terrainId]));
+    expect(terrain.get("lby-10800210b2800497533490")).toBe("desert-steppe");
+    expect(terrain.get("punic-gaul-puy-de-dome")).toBe("hills-uplands");
+    expect(terrain.get("punic-germania-erzgebirge")).toBe("mountain-pass");
+    expect(terrain.get("punic-germania-cimbri")).toBe("coastal-plain");
+    expect(overlay.settlements.some((settlement) => settlement.settlementId === "settlement-rhegium" || settlement.name === "Rhegium")).toBe(false);
+  });
+
+  it("gives every reformed French, Iberian, Italian, and Romanian territory one opening controller", () => {
+    const controller = new Set(PUNIC_WARS_CONTROL_MANIFEST.map((record) => record.provinceId));
+    const reformed = punicWarsGeoJson.features.filter((feature) => feature.properties.kind === "province" && [
+      "punic-gaul-", "punic-iberia-", "punic-italy-", "punic-thrace-",
+    ].some((prefix) => feature.id.startsWith(prefix)));
+    expect(reformed.length).toBeGreaterThan(150);
+    expect(reformed.every((feature) => controller.has(feature.id))).toBe(true);
   });
 });

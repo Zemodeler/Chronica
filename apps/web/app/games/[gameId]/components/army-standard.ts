@@ -1,10 +1,29 @@
-import type { ForceFlagAsset } from "./geo-map";
+export interface ForceFlagAsset {
+  readonly url: string;
+  readonly aspectRatio: number;
+  readonly contentBounds?: Readonly<{ x: number; y: number; width: number; height: number }>;
+}
 
 // The conflict treatment is deliberately excluded: this is the exact painted
 // flag rectangle, which is the only pointer target that may open army details.
 export const ARMY_STANDARD_WIDTH = .18;
 /** The interaction area starts just inside the painted combat/siege frame. */
 export const ARMY_STANDARD_CONFLICT_FRAME_INSET = .004;
+
+// Held to an on-screen-pixel window regardless of zoom: below MIN it would
+// shrink to an unusably small click target when zoomed out; above MAX (a
+// fixed world-space width scaling unboundedly with zoom-in) it would balloon
+// into an oversized blob at high zoom. The canvas draw (map-canvas-entities.ts)
+// and the SVG hit target (geo-map.tsx) both call this so the clickable area
+// always matches what's actually painted.
+const MIN_ARMY_STANDARD_PIXEL_WIDTH = 16;
+const MAX_ARMY_STANDARD_PIXEL_WIDTH = 120;
+
+/** World-space army standard width for the current zoom, held to a fixed on-screen-pixel range. */
+export function armyStandardWidthForZoom(pixelsPerDegree: number): number {
+  const pixels = Math.min(Math.max(ARMY_STANDARD_WIDTH * pixelsPerDegree, MIN_ARMY_STANDARD_PIXEL_WIDTH), MAX_ARMY_STANDARD_PIXEL_WIDTH);
+  return pixels / pixelsPerDegree;
+}
 
 export interface ArmyStandardBounds {
   readonly x: number;
@@ -13,18 +32,18 @@ export interface ArmyStandardBounds {
   readonly height: number;
 }
 
-export function armyStandardBounds(asset: ForceFlagAsset, centreX: number, centreY: number): ArmyStandardBounds {
-  const height = ARMY_STANDARD_WIDTH / asset.aspectRatio;
+export function armyStandardBounds(asset: ForceFlagAsset, centreX: number, centreY: number, width: number = ARMY_STANDARD_WIDTH): ArmyStandardBounds {
+  const height = width / asset.aspectRatio;
   return {
-    x: centreX - ARMY_STANDARD_WIDTH / 2,
+    x: centreX - width / 2,
     y: centreY - height / 2,
-    width: ARMY_STANDARD_WIDTH,
+    width,
     height,
   };
 }
 
-export function armyStandardHitBounds(asset: ForceFlagAsset, centreX: number, centreY: number, useConflictFrame: boolean): ArmyStandardBounds {
-  const flag = armyStandardBounds(asset, centreX, centreY);
+export function armyStandardHitBounds(asset: ForceFlagAsset, centreX: number, centreY: number, useConflictFrame: boolean, width: number = ARMY_STANDARD_WIDTH): ArmyStandardBounds {
+  const flag = armyStandardBounds(asset, centreX, centreY, width);
   if (useConflictFrame) {
     return {
       x: flag.x + ARMY_STANDARD_CONFLICT_FRAME_INSET,
