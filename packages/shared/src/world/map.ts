@@ -24,6 +24,8 @@ export const SettlementSchema = z
     id: EntityIdSchema,
     name: z.string().trim().min(1).max(120),
     kind: SettlementKindSchema,
+    /** Redundant with province nesting; enables direct lookup without a province scan. */
+    provinceId: EntityIdSchema,
     /** Explicit local control; a siege may change a city before its province changes hands. */
     controllerPolityId: EntityIdSchema.nullable().default(null),
     /** Relative size in scenario units. Populations are coarse on purpose. */
@@ -148,11 +150,19 @@ export const ProvinceGraphSchema = z
       }
       relationPairs.add(pair);
     }
+    const settlementIds = new Set<string>();
     for (const [provinceIndex, province] of graph.provinces.entries()) {
       for (const [settlementIndex, settlement] of province.settlements.entries()) {
         if (settlement.controllerPolityId !== null && !polityIds.has(settlement.controllerPolityId)) {
           context.addIssue({ code: "custom", path: ["provinces", provinceIndex, "settlements", settlementIndex, "controllerPolityId"], message: "A settlement controller must be a polity in the province graph." });
         }
+        if (settlement.provinceId !== province.id) {
+          context.addIssue({ code: "custom", path: ["provinces", provinceIndex, "settlements", settlementIndex, "provinceId"], message: "A settlement's provinceId must match the province it is nested inside." });
+        }
+        if (settlementIds.has(settlement.id)) {
+          context.addIssue({ code: "custom", path: ["provinces", provinceIndex, "settlements", settlementIndex, "id"], message: "A settlement id may be used only once across the province graph." });
+        }
+        settlementIds.add(settlement.id);
       }
     }
   });

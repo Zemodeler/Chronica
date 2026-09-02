@@ -77,7 +77,7 @@ ACTIVE STORYLINES:
 ${storylineBlock || "  (none)"}
 
 AVAILABLE CHRONICLE CAST (living NPCs):
-${castRoster || "  (none — introduce a grounded new NPC when an approved political event needs one)"}
+${castRoster || "  (none — the cast is empty; introduce a grounded new NPC for any approved event that needs a human voice)"}
 
 ACTIVE WARS: ${world.conflicts.wars.map((w) => {
     const pA = world.map.polities.find((p) => p.id === w.polityAId)?.name ?? w.polityAId;
@@ -112,8 +112,8 @@ RULES:
 8. Do not approve both sides of a conflict without explicitly resolving it in the rationale.
 9. finalWorkflows must be a subset of that proposal's listed workflows, with exactly the same actionId, actorId, and parameters. Never invent an actionId. An approved proposal that makes a world-state change must retain the matching proposed workflow; if none was proposed, defer or reject it instead of treating the change as narrative-only.
 10. An approved Character Director proposal is recorded as a Chronicle character event even when its finalWorkflows array is empty. Approve it when the character development itself is grounded and meaningful.
-11. Every approved political, deliberative, diplomatic, or institutional proposal needs a chronicleCast. Select a living NPC from AVAILABLE CHRONICLE CAST whenever one plausibly fits. A senate debate should have a named supporter, opponent, spokesperson, or presiding official — never an anonymous institution. Use only the six exact role tokens in the output schema; never write a descriptive role or title. For example, an envoy is "negotiator", an observer is "witness", and a military or political advocate is "supporter" or "spokesperson" as appropriate.
-12. If no existing NPC plausibly fits, provide newCharacter with a proper period-appropriate name and a real polity and province ID. The pipeline will automatically invoke the guarded create_world_character workflow; do not put that creation in finalWorkflows. Introduce at most one NPC per proposal and only where the event genuinely needs a human voice.
+11. Every approved political, deliberative, diplomatic, or institutional proposal needs a chronicleCast. Select a living NPC from AVAILABLE CHRONICLE CAST only when one is a genuinely good fit — right polity, right standing, right relationship to the event. A senate debate should have a named supporter, opponent, spokesperson, or presiding official — never an anonymous institution. Use only the six exact role tokens in the output schema; never write a descriptive role or title. For example, an envoy is "negotiator", an observer is "witness", and a military or political advocate is "supporter" or "spokesperson" as appropriate.
+12. Do not force-fit an existing NPC who doesn't belong in the scene just to avoid creating someone new — a wrong-polity or wrong-office character is worse than a new one. If no existing NPC plausibly fits, favor introducing a newCharacter: provide a proper period-appropriate name and a real polity and province ID. The pipeline will automatically invoke the guarded create_world_character workflow; do not put that creation in finalWorkflows. Introduce at most one NPC per proposal, only where the event genuinely needs a human voice — the roster being thin or empty is itself a reason to introduce someone, not a reason to skip casting.
 13. For a newCharacter, officeId must be null unless a real office ID is known. Never fabricate an office ID.
 
 Respond with strict JSON only: { "decisions": [...] }`;

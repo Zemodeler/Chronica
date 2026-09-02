@@ -47,4 +47,21 @@ describe("Europe and North Africa demo map features", () => {
     ]);
     expect(remainingIslands?.properties).toMatchObject({ kind: "province", name: "Sardegna e isole" });
   });
+
+  it("uses compact German government districts instead of the 16 large state provinces", () => {
+    const germanProvinces = europeNorthAfricaGeoJson.features.filter((feature) => feature.id.startsWith("deu-"));
+    expect(germanProvinces).toHaveLength(38);
+    expect(germanProvinces.map((feature) => feature.properties.name)).toEqual(expect.arrayContaining([
+      "Oberbayern",
+      "Oberpfalz",
+      "Düsseldorf",
+      "Köln",
+      "Dresden",
+      "Leipzig",
+      "Stuttgart",
+      "Freiburg",
+    ]));
+    expect(germanProvinces.map((feature) => feature.properties.name)).not.toContain("Bayern");
+    expect(germanProvinces.map((feature) => feature.properties.name)).not.toContain("Nordrhein-Westfalen");
+  });
 });

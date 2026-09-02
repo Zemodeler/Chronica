@@ -528,4 +528,89 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
       };
     },
   }),
+
+  defineWorkflow({
+    id: "disband_forces_bulk",
+    description: "Disband multiple military forces at once (e.g. post-war demobilization).",
+    category: "military",
+    parametersSchema: z.object({
+      forceIds: z.array(EntityIdSchema).min(1).max(20),
+      reason: z.string().min(1).max(240),
+    }).strict(),
+    apply(world, params) {
+      const idsToDisband = new Set(
+        params.forceIds.filter((id) => world.material.forces.some((f) => f.id === id)),
+      );
+      if (idsToDisband.size === 0) return null;
+      const disbandedNames = world.material.forces
+        .filter((f) => idsToDisband.has(f.id))
+        .map((f) => f.name)
+        .join(", ");
+      return {
+        world: {
+          ...world,
+          material: {
+            ...world.material,
+            forces: world.material.forces.filter((f) => !idsToDisband.has(f.id)),
+          },
+          conflicts: {
+            ...world.conflicts,
+            // A battle requires at least two participants; one that would drop
+            // below that after disbanding no longer has anyone left to fight.
+            battles: world.conflicts.battles
+              .map((b) => ({ ...b, participantForceIds: b.participantForceIds.filter((id) => !idsToDisband.has(id)) }))
+              .filter((b) => b.participantForceIds.length >= 2),
+            sieges: world.conflicts.sieges.map((s) => ({
+              ...s,
+              invadingForceIds: s.invadingForceIds.filter((id) => !idsToDisband.has(id)),
+              defendingForceIds: s.defendingForceIds.filter((id) => !idsToDisband.has(id)),
+            })),
+          },
+        },
+        result: {
+          summary: `${disbandedNames} disbanded. ${params.reason}`,
+          applied: true,
+        },
+      };
+    },
+  }),
+
+  defineWorkflow({
+    id: "blockade_port",
+    description: "Place a naval blockade on a port settlement, recorded as a siege with no defending force.",
+    category: "military",
+    parametersSchema: z.object({
+      settlementId: EntityIdSchema,
+      blockadingForceIds: z.array(EntityIdSchema).min(1),
+    }).strict(),
+    apply(world, params) {
+      const settlementWithProvince = world.map.provinces
+        .flatMap((province) => province.settlements.map((settlement) => ({ settlement, province })))
+        .find(({ settlement }) => settlement.id === params.settlementId);
+      if (!settlementWithProvince) return null;
+      if (settlementWithProvince.settlement.kind !== "port") return null;
+      const alreadyBesieged = world.conflicts.sieges.some((s) => s.settlementId === params.settlementId);
+      if (alreadyBesieged) return null;
+      return {
+        world: {
+          ...world,
+          conflicts: {
+            ...world.conflicts,
+            sieges: [
+              ...world.conflicts.sieges,
+              {
+                settlementId: params.settlementId,
+                invadingForceIds: params.blockadingForceIds,
+                defendingForceIds: [],
+              },
+            ],
+          },
+        },
+        result: {
+          summary: `A naval blockade begins at ${settlementWithProvince.settlement.name}.`,
+          applied: true,
+        },
+      };
+    },
+  }),
 ];

@@ -43,7 +43,10 @@ describe("Punic Wars opening political map", () => {
     expect(controller.get("punic-belgica-menapii")).toBe("belgica-menapii");
     expect(controller.get("punic-low-countries-batavi")).toBe("low-countries-batavi");
     expect(controller.get("punic-germania-cherusci")).toBe("germania-cherusci");
-    expect(overlay.polities.map((polity) => polity.name)).toEqual(expect.arrayContaining(["Dardani", "Odrysians", "Menapii", "Batavi", "Cherusci"]));
+    expect(controller.get("punic-hungary-pannonii")).toBe("hungary-pannonii");
+    expect(controller.get("punic-czechoslovakia-cotini")).toBe("czechoslovakia-cotini");
+    expect(controller.get("punic-luxembourg-treveri")).toBe("germania-treveri");
+    expect(overlay.polities.map((polity) => polity.name)).toEqual(expect.arrayContaining(["Dardani", "Odrysians", "Menapii", "Batavi", "Cherusci", "Pannonii", "Cotini", "Treveri"]));
   });
 
   it("gives the African and Alpine map actors explicit owners and settlement markers", () => {

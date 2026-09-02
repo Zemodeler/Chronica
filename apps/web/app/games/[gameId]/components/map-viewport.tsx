@@ -3,6 +3,8 @@
 import {
   useRef,
   useCallback,
+  useEffect,
+  useLayoutEffect,
   type ReactNode,
   type WheelEvent,
   type PointerEvent,
@@ -13,11 +15,19 @@ const MIN_SCALE = 1;
 const MAX_SCALE = 80;
 const ZOOM_STEP = 1.35;
 const PAN_PX = 40;
+const MEDIUM_THRESHOLD = 2.5;
+const CLOSE_THRESHOLD = 5;
 
 export interface ViewportTransform {
   scale: number;
   tx: number;
   ty: number;
+}
+
+function deriveZoomBand(scale: number): "far" | "medium" | "close" {
+  if (scale >= CLOSE_THRESHOLD) return "close";
+  if (scale >= MEDIUM_THRESHOLD) return "medium";
+  return "far";
 }
 
 interface MapViewportProps {
@@ -32,6 +42,13 @@ export function MapViewport({
   children,
 }: MapViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Live transform — mutated directly during gestures, never triggers React re-renders
+  const liveRef = useRef<ViewportTransform>(transform);
+  const zoomBandRef = useRef(deriveZoomBand(transform.scale));
+  const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const dragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -50,7 +67,46 @@ export function MapViewport({
     centerY: number;
   } | null>(null);
 
+  // Write the CSS transform directly to the DOM — zero React re-renders per frame
+  const applyTransform = useCallback((t: ViewportTransform) => {
+    liveRef.current = t;
+    const wrapper = wrapperRef.current;
+    if (wrapper) {
+      wrapper.style.transform = `translate(${t.tx}px, ${t.ty}px) scale(${t.scale})`;
+    }
+  }, []);
+
+  // Notify parent: immediate on zoom band crossing so LOD switches instantly,
+  // debounced otherwise (end of pan / end of free zoom).
+  const commitTransform = useCallback((t: ViewportTransform) => {
+    const newBand = deriveZoomBand(t.scale);
+    if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
+    if (newBand !== zoomBandRef.current) {
+      zoomBandRef.current = newBand;
+      onTransformChange(t);
+    } else {
+      commitTimerRef.current = setTimeout(() => {
+        onTransformChange(liveRef.current);
+      }, 100);
+    }
+  }, [onTransformChange]);
+
   const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
+
+  // Set initial CSS transform before first paint (no flash)
+  useLayoutEffect(() => {
+    applyTransform(transform);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Sync external prop changes (zoom buttons, keyboard in parent) to the DOM.
+  // Skip during active gestures so we don't fight the live ref.
+  useEffect(() => {
+    if (!dragRef.current && !pinchRef.current) {
+      applyTransform(transform);
+      zoomBandRef.current = deriveZoomBand(transform.scale);
+    }
+  }, [transform, applyTransform]);
 
   const zoomAroundPoint = useCallback(
     (clientX: number, clientY: number, factor: number) => {
@@ -59,170 +115,145 @@ export function MapViewport({
       const rect = container.getBoundingClientRect();
       const cx = clientX - rect.left;
       const cy = clientY - rect.top;
-
-      const newScale = clampScale(transform.scale * factor);
-      const ratio = newScale / transform.scale;
-
-      onTransformChange({
+      const live = liveRef.current;
+      const newScale = clampScale(live.scale * factor);
+      const ratio = newScale / live.scale;
+      const next: ViewportTransform = {
         scale: newScale,
-        tx: cx - ratio * (cx - transform.tx),
-        ty: cy - ratio * (cy - transform.ty),
-      });
+        tx: cx - ratio * (cx - live.tx),
+        ty: cy - ratio * (cy - live.ty),
+      };
+      applyTransform(next);
+      commitTransform(next);
     },
-    [transform, onTransformChange],
+    [applyTransform, commitTransform],
   );
 
   const handleWheel = useCallback(
     (e: WheelEvent) => {
       e.preventDefault();
-      const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
-      zoomAroundPoint(e.clientX, e.clientY, factor);
+      zoomAroundPoint(e.clientX, e.clientY, e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
     },
     [zoomAroundPoint],
   );
 
-  const handlePointerDown = useCallback(
-    (e: PointerEvent) => {
-      const container = containerRef.current;
-      if (!container) return;
+  const handlePointerDown = useCallback((e: PointerEvent) => {
+    const container = containerRef.current;
+    if (!container) return;
 
-      if (pinchRef.current) {
-        pinchRef.current.pointers.set(e.pointerId, {
-          x: e.clientX,
-          y: e.clientY,
-        });
-        if (pinchRef.current.pointers.size === 2) {
-          const pts = [...pinchRef.current.pointers.values()];
-          const dx = pts[1]!.x - pts[0]!.x;
-          const dy = pts[1]!.y - pts[0]!.y;
-          pinchRef.current.initialDistance = Math.sqrt(dx * dx + dy * dy);
-          pinchRef.current.initialScale = transform.scale;
-          pinchRef.current.initialTx = transform.tx;
-          pinchRef.current.initialTy = transform.ty;
-          pinchRef.current.centerX = (pts[0]!.x + pts[1]!.x) / 2;
-          pinchRef.current.centerY = (pts[0]!.y + pts[1]!.y) / 2;
-        }
-        return;
+    if (pinchRef.current) {
+      pinchRef.current.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinchRef.current.pointers.size === 2) {
+        const pts = [...pinchRef.current.pointers.values()];
+        const dx = pts[1]!.x - pts[0]!.x;
+        const dy = pts[1]!.y - pts[0]!.y;
+        pinchRef.current.initialDistance = Math.sqrt(dx * dx + dy * dy);
+        const live = liveRef.current;
+        pinchRef.current.initialScale = live.scale;
+        pinchRef.current.initialTx = live.tx;
+        pinchRef.current.initialTy = live.ty;
+        pinchRef.current.centerX = (pts[0]!.x + pts[1]!.x) / 2;
+        pinchRef.current.centerY = (pts[0]!.y + pts[1]!.y) / 2;
       }
+      return;
+    }
 
-      if (e.pointerType === "touch") {
-        pinchRef.current = {
-          pointers: new Map([[e.pointerId, { x: e.clientX, y: e.clientY }]]),
-          initialDistance: 0,
-          initialScale: transform.scale,
-          initialTx: transform.tx,
-          initialTy: transform.ty,
-          centerX: e.clientX,
-          centerY: e.clientY,
-        };
-        container.setPointerCapture(e.pointerId);
-        return;
-      }
-
-      dragRef.current = {
-        pointerId: e.pointerId,
-        startX: e.clientX,
-        startY: e.clientY,
-        startTx: transform.tx,
-        startTy: transform.ty,
+    if (e.pointerType === "touch") {
+      const live = liveRef.current;
+      pinchRef.current = {
+        pointers: new Map([[e.pointerId, { x: e.clientX, y: e.clientY }]]),
+        initialDistance: 0,
+        initialScale: live.scale,
+        initialTx: live.tx,
+        initialTy: live.ty,
+        centerX: e.clientX,
+        centerY: e.clientY,
       };
       container.setPointerCapture(e.pointerId);
-    },
-    [transform],
-  );
+      return;
+    }
 
-  const handlePointerMove = useCallback(
-    (e: PointerEvent) => {
-      if (pinchRef.current) {
-        const pinch = pinchRef.current;
-        pinch.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-        if (pinch.pointers.size === 2 && pinch.initialDistance > 0) {
-          const pts = [...pinch.pointers.values()];
-          const dx = pts[1]!.x - pts[0]!.x;
-          const dy = pts[1]!.y - pts[0]!.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const factor = dist / pinch.initialDistance;
-          const newScale = clampScale(pinch.initialScale * factor);
-          const ratio = newScale / pinch.initialScale;
+    const live = liveRef.current;
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      startTx: live.tx,
+      startTy: live.ty,
+    };
+    container.setPointerCapture(e.pointerId);
+  }, []);
 
-          const container = containerRef.current;
-          if (!container) return;
-          const rect = container.getBoundingClientRect();
-          const cx = pinch.centerX - rect.left;
-          const cy = pinch.centerY - rect.top;
+  const handlePointerMove = useCallback((e: PointerEvent) => {
+    if (pinchRef.current) {
+      const pinch = pinchRef.current;
+      pinch.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch.pointers.size === 2 && pinch.initialDistance > 0) {
+        const pts = [...pinch.pointers.values()];
+        const dx = pts[1]!.x - pts[0]!.x;
+        const dy = pts[1]!.y - pts[0]!.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const newScale = clampScale(pinch.initialScale * (dist / pinch.initialDistance));
+        const ratio = newScale / pinch.initialScale;
 
-          onTransformChange({
-            scale: newScale,
-            tx: cx - ratio * (cx - pinch.initialTx),
-            ty: cy - ratio * (cy - pinch.initialTy),
-          });
-        }
-        return;
+        const container = containerRef.current;
+        if (!container) return;
+        const rect = container.getBoundingClientRect();
+        const cx = pinch.centerX - rect.left;
+        const cy = pinch.centerY - rect.top;
+
+        const next: ViewportTransform = {
+          scale: newScale,
+          tx: cx - ratio * (cx - pinch.initialTx),
+          ty: cy - ratio * (cy - pinch.initialTy),
+        };
+        applyTransform(next);
+        commitTransform(next);
       }
+      return;
+    }
 
-      if (!dragRef.current || dragRef.current.pointerId !== e.pointerId) return;
-      const dx = e.clientX - dragRef.current.startX;
-      const dy = e.clientY - dragRef.current.startY;
-      onTransformChange({
-        scale: transform.scale,
-        tx: dragRef.current.startTx + dx,
-        ty: dragRef.current.startTy + dy,
-      });
-    },
-    [transform.scale, onTransformChange],
-  );
+    if (!dragRef.current || dragRef.current.pointerId !== e.pointerId) return;
+    // Panning never changes zoom band — apply to DOM only, no React re-render
+    applyTransform({
+      scale: liveRef.current.scale,
+      tx: dragRef.current.startTx + (e.clientX - dragRef.current.startX),
+      ty: dragRef.current.startTy + (e.clientY - dragRef.current.startY),
+    });
+  }, [applyTransform, commitTransform]);
 
   const handlePointerUp = useCallback((e: PointerEvent) => {
     if (pinchRef.current) {
       pinchRef.current.pointers.delete(e.pointerId);
       if (pinchRef.current.pointers.size === 0) {
         pinchRef.current = null;
+        onTransformChange(liveRef.current);
       }
       return;
     }
     if (dragRef.current?.pointerId === e.pointerId) {
       dragRef.current = null;
+      onTransformChange(liveRef.current);
     }
-  }, []);
+  }, [onTransformChange]);
 
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      switch (e.key) {
-        case "ArrowUp":
-          e.preventDefault();
-          onTransformChange({ ...transform, ty: transform.ty + PAN_PX });
-          break;
-        case "ArrowDown":
-          e.preventDefault();
-          onTransformChange({ ...transform, ty: transform.ty - PAN_PX });
-          break;
-        case "ArrowLeft":
-          e.preventDefault();
-          onTransformChange({ ...transform, tx: transform.tx + PAN_PX });
-          break;
-        case "ArrowRight":
-          e.preventDefault();
-          onTransformChange({ ...transform, tx: transform.tx - PAN_PX });
-          break;
-        case "+":
-        case "=":
-          e.preventDefault();
-          onTransformChange({
-            ...transform,
-            scale: clampScale(transform.scale * ZOOM_STEP),
-          });
-          break;
-        case "-":
-          e.preventDefault();
-          onTransformChange({
-            ...transform,
-            scale: clampScale(transform.scale / ZOOM_STEP),
-          });
-          break;
-      }
-    },
-    [transform, onTransformChange],
-  );
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    let next: ViewportTransform | null = null;
+    const live = liveRef.current;
+    switch (e.key) {
+      case "ArrowUp":    e.preventDefault(); next = { ...live, ty: live.ty + PAN_PX }; break;
+      case "ArrowDown":  e.preventDefault(); next = { ...live, ty: live.ty - PAN_PX }; break;
+      case "ArrowLeft":  e.preventDefault(); next = { ...live, tx: live.tx + PAN_PX }; break;
+      case "ArrowRight": e.preventDefault(); next = { ...live, tx: live.tx - PAN_PX }; break;
+      case "+":
+      case "=":          e.preventDefault(); next = { ...live, scale: clampScale(live.scale * ZOOM_STEP) }; break;
+      case "-":          e.preventDefault(); next = { ...live, scale: clampScale(live.scale / ZOOM_STEP) }; break;
+    }
+    if (next) {
+      applyTransform(next);
+      onTransformChange(next);
+    }
+  }, [applyTransform, onTransformChange]);
 
   return (
     <figure
@@ -240,8 +271,8 @@ export function MapViewport({
       style={{ touchAction: "none" }}
     >
       <div
+        ref={wrapperRef}
         style={{
-          transform: `translate(${transform.tx}px, ${transform.ty}px) scale(${transform.scale})`,
           transformOrigin: "0 0",
           width: "100%",
           height: "100%",
