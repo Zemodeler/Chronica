@@ -134,6 +134,23 @@ const HISTORICAL_POLITY_PALETTES = {
 
 type HistoricalPolityFamily = keyof typeof HISTORICAL_POLITY_PALETTES;
 
+// Consolidated realms are assigned an intentional slot in their cultural
+// palette instead of inheriting arbitrary positions from the old tiny-region
+// IDs.  Adjacent powers therefore receive visibly separated pigments while
+// keeping the palette historically coherent.
+const CONSOLIDATED_POLITY_PALETTE_SLOTS: Readonly<Record<string, number>> = {
+  "gaul-armorican-confederacy": 0, "gaul-belgae": 1, "gaul-treveri": 2, "gaul-sequani": 3,
+  "gaul-aedui": 4, "gaul-arverni": 5, "gaul-bituriges": 6, "gaul-sequana-peoples": 7,
+  "gaul-aquitani": 8, "gaul-volcae": 9, "gaul-allobroges": 10, "gaul-salyens": 11,
+  "germania-suebi": 0, "germania-ubii": 1, "germania-vindelici": 2, "germania-boii": 3,
+  "germania-semnones": 4, "germania-chauci": 5, "germania-chatti": 6, "germania-cherusci": 7,
+  "germania-bructeri": 8, "germania-treveri": 9, "germania-hermunduri": 10, "germania-cimbri": 11,
+  "iberia-gallaeci": 0, "iberia-astures": 1, "iberia-cantabri": 2, "iberia-vascones": 3,
+  "iberia-vaccei": 4, "iberia-vettones": 5, "iberia-lusitani": 6, "iberia-carpetani": 7,
+  "iberia-celtiberi": 8, "iberia-ilergetes": 9,
+  "thrace-dacian-highland-communities": 0, "thrace-getae": 1, "thrace-eastern-carpathian-communities": 2,
+};
+
 function historicalFamilyForPolity(polityId: string): HistoricalPolityFamily {
   if (
     polityId.startsWith("gaul-")
@@ -149,7 +166,7 @@ function historicalFamilyForPolity(polityId: string): HistoricalPolityFamily {
   if (/(^|-)(czech|bohemia|bohemian|moravia|moravian)(-|$)/.test(polityId)) return "czech";
   if (/(^|-)(poland|polish|piast|mazovia|mazovian|wielkopolska|pomerania|pomeranian)(-|$)/.test(polityId)) return "polish";
   if (["veneti", "etruscan-cities", "mamertines", "sabines", "umbrians", "picentes", "marsi-paeligni", "campanians", "samnites", "daunians", "peucetians", "messapians", "tarentines", "lucanians", "bruttians", "rhegines"].includes(polityId)) return "italic";
-  if (["athens", "achaean-league", "aetolian-league", "thessalian-league", "hellenic-islanders", "epirus"].includes(polityId)) return "hellenic";
+  if (["athens", "achaean-league", "aetolian-league", "thessalian-league", "hellenic-islanders", "epirus", "massalia"].includes(polityId)) return "hellenic";
   if (["mauretanian-peoples", "numidian-kingdoms", "gaetuli", "garamantes"].includes(polityId)) return "northAfrican";
   return "neutral";
 }
@@ -176,7 +193,8 @@ function hexToHsl(hex: string): readonly [number, number, number] {
 function historicalColourForPolity(polityId: string): string {
   const palette = HISTORICAL_POLITY_PALETTES[historicalFamilyForPolity(polityId)];
   const hash = hashString(polityId);
-  const base = palette[hash % palette.length]!;
+  const paletteSlot = CONSOLIDATED_POLITY_PALETTE_SLOTS[polityId] ?? hash;
+  const base = palette[paletteSlot % palette.length]!;
   const [baseHue, baseSaturation, baseLightness] = hexToHsl(base);
   // The 16 curated swatches provide the cultural character. Fine-grained,
   // stable variations supply effectively unbounded shades without drifting

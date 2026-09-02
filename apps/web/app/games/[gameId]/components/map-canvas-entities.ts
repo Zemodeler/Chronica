@@ -132,7 +132,7 @@ export function drawSettlements(
 
     if (capital) drawStar(ctx, x, y, radius * 1.5);
     else if (settlement.type === "city") drawDiamond(ctx, x, y, radius);
-    else if (settlement.type === "fort") ctx.rect(x - radius, y - radius, radius * 2, radius * 2);
+    else if (settlement.type === "fort") { ctx.beginPath(); ctx.rect(x - radius, y - radius, radius * 2, radius * 2); }
     else { ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); }
     ctx.fill();
     ctx.stroke();

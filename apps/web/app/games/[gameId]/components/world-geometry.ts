@@ -77,6 +77,9 @@ export function prepareStaticWorldGeometry(map: GeoJsonMap): StaticWorldGeometry
   const neighbors = new Map(preliminary.map((province) => [province.id, new Set<string>()])); const sharedBoundaries: SharedBoundary[] = [];
   for (const occurrences of boundaries.values()) {
     const first = occurrences[0]!; const other = occurrences.find((candidate) => candidate.provinceId !== first.provinceId);
+    // A dissolved territory can retain separate source polygons. A repeated
+    // edge within that same territory is internal, not a coastline.
+    if (other === undefined && occurrences.length > 1) continue;
     if (other) { neighbors.get(first.provinceId)?.add(other.provinceId); neighbors.get(other.provinceId)?.add(first.provinceId); }
     sharedBoundaries.push({ provinceA: first.provinceId, provinceB: other?.provinceId ?? null, points: first.points, svgPath: boundaryPath(first.points) });
   }

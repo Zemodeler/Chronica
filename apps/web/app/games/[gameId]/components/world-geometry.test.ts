@@ -20,10 +20,13 @@ describe("territory hover geometry", () => {
       }],
     } as GeoJsonMap;
 
-    const territory = prepareStaticWorldGeometry(map).provinceById.get("joined-territory");
+    const world = prepareStaticWorldGeometry(map);
+    const territory = world.provinceById.get("joined-territory");
 
     expect(territory?.svgPath).toContain("L1 0L1 -1");
     expect(territory?.exteriorSvgPath).not.toContain("M1 0L1 -1");
     expect(territory?.exteriorSvgPath).not.toContain("M1 -1L1 0");
+    expect(world.sharedBoundaries).toHaveLength(6);
+    expect(world.sharedBoundaries.every((boundary) => boundary.provinceB === null)).toBe(true);
   });
 });

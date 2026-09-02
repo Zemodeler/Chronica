@@ -38,6 +38,19 @@ describe("political map derivation", () => {
     expectMutedHsl(politicalColourFromId("iberia-celtiberians"));
     expectMutedHsl(politicalColourFromId("germania-suebi"));
   });
+  it("assigns consolidated neighbouring realms distinct curated palette slots", () => {
+    const groups = [
+      ["gaul-aedui", "gaul-arverni", "gaul-sequani", "gaul-belgae"],
+      ["germania-suebi", "germania-chatti", "germania-cherusci", "germania-chauci"],
+      ["iberia-vaccei", "iberia-vettones", "iberia-carpetani", "iberia-celtiberi"],
+      ["thrace-dacian-highland-communities", "thrace-getae", "thrace-eastern-carpathian-communities"],
+    ] as const;
+    for (const polityIds of groups) {
+      const colours = polityIds.map(politicalColourFromId);
+      expect(new Set(colours).size).toBe(colours.length);
+      for (const colour of colours) expectMutedHsl(colour);
+    }
+  });
   it("gives Hungarian, Czech, and Polish polities distinct muted lineage shades", () => {
     const hungarian = politicalColourFromId("kingdom-of-hungary");
     const czech = politicalColourFromId("kingdom-of-bohemia");

@@ -55,10 +55,12 @@ interface MapViewportProps {
   readonly children: ReactNode;
   /** Called each animation frame during gestures to repaint the terrain canvas. */
   readonly onDrawCanvas?: DrawCanvasFn;
+  /** Clears map hover state before the SVG is moved beneath a captured pointer. */
+  readonly onPanStart?: () => void;
 }
 
 export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
-  function MapViewport({ transform, onTransformChange, children, onDrawCanvas }, ref) {
+  function MapViewport({ transform, onTransformChange, children, onDrawCanvas, onPanStart }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const wrapperRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -79,6 +81,7 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
       startY: number;
       startTx: number;
       startTy: number;
+      hasPanned: boolean;
     } | null>(null);
 
     const pinchRef = useRef<{
@@ -89,6 +92,7 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
       initialTy: number;
       centerX: number;
       centerY: number;
+      hasPanned: boolean;
     } | null>(null);
 
     const scheduleCanvasDraw = useCallback((t: ViewportTransform) => {
@@ -113,6 +117,10 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
       }
       scheduleCanvasDraw(t);
     }, [scheduleCanvasDraw]);
+
+    const setPanning = useCallback((panning: boolean) => {
+      containerRef.current?.toggleAttribute("data-panning", panning);
+    }, []);
 
     // Notify parent: immediate on zoom band crossing so LOD switches instantly,
     // debounced otherwise (end of pan / end of free zoom).
@@ -220,6 +228,7 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
           initialTy: live.ty,
           centerX: e.clientX,
           centerY: e.clientY,
+          hasPanned: false,
         };
         container.setPointerCapture(e.pointerId);
         return;
@@ -232,6 +241,7 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
         startY: e.clientY,
         startTx: live.tx,
         startTy: live.ty,
+        hasPanned: false,
       };
       container.setPointerCapture(e.pointerId);
     }, []);
@@ -241,6 +251,11 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
         const pinch = pinchRef.current;
         pinch.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
         if (pinch.pointers.size === 2 && pinch.initialDistance > 0) {
+          if (!pinch.hasPanned) {
+            pinch.hasPanned = true;
+            setPanning(true);
+            onPanStart?.();
+          }
           const pts = [...pinch.pointers.values()];
           const dx = pts[1]!.x - pts[0]!.x;
           const dy = pts[1]!.y - pts[0]!.y;
@@ -267,27 +282,34 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
 
       if (!dragRef.current || dragRef.current.pointerId !== e.pointerId) return;
       // Panning never changes zoom band — apply to DOM only, no React re-render
+      if (!dragRef.current.hasPanned) {
+        dragRef.current.hasPanned = true;
+        setPanning(true);
+        onPanStart?.();
+      }
       applyTransform({
         scale: liveRef.current.scale,
         tx: dragRef.current.startTx + (e.clientX - dragRef.current.startX),
         ty: dragRef.current.startTy + (e.clientY - dragRef.current.startY),
       });
-    }, [applyTransform, commitTransform]);
+    }, [applyTransform, commitTransform, onPanStart, setPanning]);
 
     const handlePointerUp = useCallback((e: PointerEvent) => {
       if (pinchRef.current) {
         pinchRef.current.pointers.delete(e.pointerId);
         if (pinchRef.current.pointers.size === 0) {
           pinchRef.current = null;
+          setPanning(false);
           onTransformChange(liveRef.current);
         }
         return;
       }
       if (dragRef.current?.pointerId === e.pointerId) {
         dragRef.current = null;
+        setPanning(false);
         onTransformChange(liveRef.current);
       }
-    }, [onTransformChange]);
+    }, [onTransformChange, setPanning]);
 
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
       let next: ViewportTransform | null = null;

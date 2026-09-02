@@ -475,6 +475,32 @@ const ROMANIA_GROUNDED_TERRITORIES: readonly GroundedTerritory[] = base.features
     return { sourceId: feature.id, id: `punic-thrace-${localId(name)}`, name: localLandscapeName(name) };
   });
 
+/**
+ * The Adriatic, Alpine and British layers retain their surveyed local outlines.
+ * The political map deliberately groups these territories into substantial
+ * contemporary communities further downstream, rather than making each local
+ * shape a state in its own right.
+ */
+const YUGOSLAV_GROUNDED_TERRITORIES: readonly GroundedTerritory[] = base.features
+  .filter((feature) => ["alb-", "bih-", "hrv-", "mkd-", "mne-", "srb-", "svn-", "xkx-"].some((prefix) => feature.id.startsWith(prefix)) && feature.properties.kind === "province")
+  .map((feature) => ({ sourceId: feature.id, id: `punic-illyria-${localId(feature.id)}`, name: localLandscapeName(feature.properties.name ?? feature.id) }));
+
+const AUSTRIA_GROUNDED_TERRITORIES: readonly GroundedTerritory[] = base.features
+  .filter((feature) => feature.id.startsWith("aut-") && feature.properties.kind === "province")
+  .map((feature) => ({ sourceId: feature.id, id: `punic-austria-${localId(feature.id)}`, name: localLandscapeName(feature.properties.name ?? feature.id) }));
+
+const HUNGARY_GROUNDED_TERRITORIES: readonly GroundedTerritory[] = base.features
+  .filter((feature) => feature.id.startsWith("hun-") && feature.properties.kind === "province")
+  .map((feature) => ({ sourceId: feature.id, id: `punic-hungary-${localId(feature.id)}`, name: localLandscapeName(feature.properties.name ?? feature.id) }));
+
+const BRITAIN_GROUNDED_TERRITORIES: readonly GroundedTerritory[] = base.features
+  .filter((feature) => feature.id.startsWith("gbr-local-") && feature.properties.kind === "province")
+  .map((feature) => ({ sourceId: feature.id, id: `punic-britain-${localId(feature.id)}`, name: localLandscapeName(feature.properties.name ?? feature.id) }));
+
+const GREEK_GROUNDED_TERRITORIES: readonly GroundedTerritory[] = base.features
+  .filter((feature) => feature.id.startsWith("grc-local-") && feature.properties.kind === "province")
+  .map((feature) => ({ sourceId: feature.id, id: `punic-greece-${localId(feature.id)}`, name: localLandscapeName(feature.properties.name ?? feature.id) }));
+
 const GERMANIA_GROUNDED_TERRITORIES: readonly GroundedTerritory[] = [
   { sourceId: "deu-9070358b86745718691241", id: "punic-germania-neckar-uplands", name: "Neckar Uplands" },
   { sourceId: "deu-9070358b19876986675637", id: "punic-germania-upper-rhine", name: "Upper Rhenus Terrace" },
@@ -516,31 +542,27 @@ const GERMANIA_GROUNDED_TERRITORIES: readonly GroundedTerritory[] = [
   { sourceId: "deu-9070358b67217417145666", id: "punic-germania-hermunduri", name: "Hermundurian Basin" },
 ];
 
-// Keep the whole former-Yugoslav theatre together in the active map so the
-// Adriatic and Morava–Vardar corridors read as one uneven frontier system.
-const illyriaSourceIds = new Set(["alb-", "bih-", "hrv-", "mkd-", "mne-", "srb-", "svn-", "xkx-"].flatMap((prefix) => [...provinceIds(base, prefix)]));
 const thraceSourceIds = provinceIds(base, "bgr-");
 const belgiumSourceIds = provinceIds(base, "bel-");
 const netherlandsSourceIds = provinceIds(base, "nld-");
-const hungarySourceIds = provinceIds(base, "hun-");
 const czechoslovakiaSourceIds = new Set(["cze-", "svk-"].flatMap((prefix) => [...provinceIds(base, prefix)]));
 const luxembourgSourceIds = provinceIds(base, "lux-");
 
 const withItaly = replaceWithGroundedTerritories(base, ITALY_GROUNDED_TERRITORIES);
 const withGaul = replaceWithGroundedTerritories(withItaly, GAUL_GROUNDED_TERRITORIES);
 const withIberia = replaceWithGroundedTerritories(withGaul, IBERIA_GROUNDED_TERRITORIES);
-const withIllyria = replaceProvinceGroup(withIberia, illyriaSourceIds, ILLYRIAN_SITES, 1.18, "carthaginian");
+const withIllyria = replaceWithGroundedTerritories(withIberia, YUGOSLAV_GROUNDED_TERRITORIES);
 const withThrace = replaceProvinceGroup(withIllyria, thraceSourceIds, BULGARIAN_THRACIAN_SITES);
 const withRomania = replaceWithGroundedTerritories(withThrace, ROMANIA_GROUNDED_TERRITORIES);
 const withBelgica = replaceProvinceGroup(withRomania, belgiumSourceIds, BELGIC_SITES);
 const withLowCountries = replaceProvinceGroup(withBelgica, netherlandsSourceIds, LOW_COUNTRIES_SITES);
 const withGermania = replaceWithGroundedTerritories(withLowCountries, GERMANIA_GROUNDED_TERRITORIES);
-const withHungary = replaceProvinceGroup(withGermania, hungarySourceIds, HUNGARIAN_SITES, 1.1, "carthaginian");
+const withAustria = replaceWithGroundedTerritories(withGermania, AUSTRIA_GROUNDED_TERRITORIES);
+const withHungary = replaceWithGroundedTerritories(withAustria, HUNGARY_GROUNDED_TERRITORIES);
 const withCzechoslovakia = replaceProvinceGroup(withHungary, czechoslovakiaSourceIds, CZECHOSLOVAK_SITES);
 const withLuxembourg = replaceProvinceGroup(withCzechoslovakia, luxembourgSourceIds, LUXEMBOURG_SITES);
-const withEngland = replaceProvinceGroup(withLuxembourg, new Set(["gbr-14339913b95766344400054"]), ENGLAND_SITES);
-const withScotland = replaceProvinceGroup(withEngland, new Set(["gbr-14339913b23556801435424"]), SCOTLAND_SITES);
-const withWales = replaceProvinceGroup(withScotland, new Set(["gbr-14339913b89763821047858"]), WALES_SITES);
+const withBritain = replaceWithGroundedTerritories(withLuxembourg, BRITAIN_GROUNDED_TERRITORIES);
+const withGreece = replaceWithGroundedTerritories(withBritain, GREEK_GROUNDED_TERRITORIES);
 
 const SETTLEMENT_PROVINCES: Readonly<Record<string, string>> = {
   "settlement-rome": "punic-italy-latium",
@@ -590,17 +612,17 @@ const PUNIC_WARS_SETTLEMENTS: readonly HistoricalSettlement[] = [
   { id: "settlement-gades", name: "Gades", provinceId: "punic-iberia-andalucia", type: "port", coordinate: [-6.29, 36.53] },
   { id: "settlement-numantia", name: "Numantia", provinceId: "punic-iberia-castilla-y-leon", type: "fort", coordinate: [-2.44, 41.81] },
   { id: "settlement-carthago-nova", name: "Carthago Nova", provinceId: "punic-iberia-region-de-murcia", type: "port", coordinate: [-0.98, 37.60] },
-  { id: "settlement-maiden-castle", name: "Maiden Castle", provinceId: "punic-britain-dorset", type: "fort", coordinate: [-2.49, 50.70] },
-  { id: "settlement-danebury", name: "Danebury", provinceId: "punic-britain-thames", type: "fort", coordinate: [-1.49, 51.18] },
-  { id: "settlement-traprain-law", name: "Traprain Law", provinceId: "punic-britain-east-lowlands", type: "fort", coordinate: [-2.65, 55.93] },
-  { id: "settlement-pella", name: "Pella", provinceId: "grc-93993887b93147517098288", type: "capital", coordinate: [22.52, 40.76] },
-  { id: "settlement-athens", name: "Athens", provinceId: "grc-93993887b88980272284763", type: "capital", coordinate: [23.73, 37.98] },
+  { id: "settlement-maiden-castle", name: "Maiden Castle", provinceId: "punic-britain-gbr-local-9080712b78235082436645", type: "fort", coordinate: [-2.49, 50.70] },
+  { id: "settlement-danebury", name: "Danebury", provinceId: "punic-britain-gbr-local-9080712b82982752923250", type: "fort", coordinate: [-1.49, 51.18] },
+  { id: "settlement-traprain-law", name: "Traprain Law", provinceId: "punic-britain-gbr-local-9080712b46190908677710", type: "fort", coordinate: [-2.65, 55.93] },
+  { id: "settlement-pella", name: "Pella", provinceId: "punic-greece-grc-local-53547021b48713005805080", type: "capital", coordinate: [22.52, 40.76] },
+  { id: "settlement-athens", name: "Athens", provinceId: "punic-greece-grc-local-53547021b2738722376900", type: "capital", coordinate: [23.73, 37.98] },
 ];
 
 export const punicWarsGeoJson: GeoJsonMap = {
-  ...withWales,
+  ...withGreece,
   features: [
-    ...withWales.features.map((feature) => feature.properties.kind !== "settlement" || SETTLEMENT_PROVINCES[feature.id] === undefined
+    ...withGreece.features.map((feature) => feature.properties.kind !== "settlement" || SETTLEMENT_PROVINCES[feature.id] === undefined
       ? feature
       : { ...feature, properties: { ...feature.properties, provinceId: SETTLEMENT_PROVINCES[feature.id]!, ...(feature.id === "settlement-syracuse" ? { type: "capital" as const } : {}) } }),
     ...PUNIC_WARS_SETTLEMENTS.map((settlement) => ({
@@ -616,15 +638,15 @@ export const PUNIC_WARS_REGION_COUNTS = {
   italy: ITALY_GROUNDED_TERRITORIES.length,
   gaul: GAUL_GROUNDED_TERRITORIES.length,
   iberia: IBERIA_GROUNDED_TERRITORIES.length,
-  illyria: ILLYRIAN_SITES.length,
+  illyria: YUGOSLAV_GROUNDED_TERRITORIES.length,
   thrace: BULGARIAN_THRACIAN_SITES.length + ROMANIA_GROUNDED_TERRITORIES.length,
   belgica: BELGIC_SITES.length,
   lowCountries: LOW_COUNTRIES_SITES.length,
   germania: GERMANIA_GROUNDED_TERRITORIES.length,
-  hungary: HUNGARIAN_SITES.length,
+  hungary: HUNGARY_GROUNDED_TERRITORIES.length,
   czechoslovakia: CZECHOSLOVAK_SITES.length,
   luxembourg: LUXEMBOURG_SITES.length,
-  england: ENGLAND_SITES.length,
-  scotland: SCOTLAND_SITES.length,
-  wales: WALES_SITES.length,
+  austria: AUSTRIA_GROUNDED_TERRITORIES.length,
+  britain: BRITAIN_GROUNDED_TERRITORIES.length,
+  greece: GREEK_GROUNDED_TERRITORIES.length,
 } as const;

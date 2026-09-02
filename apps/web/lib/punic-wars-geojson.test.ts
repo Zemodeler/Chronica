@@ -39,7 +39,9 @@ describe("Punic Wars historical GeoJSON", () => {
     expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-hungary-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.hungary);
     expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-czechoslovakia-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.czechoslovakia);
     expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-luxembourg-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.luxembourg);
-    expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-britain-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.england + PUNIC_WARS_REGION_COUNTS.scotland + PUNIC_WARS_REGION_COUNTS.wales);
+    expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-austria-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.austria);
+    expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-britain-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.britain);
+    expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-greece-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.greece);
 
     const italianSource = new Set(europeNorthAfricaGeoJson.features.filter((feature) => feature.id.startsWith("ita-local-")).map((feature) => feature.id));
     expect(Math.abs(derivedArea("punic-italy-") - sourceArea(italianSource))).toBeLessThan(0.000001);
@@ -58,6 +60,20 @@ describe("Punic Wars historical GeoJSON", () => {
     }
     const frenchSource = new Set(europeNorthAfricaGeoJson.features.filter((feature) => feature.id.startsWith("fra-local-")).map((feature) => feature.id));
     expect(Math.abs(derivedArea("punic-gaul-") - sourceArea(frenchSource))).toBeLessThan(0.000001);
+  });
+
+  it("keeps surveyed local outlines for the new Adriatic, Austrian, British, and Greek territories", () => {
+    const sourceById = new Map(europeNorthAfricaGeoJson.features.map((feature) => [feature.id, feature]));
+    const checks = [
+      ["aut-97560089b12055607938436", "punic-austria-aut-97560089b12055607938436"],
+      ["hun-22733592b30896182433416", "punic-hungary-hun-22733592b30896182433416"],
+      ["xkx-2360587b5118871504069", "punic-illyria-xkx-2360587b5118871504069"],
+      ["gbr-local-9080712B78235082436645", "punic-britain-gbr-local-9080712b78235082436645"],
+      ["grc-local-53547021B64058474759409", "punic-greece-grc-local-53547021b64058474759409"],
+    ] as const;
+    for (const [sourceId, territoryId] of checks) {
+      expect(punicWarsGeoJson.features.find((feature) => feature.id === territoryId)?.geometry).toEqual(sourceById.get(sourceId)?.geometry);
+    }
   });
 
   it("attaches capitals, cities, and forts to valid derived provinces", () => {

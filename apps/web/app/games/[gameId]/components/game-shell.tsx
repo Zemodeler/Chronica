@@ -128,6 +128,7 @@ export function GameShell({
   const [selectedProvinceId, setSelectedProvinceId] = useState<string | null>(
     null,
   );
+  const [hoveredProvinceId, setHoveredProvinceId] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<{
     x: number;
     y: number;
@@ -319,16 +320,22 @@ export function GameShell({
     return names;
   }, [geoJson]);
 
+  const clearMapHover = useCallback(() => {
+    setHoveredProvinceId(null);
+    setTooltip(null);
+  }, []);
+
   const handleProvinceHover = useCallback(
     (provinceId: string | null, event?: PointerEvent) => {
       if (provinceId === null || !event) {
-        setTooltip(null);
+        clearMapHover();
         return;
       }
       const name = regionNames.get(provinceId) ?? provinceId;
+      setHoveredProvinceId(provinceId);
       setTooltip({ x: event.clientX, y: event.clientY, name });
     },
-    [regionNames],
+    [clearMapHover, regionNames],
   );
 
   const handleProvinceClick = useCallback(
@@ -427,7 +434,7 @@ export function GameShell({
       </header>
       <div className="game-shell">
         <div className="game-shell-map">
-          <MapViewport ref={mapViewportRef} transform={viewport} onTransformChange={setViewport} onDrawCanvas={onDrawCanvas}>
+          <MapViewport ref={mapViewportRef} transform={viewport} onTransformChange={setViewport} onDrawCanvas={onDrawCanvas} onPanStart={clearMapHover}>
             {world && political && (
               <GeoMap
                 world={world}
@@ -435,6 +442,7 @@ export function GameShell({
                 viewBox={viewBox}
                 overlay={overlay}
                 selectedProvinceId={selectedProvinceId}
+                hoveredProvinceId={hoveredProvinceId}
                 zoomBand={zoomBand}
                 scale={viewport.scale}
                 tx={viewport.tx}
