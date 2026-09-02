@@ -30,6 +30,8 @@ const settings = {
   fra: { tolerance: 0.03 },
   // Spain combines broad interior regions with rugged coast- and mountain-led edges.
   esp: { tolerance: 0.018 },
+  // Romania already has a strong basin-and-corridor rhythm; remove survey noise only.
+  rou: { tolerance: 0.0015 },
 };
 
 const round = (value) => Number(value.toFixed(5));

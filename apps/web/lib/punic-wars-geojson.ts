@@ -6,7 +6,8 @@ import { europeNorthAfricaGeoJson } from "./europe-north-africa-geojson";
 type Point = readonly [number, number];
 type Ring = readonly Point[];
 type Polygon = readonly Ring[];
-type HistoricalSite = Readonly<{ id: string; name: string; coordinate: Point }>;
+type HistoricalSite = Readonly<{ id: string; name: string; coordinate: Point; territorialWeight?: number }>;
+type BorderStyle = "default" | "carthaginian";
 
 function clipRingToHalfPlane(ring: Ring, valueAt: (point: Point) => number): [number, number][] {
   const result: [number, number][] = [];
@@ -81,6 +82,36 @@ function organicEdge(first: Point, second: Point, irregularity = 1): [number, nu
 }
 
 /**
+ * A broad, deliberate core–hinterland border: one long basin-like turn and a
+ * small shoulder rather than the alternating saw-teeth used by the older
+ * tribal reconstruction. The seed makes both owners emit the exact same line
+ * in reverse.
+ */
+function carthaginianEdge(first: Point, second: Point, irregularity = 1): [number, number][] {
+  const firstKey = pointKey(first);
+  const secondKey = pointKey(second);
+  const forward = firstKey < secondKey;
+  const start = forward ? roundedPoint(first) : roundedPoint(second);
+  const end = forward ? roundedPoint(second) : roundedPoint(first);
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const length = Math.hypot(dx, dy);
+  if (length < 0.045) return forward ? [start, end] : [end, start];
+  const seed = hash(`${start[0]},${start[1]}|${end[0]},${end[1]}|carthage`);
+  const normal: [number, number] = [-dy / length, dx / length];
+  const direction = seed % 2 === 0 ? 1 : -1;
+  const amplitude = Math.min(0.12 * irregularity, length * (0.075 + (seed % 20) / 1_000) * irregularity);
+  const shoulder = amplitude * (0.16 + ((seed >>> 5) % 12) / 100);
+  const bend = [0.22, 0.49, 0.76].map((position) => {
+    const main = Math.sin(Math.PI * position) * amplitude;
+    const secondary = Math.sin(2 * Math.PI * position) * shoulder;
+    return roundedPoint([start[0] + dx * position + normal[0] * direction * (main + secondary), start[1] + dy * position + normal[1] * direction * (main + secondary)]);
+  });
+  const result = [start, ...bend, end];
+  return forward ? result : [...result].reverse();
+}
+
+/**
  * Replaces only borders shared by generated regions.  Each repeated edge uses
  * the same seeded polyline in reverse, so the map gains natural irregularity
  * without creating gaps or overlaps between neighbours.
@@ -115,12 +146,42 @@ function organicizeInternalBorders(features: readonly GeoJsonMapFeature[], irreg
   });
 }
 
+function carthaginianizeInternalBorders(features: readonly GeoJsonMapFeature[], irregularity = 1): GeoJsonMapFeature[] {
+  const edgeCounts = new Map<string, number>();
+  for (const feature of features) {
+    if (feature.geometry.type !== "MultiPolygon") continue;
+    for (const polygon of feature.geometry.coordinates) for (const ring of polygon) for (let index = 1; index < ring.length; index++) {
+      const key = edgeKey(ring[index - 1]!, ring[index]!);
+      edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+    }
+  }
+  return features.map((feature) => {
+    if (feature.geometry.type !== "MultiPolygon") return feature;
+    return {
+      ...feature,
+      geometry: {
+        type: "MultiPolygon" as const,
+        coordinates: feature.geometry.coordinates.map((polygon) => polygon.map((ring) => {
+          const result: [number, number][] = [roundedPoint(ring[0]!)];
+          for (let index = 1; index < ring.length; index++) {
+            const first = ring[index - 1]!;
+            const second = ring[index]!;
+            const points = (edgeCounts.get(edgeKey(first, second)) ?? 0) > 1 ? carthaginianEdge(first, second, irregularity) : [roundedPoint(first), roundedPoint(second)];
+            result.push(...points.slice(1));
+          }
+          return result;
+        })),
+      },
+    };
+  });
+}
+
 /**
  * Fixed historical centres form a clipped Voronoi partition.  The result
  * preserves every source coastline and gives regions organic hinterlands
  * instead of grid-like modern administrative fragments.
  */
-function historicalRegions(source: readonly GeoJsonMapFeature[], sites: readonly HistoricalSite[], borderIrregularity = 1): GeoJsonMapFeature[] {
+function historicalRegions(source: readonly GeoJsonMapFeature[], sites: readonly HistoricalSite[], borderIrregularity = 1, borderStyle: BorderStyle = "default"): GeoJsonMapFeature[] {
   const polygons = source.flatMap(polygonsFor);
   const regions: GeoJsonMapFeature[] = sites.map((site): GeoJsonMapFeature => {
     const coordinates = polygons.flatMap((polygon) => {
@@ -129,7 +190,7 @@ function historicalRegions(source: readonly GeoJsonMapFeature[], sites: readonly
         if (other.id === site.id || ring.length === 0) continue;
         const [sx, sy] = site.coordinate;
         const [ox, oy] = other.coordinate;
-        ring = clipRingToHalfPlane(ring, ([x, y]) => (x - sx) ** 2 + (y - sy) ** 2 - ((x - ox) ** 2 + (y - oy) ** 2));
+        ring = clipRingToHalfPlane(ring, ([x, y]) => (x - sx) ** 2 + (y - sy) ** 2 - (site.territorialWeight ?? 0) - ((x - ox) ** 2 + (y - oy) ** 2 - (other.territorialWeight ?? 0)));
       }
       return ring.length === 0 ? [] : [[ring]];
     });
@@ -141,13 +202,13 @@ function historicalRegions(source: readonly GeoJsonMapFeature[], sites: readonly
       properties: { kind: "province", name: site.name },
     };
   });
-  return organicizeInternalBorders(regions, borderIrregularity);
+  return borderStyle === "carthaginian" ? carthaginianizeInternalBorders(regions, borderIrregularity) : organicizeInternalBorders(regions, borderIrregularity);
 }
 
-function replaceProvinceGroup(map: GeoJsonMap, sourceIds: ReadonlySet<string>, sites: readonly HistoricalSite[], borderIrregularity = 1): GeoJsonMap {
+function replaceProvinceGroup(map: GeoJsonMap, sourceIds: ReadonlySet<string>, sites: readonly HistoricalSite[], borderIrregularity = 1, borderStyle: BorderStyle = "default"): GeoJsonMap {
   const source = map.features.filter((feature) => sourceIds.has(feature.id));
   if (source.length !== sourceIds.size) throw new Error("A requested historical source province is missing from the base GeoJSON.");
-  const replacement = historicalRegions(source, sites, borderIrregularity);
+  const replacement = historicalRegions(source, sites, borderIrregularity, borderStyle);
   let inserted = false;
   return {
     ...map,
@@ -327,19 +388,19 @@ const IBERIAN_SITES: readonly HistoricalSite[] = [
   { id: "punic-iberia-cantabri", name: "Cantabri", coordinate: [-4.08, 43.29] },
   { id: "punic-iberia-varduli", name: "Varduli and Autrigones", coordinate: [-2.69, 42.85] },
   { id: "punic-iberia-vascones", name: "Vascones", coordinate: [-1.64, 42.82] },
-  { id: "punic-iberia-vaccei", name: "Vaccei", coordinate: [-4.72, 41.65] },
-  { id: "punic-iberia-vettones", name: "Vettones", coordinate: [-5.75, 40.46] },
-  { id: "punic-iberia-lusitani", name: "Lusitani", coordinate: [-7.35, 39.82] },
-  { id: "punic-iberia-carpetani", name: "Carpetani", coordinate: [-3.70, 40.42] },
-  { id: "punic-iberia-celtiberi", name: "Celtiberi", coordinate: [-2.22, 41.21] },
-  { id: "punic-iberia-oretani", name: "Oretani", coordinate: [-3.42, 38.98] },
-  { id: "punic-iberia-turdetani", name: "Turdetani", coordinate: [-5.99, 37.39] },
-  { id: "punic-iberia-turduli", name: "Turduli", coordinate: [-6.18, 38.88] },
-  { id: "punic-iberia-celtici", name: "Celtici", coordinate: [-6.80, 37.68] },
+  { id: "punic-iberia-vaccei", name: "Vaccei", coordinate: [-4.72, 41.65], territorialWeight: 0.07 },
+  { id: "punic-iberia-vettones", name: "Vettones", coordinate: [-5.75, 40.46], territorialWeight: 0.11 },
+  { id: "punic-iberia-lusitani", name: "Lusitani", coordinate: [-7.35, 39.82], territorialWeight: 0.15 },
+  { id: "punic-iberia-carpetani", name: "Carpetani", coordinate: [-3.70, 40.42], territorialWeight: -0.05 },
+  { id: "punic-iberia-celtiberi", name: "Celtiberi", coordinate: [-2.22, 41.21], territorialWeight: 0.16 },
+  { id: "punic-iberia-oretani", name: "Oretani", coordinate: [-3.42, 38.98], territorialWeight: 0.04 },
+  { id: "punic-iberia-turdetani", name: "Turdetani", coordinate: [-5.99, 37.39], territorialWeight: -0.08 },
+  { id: "punic-iberia-turduli", name: "Turduli", coordinate: [-6.18, 38.88], territorialWeight: 0.09 },
+  { id: "punic-iberia-celtici", name: "Celtici", coordinate: [-6.80, 37.68], territorialWeight: 0.08 },
   { id: "punic-iberia-conii", name: "Conii", coordinate: [-7.96, 37.02] },
-  { id: "punic-iberia-bastetani", name: "Bastetani", coordinate: [-2.77, 37.39] },
-  { id: "punic-iberia-contestani", name: "Contestani", coordinate: [-0.70, 38.35] },
-  { id: "punic-iberia-edetani", name: "Edetani", coordinate: [-0.38, 39.47] },
+  { id: "punic-iberia-bastetani", name: "Bastetani", coordinate: [-2.77, 37.39], territorialWeight: 0.06 },
+  { id: "punic-iberia-contestani", name: "Contestani", coordinate: [-0.70, 38.35], territorialWeight: 0.1 },
+  { id: "punic-iberia-edetani", name: "Edetani", coordinate: [-0.38, 39.47], territorialWeight: 0.09 },
   { id: "punic-iberia-ilergetes", name: "Ilergetes", coordinate: [0.62, 41.62] },
   { id: "punic-iberia-lacetani", name: "Lacetani", coordinate: [1.83, 41.58] },
 ];
@@ -384,8 +445,10 @@ const italianExcludedIds = new Set(["ita-72843720b81376294924159", ...base.featu
 const italySourceIds = new Set([...provinceIds(base, "ita-")].filter((id) => !italianExcludedIds.has(id)));
 const franceSourceIds = provinceIds(base, "fra-", ["fra-19338628b22604203385446"]);
 const spainSourceIds = provinceIds(base, "esp-", ["esp-25490228b84620027724461", "esp-25490228b18225280299410", "esp-25490228b48808997991554", "esp-25490228b26609846683583"]);
-const illyriaSourceIds = new Set(["alb-", "mne-", "hrv-", "bih-", "svn-", "xkx-"].flatMap((prefix) => [...provinceIds(base, prefix)]));
-const thraceSourceIds = new Set(["bgr-", "rou-", "srb-"].flatMap((prefix) => [...provinceIds(base, prefix)]));
+// Keep the whole former-Yugoslav theatre together in the active map so the
+// Adriatic and Morava–Vardar corridors read as one uneven frontier system.
+const illyriaSourceIds = new Set(["alb-", "bih-", "hrv-", "mkd-", "mne-", "srb-", "svn-", "xkx-"].flatMap((prefix) => [...provinceIds(base, prefix)]));
+const thraceSourceIds = new Set(["bgr-", "rou-"].flatMap((prefix) => [...provinceIds(base, prefix)]));
 const belgiumSourceIds = provinceIds(base, "bel-");
 const netherlandsSourceIds = provinceIds(base, "nld-");
 const germaniaSourceIds = provinceIds(base, "deu-");
@@ -394,16 +457,14 @@ const czechoslovakiaSourceIds = new Set(["cze-", "svk-"].flatMap((prefix) => [..
 const luxembourgSourceIds = provinceIds(base, "lux-");
 
 const withItaly = replaceProvinceGroup(base, italySourceIds, ITALIAN_SITES);
-const withGaul = replaceProvinceGroup(withItaly, franceSourceIds, GALLIC_SITES);
-const withIberia = replaceProvinceGroup(withGaul, spainSourceIds, IBERIAN_SITES);
-const withIllyria = replaceProvinceGroup(withIberia, illyriaSourceIds, ILLYRIAN_SITES);
+const withGaul = replaceProvinceGroup(withItaly, franceSourceIds, GALLIC_SITES, 1.12, "carthaginian");
+const withIberia = replaceProvinceGroup(withGaul, spainSourceIds, IBERIAN_SITES, 1.2, "carthaginian");
+const withIllyria = replaceProvinceGroup(withIberia, illyriaSourceIds, ILLYRIAN_SITES, 1.18, "carthaginian");
 const withThrace = replaceProvinceGroup(withIllyria, thraceSourceIds, THRACIAN_SITES);
 const withBelgica = replaceProvinceGroup(withThrace, belgiumSourceIds, BELGIC_SITES);
 const withLowCountries = replaceProvinceGroup(withBelgica, netherlandsSourceIds, LOW_COUNTRIES_SITES);
-// Germania needs deliberately uneven frontiers: the reconstructed tribal areas
-// should read as landscapes and river corridors, not a set of straight cells.
-const withGermania = replaceProvinceGroup(withLowCountries, germaniaSourceIds, GERMANIC_SITES, 1.8);
-const withHungary = replaceProvinceGroup(withGermania, hungarySourceIds, HUNGARIAN_SITES);
+const withGermania = replaceProvinceGroup(withLowCountries, germaniaSourceIds, GERMANIC_SITES, 1.28, "carthaginian");
+const withHungary = replaceProvinceGroup(withGermania, hungarySourceIds, HUNGARIAN_SITES, 1.1, "carthaginian");
 const withCzechoslovakia = replaceProvinceGroup(withHungary, czechoslovakiaSourceIds, CZECHOSLOVAK_SITES);
 const withLuxembourg = replaceProvinceGroup(withCzechoslovakia, luxembourgSourceIds, LUXEMBOURG_SITES);
 const withEngland = replaceProvinceGroup(withLuxembourg, new Set(["gbr-14339913b95766344400054"]), ENGLAND_SITES);
