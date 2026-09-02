@@ -57,7 +57,7 @@ describe("projectWorldView map conflicts", () => {
 });
 
 describe("Punic Wars opening map", () => {
-  it("keeps the opening at peace while exposing the historical map and Roman alliances", () => {
+  it("keeps the opening at peace while exposing the historical map without tactical ties", () => {
     const view = projectWorldView(punicWarsScenario.initialWorld, {
       gameId: "punic-wars-game",
       gameTitle: "Punic Wars",
@@ -69,8 +69,45 @@ describe("Punic Wars opening map", () => {
     }, "gaius-genucius");
 
     expect(view.mapOverlay?.conflicts.wars).toEqual([]);
-    expect(view.mapOverlay?.politicalRelations).toHaveLength(13);
+    expect(view.mapOverlay?.politicalRelations).toEqual([]);
     expect(view.mapOverlay?.provinces.some((province) => province.provinceId === "punic-iberia-turdetani" && province.controllerPolityId === "carthage")).toBe(true);
     expect(view.mapOverlay?.polities.some((polity) => polity.polityId === "mamertines")).toBe(true);
+  });
+
+  it("corrects legacy opening snapshots that retained Roman client controllers", () => {
+    const legacyWorld = structuredClone(punicWarsScenario.initialWorld);
+    const samnium = legacyWorld.map.provinces.find(
+      (province) => province.id === "punic-italy-samnium",
+    );
+
+    expect(samnium).toBeDefined();
+    if (samnium === undefined) return;
+
+    samnium.controllerPolityId = "samnites";
+    legacyWorld.map.politicalRelations = [
+      {
+        id: "rome-alliance-samnites",
+        kind: "alliance",
+        leaderPolityId: "rome",
+        memberPolityId: "samnites",
+        sourceNote: "Legacy opening snapshot.",
+      },
+    ];
+
+    const view = projectWorldView(legacyWorld, {
+      gameId: "punic-wars-game",
+      gameTitle: "Punic Wars",
+      turnIndex: 0,
+      turnStatus: "collecting",
+      submittedPlayers: 0,
+      totalPlayers: 1,
+      clock: punicWarsScenario.definition.clock,
+    }, "gaius-genucius");
+
+    expect(
+      view.mapOverlay?.provinces.find((province) => province.provinceId === "punic-italy-samnium")
+        ?.controllerPolityId,
+    ).toBe("rome");
+    expect(view.mapOverlay?.politicalRelations).toEqual([]);
   });
 });

@@ -1,7 +1,8 @@
+import { z } from "zod";
 import type { WorldState } from "../world/world-state";
 import type { ProposedInvocation } from "../actions/orders";
 import { WORKFLOW_REGISTRY } from "./registry";
-import { WorkflowNotFoundError, WorkflowParamsError, type WorkflowResult } from "./types";
+import type { WorkflowResult } from "./types";
 import { applyInventedWorkflow, type InventedPatchOperation, type RuntimeInventedWorkflow } from "./invented-workflow";
 
 // Workflow executor (docs/14, ADR-0032).
@@ -55,12 +56,13 @@ export function executeWorkflow(
     return { ok: false, reason: "not_found", message: `No workflow "${invocation.actionId}".` };
   }
 
-  const parsed = definition.parametersSchema.safeParse(invocation.parameters);
+  const schema = definition.parametersSchema as z.ZodType<unknown>;
+  const parsed = schema.safeParse(invocation.parameters);
   if (!parsed.success) {
     return {
       ok: false,
       reason: "invalid_params",
-      message: `Invalid params for "${invocation.actionId}": ${parsed.error.issues.map((i: { message: string }) => i.message).join("; ")}`,
+      message: `Invalid params for "${invocation.actionId}": ${parsed.error.issues.map((i) => i.message).join("; ")}`,
     };
   }
 

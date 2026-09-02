@@ -2,7 +2,7 @@ import type { GeoJsonGeometry, GeoJsonMap, GeoJsonPosition } from "@chronica/sha
 import { geometryToSvgPath, projectCoordinate } from "./geo-projection";
 
 export interface WorldBounds { readonly minX: number; readonly minY: number; readonly maxX: number; readonly maxY: number; }
-export interface StaticProvince { readonly id: string; readonly name: string; readonly geometry: GeoJsonGeometry; readonly svgPath: string; readonly area: number; readonly centroid: GeoJsonPosition; readonly bounds: WorldBounds; readonly neighborIds: readonly string[]; /** Other provinces close enough to share a single political label. Never use for game adjacency. */ readonly labelNeighborIds: readonly string[]; }
+export interface StaticProvince { readonly id: string; readonly name: string; readonly geometry: GeoJsonGeometry; readonly svgPath: string; /** Only the outside edge of a possibly multi-part territory, for hover/selection outlines. */ readonly exteriorSvgPath: string; readonly area: number; readonly centroid: GeoJsonPosition; readonly bounds: WorldBounds; readonly neighborIds: readonly string[]; /** Other provinces close enough to share a single political label. Never use for game adjacency. */ readonly labelNeighborIds: readonly string[]; }
 export interface SharedBoundary { readonly provinceA: string; readonly provinceB: string | null; readonly points: readonly [GeoJsonPosition, GeoJsonPosition]; readonly svgPath: string; }
 export interface StaticSettlement { readonly id: string; readonly name: string; readonly type: string; readonly provinceId: string; readonly coordinate: GeoJsonPosition; readonly projected: readonly [number, number]; }
 export interface StaticRiver { readonly id: string; readonly className: string; readonly svgPath: string; }
@@ -37,6 +37,23 @@ function pointKey([x, y]: GeoJsonPosition) { return `${x},${y}`; }
 function edgeKey(first: GeoJsonPosition, second: GeoJsonPosition) { const a = pointKey(first); const b = pointKey(second); return a < b ? `${a}|${b}` : `${b}|${a}`; }
 function boundaryPath([first, second]: readonly [GeoJsonPosition, GeoJsonPosition]) { const [x1, y1] = projectCoordinate(first[0], first[1]); const [x2, y2] = projectCoordinate(second[0], second[1]); return `M${x1} ${y1}L${x2} ${y2}`; }
 
+/**
+ * A generated historical territory may cross several source ADM1 polygons.
+ * Draw only edges that occur once so hovering it never exposes those retired
+ * source borders as white lines inside the same territory.
+ */
+function exteriorSvgPath(geometry: GeoJsonGeometry): string {
+  const edges = new Map<string, { readonly points: readonly [GeoJsonPosition, GeoJsonPosition]; count: number }>();
+  for (const ring of geometryRings(geometry)) for (let index = 1; index < ring.length; index++) {
+    const points = [ring[index - 1]!, ring[index]!] as const;
+    const key = edgeKey(points[0], points[1]);
+    const existing = edges.get(key);
+    if (existing) existing.count++;
+    else edges.set(key, { points, count: 1 });
+  }
+  return [...edges.values()].filter((edge) => edge.count === 1).map((edge) => boundaryPath(edge.points)).join("");
+}
+
 // Labels should survive tiny gaps between separately sourced boundaries and
 // narrow straits, without redefining province adjacency for game rules.
 const LABEL_COMPONENT_GAP_DEGREES = .22;
@@ -51,7 +68,7 @@ export function prepareStaticWorldGeometry(map: GeoJsonMap): StaticWorldGeometry
   const preliminary: Omit<StaticProvince, "neighborIds" | "labelNeighborIds">[] = []; const boundaries = new Map<string, BoundaryOccurrence[]>(); const settlements: StaticSettlement[] = []; const rivers: StaticRiver[] = [];
   for (const feature of map.features) {
     if (feature.properties.kind === "province") {
-      preliminary.push({ id: feature.id, name: feature.properties.name, geometry: feature.geometry, svgPath: geometryToSvgPath(feature.geometry), ...geometryMetrics(feature.geometry) });
+      preliminary.push({ id: feature.id, name: feature.properties.name, geometry: feature.geometry, svgPath: geometryToSvgPath(feature.geometry), exteriorSvgPath: exteriorSvgPath(feature.geometry), ...geometryMetrics(feature.geometry) });
       for (const ring of geometryRings(feature.geometry)) for (let index = 0; index < ring.length - 1; index++) { const points = [ring[index]!, ring[index + 1]!] as const; const entries = boundaries.get(edgeKey(points[0], points[1])) ?? []; entries.push({ provinceId: feature.id, points }); boundaries.set(edgeKey(points[0], points[1]), entries); }
     } else if (feature.properties.kind === "settlement" && feature.geometry.type === "Point") {
       const coordinate = feature.geometry.coordinates; settlements.push({ id: feature.id, name: feature.properties.name, type: feature.properties.type, provinceId: feature.properties.provinceId, coordinate, projected: projectCoordinate(coordinate[0], coordinate[1]) });

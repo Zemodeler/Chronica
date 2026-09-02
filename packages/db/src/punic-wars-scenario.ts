@@ -5,15 +5,18 @@ export const PUNIC_WARS_SLUG = "punic-wars";
 
 const italianPolities = [
   ["ligurians", "Ligurian peoples"], ["insubres", "Insubres"], ["boii", "Boii"], ["cenomani", "Cenomani"], ["veneti", "Veneti"], ["etruscan-cities", "Etruscan cities"],
-  ["sabines", "Sabines"], ["umbrians", "Umbrians"], ["picentes", "Picentes"], ["marsi-paeligni", "Marsi and Paeligni"], ["campanians", "Campanians"], ["samnites", "Samnites"],
-  ["daunians", "Daunians"], ["peucetians", "Peucetians"], ["messapians", "Messapians"], ["tarentines", "Tarentines"], ["lucanians", "Lucanians"], ["bruttians", "Bruttians"], ["rhegines", "Rhegines"],
 ] as const;
 
 const italy = [
-  ["punic-italy-liguria", "Liguria", "ligurians"], ["punic-italy-insubria", "Insubria", "insubres"], ["punic-italy-boii", "Boii", "boii"], ["punic-italy-cenomani", "Cenomani", "cenomani"], ["punic-italy-veneti", "Veneti", "veneti"],
-  ["punic-italy-etruria", "Etruria", "etruscan-cities"], ["punic-italy-latium", "Latium", "rome"], ["punic-italy-sabines", "Sabines", "sabines"], ["punic-italy-umbrians", "Umbria", "umbrians"], ["punic-italy-picentes", "Picenum", "picentes"],
-  ["punic-italy-marsi", "Marsi and Paeligni", "marsi-paeligni"], ["punic-italy-campania", "Campania", "campanians"], ["punic-italy-samnium", "Samnium", "samnites"], ["punic-italy-daunians", "Daunia", "daunians"], ["punic-italy-peucetians", "Peucetia", "peucetians"],
-  ["punic-italy-messapians", "Messapia", "messapians"], ["punic-italy-tarentines", "Tarentum", "tarentines"], ["punic-italy-lucanians", "Lucania", "lucanians"], ["punic-italy-bruttians", "Bruttium", "bruttians"], ["punic-italy-rhegines", "Rhegium", "rhegines"],
+  ["punic-italy-liguria-west", "Western Liguria", "ligurians"], ["punic-italy-liguria-genua", "Genoate Liguria", "ligurians"], ["punic-italy-liguria-east", "Eastern Liguria", "ligurians"],
+  ["punic-italy-insubria-ticinum", "Insubria of Ticinum", "insubres"], ["punic-italy-insubria-mediolanum", "Insubria of Mediolanum", "insubres"],
+  ["punic-italy-boii-rhenus", "Boii of the Rhenus", "boii"], ["punic-italy-boii-felsina", "Boii of Felsina", "boii"],
+  ["punic-italy-cenomani-brixia", "Cenomani of Brixia", "cenomani"], ["punic-italy-cenomani-mincius", "Cenomani of the Mincius", "cenomani"],
+  ["punic-italy-veneti-ateste", "Veneti of Ateste", "veneti"], ["punic-italy-veneti-patavium", "Veneti of Patavium", "veneti"], ["punic-italy-veneti-adria", "Veneti of Adria", "veneti"],
+  ["punic-italy-etruria-north", "Northern Etruria", "etruscan-cities"], ["punic-italy-etruria-central", "Central Etruria", "etruscan-cities"], ["punic-italy-etruria-south", "Southern Etruria", "etruscan-cities"],
+  ["punic-italy-latium", "Latium", "rome"], ["punic-italy-sabines", "Sabines", "rome"], ["punic-italy-umbrians", "Umbria", "rome"], ["punic-italy-picentes", "Picenum", "rome"],
+  ["punic-italy-marsi", "Marsi and Paeligni", "rome"], ["punic-italy-campania", "Campania", "rome"], ["punic-italy-samnium", "Samnium", "rome"], ["punic-italy-daunians", "Daunia", "rome"], ["punic-italy-peucetians", "Peucetia", "rome"],
+  ["punic-italy-messapians", "Messapia", "rome"], ["punic-italy-tarentines", "Tarentum", "rome"], ["punic-italy-lucanians", "Lucania", "rome"], ["punic-italy-bruttians", "Bruttium", "rome"], ["punic-italy-rhegines", "Rhegium", "rome"],
 ] as const;
 
 const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
@@ -23,7 +26,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
       { id: "coastal-plain", label: "Coastal plain", allowedCrossings: ["land", "strait", "sea_lane"], water: false },
       { id: "hills", label: "Hills", allowedCrossings: ["land", "pass"], water: false },
     ],
-    provinceCount: { min: 26, max: 26 },
+    provinceCount: { min: 35, max: 35 },
   },
   warfare: {
     troopCategories: [{ id: "infantry", label: "Infantry", combatWeightBps: 10_000, steadinessBps: 7_000, mobilityBps: 5_000 }],
@@ -38,13 +41,13 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
   continuity: { startingSeatCount: 1, extraPrincipalsPerPlayer: 1 },
   knowledge: [
     { id: "mamertine-crisis", summary: "In 270 BCE Hieron II's Syracuse contests the Mamertines of Messana. Rome and Carthage remain at peace, but the strait is strategically volatile.", subjectIds: ["syracuse", "mamertines", "rome", "carthage"], provinceIds: ["ita-72843720b81376294924159-sicily-northeast", "ita-72843720b81376294924159-sicily-southeast"] },
-    { id: "roman-italian-alliance", summary: "Rome's Italian allies retain local identities while belonging to its military and diplomatic sphere; these ties are visible context rather than automatic commitments.", subjectIds: ["rome", "samnites", "lucanians", "bruttians"], provinceIds: ["punic-italy-latium", "punic-italy-samnium", "punic-italy-lucanians", "punic-italy-bruttians"] },
+    { id: "roman-italian-control", summary: "Rome directly controls its Italian client territories at the opening while their local regional names remain on the map.", subjectIds: ["rome"], provinceIds: ["punic-italy-latium", "punic-italy-samnium", "punic-italy-lucanians", "punic-italy-bruttians"] },
   ],
 });
 
 const initialWorld: WorldState = WorldStateSchema.parse({
   schemaVersion: 1,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 1, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 4, libraryVersion: 1 },
   elapsedStep: 0,
   map: {
     polities: [
@@ -54,9 +57,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { id: "mamertines", name: "Mamertines of Messana", capitalSettlementId: "settlement-messana" },
       ...italianPolities.map(([id, name]) => ({ id, name, capitalSettlementId: null })),
     ],
-    politicalRelations: [
-      ...["sabines", "umbrians", "picentes", "marsi-paeligni", "campanians", "samnites", "daunians", "peucetians", "messapians", "tarentines", "lucanians", "bruttians", "rhegines"].map((memberPolityId) => ({ id: `rome-alliance-${memberPolityId}`, kind: "alliance" as const, leaderPolityId: "rome", memberPolityId, sourceNote: "Roman Italian alliance at the 270 BCE opening; descriptive only, with no automatic military effect." })),
-    ],
+    politicalRelations: [],
     provinces: [
       ...italy.map(([id, name, controllerPolityId]) => ({ id, name, formerNames: [], terrainId: id === "punic-italy-latium" || id === "punic-italy-campania" ? "coastal-plain" : "hills", settlements: id === "punic-italy-latium" ? [{ id: "settlement-rome", name: "Rome", kind: "city", controllerPolityId: "rome", size: 100, fortificationLevel: 6 }] : [], controllerPolityId, controlFirmnessBps: controllerPolityId === "rome" ? 9_000 : 7_000, tier: "far" as const })),
       { id: "tun-13205935b88806172084765", name: "Carthaginian heartland", formerNames: [], terrainId: "coastal-plain", settlements: [{ id: "settlement-carthage", name: "Carthage", kind: "city", controllerPolityId: "carthage", size: 100, fortificationLevel: 6 }], controllerPolityId: "carthage", controlFirmnessBps: 9_000, tier: "far" },

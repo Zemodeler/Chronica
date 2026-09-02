@@ -75,7 +75,7 @@ export type AnyWorkflowDefinition = WorkflowDefinition<any>;
 export function defineWorkflow<TParams extends z.ZodTypeAny>(
   workflow: WorkflowDefinition<TParams>,
 ): AnyWorkflowDefinition {
-  return workflow as unknown as AnyWorkflowDefinition;
+  return workflow;
 }
 
 export class WorkflowNotFoundError extends Error {

@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { EntityIdSchema, VisibilitySchema } from "../../material-state";
-import type { AnyWorkflowDefinition } from "../types";
+import { EntityIdSchema } from "../../material-state";
+import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
 
 // World Director entity-creation workflows.
 //
@@ -19,7 +19,7 @@ const ProvenanceSchema = z
   .strict();
 
 export const worldCreationWorkflows: AnyWorkflowDefinition[] = [
-  {
+  defineWorkflow({
     id: "create_world_character",
     description: "Create a new named NPC in the world. World Director authority only. Requires a provenance record.",
     category: "character" as const,
@@ -92,12 +92,12 @@ export const worldCreationWorkflows: AnyWorkflowDefinition[] = [
       };
 
       return {
-        world: { ...world, characters: [...world.characters, newCharacter as never] },
+        world: { ...world, characters: [...world.characters, newCharacter] },
         result: {
           summary: `${params.name} enters the world as a new character.`,
           applied: true,
         },
       };
     },
-  },
+  }),
 ];

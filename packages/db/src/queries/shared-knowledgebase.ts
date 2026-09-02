@@ -36,7 +36,7 @@ export async function insertSharedEntry(
     .values({ gameId, poolType, poolKey, body, sourceNpcCharacterId, sourceSessionId, stepOccurred })
     .returning();
   if (row === undefined) throw new Error("Failed to insert shared knowledgebase entry.");
-  return row as SharedEntryRow;
+  return row;
 }
 
 /** Fetch all entries for a set of pool specs (poolType + poolKey pairs). */
@@ -60,7 +60,7 @@ export async function listPoolEntries(
     );
   // De-duplicate by id (an entry can appear in multiple pools; we store one row per pool).
   // No dedup needed here — each pool insertion creates its own row.
-  return rows as SharedEntryRow[];
+  return rows;
 }
 
 /** Mark a set of entries as contradicted by a newer entry. */

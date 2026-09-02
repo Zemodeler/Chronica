@@ -68,7 +68,7 @@ function DirectConsequencesSection({ consequences }: { consequences: readonly Di
   return (
     <details
       open={open}
-      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+      onToggle={(e) => setOpen((e.currentTarget).open)}
       style={{ borderTop: "1px solid var(--border, rgba(255,255,255,0.08))", paddingTop: "0.75rem" }}
     >
       <summary

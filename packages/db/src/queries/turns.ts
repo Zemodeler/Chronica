@@ -1,5 +1,5 @@
 ﻿import { randomUUID } from "node:crypto";
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import type { OrderBatch, ScenarioClock, WorldState } from "@chronica/shared";
 import { ScenarioDefinitionSchema, WorldStateSchema } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";

@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { EntityIdSchema } from "../../material-state";
-import type { AnyWorkflowDefinition } from "../types";
+import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
 
 export const economicWorkflows: AnyWorkflowDefinition[] = [
-  {
+  defineWorkflow({
     id: "add_gold",
     description: "Add money to a character or polity account (income, spoils, gift, etc.).",
     category: "economic",
@@ -50,9 +50,9 @@ export const economicWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "remove_gold",
     description: "Remove money from a character or polity account (loss, tax, purchase, etc.).",
     category: "economic",
@@ -99,9 +99,9 @@ export const economicWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "transfer_gold",
     description: "Transfer money from one account to another.",
     category: "economic",
@@ -153,9 +153,9 @@ export const economicWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "create_income_source",
     description: "Create a new recurring income source for an account.",
     category: "economic",
@@ -203,9 +203,9 @@ export const economicWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "cancel_income_source",
     description: "Deactivate a recurring income source.",
     category: "economic",
@@ -231,5 +231,5 @@ export const economicWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 ];

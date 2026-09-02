@@ -576,7 +576,7 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .map-political-context { position: absolute; left: .8rem; right: 4.8rem; bottom: .75rem; z-index: 4; display: grid; gap: .18rem; max-height: 3.3rem; overflow: hidden; padding: .38rem .55rem; border: 1px solid color-mix(in srgb, var(--border) 86%, transparent); border-radius: var(--radius-control); background: color-mix(in srgb, var(--surface) 92%, transparent); color: var(--text-muted); font: 500 .72rem/1.2 system-ui, sans-serif; backdrop-filter: blur(6px); }
 .map-political-context strong { color: var(--text); font-size: .73rem; }
 .map-frame-interactive svg:active { cursor: grabbing; }
-.geo-map-region:focus-visible { outline: none; stroke: #fff; stroke-width: 0.75px; vector-effect: non-scaling-stroke; }
+.geo-map-region-hit:focus-visible { outline: none; }
 .map-controls { position: absolute; right: .75rem; bottom: 2.25rem; display: flex; gap: .35rem; padding: .35rem; border: 1px solid var(--border); border-radius: var(--radius-control); background: color-mix(in srgb, var(--surface) 92%, transparent); }
 .map-controls button { min-width: 2.25rem; min-height: 2.25rem; border: 1px solid var(--border); border-radius: .25rem; background: var(--surface-raised); color: var(--text); font: inherit; cursor: pointer; }
 .map-controls button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
@@ -584,7 +584,7 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
   .geo-map-water { fill: #09233a; }
   .map-layer-terrain path { fill: rgb(58 72 56 / 35%); vector-effect: non-scaling-stroke; }
   .geo-map-relief { fill: none; stroke: #ebe1bd; stroke-width: 1.2; stroke-opacity: .18; filter: drop-shadow(1px 1px 0 rgb(17 24 20 / 28%)); }
-  .map-layer-political path { mix-blend-mode: color; }
+  .map-layer-political path { mix-blend-mode: normal; }
   .geo-map-river { fill: none; stroke: #84b4ca; stroke-linecap: round; vector-effect: non-scaling-stroke; }
   .geo-map-river-minor { stroke-width: .55; opacity: .7; }
   .geo-map-river-major { stroke-width: 1.1; }
@@ -593,11 +593,14 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
   .geo-map-road-major, .geo-map-road-roman { stroke-width: .8; opacity: .9; }
   .geo-map-road-trade_route { stroke: #dfc47d; stroke-width: .9; stroke-dasharray: 3 1.25; }
 .geo-map-country-border { fill: none; stroke: #dc5d5d; stroke-width: .7; stroke-dasharray: 1.5 2; vector-effect: non-scaling-stroke; pointer-events: none; }
-  .geo-map-region { fill: transparent; stroke: transparent; stroke-width: 0.5; vector-effect: non-scaling-stroke; }
-  .geo-map-region:hover { fill: rgb(255 255 255 / 7%); stroke: #dce8e5; stroke-width: 0.5; }
-  .geo-map-region[data-selected="true"] { fill: rgb(244 207 104 / 11%); stroke: #f4cf68; stroke-width: 0.75; }
-  .geo-map-region:focus { outline: none; }
-  .geo-map-region:focus { stroke: white; stroke-width: 0.75; }
+  .geo-map-region-hit { fill: transparent; stroke: transparent; stroke-width: 0.5; vector-effect: non-scaling-stroke; }
+  .geo-map-region-outline { fill: none; stroke: transparent; stroke-width: 0.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+  .geo-map-region:hover .geo-map-region-hit { fill: rgb(255 255 255 / 7%); }
+  .geo-map-region:hover .geo-map-region-outline { stroke: #f5fbff; stroke-width: 0.5; }
+  .geo-map-region[data-selected="true"] .geo-map-region-hit { fill: rgb(244 207 104 / 11%); }
+  .geo-map-region[data-selected="true"] .geo-map-region-outline { stroke: #f4cf68; stroke-width: 0.75; }
+  .geo-map-region-hit:focus { outline: none; }
+  .geo-map-region-hit:focus-visible + .geo-map-region-outline { stroke: #f4cf68; stroke-width: 0.75; }
 .geo-map, .geo-map * { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .map-army-token { cursor: pointer; }
 .map-army-hit-target { fill: rgba(238, 241, 239, 0); stroke: #fcfcfc00; stroke-width: .12; vector-effect: non-scaling-stroke; }

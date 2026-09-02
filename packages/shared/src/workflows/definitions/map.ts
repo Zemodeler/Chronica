@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { EntityIdSchema, BasisPointsSchema } from "../../material-state";
-import type { AnyWorkflowDefinition } from "../types";
+import { EntityIdSchema } from "../../material-state";
+import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
 
 export const mapWorkflows: AnyWorkflowDefinition[] = [
-  {
+  defineWorkflow({
     id: "change_province_control",
     description: "Transfer control of a province to a different polity, adjusting firmness.",
     category: "map",
@@ -44,9 +44,9 @@ export const mapWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "weaken_province_control",
     description: "Reduce the control firmness of a province without changing its controller.",
     category: "map",
@@ -75,9 +75,9 @@ export const mapWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "fortify_settlement",
     description: "Increase the fortification level of a settlement.",
     category: "map",
@@ -115,9 +115,9 @@ export const mapWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "rename_province",
     description: "Change the name of a province (adds the old name to formerNames).",
     category: "map",
@@ -146,5 +146,5 @@ export const mapWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 ];

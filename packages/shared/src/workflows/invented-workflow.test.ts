@@ -51,6 +51,7 @@ describe("invented workflow patches", () => {
     const world = structuredClone(firstPunicWarScenario.initialWorld);
     const unsafe: InventedWorkflowDefinition = { ...definition, actionId: "rewrite_clock", operations: [{ op: "replace", path: "/elapsedStep", value: 99 }] };
     const outcome = applyInventedWorkflow(unsafe, world, { characterId: world.characters[0]!.id, healthBps: 1 });
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     expect(outcome).toEqual(expect.objectContaining({ error: expect.stringContaining("protected") }));
     expect(world.elapsedStep).toBe(firstPunicWarScenario.initialWorld.elapsedStep);
   });
@@ -64,6 +65,7 @@ describe("invented workflow patches", () => {
       operations: [{ op: "remove", path: "/map" }],
     };
     const outcome = applyInventedWorkflow(remove, world, {});
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     expect(outcome).toEqual(expect.objectContaining({ error: expect.stringContaining("invalid world") }));
   });
 });

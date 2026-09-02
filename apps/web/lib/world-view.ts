@@ -257,14 +257,36 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
   const usesLegacyFirstPunicOpening = world.map.provinces.some((province) => province.id === "drepanum");
   const isFirstPunicOpening = world.pins.scenarioId === "00000000-0000-4000-8000-000000000101" && world.elapsedStep === 0;
   const isPunicWars = world.pins.scenarioId === "00000000-0000-4000-8000-000000000102";
+  const isPunicWarsOpening = isPunicWars && world.elapsedStep === 0;
   const punicWarsBaseOverlay = isPunicWars ? punicWarsOpeningOverlay(meta.turnIndex) : null;
   const displayProvinces = usesLegacyFirstPunicOpening
     ? [...LEGACY_FIRST_PUNIC_OPENING_OVERLAY]
     : punicWarsBaseOverlay !== null
-      ? [...new Map([...punicWarsBaseOverlay.provinces, ...world.map.provinces.map((province) => ({ provinceId: province.id, controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier }))].map((province) => [province.provinceId, province])).values()]
+      ? [...new Map([
+        ...(isPunicWarsOpening ? world.map.provinces.map((province) => ({ provinceId: province.id, controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier })) : punicWarsBaseOverlay.provinces),
+        ...(isPunicWarsOpening ? punicWarsBaseOverlay.provinces : world.map.provinces.map((province) => ({ provinceId: province.id, controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier }))),
+      ].map((province) => [province.provinceId, province])).values()]
     : isFirstPunicOpening
       ? [...new Map([...FIRST_PUNIC_CARTHAGINIAN_OVERLAY, ...FIRST_PUNIC_SICILY_OVERLAY, ...world.map.provinces.map((province) => ({ provinceId: province.id, controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier }))].map((province) => [province.provinceId, province])).values()]
       : world.map.provinces.map((province) => ({ provinceId: province.id, controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier }));
+  const worldSettlements = world.map.provinces.flatMap((province) => province.settlements.map((settlement) => {
+    const capitalPolity = world.map.polities.find((polity) => polity.capitalSettlementId === settlement.id);
+    return {
+      settlementId: settlement.id,
+      provinceId: province.id,
+      anchorFeatureId: settlement.id,
+      name: settlement.name,
+      kind: settlement.kind,
+      controllerPolityId: settlement.controllerPolityId,
+      capitalPolityId: capitalPolity?.id ?? null,
+      importance: settlement.size,
+      underSiege: false,
+      damaged: false,
+    };
+  }));
+  const displaySettlements = punicWarsBaseOverlay === null
+    ? worldSettlements
+    : [...new Map([...punicWarsBaseOverlay.settlements, ...worldSettlements].map((settlement) => [settlement.settlementId, settlement])).values()];
 
   const edgeSet = new Set<string>();
   const provinceIds = world.map.provinces.map((p) => p.id);
@@ -354,27 +376,15 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
         : punicWarsBaseOverlay !== null
           ? [...new Map([...punicWarsBaseOverlay.polities, ...world.map.polities.map((polity) => ({ polityId: polity.id, name: polity.name }))].map((polity) => [polity.polityId, polity])).values()]
         : world.map.polities.map((polity) => ({ polityId: polity.id, name: polity.name })),
+      // Relations are opening-map presentation data, not simulation state. This
+      // prevents old saves from restoring the retired Roman client-state ties.
       politicalRelations: usesLegacyFirstPunicOpening
         ? []
         : punicWarsBaseOverlay !== null
-          ? [...new Map([...punicWarsBaseOverlay.politicalRelations, ...world.map.politicalRelations].map((relation) => [relation.id, relation])).values()]
+          ? punicWarsBaseOverlay.politicalRelations
           : world.map.politicalRelations,
       provinces: displayProvinces,
-      settlements: world.map.provinces.flatMap((province) => province.settlements.map((settlement) => {
-        const capitalPolity = world.map.polities.find((polity) => polity.capitalSettlementId === settlement.id);
-        return {
-          settlementId: settlement.id,
-          provinceId: province.id,
-          anchorFeatureId: settlement.id,
-          name: settlement.name,
-          kind: settlement.kind,
-          controllerPolityId: settlement.controllerPolityId,
-          capitalPolityId: capitalPolity?.id ?? null,
-          importance: settlement.size,
-          underSiege: besiegedSettlementIds.has(settlement.id),
-          damaged: false,
-        };
-      })),
+      settlements: displaySettlements.map((settlement) => ({ ...settlement, underSiege: settlement.underSiege || besiegedSettlementIds.has(settlement.settlementId) })),
       forces: world.material.forces.map((force) => {
         const fit = force.personnel.reduce((total, category) => total + category.fit, 0);
         const unavailable = force.personnel.reduce((total, category) => total + category.unavailable.reduce((sum, entry) => sum + entry.count, 0), 0);

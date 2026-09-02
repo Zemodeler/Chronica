@@ -36,8 +36,6 @@ export interface CharacterPanelProps {
 }
 
 const DETAIL_TITLES: Record<DetailKey, string> = { location: "Location", culture: "Culture", money: "Money", authority: "Authority", origin: "Origin", relations: "Key Relations" };
-const FAMILY_ROLES: readonly FamilyRole[] = ["parent", "partner", "sibling", "child", "other_relative"];
-
 function inferredCategory(relation: CharacterRelation): RelationCategory {
   if (relation.category) return relation.category;
   return /\b(mother|father|parent|wife|husband|spouse|sister|brother|sibling|daughter|son|child|cousin|aunt|uncle|niece|nephew)\b/i.test(relation.relationship) ? "family" : "other";

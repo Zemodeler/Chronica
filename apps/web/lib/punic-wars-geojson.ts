@@ -36,6 +36,85 @@ function polygonsFor(feature: GeoJsonMapFeature): Polygon[] {
   return [];
 }
 
+function roundedPoint([longitude, latitude]: Point): [number, number] {
+  return [Number(longitude.toFixed(5)), Number(latitude.toFixed(5))];
+}
+
+function pointKey(point: Point): string {
+  const [longitude, latitude] = roundedPoint(point);
+  return `${longitude},${latitude}`;
+}
+
+function edgeKey(first: Point, second: Point): string {
+  const firstKey = pointKey(first);
+  const secondKey = pointKey(second);
+  return firstKey < secondKey ? `${firstKey}|${secondKey}` : `${secondKey}|${firstKey}`;
+}
+
+function hash(value: string): number {
+  let result = 0x811c9dc5;
+  for (const character of value) result = Math.imul(result ^ character.charCodeAt(0), 0x01000193);
+  return result >>> 0;
+}
+
+/** A deterministic, shared bend for a generated internal border segment. */
+function organicEdge(first: Point, second: Point): [number, number][] {
+  const firstKey = pointKey(first);
+  const secondKey = pointKey(second);
+  const forward = firstKey < secondKey;
+  const start = forward ? roundedPoint(first) : roundedPoint(second);
+  const end = forward ? roundedPoint(second) : roundedPoint(first);
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const length = Math.hypot(dx, dy);
+  if (length < 0.03) return forward ? [start, end] : [end, start];
+  const seed = hash(`${start[0]},${start[1]}|${end[0]},${end[1]}`);
+  const normal: [number, number] = [-dy / length, dx / length];
+  const amplitude = Math.min(0.16, length * (0.065 + (seed % 35) / 1_000));
+  const direction = seed % 2 === 0 ? 1 : -1;
+  const bent = [0.22, 0.48, 0.76].map((position, index) => {
+    const wave = direction * amplitude * (index === 1 ? -0.7 : 1) * (0.8 + ((seed >>> (index * 5)) % 20) / 100);
+    return roundedPoint([start[0] + dx * position + normal[0] * wave, start[1] + dy * position + normal[1] * wave]);
+  });
+  const result = [start, ...bent, end];
+  return forward ? result : [...result].reverse();
+}
+
+/**
+ * Replaces only borders shared by generated regions.  Each repeated edge uses
+ * the same seeded polyline in reverse, so the map gains natural irregularity
+ * without creating gaps or overlaps between neighbours.
+ */
+function organicizeInternalBorders(features: readonly GeoJsonMapFeature[]): GeoJsonMapFeature[] {
+  const edgeCounts = new Map<string, number>();
+  for (const feature of features) {
+    if (feature.geometry.type !== "MultiPolygon") continue;
+    for (const polygon of feature.geometry.coordinates) for (const ring of polygon) for (let index = 1; index < ring.length; index++) {
+      const key = edgeKey(ring[index - 1]!, ring[index]!);
+      edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+    }
+  }
+  return features.map((feature) => {
+    if (feature.geometry.type !== "MultiPolygon") return feature;
+    return {
+      ...feature,
+      geometry: {
+        type: "MultiPolygon" as const,
+        coordinates: feature.geometry.coordinates.map((polygon) => polygon.map((ring) => {
+          const result: [number, number][] = [roundedPoint(ring[0]!)];
+          for (let index = 1; index < ring.length; index++) {
+            const first = ring[index - 1]!;
+            const second = ring[index]!;
+            const points = (edgeCounts.get(edgeKey(first, second)) ?? 0) > 1 ? organicEdge(first, second) : [roundedPoint(first), roundedPoint(second)];
+            result.push(...points.slice(1));
+          }
+          return result;
+        })),
+      },
+    };
+  });
+}
+
 /**
  * Fixed historical centres form a clipped Voronoi partition.  The result
  * preserves every source coastline and gives regions organic hinterlands
@@ -43,7 +122,7 @@ function polygonsFor(feature: GeoJsonMapFeature): Polygon[] {
  */
 function historicalRegions(source: readonly GeoJsonMapFeature[], sites: readonly HistoricalSite[]): GeoJsonMapFeature[] {
   const polygons = source.flatMap(polygonsFor);
-  return sites.map((site) => {
+  const regions: GeoJsonMapFeature[] = sites.map((site): GeoJsonMapFeature => {
     const coordinates = polygons.flatMap((polygon) => {
       let ring = polygon[0]?.map((point) => [point[0], point[1]] as [number, number]) ?? [];
       for (const other of sites) {
@@ -62,6 +141,7 @@ function historicalRegions(source: readonly GeoJsonMapFeature[], sites: readonly
       properties: { kind: "province", name: site.name },
     };
   });
+  return organicizeInternalBorders(regions);
 }
 
 function replaceProvinceGroup(map: GeoJsonMap, sourceIds: ReadonlySet<string>, sites: readonly HistoricalSite[]): GeoJsonMap {
@@ -86,12 +166,21 @@ function provinceIds(map: GeoJsonMap, prefix: string, omit: readonly string[] = 
 }
 
 const ITALIAN_SITES: readonly HistoricalSite[] = [
-  { id: "punic-italy-liguria", name: "Liguria", coordinate: [8.95, 44.41] },
-  { id: "punic-italy-insubria", name: "Insubria", coordinate: [9.19, 45.46] },
-  { id: "punic-italy-boii", name: "Boii", coordinate: [11.34, 44.50] },
-  { id: "punic-italy-cenomani", name: "Cenomani", coordinate: [10.22, 45.54] },
-  { id: "punic-italy-veneti", name: "Veneti", coordinate: [11.88, 45.41] },
-  { id: "punic-italy-etruria", name: "Etruria", coordinate: [11.88, 42.42] },
+  { id: "punic-italy-liguria-west", name: "Western Liguria", coordinate: [8.15, 44.15] },
+  { id: "punic-italy-liguria-genua", name: "Genoate Liguria", coordinate: [8.95, 44.41] },
+  { id: "punic-italy-liguria-east", name: "Eastern Liguria", coordinate: [9.45, 44.35] },
+  { id: "punic-italy-insubria-ticinum", name: "Insubria of Ticinum", coordinate: [8.95, 45.20] },
+  { id: "punic-italy-insubria-mediolanum", name: "Insubria of Mediolanum", coordinate: [9.19, 45.46] },
+  { id: "punic-italy-boii-rhenus", name: "Boii of the Rhenus", coordinate: [10.75, 44.70] },
+  { id: "punic-italy-boii-felsina", name: "Boii of Felsina", coordinate: [11.34, 44.50] },
+  { id: "punic-italy-cenomani-brixia", name: "Cenomani of Brixia", coordinate: [10.22, 45.54] },
+  { id: "punic-italy-cenomani-mincius", name: "Cenomani of the Mincius", coordinate: [10.70, 45.35] },
+  { id: "punic-italy-veneti-ateste", name: "Veneti of Ateste", coordinate: [11.65, 45.22] },
+  { id: "punic-italy-veneti-patavium", name: "Veneti of Patavium", coordinate: [11.88, 45.41] },
+  { id: "punic-italy-veneti-adria", name: "Veneti of Adria", coordinate: [12.05, 45.05] },
+  { id: "punic-italy-etruria-north", name: "Northern Etruria", coordinate: [11.85, 43.40] },
+  { id: "punic-italy-etruria-central", name: "Central Etruria", coordinate: [11.88, 42.42] },
+  { id: "punic-italy-etruria-south", name: "Southern Etruria", coordinate: [12.12, 41.87] },
   { id: "punic-italy-latium", name: "Latium", coordinate: [12.50, 41.90] },
   { id: "punic-italy-sabines", name: "Sabines", coordinate: [12.86, 42.41] },
   { id: "punic-italy-umbrians", name: "Umbria", coordinate: [12.57, 43.11] },
@@ -115,7 +204,9 @@ const GALLIC_SITES: readonly HistoricalSite[] = [
   { id: "punic-gaul-armoricans", name: "Armorican peoples", coordinate: [-3.05, 48.21] },
   { id: "punic-gaul-veneti", name: "Veneti of Gaul", coordinate: [-2.76, 47.66] },
   { id: "punic-gaul-andecavi", name: "Andecavi", coordinate: [-0.56, 47.47] },
-  { id: "punic-gaul-aulerci", name: "Aulerci", coordinate: [0.19, 48.01] },
+  { id: "punic-gaul-aulerci-eburovices", name: "Aulerci Eburovices", coordinate: [0.66, 49.09] },
+  { id: "punic-gaul-aulerci-cenomani", name: "Aulerci Cenomani", coordinate: [0.20, 48.01] },
+  { id: "punic-gaul-aulerci-diablintes", name: "Aulerci Diablintes", coordinate: [-0.75, 48.17] },
   { id: "punic-gaul-parisii", name: "Parisii", coordinate: [2.35, 48.86] },
   { id: "punic-gaul-senones", name: "Senones", coordinate: [3.28, 48.20] },
   { id: "punic-gaul-remi", name: "Remi", coordinate: [4.03, 49.26] },
@@ -223,13 +314,26 @@ type HistoricalSettlement = Readonly<{
 /** Major political and military anchors for the 270 BCE political map. */
 const PUNIC_WARS_SETTLEMENTS: readonly HistoricalSettlement[] = [
   { id: "settlement-carthage", name: "Carthage", provinceId: "tun-13205935b88806172084765", type: "capital", coordinate: [10.33, 36.85] },
+  { id: "settlement-utica", name: "Utica", provinceId: "tun-13205935b29646166511918", type: "city", coordinate: [10.57, 37.06] },
+  { id: "settlement-hippo-diarrhytus", name: "Hippo Diarrhytus", provinceId: "tun-13205935b29646166511918", type: "port", coordinate: [9.88, 37.27] },
+  { id: "settlement-hadrumetum", name: "Hadrumetum", provinceId: "tun-13205935b49970022939178", type: "port", coordinate: [10.64, 35.83] },
+  { id: "settlement-leptis-minor", name: "Leptis Minor", provinceId: "tun-13205935b953488337212", type: "city", coordinate: [10.75, 35.67] },
+  { id: "settlement-thapsus", name: "Thapsus", provinceId: "tun-13205935b953488337212", type: "port", coordinate: [11.05, 35.40] },
+  { id: "settlement-cirta", name: "Cirta", provinceId: "dza-43142294b54486011126442", type: "capital", coordinate: [6.62, 36.36] },
+  { id: "settlement-hippo-regius", name: "Hippo Regius", provinceId: "dza-43142294b62233719624556", type: "port", coordinate: [7.76, 36.90] },
+  { id: "settlement-iol", name: "Iol", provinceId: "dza-43142294b44506325294932", type: "port", coordinate: [2.88, 36.58] },
+  { id: "settlement-tingis", name: "Tingis", provinceId: "mar-70788906b66040098455254", type: "port", coordinate: [-5.83, 35.76] },
+  { id: "settlement-volubilis", name: "Volubilis", provinceId: "mar-70788906b83815134303720", type: "capital", coordinate: [-5.55, 34.07] },
+  { id: "settlement-garama", name: "Garama", provinceId: "lby-10800210b2800497533490", type: "capital", coordinate: [13.02, 26.52] },
+  { id: "settlement-cyrene", name: "Cyrene", provinceId: "lby-10800210b23470577588067", type: "capital", coordinate: [21.86, 32.82] },
+  { id: "settlement-apollonia-cyrene", name: "Apollonia", provinceId: "lby-10800210b23470577588067", type: "port", coordinate: [21.75, 32.95] },
   { id: "settlement-messana", name: "Messana", provinceId: "ita-72843720b81376294924159-sicily-northeast", type: "capital", coordinate: [15.55, 38.19] },
   { id: "settlement-lilybaeum", name: "Lilybaeum", provinceId: "ita-72843720b81376294924159-sicily-west", type: "port", coordinate: [12.95, 37.80] },
-  { id: "settlement-genua", name: "Genua", provinceId: "punic-italy-liguria", type: "port", coordinate: [8.95, 44.41] },
-  { id: "settlement-mediolanum", name: "Mediolanum", provinceId: "punic-italy-insubria", type: "city", coordinate: [9.19, 45.46] },
-  { id: "settlement-bononia", name: "Bononia", provinceId: "punic-italy-boii", type: "town", coordinate: [11.34, 44.50] },
-  { id: "settlement-patavium", name: "Patavium", provinceId: "punic-italy-veneti", type: "city", coordinate: [11.88, 45.41] },
-  { id: "settlement-volsinii", name: "Volsinii", provinceId: "punic-italy-etruria", type: "fort", coordinate: [11.88, 42.42] },
+  { id: "settlement-genua", name: "Genua", provinceId: "punic-italy-liguria-genua", type: "port", coordinate: [8.95, 44.41] },
+  { id: "settlement-mediolanum", name: "Mediolanum", provinceId: "punic-italy-insubria-mediolanum", type: "city", coordinate: [9.19, 45.46] },
+  { id: "settlement-bononia", name: "Felsina", provinceId: "punic-italy-boii-felsina", type: "town", coordinate: [11.34, 44.50] },
+  { id: "settlement-patavium", name: "Patavium", provinceId: "punic-italy-veneti-patavium", type: "city", coordinate: [11.88, 45.41] },
+  { id: "settlement-volsinii", name: "Volsinii", provinceId: "punic-italy-etruria-central", type: "fort", coordinate: [11.88, 42.42] },
   { id: "settlement-capua", name: "Capua", provinceId: "punic-italy-campania", type: "city", coordinate: [14.17, 41.03] },
   { id: "settlement-bovianum", name: "Bovianum", provinceId: "punic-italy-samnium", type: "fort", coordinate: [14.48, 41.56] },
   { id: "settlement-tarentum", name: "Tarentum", provinceId: "punic-italy-tarentines", type: "port", coordinate: [17.23, 40.47] },

@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
-import { WorldStateSchema } from "@chronica/shared";
 import type { WorldState, WorkflowAuditBlob, NovelActionProposal, RuntimeInventedWorkflow } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
-import { chronicleEntries, games, players, pendingWorkflowProposals, turns, worldSnapshots } from "../schema/game";
+import { chronicleEntries, games, turns, worldSnapshots } from "../schema/game";
 import { insertNovelActionProposals } from "./workflow-proposals";
 import { insertInventedWorkflows, recordInventedWorkflowUses, type InventedWorkflowUseInput } from "./invented-workflows";
 
@@ -167,16 +166,6 @@ export async function getOrdersForTurn(
   db: ChronicaDatabase,
   turnId: string,
 ): Promise<readonly { readonly playerId: string; readonly characterId: string; readonly rawText: string; readonly directives: unknown }[]> {
-  const rows = await db
-    .select({
-      playerId: players.id,
-      characterId: players.characterId,
-      rawText: turns.id,
-    })
-    .from(turns)
-    .innerJoin(players, eq(players.gameId, turns.gameId))
-    .where(eq(turns.id, turnId))
-    .limit(1);
   // Fetch actual orders
   const { orders: ordersTable } = await import("../schema/game");
   const orderRows = await db
@@ -222,7 +211,7 @@ export async function updateTurnProgressStep(
 export async function failTurn(
   db: ChronicaDatabase,
   turnId: string,
-  reason: string,
+  _reason: string,
 ): Promise<void> {
   await db.update(turns).set({ status: "failed" }).where(eq(turns.id, turnId));
 }
@@ -251,7 +240,7 @@ export async function getGamePayerUserId(db: ChronicaDatabase, gameId: string): 
 export async function markChronicleRead(
   db: ChronicaDatabase,
   gameId: string,
-  playerId: string,
+  _playerId: string,
 ): Promise<void> {
   await db.transaction(async (tx) => {
     const [turn] = await tx

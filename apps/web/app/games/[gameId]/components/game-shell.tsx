@@ -125,7 +125,7 @@ export function GameShell({
     setFlagCatalogForce(null);
   }, [flagCatalogForce, gameId]);
 
-  const regionNames = useState(() => {
+  const regionNames = useMemo(() => {
     if (!initialGeoJson) return new Map<string, string>();
     const names = new Map<string, string>();
     for (const feature of initialGeoJson.features) {
@@ -134,7 +134,7 @@ export function GameShell({
       }
     }
     return names;
-  })[0];
+  }, [initialGeoJson]);
 
   const handleProvinceHover = useCallback(
     (provinceId: string | null, event?: PointerEvent) => {

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { WorldState } from "../world/world-state";
 import { WORKFLOW_REGISTRY } from "./registry";
 import type { WorkflowCandidate, WorkflowCandidateSource } from "./manager-types";
@@ -74,10 +75,12 @@ export function validateCandidate(
   }
 
   // 2. Parameter schema
-  const parsed = definition?.parametersSchema.safeParse(inv.parameters);
+  const schema = definition?.parametersSchema as z.ZodType<unknown> | undefined;
+  const parsed = schema?.safeParse(inv.parameters);
   const inventedParameterError = invented ? validateInventedWorkflowParameters(invented.definition, inv.parameters) : null;
-  if ((parsed && !parsed.success) || inventedParameterError) {
-    const issues = inventedParameterError ?? parsed?.error.issues.map((i: { message: string }) => i.message).join("; ") ?? "Invalid parameters.";
+  const zodFailure = parsed && !parsed.success ? parsed : undefined;
+  if (zodFailure || inventedParameterError) {
+    const issues = inventedParameterError ?? zodFailure?.error.issues.map((i) => i.message).join("; ") ?? "Invalid parameters.";
     return {
       kind: "invalid_params",
       message: `Invalid parameters for "${inv.actionId}": ${issues}`,
