@@ -101,6 +101,7 @@ describe("buildPlayerKnowledgeSection", () => {
       [],
       [],
       [],
+      { score: 0, label: "neutral" },
     );
 
     expect(prompt).toContain("Gaius Aurelius: younger brother");
