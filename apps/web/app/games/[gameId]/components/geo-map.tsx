@@ -22,6 +22,7 @@ interface GeoMapProps {
   readonly viewBox: string;
   readonly overlay: DynamicMapOverlay | null;
   readonly selectedProvinceId: string | null;
+  readonly hoveredProvinceId: string | null;
   readonly zoomBand: ZoomBand;
   readonly scale: number;
   readonly tx: number;
@@ -76,7 +77,7 @@ function ArmyStandardHitTarget({ asset, x, y, width, conflictClass, onActivate }
  * (one <text> plus a <defs> path per territory) and were a real pan/zoom lag
  * source once a map had enough small territories.
  */
-export function GeoMap({ world, political, viewBox, overlay, selectedProvinceId, zoomBand, scale, tx, ty, forceFlagUrls, onProvinceHover, onProvinceClick, onForceClick, onMapPointerDown }: GeoMapProps) {
+export function GeoMap({ world, political, viewBox, overlay, selectedProvinceId, hoveredProvinceId, zoomBand, scale, tx, ty, forceFlagUrls, onProvinceHover, onProvinceClick, onForceClick, onMapPointerDown }: GeoMapProps) {
   const forceMarkers = useMemo(() => (overlay?.forces ?? []).flatMap((force) => {
     const position = resolveForceMapPosition(force, world);
     return position === null ? [] : [{ ...force, ...position }];
@@ -139,7 +140,7 @@ export function GeoMap({ world, political, viewBox, overlay, selectedProvinceId,
 
   return <svg ref={svgRef} className="geo-map" viewBox={viewBox} xmlns="http://www.w3.org/2000/svg" data-zoom={zoomBand} preserveAspectRatio="xMidYMid meet" onPointerDown={onMapPointerDown} style={{ willChange: "transform" }}>
     {/* Terrain, rivers, political fills, and borders are all on the canvas layer */}
-    <g className="layer-dynamic-selection">{visibleProvinces.map((province) => <g key={province.id} className="geo-map-region" data-selected={selectedProvinceId === province.id ? "true" : undefined}><path d={province.svgPath} className="geo-map-region-hit" data-province-id={province.id} tabIndex={0} role="button" aria-label={province.name} onPointerEnter={handlePointerEnter} onPointerLeave={handlePointerLeave} onClick={handleClick} onKeyDown={handleKeyDown} /><path d={province.exteriorSvgPath} className="geo-map-region-outline" pointerEvents="none" /></g>)}</g>
+    <g className="layer-dynamic-selection">{visibleProvinces.map((province) => <g key={province.id} className="geo-map-region" data-selected={selectedProvinceId === province.id ? "true" : undefined} data-hovered={hoveredProvinceId === province.id ? "true" : undefined}><path d={province.svgPath} className="geo-map-region-hit" data-province-id={province.id} tabIndex={0} role="button" aria-label={province.name} onPointerEnter={handlePointerEnter} onPointerLeave={handlePointerLeave} onClick={handleClick} onKeyDown={handleKeyDown} /><path d={province.exteriorSvgPath} className="geo-map-region-outline" pointerEvents="none" /></g>)}</g>
     {/* Political territory name labels, settlements, and army/fleet standards
         are all drawn on the terrain canvas now (see map-canvas-labels.ts and
         map-canvas-entities.ts) — this group only carries invisible force hit

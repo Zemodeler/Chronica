@@ -69,4 +69,41 @@ describe("Europe and North Africa demo map features", () => {
     expect(europeNorthAfricaGeoJson.features.filter((feature) => feature.id.startsWith("fra-local-") && feature.properties.kind === "province")).toHaveLength(96);
     expect(europeNorthAfricaGeoJson.features.filter((feature) => feature.id.startsWith("ita-local-") && feature.properties.kind === "province")).toHaveLength(18);
   });
+
+  it("condenses Athens' municipality-scale regions into metro-sized territories", () => {
+    const athensMetro = europeNorthAfricaGeoJson.features.filter((feature) => feature.properties.kind === "province" && [
+      "grc-local-53547021B2738722376900",
+      "grc-local-53547021B60272535960699",
+      "grc-local-53547021B73781600558558",
+      "grc-local-53547021B42397561694605",
+      "grc-local-53547021B46293618367520",
+    ].includes(feature.id));
+    expect(athensMetro.map((feature) => feature.properties.name).sort()).toEqual([
+      "Athens",
+      "Eastern Athens",
+      "Northern Athens",
+      "Piraeus and Western Athens",
+      "Southern Athens",
+    ]);
+    expect(athensMetro.filter((feature) => feature.geometry.type === "Polygon")).toHaveLength(3);
+    expect(europeNorthAfricaGeoJson.features.some((feature) => feature.id === "grc-local-53547021B24220934156468")).toBe(false);
+    expect(europeNorthAfricaGeoJson.features.some((feature) => feature.id === "grc-local-53547021B46856554305408")).toBe(true);
+    expect(europeNorthAfricaGeoJson.features.some((feature) => feature.id === "grc-local-53547021B9274256728427")).toBe(true);
+  });
+
+  it("removes only the remaining sub-scale Macedonian and Acarnanian regions", () => {
+    const greekProvinceNames = europeNorthAfricaGeoJson.features
+      .filter((feature) => feature.id.startsWith("grc-local-") && feature.properties.kind === "province")
+      .map((feature) => feature.properties.name);
+
+    expect(greekProvinceNames).toEqual(expect.arrayContaining([
+      "Thessaloniki",
+      "Acarnanian Islands",
+      "Samothrakis",
+      "Pineios",
+      "Arta",
+    ]));
+    expect(europeNorthAfricaGeoJson.features.some((feature) => feature.id === "grc-local-53547021B66289561682340")).toBe(false);
+    expect(europeNorthAfricaGeoJson.features.some((feature) => feature.id === "grc-local-53547021B5259778029298")).toBe(false);
+  });
 });

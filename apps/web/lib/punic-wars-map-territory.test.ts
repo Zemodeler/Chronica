@@ -15,7 +15,7 @@ describe("Punic Wars opening political map", () => {
 
   it("makes Roman client regions direct territory of the Roman Republic", () => {
     const controller = new Map(PUNIC_WARS_CONTROL_MANIFEST.map((record) => [record.provinceId, record.controllerPolityId]));
-    for (const provinceId of ["punic-italy-samnium", "punic-italy-lucanian-uplands", "punic-italy-bruttian-highlands", "punic-italy-apulian-coast"]) {
+    for (const provinceId of ["punic-italy-etrurian-uplands", "punic-italy-samnium", "punic-italy-lucanian-uplands", "punic-italy-bruttian-highlands", "punic-italy-apulian-coast"]) {
       expect(controller.get(provinceId)).toBe("rome");
     }
   });
@@ -28,25 +28,57 @@ describe("Punic Wars opening political map", () => {
     expect(controller.get("punic-italy-venetian-lagoon")).toBe("veneti");
   });
 
-  it("keeps Gaul's local river-basin territories owned independently of their geometry", () => {
+  it("uses substantial Gaulish peoples rather than treating every local boundary as a polity", () => {
     const controller = new Map(PUNIC_WARS_CONTROL_MANIFEST.map((record) => [record.provinceId, record.controllerPolityId]));
-    expect(controller.get("punic-gaul-paris")).toBe("gaul-paris");
-    expect(controller.get("punic-gaul-moselle")).toBe("gaul-moselle");
-    expect(controller.get("punic-gaul-puy-de-dome")).toBe("gaul-puy-de-dome");
+    expect(controller.get("punic-gaul-saone-et-loire")).toBe("gaul-aedui");
+    expect(controller.get("punic-gaul-puy-de-dome")).toBe("gaul-arverni");
+    expect(controller.get("punic-gaul-moselle")).toBe("gaul-treveri");
+    expect(new Set(PUNIC_WARS_CONTROL_MANIFEST.filter((record) => record.provinceId.startsWith("punic-gaul-")).map((record) => record.controllerPolityId)).size).toBeLessThan(20);
   });
 
-  it("gives the newly partitioned northern and Balkan territories distinct community owners", () => {
+  it("keeps distinct northern and Balkan community owners where they remain politically meaningful", () => {
     const overlay = punicWarsOpeningOverlay(0);
     const controller = new Map(overlay.provinces.map((province) => [province.provinceId, province.controllerPolityId]));
-    expect(controller.get("punic-illyria-dardani")).toBe("illyria-dardani");
+    expect(controller.get("punic-illyria-xkx-2360587b5118871504069")).toBe("illyria-dardani");
     expect(controller.get("punic-thrace-odrysians")).toBe("thrace-odrysians");
     expect(controller.get("punic-belgica-menapii")).toBe("belgica-menapii");
     expect(controller.get("punic-low-countries-batavi")).toBe("low-countries-batavi");
     expect(controller.get("punic-germania-cherusci")).toBe("germania-cherusci");
-    expect(controller.get("punic-hungary-pannonii")).toBe("hungary-pannonii");
+    expect(controller.get("punic-hungary-hun-22733592b86637050333024")).toBe("pannonii");
     expect(controller.get("punic-czechoslovakia-cotini")).toBe("czechoslovakia-cotini");
     expect(controller.get("punic-luxembourg-treveri")).toBe("germania-treveri");
-    expect(overlay.polities.map((polity) => polity.name)).toEqual(expect.arrayContaining(["Dardani", "Odrysians", "Menapii", "Batavi", "Cheruscan Leine", "Pannonii", "Cotini", "Treveri"]));
+    expect(overlay.polities.map((polity) => polity.name)).toEqual(expect.arrayContaining(["Dardani", "Odrysians", "Menapii", "Batavi", "Cherusci", "Pannonii", "Cotini", "Treveri"]));
+  });
+
+  it("uses substantial historical polities for grounded Austrian, Adriatic, British, and Greek local territories", () => {
+    const controller = new Map(PUNIC_WARS_CONTROL_MANIFEST.map((record) => [record.provinceId, record.controllerPolityId]));
+    expect(controller.get("punic-austria-aut-97560089b12055607938436")).toBe("boii-middle-danube");
+    expect(controller.get("punic-hungary-hun-22733592b30896182433416")).toBe("boii-middle-danube");
+    expect(controller.get("punic-illyria-xkx-2360587b5118871504069")).toBe("illyria-dardani");
+    expect(controller.get("punic-greece-grc-local-53547021b64058474759409")).toBe("thebes");
+    expect(controller.get("punic-greece-grc-local-53547021b2738722376900")).toBe("athens");
+    expect(controller.get("punic-greece-grc-local-53547021b92158672895518")).toBe("sparta");
+    expect(controller.get("punic-greece-grc-local-53547021b34089236971204")).toBe("megalopolis");
+    const groups = ["punic-hungary-", "punic-illyria-", "punic-britain-", "punic-greece-"] as const;
+    for (const prefix of groups) {
+      const records = PUNIC_WARS_CONTROL_MANIFEST.filter((record) => record.provinceId.startsWith(prefix));
+      expect(records).not.toHaveLength(0);
+      expect(new Set(records.map((record) => record.controllerPolityId)).size).toBeLessThan(records.length / 2);
+    }
+    expect([...new Set(PUNIC_WARS_CONTROL_MANIFEST.filter((record) => record.provinceId.startsWith("punic-greece-")).map((record) => record.controllerPolityId))]).toEqual(expect.arrayContaining([
+      "macedon", "epirus", "acarnania", "aetolian-league", "boeotian-league", "thebes", "athens", "elis", "messenia", "sparta", "megalopolis", "thracian-communities",
+    ]));
+  });
+
+  it("consolidates Germania, Iberia, and Romania into attested regional powers", () => {
+    const controller = new Map(PUNIC_WARS_CONTROL_MANIFEST.map((record) => [record.provinceId, record.controllerPolityId]));
+    expect(controller.get("punic-germania-teutoburg")).toBe("germania-cherusci");
+    expect(controller.get("punic-iberia-castilla-y-leon")).toBe("iberia-vaccei");
+    expect(controller.get("punic-thrace-cluj")).toBe("thrace-dacian-highland-communities");
+    expect(controller.get("punic-thrace-bucuresti")).toBe("thrace-getae");
+    expect(new Set(PUNIC_WARS_CONTROL_MANIFEST.filter((record) => record.provinceId.startsWith("punic-germania-")).map((record) => record.controllerPolityId)).size).toBeLessThan(15);
+    expect(new Set(PUNIC_WARS_CONTROL_MANIFEST.filter((record) => record.provinceId.startsWith("punic-iberia-")).map((record) => record.controllerPolityId)).size).toBeLessThan(15);
+    expect(new Set(PUNIC_WARS_CONTROL_MANIFEST.filter((record) => record.provinceId.startsWith("punic-thrace-")).map((record) => record.controllerPolityId)).size).toBeLessThan(15);
   });
 
   it("gives the African and Alpine map actors explicit owners and settlement markers", () => {
@@ -79,10 +111,10 @@ describe("Punic Wars opening political map", () => {
     expect(overlay.settlements.some((settlement) => settlement.settlementId === "settlement-rhegium" || settlement.name === "Rhegium")).toBe(false);
   });
 
-  it("gives every reformed French, Iberian, Italian, and Romanian territory one opening controller", () => {
+  it("gives every reformed French, Iberian, Italian, Balkan, British, Greek, and Romanian territory one opening controller", () => {
     const controller = new Set(PUNIC_WARS_CONTROL_MANIFEST.map((record) => record.provinceId));
     const reformed = punicWarsGeoJson.features.filter((feature) => feature.properties.kind === "province" && [
-      "punic-gaul-", "punic-iberia-", "punic-italy-", "punic-thrace-",
+      "punic-gaul-", "punic-iberia-", "punic-italy-", "punic-hungary-", "punic-illyria-", "punic-thrace-", "punic-austria-", "punic-britain-", "punic-greece-",
     ].some((prefix) => feature.id.startsWith(prefix)));
     expect(reformed.length).toBeGreaterThan(150);
     expect(reformed.every((feature) => controller.has(feature.id))).toBe(true);

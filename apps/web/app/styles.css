@@ -597,8 +597,8 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .geo-map-country-border { fill: none; stroke: #dc5d5d; stroke-width: .7; stroke-dasharray: 1.5 2; vector-effect: non-scaling-stroke; pointer-events: none; }
   .geo-map-region-hit { fill: transparent; stroke: transparent; stroke-width: 0.5; vector-effect: non-scaling-stroke; }
   .geo-map-region-outline { fill: none; stroke: transparent; stroke-width: 0.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-  .geo-map-region:hover .geo-map-region-hit { fill: rgb(255 255 255 / 7%); }
-  .geo-map-region:hover .geo-map-region-outline { stroke: #f5fbff; stroke-width: 0.5; }
+  .geo-map-region[data-hovered="true"] .geo-map-region-hit { fill: rgb(255 255 255 / 7%); }
+  .geo-map-region[data-hovered="true"] .geo-map-region-outline { stroke: #f5fbff; stroke-width: 0.5; }
   .geo-map-region[data-selected="true"] .geo-map-region-hit { fill: rgb(244 207 104 / 11%); }
   .geo-map-region[data-selected="true"] .geo-map-region-outline { stroke: #f4cf68; stroke-width: 0.75; }
   .geo-map-region-hit:focus { outline: none; }
