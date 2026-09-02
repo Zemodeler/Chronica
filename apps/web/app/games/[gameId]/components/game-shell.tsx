@@ -2,6 +2,10 @@
 
 import { useState, useCallback, useEffect, useMemo, type PointerEvent } from "react";
 import { DynamicMapOverlaySchema, GeoJsonMapSchema, type GeoJsonMap, type DynamicMapOverlay, type GamePhase } from "@chronica/shared";
+
+// Module-level cache: survives React component unmounts (e.g. soft navigation away
+// and back) so the GeoJSON never reloads within the same browser tab session.
+const _geoJsonCache = new Map<string, GeoJsonMap>();
 import { GeoMap, type ForceFlagAsset, type ForceMapDetails } from "./geo-map";
 import { MapViewport, type ViewportTransform } from "./map-viewport";
 import { MapTooltip } from "./map-tooltip";
@@ -111,7 +115,9 @@ export function GameShell({
   characterPanel,
   playerCharacterId,
 }: GameShellProps) {
-  const [geoJson, setGeoJson] = useState<GeoJsonMap | undefined>(initialGeoJson);
+  const [geoJson, setGeoJson] = useState<GeoJsonMap | undefined>(
+    () => initialGeoJson ?? _geoJsonCache.get(gameId),
+  );
   const [overlay, setOverlay] = useState<DynamicMapOverlay | null>(
     initialOverlay ?? null,
   );
@@ -149,7 +155,10 @@ export function GameShell({
       .then((response) => response.ok ? response.json() : null)
       .then((data: unknown) => {
         const parsed = GeoJsonMapSchema.safeParse(data);
-        if (!cancelled && parsed.success) setGeoJson(parsed.data);
+        if (!cancelled && parsed.success) {
+          _geoJsonCache.set(gameId, parsed.data);
+          setGeoJson(parsed.data);
+        }
       })
       .catch(() => { /* The compact loading state remains available for a retry. */ });
     return () => { cancelled = true; };
@@ -318,6 +327,8 @@ export function GameShell({
               selectedProvinceId={selectedProvinceId}
               zoomBand={zoomBand}
               scale={viewport.scale}
+              tx={viewport.tx}
+              ty={viewport.ty}
               baseImageUrl={baseImageUrl}
               detailImageUrl={detailImageUrl}
               forceFlagUrls={forceFlagUrls}

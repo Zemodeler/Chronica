@@ -58,7 +58,7 @@ function hash(value: string): number {
 }
 
 /** A deterministic, shared bend for a generated internal border segment. */
-function organicEdge(first: Point, second: Point): [number, number][] {
+function organicEdge(first: Point, second: Point, irregularity = 1): [number, number][] {
   const firstKey = pointKey(first);
   const secondKey = pointKey(second);
   const forward = firstKey < secondKey;
@@ -70,10 +70,10 @@ function organicEdge(first: Point, second: Point): [number, number][] {
   if (length < 0.03) return forward ? [start, end] : [end, start];
   const seed = hash(`${start[0]},${start[1]}|${end[0]},${end[1]}`);
   const normal: [number, number] = [-dy / length, dx / length];
-  const amplitude = Math.min(0.16, length * (0.065 + (seed % 35) / 1_000));
+  const amplitude = Math.min(0.16 * irregularity, length * (0.065 + (seed % 35) / 1_000) * irregularity);
   const direction = seed % 2 === 0 ? 1 : -1;
-  const bent = [0.22, 0.48, 0.76].map((position, index) => {
-    const wave = direction * amplitude * (index === 1 ? -0.7 : 1) * (0.8 + ((seed >>> (index * 5)) % 20) / 100);
+  const bent = [0.16, 0.34, 0.54, 0.74, 0.89].map((position, index) => {
+    const wave = direction * amplitude * (index % 2 === 0 ? 1 : -0.72) * (0.8 + ((seed >>> (index * 5)) % 20) / 100);
     return roundedPoint([start[0] + dx * position + normal[0] * wave, start[1] + dy * position + normal[1] * wave]);
   });
   const result = [start, ...bent, end];
@@ -85,7 +85,7 @@ function organicEdge(first: Point, second: Point): [number, number][] {
  * the same seeded polyline in reverse, so the map gains natural irregularity
  * without creating gaps or overlaps between neighbours.
  */
-function organicizeInternalBorders(features: readonly GeoJsonMapFeature[]): GeoJsonMapFeature[] {
+function organicizeInternalBorders(features: readonly GeoJsonMapFeature[], irregularity = 1): GeoJsonMapFeature[] {
   const edgeCounts = new Map<string, number>();
   for (const feature of features) {
     if (feature.geometry.type !== "MultiPolygon") continue;
@@ -105,7 +105,7 @@ function organicizeInternalBorders(features: readonly GeoJsonMapFeature[]): GeoJ
           for (let index = 1; index < ring.length; index++) {
             const first = ring[index - 1]!;
             const second = ring[index]!;
-            const points = (edgeCounts.get(edgeKey(first, second)) ?? 0) > 1 ? organicEdge(first, second) : [roundedPoint(first), roundedPoint(second)];
+            const points = (edgeCounts.get(edgeKey(first, second)) ?? 0) > 1 ? organicEdge(first, second, irregularity) : [roundedPoint(first), roundedPoint(second)];
             result.push(...points.slice(1));
           }
           return result;
@@ -120,7 +120,7 @@ function organicizeInternalBorders(features: readonly GeoJsonMapFeature[]): GeoJ
  * preserves every source coastline and gives regions organic hinterlands
  * instead of grid-like modern administrative fragments.
  */
-function historicalRegions(source: readonly GeoJsonMapFeature[], sites: readonly HistoricalSite[]): GeoJsonMapFeature[] {
+function historicalRegions(source: readonly GeoJsonMapFeature[], sites: readonly HistoricalSite[], borderIrregularity = 1): GeoJsonMapFeature[] {
   const polygons = source.flatMap(polygonsFor);
   const regions: GeoJsonMapFeature[] = sites.map((site): GeoJsonMapFeature => {
     const coordinates = polygons.flatMap((polygon) => {
@@ -141,13 +141,13 @@ function historicalRegions(source: readonly GeoJsonMapFeature[], sites: readonly
       properties: { kind: "province", name: site.name },
     };
   });
-  return organicizeInternalBorders(regions);
+  return organicizeInternalBorders(regions, borderIrregularity);
 }
 
-function replaceProvinceGroup(map: GeoJsonMap, sourceIds: ReadonlySet<string>, sites: readonly HistoricalSite[]): GeoJsonMap {
+function replaceProvinceGroup(map: GeoJsonMap, sourceIds: ReadonlySet<string>, sites: readonly HistoricalSite[], borderIrregularity = 1): GeoJsonMap {
   const source = map.features.filter((feature) => sourceIds.has(feature.id));
   if (source.length !== sourceIds.size) throw new Error("A requested historical source province is missing from the base GeoJSON.");
-  const replacement = historicalRegions(source, sites);
+  const replacement = historicalRegions(source, sites, borderIrregularity);
   let inserted = false;
   return {
     ...map,
@@ -298,6 +298,29 @@ const GERMANIC_SITES: readonly HistoricalSite[] = [
   { id: "punic-germania-boii", name: "Boii of the Danube", coordinate: [12.00, 48.80] },
 ];
 
+// These labels identify Iron Age communities in the territory of today's
+// Hungary and Czechia/Slovakia; they do not project modern national identities
+// into the 270 BCE setting. Their boundaries are broad reconstructions.
+const HUNGARIAN_SITES: readonly HistoricalSite[] = [
+  { id: "punic-hungary-boii-western-pannonia", name: "Boii of western Pannonia", coordinate: [17.20, 47.65] },
+  { id: "punic-hungary-pannonii", name: "Pannonii", coordinate: [18.25, 46.55] },
+  { id: "punic-hungary-scordisci", name: "Scordisci", coordinate: [19.10, 46.15] },
+  { id: "punic-hungary-carpathian-communities", name: "Carpathian communities", coordinate: [19.65, 47.50] },
+  { id: "punic-hungary-upper-tisza-communities", name: "Upper Tisza communities", coordinate: [21.20, 47.85] },
+];
+
+const CZECHOSLOVAK_SITES: readonly HistoricalSite[] = [
+  { id: "punic-czechoslovakia-boii-bohemia", name: "Boii of Bohemia", coordinate: [14.45, 50.05] },
+  { id: "punic-czechoslovakia-boii-moravia", name: "Boii of Moravia", coordinate: [16.85, 49.20] },
+  { id: "punic-czechoslovakia-boii-slovakia", name: "Boii of western Slovakia", coordinate: [17.45, 48.55] },
+  { id: "punic-czechoslovakia-cotini", name: "Cotini", coordinate: [19.15, 48.95] },
+  { id: "punic-czechoslovakia-eastern-carpathian-communities", name: "Eastern Carpathian communities", coordinate: [21.05, 48.75] },
+];
+
+const LUXEMBOURG_SITES: readonly HistoricalSite[] = [
+  { id: "punic-luxembourg-treveri", name: "Treveri", coordinate: [6.10, 49.75] },
+];
+
 const IBERIAN_SITES: readonly HistoricalSite[] = [
   { id: "punic-iberia-gallaeci", name: "Gallaeci", coordinate: [-8.41, 42.88] },
   { id: "punic-iberia-astures", name: "Astures", coordinate: [-5.85, 43.36] },
@@ -366,6 +389,9 @@ const thraceSourceIds = new Set(["bgr-", "rou-", "srb-"].flatMap((prefix) => [..
 const belgiumSourceIds = provinceIds(base, "bel-");
 const netherlandsSourceIds = provinceIds(base, "nld-");
 const germaniaSourceIds = provinceIds(base, "deu-");
+const hungarySourceIds = provinceIds(base, "hun-");
+const czechoslovakiaSourceIds = new Set(["cze-", "svk-"].flatMap((prefix) => [...provinceIds(base, prefix)]));
+const luxembourgSourceIds = provinceIds(base, "lux-");
 
 const withItaly = replaceProvinceGroup(base, italySourceIds, ITALIAN_SITES);
 const withGaul = replaceProvinceGroup(withItaly, franceSourceIds, GALLIC_SITES);
@@ -374,8 +400,13 @@ const withIllyria = replaceProvinceGroup(withIberia, illyriaSourceIds, ILLYRIAN_
 const withThrace = replaceProvinceGroup(withIllyria, thraceSourceIds, THRACIAN_SITES);
 const withBelgica = replaceProvinceGroup(withThrace, belgiumSourceIds, BELGIC_SITES);
 const withLowCountries = replaceProvinceGroup(withBelgica, netherlandsSourceIds, LOW_COUNTRIES_SITES);
-const withGermania = replaceProvinceGroup(withLowCountries, germaniaSourceIds, GERMANIC_SITES);
-const withEngland = replaceProvinceGroup(withGermania, new Set(["gbr-14339913b95766344400054"]), ENGLAND_SITES);
+// Germania needs deliberately uneven frontiers: the reconstructed tribal areas
+// should read as landscapes and river corridors, not a set of straight cells.
+const withGermania = replaceProvinceGroup(withLowCountries, germaniaSourceIds, GERMANIC_SITES, 1.8);
+const withHungary = replaceProvinceGroup(withGermania, hungarySourceIds, HUNGARIAN_SITES);
+const withCzechoslovakia = replaceProvinceGroup(withHungary, czechoslovakiaSourceIds, CZECHOSLOVAK_SITES);
+const withLuxembourg = replaceProvinceGroup(withCzechoslovakia, luxembourgSourceIds, LUXEMBOURG_SITES);
+const withEngland = replaceProvinceGroup(withLuxembourg, new Set(["gbr-14339913b95766344400054"]), ENGLAND_SITES);
 const withScotland = replaceProvinceGroup(withEngland, new Set(["gbr-14339913b23556801435424"]), SCOTLAND_SITES);
 const withWales = replaceProvinceGroup(withScotland, new Set(["gbr-14339913b89763821047858"]), WALES_SITES);
 
@@ -459,6 +490,9 @@ export const PUNIC_WARS_REGION_COUNTS = {
   belgica: BELGIC_SITES.length,
   lowCountries: LOW_COUNTRIES_SITES.length,
   germania: GERMANIC_SITES.length,
+  hungary: HUNGARIAN_SITES.length,
+  czechoslovakia: CZECHOSLOVAK_SITES.length,
+  luxembourg: LUXEMBOURG_SITES.length,
   england: ENGLAND_SITES.length,
   scotland: SCOTLAND_SITES.length,
   wales: WALES_SITES.length,

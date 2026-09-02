@@ -232,4 +232,50 @@ export const economicWorkflows: AnyWorkflowDefinition[] = [
       };
     },
   }),
+
+  defineWorkflow({
+    id: "grant_holding",
+    description: "Grant a character legal holder rights over a territory-linked holding tied to an income source.",
+    category: "economic",
+    parametersSchema: z.object({
+      holdingId: EntityIdSchema,
+      title: z.string().min(1).max(120),
+      territoryId: EntityIdSchema,
+      legalHolderCharacterId: EntityIdSchema,
+      incomeSourceId: EntityIdSchema,
+      successionRuleId: EntityIdSchema,
+      physicalControlBps: z.number().int().min(0).max(10_000).default(10_000),
+    }).strict(),
+    apply(world, params) {
+      if (world.material.holdings.some((h) => h.id === params.holdingId)) return null;
+      const holder = world.characters.find((c) => c.id === params.legalHolderCharacterId);
+      if (!holder || !holder.alive) return null;
+      const incomeSource = world.material.incomeSources.find((s) => s.id === params.incomeSourceId);
+      if (!incomeSource) return null;
+      return {
+        world: {
+          ...world,
+          material: {
+            ...world.material,
+            holdings: [
+              ...world.material.holdings,
+              {
+                id: params.holdingId,
+                title: params.title,
+                territoryId: params.territoryId,
+                legalHolderCharacterId: params.legalHolderCharacterId,
+                incomeSourceId: params.incomeSourceId,
+                successionRuleId: params.successionRuleId,
+                physicalControlBps: params.physicalControlBps,
+              },
+            ],
+          },
+        },
+        result: {
+          summary: `${holder.name} is granted the holding "${params.title}".`,
+          applied: true,
+        },
+      };
+    },
+  }),
 ];

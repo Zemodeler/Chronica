@@ -32,16 +32,21 @@ province map.
 
 ## Current regional boundary source
 
-`apps/web/lib/europe-north-africa-geojson.ts` loads 879 ADM1 boundaries
+`apps/web/lib/europe-north-africa-geojson.ts` loads 901 provincial boundaries
 from 50 Europe and Northern Africa country layers supplied by geoBoundaries
-gbOpen. It is normalized to Chronica's `province` feature contract and uses
-WGS84 longitude/latitude, matching the equirectangular base image. The
-geometry is clipped to longitude −25° to 60° and latitude 15° to 72° and
-rounded to five decimal places, keeping it under the 20 MiB upload limit.
+gbOpen. Germany uses its 38 ADM2 government districts so its provinces are
+smaller and follow real administrative geography; the other country layers use
+ADM1. It is normalized to Chronica's `province` feature contract and uses WGS84
+longitude/latitude, matching the equirectangular base image. The geometry is
+clipped to longitude −25° to 60° and latitude 15° to 72° and rounded to five
+decimal places, keeping it under the 20 MiB upload limit.
 
 - Metadata endpoint: https://www.geoboundaries.org/api/current/gbOpen/ALL/ADM1/
+- German metadata endpoint: https://www.geoboundaries.org/api/current/gbOpen/DEU/ADM2/
 - Geographic selection: `Continent = Europe` or `UNSDG-subregion = Northern Africa`
 - Source licences vary by country; preserve the geoBoundaries attribution metadata when redistributing.
+- German ADM2 boundaries: Federal Agency for Cartography and Geodesy, provided
+  through geoBoundaries gbOpen under Data licence Germany — Attribution 2.0.
 
 ## Europe and North Africa raster subset
 

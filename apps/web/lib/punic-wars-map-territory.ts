@@ -76,6 +76,17 @@ const POLITY_NAMES: Record<string, string> = {
   "illyrian-communities": "Illyrian communities",
   "thracian-communities": "Thracian communities",
   "ptolemaic-cyrenaica": "Ptolemaic Cyrenaica",
+  "boii-middle-danube": "Boii of the Middle Danube",
+  "thrace-scordisci": "Scordisci",
+};
+
+const TRANSREGIONAL_TRIBAL_CONTROLLERS: Readonly<Record<string, string>> = {
+  "punic-hungary-boii-western-pannonia": "boii-middle-danube",
+  "punic-czechoslovakia-boii-bohemia": "boii-middle-danube",
+  "punic-czechoslovakia-boii-moravia": "boii-middle-danube",
+  "punic-czechoslovakia-boii-slovakia": "boii-middle-danube",
+  "punic-hungary-scordisci": "thrace-scordisci",
+  "punic-luxembourg-treveri": "germania-treveri",
 };
 
 const CARTHAGINIAN_IBERIAN_REGIONS = new Set([
@@ -130,6 +141,8 @@ const GREEK_CONTROLLERS: Readonly<Record<string, string>> = {
 function controllerFor(provinceId: string): string | null {
   const italian = ITALIAN_CONTROLLERS[provinceId];
   if (italian !== undefined) return italian;
+  const transregionalTribe = TRANSREGIONAL_TRIBAL_CONTROLLERS[provinceId];
+  if (transregionalTribe !== undefined) return transregionalTribe;
   if (provinceId.startsWith("punic-gaul-")) return `gaul-${provinceId.slice("punic-gaul-".length)}`;
   if (provinceId.startsWith("punic-britain-")) return `britain-${provinceId.slice("punic-britain-".length)}`;
   if (provinceId.startsWith("punic-iberia-")) return CARTHAGINIAN_IBERIAN_REGIONS.has(provinceId) ? "carthage" : `iberia-${provinceId.slice("punic-iberia-".length)}`;
@@ -138,6 +151,8 @@ function controllerFor(provinceId: string): string | null {
   if (provinceId.startsWith("punic-belgica-")) return `belgica-${provinceId.slice("punic-belgica-".length)}`;
   if (provinceId.startsWith("punic-low-countries-")) return `low-countries-${provinceId.slice("punic-low-countries-".length)}`;
   if (provinceId.startsWith("punic-germania-")) return `germania-${provinceId.slice("punic-germania-".length)}`;
+  if (provinceId.startsWith("punic-hungary-")) return `hungary-${provinceId.slice("punic-hungary-".length)}`;
+  if (provinceId.startsWith("punic-czechoslovakia-")) return `czechoslovakia-${provinceId.slice("punic-czechoslovakia-".length)}`;
   if (provinceId.startsWith("prt-")) return "lusitanians";
   if (provinceId.startsWith("mar-")) return CARTHAGINIAN_MAURETANIAN_COAST.has(provinceId) ? "carthage" : "mauretanian-peoples";
   if (provinceId.startsWith("dza-")) return GAETULIAN_PROVINCES.has(provinceId) ? "gaetuli" : NUMIDIAN_PROVINCES.has(provinceId) ? "numidian-kingdoms" : "carthage";
@@ -159,13 +174,13 @@ function controllerFor(provinceId: string): string | null {
 
 function confidenceFor(provinceId: string): HistoricalConfidence {
   if (provinceId.startsWith("punic-britain-")) return "cautious";
-  if (provinceId.startsWith("punic-gaul-") || provinceId.startsWith("punic-iberia-") || provinceId.startsWith("punic-illyria-") || provinceId.startsWith("punic-thrace-") || provinceId.startsWith("punic-belgica-") || provinceId.startsWith("punic-low-countries-") || provinceId.startsWith("punic-germania-")) return "medium";
+  if (provinceId.startsWith("punic-gaul-") || provinceId.startsWith("punic-iberia-") || provinceId.startsWith("punic-illyria-") || provinceId.startsWith("punic-thrace-") || provinceId.startsWith("punic-belgica-") || provinceId.startsWith("punic-low-countries-") || provinceId.startsWith("punic-germania-") || provinceId.startsWith("punic-hungary-") || provinceId.startsWith("punic-czechoslovakia-") || provinceId.startsWith("punic-luxembourg-")) return "medium";
   return "high";
 }
 
 function nameFor(controllerPolityId: string, provinceName: string): string {
   return POLITY_NAMES[controllerPolityId]
-    ?? (controllerPolityId.startsWith("gaul-") || controllerPolityId.startsWith("iberia-") || controllerPolityId.startsWith("britain-") || controllerPolityId.startsWith("illyria-") || controllerPolityId.startsWith("thrace-") || controllerPolityId.startsWith("belgica-") || controllerPolityId.startsWith("low-countries-") || controllerPolityId.startsWith("germania-") ? provinceName : controllerPolityId);
+    ?? (controllerPolityId.startsWith("gaul-") || controllerPolityId.startsWith("iberia-") || controllerPolityId.startsWith("britain-") || controllerPolityId.startsWith("illyria-") || controllerPolityId.startsWith("thrace-") || controllerPolityId.startsWith("belgica-") || controllerPolityId.startsWith("low-countries-") || controllerPolityId.startsWith("germania-") || controllerPolityId.startsWith("hungary-") || controllerPolityId.startsWith("czechoslovakia-") ? provinceName : controllerPolityId);
 }
 
 /**

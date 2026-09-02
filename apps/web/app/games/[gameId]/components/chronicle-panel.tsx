@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 
 interface DirectConsequence {
   readonly kind: string;
@@ -117,6 +118,7 @@ function DirectConsequencesSection({ consequences }: { consequences: readonly Di
 }
 
 export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, onDisplayPatch }: ChroniclePanelProps) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [chronicle, setChronicle] = useState<ChronicleData | null>(null);
   const [cursor, setCursor] = useState(0);
@@ -171,7 +173,7 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
         return;
       }
       setOpen(false);
-      window.location.reload();
+      router.refresh();
     } catch {
       setError("Failed to mark chronicle as read.");
       setMarking(false);

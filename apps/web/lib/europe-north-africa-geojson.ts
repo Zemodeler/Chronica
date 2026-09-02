@@ -4,9 +4,11 @@ import type { GeoJsonMap } from "@chronica/shared";
 import { agrigentumFortDemoSettlement, caralisDemoSettlement, naplesDemoSettlement, romeDemoSettlement, syracuseDemoSettlement } from "./calibration-map-features";
 
 /**
- * Europe and Northern Africa ADM1 boundaries from geoBoundaries gbOpen.
- * 50 national layers, 913 Chronica province features, WGS84 longitude/latitude.
+ * Europe and Northern Africa provincial boundaries from geoBoundaries gbOpen.
+ * Germany uses 38 ADM2 government districts; the remaining 49 country layers
+ * use ADM1 boundaries. The source file has 901 province features in WGS84.
  * Source metadata: https://www.geoboundaries.org/api/current/gbOpen/ALL/ADM1/
+ * Germany: https://www.geoboundaries.org/api/current/gbOpen/DEU/ADM2/
  */
 const mapPath = join(process.cwd(), "public", "maps", "europe-north-africa-adm1.geojson");
 const regionalMap = JSON.parse(readFileSync(mapPath, "utf8")) as GeoJsonMap;

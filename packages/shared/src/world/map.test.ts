@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { ProvinceGraphSchema } from "./map";
 
-const graph = (settlementControllerPolityId: string | null) => ({
+const graph = (settlementControllerPolityId: string | null, settlementProvinceId = "latium") => ({
   provinces: [{
     id: "latium",
     name: "Latium",
     formerNames: [],
     terrainId: "farmland",
-    settlements: [{ id: "roma", name: "Roma", kind: "city", controllerPolityId: settlementControllerPolityId, size: 100, fortificationLevel: 4 }],
+    settlements: [{ id: "roma", name: "Roma", kind: "city", provinceId: settlementProvinceId, controllerPolityId: settlementControllerPolityId, size: 100, fortificationLevel: 4 }],
     controllerPolityId: "ROM",
     controlFirmnessBps: 9_000,
     tier: "focus",
@@ -25,5 +25,29 @@ describe("settlement ownership", () => {
 
   it("rejects a city controller that is not present in the world graph", () => {
     expect(ProvinceGraphSchema.safeParse(graph("CAR")).success).toBe(false);
+  });
+
+  it("rejects a settlement whose provinceId does not match its enclosing province", () => {
+    expect(ProvinceGraphSchema.safeParse(graph(null, "not-latium")).success).toBe(false);
+  });
+
+  it("rejects a duplicate settlement id across provinces", () => {
+    const graphWithDuplicate = {
+      ...graph(null),
+      provinces: [
+        ...graph(null).provinces,
+        {
+          id: "campania",
+          name: "Campania",
+          formerNames: [],
+          terrainId: "farmland",
+          settlements: [{ id: "roma", name: "Roma", kind: "city", provinceId: "campania", controllerPolityId: null, size: 10, fortificationLevel: 1 }],
+          controllerPolityId: "ROM",
+          controlFirmnessBps: 9_000,
+          tier: "focus",
+        },
+      ],
+    };
+    expect(ProvinceGraphSchema.safeParse(graphWithDuplicate).success).toBe(false);
   });
 });

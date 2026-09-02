@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { WorldState } from "../world/world-state";
+import { WorldStateSchema } from "../world/world-state";
 import type { ProposedInvocation } from "../actions/orders";
 import { WORKFLOW_REGISTRY } from "./registry";
 import type { WorkflowResult } from "./types";
@@ -75,7 +76,16 @@ export function executeWorkflow(
     };
   }
 
-  return { ok: true, world: applied.world, result: applied.result };
+  const validated = WorldStateSchema.safeParse(applied.world);
+  if (!validated.success) {
+    return {
+      ok: false,
+      reason: "not_applicable",
+      message: `Workflow "${invocation.actionId}" produced an invalid world state: ${validated.error.issues.map((i) => i.message).join("; ")}`,
+    };
+  }
+
+  return { ok: true, world: validated.data, result: applied.result };
 }
 
 /**
