@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo, useCallback, useState, useRef, useEffect, type KeyboardEvent, type PointerEvent } from "react";
-import type { DynamicMapOverlay, GeoJsonMap, GeoJsonPosition } from "@chronica/shared";
-import { computeViewBox, projectCoordinate } from "./geo-projection";
+import type { DynamicMapOverlay, GeoJsonPosition } from "@chronica/shared";
+import { projectCoordinate } from "./geo-projection";
 import { derivePoliticalLabels } from "./political-labels";
-import { derivePoliticalMapState, deriveWarBorderPaths, politicalColourWithAlpha, type PoliticalOverlayInput } from "./political-geometry";
-import { prepareStaticWorldGeometry, provinceContains } from "./world-geometry";
+import { politicalColourWithAlpha, type PoliticalMapState } from "./political-geometry";
+import { provinceContains, type StaticWorldGeometry } from "./world-geometry";
 import { resolveForceMapPosition } from "./map-dynamic-geometry";
 import { deriveForceConflictStatuses } from "./map-conflict-state";
 import { armyStandardBounds, armyStandardHitBounds } from "./army-standard";
@@ -17,16 +17,20 @@ export interface ForceFlagAsset {
   readonly aspectRatio: number;
   readonly contentBounds?: Readonly<{ x: number; y: number; width: number; height: number }>;
 }
+
 interface GeoMapProps {
-  readonly geoJson: GeoJsonMap;
+  /** Pre-computed world geometry — shared with the canvas terrain layer. */
+  readonly world: StaticWorldGeometry;
+  /** Pre-computed political map state — shared with the canvas terrain layer. */
+  readonly political: PoliticalMapState;
+  /** SVG viewBox string derived from the GeoJSON map. */
+  readonly viewBox: string;
   readonly overlay: DynamicMapOverlay | null;
   readonly selectedProvinceId: string | null;
   readonly zoomBand: ZoomBand;
   readonly scale: number;
   readonly tx: number;
   readonly ty: number;
-  readonly baseImageUrl: string | undefined;
-  readonly detailImageUrl?: string | undefined;
   readonly forceFlagUrls: ReadonlyMap<string, ForceFlagAsset>;
   readonly onProvinceHover: (provinceId: string | null, event?: PointerEvent) => void;
   readonly onProvinceClick: (provinceId: string) => void;
@@ -39,7 +43,6 @@ interface VisibleRect { minX: number; maxX: number; minY: number; maxY: number; 
 function settlementRadius(type: string): number { return type === "capital" ? .06 : type === "city" ? .035 : type === "town" ? .015 : type === "fort" || type === "port" ? .04 : .020; }
 function diamondPoints(x: number, y: number, radius: number): string { return `${x},${y - radius} ${x + radius},${y} ${x},${y + radius} ${x - radius},${y}`; }
 function starPoints(x: number, y: number, radius: number): string { return Array.from({ length: 10 }, (_, index) => { const angle = -Math.PI / 2 + index * Math.PI / 5; const size = index % 2 === 0 ? radius : radius * .45; return `${x + Math.cos(angle) * size},${y + Math.sin(angle) * size}`; }).join(" "); }
-function politicalIdentity(overlay: DynamicMapOverlay | null) { return overlay === null ? "" : `${overlay.polities.map((polity) => `${polity.polityId}:${polity.name}`).sort().join("|")}#${overlay.provinces.map((province) => `${province.provinceId}:${province.controllerPolityId ?? ""}`).sort().join("|")}`; }
 function coordinateLabel([longitude, latitude]: GeoJsonPosition) { return `${latitude.toFixed(1)}°N, ${longitude.toFixed(1)}°E`; }
 
 function computeVisibleRect(
@@ -55,7 +58,6 @@ function computeVisibleRect(
   const svgFactor = Math.min(containerW / vw, containerH / vh);
   const ox = (containerW - vw * svgFactor) / 2;
   const oy = (containerH - vh * svgFactor) / 2;
-  // 5 SVG units (degrees) of padding prevents pop-in during a pan gesture
   const PAD = 5;
   const toX = (sx: number) => vx + ((sx - tx) / scale - ox) / svgFactor;
   const toY = (sy: number) => vy + ((sy - ty) / scale - oy) / svgFactor;
@@ -80,17 +82,17 @@ function ArmyStandard({ asset, x, y, conflictClass, onActivate }: { readonly ass
   </>;
 }
 
-/** SVG view over immutable world geometry and derived political/dynamic map data. */
-export function GeoMap({ geoJson, overlay, selectedProvinceId, zoomBand, scale, tx, ty, baseImageUrl, detailImageUrl, forceFlagUrls, onProvinceHover, onProvinceClick, onForceClick, onMapPointerDown }: GeoMapProps) {
+/**
+ * Lightweight SVG overlay: hit areas, labels, settlements, forces.
+ *
+ * Terrain fills, rivers, political overlay, and borders are all on the
+ * canvas layer drawn by MapViewport, so this SVG has zero fill paths and
+ * repaints roughly 80% fewer elements per animation frame.
+ */
+export function GeoMap({ world, political, viewBox, overlay, selectedProvinceId, zoomBand, scale, tx, ty, forceFlagUrls, onProvinceHover, onProvinceClick, onForceClick, onMapPointerDown }: GeoMapProps) {
   const invScale = 1 / scale;
-  const viewBox = useMemo(() => computeViewBox(geoJson), [geoJson]);
-  const world = useMemo(() => prepareStaticWorldGeometry(geoJson), [geoJson]);
-  const politicsKey = politicalIdentity(overlay);
-  const politicalInput = useMemo<PoliticalOverlayInput | null>(() => overlay === null ? null : ({ polities: overlay.polities, provinces: overlay.provinces }), [politicsKey]);
-  const political = useMemo(() => derivePoliticalMapState(world, politicalInput), [world, politicalInput]);
   const politicalLabels = useMemo(() => derivePoliticalLabels(political, zoomBand), [political, zoomBand]);
-  const settlementOverlay = useMemo(() => new Map(overlay?.settlements.map((settlement) => [settlement.settlementId, settlement]) ?? []), [overlay]);
-  const countryBorders = useMemo(() => deriveWarBorderPaths(political, overlay?.conflicts.wars ?? []), [overlay?.conflicts.wars, political]);
+  const settlementOverlay = useMemo(() => new Map(overlay?.settlements.map((s) => [s.settlementId, s]) ?? []), [overlay]);
   const forceMarkers = useMemo(() => (overlay?.forces ?? []).flatMap((force) => {
     const position = resolveForceMapPosition(force, world);
     return position === null ? [] : [{ ...force, ...position }];
@@ -98,15 +100,14 @@ export function GeoMap({ geoJson, overlay, selectedProvinceId, zoomBand, scale, 
   const conflictByForceId = useMemo(() => deriveForceConflictStatuses(overlay), [overlay]);
   const besiegedSettlementIds = useMemo(() => new Set(overlay?.conflicts.sieges.map((siege) => siege.settlementId) ?? []), [overlay?.conflicts.sieges]);
 
-  // Container size — observed once via ResizeObserver so culling rect stays current
+  // Container size via ResizeObserver — uses contentRect (layout box, unaffected
+  // by CSS transform) so viewport culling stays accurate at any zoom level.
   const svgRef = useRef<SVGSVGElement>(null);
   const [containerSize, setContainerSize] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => {
     const el = svgRef.current;
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
-      // Use contentRect (layout box) not getBoundingClientRect — the latter
-      // returns post-CSS-transform dimensions, which are 3× too large at 3× zoom.
       const rect = entries[0]?.contentRect;
       if (!rect) return;
       const w = Math.round(rect.width);
@@ -117,15 +118,11 @@ export function GeoMap({ geoJson, overlay, selectedProvinceId, zoomBand, scale, 
     return () => ro.disconnect();
   }, []);
 
-  // Visible world rect in SVG coordinate space (lon, -lat).
-  // Recomputes only when the committed transform or container size changes —
-  // panning inside MapViewport doesn't trigger this until the gesture ends.
   const visibleRect = useMemo((): VisibleRect | null => {
     if (!containerSize || containerSize.w === 0 || containerSize.h === 0) return null;
     return computeVisibleRect(viewBox, containerSize.w, containerSize.h, tx, ty, scale);
   }, [viewBox, tx, ty, scale, containerSize]);
 
-  // Province bounds use geographic (lon, lat) coords; SVG Y = −lat
   const visibleProvinces = useMemo(() => {
     if (!visibleRect) return world.provinces;
     const r = visibleRect;
@@ -135,7 +132,6 @@ export function GeoMap({ geoJson, overlay, selectedProvinceId, zoomBand, scale, 
     );
   }, [world.provinces, visibleRect]);
 
-  // Settlement projected coords are already in SVG space (lon, -lat)
   const visibleSettlements = useMemo(() => {
     if (!visibleRect) return world.settlements;
     const r = visibleRect;
@@ -145,11 +141,10 @@ export function GeoMap({ geoJson, overlay, selectedProvinceId, zoomBand, scale, 
     );
   }, [world.settlements, visibleRect]);
 
-  // Labels are text paths — few in number and safe to always render.
-  // Filtering them by viewport causes textPath→defs reference races in React.
+  // Labels are text paths — filtering by viewport causes textPath→defs reference
+  // races in React reconciliation, so we always render all of them.
   const visibleLabels = politicalLabels;
 
-  // Force markers: x/y are already projected SVG coords
   const visibleForces = useMemo(() => {
     if (!visibleRect) return forceMarkers;
     const r = visibleRect;
@@ -162,13 +157,7 @@ export function GeoMap({ geoJson, overlay, selectedProvinceId, zoomBand, scale, 
   const handleKeyDown = useCallback((event: KeyboardEvent<SVGPathElement>) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); const id = event.currentTarget.dataset.provinceId; if (id) onProvinceClick(id); } }, [onProvinceClick]);
 
   return <svg ref={svgRef} className="geo-map" viewBox={viewBox} xmlns="http://www.w3.org/2000/svg" data-zoom={zoomBand} preserveAspectRatio="xMidYMid meet" onPointerDown={onMapPointerDown}>
-    <rect x="-180" y="-90" width="360" height="180" className="geo-map-water" />
-    {baseImageUrl && <image href={baseImageUrl} x="-180" y="-90" width="360" height="180" preserveAspectRatio="none" className="geo-map-base-image" />}
-    {detailImageUrl && <image href={detailImageUrl} x="-25" y="-72" width="85" height="57" preserveAspectRatio="none" className="geo-map-base-image" />}
-    <g className="map-layer-terrain">{visibleProvinces.map((province) => <path key={province.id} d={province.svgPath} />)}</g>
-    <g className="layer-rivers">{world.rivers.map((river) => <path key={river.id} d={river.svgPath} className={`geo-map-river geo-map-river-${river.className}`} />)}</g>
-    <g className="map-layer-political">{visibleProvinces.map((province) => { const owner = political.ownerByProvince.get(province.id); return owner ? <path key={province.id} d={province.svgPath} fill={politicalColourWithAlpha(owner, .76)} /> : null; })}</g>
-    {political.territories.length > 0 && <g className="layer-political-borders"><path d={countryBorders} className="geo-map-country-border" /></g>}
+    {/* Terrain, rivers, political fills, and borders are all on the canvas layer */}
     <g className="layer-dynamic-selection">{visibleProvinces.map((province) => <g key={province.id} className="geo-map-region" data-selected={selectedProvinceId === province.id ? "true" : undefined}><path d={province.svgPath} className="geo-map-region-hit" data-province-id={province.id} tabIndex={0} role="button" aria-label={province.name} onPointerEnter={handlePointerEnter} onPointerLeave={handlePointerLeave} onClick={handleClick} onKeyDown={handleKeyDown} /><path d={province.exteriorSvgPath} className="geo-map-region-outline" pointerEvents="none" /></g>)}</g>
     <g className="layer-political-labels">
       <defs>{visibleLabels.map((label) => {
