@@ -3,8 +3,8 @@
 import { useState, useCallback, useEffect, useMemo, type PointerEvent } from "react";
 import { DynamicMapOverlaySchema, GeoJsonMapSchema, type GeoJsonMap, type DynamicMapOverlay, type GamePhase } from "@chronica/shared";
 
-// Module-level cache: survives React component unmounts (e.g. soft navigation away
-// and back) so the GeoJSON never reloads within the same browser tab session.
+// Module-level cache provides geometry immediately during soft navigation; a
+// fresh request below then replaces it if the active scenario map was revised.
 const _geoJsonCache = new Map<string, GeoJsonMap>();
 import { GeoMap, type ForceFlagAsset, type ForceMapDetails } from "./geo-map";
 import { MapViewport, type ViewportTransform } from "./map-viewport";
@@ -146,12 +146,8 @@ export function GameShell({
   }, [overlay]);
 
   useEffect(() => {
-    if (initialGeoJson !== undefined) {
-      setGeoJson(initialGeoJson);
-      return;
-    }
     let cancelled = false;
-    void fetch(`/api/games/${encodeURIComponent(gameId)}/map`, { cache: "force-cache" })
+    const refreshMap = () => void fetch(`/api/games/${encodeURIComponent(gameId)}/map`, { cache: "no-store" })
       .then((response) => response.ok ? response.json() : null)
       .then((data: unknown) => {
         const parsed = GeoJsonMapSchema.safeParse(data);
@@ -161,7 +157,16 @@ export function GameShell({
         }
       })
       .catch(() => { /* The compact loading state remains available for a retry. */ });
-    return () => { cancelled = true; };
+    if (initialGeoJson !== undefined) {
+      _geoJsonCache.set(gameId, initialGeoJson);
+      setGeoJson(initialGeoJson);
+    }
+    refreshMap();
+    window.addEventListener("focus", refreshMap);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", refreshMap);
+    };
   }, [gameId, initialGeoJson]);
 
   useEffect(() => {

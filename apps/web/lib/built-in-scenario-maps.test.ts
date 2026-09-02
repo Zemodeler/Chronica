@@ -8,7 +8,7 @@ describe("built-in scenario maps", () => {
 
     expect(first).toBeDefined();
     expect(first).not.toBe(second);
-    expect(first?.features.length).toBe(889);
+    expect(first?.features.length).toBe(911);
   });
 
   it("gives Punic Wars an independent historical map", () => {
@@ -17,7 +17,7 @@ describe("built-in scenario maps", () => {
 
     expect(first).toBeDefined();
     expect(first).not.toBe(second);
-    expect(first?.features.length).toBe(990);
+    expect(first?.features.length).toBe(802);
     expect(first?.features.some((feature) => feature.id === "punic-italy-latium")).toBe(true);
   });
 });
