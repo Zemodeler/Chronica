@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, type PointerEvent } from "react";
-import { DynamicMapOverlaySchema, type GeoJsonMap, type DynamicMapOverlay, type GamePhase } from "@chronica/shared";
+import { DynamicMapOverlaySchema, GeoJsonMapSchema, type GeoJsonMap, type DynamicMapOverlay, type GamePhase } from "@chronica/shared";
 import { GeoMap, type ForceFlagAsset, type ForceMapDetails } from "./geo-map";
 import { MapViewport, type ViewportTransform } from "./map-viewport";
 import { MapTooltip } from "./map-tooltip";
@@ -111,6 +111,7 @@ export function GameShell({
   characterPanel,
   playerCharacterId,
 }: GameShellProps) {
+  const [geoJson, setGeoJson] = useState<GeoJsonMap | undefined>(initialGeoJson);
   const [overlay, setOverlay] = useState<DynamicMapOverlay | null>(
     initialOverlay ?? null,
   );
@@ -137,6 +138,22 @@ export function GameShell({
     const names = new Map(overlay?.polities.map((polity) => [polity.polityId, polity.name]) ?? []);
     return (overlay?.politicalRelations ?? []).map((relation) => `${names.get(relation.leaderPolityId) ?? relation.leaderPolityId} allied with ${names.get(relation.memberPolityId) ?? relation.memberPolityId}`);
   }, [overlay]);
+
+  useEffect(() => {
+    if (initialGeoJson !== undefined) {
+      setGeoJson(initialGeoJson);
+      return;
+    }
+    let cancelled = false;
+    void fetch(`/api/games/${encodeURIComponent(gameId)}/map`, { cache: "force-cache" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data: unknown) => {
+        const parsed = GeoJsonMapSchema.safeParse(data);
+        if (!cancelled && parsed.success) setGeoJson(parsed.data);
+      })
+      .catch(() => { /* The compact loading state remains available for a retry. */ });
+    return () => { cancelled = true; };
+  }, [gameId, initialGeoJson]);
 
   useEffect(() => {
     let cancelled = false;
@@ -176,15 +193,15 @@ export function GameShell({
   }, [flagCatalogForce, gameId]);
 
   const regionNames = useMemo(() => {
-    if (!initialGeoJson) return new Map<string, string>();
+    if (!geoJson) return new Map<string, string>();
     const names = new Map<string, string>();
-    for (const feature of initialGeoJson.features) {
+    for (const feature of geoJson.features) {
       if (feature.properties.kind === "province") {
         names.set(feature.id, feature.properties.name);
       }
     }
     return names;
-  }, [initialGeoJson]);
+  }, [geoJson]);
 
   const handleProvinceHover = useCallback(
     (provinceId: string | null, event?: PointerEvent) => {
@@ -206,6 +223,8 @@ export function GameShell({
     },
     [],
   );
+
+  const clearSelectedForce = useCallback(() => setSelectedForce(null), []);
 
   const handleZoomIn = useCallback(() => {
     setViewport((v) => ({
@@ -242,7 +261,7 @@ export function GameShell({
     return () => clearInterval(interval);
   }, [gameId, phase]);
 
-  if (!initialGeoJson) {
+  if (!geoJson) {
     return (
       <>
         <header className="shell-top-bar">
@@ -294,7 +313,7 @@ export function GameShell({
         <div className="game-shell-map">
           <MapViewport transform={viewport} onTransformChange={setViewport}>
             <GeoMap
-              geoJson={initialGeoJson}
+              geoJson={geoJson}
               overlay={overlay}
               selectedProvinceId={selectedProvinceId}
               zoomBand={zoomBand}
@@ -305,7 +324,7 @@ export function GameShell({
               onProvinceHover={handleProvinceHover}
               onProvinceClick={handleProvinceClick}
               onForceClick={setSelectedForce}
-              onMapPointerDown={() => setSelectedForce(null)}
+              onMapPointerDown={clearSelectedForce}
             />
           </MapViewport>
           {selectedForce && <aside className="map-force-details" aria-label={`${selectedForce.name} details`}>

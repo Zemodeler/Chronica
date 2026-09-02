@@ -20,6 +20,20 @@ describe("political map derivation", () => {
     expect(politicalColourFromId("carthage")).toBe("#2e245f");
     expect(politicalColourFromId("syracuse")).toBe("#80512f");
   });
+  it("gives minor polities distinct shades within their cultural palette", () => {
+    const arverni = politicalColourFromId("gaul-arverni");
+    const aedui = politicalColourFromId("gaul-aedui");
+    expect(arverni).toMatch(/^hsl\((?:10\d|1[1-5]\d|16[01])(?:\.\d+)? /);
+    expect(aedui).toMatch(/^hsl\((?:10\d|1[1-5]\d|16[01])(?:\.\d+)? /);
+    expect(aedui).not.toBe(arverni);
+    expect(politicalColourFromId("boii")).toMatch(/^hsl\((?:10\d|1[1-5]\d|16[01])(?:\.\d+)? /);
+    expect(politicalColourFromId("iberia-celtiberians")).toMatch(/^hsl\((?:\d|[1-4]\d|3[3-5]\d)(?:\.\d+)? /);
+    expect(politicalColourFromId("germania-suebi")).toMatch(/^hsl\((?:[5-9]\d|10\d)(?:\.\d+)? /);
+  });
+  it("keeps major nations visually distinct from their cultural group", () => {
+    expect(politicalColourFromId("macedon")).toBe("#355f91");
+    expect(politicalColourFromId("macedon")).not.toBe(politicalColourFromId("athens"));
+  });
   it("builds static adjacency and shared boundaries once", () => {
     const world = prepareStaticWorldGeometry(map);
     expect(world.provinceById.get("west")?.neighborIds).toEqual(["east"]);
