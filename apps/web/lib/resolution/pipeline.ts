@@ -29,6 +29,10 @@ import {
   inferTheatre,
   WORKFLOW_REGISTRY,
   applySocialEvents,
+  deriveDefaultMind,
+  advancePressureLifecycle,
+  derivePressureTriggers,
+  createPressure,
 } from "@chronica/shared";
 import { collectPlayerCandidates, collectWorldCandidates, previewPlayerWorkflows, runWorkflowManager } from "./workflow-manager";
 
@@ -385,6 +389,7 @@ function materializePlayerCharacter(
     personalAccountId: accountId,
     skills: knowledgebase.skills,
     traits: [],
+    mind: deriveDefaultMind({ officeId: null, skills: knowledgebase.skills, ageYears: 35, cultureId: `culture-${knowledgebase.culture.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "local"}` }),
     healthBps: 10_000,
     prestigeBps: 3_000,
     relations: [],
@@ -800,7 +805,15 @@ export async function resolveTurn(
       materializedWorld.elapsedStep + 1,
       turnId,
     );
-    const resolutionWorld = socialEventOutcome.world;
+    // Character-sim phase 2: pressure review/decay/expiry runs before
+    // character selection, so a stale or spent pressure never shapes this
+    // turn's Character Director context.
+    const pressureAdvanced = advancePressureLifecycle(socialEventOutcome.world, materializedWorld.elapsedStep + 1);
+    const resolutionWorld: WorldState = {
+      ...socialEventOutcome.world,
+      characters: [...pressureAdvanced.characters],
+      characterPressures: [...pressureAdvanced.characterPressures],
+    };
     const actor = resolutionWorld.characters.find((character) => character.id === actorCharacterId)!;
     console.log(
       `${tag()} ══ RESOLUTION START ══ gameId=${gameId} actor="${actor.name}" step=${resolutionWorld.elapsedStep} directives=${batch.directives.length} storylines=${(resolutionWorld.storylines ?? []).length} characters=${resolutionWorld.characters.filter((character) => character.alive).length}`,
@@ -1396,10 +1409,17 @@ export async function resolveTurn(
     // Commitment resolution
     const fulfilledCommitmentIds: string[] = [];
     const deferredCommitmentIds: string[] = [];
+    // A commitment deferred because its promiser died can never be fulfilled
+    // -- a broken promise, distinct from one merely awaiting its conditions.
+    const brokenCommitments: { id: string; npcCharacterId: string; playerCharacterId: string }[] = [];
     const commitmentChronicle: ChronicleEntryInput[] = [];
     for (const commitment of pendingCommitments) {
       const npc = newWorld.characters.find((character) => character.id === commitment.npcCharacterId);
-      if (!npc?.alive || commitment.conditions !== "") { deferredCommitmentIds.push(commitment.id); continue; }
+      if (!npc?.alive || commitment.conditions !== "") {
+        deferredCommitmentIds.push(commitment.id);
+        if (!npc?.alive) brokenCommitments.push({ id: commitment.id, npcCharacterId: commitment.npcCharacterId, playerCharacterId: commitment.playerCharacterId });
+        continue;
+      }
       if (commitment.promiseType === "money") {
         const account = newWorld.material.accounts.find((candidate) => candidate.owner.kind === "character" && candidate.owner.id === commitment.playerCharacterId && candidate.status === "active");
         if (account) {
@@ -1498,8 +1518,47 @@ export async function resolveTurn(
 
     // Update character relevance in newWorld before committing
     const updatedRelevance = updateCharacterRelevance(newWorld.characterRelevance ?? [], chronicleInputs, atStep);
+
+    // Character-sim phase 2: derive this turn's own pressure triggers (an
+    // injury, a debt, a broken commitment, a war, an insult, a vacated
+    // office) from outcomes already validated and applied this same turn.
+    // These become visible to *next* turn's character selection and
+    // director context -- the same committed-then-consumed-next pattern
+    // `characterRelevance`/`chronicleChains` already use.
+    const accountBalance = (characters: WorldState["characters"], accounts: WorldState["material"]["accounts"]) => {
+      const map = new Map<string, number>();
+      for (const character of characters) {
+        const account = accounts.find((a) => a.id === character.personalAccountId);
+        if (account !== undefined) map.set(character.id, account.balance);
+      }
+      return map;
+    };
+    const appliedSocialEventSummaries = pendingSocialEvents
+      .filter((event) => socialEventOutcome.appliedIds.includes(event.id))
+      .map((event) => ({ id: event.id, kind: event.kind, participantCharacterIds: event.participantCharacterIds }));
+    const warringPolityIds = new Set(newWorld.conflicts.wars.flatMap((w) => [w.polityAId, w.polityBId]));
+    const pressureTriggers = derivePressureTriggers({
+      atStep,
+      charactersBefore: resolutionWorld.characters,
+      charactersAfter: newWorld.characters,
+      accountBalanceBefore: accountBalance(resolutionWorld.characters, resolutionWorld.material.accounts),
+      accountBalanceAfter: accountBalance(newWorld.characters, newWorld.material.accounts),
+      appliedSocialEvents: appliedSocialEventSummaries,
+      failedOrCancelledCommitments: brokenCommitments,
+      warringPolityIds,
+    });
+    let worldWithTriggeredPressures: WorldState = newWorld;
+    for (const trigger of pressureTriggers) {
+      const result = createPressure(worldWithTriggeredPressures, trigger);
+      worldWithTriggeredPressures = {
+        ...worldWithTriggeredPressures,
+        characters: [...result.characters],
+        characterPressures: [...result.characterPressures],
+      };
+    }
+
     const finalWorld = {
-      ...newWorld,
+      ...worldWithTriggeredPressures,
       elapsedStep: atStep,
       characterRelevance: updatedRelevance,
       lastTurnSummary: summarizeResolvedTurn(chronicleInputs, atStep),

@@ -30,14 +30,24 @@ import {
 } from "@chronica/db";
 import type {
   Character,
+  CharacterBelief,
   CharacterKnowledgebase,
+  CharacterPressure,
   CharacterProfile,
   CharacterSocialEvent,
   ConversationMemoryEntry,
   DialogueChannel,
   RelationCauseProposal,
 } from "@chronica/shared";
-import { computeOpinion, isCharacterReachable, opinionLabel } from "@chronica/shared";
+import {
+  computeOpinion,
+  deriveDefaultMind,
+  getActivePressures,
+  isCharacterReachable,
+  NEUTRAL_MIND,
+  opinionLabel,
+  queryBeliefs,
+} from "@chronica/shared";
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { ChronicaDatabase } from "@chronica/db";
@@ -133,11 +143,40 @@ const ProposedRelationCauseSchema = z.object({
   decayPerYearBps: z.number().int().min(0).max(10_000),
 });
 
+const BELIEF_KIND_VALUES = ["fact", "rumour", "suspicion", "secret"] as const;
+// Channels a single two-party conversation can plausibly ground: the NPC
+// speaking from direct experience, or confiding something in the player.
+// Broad-grant channels (public_announcement, ordinary_rumour spreading past
+// this conversation, intercepted_secret) are not choices dialogue itself may
+// make -- those require a world event with real witnesses/reach.
+const DIALOGUE_KNOWLEDGE_CHANNEL_VALUES = ["direct_witness", "event_participant", "private_disclosure", "trusted_report"] as const;
+
+const ProposedBeliefSchema = z.object({
+  subjectEntityId: z.string().trim().min(1).nullable(),
+  claim: z.string().trim().min(1).max(400),
+  kind: z.enum(BELIEF_KIND_VALUES),
+  channel: z.enum(DIALOGUE_KNOWLEDGE_CHANNEL_VALUES),
+  /** Who receives this belief -- must be the NPC, the player, or both; validated below. */
+  recipientCharacterIds: z.array(z.string().trim().min(1)).min(1).max(2),
+});
+
+const PRESSURE_KIND_VALUES = ["debt", "threat", "grief", "illness", "political_danger", "family_obligation", "opportunity", "humiliation", "military_emergency"] as const;
+
+const ProposedPressureChangeSchema = z.object({
+  action: z.enum(["create", "refresh", "resolve"]),
+  kind: z.enum(PRESSURE_KIND_VALUES).optional(),
+  intensity: z.number().int().min(0).max(100).optional(),
+  label: z.string().trim().min(1).max(200).optional(),
+});
+
 const ProposeSocialEventsResponseSchema = z.object({
   events: z.array(z.object({
     kind: z.enum(SOCIAL_EVENT_KIND_VALUES),
     relationCauses: z.array(ProposedRelationCauseSchema).max(4),
     visibility: z.enum(["public", "polity", "private"]),
+    proposedBeliefs: z.array(ProposedBeliefSchema).max(2).default([]),
+    /** Only the speaking NPC's own pressure -- never the player's, never a third party's. */
+    pressureChange: ProposedPressureChangeSchema.nullable().default(null),
   })).max(3),
 });
 
@@ -154,10 +193,13 @@ Respond ONLY with JSON matching this schema:
     {
       "kind": "conversation" | "promise" | "insult" | "favour" | "deception" | "rumour",
       "relationCauses": [ { "subjectCharacterId": "who now holds this opinion", "targetCharacterId": "who it is about", "label": "short reason, e.g. 'You publicly insulted him.'", "score": -20 to 20, "decayPerYearBps": 0 to 10000 } ],
-      "visibility": "public" | "polity" | "private"
+      "visibility": "public" | "polity" | "private",
+      "proposedBeliefs": [ { "subjectEntityId": "id this is about, or null", "claim": "third-person statement", "kind": "fact"|"rumour"|"suspicion"|"secret", "channel": "direct_witness"|"event_participant"|"private_disclosure"|"trusted_report", "recipientCharacterIds": ["${npcCharacterId}" and/or "${playerCharacterId}" -- only these two ids] } ],
+      "pressureChange": { "action": "create"|"refresh"|"resolve", "kind": "debt"|"threat"|"grief"|"illness"|"political_danger"|"family_obligation"|"opportunity"|"humiliation"|"military_emergency", "intensity": 0-100, "label": "short reason" } | null
     }
   ]
 }
+"pressureChange" may only ever describe a pressure on "${npcCharacterId}" (the NPC speaking), never on "${playerCharacterId}" or anyone else -- omit it (null) unless this exchange concretely changes what the NPC is under pressure from.
 Return { "events": [] } if nothing consequential happened.`;
 }
 
@@ -219,6 +261,33 @@ async function proposeAndPersistSocialEvents(
     );
     if (hasUnknownId) continue;
 
+    // Beliefs: reject anything naming a recipient outside this conversation.
+    const proposedBeliefs = draft.proposedBeliefs
+      .filter((belief) => belief.recipientCharacterIds.every((id) => validIds.has(id)))
+      .map((belief) => ({
+        subjectEntityId: belief.subjectEntityId,
+        claim: belief.claim,
+        kind: belief.kind,
+        channel: belief.channel,
+        explicitRecipientCharacterIds: belief.recipientCharacterIds,
+        expiresInSteps: null,
+      }));
+
+    // Pressure changes: only ever about the NPC speaking, never the player or a third party.
+    const pressureChanges = draft.pressureChange !== null && draft.pressureChange.action === "create"
+      && draft.pressureChange.kind !== undefined && draft.pressureChange.intensity !== undefined && draft.pressureChange.label !== undefined
+      ? [{
+          characterId: npcCharacterId,
+          action: draft.pressureChange.action,
+          kind: draft.pressureChange.kind,
+          intensity: draft.pressureChange.intensity,
+          label: draft.pressureChange.label,
+          reviewInSteps: 4,
+          expiresInSteps: null,
+          visibility: "private" as const,
+        }]
+      : [];
+
     const id = randomUUID();
     const event = {
       id,
@@ -232,6 +301,8 @@ async function proposeAndPersistSocialEvents(
       knownByCharacterIds: [npcCharacterId, playerCharacterId],
       relationCauses: draft.relationCauses as RelationCauseProposal[],
       knowledgeClaims: [],
+      proposedBeliefs,
+      pressureChanges,
       commitmentProposal: null,
       introducedCharacter: null,
       introducedProfile: null,
@@ -271,6 +342,7 @@ async function extractAndPropagateKnowledge(
   gameId: string,
   npcCharacterId: string,
   sessionId: string,
+  npcMessageId: string,
   npcReply: string,
   playerMessage: string,
   existingEntries: readonly SharedEntryRow[],
@@ -329,6 +401,34 @@ async function extractAndPropagateKnowledge(
         body, npcCharacterId, sessionId, stepOccurred,
       );
     }
+
+    // The speaking NPC durably believes what they just said -- a canonical
+    // belief, proposed through the same social-event ledger every other
+    // canonical mutation uses (character-sim phase 2). Sharing a pool entry
+    // is descriptive/performance only and never itself grants knowledge.
+    await insertCharacterSocialEvent(db, randomUUID(), gameId, {
+      sourceSessionId: sessionId,
+      sourceMessageId: npcMessageId,
+      participantCharacterIds: [npcCharacterId],
+      kind: "conversation",
+      visibility: "private",
+      knownByCharacterIds: [npcCharacterId],
+      relationCauses: [],
+      knowledgeClaims: [],
+      proposedBeliefs: [{
+        subjectEntityId: null,
+        claim: body,
+        kind: "fact",
+        channel: "event_participant",
+        explicitRecipientCharacterIds: [npcCharacterId],
+        expiresInSteps: null,
+      }],
+      pressureChanges: [],
+      commitmentProposal: null,
+      introducedCharacter: null,
+      introducedProfile: null,
+      createdAtStep: stepOccurred,
+    });
   }
 }
 
@@ -487,6 +587,9 @@ interface DialogueCallInput {
   currentStep: number;
   continuityTier: "ordinary" | "remembered" | "principal";
   worldCharacters: readonly WorldCharacterRef[];
+  /** Character-sim phase 2: full canonical lists, filtered down to the speaking NPC's own state below. */
+  characterPressures: readonly CharacterPressure[];
+  characterBeliefs: readonly CharacterBelief[];
 }
 
 export interface DialogueCallResult {
@@ -513,7 +616,7 @@ export async function generateDialogueReply(input: DialogueCallInput & { readonl
   const {
     db, userId, gameId, playerId, playerCharacterId, playerCharacterName, playerKnowledgebase,
     npcCharacterId, sessionId, channel, playerMessageBody, period, currentStep, continuityTier,
-    worldCharacters,
+    worldCharacters, characterPressures, characterBeliefs,
   } = input;
 
   let kb = await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcCharacterId);
@@ -565,8 +668,16 @@ export async function generateDialogueReply(input: DialogueCallInput & { readonl
   const sharedEntries = await listPoolEntries(db, gameId, pools);
 
   const recentMessages = await listSessionMessages(db, sessionId, 20);
+  // Subjective context (character-sim phase 2): only this NPC's own mind,
+  // traits, active pressures, and beliefs -- never another character's.
+  const mindContext = {
+    mind: npcRef?.mind ?? NEUTRAL_MIND,
+    traits: npcRef?.traits ?? [],
+    pressures: getActivePressures({ characterPressures }, npcCharacterId),
+    beliefs: queryBeliefs({ characterBeliefs }, npcCharacterId),
+  };
   const systemPrompt = buildDialogueSystemPrompt(
-    kb, playerCharacterName, playerCharacterId, playerKnowledgebase, channel, period, recentMessages, worldCharacters, sharedEntries, opinion,
+    kb, playerCharacterName, playerCharacterId, playerKnowledgebase, channel, period, recentMessages, worldCharacters, mindContext, opinion,
   );
   const operation = continuityTier === "ordinary" ? "dialogue_ordinary" : "dialogue_principal";
 
@@ -601,7 +712,7 @@ export async function generateDialogueReply(input: DialogueCallInput & { readonl
   // propagation failure must not discard an otherwise valid dialogue reply.
   try {
     await extractAndPropagateKnowledge(
-      db, userId, gameId, npcCharacterId, sessionId,
+      db, userId, gameId, npcCharacterId, sessionId, npcMsg.id,
       npcBody, playerMessageBody, sharedEntries, pools, currentStep,
     );
   } catch (error) {
@@ -788,11 +899,13 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
     ?? worldView.world.map.provinces.find((p) => p.id === playerLocationProvinceId)
     ?? worldView.world.map.provinces[0];
   if (!province) return { status: "unavailable", explanation: "No valid location is available for that contact." };
+  const npcSkills = { martial: 35, intrigue: 35, learning: 35, piety: 35, stewardship: 35, diplomacy: 35, body: 50, subSkills: {} };
   const character: Character = {
     id: npcCharacterId, name: parsed.name, cultureId: "local", faithId: null, dynastyId: null,
     locationProvinceId: province.id, polityId: province.controllerPolityId, ageYearsAtStart: 35, officeId: null,
-    personalAccountId: `${npcCharacterId}:abstract`, skills: { martial: 35, intrigue: 35, learning: 35, piety: 35, stewardship: 35, diplomacy: 35, body: 50, subSkills: {} },
-    traits: [], healthBps: 8_000, prestigeBps: 3_000, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null,
+    personalAccountId: `${npcCharacterId}:abstract`, skills: npcSkills,
+    traits: [], mind: deriveDefaultMind({ officeId: null, skills: npcSkills, ageYears: 35, cultureId: "local" }),
+    healthBps: 8_000, prestigeBps: 3_000, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null,
   };
   const profile: CharacterProfile = {
     gameId, characterId: npcCharacterId, version: 1, roleLabel: parsed.roleLabel,
@@ -809,6 +922,8 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
     knownByCharacterIds: [playerCharacterId, npcCharacterId],
     relationCauses: [],
     knowledgeClaims: [],
+    proposedBeliefs: [],
+    pressureChanges: [],
     commitmentProposal: null,
     introducedCharacter: character,
     introducedProfile: profile,
@@ -876,6 +991,8 @@ export interface DialogueContext {
   currentStep: number;
   continuityTier: "ordinary" | "remembered" | "principal";
   worldCharacters: readonly WorldCharacterRef[];
+  characterPressures: readonly CharacterPressure[];
+  characterBeliefs: readonly CharacterBelief[];
 }
 
 export async function resolveDialogueContext(gameId: string): Promise<DialogueContext | null> {
@@ -929,9 +1046,15 @@ export async function resolveDialogueContext(gameId: string): Promise<DialogueCo
       locationProvinceId: c.locationProvinceId,
       alive: c.alive,
       relations: c.relations,
+      mind: c.mind,
+      traits: c.traits,
     }));
 
-    return { db, close, userId, playerId: player.id, characterId, characterName, playerKnowledgebase, locationProvinceId, roleLabel, period, currentStep, continuityTier: tier, worldCharacters };
+    return {
+      db, close, userId, playerId: player.id, characterId, characterName, playerKnowledgebase, locationProvinceId, roleLabel, period, currentStep, continuityTier: tier, worldCharacters,
+      characterPressures: world.characterPressures,
+      characterBeliefs: world.characterBeliefs,
+    };
   } catch (error) {
     await close();
     throw error;

@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
-import type { WorldState } from "../world/world-state";
 import type { CharacterSocialEvent } from "./social-events";
 import { applySocialEvents } from "./apply-social-events";
 
-const world = () => structuredClone(firstPunicWarScenario.initialWorld) as WorldState;
+const world = () => structuredClone(firstPunicWarScenario.initialWorld);
 
 function baseEvent(overrides: Partial<CharacterSocialEvent> = {}): CharacterSocialEvent {
   return {
@@ -21,6 +20,8 @@ function baseEvent(overrides: Partial<CharacterSocialEvent> = {}): CharacterSoci
       { subjectCharacterId: "hanno", targetCharacterId: "marcus-atilius", label: "You publicly insulted him.", score: -12, decayPerYearBps: 2_000 },
     ],
     knowledgeClaims: [],
+    proposedBeliefs: [],
+    pressureChanges: [],
     commitmentProposal: null,
     introducedCharacter: null,
     introducedProfile: null,
@@ -97,5 +98,94 @@ describe("applySocialEvents", () => {
     const before = world();
     const outcome = applySocialEvents(before, [baseEvent()], 5, "turn-1");
     expect(outcome.world.material).toBe(before.material);
+  });
+});
+
+describe("applySocialEvents — character-sim phase 2 extensions", () => {
+  it("grants a belief only to a witness/participant recipient, through the same idempotent path", () => {
+    const event = baseEvent({
+      relationCauses: [],
+      proposedBeliefs: [{
+        subjectEntityId: null,
+        claim: "Hanno is short on funds.",
+        kind: "rumour",
+        channel: "event_participant",
+        explicitRecipientCharacterIds: [],
+        expiresInSteps: null,
+      }],
+    });
+    const outcome = applySocialEvents(world(), [event], 5, "turn-1");
+    expect(outcome.appliedIds).toEqual(["event-1"]);
+    const beliefHolders = outcome.world.characterBeliefs.map((b) => b.holderCharacterId).sort();
+    expect(beliefHolders).toEqual(["hanno", "marcus-atilius"]);
+
+    // Applying the same already-applied event again produces no duplicate belief.
+    const appliedEvent = { ...event, status: "applied" as const };
+    const secondPass = applySocialEvents(outcome.world, [appliedEvent], 5, "turn-1");
+    expect(secondPass.world.characterBeliefs).toHaveLength(outcome.world.characterBeliefs.length);
+  });
+
+  it("rejects a belief proposal naming a recipient outside the event", () => {
+    const event = baseEvent({
+      relationCauses: [],
+      proposedBeliefs: [{
+        subjectEntityId: null, claim: "X", kind: "secret", channel: "private_disclosure",
+        explicitRecipientCharacterIds: ["some-uninvolved-character"], expiresInSteps: null,
+      }],
+    });
+    const outcome = applySocialEvents(world(), [event], 5, "turn-1");
+    expect(outcome.appliedIds).toEqual([]);
+    expect(outcome.world.characterBeliefs).toEqual([]);
+  });
+
+  it("creates a pressure for a participant via a pressureChanges proposal", () => {
+    const event = baseEvent({
+      relationCauses: [],
+      pressureChanges: [{
+        characterId: "hanno", action: "create", kind: "humiliation", intensity: 55,
+        label: "Publicly insulted.", reviewInSteps: 4, expiresInSteps: 20, visibility: "public",
+      }],
+    });
+    const outcome = applySocialEvents(world(), [event], 5, "turn-1");
+    const pressure = outcome.world.characterPressures.find((p) => p.characterId === "hanno");
+    expect(pressure).toBeDefined();
+    expect(pressure!.kind).toBe("humiliation");
+    expect(outcome.world.characters.find((c) => c.id === "hanno")!.mind.currentPressures).toContain(pressure!.id);
+  });
+
+  it("rejects a pressure change referencing an unknown character", () => {
+    const event = baseEvent({
+      relationCauses: [],
+      pressureChanges: [{
+        characterId: "nobody", action: "create", kind: "debt", intensity: 40,
+        label: "x", reviewInSteps: 4, expiresInSteps: null, visibility: "private",
+      }],
+    });
+    const outcome = applySocialEvents(world(), [event], 5, "turn-1");
+    expect(outcome.appliedIds).toEqual([]);
+    expect(outcome.world.characterPressures).toEqual([]);
+  });
+
+  it("creates a typed social link alongside a relation cause when socialLinkKind is given", () => {
+    const event = baseEvent({
+      relationCauses: [
+        { subjectCharacterId: "hanno", targetCharacterId: "marcus-atilius", label: "Sworn allies.", score: 15, decayPerYearBps: 0, socialLinkKind: "ally" },
+      ],
+    });
+    const outcome = applySocialEvents(world(), [event], 5, "turn-1");
+    const link = outcome.world.socialLinks.find((l) => l.subjectCharacterId === "hanno" && l.targetCharacterId === "marcus-atilius");
+    expect(link?.kind).toBe("ally");
+  });
+
+  it("stores a cause's dimensions map so multidimensional derivation reads more than the legacy score", () => {
+    const event = baseEvent({
+      relationCauses: [
+        { subjectCharacterId: "hanno", targetCharacterId: "marcus-atilius", label: "Threatened him.", score: -5, decayPerYearBps: 0, dimensions: { fear: 30, trust: -10 } },
+      ],
+    });
+    const outcome = applySocialEvents(world(), [event], 5, "turn-1");
+    const cause = outcome.world.characters.find((c) => c.id === "hanno")!.relations
+      .find((r) => r.subjectCharacterId === "marcus-atilius")!.causes[0]!;
+    expect(cause.dimensions).toEqual({ fear: 30, trust: -10 });
   });
 });

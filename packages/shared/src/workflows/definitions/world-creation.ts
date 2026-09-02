@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { EntityIdSchema } from "../../material-state";
 import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
+import { deriveDefaultMind } from "../../characters/mind";
 
 // World Director entity-creation workflows.
 //
@@ -55,6 +56,16 @@ export const worldCreationWorkflows: AnyWorkflowDefinition[] = [
       const characterId = params.characterId ?? `char-wd-${randomUUID().slice(0, 12)}`;
       if (world.characters.some((character) => character.id === characterId)) return null;
 
+      const skills = {
+        martial: 35,
+        intrigue: 45,
+        learning: 45,
+        piety: 35,
+        stewardship: 45,
+        diplomacy: 55,
+        body: 45,
+        subSkills: {},
+      };
       const newCharacter = {
         id: characterId,
         name: params.name,
@@ -68,17 +79,9 @@ export const worldCreationWorkflows: AnyWorkflowDefinition[] = [
         ageYearsAtStart: 35,
         officeId: params.officeId,
         personalAccountId: `account-${characterId}`,
-        skills: {
-          martial: 35,
-          intrigue: 45,
-          learning: 45,
-          piety: 35,
-          stewardship: 45,
-          diplomacy: 55,
-          body: 45,
-          subSkills: {},
-        },
+        skills,
         traits: [],
+        mind: deriveDefaultMind({ officeId: params.officeId, skills, ageYears: 35, cultureId: "culture-local" }),
         alive: true,
         healthBps: 10000,
         prestigeBps: 3000,
