@@ -1,5 +1,5 @@
 import type { KnowledgebaseRow, MessageRow, SharedEntryRow } from "@chronica/db";
-import type { CharacterKnowledgebase, CharacterSkills } from "@chronica/shared";
+import type { CharacterKnowledgebase, CharacterSkills, DirectedRelation } from "@chronica/shared";
 
 const CHANNEL_LABELS: Record<string, string> = {
   in_person_private: "in private",
@@ -17,6 +17,8 @@ export interface WorldCharacterRef {
   readonly officeId: string | null;
   readonly locationProvinceId: string | null;
   readonly alive: boolean;
+  /** The canonical directed-relation ledger, so opinion can be read from causes rather than a stored score. */
+  readonly relations: readonly DirectedRelation[];
 }
 
 function buildSharedKnowledgeSection(entries: readonly SharedEntryRow[]): string {
@@ -141,13 +143,16 @@ export function buildDialogueSystemPrompt(
   recentMessages: readonly MessageRow[],
   worldCharacters: readonly WorldCharacterRef[],
   sharedEntries: readonly SharedEntryRow[],
+  opinion: { score: number; label: string },
 ): string {
   const channelCtx = CHANNEL_LABELS[channel] ?? "by correspondence";
   const memory = kb.conversationMemory.slice(-6);
   const memorySection = memory.length > 0
     ? `\n\nPast conversation notes:\n${memory.map((entry) => `- ${entry.exchange}`).join("\n")}`
     : "";
-  const relationship = `Your enduring connection to ${playerCharacterName}: ${kb.declaredConnection}. ${kb.declaredConnectionNotes} Your current sentiment is ${kb.relationshipLabel} (score ${kb.relationshipScore > 0 ? "+" : ""}${kb.relationshipScore}/100).`;
+  // Sourced from the character's authoritative directed relation causes
+  // (computeOpinion), never from the legacy stored `relationshipScore`.
+  const relationship = `Your enduring connection to ${playerCharacterName}: ${kb.declaredConnection}. ${kb.declaredConnectionNotes} Your current sentiment is ${opinion.label} (score ${opinion.score > 0 ? "+" : ""}${opinion.score}/100).`;
   const events = kb.relevancyScore < 50 && kb.significantEvents.length > 0
     ? `\n\nSignificant events you know of:\n${kb.significantEvents.map((event) => `- ${event}`).join("\n")}`
     : "";

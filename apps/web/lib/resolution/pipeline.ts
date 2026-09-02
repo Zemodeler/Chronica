@@ -1,6 +1,5 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
 import type {
   OrderBatch,
   WorldState,
@@ -29,6 +28,7 @@ import {
   selectRelevantCharacters,
   inferTheatre,
   WORKFLOW_REGISTRY,
+  applySocialEvents,
 } from "@chronica/shared";
 import { collectPlayerCandidates, collectWorldCandidates, previewPlayerWorkflows, runWorkflowManager } from "./workflow-manager";
 
@@ -51,6 +51,10 @@ import {
   listPendingNpcCommitments,
   resolveNpcCommitments,
   listActiveInventedWorkflows,
+  listUnappliedCharacterSocialEvents,
+  markCharacterSocialEventsApplied,
+  markCharacterSocialEventsRejected,
+  upsertCharacterProfile,
 } from "@chronica/db";
 import type { ChronicleEntryInput } from "@chronica/db";
 import type { ResolutionProgress, ResolutionStep } from "./types";
@@ -630,7 +634,7 @@ function buildChronicleEntries(
   }
 
   // Simulator proposal entries
-  for (const sp of simulatorProposals) {
+  for (const [simulatorProposalIndex, sp] of simulatorProposals.entries()) {
     if (sp.salience < 4) continue;
     const logEntries = sp.proposedWorkflows
       .map((wf) => workflowLog.find((l) => l.invocation.actionId === wf.actionId && l.outcome.ok))
@@ -644,7 +648,9 @@ function buildChronicleEntries(
       simulatedDurationDays: estimateWorkflowDurationDays(sp.proposedWorkflows),
       input: applyChronicleCast({
         scope: "world_event",
-        scopeRef: sp.storylineId ?? `sim-${randomUUID().slice(0, 8)}`,
+        // Deterministic across replay: derived from step + index rather than
+        // a random UUID (character-sim phase 1).
+        scopeRef: sp.storylineId ?? `sim-${atStep}-${simulatorProposalIndex}`,
         audience: sp.visibility === "private" ? "knowledge_scoped" : "all_players",
         body,
         atStep,
@@ -777,7 +783,24 @@ export async function resolveTurn(
     const pendingCommitments = await listPendingNpcCommitments(db, gameId);
     const activeInventedWorkflows = await listActiveInventedWorkflows(db, gameId);
     const resolutionContext: ResolutionPlayerContext = { knowledgebase: playerKnowledgebase, pendingCommitments };
-    const resolutionWorld = materializePlayerCharacter(world, actorCharacterId, playerKnowledgebase);
+    const materializedWorld = materializePlayerCharacter(world, actorCharacterId, playerKnowledgebase);
+
+    // ── Step 0: Apply pending dialogue social events ────────────────────────
+    //
+    // The chat/simulation boundary (character-sim phase 1): dialogue can only
+    // ever propose a CharacterSocialEvent, never mutate a Character directly.
+    // Turn resolution is the sole authority that validates every reference
+    // against canonical state and applies the deterministic deltas, so a
+    // dialogue insult, a promise, or a discovered NPC only ever becomes real
+    // through the same committed-turn path every other world mutation uses.
+    const pendingSocialEvents = await listUnappliedCharacterSocialEvents(db, gameId);
+    const socialEventOutcome = applySocialEvents(
+      materializedWorld,
+      pendingSocialEvents,
+      materializedWorld.elapsedStep + 1,
+      turnId,
+    );
+    const resolutionWorld = socialEventOutcome.world;
     const actor = resolutionWorld.characters.find((character) => character.id === actorCharacterId)!;
     console.log(
       `${tag()} ══ RESOLUTION START ══ gameId=${gameId} actor="${actor.name}" step=${resolutionWorld.elapsedStep} directives=${batch.directives.length} storylines=${(resolutionWorld.storylines ?? []).length} characters=${resolutionWorld.characters.filter((character) => character.alive).length}`,
@@ -1217,7 +1240,9 @@ export async function resolveTurn(
                 chronicleCasts.set(proposal.id, { characterId: castCharacter.id, role: decision.chronicleCast.role });
               }
             } else if (proposal && decision.chronicleCast?.newCharacter) {
-              const createdCharacterId = `char-cast-${randomUUID().slice(0, 12)}`;
+              // Deterministic across replay: derived from the proposal id and
+              // step rather than a random UUID (character-sim phase 1).
+              const createdCharacterId = `char-cast-${atStep}-${proposal.id.slice(0, 12)}`;
               const created = decision.chronicleCast.newCharacter;
               chronicleCasts.set(proposal.id, { characterId: createdCharacterId, role: decision.chronicleCast.role });
               worldDirectorInvocations.push({
@@ -1494,6 +1519,14 @@ export async function resolveTurn(
 
     await resolveNpcCommitments(db, fulfilledCommitmentIds, "fulfilled", atStep, "Validated and fulfilled during turn resolution.");
     await resolveNpcCommitments(db, deferredCommitmentIds, "deferred", atStep, "Conditions require a later turn.");
+
+    // Guarded by `WHERE status = 'proposed'` inside the query itself, so this
+    // can never re-apply an event a concurrent resolution already committed.
+    for (const profile of socialEventOutcome.introducedProfiles) {
+      await upsertCharacterProfile(db, profile);
+    }
+    await markCharacterSocialEventsApplied(db, socialEventOutcome.appliedIds, atStep, turnId);
+    await markCharacterSocialEventsRejected(db, socialEventOutcome.rejectedIds);
 
     const playerProvinceId = resolutionWorld.characters.find((c) => c.id === actorCharacterId)?.locationProvinceId;
     const playerPolityId = resolutionWorld.characters.find((c) => c.id === actorCharacterId)?.polityId;
