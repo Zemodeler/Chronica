@@ -1214,24 +1214,6 @@ export const postgresGameRepository: GameRepository = {
 };
 
 /** The signed-in viewer's player row and claimed character for one game, or null in fixture/demo mode. */
-async function currentViewerCharacter(gameId: string) {
-  const resolved = await resolvePlayer(gameId);
-  if (resolved === null) return null;
-  const { db, close, playerId } = resolved;
-  const view = await getWorldView(db, gameId);
-  if (view === undefined) {
-    await close();
-    return null;
-  }
-  const [player] = await db
-    .select({ characterId: schema.players.characterId })
-    .from(schema.players)
-    .where(eq(schema.players.id, playerId))
-    .limit(1);
-  const characterId = player?.characterId ?? view.world.characters[0]?.id ?? "";
-  return { db, close, playerId, characterId, world: view.world };
-}
-
 /**
  * The web layer depends on this interface, never a Drizzle client directly --
  * `postgresGameRepository` is itself the Drizzle-backed implementation, chosen

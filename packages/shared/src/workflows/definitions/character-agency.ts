@@ -1,12 +1,10 @@
 import { z } from "zod";
 import { EntityIdSchema, VisibilitySchema } from "../../material-state";
-import type { AnyWorkflowDefinition } from "../types";
+import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
 import {
   CharacterGoalCategorySchema,
   CharacterGoalStatusSchema,
   CharacterPlotStageSchema,
-  CharacterPlotStatusSchema,
-  DEFAULT_NEMESIS_STATE,
 } from "../../character-agency/schemas";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
@@ -19,7 +17,7 @@ const randomUUID = () => globalThis.crypto.randomUUID();
 // forces, provinces) — those require separate material workflow invocations.
 
 export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
-  {
+  defineWorkflow({
     id: "create_character_goal",
     description: "Give a character a new persistent goal. Use when the Character Director forms a new goal after a meaningful trigger (encounter, political event, plot resolution).",
     category: "character" as const,
@@ -64,9 +62,9 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "update_character_goal",
     description: "Update the status or priority of an existing character goal.",
     category: "character" as const,
@@ -104,9 +102,9 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "create_character_plot",
     description: "Create a new plot for a character pursuing a goal. A plot is a concrete attempt: participants, objective, stakes, and a starting stage.",
     category: "character" as const,
@@ -162,9 +160,9 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "advance_character_plot",
     description: "Advance a plot to a new stage, updating momentum, obstacle, and next intended move.",
     category: "character" as const,
@@ -208,9 +206,9 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "resolve_character_plot",
     description: "Mark a plot as resolved (succeeded, failed, abandoned, exposed, or stalled).",
     category: "character" as const,
@@ -245,9 +243,9 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "assign_nemesis",
     description: "Assign a character as the player's Nemesis. Must emerge organically — only assign when the character has active opposition and significant recent Chronicle presence.",
     category: "character" as const,
@@ -297,9 +295,9 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "clear_nemesis",
     description: "Deactivate a Nemesis (e.g., because they died or the conflict was resolved).",
     category: "character" as const,
@@ -331,5 +329,5 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 ];

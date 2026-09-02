@@ -9,7 +9,6 @@ import {
   findOrOpenSession,
   getCharacterKnowledgebase,
   getOrCreateNpcKnowledgebase,
-  getNpcKnowledgebase,
   getWorldView,
   insertSharedEntry,
   listNpcKnowledgebases,
@@ -25,10 +24,9 @@ import {
   updateNpcKnowledgebase,
   type KnowledgebaseRow,
   type MessageRow,
-  type SessionRow,
   type SharedEntryRow,
 } from "@chronica/db";
-import type { Character, CharacterKnowledgebase, ConversationConsequence, ConversationMemoryEntry, NpcChatKnowledgebase } from "@chronica/shared";
+import type { Character, CharacterKnowledgebase, ConversationConsequence, ConversationMemoryEntry } from "@chronica/shared";
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { ChronicaDatabase } from "@chronica/db";
@@ -566,7 +564,7 @@ const normalizeContactQuery = (value: string): string => value.toLocaleLowerCase
 
 export async function discoverContact(input: DiscoverContactInput): Promise<DiscoverContactOutput> {
   const {
-    db, userId, gameId, playerId, playerCharacterId, playerCharacterName,
+    db, userId, gameId, playerId, playerCharacterName,
     playerLocationProvinceId, playerRoleLabel, period, query, characterId,
   } = input;
 
@@ -768,7 +766,7 @@ export async function resolveDialogueContext(gameId: string): Promise<DialogueCo
     const officeId = character?.officeId ?? null;
     const characterName = character?.name ?? characterId;
     const roleLabel = officeId ?? "notable figure";
-    const tier = (continuity?.tier ?? "ordinary") as "ordinary" | "remembered" | "principal";
+    const tier = (continuity?.tier ?? "ordinary");
     const currentStep = world.elapsedStep ?? 0;
 
     const allCharacters = [...world.characters, ...registeredNpcs.map((record) => record.character)];

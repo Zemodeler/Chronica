@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { EntityIdSchema, VisibilitySchema } from "../../material-state";
-import type { AnyWorkflowDefinition } from "../types";
+import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
 
 export const narrativeWorkflows: AnyWorkflowDefinition[] = [
-  {
+  defineWorkflow({
     id: "create_storyline",
     description: "Start a new narrative storyline in the world.",
     category: "narrative",
@@ -47,9 +47,9 @@ export const narrativeWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "update_storyline",
     description: "Advance an existing storyline to a new phase with updated stakes.",
     category: "narrative",
@@ -85,9 +85,9 @@ export const narrativeWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "resolve_storyline",
     description: "Conclude a storyline by recording its final outcome.",
     category: "narrative",
@@ -119,5 +119,5 @@ export const narrativeWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 ];

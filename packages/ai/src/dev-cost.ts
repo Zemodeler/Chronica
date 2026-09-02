@@ -25,11 +25,9 @@ export function logDevAiCost(
   sessionProviderCostMicroUnits += usage.providerCostMicroUnits;
   sessionCoinChargeMicroUnits += usage.coinChargeMicroUnits;
 
-  // eslint-disable-next-line no-console
   console.log(
     `[AI] ${operation} | ${result.model} | in:${result.inputTokens} cached:${result.cacheReadTokens} cache-write:${result.cacheWriteTokens} out:${result.outputTokens} | ${formatCoins(usage.coinChargeMicroUnits)} coins`,
   );
-  // eslint-disable-next-line no-console
   console.log(
     `[AI] session total: ${sessionCalls} call${sessionCalls === 1 ? "" : "s"}, in:${sessionInputTokens} cached:${sessionCacheReadTokens} cache-write:${sessionCacheWriteTokens} out:${sessionOutputTokens} | ${formatCoins(sessionCoinChargeMicroUnits)} coins (provider ${formatCoins(sessionProviderCostMicroUnits)} coins)`,
   );

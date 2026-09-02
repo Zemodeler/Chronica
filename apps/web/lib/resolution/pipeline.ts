@@ -313,11 +313,11 @@ function assessmentWorkflows(assessment: OrderAssessment) {
     : assessment.workflow === null ? [] : [assessment.workflow];
 }
 
-async function safeParseJson<T>(
+function safeParseJson<T>(
   text: string,
   schema: { safeParse(v: unknown): { success: boolean; data?: T; error?: unknown } },
   label: string,
-): Promise<T | null> {
+): T | null {
   try {
     const raw = JSON.parse(stripToJson(text)) as unknown;
     const result = schema.safeParse(raw);
@@ -425,7 +425,7 @@ function deriveExecutedWorkflowConsequences(
       const amount = invocation.parameters["amount"];
       consequences.push({
         kind: "material",
-        label: `+${amount} gold`,
+        label: `+${String(amount)} gold`,
         entityId: null,
         quantified: true,
       });
@@ -433,7 +433,7 @@ function deriveExecutedWorkflowConsequences(
       const amount = invocation.parameters["amount"];
       consequences.push({
         kind: "material",
-        label: `-${amount} gold`,
+        label: `-${String(amount)} gold`,
         entityId: null,
         quantified: true,
       });
@@ -725,7 +725,7 @@ function summarizeResolvedTurn(entries: readonly ChronicleEntryInput[], atStep: 
 }
 
 /** Build a displayPatch from world-state diff for map-relevant changes. */
-function buildDisplayPatch(before: WorldState, after: WorldState): unknown | undefined {
+function buildDisplayPatch(before: WorldState, after: WorldState): unknown {
   const patches: Record<string, unknown>[] = [];
   for (const pBefore of before.map.provinces) {
     const pAfter = after.map.provinces.find((p) => p.id === pBefore.id);
@@ -798,7 +798,7 @@ export async function resolveTurn(
         try {
           interpretContent = normalizeInterpretationContent(interpretContent);
         } catch { /* preserve the original response for normal parse diagnostics */ }
-        const parsed = await safeParseJson(interpretContent, InterpretParseSchema, `interpret:directive-${idx}`);
+        const parsed = safeParseJson(interpretContent, InterpretParseSchema, `interpret:directive-${idx}`);
         if (parsed) {
           interpretations.push({ ...parsed, directiveId: `directive-${idx}` });
         } else {
@@ -844,7 +844,7 @@ export async function resolveTurn(
         try {
           assessContent = normalizeAssessmentContent(assessContent);
         } catch { /* preserve the original response for normal parse diagnostics */ }
-        const parsed = await safeParseJson(assessContent, AssessParseSchema, `assess:${interpretation.directiveId}`);
+        const parsed = safeParseJson(assessContent, AssessParseSchema, `assess:${interpretation.directiveId}`);
         if (parsed) {
           assessments.push({ ...parsed, directiveId: interpretation.directiveId });
         } else {
@@ -900,7 +900,7 @@ export async function resolveTurn(
 
       // Extracted parse-and-repair logic so it can run on both the first attempt
       // and a single retry without duplicating the repair / income-injection code.
-      const parseAdjudicationContent = async (content: string): Promise<Verdict | null> => {
+      const parseAdjudicationContent = (content: string): Verdict | null => {
         let adjContent = content;
         try {
           const raw = JSON.parse(stripToJson(adjContent)) as Record<string, unknown>;
@@ -931,7 +931,7 @@ export async function resolveTurn(
           if (raw && typeof raw === "object") adjContent = JSON.stringify(raw);
         } catch { /* leave adjContent as-is */ }
 
-        const parsed = await safeParseJson(adjContent, VerdictParseSchema, `adjudicate:${assessment.directiveId}`);
+        const parsed = safeParseJson(adjContent, VerdictParseSchema, `adjudicate:${assessment.directiveId}`);
         if (!parsed) return null;
 
         let finalDeltas: StateDelta[] = parsed.deltas;
@@ -973,7 +973,7 @@ export async function resolveTurn(
 
       try {
         const result = await coinGatedAdapter.call("adjudicate", adjSystemPrompt, userMsg);
-        verdict = await parseAdjudicationContent(result.content);
+        verdict = parseAdjudicationContent(result.content);
         if (!verdict) {
           retryReason = "Previous response could not be parsed as a valid verdict. Please return valid JSON.";
         } else {
@@ -1018,7 +1018,7 @@ export async function resolveTurn(
       if (verdict === null && retryReason !== null) {
         try {
           const retry = await coinGatedAdapter.call("adjudicate", adjSystemPrompt, retryReason);
-          verdict = await parseAdjudicationContent(retry.content);
+          verdict = parseAdjudicationContent(retry.content);
         } catch (retryErr) {
           console.error(`${tag()} [adjudicate:retry-error] ${assessment.directiveId}:`, retryErr);
         }
@@ -1104,7 +1104,7 @@ export async function resolveTurn(
         try {
           const reactionPrompt = buildReactionDirectorSystemPrompt(worldAfterPlayer, verdicts, actorCharacterId, resolutionContext, activeInventedWorkflows);
           const reactionResult = await coinGatedAdapter.call("reaction_director", reactionPrompt, `Step ${atStep}: generate reactions.`);
-          const reactionParsed = await safeParseJson(reactionResult.content, ReactionProposalBatchSchema, "reaction_director");
+          const reactionParsed = safeParseJson(reactionResult.content, ReactionProposalBatchSchema, "reaction_director");
           if (reactionParsed) proposals.push(...reactionParsed.proposals);
         } catch (err) {
           console.error(`${tag()} [reaction:error]`, err);
@@ -1125,7 +1125,7 @@ export async function resolveTurn(
         try {
           simContent = sanitizeSimulatorContent(simContent, worldAfterPlayer);
         } catch { /* preserve the original response for normal parse diagnostics */ }
-        const simParsed = await safeParseJson(simContent, SimulatorProposalBatchSchema, "simulator");
+        const simParsed = safeParseJson(simContent, SimulatorProposalBatchSchema, "simulator");
         if (simParsed) proposals.push(...simParsed.proposals);
       } catch (err) {
         console.error(`${tag()} [simulate:error]`, err);
@@ -1147,7 +1147,7 @@ export async function resolveTurn(
         try {
           const charPrompt = buildCharacterDirectorSystemPrompt(worldAfterPlayer, selectedCharacters, actorCharacterId, resolutionContext);
           const charResult = await coinGatedAdapter.call("character_director", charPrompt, `Step ${atStep}: advise on ${selectedCharacters.length} character(s).`);
-          const charParsed = await safeParseJson(charResult.content, CharacterSuggestionBatchSchema, "character_director");
+          const charParsed = safeParseJson(charResult.content, CharacterSuggestionBatchSchema, "character_director");
           if (charParsed) {
             for (const suggestion of charParsed.suggestions) {
               const isSelected = selectedCharacters.some((sc) => sc.characterId === suggestion.characterId);
@@ -1200,7 +1200,7 @@ export async function resolveTurn(
       try {
         wdContent = sanitizeWorldDirectorContent(wdContent, consolidatedPackage);
       } catch { /* retain the original response for normal parse diagnostics */ }
-      const wdParsed = await safeParseJson(wdContent, WorldDirectorDecisionBatchSchema, "world_director");
+      const wdParsed = safeParseJson(wdContent, WorldDirectorDecisionBatchSchema, "world_director");
       if (wdParsed) {
         const decisions = wdParsed.decisions;
         for (const decision of decisions) {
@@ -1291,7 +1291,7 @@ export async function resolveTurn(
     const invocationsToExecute = [...managerResult.acceptedInvocations];
     for (const inv of managerResult.acceptedInvocations) {
       if (inv.actionId !== "start_battle") continue;
-      const params = inv.parameters as Record<string, unknown>;
+      const params = inv.parameters;
       const atkId = params["attackingForceId"] as string | undefined;
       const defId = params["defendingForceId"] as string | undefined;
       if (!atkId || !defId) continue;
@@ -1415,7 +1415,7 @@ export async function resolveTurn(
       chronicleCasts,
       reactionProposals,
       simulatorProposals,
-      allWorkflowLog as never,
+      allWorkflowLog,
       finalWorkflowAudit,
       atStep,
       displayPatchByInvocation,

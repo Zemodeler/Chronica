@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { EntityIdSchema } from "../../material-state";
-import type { AnyWorkflowDefinition } from "../types";
+import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
 
 export const politicalWorkflows: AnyWorkflowDefinition[] = [
-  {
+  defineWorkflow({
     id: "start_war",
     description: "Declare war between two polities. Creates a war entry in conflicts.",
     category: "political",
@@ -35,9 +35,9 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "end_war",
     description: "End an active war between two polities via treaty or defeat.",
     category: "political",
@@ -76,9 +76,9 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "give_territory",
     description: "Transfer control of a province from one polity to another.",
     category: "political",
@@ -111,9 +111,9 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "sign_treaty",
     description: "Record a peace treaty between two polities (ends war if active).",
     category: "political",
@@ -146,9 +146,9 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "declare_independence",
     description: "Create a new polity that breaks away from a parent polity and claims a province.",
     category: "political",
@@ -183,9 +183,9 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "impose_tribute",
     description: "Create a periodic tribute obligation from one polity's treasury to another.",
     category: "political",
@@ -229,9 +229,9 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "break_alliance",
     description: "Dissolve an alliance between two polities.",
     category: "political",
@@ -252,5 +252,5 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 ];

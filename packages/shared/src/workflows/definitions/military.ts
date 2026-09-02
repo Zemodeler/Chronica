@@ -1,13 +1,13 @@
 import { z } from "zod";
-import { EntityIdSchema, BasisPointsSchema } from "../../material-state";
-import type { AnyWorkflowDefinition } from "../types";
+import { EntityIdSchema } from "../../material-state";
+import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
 
 const FORCE_KIND_SCHEMA = z.enum(["infantry", "cavalry", "siege", "naval", "militia", "mercenary", "other"]);
 
 const randomUUID = () => globalThis.crypto.randomUUID();
 
 export const militaryWorkflows: AnyWorkflowDefinition[] = [
-  {
+  defineWorkflow({
     id: "army_change_name",
     description: "Rename an existing military force, such as an army or legion.",
     category: "military",
@@ -34,9 +34,9 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "create_force",
     description: "Raise a new military force for a polity at a specified province. Use when a player orders raising an army, recruiting troops, or mustering soldiers. Requires a polity account to fund the obligation.",
     category: "military",
@@ -119,9 +119,9 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
         result: { summary, applied: true },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "move_force",
     description: "Move a military force to a different province. The force's locationId changes immediately.",
     category: "military",
@@ -129,7 +129,7 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
       forceId: EntityIdSchema,
       destinationProvinceId: EntityIdSchema,
     }).strict(),
-    apply(world, params, context) {
+    apply(world, params, _context) {
       const force = world.material.forces.find((f) => f.id === params.forceId);
       if (!force) return null;
       const province = world.map.provinces.find((p) => p.id === params.destinationProvinceId);
@@ -150,9 +150,9 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "injure_force",
     description: "Inflict casualties on a force, reducing its fit personnel count in a given category.",
     category: "military",
@@ -206,9 +206,9 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "raise_morale",
     description: "Increase a force's morale by a given basis-points amount (capped at 10 000).",
     category: "military",
@@ -236,9 +236,9 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "lower_morale",
     description: "Decrease a force's morale by a given basis-points amount (floor at 0).",
     category: "military",
@@ -266,9 +266,9 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "disband_force",
     description: "Remove a military force from the world permanently.",
     category: "military",
@@ -300,9 +300,9 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "start_battle",
     description: "Start a battle between two forces. Creates a conflict entry in the world.",
     category: "military",
@@ -336,9 +336,9 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "end_battle",
     description: "Remove a battle from the active conflicts list.",
     category: "military",
@@ -363,9 +363,9 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "start_siege",
     description: "Begin a siege of a settlement by besieging forces.",
     category: "military",
@@ -402,9 +402,9 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "end_siege",
     description: "End an active siege, optionally transferring province control.",
     category: "military",
@@ -449,9 +449,9 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "merge_forces",
     description: "Merge one force into another, combining personnel. The source force is removed.",
     category: "military",
@@ -495,9 +495,9 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "retreat_force",
     description: "Force a military force to retreat to an adjacent province.",
     category: "military",
@@ -527,5 +527,5 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 ];

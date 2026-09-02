@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { EntityIdSchema } from "../../material-state";
-import type { AnyWorkflowDefinition } from "../types";
+import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
 
 export const characterWorkflows: AnyWorkflowDefinition[] = [
-  {
+  defineWorkflow({
     id: "kill_character",
     description: "Mark a character as dead and record the step of death.",
     category: "character",
@@ -29,9 +29,9 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "injure_character",
     description: "Reduce a character's health basis-points, reflecting wounds or illness.",
     category: "character",
@@ -57,9 +57,9 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "heal_character",
     description: "Restore a character's health basis-points (capped at 10 000).",
     category: "character",
@@ -84,9 +84,9 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "add_age",
     description: "Increment a character's age by a given number of years.",
     category: "character",
@@ -112,9 +112,9 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "move_character",
     description: "Relocate a character to a different province.",
     category: "character",
@@ -142,9 +142,9 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "appoint_to_office",
     description: "Assign a character to a government office.",
     category: "character",
@@ -168,9 +168,9 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "remove_from_office",
     description: "Remove a character from their current government office.",
     category: "character",
@@ -194,9 +194,9 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "change_allegiance",
     description: "Switch a character's polity allegiance to a new polity.",
     category: "character",
@@ -223,9 +223,9 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "capture_character",
     description: "Record a character as captured (alive but unable to act freely).",
     category: "character",
@@ -252,9 +252,9 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 
-  {
+  defineWorkflow({
     id: "promote_character",
     description: "Increase a character's prestige basis-points.",
     category: "character",
@@ -281,5 +281,5 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
         },
       };
     },
-  },
+  }),
 ];

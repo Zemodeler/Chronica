@@ -6,6 +6,7 @@ import { narrativeWorkflows } from "./definitions/narrative";
 import { mapWorkflows } from "./definitions/map";
 import { characterAgencyWorkflows } from "./definitions/character-agency";
 import { worldCreationWorkflows } from "./definitions/world-creation";
+import { z } from "zod";
 import type { AnyWorkflowDefinition } from "./types";
 import type { RuntimeInventedWorkflow } from "./invented-workflow";
 
@@ -49,8 +50,7 @@ export function buildWorkflowCatalog(inventedWorkflows: readonly RuntimeInvented
   for (const category of ["military", "political", "economic", "character", "narrative", "map"] as const) {
     lines.push(`\n[${category.toUpperCase()}]`);
     for (const w of allWorkflows.filter((x) => x.category === category)) {
-      const rawShape = (w.parametersSchema as any)?._def?.shape;
-      const shape = typeof rawShape === "function" ? rawShape() : rawShape;
+      const shape = w.parametersSchema instanceof z.ZodObject ? w.parametersSchema.shape : undefined;
       const paramKeys = shape ? Object.keys(shape).join(", ") : "";
       const paramHint = paramKeys ? ` | params: ${paramKeys}` : "";
       const authorityMap: Record<string, string> = {

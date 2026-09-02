@@ -43,7 +43,8 @@ export function buildSimulatorSystemPrompt(
   const storylineBlock = activeStorylines.length > 0
     ? activeStorylines
         .map((s) => {
-          const type = (s as Record<string, unknown>)["type"] ?? "simulator";
+          const typeVal = (s as Record<string, unknown>)["type"];
+          const type = typeof typeVal === "string" ? typeVal : "simulator";
           return `  [${s.id}] ${s.title} | type: ${type} | phase: ${s.phase} | next: ${s.nextDevelopment.slice(0, 120)}`;
         })
         .join("\n")

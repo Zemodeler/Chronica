@@ -6,15 +6,15 @@ import type { AiAdapter, AiCallResult } from "../adapter";
 
 export function createMockAdapter(fixedContent = "{}"): AiAdapter {
   return {
-    async call(_operation: AiOperation): Promise<AiCallResult> {
-      return {
+    call(_operation: AiOperation): Promise<AiCallResult> {
+      return Promise.resolve({
         content: fixedContent,
         model: "mock",
         inputTokens: 10,
         outputTokens: 5,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
-      };
+      });
     },
   };
 }

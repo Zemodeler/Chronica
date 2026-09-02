@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Character, CharacterSkills, ConversationConsequence, ConversationMemoryEntry, NpcChatKnowledgebase } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
@@ -39,14 +38,14 @@ export async function findOrOpenSession(
         ),
       )
       .limit(1);
-    if (existing !== undefined) return existing as SessionRow;
+    if (existing !== undefined) return existing;
 
     const [created] = await tx
       .insert(dialogueSessions)
       .values({ gameId, playerId, npcCharacterId, channel, isGroup: false, participantIds: [] })
       .returning();
     if (created === undefined) throw new Error("Failed to create dialogue session.");
-    return created as SessionRow;
+    return created;
   });
 }
 
@@ -63,7 +62,7 @@ export async function createGroupSession(
     .values({ gameId, playerId, npcCharacterId: null, isGroup: true, participantIds, channel })
     .returning();
   if (created === undefined) throw new Error("Failed to create group session.");
-  return created as SessionRow;
+  return created;
 }
 
 /** All active sessions for a player in a game, newest first. */
@@ -77,7 +76,7 @@ export async function listSessions(
     .from(dialogueSessions)
     .where(and(eq(dialogueSessions.gameId, gameId), eq(dialogueSessions.playerId, playerId), eq(dialogueSessions.isClosed, false)))
     .orderBy(desc(dialogueSessions.updatedAt));
-  return rows as SessionRow[];
+  return rows;
 }
 
 export async function getSession(
@@ -90,7 +89,7 @@ export async function getSession(
     .from(dialogueSessions)
     .where(and(eq(dialogueSessions.id, sessionId), eq(dialogueSessions.playerId, playerId)))
     .limit(1);
-  return row as SessionRow | undefined;
+  return row;
 }
 
 /** Bumps `updatedAt` on a session so it sorts to the top of the contact list. */
@@ -133,7 +132,7 @@ export async function appendMessage(
       .values({ sessionId, sequence: nextSeq, speakerCharacterId, isPlayerMessage, body })
       .returning();
     if (row === undefined) throw new Error("Failed to append message.");
-    return row as MessageRow;
+    return row;
   });
 }
 
@@ -149,7 +148,7 @@ export async function listSessionMessages(
     .where(eq(dialogueMessages.sessionId, sessionId))
     .orderBy(dialogueMessages.sequence)
     .limit(limit);
-  return rows as MessageRow[];
+  return rows;
 }
 
 // ── NPC knowledgebase ───────────────────────────────────────────────────────
@@ -217,7 +216,7 @@ export async function getOrCreateNpcKnowledgebase(
         ),
       )
       .limit(1);
-    if (existing !== undefined) return existing as KnowledgebaseRow;
+    if (existing !== undefined) return existing;
 
     const canonicalName = seed?.canonicalName ?? npcCharacterId;
     const [created] = await tx
@@ -244,7 +243,7 @@ export async function getOrCreateNpcKnowledgebase(
       })
       .returning();
     if (created === undefined) throw new Error("Failed to create NPC knowledgebase.");
-    return created as KnowledgebaseRow;
+    return created;
   });
 }
 
@@ -297,7 +296,7 @@ export async function getNpcKnowledgebase(
       ),
     )
     .limit(1);
-  return row as KnowledgebaseRow | undefined;
+  return row;
 }
 
 export async function listNpcKnowledgebases(
@@ -310,7 +309,7 @@ export async function listNpcKnowledgebases(
     .from(npcChatKnowledgebases)
     .where(and(eq(npcChatKnowledgebases.gameId, gameId), eq(npcChatKnowledgebases.playerId, playerId)))
     .orderBy(desc(npcChatKnowledgebases.relevancyScore), desc(npcChatKnowledgebases.interactionCount));
-  return rows as KnowledgebaseRow[];
+  return rows;
 }
 
 export function toNpcChatKnowledgebase(row: KnowledgebaseRow): NpcChatKnowledgebase {
@@ -347,7 +346,7 @@ export interface GameNpcRecordRow { readonly characterId: string; readonly chara
 
 export async function listGameNpcRecords(db: ChronicaDatabase, gameId: string): Promise<readonly GameNpcRecordRow[]> {
   return (await db.select({ characterId: gameNpcRecords.characterId, character: gameNpcRecords.character, roleLabel: gameNpcRecords.roleLabel })
-    .from(gameNpcRecords).where(eq(gameNpcRecords.gameId, gameId))) as GameNpcRecordRow[];
+    .from(gameNpcRecords).where(eq(gameNpcRecords.gameId, gameId)));
 }
 
 export async function insertGameNpcRecord(db: ChronicaDatabase, gameId: string, character: Character, roleLabel: string): Promise<void> {
@@ -359,7 +358,7 @@ export async function createNpcCommitment(db: ChronicaDatabase, input: { gameId:
   await db.insert(npcCommitments).values(input).onConflictDoNothing();
 }
 export async function listPendingNpcCommitments(db: ChronicaDatabase, gameId: string): Promise<readonly NpcCommitmentRow[]> {
-  return (await db.select().from(npcCommitments).where(and(eq(npcCommitments.gameId, gameId), eq(npcCommitments.status, "pending")))) as NpcCommitmentRow[];
+  return (await db.select().from(npcCommitments).where(and(eq(npcCommitments.gameId, gameId), eq(npcCommitments.status, "pending"))));
 }
 export async function resolveNpcCommitments(db: ChronicaDatabase, ids: readonly string[], status: "fulfilled" | "partially_fulfilled" | "deferred" | "failed" | "cancelled", atStep: number, reason: string): Promise<void> {
   if (ids.length === 0) return;

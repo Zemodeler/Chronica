@@ -17,7 +17,7 @@ describe("built-in scenario maps", () => {
 
     expect(first).toBeDefined();
     expect(first).not.toBe(second);
-    expect(first?.features.length).toBe(966);
+    expect(first?.features.length).toBe(990);
     expect(first?.features.some((feature) => feature.id === "punic-italy-latium")).toBe(true);
   });
 });

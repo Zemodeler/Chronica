@@ -34,7 +34,16 @@ describe("Punic Wars historical GeoJSON", () => {
     expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-britain-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.england + PUNIC_WARS_REGION_COUNTS.scotland + PUNIC_WARS_REGION_COUNTS.wales);
 
     const italianSource = new Set(["ita-72843720b99597932318450", "ita-72843720b59566147937015", "ita-72843720b863019116732", "ita-72843720b88210905209841"]);
-    expect(Math.abs(derivedArea("punic-italy-") - sourceArea(italianSource))).toBeLessThan(0.0001);
+    // Rounding and the organic shared-edge bends may move the planar estimate
+    // slightly, but preserve the source area within a very small tolerance.
+    expect(Math.abs(derivedArea("punic-italy-") - sourceArea(italianSource))).toBeLessThan(0.002);
+
+    const latium = punicWarsGeoJson.features.find((feature) => feature.id === "punic-italy-latium");
+    expect(latium?.geometry.type).toBe("MultiPolygon");
+    if (latium?.geometry.type === "MultiPolygon") {
+      const longestRing = Math.max(...latium.geometry.coordinates.flatMap((polygon) => polygon.map((ring) => ring.length)));
+      expect(longestRing).toBeGreaterThan(12);
+    }
   });
 
   it("attaches capitals, cities, and forts to valid derived provinces", () => {
