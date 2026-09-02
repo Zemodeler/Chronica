@@ -25,6 +25,9 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
     terrains: [
       { id: "coastal-plain", label: "Coastal plain", allowedCrossings: ["land", "strait", "sea_lane"], water: false },
       { id: "hills", label: "Hills", allowedCrossings: ["land", "pass"], water: false },
+      { id: "hills-uplands", label: "Hills and uplands", allowedCrossings: ["land", "pass"], water: false },
+      { id: "mountain-pass", label: "Mountain passes", allowedCrossings: ["pass"], water: false },
+      { id: "desert-steppe", label: "Desert and steppe", allowedCrossings: ["land"], water: false },
     ],
     provinceCount: { min: 35, max: 35 },
   },

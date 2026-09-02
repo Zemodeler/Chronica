@@ -9,8 +9,8 @@ const _geoJsonCache = new Map<string, GeoJsonMap>();
 import { GeoMap, type ForceFlagAsset, type ForceMapDetails } from "./geo-map";
 import { MapViewport, type ViewportTransform, type MapViewportHandle, type DrawCanvasFn } from "./map-viewport";
 import { computeViewBox } from "./geo-projection";
-import { prepareStaticWorldGeometry } from "./world-geometry";
-import { derivePoliticalMapState, deriveWarBorderPaths, type PoliticalOverlayInput } from "./political-geometry";
+import { prepareStaticWorldGeometry, type StaticWorldGeometry } from "./world-geometry";
+import { derivePoliticalMapState, deriveWarBorderPaths, type PoliticalMapState, type PoliticalOverlayInput } from "./political-geometry";
 import { drawTerrainToCanvas } from "./map-canvas-terrain";
 import { MapTooltip } from "./map-tooltip";
 import { MapControls } from "./map-controls";
@@ -161,10 +161,17 @@ export function GameShell({
     () => overlay === null ? null : ({ polities: overlay.polities, provinces: overlay.provinces }),
     [politicsKey], // intentional: recompute only when ownership changes, not on every overlay tick
   );
-  const political = useMemo(
-    () => (world ? derivePoliticalMapState(world, politicalInput) : null),
-    [world, politicalInput],
-  );
+  // Reused across recomputes so unaffected polities skip the expensive
+  // label-curve search entirely — see derivePoliticalMapState's `previous`
+  // param. Only valid for the same `world`; a new map load starts fresh.
+  const previousPoliticalRef = useRef<{ world: StaticWorldGeometry; political: PoliticalMapState } | null>(null);
+  const political = useMemo(() => {
+    if (!world) return null;
+    const previous = previousPoliticalRef.current?.world === world ? previousPoliticalRef.current.political : null;
+    const next = derivePoliticalMapState(world, politicalInput, previous);
+    previousPoliticalRef.current = { world, political: next };
+    return next;
+  }, [world, politicalInput]);
   const countryBorderPath = useMemo(
     () => (political ? deriveWarBorderPaths(political, overlay?.conflicts.wars ?? []) : ""),
     [political, overlay?.conflicts.wars],
@@ -194,11 +201,12 @@ export function GameShell({
   // The draw function reference is updated during render (safe ref mutation) so
   // the RAF inside MapViewport always calls the latest version without needing
   // the callback itself to change (which would cause extra renders).
+  const requestRedraw = useCallback(() => mapViewportRef.current?.redrawCanvas(), []);
   const drawCanvasFnRef = useRef<DrawCanvasFn>(() => { /* awaiting world data */ });
   if (world && political && viewBox) {
-    const w = world; const p = political; const vb = viewBox; const cbp = countryBorderPath;
+    const w = world; const p = political; const vb = viewBox; const cbp = countryBorderPath; const ov = overlay; const flags = forceFlagUrls;
     drawCanvasFnRef.current = (canvas, transform, containerW, containerH) => {
-      drawTerrainToCanvas(canvas, containerW, containerH, transform, vb, w, p, cbp, baseImageRef.current, detailImageRef.current);
+      drawTerrainToCanvas(canvas, containerW, containerH, transform, vb, w, p, cbp, baseImageRef.current, detailImageRef.current, ov, flags, requestRedraw);
     };
   }
 
@@ -211,7 +219,25 @@ export function GameShell({
   // Trigger canvas redraw whenever the underlying data changes (new overlay, etc.)
   useEffect(() => {
     mapViewportRef.current?.redrawCanvas();
-  }, [world, political, countryBorderPath]);
+  }, [world, political, countryBorderPath, overlay, forceFlagUrls]);
+
+  // Settlement-siege and army-conflict frames pulse (see map-canvas-entities.ts's
+  // pulseOpacity) — that animation used to be a free CSS `animation` on the SVG
+  // shapes, but a canvas paint only ever reflects the moment it was drawn, so
+  // driving it here keeps the pulse visible even while the map sits idle.
+  // Only runs while something is actually pulsing, so an idle map with no
+  // active combat costs nothing extra.
+  const hasActiveConflict = Boolean(overlay && (overlay.conflicts.battles.length > 0 || overlay.conflicts.sieges.length > 0));
+  useEffect(() => {
+    if (!hasActiveConflict) return;
+    let raf: number;
+    const tick = () => {
+      mapViewportRef.current?.redrawCanvas();
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [hasActiveConflict]);
 
   const allianceLabels = useMemo(() => {
     const names = new Map(overlay?.polities.map((polity) => [polity.polityId, polity.name]) ?? []);
@@ -220,7 +246,10 @@ export function GameShell({
 
   useEffect(() => {
     let cancelled = false;
-    const refreshMap = () => void fetch(`/api/games/${encodeURIComponent(gameId)}/map`, { cache: "no-store" })
+    // Respects the map route's Cache-Control (a few minutes), so refocusing
+    // the tab doesn't force the server to refetch and re-copy this
+    // multi-megabyte document when nothing has changed.
+    const refreshMap = () => void fetch(`/api/games/${encodeURIComponent(gameId)}/map`)
       .then((response) => response.ok ? response.json() : null)
       .then((data: unknown) => {
         const parsed = GeoJsonMapSchema.safeParse(data);

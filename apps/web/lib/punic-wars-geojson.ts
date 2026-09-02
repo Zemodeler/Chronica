@@ -7,6 +7,7 @@ type Point = readonly [number, number];
 type Ring = readonly Point[];
 type Polygon = readonly Ring[];
 type HistoricalSite = Readonly<{ id: string; name: string; coordinate: Point; territorialWeight?: number }>;
+type GroundedTerritory = Readonly<{ sourceId: string; id: string; name: string }>;
 type BorderStyle = "default" | "carthaginian";
 
 function clipRingToHalfPlane(ring: Ring, valueAt: (point: Point) => number): [number, number][] {
@@ -221,6 +222,30 @@ function replaceProvinceGroup(map: GeoJsonMap, sourceIds: ReadonlySet<string>, s
   };
 }
 
+/**
+ * Keeps a surveyed local boundary when it is already more meaningful than a
+ * reconstructed one.  France and Germania used to be cut from their entire
+ * modern outline by a site-centred tessellation; using the existing local
+ * hydrographic/settlement-scale outlines avoids inventing a country-wide
+ * lattice while still giving the 270 BCE map its own names and ownership.
+ */
+function replaceWithGroundedTerritories(map: GeoJsonMap, territories: readonly GroundedTerritory[]): GeoJsonMap {
+  const territoryBySourceId = new Map(territories.map((territory) => [territory.sourceId, territory]));
+  if (territoryBySourceId.size !== territories.length) throw new Error("A grounded territory source was assigned twice.");
+  const sourceIds = new Set(territoryBySourceId.keys());
+  const sourceCount = map.features.filter((feature) => sourceIds.has(feature.id)).length;
+  if (sourceCount !== sourceIds.size) throw new Error("A grounded territory source is missing from the base GeoJSON.");
+  return {
+    ...map,
+    features: map.features.map((feature) => {
+      const territory = territoryBySourceId.get(feature.id);
+      return territory === undefined
+        ? feature
+        : { ...feature, id: territory.id, properties: { ...feature.properties, name: territory.name } };
+    }),
+  };
+}
+
 function provinceIds(map: GeoJsonMap, prefix: string, omit: readonly string[] = []): Set<string> {
   const excluded = new Set(omit);
   return new Set(map.features.filter((feature) => feature.properties.kind === "province" && feature.id.startsWith(prefix) && !excluded.has(feature.id)).map((feature) => feature.id));
@@ -256,33 +281,6 @@ const ITALIAN_SITES: readonly HistoricalSite[] = [
   { id: "punic-italy-lucanians", name: "Lucania", coordinate: [15.80, 40.64] },
   { id: "punic-italy-bruttians", name: "Bruttium", coordinate: [16.19, 39.30] },
   { id: "punic-italy-rhegines", name: "Rhegium", coordinate: [15.65, 38.11] },
-];
-
-const GALLIC_SITES: readonly HistoricalSite[] = [
-  { id: "punic-gaul-aquitani", name: "Aquitani", coordinate: [-0.65, 43.45] },
-  { id: "punic-gaul-santones", name: "Santones", coordinate: [-0.95, 45.74] },
-  { id: "punic-gaul-pictones", name: "Pictones", coordinate: [0.34, 46.58] },
-  { id: "punic-gaul-armoricans", name: "Armorican peoples", coordinate: [-3.05, 48.21] },
-  { id: "punic-gaul-veneti", name: "Veneti of Gaul", coordinate: [-2.76, 47.66] },
-  { id: "punic-gaul-andecavi", name: "Andecavi", coordinate: [-0.56, 47.47] },
-  { id: "punic-gaul-aulerci-eburovices", name: "Aulerci Eburovices", coordinate: [0.66, 49.09] },
-  { id: "punic-gaul-aulerci-cenomani", name: "Aulerci Cenomani", coordinate: [0.20, 48.01] },
-  { id: "punic-gaul-aulerci-diablintes", name: "Aulerci Diablintes", coordinate: [-0.75, 48.17] },
-  { id: "punic-gaul-parisii", name: "Parisii", coordinate: [2.35, 48.86] },
-  { id: "punic-gaul-senones", name: "Senones", coordinate: [3.28, 48.20] },
-  { id: "punic-gaul-remi", name: "Remi", coordinate: [4.03, 49.26] },
-  { id: "punic-gaul-bellovaci", name: "Bellovaci", coordinate: [2.08, 49.43] },
-  { id: "punic-gaul-atrebates", name: "Atrebates", coordinate: [2.78, 50.29] },
-  { id: "punic-gaul-biturgies", name: "Bituriges", coordinate: [2.40, 47.08] },
-  { id: "punic-gaul-arverni", name: "Arverni", coordinate: [3.09, 45.78] },
-  { id: "punic-gaul-aedui", name: "Aedui", coordinate: [4.30, 46.95] },
-  { id: "punic-gaul-sequani", name: "Sequani", coordinate: [6.02, 47.24] },
-  { id: "punic-gaul-allobroges", name: "Allobroges", coordinate: [5.72, 45.19] },
-  { id: "punic-gaul-vocontii", name: "Vocontii", coordinate: [5.10, 44.30] },
-  { id: "punic-gaul-salyes", name: "Salyes", coordinate: [5.45, 43.53] },
-  { id: "punic-gaul-volcae", name: "Volcae", coordinate: [3.88, 43.61] },
-  { id: "punic-gaul-ruteni", name: "Ruteni", coordinate: [2.57, 44.35] },
-  { id: "punic-gaul-cadurci", name: "Cadurci", coordinate: [1.44, 44.45] },
 ];
 
 // These are territorial reconstructions rather than exact frontiers.  They
@@ -325,6 +323,11 @@ const THRACIAN_SITES: readonly HistoricalSite[] = [
   { id: "punic-thrace-scordisci", name: "Scordisci", coordinate: [21.40, 44.70] },
 ];
 
+const BULGARIAN_THRACIAN_SITES = THRACIAN_SITES.filter((site) => !new Set([
+  "punic-thrace-triballi", "punic-thrace-getae", "punic-thrace-tyrizagetae", "punic-thrace-daci",
+  "punic-thrace-carpi", "punic-thrace-costoboci", "punic-thrace-buri", "punic-thrace-scordisci",
+]).has(site.id));
+
 const BELGIC_SITES: readonly HistoricalSite[] = [
   { id: "punic-belgica-morini", name: "Morini", coordinate: [2.20, 50.80] },
   { id: "punic-belgica-menapii", name: "Menapii", coordinate: [3.20, 51.00] },
@@ -340,23 +343,6 @@ const LOW_COUNTRIES_SITES: readonly HistoricalSite[] = [
   { id: "punic-low-countries-chamavi", name: "Chamavi", coordinate: [6.40, 52.30] },
   { id: "punic-low-countries-tubantes", name: "Tubantes", coordinate: [6.60, 52.30] },
   { id: "punic-low-countries-frisii", name: "Frisii", coordinate: [5.50, 53.20] },
-];
-
-const GERMANIC_SITES: readonly HistoricalSite[] = [
-  { id: "punic-germania-cimbri", name: "Cimbri", coordinate: [9.80, 54.80] },
-  { id: "punic-germania-teutones", name: "Teutones", coordinate: [10.10, 54.00] },
-  { id: "punic-germania-chauci", name: "Chauci", coordinate: [8.50, 53.20] },
-  { id: "punic-germania-bructeri", name: "Bructeri", coordinate: [7.50, 52.00] },
-  { id: "punic-germania-cherusci", name: "Cherusci", coordinate: [10.50, 52.00] },
-  { id: "punic-germania-langobardi", name: "Langobardi", coordinate: [11.60, 52.70] },
-  { id: "punic-germania-semnones", name: "Semnones", coordinate: [13.00, 52.50] },
-  { id: "punic-germania-chatti", name: "Chatti", coordinate: [9.10, 50.80] },
-  { id: "punic-germania-hermunduri", name: "Hermunduri", coordinate: [11.50, 50.80] },
-  { id: "punic-germania-suebi", name: "Suebi", coordinate: [10.50, 49.80] },
-  { id: "punic-germania-ubii", name: "Ubii", coordinate: [6.80, 50.90] },
-  { id: "punic-germania-treveri", name: "Treveri", coordinate: [6.50, 49.70] },
-  { id: "punic-germania-vindelici", name: "Vindelici", coordinate: [10.80, 48.40] },
-  { id: "punic-germania-boii", name: "Boii of the Danube", coordinate: [12.00, 48.80] },
 ];
 
 // These labels identify Iron Age communities in the territory of today's
@@ -441,29 +427,114 @@ const WALES_SITES: readonly HistoricalSite[] = [
 ];
 
 const base = europeNorthAfricaGeoJson;
-const italianExcludedIds = new Set(["ita-72843720b81376294924159", ...base.features.filter((feature) => feature.id.startsWith("ita-72843720b81376294924159-sicily-")).map((feature) => feature.id)]);
-const italySourceIds = new Set([...provinceIds(base, "ita-")].filter((id) => !italianExcludedIds.has(id)));
-const franceSourceIds = provinceIds(base, "fra-", ["fra-19338628b22604203385446"]);
-const spainSourceIds = provinceIds(base, "esp-", ["esp-25490228b84620027724461", "esp-25490228b18225280299410", "esp-25490228b48808997991554", "esp-25490228b26609846683583"]);
+
+function localId(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+const LOCAL_LANDSCAPE_NAMES: Readonly<Record<string, string>> = {
+  "Bouches-du-Rhône": "Rhodanus Delta", "Saône-et-Loire": "Arar Heights", "Puy-de-Dôme": "Arvernian Cones",
+  Moselle: "Mosella Valley", "Bas-Rhin": "Lower Rhenus Terrace", "Haut-Rhin": "Upper Rhenus Terrace", Vosges: "Vosges Passes", Paris: "Lutetian Island",
+  Piemonte: "Upper Padus and Alpine Gate", Lombardia: "Insubrian Plain", "Valle d'Aosta": "Alpine Passes", "Trentino-Alto Adige": "Adige Passes",
+  Veneto: "Venetian Lagoon", "Friuli Venezia Giulia": "Isonzo Gate", Liguria: "Ligurian Coast", "Emilia-Romagna": "Middle Padus",
+  Toscana: "Etrurian Uplands", Umbria: "Umbrian Valleys", Marche: "Picenum Coast", Lazio: "Latium", Abruzzo: "Marsian Highlands",
+  Molise: "Samnium", Campania: "Campanian Plain", Puglia: "Apulian Coast", Basilicata: "Lucanian Uplands", Calabria: "Bruttian Highlands",
+};
+
+function localLandscapeName(name: string): string {
+  return LOCAL_LANDSCAPE_NAMES[name] ?? name;
+}
+
+const ITALY_GROUNDED_TERRITORIES: readonly GroundedTerritory[] = base.features
+  .filter((feature) => feature.id.startsWith("ita-local-") && feature.properties.kind === "province")
+  .map((feature) => {
+    const name = feature.properties.name ?? feature.id;
+    return { sourceId: feature.id, id: `punic-italy-${localId(localLandscapeName(name))}`, name: localLandscapeName(name) };
+  });
+
+// present in the map source.  The names are local landscape/corridor names,
+// rather than modern administrative identities or single-label tribal cells.
+const GAUL_GROUNDED_TERRITORIES: readonly GroundedTerritory[] = base.features
+  .filter((feature) => feature.id.startsWith("fra-local-") && feature.properties.kind === "province")
+  .map((feature) => {
+    const name = feature.properties.name ?? feature.id;
+    return { sourceId: feature.id, id: `punic-gaul-${localId(name)}`, name: localLandscapeName(name) };
+  });
+
+const IBERIA_GROUNDED_TERRITORIES: readonly GroundedTerritory[] = base.features
+  .filter((feature) => feature.id.startsWith("esp-") && feature.properties.kind === "province")
+  .map((feature) => {
+    const name = feature.properties.name ?? feature.id;
+    return { sourceId: feature.id, id: `punic-iberia-${localId(name)}`, name: localLandscapeName(name) };
+  });
+
+const ROMANIA_GROUNDED_TERRITORIES: readonly GroundedTerritory[] = base.features
+  .filter((feature) => feature.id.startsWith("rou-") && feature.properties.kind === "province")
+  .map((feature) => {
+    const name = feature.properties.name ?? feature.id;
+    return { sourceId: feature.id, id: `punic-thrace-${localId(name)}`, name: localLandscapeName(name) };
+  });
+
+const GERMANIA_GROUNDED_TERRITORIES: readonly GroundedTerritory[] = [
+  { sourceId: "deu-9070358b86745718691241", id: "punic-germania-neckar-uplands", name: "Neckar Uplands" },
+  { sourceId: "deu-9070358b19876986675637", id: "punic-germania-upper-rhine", name: "Upper Rhenus Terrace" },
+  { sourceId: "deu-9070358b61051204169762", id: "punic-germania-black-forest", name: "Black Forest Gate" },
+  { sourceId: "deu-9070358b15022388296844", id: "punic-germania-swabian-jura", name: "Swabian Jura" },
+  { sourceId: "deu-9070358b1315543690610", id: "punic-germania-upper-isar", name: "Upper Isar Country" },
+  { sourceId: "deu-9070358b22007842747726", id: "punic-germania-boii", name: "Boii of the Danube" },
+  { sourceId: "deu-9070358b44987229854715", id: "punic-germania-naab", name: "Naab Uplands" },
+  { sourceId: "deu-9070358b72727683862663", id: "punic-germania-franconian-forest", name: "Franconian Forest" },
+  { sourceId: "deu-9070358b15061347548929", id: "punic-germania-middle-main", name: "Middle Moenus" },
+  { sourceId: "deu-9070358b89448690772082", id: "punic-germania-lower-main", name: "Lower Moenus" },
+  { sourceId: "deu-9070358b65596861168427", id: "punic-germania-vindelici", name: "Vindelician Lech" },
+  { sourceId: "deu-9070358b20892132820961", id: "punic-germania-spree-havel", name: "Spree–Havel Confluence" },
+  { sourceId: "deu-9070358b40185768535592", id: "punic-germania-semnones", name: "Semnonian March" },
+  { sourceId: "deu-9070358b44391416804171", id: "punic-germania-weser-mouth", name: "Visurgis Mouth" },
+  { sourceId: "deu-9070358b45896528657515", id: "punic-germania-elbe-mouth", name: "Albis Mouth" },
+  { sourceId: "deu-9070358b42560167255242", id: "punic-germania-main-rhine", name: "Moenus–Rhenus Gate" },
+  { sourceId: "deu-9070358b56635429978008", id: "punic-germania-chatti", name: "Chattian Lahn" },
+  { sourceId: "deu-9070358b5760978041875", id: "punic-germania-upper-weser", name: "Upper Visurgis" },
+  { sourceId: "deu-9070358b60782008682549", id: "punic-germania-baltic-lagoons", name: "Baltic Lagoons" },
+  { sourceId: "deu-9070358b23702346475723", id: "punic-germania-harz-foreland", name: "Harz Foreland" },
+  { sourceId: "deu-9070358b94432643063062", id: "punic-germania-cherusci", name: "Cheruscan Leine" },
+  { sourceId: "deu-9070358b4064771181754", id: "punic-germania-elbe-heath", name: "Albis Heath" },
+  { sourceId: "deu-9070358b2639969244614", id: "punic-germania-chauci", name: "Chaucian Coastal Plain" },
+  { sourceId: "deu-9070358b16138204042833", id: "punic-germania-ubii", name: "Ubian Lower Rhenus" },
+  { sourceId: "deu-9070358b57109950257038", id: "punic-germania-rhine-gorge", name: "Rhenus Gorge" },
+  { sourceId: "deu-9070358b93499833428165", id: "punic-germania-bructeri", name: "Bructerian Plain" },
+  { sourceId: "deu-9070358b64982818747725", id: "punic-germania-teutoburg", name: "Teutoburg Ridge" },
+  { sourceId: "deu-9070358b40774776719210", id: "punic-germania-sauerland", name: "Sauerland Heights" },
+  { sourceId: "deu-9070358b14573642950642", id: "punic-germania-moselle-rhine", name: "Mosella–Rhenus Confluence" },
+  { sourceId: "deu-9070358b88105018400154", id: "punic-germania-treveri", name: "Treveran Mosella" },
+  { sourceId: "deu-9070358b81909410124776", id: "punic-germania-upper-rhine-bend", name: "Upper Rhenus Bend" },
+  { sourceId: "deu-9070358b83775792336645", id: "punic-germania-saar", name: "Saar Coal Hills" },
+  { sourceId: "deu-9070358b71091673137763", id: "punic-germania-elbe-valley", name: "Upper Albis Valley" },
+  { sourceId: "deu-9070358b71894413182695", id: "punic-germania-erzgebirge", name: "Ore Mountain Passes" },
+  { sourceId: "deu-9070358b77675294704498", id: "punic-germania-pleisse", name: "Pleiße Lowland" },
+  { sourceId: "deu-9070358b23625801106445", id: "punic-germania-middle-elbe", name: "Middle Albis" },
+  { sourceId: "deu-9070358b46069870964378", id: "punic-germania-cimbri", name: "Cimbrian Jutland Approaches" },
+  { sourceId: "deu-9070358b67217417145666", id: "punic-germania-hermunduri", name: "Hermundurian Basin" },
+];
+
 // Keep the whole former-Yugoslav theatre together in the active map so the
 // Adriatic and Morava–Vardar corridors read as one uneven frontier system.
 const illyriaSourceIds = new Set(["alb-", "bih-", "hrv-", "mkd-", "mne-", "srb-", "svn-", "xkx-"].flatMap((prefix) => [...provinceIds(base, prefix)]));
-const thraceSourceIds = new Set(["bgr-", "rou-"].flatMap((prefix) => [...provinceIds(base, prefix)]));
+const thraceSourceIds = provinceIds(base, "bgr-");
 const belgiumSourceIds = provinceIds(base, "bel-");
 const netherlandsSourceIds = provinceIds(base, "nld-");
-const germaniaSourceIds = provinceIds(base, "deu-");
 const hungarySourceIds = provinceIds(base, "hun-");
 const czechoslovakiaSourceIds = new Set(["cze-", "svk-"].flatMap((prefix) => [...provinceIds(base, prefix)]));
 const luxembourgSourceIds = provinceIds(base, "lux-");
 
-const withItaly = replaceProvinceGroup(base, italySourceIds, ITALIAN_SITES);
-const withGaul = replaceProvinceGroup(withItaly, franceSourceIds, GALLIC_SITES, 1.12, "carthaginian");
-const withIberia = replaceProvinceGroup(withGaul, spainSourceIds, IBERIAN_SITES, 1.2, "carthaginian");
+const withItaly = replaceWithGroundedTerritories(base, ITALY_GROUNDED_TERRITORIES);
+const withGaul = replaceWithGroundedTerritories(withItaly, GAUL_GROUNDED_TERRITORIES);
+const withIberia = replaceWithGroundedTerritories(withGaul, IBERIA_GROUNDED_TERRITORIES);
 const withIllyria = replaceProvinceGroup(withIberia, illyriaSourceIds, ILLYRIAN_SITES, 1.18, "carthaginian");
-const withThrace = replaceProvinceGroup(withIllyria, thraceSourceIds, THRACIAN_SITES);
-const withBelgica = replaceProvinceGroup(withThrace, belgiumSourceIds, BELGIC_SITES);
+const withThrace = replaceProvinceGroup(withIllyria, thraceSourceIds, BULGARIAN_THRACIAN_SITES);
+const withRomania = replaceWithGroundedTerritories(withThrace, ROMANIA_GROUNDED_TERRITORIES);
+const withBelgica = replaceProvinceGroup(withRomania, belgiumSourceIds, BELGIC_SITES);
 const withLowCountries = replaceProvinceGroup(withBelgica, netherlandsSourceIds, LOW_COUNTRIES_SITES);
-const withGermania = replaceProvinceGroup(withLowCountries, germaniaSourceIds, GERMANIC_SITES, 1.28, "carthaginian");
+const withGermania = replaceWithGroundedTerritories(withLowCountries, GERMANIA_GROUNDED_TERRITORIES);
 const withHungary = replaceProvinceGroup(withGermania, hungarySourceIds, HUNGARIAN_SITES, 1.1, "carthaginian");
 const withCzechoslovakia = replaceProvinceGroup(withHungary, czechoslovakiaSourceIds, CZECHOSLOVAK_SITES);
 const withLuxembourg = replaceProvinceGroup(withCzechoslovakia, luxembourgSourceIds, LUXEMBOURG_SITES);
@@ -473,7 +544,7 @@ const withWales = replaceProvinceGroup(withScotland, new Set(["gbr-14339913b8976
 
 const SETTLEMENT_PROVINCES: Readonly<Record<string, string>> = {
   "settlement-rome": "punic-italy-latium",
-  "settlement-naples": "punic-italy-campania",
+  "settlement-naples": "punic-italy-campanian-plain",
   "settlement-caralis": "ita-72843720b81376294924159",
   "settlement-syracuse": "ita-72843720b81376294924159-sicily-southeast",
   "settlement-agrigentum-fort": "ita-72843720b81376294924159-sicily-central",
@@ -505,21 +576,20 @@ const PUNIC_WARS_SETTLEMENTS: readonly HistoricalSettlement[] = [
   { id: "settlement-apollonia-cyrene", name: "Apollonia", provinceId: "lby-10800210b23470577588067", type: "port", coordinate: [21.75, 32.95] },
   { id: "settlement-messana", name: "Messana", provinceId: "ita-72843720b81376294924159-sicily-northeast", type: "capital", coordinate: [15.55, 38.19] },
   { id: "settlement-lilybaeum", name: "Lilybaeum", provinceId: "ita-72843720b81376294924159-sicily-west", type: "port", coordinate: [12.95, 37.80] },
-  { id: "settlement-genua", name: "Genua", provinceId: "punic-italy-liguria-genua", type: "port", coordinate: [8.95, 44.41] },
-  { id: "settlement-mediolanum", name: "Mediolanum", provinceId: "punic-italy-insubria-mediolanum", type: "city", coordinate: [9.19, 45.46] },
-  { id: "settlement-bononia", name: "Felsina", provinceId: "punic-italy-boii-felsina", type: "town", coordinate: [11.34, 44.50] },
-  { id: "settlement-patavium", name: "Patavium", provinceId: "punic-italy-veneti-patavium", type: "city", coordinate: [11.88, 45.41] },
-  { id: "settlement-volsinii", name: "Volsinii", provinceId: "punic-italy-etruria-central", type: "fort", coordinate: [11.88, 42.42] },
-  { id: "settlement-capua", name: "Capua", provinceId: "punic-italy-campania", type: "city", coordinate: [14.17, 41.03] },
+  { id: "settlement-genua", name: "Genua", provinceId: "punic-italy-ligurian-coast", type: "port", coordinate: [8.95, 44.41] },
+  { id: "settlement-mediolanum", name: "Mediolanum", provinceId: "punic-italy-insubrian-plain", type: "city", coordinate: [9.19, 45.46] },
+  { id: "settlement-bononia", name: "Felsina", provinceId: "punic-italy-middle-padus", type: "town", coordinate: [11.34, 44.50] },
+  { id: "settlement-patavium", name: "Patavium", provinceId: "punic-italy-venetian-lagoon", type: "city", coordinate: [11.88, 45.41] },
+  { id: "settlement-volsinii", name: "Volsinii", provinceId: "punic-italy-etrurian-uplands", type: "fort", coordinate: [11.88, 42.42] },
+  { id: "settlement-capua", name: "Capua", provinceId: "punic-italy-campanian-plain", type: "city", coordinate: [14.17, 41.03] },
   { id: "settlement-bovianum", name: "Bovianum", provinceId: "punic-italy-samnium", type: "fort", coordinate: [14.48, 41.56] },
-  { id: "settlement-tarentum", name: "Tarentum", provinceId: "punic-italy-tarentines", type: "port", coordinate: [17.23, 40.47] },
-  { id: "settlement-rhegium", name: "Rhegium", provinceId: "punic-italy-rhegines", type: "port", coordinate: [15.65, 38.11] },
-  { id: "settlement-massalia", name: "Massalia", provinceId: "punic-gaul-salyes", type: "port", coordinate: [5.37, 43.30] },
-  { id: "settlement-bibracte", name: "Bibracte", provinceId: "punic-gaul-aedui", type: "fort", coordinate: [4.03, 46.92] },
-  { id: "settlement-gergovia", name: "Gergovia", provinceId: "punic-gaul-arverni", type: "fort", coordinate: [3.13, 45.72] },
-  { id: "settlement-gades", name: "Gades", provinceId: "punic-iberia-turdetani", type: "port", coordinate: [-6.29, 36.53] },
-  { id: "settlement-numantia", name: "Numantia", provinceId: "punic-iberia-celtiberi", type: "fort", coordinate: [-2.44, 41.81] },
-  { id: "settlement-carthago-nova", name: "Carthago Nova", provinceId: "punic-iberia-bastetani", type: "port", coordinate: [-0.98, 37.60] },
+  { id: "settlement-tarentum", name: "Tarentum", provinceId: "punic-italy-apulian-coast", type: "port", coordinate: [17.23, 40.47] },
+  { id: "settlement-massalia", name: "Massalia", provinceId: "punic-gaul-bouches-du-rhone", type: "port", coordinate: [5.37, 43.30] },
+  { id: "settlement-bibracte", name: "Bibracte", provinceId: "punic-gaul-saone-et-loire", type: "fort", coordinate: [4.03, 46.92] },
+  { id: "settlement-gergovia", name: "Gergovia", provinceId: "punic-gaul-puy-de-dome", type: "fort", coordinate: [3.13, 45.72] },
+  { id: "settlement-gades", name: "Gades", provinceId: "punic-iberia-andalucia", type: "port", coordinate: [-6.29, 36.53] },
+  { id: "settlement-numantia", name: "Numantia", provinceId: "punic-iberia-castilla-y-leon", type: "fort", coordinate: [-2.44, 41.81] },
+  { id: "settlement-carthago-nova", name: "Carthago Nova", provinceId: "punic-iberia-region-de-murcia", type: "port", coordinate: [-0.98, 37.60] },
   { id: "settlement-maiden-castle", name: "Maiden Castle", provinceId: "punic-britain-dorset", type: "fort", coordinate: [-2.49, 50.70] },
   { id: "settlement-danebury", name: "Danebury", provinceId: "punic-britain-thames", type: "fort", coordinate: [-1.49, 51.18] },
   { id: "settlement-traprain-law", name: "Traprain Law", provinceId: "punic-britain-east-lowlands", type: "fort", coordinate: [-2.65, 55.93] },
@@ -543,14 +613,14 @@ export const punicWarsGeoJson: GeoJsonMap = {
 };
 
 export const PUNIC_WARS_REGION_COUNTS = {
-  italy: ITALIAN_SITES.length,
-  gaul: GALLIC_SITES.length,
-  iberia: IBERIAN_SITES.length,
+  italy: ITALY_GROUNDED_TERRITORIES.length,
+  gaul: GAUL_GROUNDED_TERRITORIES.length,
+  iberia: IBERIA_GROUNDED_TERRITORIES.length,
   illyria: ILLYRIAN_SITES.length,
-  thrace: THRACIAN_SITES.length,
+  thrace: BULGARIAN_THRACIAN_SITES.length + ROMANIA_GROUNDED_TERRITORIES.length,
   belgica: BELGIC_SITES.length,
   lowCountries: LOW_COUNTRIES_SITES.length,
-  germania: GERMANIC_SITES.length,
+  germania: GERMANIA_GROUNDED_TERRITORIES.length,
   hungary: HUNGARIAN_SITES.length,
   czechoslovakia: CZECHOSLOVAK_SITES.length,
   luxembourg: LUXEMBOURG_SITES.length,

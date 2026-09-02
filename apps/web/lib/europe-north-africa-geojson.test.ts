@@ -14,7 +14,7 @@ describe("Europe and North Africa demo map features", () => {
     expect(rome.geometry.coordinates).toEqual([12.4964, 41.9028]);
     expect(rome.properties).toMatchObject({
       name: "Rome",
-      provinceId: "ita-72843720b863019116732",
+      provinceId: "ita-local-23120603B86473916475875",
       type: "capital",
     });
   });
@@ -63,5 +63,10 @@ describe("Europe and North Africa demo map features", () => {
     ]));
     expect(germanProvinces.map((feature) => feature.properties.name)).not.toContain("Bayern");
     expect(germanProvinces.map((feature) => feature.properties.name)).not.toContain("Nordrhein-Westfalen");
+  });
+
+  it("uses detailed local source boundaries for France and mainland Italy", () => {
+    expect(europeNorthAfricaGeoJson.features.filter((feature) => feature.id.startsWith("fra-local-") && feature.properties.kind === "province")).toHaveLength(96);
+    expect(europeNorthAfricaGeoJson.features.filter((feature) => feature.id.startsWith("ita-local-") && feature.properties.kind === "province")).toHaveLength(18);
   });
 });

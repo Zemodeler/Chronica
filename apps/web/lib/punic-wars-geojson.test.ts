@@ -22,9 +22,9 @@ function derivedArea(prefix: string): number {
 describe("Punic Wars historical GeoJSON", () => {
   it("is schema-valid and preserves the base map outside deliberate replacements", () => {
     expect(GeoJsonMapSchema.safeParse(punicWarsGeoJson).success).toBe(true);
-    expect(punicWarsGeoJson.features.some((feature) => feature.id === "ita-72843720b863019116732")).toBe(false);
+    expect(punicWarsGeoJson.features.some((feature) => feature.id === "ita-local-23120603B86473916475875")).toBe(false);
     expect(punicWarsGeoJson.features.some((feature) => feature.id === "gbr-14339913b95766344400054")).toBe(false);
-    expect(punicWarsGeoJson.features.find((feature) => feature.id === "fra-19338628b22604203385446")?.properties).toMatchObject({ name: "Corse" });
+    expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-gaul-") && feature.properties.kind === "province")).toHaveLength(96);
   });
 
   it("creates the agreed historical region counts with no lost outer area", () => {
@@ -41,22 +41,29 @@ describe("Punic Wars historical GeoJSON", () => {
     expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-luxembourg-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.luxembourg);
     expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-britain-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.england + PUNIC_WARS_REGION_COUNTS.scotland + PUNIC_WARS_REGION_COUNTS.wales);
 
-    const italianSource = new Set(["ita-72843720b99597932318450", "ita-72843720b59566147937015", "ita-72843720b863019116732", "ita-72843720b88210905209841"]);
-    // Rounding and the organic shared-edge bends may move the planar estimate
-    // slightly, but preserve the source area within a very small tolerance.
-    expect(Math.abs(derivedArea("punic-italy-") - sourceArea(italianSource))).toBeLessThan(0.002);
+    const italianSource = new Set(europeNorthAfricaGeoJson.features.filter((feature) => feature.id.startsWith("ita-local-")).map((feature) => feature.id));
+    expect(Math.abs(derivedArea("punic-italy-") - sourceArea(italianSource))).toBeLessThan(0.000001);
+  });
 
-    const latium = punicWarsGeoJson.features.find((feature) => feature.id === "punic-italy-latium");
-    expect(latium?.geometry.type).toBe("MultiPolygon");
-    if (latium?.geometry.type === "MultiPolygon") {
-      const longestRing = Math.max(...latium.geometry.coordinates.flatMap((polygon) => polygon.map((ring) => ring.length)));
-      expect(longestRing).toBeGreaterThan(12);
+  it("keeps the surveyed local outlines for Gaul and Germania instead of re-partitioning whole countries", () => {
+    const sourceById = new Map(europeNorthAfricaGeoJson.features.map((feature) => [feature.id, feature]));
+    const checks = [
+      ["fra-local-29444166B68738187753831", "punic-gaul-ain"],
+      ["fra-local-29444166B62247732126362", "punic-gaul-aisne"],
+      ["deu-9070358b94432643063062", "punic-germania-cherusci"],
+      ["deu-9070358b46069870964378", "punic-germania-cimbri"],
+    ] as const;
+    for (const [sourceId, territoryId] of checks) {
+      expect(punicWarsGeoJson.features.find((feature) => feature.id === territoryId)?.geometry).toEqual(sourceById.get(sourceId)?.geometry);
     }
+    const frenchSource = new Set(europeNorthAfricaGeoJson.features.filter((feature) => feature.id.startsWith("fra-local-")).map((feature) => feature.id));
+    expect(Math.abs(derivedArea("punic-gaul-") - sourceArea(frenchSource))).toBeLessThan(0.000001);
   });
 
   it("attaches capitals, cities, and forts to valid derived provinces", () => {
     const settlements = punicWarsGeoJson.features.filter((feature) => feature.properties.kind === "settlement");
     expect(settlements.filter((feature) => feature.properties.kind === "settlement" && feature.properties.type === "capital").map((feature) => feature.properties.name)).toEqual(expect.arrayContaining(["Rome", "Carthage", "Syracuse", "Messana", "Pella", "Athens"]));
     expect(settlements.filter((feature) => feature.properties.kind === "settlement" && feature.properties.type === "fort").length).toBeGreaterThanOrEqual(6);
+    expect(settlements.some((feature) => feature.id === "settlement-rhegium" || feature.properties.name === "Rhegium")).toBe(false);
   });
 });

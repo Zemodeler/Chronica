@@ -29,6 +29,10 @@ export interface ViewportTransform {
 export interface MapViewportHandle {
   /** Trigger an immediate canvas redraw using the current live transform. */
   redrawCanvas: () => void;
+  /** Return the current container size in CSS pixels (unaffected by zoom). */
+  containerSize: () => { w: number; h: number } | null;
+  /** Return the current live viewport transform. */
+  liveTransform: () => ViewportTransform;
 }
 
 /** Callback signature for canvas terrain drawing. */
@@ -135,6 +139,11 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
           drawCanvasRef.current(canvas, liveRef.current, container.clientWidth, container.clientHeight);
         }
       },
+      containerSize() {
+        const c = containerRef.current;
+        return c ? { w: c.clientWidth, h: c.clientHeight } : null;
+      },
+      liveTransform() { return liveRef.current; },
     }), []);
 
     // Set initial CSS transform and canvas before first paint

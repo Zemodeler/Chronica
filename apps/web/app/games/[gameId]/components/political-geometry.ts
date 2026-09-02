@@ -15,6 +15,10 @@ export interface PoliticalLabelGeometry {
   readonly territoryArea: number;
   readonly priority: number;
   readonly recommendedFontSize: number;
+  /** The component's own bounding box, larger dimension — used to hide the
+   *  label once zoomed in far enough that the territory no longer fits the
+   *  screen (see MAX_LABEL_PIXEL_EXTENT in political-labels.ts). */
+  readonly maxExtent: number;
 }
 export interface PoliticalTerritory { readonly polityId: string; readonly name: string; readonly colour: string; readonly components: readonly TerritorialComponent[]; readonly primaryComponent: TerritorialComponent; readonly label: PoliticalLabelGeometry; readonly componentLabels: readonly PoliticalLabelGeometry[]; }
 export interface PoliticalMapState { readonly ownerByProvince: ReadonlyMap<string, string | null>; readonly territories: readonly PoliticalTerritory[]; readonly borderSegments: readonly PoliticalBorderSegment[]; }
@@ -49,17 +53,34 @@ const MAJOR_POLITY_COLOURS: Readonly<Record<string, string>> = {
 export function politicalColourFromId(polityId: string) { return MAJOR_POLITY_COLOURS[polityId] ?? polityColorFromId(polityId); }
 export function politicalColourWithAlpha(polityId: string, alpha: number) { const colour = MAJOR_POLITY_COLOURS[polityId]; return colour === undefined ? polityColorWithAlpha(polityId, alpha) : `${colour}${Math.round(alpha * 255).toString(16).padStart(2, "0")}`; }
 const LABEL_PATH_COVERAGE = .85;
-const MAX_BOUNDARY_SAMPLES = 48;
+// Pair generation/ranking below is O(samples²) but cheap (just a distance
+// compare); the expensive containment check only runs on the top few
+// ranked candidates until one passes (see longestUsablePath), so this can
+// stay high for label-curve quality without a speed cost.
+const MAX_BOUNDARY_SAMPLES = 14;
 const PATH_SAMPLES = 30;
 // A country name may extend outside its territorial component for at most 5% of
 // the sampled route, preserving a natural curve without visibly crossing borders.
 const MAX_LABEL_OUTSIDE_BORDER_RATIO = .05;
 
-function componentContains(component: TerritorialComponent, world: StaticWorldGeometry, point: GeoJsonPosition) {
-  return component.provinceIds.some((id) => {
-    const province = world.provinceById.get(id);
-    return province !== undefined && provinceContains(province, point);
-  });
+/**
+ * Repeated point-in-component tests along one candidate curve land in the
+ * same province far more often than not, so trying last winner first turns
+ * most of a component's `provinceIds.length` linear scan into O(1) — this
+ * matters a lot once a territory spans dozens of small provinces.
+ */
+function componentContainsTester(component: TerritorialComponent, world: StaticWorldGeometry) {
+  const provinces = component.provinceIds.map((id) => world.provinceById.get(id)).filter((province): province is StaticProvince => province !== undefined);
+  let hint = 0;
+  return (point: GeoJsonPosition): boolean => {
+    if (provinces.length === 0) return false;
+    if (provinceContains(provinces[hint]!, point)) return true;
+    for (let index = 0; index < provinces.length; index++) {
+      if (index === hint) continue;
+      if (provinceContains(provinces[index]!, point)) { hint = index; return true; }
+    }
+    return false;
+  };
 }
 
 function quadraticPoint(points: readonly [GeoJsonPosition, GeoJsonPosition, GeoJsonPosition], t: number): GeoJsonPosition {
@@ -125,19 +146,37 @@ function gentleCurve(start: GeoJsonPosition, end: GeoJsonPosition, anchor: GeoJs
   return [start, [midpoint[0] + normal[0] * bend, midpoint[1] + normal[1] * bend], end];
 }
 
+/**
+ * Finds the longest boundary-to-boundary curve that stays inside the
+ * component. The expensive part is the per-candidate containment check
+ * (PATH_SAMPLES point-in-territory tests), so instead of running it on
+ * every one of the O(samples²) pairs, rank pairs by their cheap chord
+ * distance first (longest first) and containment-check in that order,
+ * stopping at the first pair that passes — since chord length and curve
+ * length track closely, that first success is effectively always the
+ * longest valid curve, at a fraction of the containment-test cost.
+ */
 function longestUsablePath(component: TerritorialComponent, world: StaticWorldGeometry, anchor: GeoJsonPosition) {
   const samples = componentBoundarySamples(component, world);
-  let winner: readonly [GeoJsonPosition, GeoJsonPosition, GeoJsonPosition] | null = null;
-  let winnerLength = -Infinity;
+  const contains = componentContainsTester(component, world);
+  const pairsByChordLength: { first: number; second: number }[] = [];
   for (let first = 0; first < samples.length; first++) for (let second = first + 1; second < samples.length; second++) {
-    const candidate = gentleCurve(samples[first]!, samples[second]!, anchor);
-    let inside = 0;
-    for (let index = 1; index < PATH_SAMPLES; index++) if (componentContains(component, world, quadraticPoint(candidate, index / PATH_SAMPLES))) inside++;
-    if (inside / (PATH_SAMPLES - 1) < 1 - MAX_LABEL_OUTSIDE_BORDER_RATIO) continue;
-    const length = quadraticLength(candidate);
-    if (length > winnerLength) { winner = candidate; winnerLength = length; }
+    pairsByChordLength.push({ first, second });
   }
-  return winner === null ? null : { points: orientPath(winner), length: winnerLength };
+  pairsByChordLength.sort((a, b) => distance(samples[b.first]!, samples[b.second]!) - distance(samples[a.first]!, samples[a.second]!));
+  const sampleCount = PATH_SAMPLES - 1;
+  const maxOutsideAllowed = Math.floor(MAX_LABEL_OUTSIDE_BORDER_RATIO * sampleCount);
+  for (const { first, second } of pairsByChordLength) {
+    const candidate = gentleCurve(samples[first]!, samples[second]!, anchor);
+    let outside = 0;
+    // Same accept/reject outcome as scoring every sample and comparing the
+    // ratio at the end, but stops as soon as the threshold is unreachable —
+    // most candidates here are rejects, so this is where the time goes.
+    for (let index = 1; index < PATH_SAMPLES && outside <= maxOutsideAllowed; index++) if (!contains(quadraticPoint(candidate, index / PATH_SAMPLES))) outside++;
+    if (outside > maxOutsideAllowed) continue;
+    return { points: orientPath(candidate), length: quadraticLength(candidate) };
+  }
+  return null;
 }
 
 function labelGeometry(component: TerritorialComponent, world: StaticWorldGeometry, name: string): PoliticalLabelGeometry {
@@ -154,20 +193,56 @@ function labelGeometry(component: TerritorialComponent, world: StaticWorldGeomet
   ]);
   const route = longestUsablePath(component, world, anchor) ?? { points: fallbackPoints, length: quadraticLength(fallbackPoints) };
   const usableLength = route.length * LABEL_PATH_COVERAGE;
-  // Width is fixed by SVG textLength; use a deliberately restrained height so
-  // country names read as cartographic labels rather than oversized banners.
-  return { componentId: component.provinceIds.join("+"), anchor, pathPoints: route.points, pathLength: route.length, usableLength, territoryArea: component.totalArea, priority: component.totalArea, recommendedFontSize: usableLength / glyphUnits * .42 };
+  // Width is fixed by SVG textLength, so it already tracks how much of the
+  // territory the curve can run through. Height doesn't: a font sized only
+  // from the curve's length can still be taller than a thin/small territory
+  // is wide, poking the glyphs out past its borders. `smallest` (the minor
+  // eigenvalue of the province-centroid covariance, already computed above
+  // for the label's rotation) is a rotation-invariant estimate of the
+  // territory's extent perpendicular to the label direction — capping the
+  // font size to a fraction of that keeps the label's own scale tied to how
+  // big the territory actually is, and guarantees it never grows past what
+  // the shape can hold.
+  // It degenerates to exactly 0 for a single-province component (its only
+  // centroid sits exactly on itself, so there's no spread to measure) even
+  // though the province obviously still has real width — the component's
+  // own bounding box catches that case.
+  const boundsExtent = Math.min(component.bounds.maxX - component.bounds.minX, component.bounds.maxY - component.bounds.minY);
+  const perpendicularExtent = Math.max(2 * Math.sqrt(Math.max(smallest, 0)), boundsExtent * .5);
+  const recommendedFontSize = Math.min(usableLength / glyphUnits * .42, perpendicularExtent * .7);
+  const maxExtent = Math.max(component.bounds.maxX - component.bounds.minX, component.bounds.maxY - component.bounds.minY);
+  return { componentId: component.provinceIds.join("+"), anchor, pathPoints: route.points, pathLength: route.length, usableLength, territoryArea: component.totalArea, priority: component.totalArea, recommendedFontSize, maxExtent };
 }
 
-/** Derives ownership, territorial components, borders, and labels without renderer state. */
-export function derivePoliticalMapState(world: StaticWorldGeometry, overlay: PoliticalOverlayInput | null): PoliticalMapState {
+function provinceSetKey(ids: Iterable<string>): string { return [...ids].sort().join(","); }
+
+/**
+ * Derives ownership, territorial components, borders, and labels without
+ * renderer state. `previous` is the last state computed for this same
+ * `world` (the caller must not pass one computed against a different
+ * world/geometry) — any polity whose owned-province set and name are
+ * unchanged reuses its old components/label geometry untouched, so a
+ * single province changing hands only re-runs the expensive label-curve
+ * search for the one or two polities actually affected, not all of them.
+ */
+export function derivePoliticalMapState(world: StaticWorldGeometry, overlay: PoliticalOverlayInput | null, previous?: PoliticalMapState | null): PoliticalMapState {
   const ownerByProvince = new Map<string, string | null>(world.provinces.map((province) => [province.id, null]));
   if (!overlay) return { ownerByProvince, territories: [], borderSegments: world.sharedBoundaries.map((boundary) => ({ ...boundary, classification: boundary.provinceB === null ? "coast" as const : "internal_province" as const })) };
   for (const province of overlay.provinces) if (world.provinceById.has(province.provinceId)) ownerByProvince.set(province.provinceId, province.controllerPolityId);
   const names = new Map(overlay.polities.map((polity) => [polity.polityId, polity.name])); const ownedByPolity = new Map<string, Set<string>>();
   for (const [provinceId, owner] of ownerByProvince) if (owner !== null) { const owned = ownedByPolity.get(owner) ?? new Set<string>(); owned.add(provinceId); ownedByPolity.set(owner, owned); }
+  const previousByPolity = new Map((previous?.territories ?? []).map((territory) => [territory.polityId, territory]));
   const territories: PoliticalTerritory[] = [];
-  for (const [polityId, owned] of ownedByPolity) { const name = names.get(polityId); if (!name) continue; const remaining = new Set(owned); const components: TerritorialComponent[] = []; while (remaining.size) components.push(componentFor(remaining.values().next().value as string, remaining, world)); components.sort((a, b) => b.totalArea - a.totalArea || a.provinceIds[0]!.localeCompare(b.provinceIds[0]!)); const primaryComponent = components[0]!; const componentLabels = components.map((component) => labelGeometry(component, world, name)); territories.push({ polityId, name, colour: politicalColourFromId(polityId), components, primaryComponent, label: componentLabels[0]!, componentLabels }); }
+  for (const [polityId, owned] of ownedByPolity) {
+    const name = names.get(polityId);
+    if (!name) continue;
+    const previousTerritory = previousByPolity.get(polityId);
+    if (previousTerritory && previousTerritory.name === name && provinceSetKey(previousTerritory.components.flatMap((component) => component.provinceIds)) === provinceSetKey(owned)) {
+      territories.push(previousTerritory);
+      continue;
+    }
+    const remaining = new Set(owned); const components: TerritorialComponent[] = []; while (remaining.size) components.push(componentFor(remaining.values().next().value as string, remaining, world)); components.sort((a, b) => b.totalArea - a.totalArea || a.provinceIds[0]!.localeCompare(b.provinceIds[0]!)); const primaryComponent = components[0]!; const componentLabels = components.map((component) => labelGeometry(component, world, name)); territories.push({ polityId, name, colour: politicalColourFromId(polityId), components, primaryComponent, label: componentLabels[0]!, componentLabels });
+  }
   const borderSegments = world.sharedBoundaries.map((boundary) => { if (boundary.provinceB === null) return { ...boundary, classification: "coast" as const }; const a = ownerByProvince.get(boundary.provinceA) ?? null; const b = ownerByProvince.get(boundary.provinceB) ?? null; return { ...boundary, classification: a !== b ? "country_border" as const : "internal_province" as const }; });
   return { ownerByProvince, territories: territories.sort((a, b) => b.label.priority - a.label.priority), borderSegments };
 }

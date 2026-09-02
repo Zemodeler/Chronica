@@ -6,9 +6,16 @@ import { punicWarsGeoJson } from "./punic-wars-geojson";
 export const NUMIDIAN_DECISION_MAP_ASSET_ID = "00000000-0000-4000-8000-000000000201";
 export const PUNIC_WARS_MAP_ASSET_ID = "00000000-0000-4000-8000-000000000202";
 
-/** Return a fresh map document so hosted scenarios cannot mutate the DEMO map. */
+/**
+ * Return a fresh top-level map document so callers can't accidentally share
+ * object identity with the shared singleton across requests. Callers only
+ * ever read `features`, never mutate it, so a shallow copy — not a deep
+ * `structuredClone` of the whole multi-megabyte geometry — is enough, and
+ * it avoids re-cloning tens of thousands of coordinate points on every
+ * request to this hot path.
+ */
 export function builtInScenarioMap(mapAssetId: string | null): GeoJsonMap | undefined {
-  if (mapAssetId === NUMIDIAN_DECISION_MAP_ASSET_ID) return structuredClone(europeNorthAfricaGeoJson);
-  if (mapAssetId === PUNIC_WARS_MAP_ASSET_ID) return structuredClone(punicWarsGeoJson);
+  if (mapAssetId === NUMIDIAN_DECISION_MAP_ASSET_ID) return { ...europeNorthAfricaGeoJson };
+  if (mapAssetId === PUNIC_WARS_MAP_ASSET_ID) return { ...punicWarsGeoJson };
   return undefined;
 }

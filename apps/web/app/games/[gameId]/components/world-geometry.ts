@@ -97,6 +97,8 @@ export function prepareStaticWorldGeometry(map: GeoJsonMap): StaticWorldGeometry
 }
 
 export function provinceContains(province: StaticProvince, point: GeoJsonPosition): boolean {
+  const { bounds } = province;
+  if (point[0] < bounds.minX || point[0] > bounds.maxX || point[1] < bounds.minY || point[1] > bounds.maxY) return false;
   const polygons = province.geometry.type === "Polygon" ? [province.geometry.coordinates] : province.geometry.type === "MultiPolygon" ? province.geometry.coordinates : [];
   const inRing = (ring: readonly GeoJsonPosition[]) => { let inside = false; for (let index = 0, previous = ring.length - 1; index < ring.length; previous = index++) { const [x, y] = ring[index]!; const [px, py] = ring[previous]!; if ((y > point[1]) !== (py > point[1]) && point[0] < ((px - x) * (point[1] - y)) / (py - y) + x) inside = !inside; } return inside; };
   return polygons.some((polygon) => polygon[0] !== undefined && inRing(polygon[0]) && !polygon.slice(1).some(inRing));
