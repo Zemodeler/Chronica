@@ -166,7 +166,12 @@ function historicalFamilyForPolity(polityId: string): HistoricalPolityFamily {
   if (/(^|-)(czech|bohemia|bohemian|moravia|moravian)(-|$)/.test(polityId)) return "czech";
   if (/(^|-)(poland|polish|piast|mazovia|mazovian|wielkopolska|pomerania|pomeranian)(-|$)/.test(polityId)) return "polish";
   if (["veneti", "etruscan-cities", "mamertines", "sabines", "umbrians", "picentes", "marsi-paeligni", "campanians", "samnites", "daunians", "peucetians", "messapians", "tarentines", "lucanians", "bruttians", "rhegines"].includes(polityId)) return "italic";
-  if (["athens", "achaean-league", "aetolian-league", "thessalian-league", "hellenic-islanders", "epirus", "massalia"].includes(polityId)) return "hellenic";
+  if ([
+    "athens", "achaean-league", "aetolian-league", "thessalian-league", "epirus", "massalia",
+    "acarnania", "boeotian-league", "phocian-league", "corinthian-league", "arcadian-league", "thebes", "argos",
+    "elis", "messenia", "sparta", "megalopolis", "euboean-cities", "ionian-islands", "cycladic-islanders",
+    "dodecanese-islanders", "aeolis-communities", "ionia-communities", "cretan-cities-west", "cretan-cities-east",
+  ].includes(polityId)) return "hellenic";
   if (["mauretanian-peoples", "numidian-kingdoms", "gaetuli", "garamantes"].includes(polityId)) return "northAfrican";
   return "neutral";
 }

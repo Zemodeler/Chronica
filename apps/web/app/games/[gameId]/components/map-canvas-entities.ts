@@ -26,6 +26,13 @@ interface VisibleWorldRect { minX: number; maxX: number; minY: number; maxY: num
 const MIN_SETTLEMENT_PIXEL_RADIUS = 6;
 const MAX_SETTLEMENT_PIXEL_RADIUS = 22;
 const MIN_SETTLEMENT_LABEL_PIXEL_FONT = 9;
+// Screen-pixel gap between a marker's edge and its label's baseline. Must be
+// pixel-based (divided through by pixelsPerDegree at use, like the radius
+// constants above) rather than a flat world-space degree offset — a flat
+// degree gap is invisible at low zoom but balloons into a huge on-screen gap
+// at high zoom (nothing caps it the way MAX_SETTLEMENT_PIXEL_RADIUS caps the
+// marker), which is what made labels read as detached from their city.
+const SETTLEMENT_LABEL_GAP_PIXELS = 3;
 
 // Mirrors MapViewport's zoom bands (far < 2.5 <= medium < 5 <= close) and the
 // same-named CSS zoom-visibility rules that used to gate the SVG settlement
@@ -93,6 +100,7 @@ export function drawSettlements(
   pixelsPerDegree: number,
   visibleRect: VisibleWorldRect,
   nowMs: number,
+  polityLabelFontSizes: Map<string, number>,
 ): void {
   const settlementOverlay = new Map((overlay?.settlements ?? []).map((s) => [s.settlementId, s]));
   const besiegedSettlementIds = new Set(overlay?.conflicts.sieges.map((siege) => siege.settlementId) ?? []);
@@ -103,6 +111,12 @@ export function drawSettlements(
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
   ctx.lineJoin = "round";
+
+  // Labels are collected here and drawn in a second pass (see below) instead
+  // of inline, so two settlements close enough on screen for their names to
+  // collide can be resolved by priority (capitals, then importance) rather
+  // than just letting whichever iterates second stamp over the first.
+  const labelCandidates: { name: string; x: number; labelY: number; fontSize: number; priority: number }[] = [];
 
   for (const settlement of world.settlements) {
     const [x, y] = settlement.projected;
@@ -145,14 +159,35 @@ export function drawSettlements(
     if (!showNonCapitals) continue;
     if (!capital && !showTowns) continue;
 
-    const labelSize = Math.max((state?.importance ?? 50) * .0035, MIN_SETTLEMENT_LABEL_PIXEL_FONT / pixelsPerDegree);
-    ctx.font = `500 ${labelSize}px ${LABEL_FONT_FAMILY}`;
-    ctx.lineWidth = labelSize * .22;
-    ctx.strokeStyle = SETTLEMENT_LABEL_HALO;
-    ctx.fillStyle = SETTLEMENT_LABEL_FILL;
-    const labelY = y + radius + .28;
-    ctx.strokeText(settlement.name, x, labelY);
-    ctx.fillText(settlement.name, x, labelY);
+    const legibleFloor = MIN_SETTLEMENT_LABEL_PIXEL_FONT / pixelsPerDegree;
+    let labelSize = Math.max((state?.importance ?? 50) * .0035, legibleFloor);
+    // A settlement's own importance doesn't know how small the polity that
+    // holds it is, so an important capital in a tiny kingdom could otherwise
+    // render its name bigger than the kingdom's — never let a city's label
+    // outgrow (a fraction of) its own polity's territory-name label.
+    const polityId = state?.controllerPolityId ?? state?.capitalPolityId ?? undefined;
+    const polityFontSize = polityId ? polityLabelFontSizes.get(polityId) : undefined;
+    if (polityFontSize !== undefined) labelSize = Math.min(labelSize, Math.max(polityFontSize * .8, legibleFloor));
+    const labelY = y + radius + SETTLEMENT_LABEL_GAP_PIXELS / pixelsPerDegree;
+    labelCandidates.push({ name: settlement.name, x, labelY, fontSize: labelSize, priority: capital ? Number.POSITIVE_INFINITY : (state?.importance ?? 50) });
+  }
+
+  // Most important settlement (capitals first, then by importance) claims
+  // its screen space first; anything whose name would overlap an
+  // already-placed one is dropped rather than drawn on top of it — two
+  // stacked, unreadable names side by side is worse than one legible name.
+  ctx.strokeStyle = SETTLEMENT_LABEL_HALO;
+  ctx.fillStyle = SETTLEMENT_LABEL_FILL;
+  const placedBoxes: { minX: number; maxX: number; minY: number; maxY: number }[] = [];
+  for (const label of labelCandidates.sort((a, b) => b.priority - a.priority)) {
+    ctx.font = `500 ${label.fontSize}px ${LABEL_FONT_FAMILY}`;
+    const halfWidth = ctx.measureText(label.name).width / 2;
+    const box = { minX: label.x - halfWidth, maxX: label.x + halfWidth, minY: label.labelY - label.fontSize, maxY: label.labelY };
+    if (placedBoxes.some((p) => box.minX < p.maxX && box.maxX > p.minX && box.minY < p.maxY && box.maxY > p.minY)) continue;
+    placedBoxes.push(box);
+    ctx.lineWidth = label.fontSize * .22;
+    ctx.strokeText(label.name, label.x, label.labelY);
+    ctx.fillText(label.name, label.x, label.labelY);
   }
 }
 

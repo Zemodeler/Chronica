@@ -52,7 +52,6 @@ const POLITY_NAMES: Record<string, string> = {
   "helvetian-peoples": "Helvetian peoples",
   "noric-communities": "Eastern Alpine communities",
   "transalpine-celts": "Transalpine Celtic peoples",
-  "hellenic-islanders": "Aegean island communities",
   macedon: "Kingdom of Macedon",
   epirus: "Kingdom of Epirus",
   athens: "Athens",
@@ -122,7 +121,19 @@ const POLITY_NAMES: Record<string, string> = {
   "britain-irish-sea-communities": "Irish Sea communities",
   acarnania: "Acarnanian League",
   "boeotian-league": "Boeotian League",
+  "phocian-league": "Phocian League",
+  "corinthian-league": "Corinthian League",
+  "arcadian-league": "Arcadian League",
+  "euboean-cities": "Euboean cities",
+  "ionian-islands": "Ionian Islands",
+  "cycladic-islanders": "Cycladic islanders",
+  "dodecanese-islanders": "Dodecanesian islanders",
+  "aeolis-communities": "Aeolis",
+  "ionia-communities": "Ionia",
+  "cretan-cities-west": "Western Crete",
+  "cretan-cities-east": "Eastern Crete",
   thebes: "Thebes",
+  argos: "Argos",
   elis: "Elis",
   messenia: "Messenia",
   sparta: "Sparta",
@@ -252,6 +263,25 @@ function provinceCentre(feature: (typeof punicWarsGeoJson.features)[number]): re
   return [0, 0];
 }
 
+// Euboea and the Ionian Sea islands sit at longitudes that overlap Attica and
+// coastal Epirus/Acarnania respectively, so a lon/lat rectangle can't tell
+// them apart from their mainland neighbours. Both groups are small, fixed
+// municipality lists, so they're named directly instead.
+const EUBOEAN_MUNICIPALITIES = new Set([
+  "Chalcis", "Istiaia-Aidipsos", "Mantoudi-Limni-Agia Anna", "Eretria", "Dirfys-Messapia", "Kymi-Aliveri", "Skyros", "Karystos",
+]);
+const IONIAN_SEA_ISLAND_MUNICIPALITIES = new Set(["Corfu", "Paxos", "Lefkada", "Meganisi", "Ithaca", "Cephalonia", "Zakynthos"]);
+
+/**
+ * A geographic reconstruction of the 270 BCE Greek world: broad kingdoms in
+ * the north (Macedon, Epirus, Thessaly, Aegean Thrace — pre-merged into one
+ * province apiece, see GREEK_METRO_REGION_GROUPS), fragmenting into the
+ * leagues and city-states that actually held the south and the Aegean at
+ * municipality scale. Every rule below was checked against real coordinates
+ * for all 326 underlying municipalities so no province falls through to a
+ * default bucket. See the historical-control research notes for sourcing;
+ * boundaries between adjacent leagues are necessarily approximate.
+ */
 function greekControllerFor(feature: (typeof punicWarsGeoJson.features)[number]): string {
   const [longitude, latitude] = provinceCentre(feature);
   const name = feature.properties.name;
@@ -259,16 +289,53 @@ function greekControllerFor(feature: (typeof punicWarsGeoJson.features)[number])
   if (name === "Athens") return "athens";
   if (name === "Sparta" || name === "Elafonisos") return "sparta";
   if (name === "Megalopolis") return "megalopolis";
-  if (latitude >= 39.45) return longitude > 24.25 ? "thracian-communities" : "macedon";
-  if (latitude < 36.65 || longitude > 24.25 || longitude < 20.75) return "hellenic-islanders";
-  if (longitude < 21.35 && latitude >= 38.7) return "epirus";
+  if (name === "Argos-Mykines" || name === "Nafplio" || name === "Epidaurus") return "argos";
+  if (name === "Corinth") return "corinthian-league";
+  if (name !== undefined && EUBOEAN_MUNICIPALITIES.has(name)) return "euboean-cities";
+  if (name !== undefined && IONIAN_SEA_ISLAND_MUNICIPALITIES.has(name)) return "ionian-islands";
+  // Macedon, Thessaly, Epirus, and Aegean Thrace are pre-merged (see
+  // GREEK_METRO_REGION_GROUPS) into one broad kingdom/hinterland apiece, so
+  // they're matched directly rather than by a lon/lat rectangle.
+  if (name === "Macedon") return "macedon";
+  if (name === "Thessaly") return "thessalian-league";
+  if (name === "Epirus") return "epirus";
+  if (name === "Aegean Thrace") return "thracian-communities";
+
+  // Crete
+  if (latitude < 35.75) return longitude < 24.6 ? "cretan-cities-west" : "cretan-cities-east";
+  // Cyclades (including their northernmost outliers, Andros/Tinos/Kea, which
+  // sit at a higher latitude than the rest of the group)
+  if (longitude >= 24.1 && longitude < 26.0 && latitude < 38.0) return "cycladic-islanders";
+  // Dodecanese
+  if (longitude >= 26.0 && latitude < 37.6) return "dodecanese-islanders";
+  // North-eastern Aegean: Lesbos/Lemnos (Aeolis) and Chios/Samos (Ionia)
+  if (longitude > 24.9 && latitude >= 38.3 && latitude < 40.0) return "aeolis-communities";
+  if (longitude >= 26.0 && latitude >= 37.6 && latitude < 38.9) return "ionia-communities";
+
+  // Acarnania
   if (longitude < 21.45 && latitude >= 38.05) return "acarnania";
-  if (longitude < 22.55 && latitude >= 37.85) return "aetolian-league";
-  if (latitude >= 38.0 && latitude < 38.75 && longitude >= 22.55 && longitude < 23.55) return "boeotian-league";
-  if (longitude >= 23.25 && latitude >= 37.65 && latitude < 38.25) return "athens";
+  // Achaea: the Peloponnesian shore of the Gulf of Corinth
+  if (latitude >= 37.95 && latitude < 38.35 && longitude >= 21.5 && longitude < 22.35) return "achaean-league";
+  // Elis
   if (longitude < 22.05 && latitude >= 37.1 && latitude < 38.05) return "elis";
-  if (longitude < 22.15 && latitude < 37.1) return "messenia";
-  if (longitude >= 22.15 && longitude < 22.85 && latitude < 37.45) return "sparta";
+  // Corinthia
+  if (longitude >= 22.35 && longitude < 23.15 && latitude >= 37.75 && latitude < 38.15) return "corinthian-league";
+  // Phocis (Delphi and the slopes of Parnassus)
+  if (latitude >= 38.3 && latitude < 38.8 && longitude >= 22.15 && longitude < 22.95) return "phocian-league";
+  // Boeotia
+  if (latitude >= 38.0 && latitude < 38.7 && longitude >= 22.55 && longitude < 23.6) return "boeotian-league";
+  // Aetolia, plus Phthiotis/Evrytania to its east (a 270 BCE Aetolian sphere)
+  if (longitude < 22.75 && latitude >= 38.3) return "aetolian-league";
+  // Attica
+  if (longitude >= 23.25 && latitude >= 37.6 && latitude < 38.3) return "athens";
+  // Argolis
+  if (longitude >= 22.55 && latitude >= 37.3 && latitude < 37.9) return "argos";
+  // Arcadia
+  if (longitude >= 22.0 && longitude < 22.7 && latitude >= 37.3 && latitude < 37.95) return "arcadian-league";
+  // Messenia
+  if (longitude < 22.25 && latitude < 37.4) return "messenia";
+  // Laconia
+  if (longitude >= 22.0 && latitude < 37.5) return "sparta";
   return "achaean-league";
 }
 
@@ -360,11 +427,27 @@ function nameFor(controllerPolityId: string, provinceName: string): string {
 }
 
 /** Terrain is a local movement description, independent from who rules it. */
+// Greek terrain follows the same political reconstruction rather than a
+// separate geometry pass: island leagues sit on their own island/coastal
+// terrain, the mountainous western and central leagues get a pass/upland
+// terrain, and the rest (river plains, the Argolid, Attica, the Macedonian
+// coastal lowlands) read as ordinary coastal plain.
+const GREEK_ISLAND_POLITIES = new Set([
+  "ionian-islands", "cycladic-islanders", "dodecanese-islanders", "aeolis-communities", "ionia-communities", "cretan-cities-west", "cretan-cities-east", "euboean-cities",
+]);
+const GREEK_MOUNTAIN_POLITIES = new Set(["epirus", "arcadian-league", "aetolian-league", "phocian-league"]);
+
 function terrainFor(provinceId: string): string {
   if (GAETULIAN_PROVINCES.has(provinceId) || GARAMANTIAN_PROVINCES.has(provinceId)) return "desert-steppe";
   if (provinceId.startsWith("lby-")) return PTOLEMAIC_CYRENAICA_PROVINCES.has(provinceId) ? "coastal-plain" : "desert-steppe";
   if (provinceId.startsWith("tun-") || CARTHAGINIAN_MAURETANIAN_COAST.has(provinceId)) return "coastal-plain";
   if (provinceId.startsWith("mar-") || provinceId.startsWith("dza-")) return NUMIDIAN_PROVINCES.has(provinceId) ? "hills-uplands" : "desert-steppe";
+  if (provinceId.startsWith("punic-greece-")) {
+    const polity = GROUNDED_POLITY_BY_PROVINCE_ID.get(provinceId);
+    if (polity !== undefined && GREEK_ISLAND_POLITIES.has(polity)) return "island-coastal";
+    if (polity !== undefined && GREEK_MOUNTAIN_POLITIES.has(polity)) return "mountain-pass";
+    return "coastal-plain";
+  }
   if (provinceId.startsWith("punic-italy-") || provinceId.startsWith("punic-illyria-") || provinceId.startsWith("punic-thrace-")) return "hills-uplands";
   if (provinceId.includes("black-forest") || provinceId.includes("jura") || provinceId.includes("harz") || provinceId.includes("erzgebirge") || provinceId.includes("sauerland") || provinceId.includes("uplands") || provinceId.includes("heights") || provinceId.includes("passes")) return "mountain-pass";
   if (provinceId.startsWith("punic-gaul-arverni") || provinceId.startsWith("punic-gaul-aedui")) return "hills-uplands";

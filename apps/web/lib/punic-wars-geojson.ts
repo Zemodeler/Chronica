@@ -32,6 +32,17 @@ function clipRingToHalfPlane(ring: Ring, valueAt: (point: Point) => number): [nu
   return result;
 }
 
+/** Shoelace formula; only used to compare ring sizes, so sign/units don't matter. */
+function ringArea(ring: Ring): number {
+  let twice = 0;
+  for (let index = 0; index < ring.length - 1; index++) {
+    const [x1, y1] = ring[index]!;
+    const [x2, y2] = ring[index + 1]!;
+    twice += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(twice) / 2;
+}
+
 function polygonsFor(feature: GeoJsonMapFeature): Polygon[] {
   if (feature.geometry.type === "Polygon") return [feature.geometry.coordinates];
   if (feature.geometry.type === "MultiPolygon") return feature.geometry.coordinates;
@@ -185,7 +196,7 @@ function carthaginianizeInternalBorders(features: readonly GeoJsonMapFeature[], 
 function historicalRegions(source: readonly GeoJsonMapFeature[], sites: readonly HistoricalSite[], borderIrregularity = 1, borderStyle: BorderStyle = "default"): GeoJsonMapFeature[] {
   const polygons = source.flatMap(polygonsFor);
   const regions: GeoJsonMapFeature[] = sites.map((site): GeoJsonMapFeature => {
-    const coordinates = polygons.flatMap((polygon) => {
+    const clippedRings = polygons.flatMap((polygon) => {
       let ring = polygon[0]?.map((point) => [point[0], point[1]] as [number, number]) ?? [];
       for (const other of sites) {
         if (other.id === site.id || ring.length === 0) continue;
@@ -193,8 +204,17 @@ function historicalRegions(source: readonly GeoJsonMapFeature[], sites: readonly
         const [ox, oy] = other.coordinate;
         ring = clipRingToHalfPlane(ring, ([x, y]) => (x - sx) ** 2 + (y - sy) ** 2 - (site.territorialWeight ?? 0) - ((x - ox) ** 2 + (y - oy) ** 2 - (other.territorialWeight ?? 0)));
       }
-      return ring.length === 0 ? [] : [[ring]];
+      return ring.length === 0 ? [] : [ring];
     });
+    // Clipping a source polygon against every other site's half-plane can leave a
+    // sliver ring behind — a near-zero-area artifact from a concave corner just
+    // barely surviving every cut, not a real exclave. It doesn't affect the fill
+    // (same colour as the rest of the territory) but shows up as a stray loop in
+    // the hover/selection outline, which only draws each territory's true
+    // exterior edges. Drop rings that are negligible next to this site's largest
+    // piece so they never enter the territory's geometry.
+    const maxArea = Math.max(0, ...clippedRings.map(ringArea));
+    const coordinates = clippedRings.filter((ring) => ringArea(ring) >= maxArea * 0.002).map((ring) => [ring]);
     if (coordinates.length === 0) throw new Error(`Historical region ${site.id} does not intersect its source geography.`);
     return {
       type: "Feature",
@@ -439,6 +459,12 @@ const LOCAL_LANDSCAPE_NAMES: Readonly<Record<string, string>> = {
   Veneto: "Venetian Lagoon", "Friuli Venezia Giulia": "Isonzo Gate", Liguria: "Ligurian Coast", "Emilia-Romagna": "Middle Padus",
   Toscana: "Etrurian Uplands", Umbria: "Umbrian Valleys", Marche: "Picenum Coast", Lazio: "Latium", Abruzzo: "Marsian Highlands",
   Molise: "Samnium", Campania: "Campanian Plain", Puglia: "Apulian Coast", Basilicata: "Lucanian Uplands", Calabria: "Bruttian Highlands",
+  // A handful of Greek municipalities carry names of modern national heroes
+  // (Filiki Eteria conspirators, War of Independence commanders, Macedonian
+  // Struggle fighters) — anachronistic for a 270 BCE map, so these are
+  // relabelled with the local landscape they occupy instead.
+  "Emmanouil Pappas": "Kerkini Uplands", "Pavlos Melas": "Western Thessaloniki",
+  "Rigas Feraios": "Pagasetic Coast", "Georgios Karaiskakis": "Ambracian Hinterland", "Nikolaos Skoufas": "Arachthos Valley",
 };
 
 function localLandscapeName(name: string): string {
@@ -598,6 +624,7 @@ const PUNIC_WARS_SETTLEMENTS: readonly HistoricalSettlement[] = [
   { id: "settlement-apollonia-cyrene", name: "Apollonia", provinceId: "lby-10800210b23470577588067", type: "port", coordinate: [21.75, 32.95] },
   { id: "settlement-messana", name: "Messana", provinceId: "ita-72843720b81376294924159-sicily-northeast", type: "capital", coordinate: [15.55, 38.19] },
   { id: "settlement-lilybaeum", name: "Lilybaeum", provinceId: "ita-72843720b81376294924159-sicily-west", type: "port", coordinate: [12.95, 37.80] },
+  { id: "settlement-panormus", name: "Panormus", provinceId: "ita-72843720b81376294924159-sicily-northwest", type: "city", coordinate: [13.36, 38.12] },
   { id: "settlement-genua", name: "Genua", provinceId: "punic-italy-ligurian-coast", type: "port", coordinate: [8.95, 44.41] },
   { id: "settlement-mediolanum", name: "Mediolanum", provinceId: "punic-italy-insubrian-plain", type: "city", coordinate: [9.19, 45.46] },
   { id: "settlement-bononia", name: "Felsina", provinceId: "punic-italy-middle-padus", type: "town", coordinate: [11.34, 44.50] },
