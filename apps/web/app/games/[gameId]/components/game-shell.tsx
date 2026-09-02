@@ -19,16 +19,66 @@ const ZOOM_STEP = 1.35;
 const MEDIUM_THRESHOLD = 2.5;
 const CLOSE_THRESHOLD = 5;
 
+type FlagFaction = "rome" | "carthage" | "gauls" | "generic";
+type FlagCatalogEntry = Readonly<{
+  id: string;
+  factions: readonly FlagFaction[];
+  name: string;
+  description: string;
+  url: string;
+  aspectRatio: number;
+  contentBounds: Readonly<{ x: number; y: number; width: number; height: number }>;
+}>;
+
 const FLAG_CATALOG = [
-  { id: "legio-i-adiutrix", name: "Legio I Adiutrix", description: "Capricorn standard of the First Legion", url: "/maps/legio-i-adiutrix-standard.png", aspectRatio: 1, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
-  { id: "spqr", name: "SPQR standard", description: "The Roman Senate and People", url: "/maps/roman-spqr-banner.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "legio-i-adiutrix", factions: ["rome"], name: "Capricorn standard", description: "Roman legionary Capricorn emblem", url: "/maps/legio-i-adiutrix-standard.png", aspectRatio: 1, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "spqr", factions: ["rome"], name: "SPQR standard", description: "The Roman Senate and People", url: "/maps/roman-spqr-banner.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
   // These PNGs have transparent padding.  The same normalized rectangle is
   // used for rendering and pointer hit-testing, so their combat outline can
   // never activate army details.
-  { id: "eagle", name: "Legion eagle", description: "Gold eagle on crimson", url: "/maps/roman-eagle-banner.png", aspectRatio: 4 / 3, contentBounds: { x: 18 / 160, y: 13 / 120, width: 125 / 160, height: 89 / 120 } },
-  { id: "laurel", name: "Laurel standard", description: "Victory wreath on deep red", url: "/maps/roman-laurel-banner.png", aspectRatio: 4 / 3, contentBounds: { x: 18 / 160, y: 13 / 120, width: 125 / 160, height: 89 / 120 } },
-] as const;
+  { id: "eagle", factions: ["rome"], name: "Legion eagle", description: "Gold eagle on crimson", url: "/maps/roman-eagle-banner.png", aspectRatio: 4 / 3, contentBounds: { x: 18 / 160, y: 13 / 120, width: 125 / 160, height: 89 / 120 } },
+  { id: "laurel", factions: ["rome"], name: "Laurel standard", description: "Victory wreath on deep red", url: "/maps/roman-laurel-banner.png", aspectRatio: 4 / 3, contentBounds: { x: 18 / 160, y: 13 / 120, width: 125 / 160, height: 89 / 120 } },
+  { id: "roman-wolf", factions: ["rome"], name: "Wolf signum", description: "Early Roman animal standard", url: "/maps/roman-wolf-signum.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "roman-boar", factions: ["rome"], name: "Boar signum", description: "Early Roman animal standard", url: "/maps/roman-boar-signum.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "roman-minotaur", factions: ["rome"], name: "Minotaur signum", description: "Early Roman animal standard", url: "/maps/roman-minotaur-signum.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "roman-horse", factions: ["rome"], name: "Horse signum", description: "Early Roman animal standard", url: "/maps/roman-horse-signum.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "roman-fasces", factions: ["rome"], name: "Fasces vexillum", description: "Roman civic emblem on a reconstructed banner", url: "/maps/roman-fasces-vexillum.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "roman-victory", factions: ["rome"], name: "Victory vexillum", description: "Roman Victoria motif on a reconstructed banner", url: "/maps/roman-victory-vexillum.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "carthage-tanit", factions: ["carthage"], name: "Sign of Tanit", description: "Punic religious symbol attested on stelae", url: "/maps/carthaginian-tanit-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "carthage-horse", factions: ["carthage"], name: "Punic horse", description: "Horse motif attested on Carthaginian coinage", url: "/maps/carthaginian-horse-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "carthage-palm", factions: ["carthage"], name: "Punic palm", description: "Palm motif from Punic coin imagery", url: "/maps/carthaginian-palm-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "carthage-crescent", factions: ["carthage"], name: "Crescent and disk", description: "Punic celestial motif on a reconstructed vexillum", url: "/maps/carthaginian-crescent-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "carthage-elephant", factions: ["carthage"], name: "Punic elephant", description: "War elephant motif attested in Punic warfare", url: "/maps/carthaginian-elephant-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "carthage-solar-disk", factions: ["carthage"], name: "Punic solar disk", description: "Solar emblem on a reconstructed Punic banner", url: "/maps/carthaginian-solar-disk-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "carthage-horse-head", factions: ["carthage"], name: "Punic horse head", description: "Horse-head motif attested on Carthaginian coinage", url: "/maps/carthaginian-horse-head-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "carthage-palm-disk", factions: ["carthage"], name: "Palm and disk", description: "Punic palm and celestial imagery", url: "/maps/carthaginian-palm-disk-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "hellenic-owl", factions: ["generic"], name: "Hellenic owl", description: "Athena's owl, widely attested in Greek civic imagery", url: "/maps/generic-hellenic-owl-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "macedonian-sun", factions: ["generic"], name: "Macedonian sun", description: "Argead star emblem", url: "/maps/generic-macedonian-sun-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "hellenic-gorgon", factions: ["generic"], name: "Gorgon emblem", description: "Apotropaic Hellenic shield motif", url: "/maps/generic-gorgon-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "merchant-ship", factions: ["generic"], name: "Merchant ship", description: "Mediterranean maritime standard", url: "/maps/generic-merchant-ship-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "syracusan-dolphin", factions: ["generic"], name: "Syracusan dolphin", description: "Dolphin imagery from Syracusan coinage", url: "/maps/generic-syracusan-dolphin-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "corinthian-pegasus", factions: ["generic"], name: "Corinthian Pegasus", description: "Pegasus motif from Corinthian coinage", url: "/maps/generic-corinthian-pegasus-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "spartan-lambda", factions: ["generic"], name: "Spartan lambda", description: "Lacedaemonian shield emblem", url: "/maps/generic-spartan-lambda-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "samnite-bull", factions: ["generic"], name: "Samnite bull", description: "Italic bull motif from regional coinage", url: "/maps/generic-samnite-bull-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "numidian-horse", factions: ["generic"], name: "Numidian horse", description: "North African cavalry motif", url: "/maps/generic-numidian-horse-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "iberian-horseman", factions: ["generic"], name: "Iberian horseman", description: "Horseman motif from Iberian coinage", url: "/maps/generic-iberian-horseman-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "sicilian-triskelion", factions: ["generic"], name: "Sicilian triskelion", description: "Ancient Sicilian three-legged emblem", url: "/maps/generic-sicilian-triskelion-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "etruscan-sphinx", factions: ["generic"], name: "Etruscan sphinx", description: "Etruscan decorative motif on a reconstructed banner", url: "/maps/generic-etruscan-sphinx-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "gallic-boar", factions: ["gauls"], name: "Gallic boar", description: "Celtic boar standard based on surviving martial imagery", url: "/maps/gallic-boar-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+  { id: "gallic-carnyx", factions: ["gauls"], name: "Gallic carnyx", description: "War-horn standard inspired by Celtic carnyces", url: "/maps/gallic-carnyx-standard.png", aspectRatio: 4 / 3, contentBounds: { x: 0, y: 0, width: 1, height: 1 } },
+] as const satisfies readonly FlagCatalogEntry[];
 type FlagId = (typeof FLAG_CATALOG)[number]["id"];
+
+function flagsForPolity(polityId: string) {
+  return FLAG_CATALOG.filter((flag) => {
+    const factions = flag.factions as readonly FlagFaction[];
+    return factions.includes(polityId as FlagFaction) || factions.includes("generic");
+  });
+}
+
+function defaultFlagForPolity(polityId: string) {
+  return flagsForPolity(polityId)[0] ?? FLAG_CATALOG.find((flag) => flag.id === "merchant-ship")!;
+}
 
 function deriveZoomBand(scale: number): ZoomBand {
   if (scale >= CLOSE_THRESHOLD) return "close";
@@ -106,7 +156,7 @@ export function GameShell({
       } catch {
         // Storage is optional; the scenario's current standard still renders.
       }
-      const flag = FLAG_CATALOG.find((candidate) => candidate.id === (savedId ?? force.flagAssetId));
+      const flag = flagsForPolity(force.ownerPolityId).find((candidate) => candidate.id === (savedId ?? force.flagAssetId)) ?? defaultFlagForPolity(force.ownerPolityId);
       if (flag) savedFlags.set(force.forceId, { url: flag.url, aspectRatio: flag.aspectRatio, contentBounds: flag.contentBounds });
     }
     setForceFlagUrls(savedFlags);
@@ -114,7 +164,7 @@ export function GameShell({
 
   const selectForceFlag = useCallback((flagId: FlagId) => {
     if (!flagCatalogForce) return;
-    const flag = FLAG_CATALOG.find((candidate) => candidate.id === flagId);
+    const flag = flagsForPolity(flagCatalogForce.ownerPolityId).find((candidate) => candidate.id === flagId);
     if (!flag) return;
     setForceFlagUrls((current) => new Map(current).set(flagCatalogForce.forceId, { url: flag.url, aspectRatio: flag.aspectRatio, contentBounds: flag.contentBounds }));
     try {
@@ -272,7 +322,7 @@ export function GameShell({
           {flagCatalogForce && <div className="map-flag-catalog-backdrop" role="presentation" onMouseDown={() => setFlagCatalogForce(null)}>
             <section className="map-flag-catalog" role="dialog" aria-modal="true" aria-labelledby="flag-catalog-title" onMouseDown={(event) => event.stopPropagation()}>
               <div className="map-flag-catalog-header"><div><p>Army standard</p><h2 id="flag-catalog-title">Choose a banner for {flagCatalogForce.name}</h2></div><button type="button" className="map-force-details-close" onClick={() => setFlagCatalogForce(null)} aria-label="Close flag catalog">×</button></div>
-              <div className="map-flag-options">{FLAG_CATALOG.map((flag) => <button key={flag.id} type="button" className="map-flag-option" onClick={() => selectForceFlag(flag.id)}><img src={flag.url} alt="" decoding="sync" /><span><strong>{flag.name}</strong><small>{flag.description}</small></span></button>)}</div>
+              <div className="map-flag-options">{flagsForPolity(flagCatalogForce.ownerPolityId).map((flag) => <button key={flag.id} type="button" className="map-flag-option" onClick={() => selectForceFlag(flag.id)}><img src={flag.url} alt="" decoding="sync" /><span><strong>{flag.name}</strong><small>{flag.description}</small></span></button>)}</div>
             </section>
           </div>}
           {tooltip && (

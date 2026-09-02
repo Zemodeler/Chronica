@@ -11,7 +11,7 @@ import { deriveForceConflictStatuses } from "./map-conflict-state";
 import { armyStandardBounds, armyStandardHitBounds } from "./army-standard";
 
 type ZoomBand = "far" | "medium" | "close";
-export interface ForceMapDetails { readonly forceId: string; readonly name: string; readonly commanderLabel: string | null; readonly statusLabel: string; readonly strengthLabel: string; readonly locationLabel: string; readonly destinationLabel: string; readonly progressBps: number | null; readonly movementState: "moving" | "retreating" | null; }
+export interface ForceMapDetails { readonly forceId: string; readonly ownerPolityId: string; readonly name: string; readonly commanderLabel: string | null; readonly statusLabel: string; readonly strengthLabel: string; readonly locationLabel: string; readonly destinationLabel: string; readonly progressBps: number | null; readonly movementState: "moving" | "retreating" | null; }
 export interface ForceFlagAsset {
   readonly url: string;
   readonly aspectRatio: number;
@@ -93,8 +93,8 @@ export function GeoMap({ geoJson, overlay, selectedProvinceId, zoomBand, scale, 
       const destination = force.movement?.destination;
       const destinationLabel = destination === undefined ? "Holding position" : world.provinces.find((province) => provinceContains(province, destination))?.name ?? coordinateLabel(destination);
       const conflict = conflictByForceId.get(force.forceId);
-      const details: ForceMapDetails = { forceId: force.forceId, name: force.name, commanderLabel: force.commanderLabel, statusLabel: conflict?.statusLabel ?? "Not in combat", strengthLabel: force.strengthLabel, locationLabel, destinationLabel, progressBps: force.movement?.progressBps ?? null, movementState: force.movement?.state ?? null };
-      const flagAsset = forceFlagUrls.get(force.forceId) ?? { url: "/maps/roman-spqr-banner.png", aspectRatio: 4 / 3 };
+      const details: ForceMapDetails = { forceId: force.forceId, ownerPolityId: force.ownerPolityId, name: force.name, commanderLabel: force.commanderLabel, statusLabel: conflict?.statusLabel ?? "Not in combat", strengthLabel: force.strengthLabel, locationLabel, destinationLabel, progressBps: force.movement?.progressBps ?? null, movementState: force.movement?.state ?? null };
+      const flagAsset = forceFlagUrls.get(force.forceId) ?? { url: "/maps/generic-merchant-ship-standard.png", aspectRatio: 4 / 3 };
       const activate = () => onForceClick(details);
       return <g key={force.forceId} className="map-army-token" role="button" tabIndex={0} aria-label={`View ${force.name}`} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); } }}>
         <title>{force.name}</title>

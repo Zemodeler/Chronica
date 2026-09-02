@@ -116,8 +116,6 @@ const GARAMANTIAN_PROVINCES = new Set([
   "lby-10800210b20515568933500", "lby-10800210b26344076542723", "lby-10800210b94224648391824",
   "lby-10800210b80153830865201", "lby-10800210b2800497533490",
 ]);
-const TRANSALPINE_CELTIC_PROVINCES = new Set(["deu-10402087b60055985875400", "deu-10402087b60477050509260"]);
-
 const GREEK_CONTROLLERS: Readonly<Record<string, string>> = {
   "grc-93993887b93147517098288": "macedon",
   "grc-93993887b75841959134679": "epirus",
@@ -135,6 +133,11 @@ function controllerFor(provinceId: string): string | null {
   if (provinceId.startsWith("punic-gaul-")) return `gaul-${provinceId.slice("punic-gaul-".length)}`;
   if (provinceId.startsWith("punic-britain-")) return `britain-${provinceId.slice("punic-britain-".length)}`;
   if (provinceId.startsWith("punic-iberia-")) return CARTHAGINIAN_IBERIAN_REGIONS.has(provinceId) ? "carthage" : `iberia-${provinceId.slice("punic-iberia-".length)}`;
+  if (provinceId.startsWith("punic-illyria-")) return `illyria-${provinceId.slice("punic-illyria-".length)}`;
+  if (provinceId.startsWith("punic-thrace-")) return `thrace-${provinceId.slice("punic-thrace-".length)}`;
+  if (provinceId.startsWith("punic-belgica-")) return `belgica-${provinceId.slice("punic-belgica-".length)}`;
+  if (provinceId.startsWith("punic-low-countries-")) return `low-countries-${provinceId.slice("punic-low-countries-".length)}`;
+  if (provinceId.startsWith("punic-germania-")) return `germania-${provinceId.slice("punic-germania-".length)}`;
   if (provinceId.startsWith("prt-")) return "lusitanians";
   if (provinceId.startsWith("mar-")) return CARTHAGINIAN_MAURETANIAN_COAST.has(provinceId) ? "carthage" : "mauretanian-peoples";
   if (provinceId.startsWith("dza-")) return GAETULIAN_PROVINCES.has(provinceId) ? "gaetuli" : NUMIDIAN_PROVINCES.has(provinceId) ? "numidian-kingdoms" : "carthage";
@@ -142,7 +145,6 @@ function controllerFor(provinceId: string): string | null {
   if (provinceId.startsWith("lby-")) return PTOLEMAIC_CYRENAICA_PROVINCES.has(provinceId) ? "ptolemaic-cyrenaica" : GARAMANTIAN_PROVINCES.has(provinceId) ? "garamantes" : "carthage";
   if (provinceId.startsWith("che-")) return "helvetian-peoples";
   if (provinceId.startsWith("aut-")) return "noric-communities";
-  if (TRANSALPINE_CELTIC_PROVINCES.has(provinceId)) return "transalpine-celts";
   if (provinceId === "ita-72843720b81376294924159" || provinceId === "fra-19338628b22604203385446" || CARTHAGINIAN_IBERIAN_REGIONS.has(provinceId)) return "carthage";
   if (provinceId.startsWith("ita-72843720b81376294924159-sicily-")) {
     if (provinceId.endsWith("sicily-southeast")) return "syracuse";
@@ -151,21 +153,19 @@ function controllerFor(provinceId: string): string | null {
   }
   const greek = GREEK_CONTROLLERS[provinceId];
   if (greek !== undefined) return greek;
-  if (provinceId.startsWith("alb-") || provinceId.startsWith("mne-") || provinceId.startsWith("hrv-") || provinceId.startsWith("bih-") || provinceId.startsWith("svn-")) return "illyrian-communities";
   if (provinceId.startsWith("mkd-")) return "macedon";
-  if (provinceId.startsWith("bgr-") || provinceId.startsWith("rou-") || provinceId.startsWith("srb-")) return "thracian-communities";
   return null;
 }
 
 function confidenceFor(provinceId: string): HistoricalConfidence {
   if (provinceId.startsWith("punic-britain-")) return "cautious";
-  if (provinceId.startsWith("punic-gaul-") || provinceId.startsWith("punic-iberia-")) return "medium";
+  if (provinceId.startsWith("punic-gaul-") || provinceId.startsWith("punic-iberia-") || provinceId.startsWith("punic-illyria-") || provinceId.startsWith("punic-thrace-") || provinceId.startsWith("punic-belgica-") || provinceId.startsWith("punic-low-countries-") || provinceId.startsWith("punic-germania-")) return "medium";
   return "high";
 }
 
 function nameFor(controllerPolityId: string, provinceName: string): string {
   return POLITY_NAMES[controllerPolityId]
-    ?? (controllerPolityId.startsWith("gaul-") || controllerPolityId.startsWith("iberia-") || controllerPolityId.startsWith("britain-") ? provinceName : controllerPolityId);
+    ?? (controllerPolityId.startsWith("gaul-") || controllerPolityId.startsWith("iberia-") || controllerPolityId.startsWith("britain-") || controllerPolityId.startsWith("illyria-") || controllerPolityId.startsWith("thrace-") || controllerPolityId.startsWith("belgica-") || controllerPolityId.startsWith("low-countries-") || controllerPolityId.startsWith("germania-") ? provinceName : controllerPolityId);
 }
 
 /**

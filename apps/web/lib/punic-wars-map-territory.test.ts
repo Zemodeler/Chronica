@@ -35,6 +35,17 @@ describe("Punic Wars opening political map", () => {
     expect(controller.get("punic-gaul-aulerci-diablintes")).toBe("gaul-aulerci-diablintes");
   });
 
+  it("gives the newly partitioned northern and Balkan territories distinct community owners", () => {
+    const overlay = punicWarsOpeningOverlay(0);
+    const controller = new Map(overlay.provinces.map((province) => [province.provinceId, province.controllerPolityId]));
+    expect(controller.get("punic-illyria-dardani")).toBe("illyria-dardani");
+    expect(controller.get("punic-thrace-odrysians")).toBe("thrace-odrysians");
+    expect(controller.get("punic-belgica-menapii")).toBe("belgica-menapii");
+    expect(controller.get("punic-low-countries-batavi")).toBe("low-countries-batavi");
+    expect(controller.get("punic-germania-cherusci")).toBe("germania-cherusci");
+    expect(overlay.polities.map((polity) => polity.name)).toEqual(expect.arrayContaining(["Dardani", "Odrysians", "Menapii", "Batavi", "Cherusci"]));
+  });
+
   it("gives the African and Alpine map actors explicit owners and settlement markers", () => {
     const overlay = punicWarsOpeningOverlay(0);
     const controller = new Map(overlay.provinces.map((province) => [province.provinceId, province.controllerPolityId]));

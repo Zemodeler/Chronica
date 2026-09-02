@@ -31,6 +31,11 @@ describe("Punic Wars historical GeoJSON", () => {
     expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-italy-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.italy);
     expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-gaul-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.gaul);
     expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-iberia-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.iberia);
+    expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-illyria-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.illyria);
+    expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-thrace-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.thrace);
+    expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-belgica-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.belgica);
+    expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-low-countries-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.lowCountries);
+    expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-germania-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.germania);
     expect(punicWarsGeoJson.features.filter((feature) => feature.id.startsWith("punic-britain-") && feature.properties.kind === "province")).toHaveLength(PUNIC_WARS_REGION_COUNTS.england + PUNIC_WARS_REGION_COUNTS.scotland + PUNIC_WARS_REGION_COUNTS.wales);
 
     const italianSource = new Set(["ita-72843720b99597932318450", "ita-72843720b59566147937015", "ita-72843720b863019116732", "ita-72843720b88210905209841"]);

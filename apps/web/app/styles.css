@@ -440,11 +440,13 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .shell-top-bar-exit { color: var(--text-muted); font-size: .85rem; text-decoration: none; }
 .shell-top-bar-exit:hover { color: var(--text); }
 
+@keyframes game-shell-enter { from { opacity: 0; } to { opacity: 1; } }
 .game-shell {
   position: fixed;
   inset: 52px 0 0 0;
   overflow: hidden;
   background: var(--background);
+  animation: game-shell-enter 0.5s ease both;
 }
 .game-shell-map {
   width: 100%;

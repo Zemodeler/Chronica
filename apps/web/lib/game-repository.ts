@@ -58,11 +58,11 @@ import {
   type PublicScenarioSummary,
 } from "@chronica/db";
 import { demoMaterialView } from "./demo-material-view";
-import { europeNorthAfricaGeoJson } from "./europe-north-africa-geojson";
-import { FIRST_PUNIC_CARTHAGINIAN_OVERLAY, FIRST_PUNIC_SICILY_OVERLAY } from "./first-punic-map-territory";
 import { builtInScenarioMap } from "./built-in-scenario-maps";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { projectNewsView, projectWorldView } from "./world-view";
+import { punicWarsGeoJson } from "./punic-wars-geojson";
+import { punicWarsOpeningOverlay } from "./punic-wars-map-territory";
 
 /**
  * The preserved, resettable product demo.  This is deliberately distinct from
@@ -342,108 +342,14 @@ function fixtureConnectedPlayerCount(): number {
   return Math.max(1, state.lobby.characters.filter((character) => character.claimedByPlayerId !== null).length);
 }
 
-const DEMO_POLITY_NAMES: Readonly<Record<string, string>> = {
-  rome: "Roman Republic",
-  carthage: "Carthaginian Empire",
-  syracuse: "Kingdom of Syracuse",
-  gauls: "Gallic Tribes",
-  macedonia: "Kingdom of Macedonia",
-  "greek-states": "Greek City-States",
-  illyrians: "Illyrian Tribes",
-  iberians: "Iberian Peoples",
-  germanic: "Germanic Tribes",
-  nordic: "Nordic Peoples",
-  "eastern-tribes": "Eastern Tribes",
-  baltic: "Baltic Peoples",
-  celtic: "Celtic Tribes",
-  "local-tribes": "Local Tribes",
-  savoy: "Duchy of Savoy",
-  milan: "Duchy of Milan",
-  venice: "Republic of Venice",
-  genoa: "Republic of Genoa",
-  florence: "Florentine Republic",
-  papacy: "Papal States",
-  naples: "Kingdom of Naples",
-};
-
-const DEMO_OVERLAY_PROVINCES: DynamicMapOverlay["provinces"] = [
-  { provinceId: "ita-72843720b99597932318450", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "far" },
-  { provinceId: "ita-72843720b59566147937015", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "far" },
-  { provinceId: "ita-72843720b863019116732", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "focus" },
-  { provinceId: "ita-72843720b88210905209841", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "calibration", tier: "far" },
-  ...FIRST_PUNIC_CARTHAGINIAN_OVERLAY,
-  ...FIRST_PUNIC_SICILY_OVERLAY,
-];
-
 function demoMapOverlay(revision: number): DynamicMapOverlay {
-  const polityIds = new Set(DEMO_OVERLAY_PROVINCES.flatMap((p) => p.controllerPolityId === null ? [] : [p.controllerPolityId]));
+  const opening = punicWarsOpeningOverlay(revision);
   return {
     revision,
-    polities: [...polityIds].map((polityId) => ({ polityId, name: DEMO_POLITY_NAMES[polityId] ?? polityId })),
-    politicalRelations: [],
-    provinces: DEMO_OVERLAY_PROVINCES,
-    settlements: [
-      {
-        settlementId: "settlement-rome",
-        provinceId: "ita-72843720b863019116732",
-        anchorFeatureId: "settlement-rome",
-        name: "Rome",
-        kind: "city",
-        controllerPolityId: "rome",
-        capitalPolityId: "rome",
-        importance: 100,
-        underSiege: false,
-        damaged: false,
-      },
-      {
-        settlementId: "settlement-naples",
-        provinceId: "ita-72843720b88210905209841",
-        anchorFeatureId: "settlement-naples",
-        name: "Naples",
-        kind: "city",
-        controllerPolityId: "rome",
-        capitalPolityId: null,
-        importance: 80,
-        underSiege: false,
-        damaged: false,
-      },
-      {
-        settlementId: "settlement-syracuse",
-        provinceId: "ita-72843720b81376294924159-sicily-southeast",
-        anchorFeatureId: "settlement-syracuse",
-        name: "Syracuse",
-        kind: "city",
-        controllerPolityId: "syracuse",
-        capitalPolityId: "syracuse",
-        importance: 80,
-        underSiege: false,
-        damaged: false,
-      },
-      {
-        settlementId: "settlement-agrigentum-fort",
-        provinceId: "ita-72843720b81376294924159-sicily-west",
-        anchorFeatureId: "settlement-agrigentum-fort",
-        name: "Fort Agrigentum",
-        kind: "fortress",
-        controllerPolityId: "carthage",
-        capitalPolityId: null,
-        importance: 50,
-        underSiege: false,
-        damaged: false,
-      },
-      {
-        settlementId: "settlement-caralis",
-        provinceId: "ita-72843720b81376294924159",
-        anchorFeatureId: "settlement-caralis",
-        name: "Caralis",
-        kind: "city",
-        controllerPolityId: "carthage",
-        capitalPolityId: null,
-        importance: 65,
-        underSiege: true,
-        damaged: false,
-      },
-    ],
+    polities: opening.polities,
+    politicalRelations: opening.politicalRelations,
+    provinces: opening.provinces,
+    settlements: opening.settlements,
     forces: [
       {
         forceId: demoMaterialView.forces[0]!.id,
@@ -667,7 +573,7 @@ export const fixtureGameRepository: GameRepository = {
       totalPlayers: connectedPlayers,
       submittedPlayers: Math.min(state.world.submittedPlayers, connectedPlayers),
     };
-    const mapGeoJson = europeNorthAfricaGeoJson;
+    const mapGeoJson = punicWarsGeoJson;
     const mapOverlay = demoMapOverlay(state.revision);
     return omitGeo ? { ...world, mapOverlay } : { ...world, mapGeoJson, mapOverlay };
   },
