@@ -91,19 +91,31 @@ describe("Europe and North Africa demo map features", () => {
     expect(europeNorthAfricaGeoJson.features.some((feature) => feature.id === "grc-local-53547021B9274256728427")).toBe(true);
   });
 
-  it("removes only the remaining sub-scale Macedonian and Acarnanian regions", () => {
+  it("condenses the Acarnanian islands, keeping the rest of the southern/central mainland at municipality scale", () => {
     const greekProvinceNames = europeNorthAfricaGeoJson.features
       .filter((feature) => feature.id.startsWith("grc-local-") && feature.properties.kind === "province")
       .map((feature) => feature.properties.name);
 
     expect(greekProvinceNames).toEqual(expect.arrayContaining([
-      "Thessaloniki",
       "Acarnanian Islands",
-      "Samothrakis",
       "Pineios",
-      "Arta",
     ]));
-    expect(europeNorthAfricaGeoJson.features.some((feature) => feature.id === "grc-local-53547021B66289561682340")).toBe(false);
     expect(europeNorthAfricaGeoJson.features.some((feature) => feature.id === "grc-local-53547021B5259778029298")).toBe(false);
+  });
+
+  it("condenses Macedon, Thessaly, Epirus, and Aegean Thrace into one broad province apiece", () => {
+    const greekProvinces = europeNorthAfricaGeoJson.features
+      .filter((feature) => feature.id.startsWith("grc-local-") && feature.properties.kind === "province");
+    const greekProvinceNames = greekProvinces.map((feature) => feature.properties.name);
+
+    expect(greekProvinceNames).toEqual(expect.arrayContaining(["Macedon", "Thessaly", "Epirus", "Aegean Thrace"]));
+    // The individual modern municipalities that used to stand for these kingdoms/leagues are gone.
+    expect(greekProvinceNames).not.toEqual(expect.arrayContaining(["Thessaloniki", "Samothrakis", "Arta", "Trikala", "Ioannina"]));
+    // The merge produced a single contiguous Macedon (its geometry may still
+    // be a MultiPolygon because Chalkidiki's fingers and offshore islets
+    // aren't edge-adjacent to the mainland ring).
+    const macedon = greekProvinces.find((feature) => feature.properties.name === "Macedon");
+    expect(macedon?.geometry.type === "Polygon" || macedon?.geometry.type === "MultiPolygon").toBe(true);
+    expect(europeNorthAfricaGeoJson.features.some((feature) => feature.id === "grc-local-53547021B66289561682340")).toBe(false);
   });
 });

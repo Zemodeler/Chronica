@@ -64,3 +64,19 @@ export function derivePoliticalLabels(state: PoliticalMapState, pixelsPerDegree?
   }
   return labels;
 }
+
+/**
+ * The largest on-screen font size at which a polity's own territory name is
+ * rendered (a fragmented empire has one label per landmass component; the
+ * largest is the one a viewer actually reads as "the kingdom's name").
+ * Used to cap settlement labels so a city's name can never outgrow the name
+ * of the kingdom it sits in — see drawSettlements in map-canvas-entities.ts.
+ */
+export function derivePolityLabelFontSizes(state: PoliticalMapState, pixelsPerDegree: number): Map<string, number> {
+  const sizes = new Map<string, number>();
+  for (const label of derivePoliticalLabels(state, pixelsPerDegree)) {
+    const current = sizes.get(label.polityId);
+    if (current === undefined || label.fontSize > current) sizes.set(label.polityId, label.fontSize);
+  }
+  return sizes;
+}

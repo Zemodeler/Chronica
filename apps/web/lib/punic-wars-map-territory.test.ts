@@ -70,6 +70,47 @@ describe("Punic Wars opening political map", () => {
     ]));
   });
 
+  it("gives the southern Greek mainland and the Aegean their own fragmented polities rather than one catch-all bucket", () => {
+    const overlay = punicWarsOpeningOverlay(0);
+    const controller = new Map(overlay.provinces.map((province) => [province.provinceId, province.controllerPolityId]));
+    // Central/southern mainland leagues and city-states carved out of the old achaean-league catch-all.
+    expect(controller.get("punic-greece-grc-local-53547021b76628339296380")).toBe("argos"); // Argos-Mykines
+    expect(controller.get("punic-greece-grc-local-53547021b7583828069802")).toBe("corinthian-league"); // Corinth
+    expect(controller.get("punic-greece-grc-local-53547021b21928215171810")).toBe("arcadian-league"); // Tripoli
+    expect(controller.get("punic-greece-grc-local-53547021b62210225540795")).toBe("phocian-league"); // Delphi
+    expect(controller.get("punic-greece-grc-local-53547021b4929221298038")).toBe("euboean-cities"); // Chalcis
+    // The Aegean and Ionian Sea are fragmented into several island polities, not one "hellenic-islanders" blob.
+    expect(controller.get("punic-greece-grc-local-53547021b4893314686518")).toBe("ionian-islands"); // Corfu
+    expect(controller.get("punic-greece-grc-local-53547021b91453036712640")).toBe("cycladic-islanders"); // Naxos and Lesser Cyclades
+    expect(controller.get("punic-greece-grc-local-53547021b33259065854290")).toBe("dodecanese-islanders"); // Rhodes
+    expect(controller.get("punic-greece-grc-local-53547021b48314635979132")).toBe("aeolis-communities"); // Lesbos
+    expect(controller.get("punic-greece-grc-local-53547021b1583318227364")).toBe("ionia-communities"); // Samos
+    expect(controller.get("punic-greece-grc-local-53547021b22915983963117")).toBe("cretan-cities-east"); // Heraklion
+    expect(controller.get("punic-greece-grc-local-53547021b84334822638882")).toBe("cretan-cities-west"); // Chania
+    const greekPolities = new Set(PUNIC_WARS_CONTROL_MANIFEST.filter((record) => record.provinceId.startsWith("punic-greece-")).map((record) => record.controllerPolityId));
+    expect(greekPolities.size).toBeGreaterThan(20);
+    expect(overlay.polities.map((polity) => polity.name)).toEqual(expect.arrayContaining(["Argos", "Corinthian League", "Arcadian League", "Phocian League", "Euboean cities"]));
+  });
+
+  it("merges Macedon, Thessaly, Epirus, and Aegean Thrace into single broad provinces instead of dozens of modern municipalities", () => {
+    const overlay = punicWarsOpeningOverlay(0);
+    const provinceIds = new Set(overlay.provinces.map((province) => province.provinceId));
+    const byName = new Map(punicWarsGeoJson.features.filter((feature) => feature.properties.kind === "province" && feature.id.startsWith("punic-greece-")).map((feature) => [feature.properties.name, feature.id]));
+    expect(byName.get("Macedon")).toBe("punic-greece-grc-local-53547021b48713005805080");
+    expect(byName.get("Thessaly")).toBe("punic-greece-grc-local-53547021b50324925273652");
+    expect(byName.get("Epirus")).toBe("punic-greece-grc-local-53547021b74781806510115");
+    expect(byName.get("Aegean Thrace")).toBe("punic-greece-grc-local-53547021b38986077120400");
+    const controller = new Map(overlay.provinces.map((province) => [province.provinceId, province.controllerPolityId]));
+    expect(controller.get("punic-greece-grc-local-53547021b48713005805080")).toBe("macedon");
+    expect(controller.get("punic-greece-grc-local-53547021b50324925273652")).toBe("thessalian-league");
+    expect(controller.get("punic-greece-grc-local-53547021b74781806510115")).toBe("epirus");
+    expect(controller.get("punic-greece-grc-local-53547021b38986077120400")).toBe("thracian-communities");
+    // Absorbed municipalities (Trikala into Thessaly, Ioannina's Zitsa into Epirus, Thessaloniki's Kalamaria into Macedon) no longer exist as separate provinces.
+    expect(provinceIds.has("punic-greece-grc-local-53547021b2020511099741")).toBe(false);
+    expect(provinceIds.has("punic-greece-grc-local-53547021b33840684001600")).toBe(false);
+    expect(provinceIds.has("punic-greece-grc-local-53547021b82210761635723")).toBe(false);
+  });
+
   it("consolidates Germania, Iberia, and Romania into attested regional powers", () => {
     const controller = new Map(PUNIC_WARS_CONTROL_MANIFEST.map((record) => [record.provinceId, record.controllerPolityId]));
     expect(controller.get("punic-germania-teutoburg")).toBe("germania-cherusci");
