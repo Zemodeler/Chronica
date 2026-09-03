@@ -7,16 +7,29 @@ const italianPolities = [
   ["ligurians", "Ligurian peoples"], ["insubres", "Insubres"], ["boii", "Boii"], ["cenomani", "Cenomani"], ["veneti", "Veneti"], ["etruscan-cities", "Etruscan cities"],
 ] as const;
 
+// Ids and boundaries match the rendered map's own Italy partition exactly
+// (apps/web/lib/punic-wars-geojson.ts's ITALY_GROUNDED_TERRITORIES, 15 real
+// modern-region polygons) rather than a separately authored, finer tribal
+// breakdown. A gameplay province with no matching map polygon has no
+// position to render at -- see the army-vanishing and mismatched-label bugs
+// this replaced. Where several old tribal provinces shared one real region
+// (e.g. three Liguria provinces, Bruttium and Rhegium), they're merged into
+// one gameplay province here too, keeping each region's original controller.
 const italy = [
-  ["punic-italy-liguria-west", "Western Liguria", "ligurians"], ["punic-italy-liguria-genua", "Genoate Liguria", "ligurians"], ["punic-italy-liguria-east", "Eastern Liguria", "ligurians"],
-  ["punic-italy-insubria-ticinum", "Insubria of Ticinum", "insubres"], ["punic-italy-insubria-mediolanum", "Insubria of Mediolanum", "insubres"],
-  ["punic-italy-boii-rhenus", "Boii of the Rhenus", "boii"], ["punic-italy-boii-felsina", "Boii of Felsina", "boii"],
-  ["punic-italy-cenomani-brixia", "Cenomani of Brixia", "cenomani"], ["punic-italy-cenomani-mincius", "Cenomani of the Mincius", "cenomani"],
-  ["punic-italy-veneti-ateste", "Veneti of Ateste", "veneti"], ["punic-italy-veneti-patavium", "Veneti of Patavium", "veneti"], ["punic-italy-veneti-adria", "Veneti of Adria", "veneti"],
-  ["punic-italy-etruria-north", "Northern Etruria", "etruscan-cities"], ["punic-italy-etruria-central", "Central Etruria", "etruscan-cities"], ["punic-italy-etruria-south", "Southern Etruria", "etruscan-cities"],
-  ["punic-italy-latium", "Latium", "rome"], ["punic-italy-sabines", "Sabines", "rome"], ["punic-italy-umbrians", "Umbria", "rome"], ["punic-italy-picentes", "Picenum", "rome"],
-  ["punic-italy-marsi", "Marsi and Paeligni", "rome"], ["punic-italy-campania", "Campania", "rome"], ["punic-italy-samnium", "Samnium", "rome"], ["punic-italy-daunians", "Daunia", "rome"], ["punic-italy-peucetians", "Peucetia", "rome"],
-  ["punic-italy-messapians", "Messapia", "rome"], ["punic-italy-tarentines", "Tarentum", "rome"], ["punic-italy-lucanians", "Lucania", "rome"], ["punic-italy-bruttians", "Bruttium", "rome"], ["punic-italy-rhegines", "Rhegium", "rome"],
+  ["punic-italy-ligurian-coast", "Liguria", "ligurians"],
+  ["punic-italy-insubrian-plain", "Insubria", "insubres"],
+  ["punic-italy-middle-padus", "Boii", "boii"],
+  ["punic-italy-venetian-lagoon", "Veneti", "veneti"],
+  ["punic-italy-etrurian-uplands", "Etruria", "etruscan-cities"],
+  ["punic-italy-umbrian-valleys", "Umbria", "rome"],
+  ["punic-italy-picenum-coast", "Picenum", "rome"],
+  ["punic-italy-latium", "Latium", "rome"],
+  ["punic-italy-marsian-highlands", "Marsi and Paeligni", "rome"],
+  ["punic-italy-samnium", "Samnium", "rome"],
+  ["punic-italy-campanian-plain", "Campania", "rome"],
+  ["punic-italy-apulian-coast", "Apulia", "rome"],
+  ["punic-italy-lucanian-uplands", "Lucania", "rome"],
+  ["punic-italy-bruttian-highlands", "Bruttium", "rome"],
 ] as const;
 
 const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
@@ -29,7 +42,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
       { id: "mountain-pass", label: "Mountain passes", allowedCrossings: ["pass"], water: false },
       { id: "desert-steppe", label: "Desert and steppe", allowedCrossings: ["land"], water: false },
     ],
-    provinceCount: { min: 35, max: 35 },
+    provinceCount: { min: 19, max: 19 },
   },
   warfare: {
     troopCategories: [{ id: "infantry", label: "Infantry", combatWeightBps: 10_000, steadinessBps: 7_000, mobilityBps: 5_000 }],
@@ -44,7 +57,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
   continuity: { startingSeatCount: 1, extraPrincipalsPerPlayer: 1 },
   knowledge: [
     { id: "mamertine-crisis", summary: "In 270 BCE Hieron II's Syracuse contests the Mamertines of Messana. Rome and Carthage remain at peace, but the strait is strategically volatile.", subjectIds: ["syracuse", "mamertines", "rome", "carthage"], provinceIds: ["ita-72843720b81376294924159-sicily-northeast", "ita-72843720b81376294924159-sicily-southeast"] },
-    { id: "roman-italian-control", summary: "Rome directly controls its Italian client territories at the opening while their local regional names remain on the map.", subjectIds: ["rome"], provinceIds: ["punic-italy-latium", "punic-italy-samnium", "punic-italy-lucanians", "punic-italy-bruttians"] },
+    { id: "roman-italian-control", summary: "Rome directly controls its Italian client territories at the opening while their local regional names remain on the map.", subjectIds: ["rome"], provinceIds: ["punic-italy-latium", "punic-italy-samnium", "punic-italy-lucanian-uplands", "punic-italy-bruttian-highlands"] },
   ],
 });
 
@@ -62,7 +75,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
     ],
     politicalRelations: [],
     provinces: [
-      ...italy.map(([id, name, controllerPolityId]) => ({ id, name, formerNames: [], terrainId: id === "punic-italy-latium" || id === "punic-italy-campania" ? "coastal-plain" : "hills", settlements: id === "punic-italy-latium" ? [{ id: "settlement-rome", name: "Rome", kind: "city", provinceId: id, controllerPolityId: "rome", size: 100, fortificationLevel: 6 }] : [], controllerPolityId, controlFirmnessBps: controllerPolityId === "rome" ? 9_000 : 7_000, tier: "far" as const })),
+      ...italy.map(([id, name, controllerPolityId]) => ({ id, name, formerNames: [], terrainId: id === "punic-italy-latium" || id === "punic-italy-campanian-plain" ? "coastal-plain" : "hills", settlements: id === "punic-italy-latium" ? [{ id: "settlement-rome", name: "Rome", kind: "city", provinceId: id, controllerPolityId: "rome", size: 100, fortificationLevel: 6 }] : [], controllerPolityId, controlFirmnessBps: controllerPolityId === "rome" ? 9_000 : 7_000, tier: "far" as const })),
       { id: "tun-13205935b88806172084765", name: "Carthaginian heartland", formerNames: [], terrainId: "coastal-plain", settlements: [{ id: "settlement-carthage", name: "Carthage", kind: "city", provinceId: "tun-13205935b88806172084765", controllerPolityId: "carthage", size: 100, fortificationLevel: 6 }], controllerPolityId: "carthage", controlFirmnessBps: 9_000, tier: "far" },
       { id: "ita-72843720b81376294924159-sicily-west", name: "Lilybaeum and western Sicily", formerNames: [], terrainId: "coastal-plain", settlements: [], controllerPolityId: "carthage", controlFirmnessBps: 8_500, tier: "focus" },
       { id: "ita-72843720b81376294924159-sicily-northwest", name: "Panormus and the north-west", formerNames: [], terrainId: "hills", settlements: [], controllerPolityId: "carthage", controlFirmnessBps: 8_000, tier: "focus" },

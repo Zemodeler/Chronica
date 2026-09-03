@@ -12,6 +12,7 @@ export interface DispatchEntryInput {
   readonly body: string;
   readonly playerRelevance: "high" | "medium" | "low" | "none";
   readonly knowledgeStatus: ChronicleKnowledgeStatus;
+  readonly consequences: readonly string[];
 }
 
 export interface CurrentDispatch {
@@ -45,11 +46,14 @@ export function buildCurrentDispatch(input: {
 
   const headline = ranked[0]?.title ?? input.authorityChangesForPlayer[0] ?? "A quiet turn passes.";
 
+  // The strip is a factual brief, not a second copy of the prose -- only
+  // authority changes and concrete direct consequences belong here. A title
+  // (often a truncated body) reads as garbled filler alongside real facts.
   const items: string[] = [];
   let used = headline.length;
   const candidates = [
     ...input.authorityChangesForPlayer,
-    ...ranked.filter((entry) => entry.playerRelevance !== "none").map((entry) => entry.title),
+    ...ranked.filter((entry) => entry.playerRelevance !== "none").flatMap((entry) => entry.consequences),
   ];
   for (const candidate of candidates) {
     if (items.includes(candidate)) continue;

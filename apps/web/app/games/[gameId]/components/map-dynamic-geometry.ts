@@ -1,4 +1,4 @@
-import type { GeoJsonPosition, MapForceOverlay, MapMovementOverlay } from "@chronica/shared";
+import type { DynamicMapOverlay, GeoJsonPosition, MapForceOverlay, MapMovementOverlay } from "@chronica/shared";
 import { projectCoordinate } from "./geo-projection";
 import type { StaticWorldGeometry } from "./world-geometry";
 
@@ -32,10 +32,31 @@ export function interpolateMovement(movement: MapMovementOverlay): { coordinate:
   return { coordinate: movement.destination, travelledPath: travelled };
 }
 
-/** Chooses movement progress, then an explicit coordinate, then province centroid. */
-export function resolveForceMapPosition(force: MapForceOverlay, world: StaticWorldGeometry): { x: number; y: number; travelledPath: readonly GeoJsonPosition[] | null } | null {
+/**
+ * Chooses movement progress, then an explicit coordinate, then province
+ * centroid, then (general fallback, works for any scenario) another
+ * province held by the force's own polity that does have geometry.
+ *
+ * A gameplay province id with no matching map polygon -- e.g. a scenario
+ * that authors finer-grained provinces than the rendered map's partition,
+ * or any future scenario/geometry mismatch -- would otherwise leave a force
+ * with nowhere to draw and make it silently vanish. Landing on any of the
+ * force's own polity's real territory is a better approximation than
+ * disappearing, and needs no scenario-specific alias data.
+ */
+export function resolveForceMapPosition(
+  force: MapForceOverlay,
+  world: StaticWorldGeometry,
+  overlay?: DynamicMapOverlay | null,
+): { x: number; y: number; travelledPath: readonly GeoJsonPosition[] | null } | null {
   const movement = force.movement === null ? null : interpolateMovement(force.movement);
-  const coordinate = movement?.coordinate ?? force.coordinate ?? world.provinceById.get(force.provinceId)?.centroid;
+  let coordinate = movement?.coordinate ?? force.coordinate ?? world.provinceById.get(force.provinceId)?.centroid;
+  if (coordinate === undefined && overlay) {
+    const sameOwnerProvince = overlay.provinces.find(
+      (province) => province.controllerPolityId === force.ownerPolityId && world.provinceById.has(province.provinceId),
+    );
+    coordinate = sameOwnerProvince ? world.provinceById.get(sameOwnerProvince.provinceId)?.centroid : undefined;
+  }
   if (coordinate === undefined) return null;
   const [x, y] = projectCoordinate(coordinate[0], coordinate[1]);
   return { x, y, travelledPath: movement?.travelledPath ?? null };

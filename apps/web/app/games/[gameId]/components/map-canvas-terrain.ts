@@ -3,7 +3,6 @@ import type { StaticWorldGeometry } from "./world-geometry";
 import { politicalColourWithAlpha, type PoliticalMapState } from "./political-geometry";
 import type { ViewportTransform } from "./map-viewport";
 import { drawPoliticalLabels } from "./map-canvas-labels";
-import { derivePolityLabelFontSizes } from "./political-labels";
 import { drawForces, drawSettlements } from "./map-canvas-entities";
 import type { ForceFlagAsset } from "./army-standard";
 
@@ -308,8 +307,7 @@ export function drawTerrainToCanvas(
   // for why these moved off the SVG layer too). `m` is CSS pixels per world
   // degree, the same rate the old SVG floor logic converted through.
   const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
-  const polityLabelFontSizes = derivePolityLabelFontSizes(political, m);
-  drawSettlements(ctx, world, overlay, transform.scale, m, visibleRect, nowMs, polityLabelFontSizes);
+  drawSettlements(ctx, world, overlay, transform.scale, m, visibleRect, nowMs);
   drawForces(ctx, world, overlay, forceFlagUrls, transform.scale, m, visibleRect, nowMs, requestRedraw);
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);

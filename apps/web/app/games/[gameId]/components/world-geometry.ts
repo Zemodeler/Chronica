@@ -63,8 +63,17 @@ function boundsDistance(first: WorldBounds, second: WorldBounds) {
   return Math.hypot(dx, dy);
 }
 
-/** Compiles immutable GeoJSON into reusable world-space map data. */
-export function prepareStaticWorldGeometry(map: GeoJsonMap): StaticWorldGeometry {
+/** Compiles immutable GeoJSON into reusable world-space map data.
+ *
+ * `geometryAliases` maps a gameplay province id with no polygon of its own
+ * onto the real polygon of the region it falls within (e.g. several tribal
+ * client provinces sharing one modern-region polygon). It only extends
+ * lookup by id -- it does not add entries to `provinces`, so nothing is
+ * drawn twice and no area is double-counted; it exists purely so a force or
+ * label at an aliased province still resolves to a real position instead of
+ * silently vanishing.
+ */
+export function prepareStaticWorldGeometry(map: GeoJsonMap, geometryAliases?: ReadonlyMap<string, string>): StaticWorldGeometry {
   const preliminary: Omit<StaticProvince, "neighborIds" | "labelNeighborIds">[] = []; const boundaries = new Map<string, BoundaryOccurrence[]>(); const settlements: StaticSettlement[] = []; const rivers: StaticRiver[] = [];
   for (const feature of map.features) {
     if (feature.properties.kind === "province") {
@@ -96,7 +105,13 @@ export function prepareStaticWorldGeometry(map: GeoJsonMap): StaticWorldGeometry
     labelNeighbors.get(second.id)?.add(first.id);
   }
   const provinces = preliminary.map((province) => ({ ...province, neighborIds: [...(neighbors.get(province.id) ?? [])].sort(), labelNeighborIds: [...(labelNeighbors.get(province.id) ?? [])].sort() }));
-  return { provinces, provinceById: new Map(provinces.map((province) => [province.id, province])), sharedBoundaries, boundariesByProvince, settlements, rivers };
+  const provinceById = new Map(provinces.map((province) => [province.id, province]));
+  for (const [aliasId, realId] of geometryAliases ?? []) {
+    if (provinceById.has(aliasId)) continue;
+    const real = provinceById.get(realId);
+    if (real) provinceById.set(aliasId, real);
+  }
+  return { provinces, provinceById, sharedBoundaries, boundariesByProvince, settlements, rivers };
 }
 
 export function provinceContains(province: StaticProvince, point: GeoJsonPosition): boolean {

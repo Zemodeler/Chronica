@@ -225,10 +225,28 @@ function provinceSetKey(ids: Iterable<string>): string { return [...ids].sort().
  * single province changing hands only re-runs the expensive label-curve
  * search for the one or two polities actually affected, not all of them.
  */
-export function derivePoliticalMapState(world: StaticWorldGeometry, overlay: PoliticalOverlayInput | null, previous?: PoliticalMapState | null): PoliticalMapState {
+export function derivePoliticalMapState(
+  world: StaticWorldGeometry,
+  overlay: PoliticalOverlayInput | null,
+  previous?: PoliticalMapState | null,
+  geometryAliases?: ReadonlyMap<string, string>,
+): PoliticalMapState {
   const ownerByProvince = new Map<string, string | null>(world.provinces.map((province) => [province.id, null]));
   if (!overlay) return { ownerByProvince, territories: [], borderSegments: world.sharedBoundaries.map((boundary) => ({ ...boundary, classification: boundary.provinceB === null ? "coast" as const : "internal_province" as const })) };
   for (const province of overlay.provinces) if (world.provinceById.has(province.provinceId)) ownerByProvince.set(province.provinceId, province.controllerPolityId);
+  // A geometry polygon with no gameplay province of its own (several tribal
+  // provinces merged onto one real region -- see geometryAliases) never gets
+  // an owner from the loop above, since no overlay province carries its
+  // exact id. It would otherwise render as permanently unclaimed inside an
+  // otherwise fully owned nation. Borrow the controller of any gameplay
+  // province known to alias onto it instead.
+  const controllerByGameplayId = new Map(overlay.provinces.map((province) => [province.provinceId, province.controllerPolityId]));
+  for (const [gameplayId, geometryId] of geometryAliases ?? []) {
+    if (ownerByProvince.get(geometryId) != null) continue;
+    if (!world.provinceById.has(geometryId)) continue;
+    const controllerId = controllerByGameplayId.get(gameplayId);
+    if (controllerId) ownerByProvince.set(geometryId, controllerId);
+  }
   const names = new Map(overlay.polities.map((polity) => [polity.polityId, polity.name])); const ownedByPolity = new Map<string, Set<string>>();
   for (const [provinceId, owner] of ownerByProvince) if (owner !== null) { const owned = ownedByPolity.get(owner) ?? new Set<string>(); owned.add(provinceId); ownedByPolity.set(owner, owned); }
   const previousByPolity = new Map((previous?.territories ?? []).map((territory) => [territory.polityId, territory]));

@@ -1,28 +1,13 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback, type FormEvent, type KeyboardEvent } from "react";
+import { RESOLUTION_PROGRESS_STAGES, STEP_LABELS, type ResolutionStep as PipelineResolutionStep } from "../../../../lib/resolution/types";
 
 interface ResolutionStep {
   readonly step: string;
   readonly label: string;
   readonly done: boolean;
 }
-
-const ALL_STEPS = [
-  { step: "interpret", label: "Interpreting your orders…" },
-  { step: "assess", label: "Assessing feasibility…" },
-  { step: "adjudicate", label: "Calculating consequences…" },
-  { step: "preview_player", label: "Forecasting immediate effects…" },
-  { step: "reaction", label: "Observing reactions…" },
-  { step: "simulate", label: "Simulating the world…" },
-  { step: "character_advise", label: "Consulting character intentions…" },
-  { step: "consolidate", label: "Consolidating proposals…" },
-  { step: "world_direct", label: "World Director deciding…" },
-  { step: "manage", label: "Reviewing proposed actions…" },
-  { step: "execute_world", label: "Applying world changes…" },
-  { step: "chronicle", label: "Writing the chronicle…" },
-  { step: "commit", label: "Saving the new world…" },
-] as const;
 
 interface OrdersPanelProps {
   readonly gameId: string;
@@ -394,11 +379,14 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
               {resolving ? "Resolving your orders…" : "Resolution complete"}
             </p>
             <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-              {ALL_STEPS.map(({ step, label }) => {
+              {RESOLUTION_PROGRESS_STAGES.map(({ step, group }, index) => {
                 const stepState = steps.find((s) => s.step === step);
-                const isActive = currentStep === step && !stepState?.done;
-                const isDone = stepState?.done;
-                const isPending = !stepState && !isActive;
+                const currentIndex = RESOLUTION_PROGRESS_STAGES.findIndex((stage) => stage.step === currentStep);
+                const currentGroup = currentIndex === -1 ? null : RESOLUTION_PROGRESS_STAGES[currentIndex]?.group;
+                const hasAdvancedPastGroup = currentIndex > index && currentGroup !== group;
+                const isDone = stepState?.done === true || hasAdvancedPastGroup;
+                const isActive = !isDone && currentGroup === group;
+                const isPending = !isDone && !isActive;
 
                 return (
                   <li
@@ -415,7 +403,7 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
                       {isDone ? "✓" : isActive ? "⟳" : "○"}
                     </span>
                     <span style={{ fontSize: "0.9375rem", color: isDone ? "var(--text)" : isActive ? "var(--text)" : "var(--text-muted)" }}>
-                      {label}
+                      {STEP_LABELS[step as PipelineResolutionStep]}
                     </span>
                   </li>
                 );

@@ -271,38 +271,6 @@ function provinceIds(map: GeoJsonMap, prefix: string, omit: readonly string[] = 
   return new Set(map.features.filter((feature) => feature.properties.kind === "province" && feature.id.startsWith(prefix) && !excluded.has(feature.id)).map((feature) => feature.id));
 }
 
-const ITALIAN_SITES: readonly HistoricalSite[] = [
-  { id: "punic-italy-liguria-west", name: "Western Liguria", coordinate: [8.15, 44.15] },
-  { id: "punic-italy-liguria-genua", name: "Genoate Liguria", coordinate: [8.95, 44.41] },
-  { id: "punic-italy-liguria-east", name: "Eastern Liguria", coordinate: [9.45, 44.35] },
-  { id: "punic-italy-insubria-ticinum", name: "Insubria of Ticinum", coordinate: [8.95, 45.20] },
-  { id: "punic-italy-insubria-mediolanum", name: "Insubria of Mediolanum", coordinate: [9.19, 45.46] },
-  { id: "punic-italy-boii-rhenus", name: "Boii of the Rhenus", coordinate: [10.75, 44.70] },
-  { id: "punic-italy-boii-felsina", name: "Boii of Felsina", coordinate: [11.34, 44.50] },
-  { id: "punic-italy-cenomani-brixia", name: "Cenomani of Brixia", coordinate: [10.22, 45.54] },
-  { id: "punic-italy-cenomani-mincius", name: "Cenomani of the Mincius", coordinate: [10.70, 45.35] },
-  { id: "punic-italy-veneti-ateste", name: "Veneti of Ateste", coordinate: [11.65, 45.22] },
-  { id: "punic-italy-veneti-patavium", name: "Veneti of Patavium", coordinate: [11.88, 45.41] },
-  { id: "punic-italy-veneti-adria", name: "Veneti of Adria", coordinate: [12.05, 45.05] },
-  { id: "punic-italy-etruria-north", name: "Northern Etruria", coordinate: [11.85, 43.40] },
-  { id: "punic-italy-etruria-central", name: "Central Etruria", coordinate: [11.88, 42.42] },
-  { id: "punic-italy-etruria-south", name: "Southern Etruria", coordinate: [12.12, 41.87] },
-  { id: "punic-italy-latium", name: "Latium", coordinate: [12.50, 41.90] },
-  { id: "punic-italy-sabines", name: "Sabines", coordinate: [12.86, 42.41] },
-  { id: "punic-italy-umbrians", name: "Umbria", coordinate: [12.57, 43.11] },
-  { id: "punic-italy-picentes", name: "Picenum", coordinate: [13.58, 42.85] },
-  { id: "punic-italy-marsi", name: "Marsi and Paeligni", coordinate: [13.62, 42.09] },
-  { id: "punic-italy-campania", name: "Campania", coordinate: [14.17, 41.03] },
-  { id: "punic-italy-samnium", name: "Samnium", coordinate: [14.48, 41.56] },
-  { id: "punic-italy-daunians", name: "Daunia", coordinate: [15.34, 41.50] },
-  { id: "punic-italy-peucetians", name: "Peucetia", coordinate: [16.50, 41.13] },
-  { id: "punic-italy-messapians", name: "Messapia", coordinate: [17.95, 40.35] },
-  { id: "punic-italy-tarentines", name: "Tarentum", coordinate: [17.23, 40.47] },
-  { id: "punic-italy-lucanians", name: "Lucania", coordinate: [15.80, 40.64] },
-  { id: "punic-italy-bruttians", name: "Bruttium", coordinate: [16.19, 39.30] },
-  { id: "punic-italy-rhegines", name: "Rhegium", coordinate: [15.65, 38.11] },
-];
-
 // These are territorial reconstructions rather than exact frontiers.  They
 // deliberately use broad Iron Age community areas, while keeping every base
 // coastline and external border intact.

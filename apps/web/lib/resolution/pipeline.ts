@@ -67,6 +67,13 @@ import { collectCharacterAgencyCandidates, collectPlayerCandidates, collectWorld
 const InterpretParseSchema = OrderInterpretationSchema.omit({ directiveId: true });
 const AssessParseSchema = OrderAssessmentSchema.omit({ directiveId: true });
 const VALID_KNOWLEDGE_VISIBILITIES = new Set(["public", "polity", "private"]);
+// Territory, war, and battle outcomes are inherently visible at large scale —
+// no adjudication can plausibly keep them private. See the visibility-floor
+// repair in the adjudicate step below.
+const PUBLICLY_VISIBLE_ACTIONS = new Set([
+  "change_province_control", "give_territory", "start_war", "end_war",
+  "start_battle", "end_battle", "start_siege", "end_siege", "sign_treaty",
+]);
 // Player ownership is assigned from the authenticated turn, never trusted from
 // a model response. This also prevents a malformed `playerId: null` from
 // discarding an otherwise valid adjudication.
@@ -497,6 +504,11 @@ interface ChronicleCharacterMention {
 
 type ChronicleCastByProposal = ReadonlyMap<string, ChronicleCharacterMention>;
 
+/** Maps a 0–10 salience score to the same relevancy tier used for display and visibility ranking. */
+function salienceTier(salience: number): "high" | "medium" | "low" {
+  return salience >= 8 ? "high" : salience >= 5 ? "medium" : "low";
+}
+
 function isPoliticalChronicleEvent(body: string): boolean {
   return /\b(senate|senator|council|assembly|debate|motion|vote|voted|decree|faction|political|diplomat|negotiat|treaty|envoy|delegation|spokesperson|office)\b/i.test(body);
 }
@@ -616,6 +628,9 @@ function buildChronicleEntries(
         directConsequences: deriveExecutedWorkflowConsequences(executedWorkflowEntries, workflowLog),
         sourceDirector: "player",
         chainPosition: "root",
+        // The player's own actions are always shown in full, exempt from the
+        // Chronicle visibility cap -- see capChronicleVisibility.
+        playerRelevance: "high",
       }, world, undefined, playerId),
     });
   }
@@ -640,6 +655,7 @@ function buildChronicleEntries(
         sourceDirector: "character_director",
         chainPosition: "pressure",
         characterMentions: [{ characterId: suggestion.characterId, role: "participant" }],
+        playerRelevance: salienceTier(suggestion.salience),
       },
     });
   }
@@ -666,6 +682,7 @@ function buildChronicleEntries(
         materialConsequence: logEntries.length > 0,
         sourceDirector: "reaction_director",
         chainPosition: "reaction",
+        playerRelevance: salienceTier(rp.salience),
       }, world, cast, playerId),
     });
   }
@@ -695,16 +712,67 @@ function buildChronicleEntries(
         sourceDirector: "simulator",
         chainPosition: sp.scopeTag === "star" || sp.scopeTag === "near" ? "spread" : "distant",
         displayPatch: displayPatchByInvocation.get(sp.proposedWorkflows[0]?.actionId ?? ""),
+        playerRelevance: salienceTier(sp.salience),
       }, world, cast, playerId),
     });
+  }
+
+  // A reaction is caused by the player's own resolved action and can never
+  // chronologically precede it, no matter how the reaction's own estimated
+  // duration compares to the player's. Anchor every "reaction" entry to sort
+  // after every "root" entry before the shared duration sort below runs.
+  const rootDurations = raw.filter((r) => r.input.chainPosition === "root").map((r) => r.simulatedDurationDays);
+  const maxRootDuration = rootDurations.length > 0 ? Math.max(...rootDurations) : 0;
+  for (const entry of raw) {
+    if (entry.input.chainPosition === "reaction" && entry.simulatedDurationDays <= maxRootDuration) {
+      entry.simulatedDurationDays = maxRootDuration + entry.simulatedDurationDays;
+    }
   }
 
   // Chronicle chronology is a simulated schedule: quick events resolve first,
   // then longer developments. Salience only breaks ties within a duration.
   raw.sort((a, b) => a.simulatedDurationDays - b.simulatedDurationDays || b.sortKey - a.sortKey);
 
-  // Soft cap at `maxChronicleEntriesPerTurn` (default 12).
-  return raw.slice(0, DEFAULT_MAX_CHRONICLE_ENTRIES_PER_TURN).map((r, i) => ({ ...r.input, sequence: i, simulatedDurationDays: r.simulatedDurationDays }));
+  // No cap here: every event this turn is returned, tagged with its
+  // relevancy tier. Visibility is capped once, later, after every other
+  // Chronicle-producing stream (life events, politics, commitments, etc.) is
+  // merged in -- see capChronicleVisibility.
+  return raw.map((r, i) => ({ ...r.input, sequence: i, simulatedDurationDays: r.simulatedDurationDays }));
+}
+
+/**
+ * At most `maxVisible` non-player events surface in the Chronicle each turn.
+ * Every event already executed and changed world state before this runs --
+ * the cap only decides what gets narrated, never what happened. The
+ * player's own directive entries are exempt and always shown in full.
+ */
+// Consequence-free "world color" (diplomatic chatter, background rumor) is
+// capped hard regardless of maxVisible, so it can never crowd out the events
+// that actually changed something -- it stays in the background, not the
+// majority of the turn's Chronicle.
+const BACKGROUND_FLAVOR_QUOTA = 3;
+
+function capChronicleVisibility(entries: readonly ChronicleEntryInput[], maxVisible: number): ChronicleEntryInput[] {
+  const relevancyWeight = (tier: ChronicleEntryInput["playerRelevance"]): number =>
+    tier === "high" ? 3 : tier === "medium" ? 2 : tier === "low" ? 1 : 0;
+  const isPlayerAction = (entry: ChronicleEntryInput) => entry.scope === "directive" && entry.sourceDirector === "player";
+  const rankByRelevance = (list: readonly ChronicleEntryInput[]) =>
+    [...list].sort((a, b) => {
+      const weightDiff = relevancyWeight(b.playerRelevance) - relevancyWeight(a.playerRelevance);
+      if (weightDiff !== 0) return weightDiff;
+      return (a.simulatedDurationDays ?? 1) - (b.simulatedDurationDays ?? 1);
+    });
+
+  const alwaysShown = entries.filter(isPlayerAction);
+  const rest = entries.filter((entry) => !isPlayerAction(entry));
+  // Every entry that actually changed world state earns its place on its own
+  // merit -- it is never traded away for background flavor. Only
+  // consequence-free color competes for the small remaining quota.
+  const material = rankByRelevance(rest.filter((entry) => entry.materialConsequence));
+  const flavor = rankByRelevance(rest.filter((entry) => !entry.materialConsequence));
+  const flavorBudget = Math.min(BACKGROUND_FLAVOR_QUOTA, Math.max(0, maxVisible - material.length));
+
+  return [...alwaysShown, ...material, ...flavor.slice(0, flavorBudget)];
 }
 
 function estimatePlayerEventDurationDays(verdict: Verdict): number {
@@ -765,6 +833,47 @@ function summarizeResolvedTurn(entries: readonly ChronicleEntryInput[], atStep: 
   }
 
   return bullets.length > 0 ? `${header}\n${bullets.join("\n")}` : `${header} no Chronicle-worthy events occurred.`;
+}
+
+/**
+ * A storyline about contested control of a province is settled the instant
+ * that province's controller changes -- independent of whether any director
+ * remembered to call `resolve_storyline`. Leaving it open feeds next turn's
+ * Simulator a storyline that still describes an already-decided conflict as
+ * live, which is how a captured province keeps getting narrated as contested.
+ */
+function autoResolveDecidedStorylines(before: WorldState, after: WorldState, atStep: number): WorldState {
+  if (!after.storylines || after.storylines.length === 0) return after;
+
+  const changedProvinceControllers = new Map<string, string | null>();
+  for (const beforeProvince of before.map.provinces) {
+    const afterProvince = after.map.provinces.find((p) => p.id === beforeProvince.id);
+    if (afterProvince && afterProvince.controllerPolityId !== beforeProvince.controllerPolityId) {
+      changedProvinceControllers.set(beforeProvince.id, afterProvince.controllerPolityId);
+    }
+  }
+  if (changedProvinceControllers.size === 0) return after;
+
+  const polityName = (id: string | null) => id === null ? "no one" : after.map.polities.find((p) => p.id === id)?.name ?? id;
+  const provinceName = (id: string) => after.map.provinces.find((p) => p.id === id)?.name ?? id;
+
+  let resolvedAny = false;
+  const storylines = after.storylines.map((storyline) => {
+    if (storyline.phase === "resolved" || storyline.provinceId === null || !changedProvinceControllers.has(storyline.provinceId)) {
+      return storyline;
+    }
+    resolvedAny = true;
+    const newController = changedProvinceControllers.get(storyline.provinceId) ?? null;
+    console.log(`${tag()} [storyline:auto-resolve] "${storyline.title}" — ${provinceName(storyline.provinceId)} now controlled by ${polityName(newController)}`);
+    return {
+      ...storyline,
+      phase: "resolved",
+      nextDevelopment: "",
+      history: [...storyline.history, `Control of ${provinceName(storyline.provinceId)} passed to ${polityName(newController)}, settling this storyline.`].slice(-24),
+      updatedAtStep: atStep,
+    };
+  });
+  return resolvedAny ? { ...after, storylines } : after;
 }
 
 /** Build a displayPatch from world-state diff for map-relevant changes. */
@@ -1032,8 +1141,23 @@ export async function resolveTurn(
           }
         }
 
+        // Visibility floor: capturing territory or going to war cannot stay a
+        // secret, no matter how "uncertain, so default to private" guidance in
+        // the adjudicate prompt was applied. A private verdict here silently
+        // disables the Reaction Director (see shouldRunReactionDirector) and
+        // Carthage never hears that Messana fell.
+        let knowledgeVisibility = parsed.knowledgeVisibility;
+        const hasPubliclyVisibleWorkflow = finalDeltas.some(
+          (delta) => delta.kind === "workflow" && PUBLICLY_VISIBLE_ACTIONS.has(delta.invocation.actionId),
+        );
+        if (hasPubliclyVisibleWorkflow && knowledgeVisibility === "private") {
+          console.warn(`${tag()} [adjudicate] ${assessment.directiveId}: forcing knowledgeVisibility to public — territory/war/battle outcomes cannot stay private`);
+          knowledgeVisibility = "public";
+        }
+
         return {
           ...parsed,
+          knowledgeVisibility,
           deltas: finalDeltas,
           directiveId: assessment.directiveId,
           playerInvolvement: [{ playerId, characterId: actorCharacterId, role: "actor" }],
@@ -1352,7 +1476,11 @@ export async function resolveTurn(
     // procedure — `heirCharacterId`/family seniority only ever nominates a
     // sponsor, never a holder.
     emit(onProgress, "life_review");
-    let lifeReviewedWorld: WorldState = resolutionWorld;
+    // Seeded from `worldAfterPlayer`, not `resolutionWorld`: life review and
+    // the character-agency phase below it must see this turn's player
+    // actions already applied, or NPCs choose their goals/plots against a
+    // world that doesn't yet reflect what the player just did.
+    let lifeReviewedWorld: WorldState = worldAfterPlayer;
     const lifeEventChronicle: ChronicleEntryInput[] = [];
     const lifeStages = input.scenarioLife?.lifeStages ?? [];
     const stepsPerYear = input.scenarioClock?.stepsPerYear ?? 4;
@@ -1725,6 +1853,7 @@ export async function resolveTurn(
     }
 
     console.log(`${tag()} [execute_world] OUT: ${allWorkflowLog.filter((e) => e.outcome.ok).length}/${allWorkflowLog.length} workflows applied`);
+    newWorld = autoResolveDecidedStorylines(world, newWorld, atStep);
     const executionByInvocation = new Map(
       allWorkflowLog.map((entry) => [JSON.stringify(entry.invocation), entry.outcome]),
     );
@@ -1790,12 +1919,12 @@ export async function resolveTurn(
         if (account) {
           newWorld.material.accounts = newWorld.material.accounts.map((candidate) => candidate.id === account.id ? { ...candidate, balance: candidate.balance + 25 } : candidate);
           fulfilledCommitmentIds.push(commitment.id);
-          commitmentChronicle.push({ sequence: 0, scope: "dialogue_commitment", scopeRef: commitment.id, audience: "all_players", body: `${npc.name} fulfilled a promised financial help.`, atStep, materialConsequence: true, simulatedDurationDays: 1 });
+          commitmentChronicle.push({ sequence: 0, scope: "dialogue_commitment", scopeRef: commitment.id, audience: "all_players", body: `${npc.name} fulfilled a promised financial help.`, atStep, materialConsequence: true, simulatedDurationDays: 1, playerRelevance: "medium" });
           continue;
         }
       } else {
         fulfilledCommitmentIds.push(commitment.id);
-        commitmentChronicle.push({ sequence: 0, scope: "dialogue_commitment", scopeRef: commitment.id, audience: "all_players", body: `${npc.name} fulfilled a promised ${commitment.promiseType}.`, atStep, materialConsequence: false, simulatedDurationDays: 1 });
+        commitmentChronicle.push({ sequence: 0, scope: "dialogue_commitment", scopeRef: commitment.id, audience: "all_players", body: `${npc.name} fulfilled a promised ${commitment.promiseType}.`, atStep, materialConsequence: false, simulatedDurationDays: 1, playerRelevance: "medium" });
       }
     }
 
@@ -1939,14 +2068,14 @@ export async function resolveTurn(
       displayPatchByInvocation,
       playerId,
     );
-    chronicleInputs = scheduleChronicleEntries([
+    chronicleInputs = scheduleChronicleEntries(capChronicleVisibility([
       ...chronicleInputs,
       ...commitmentChronicle,
       ...politicalChronicle,
       ...lifeEventChronicle,
       ...commandChangeChronicle,
       ...familyEventChronicle,
-    ]);
+    ], DEFAULT_MAX_CHRONICLE_ENTRIES_PER_TURN));
 
     if (displayPatch && chronicleInputs.length > 0) {
       const lastIdx = chronicleInputs.length - 1;
@@ -2008,6 +2137,7 @@ export async function resolveTurn(
         body: e.body,
         playerRelevance: e.playerRelevance ?? "none",
         knowledgeStatus: e.knowledgeStatus ?? "confirmed",
+        consequences: (e.directConsequences ?? []).map((c) => c.label),
       })),
       authorityChangesForPlayer,
     });
