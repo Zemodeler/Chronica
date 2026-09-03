@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { EntityIdSchema } from "../../material-state";
 import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
+import { requireProcedureAuthorization } from "./political-procedures";
 
 export const characterWorkflows: AnyWorkflowDefinition[] = [
   defineWorkflow({
@@ -146,21 +147,62 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
 
   defineWorkflow({
     id: "appoint_to_office",
-    description: "Assign a character to a government office.",
+    description: "Assign a character to a government office. Requires an already-resolved, passed appointment procedure (or system authority).",
     category: "character",
     parametersSchema: z.object({
       characterId: EntityIdSchema,
       officeId: EntityIdSchema,
+      authorization: z.object({ procedureId: EntityIdSchema }).optional(),
     }).strict(),
-    apply(world, params) {
+    apply(world, params, context) {
+      const authorized = requireProcedureAuthorization(world.material.politicalProcedures, context.actorId, "appoint_to_office", params.authorization);
+      if (authorized === null) return null;
       const character = world.characters.find((c) => c.id === params.characterId);
       if (!character || !character.alive) return null;
+      // Two actors cannot occupy one exclusive office seat: a seat already
+      // held by someone else must be vacated (removal/expiry) before this can succeed.
+      const seat = world.material.officeSeats.find((s) => s.officeId === params.officeId && s.seatIndex === 0);
+      if (seat !== undefined && seat.status === "held" && seat.holderCharacterId !== params.characterId) return null;
+      const procedureId = authorized !== "system" ? authorized.id : null;
       return {
         world: {
           ...world,
           characters: world.characters.map((c) =>
             c.id === params.characterId ? { ...c, officeId: params.officeId } : c,
           ),
+          material: {
+            ...world.material,
+            officeSeats:
+              seat === undefined
+                ? [
+                    ...world.material.officeSeats,
+                    {
+                      id: `${params.officeId}:seat:0`,
+                      officeId: params.officeId,
+                      seatIndex: 0,
+                      holderCharacterId: params.characterId,
+                      status: "held" as const,
+                      vacancyCause: "none" as const,
+                      termStartedAtStep: context.atStep,
+                      termExpiresAtStep: null,
+                      appointmentProcedureId: procedureId,
+                      removalProcedureId: null,
+                      eligibilityRequirementIds: [],
+                    },
+                  ]
+                : world.material.officeSeats.map((s) =>
+                    s.id === seat.id
+                      ? {
+                          ...s,
+                          holderCharacterId: params.characterId,
+                          status: "held" as const,
+                          vacancyCause: "none" as const,
+                          termStartedAtStep: context.atStep,
+                          appointmentProcedureId: procedureId,
+                        }
+                      : s,
+                  ),
+          },
         },
         result: {
           summary: `${character.name} is appointed to office ${params.officeId}.`,
@@ -172,21 +214,40 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
 
   defineWorkflow({
     id: "remove_from_office",
-    description: "Remove a character from their current government office.",
+    description: "Remove a character from their current government office. Requires an already-resolved, passed removal procedure (or system authority).",
     category: "character",
     parametersSchema: z.object({
       characterId: EntityIdSchema,
       reason: z.string().min(1).max(240),
+      authorization: z.object({ procedureId: EntityIdSchema }).optional(),
     }).strict(),
-    apply(world, params) {
+    apply(world, params, context) {
+      const authorized = requireProcedureAuthorization(world.material.politicalProcedures, context.actorId, "remove_from_office", params.authorization);
+      if (authorized === null) return null;
       const character = world.characters.find((c) => c.id === params.characterId);
       if (!character || character.officeId === null) return null;
+      const officeId = character.officeId;
+      const procedureId = authorized !== "system" ? authorized.id : null;
       return {
         world: {
           ...world,
           characters: world.characters.map((c) =>
             c.id === params.characterId ? { ...c, officeId: null } : c,
           ),
+          material: {
+            ...world.material,
+            officeSeats: world.material.officeSeats.map((s) =>
+              s.officeId === officeId && s.holderCharacterId === params.characterId
+                ? {
+                    ...s,
+                    holderCharacterId: null,
+                    status: "vacant" as const,
+                    vacancyCause: "removal" as const,
+                    removalProcedureId: procedureId,
+                  }
+                : s,
+            ),
+          },
         },
         result: {
           summary: `${character.name} is removed from office. ${params.reason}`,
@@ -242,7 +303,13 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
           ...world,
           characters: world.characters.map((c) =>
             c.id === params.characterId
-              ? { ...c, officeId: null }
+              ? {
+                  ...c,
+                  officeId: null,
+                  disqualifyingStatuses: c.disqualifyingStatuses.includes("captured")
+                    ? c.disqualifyingStatuses
+                    : [...c.disqualifyingStatuses, "captured"],
+                }
               : c,
           ),
         },

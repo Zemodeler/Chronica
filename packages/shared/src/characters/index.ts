@@ -7,6 +7,8 @@ export * from "./introduction";
 export * from "./knowledgebase";
 export * from "./mind";
 export * from "./opinion";
+export * from "./political-authority";
+export * from "./political-inspector";
 export * from "./pressures";
 export * from "./reachability";
 export * from "./relationship-dimensions";

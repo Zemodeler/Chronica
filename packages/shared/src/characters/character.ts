@@ -188,6 +188,14 @@ export const CharacterSchema = z
     createdByDirector: z.boolean().optional(),
     createdAtStep: ElapsedStepSchema.optional(),
     creationReason: z.string().trim().min(1).max(320).optional(),
+
+    /**
+     * Status tags that disqualify a living character from political
+     * participation (e.g. "captured"). Defaulted so every pre-phase-4
+     * character stays valid; checked by the `not_disqualified` eligibility
+     * requirement kind (character-sim phase 4).
+     */
+    disqualifyingStatuses: z.array(EntityIdSchema).default([]),
   })
   .strict()
   .superRefine((character, context) => {
@@ -232,6 +240,11 @@ export const OfficeSchema = z
     /** The estate that expects to fill it; appointing against it costs. */
     expectedBlocId: EntityIdSchema.nullable(),
     successionRuleId: EntityIdSchema,
+    /**
+     * Reusable eligibility checks a holder must pass (character-sim phase 4).
+     * Defaulted so every pre-phase-4 office stays valid unchanged.
+     */
+    eligibilityRequirementIds: z.array(EntityIdSchema).default([]),
   })
   .strict();
 export type Office = z.infer<typeof OfficeSchema>;

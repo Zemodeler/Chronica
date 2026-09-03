@@ -7,6 +7,7 @@ export * from "./character-agency/commitments";
 export * from "./character-agency/conflicts";
 export * from "./character-agency/intents";
 export * from "./character-agency/scoring";
+export * from "./character-agency/political-resolver";
 export * from "./coins";
 export * from "./continuity/index";
 export * from "./determinism";

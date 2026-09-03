@@ -36,6 +36,23 @@ export interface ChronicleEntryInput {
   readonly causalFactIds?: readonly string[];
   readonly sourceDirector?: "player" | "character_director" | "reaction_director" | "simulator" | "world_director";
   readonly openPressure?: boolean;
+  /**
+   * Player-visible summary of one resolved political procedure (character-sim
+   * phase 4): institution, sponsor, net support/opposition, outcome and
+   * public reason. Deliberately carries nothing private -- no per-supporter
+   * reasons, no undisclosed positions. See `packages/shared/src/characters/political-inspector.ts`
+   * for the admin-only view that does carry those.
+   */
+  readonly politicalOutcome?: {
+    readonly procedureId: string;
+    readonly procedureType: string;
+    readonly institutionName: string | null;
+    readonly sponsorName: string;
+    readonly outcome: "passed" | "failed" | "blocked" | "withdrawn";
+    readonly publicReason: string;
+    readonly netSupportWeight: number;
+    readonly netOppositionWeight: number;
+  };
 }
 
 export interface CommitResolutionInput {
@@ -121,6 +138,7 @@ export async function commitResolution(
             ...(entry.causalFactIds && entry.causalFactIds.length > 0
               ? { causalFactIds: [...entry.causalFactIds] }
               : {}),
+            ...(entry.politicalOutcome !== undefined ? { politicalOutcome: entry.politicalOutcome } : {}),
           },
         })),
       );
