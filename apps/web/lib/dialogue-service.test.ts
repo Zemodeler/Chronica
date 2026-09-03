@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildDialogueSystemPrompt, buildPlayerKnowledgeSection } from "./dialogue-prompt";
 import type { CharacterKnowledgebase } from "@chronica/shared";
+import { NEUTRAL_MIND } from "@chronica/shared";
 import type { KnowledgebaseRow } from "@chronica/db";
-import { extractDialogueCommitment } from "./dialogue-commitment";
 
 const playerKnowledgebase: CharacterKnowledgebase = {
   version: 1,
@@ -100,17 +100,11 @@ describe("buildPlayerKnowledgeSection", () => {
       "First Punic War",
       [],
       [],
-      [],
+      { mind: NEUTRAL_MIND, traits: [], pressures: [], beliefs: [] },
+      { score: 0, label: "neutral" },
     );
 
     expect(prompt).toContain("Gaius Aurelius: younger brother");
     expect(prompt).toContain("Do not claim ignorance of a named person or relationship recorded there.");
-  });
-});
-
-describe("extractDialogueCommitment", () => {
-  it("records an explicit bounded promise but not ordinary dialogue", () => {
-    expect(extractDialogueCommitment("I will lend you twenty denarii before dawn.", "Could you lend me money?")?.promiseType).toBe("money");
-    expect(extractDialogueCommitment("I understand your difficulty.", "Could you help?")).toBeNull();
   });
 });

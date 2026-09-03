@@ -1,19 +1,19 @@
 import "server-only";
 
+import { z } from "zod";
 import { createAiAdapter, callWithCoinGate, InsufficientCoinsError } from "@chronica/ai";
 import {
   appendMessage,
   createDatabase,
   createGroupSession,
-  createNpcCommitment,
   findOrOpenSession,
   getCharacterKnowledgebase,
   getOrCreateNpcKnowledgebase,
   getWorldView,
+  insertCharacterSocialEvent,
   insertSharedEntry,
   listNpcKnowledgebases,
-  listGameNpcRecords,
-  insertGameNpcRecord,
+  listUnappliedCharacterSocialEvents,
   listPoolEntries,
   listSessionMessages,
   listSessions,
@@ -22,18 +22,37 @@ import {
   schema,
   touchSession,
   updateNpcKnowledgebase,
+  upsertCharacterProfile,
   type KnowledgebaseRow,
   type MessageRow,
   type SharedEntryRow,
 } from "@chronica/db";
-import type { Character, CharacterKnowledgebase, ConversationConsequence, ConversationMemoryEntry } from "@chronica/shared";
+import type {
+  Character,
+  CharacterBelief,
+  CharacterKnowledgebase,
+  CharacterPressure,
+  CharacterProfile,
+  CharacterSocialEvent,
+  ConversationMemoryEntry,
+  DialogueChannel,
+  RelationCauseProposal,
+} from "@chronica/shared";
+import {
+  computeOpinion,
+  deriveDefaultMind,
+  getActivePressures,
+  isCharacterReachable,
+  NEUTRAL_MIND,
+  opinionLabel,
+  queryBeliefs,
+} from "@chronica/shared";
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { ChronicaDatabase } from "@chronica/db";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { headers } from "next/headers";
 import { buildDialogueSystemPrompt, type WorldCharacterRef } from "./dialogue-prompt";
-import { extractDialogueCommitment } from "./dialogue-commitment";
 import { clampRelationshipScore, relationshipLabelForScore, scoreForDeclaredConnection } from "./relationship-score";
 
 export type { WorldCharacterRef } from "./dialogue-prompt";
@@ -103,36 +122,239 @@ Respond ONLY with a JSON object matching this schema, no other text:
 }`;
 }
 
-// ── Consequence detection ───────────────────────────────────────────────────
+// ── Social event proposal (the chat/simulation boundary) ────────────────────
+//
+// Dialogue never mutates a relationship, and never decides on its own that
+// something consequential happened -- it can only propose a CharacterSocialEvent,
+// which turn resolution later validates against canonical world state and
+// applies (packages/shared/src/characters/apply-social-events.ts). Replaces
+// the old regex-based `detectConsequences` and the ad hoc relationship-score
+// patch that used to live in the knowledge-extraction call below.
 
-const CONSEQUENCE_PATTERNS: Array<{ pattern: RegExp; type: ConversationConsequence["type"] }> = [
-  { pattern: /\b(agree|agreed|deal|bargain|arrangement|treaty|promise|pact|accord)\b/i, type: "deal" },
-  { pattern: /\b(alliance|ally|allied|join forces|stand together|support)\b/i, type: "alliance" },
-  { pattern: /\b(enemy|enemies|rival|oppose|against you|never forget|betray|enmity|hatred)\b/i, type: "enmity" },
-  { pattern: /\b(insult|fool|coward|dishonour|disgrace|shame on you)\b/i, type: "insult" },
-];
+const SOCIAL_EVENT_KIND_VALUES = ["conversation", "promise", "insult", "favour", "deception", "rumour"] as const;
 
-function detectConsequences(
-  npcReplyBody: string,
-  playerBody: string,
+const ProposedRelationCauseSchema = z.object({
+  subjectCharacterId: z.string().trim().min(1),
+  targetCharacterId: z.string().trim().min(1),
+  label: z.string().trim().min(1).max(200),
+  score: z.number().int().min(-20).max(20),
+  decayPerYearBps: z.number().int().min(0).max(10_000),
+});
+
+const BELIEF_KIND_VALUES = ["fact", "rumour", "suspicion", "secret"] as const;
+// Channels a single two-party conversation can plausibly ground: the NPC
+// speaking from direct experience, or confiding something in the player.
+// Broad-grant channels (public_announcement, ordinary_rumour spreading past
+// this conversation, intercepted_secret) are not choices dialogue itself may
+// make -- those require a world event with real witnesses/reach.
+const DIALOGUE_KNOWLEDGE_CHANNEL_VALUES = ["direct_witness", "event_participant", "private_disclosure", "trusted_report"] as const;
+
+const ProposedBeliefSchema = z.object({
+  subjectEntityId: z.string().trim().min(1).nullable(),
+  claim: z.string().trim().min(1).max(400),
+  kind: z.enum(BELIEF_KIND_VALUES),
+  channel: z.enum(DIALOGUE_KNOWLEDGE_CHANNEL_VALUES),
+  /** Who receives this belief -- must be the NPC, the player, or both; validated below. */
+  recipientCharacterIds: z.array(z.string().trim().min(1)).min(1).max(2),
+});
+
+const PRESSURE_KIND_VALUES = ["debt", "threat", "grief", "illness", "political_danger", "family_obligation", "opportunity", "humiliation", "military_emergency"] as const;
+
+const ProposedPressureChangeSchema = z.object({
+  action: z.enum(["create", "refresh", "resolve"]),
+  kind: z.enum(PRESSURE_KIND_VALUES).optional(),
+  intensity: z.number().int().min(0).max(100).optional(),
+  label: z.string().trim().min(1).max(200).optional(),
+});
+
+// Character-sim phase 3: a commitment is only ever proposed by the NPC
+// speaking, about the NPC's own resources -- dialogue never promises on the
+// player's behalf, and never names an account id itself (the resolver fills
+// in the NPC's own personal account for a payment; anything else is a
+// resource-free social/informational commitment).
+const COMMITMENT_ACTION_KIND_VALUES = [
+  "payment", "military_support", "political_support",
+  "information_sharing", "protection", "office_favour", "other",
+] as const;
+
+const ProposedCommitmentSchema = z.object({
+  actionKind: z.enum(COMMITMENT_ACTION_KIND_VALUES),
+  promisedResult: z.string().trim().min(1).max(400),
+  conditions: z.string().trim().max(400).default(""),
+  /** Only meaningful when actionKind is "payment"; the NPC's own funds back it. */
+  amount: z.number().int().positive().nullable().default(null),
+});
+
+const ProposeSocialEventsResponseSchema = z.object({
+  events: z.array(z.object({
+    kind: z.enum(SOCIAL_EVENT_KIND_VALUES),
+    relationCauses: z.array(ProposedRelationCauseSchema).max(4),
+    visibility: z.enum(["public", "polity", "private"]),
+    proposedBeliefs: z.array(ProposedBeliefSchema).max(2).default([]),
+    /** Only the speaking NPC's own pressure -- never the player's, never a third party's. */
+    pressureChange: ProposedPressureChangeSchema.nullable().default(null),
+    /** Only a promise the NPC just made to the player -- never on the player's behalf. */
+    commitmentProposal: ProposedCommitmentSchema.nullable().default(null),
+  })).max(3),
+});
+
+function buildSocialEventSystemPrompt(npcCharacterId: string, playerCharacterId: string): string {
+  return `You analyze one exchange between an NPC and a player character in a historical strategy game and decide whether it produced a lasting social consequence worth recording in the world's social ledger.
+
+Only propose an event when the exchange gives a concrete, attributable reason: a promise, an insult, a favour, a deception, a rumour, or an otherwise consequential conversation. Do not propose anything for routine pleasantries or small talk.
+
+The only two character ids that exist in this exchange are "${npcCharacterId}" (the NPC) and "${playerCharacterId}" (the player). Never invent or reference any other id.
+
+Respond ONLY with JSON matching this schema:
+{
+  "events": [
+    {
+      "kind": "conversation" | "promise" | "insult" | "favour" | "deception" | "rumour",
+      "relationCauses": [ { "subjectCharacterId": "who now holds this opinion", "targetCharacterId": "who it is about", "label": "short reason, e.g. 'You publicly insulted him.'", "score": -20 to 20, "decayPerYearBps": 0 to 10000 } ],
+      "visibility": "public" | "polity" | "private",
+      "proposedBeliefs": [ { "subjectEntityId": "id this is about, or null", "claim": "third-person statement", "kind": "fact"|"rumour"|"suspicion"|"secret", "channel": "direct_witness"|"event_participant"|"private_disclosure"|"trusted_report", "recipientCharacterIds": ["${npcCharacterId}" and/or "${playerCharacterId}" -- only these two ids] } ],
+      "pressureChange": { "action": "create"|"refresh"|"resolve", "kind": "debt"|"threat"|"grief"|"illness"|"political_danger"|"family_obligation"|"opportunity"|"humiliation"|"military_emergency", "intensity": 0-100, "label": "short reason" } | null,
+      "commitmentProposal": { "actionKind": "payment"|"military_support"|"political_support"|"information_sharing"|"protection"|"office_favour"|"other", "promisedResult": "what was actually promised, in the NPC's own words", "conditions": "any stated condition, or empty string", "amount": integer or null (only for "payment", the exact amount if a specific number was promised) } | null
+    }
+  ]
+}
+"pressureChange" may only ever describe a pressure on "${npcCharacterId}" (the NPC speaking), never on "${playerCharacterId}" or anyone else -- omit it (null) unless this exchange concretely changes what the NPC is under pressure from.
+"commitmentProposal" may only ever describe a promise "${npcCharacterId}" just made to "${playerCharacterId}" -- never a promise on the player's behalf, and only when the NPC's reply contains an explicit, concrete commitment (not a vague offer of sympathy). Omit it (null) otherwise.
+Return { "events": [] } if nothing consequential happened.`;
+}
+
+/**
+ * Proposes social events via a structured, Zod-validated AI call and persists
+ * each one as a "proposed" row. Never touches `WorldState` directly -- only
+ * turn resolution applies them (apps/web/lib/resolution/pipeline.ts).
+ */
+async function proposeAndPersistSocialEvents(
+  db: ChronicaDatabase,
+  userId: string,
+  gameId: string,
   npcCharacterId: string,
   playerCharacterId: string,
+  sessionId: string,
+  npcMessageId: string,
+  playerMessage: string,
+  npcReply: string,
   currentStep: number,
-): ConversationConsequence[] {
-  const combined = `${playerBody}\n${npcReplyBody}`;
-  const found: ConversationConsequence[] = [];
-  for (const { pattern, type } of CONSEQUENCE_PATTERNS) {
-    if (pattern.test(combined)) {
-      found.push({
-        id: randomUUID(),
-        type,
-        description: npcReplyBody.slice(0, 200),
-        parties: [playerCharacterId, npcCharacterId],
-        occurredAtStep: currentStep,
-      });
+  npcPersonalAccountId: string | null,
+): Promise<CharacterSocialEvent[]> {
+  const adapter = createAiAdapter();
+  let result: Awaited<ReturnType<typeof callWithCoinGate>>;
+  try {
+    result = await callWithCoinGate(
+      db, userId, gameId, "propose_social_events", adapter,
+      { system: buildSocialEventSystemPrompt(npcCharacterId, playerCharacterId), user: `Player: ${playerMessage}\nNPC reply: ${npcReply}` },
+      (content) => {
+        try {
+          const parsed: unknown = JSON.parse(content);
+          return typeof parsed === "object" && parsed !== null && "events" in parsed;
+        } catch {
+          return false;
+        }
+      },
+    );
+  } catch (error) {
+    if (!(error instanceof InsufficientCoinsError)) {
+      console.warn("[propose_social_events] unexpected error during social event proposal:", error);
     }
+    return [];
   }
-  return found;
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(result.content);
+  } catch {
+    return [];
+  }
+  const parsed = ProposeSocialEventsResponseSchema.safeParse(raw);
+  if (!parsed.success) return [];
+
+  const validIds = new Set([npcCharacterId, playerCharacterId]);
+  const persisted: CharacterSocialEvent[] = [];
+  for (const draft of parsed.data.events) {
+    // Reject impossible knowledge: only the two participants in this exchange
+    // may be named as a relation cause's subject or target.
+    const hasUnknownId = draft.relationCauses.some(
+      (cause) => !validIds.has(cause.subjectCharacterId) || !validIds.has(cause.targetCharacterId),
+    );
+    if (hasUnknownId) continue;
+
+    // Beliefs: reject anything naming a recipient outside this conversation.
+    const proposedBeliefs = draft.proposedBeliefs
+      .filter((belief) => belief.recipientCharacterIds.every((id) => validIds.has(id)))
+      .map((belief) => ({
+        subjectEntityId: belief.subjectEntityId,
+        claim: belief.claim,
+        kind: belief.kind,
+        channel: belief.channel,
+        explicitRecipientCharacterIds: belief.recipientCharacterIds,
+        expiresInSteps: null,
+      }));
+
+    // Pressure changes: only ever about the NPC speaking, never the player or a third party.
+    const pressureChanges = draft.pressureChange !== null && draft.pressureChange.action === "create"
+      && draft.pressureChange.kind !== undefined && draft.pressureChange.intensity !== undefined && draft.pressureChange.label !== undefined
+      ? [{
+          characterId: npcCharacterId,
+          action: draft.pressureChange.action,
+          kind: draft.pressureChange.kind,
+          intensity: draft.pressureChange.intensity,
+          label: draft.pressureChange.label,
+          reviewInSteps: 4,
+          expiresInSteps: null,
+          visibility: "private" as const,
+        }]
+      : [];
+
+    // Commitments (character-sim phase 3): only ever a promise the NPC just
+    // made to the player, about the NPC's own resources. A payment names the
+    // NPC's own personal account -- never one the AI supplies -- and is
+    // dropped silently (not rejected) if the NPC has no account to name,
+    // since `applySocialEvents` would reject an accountless payment anyway.
+    const commitmentProposal = draft.commitmentProposal !== null
+      && (draft.commitmentProposal.actionKind !== "payment" || (draft.commitmentProposal.amount !== null && npcPersonalAccountId !== null))
+      ? {
+          actionKind: draft.commitmentProposal.actionKind,
+          promisedResult: draft.commitmentProposal.promisedResult,
+          conditions: draft.commitmentProposal.conditions,
+          rationale: "",
+          promisorCharacterId: npcCharacterId,
+          beneficiaryCharacterId: playerCharacterId,
+          requiredOfficeId: null,
+          requiredResource: draft.commitmentProposal.actionKind === "payment" && draft.commitmentProposal.amount !== null && npcPersonalAccountId !== null
+            ? { accountId: npcPersonalAccountId, minAmount: draft.commitmentProposal.amount }
+            : null,
+          reviewInSteps: 6,
+        }
+      : null;
+
+    const id = randomUUID();
+    const event = {
+      id,
+      gameId,
+      sourceTurnId: null,
+      sourceSessionId: sessionId,
+      sourceMessageId: npcMessageId,
+      participantCharacterIds: [npcCharacterId, playerCharacterId],
+      kind: draft.kind,
+      visibility: draft.visibility,
+      knownByCharacterIds: [npcCharacterId, playerCharacterId],
+      relationCauses: draft.relationCauses as RelationCauseProposal[],
+      knowledgeClaims: [],
+      proposedBeliefs,
+      pressureChanges,
+      commitmentProposal,
+      introducedCharacter: null,
+      introducedProfile: null,
+      createdAtStep: currentStep,
+    };
+    await insertCharacterSocialEvent(db, id, gameId, event);
+    persisted.push({ ...event, appliedAtStep: null, appliedInTurnId: null, status: "proposed", rejectionReason: null });
+  }
+  return persisted;
 }
 
 // ── Knowledge extraction ────────────────────────────────────────────────────
@@ -143,10 +365,8 @@ Extract only statements the NPC presents as information about the world: facts, 
 
 Each extracted entry must be self-contained (1–2 sentences, max 400 characters) and expressed as a third-person statement.
 
-Also evaluate the NPC's opinion of the player after this exchange. Only change it when the player's message or the NPC's response gives a concrete reason: generosity, fulfilled help, respect, insult, threat, deception, betrayal, or a broken promise. Use small changes for ordinary courtesy and larger changes only for consequential acts. Do not change it merely because they spoke.
-
 Respond ONLY with JSON matching this schema:
-{ "entries": [ { "body": "...", "contradicts": ["entry-id", ...] } ], "relationship": { "scoreDelta": number, "reason": string } | null }
+{ "entries": [ { "body": "...", "contradicts": ["entry-id", ...] } ] }
 Return { "entries": [] } if the reply contains nothing worth recording.`;
 
 interface ExtractedKnowledgeEntry {
@@ -154,24 +374,23 @@ interface ExtractedKnowledgeEntry {
   contradicts: string[];
 }
 
-interface RelationshipAssessment {
-  scoreDelta: number;
-  reason: string;
-}
-
+/**
+ * Shares factual, third-person claims into the network's knowledge pools.
+ * Informational only -- opinion/relationship deltas are no longer decided
+ * here; they flow exclusively through `proposeAndPersistSocialEvents` above.
+ */
 async function extractAndPropagateKnowledge(
   db: ChronicaDatabase,
   userId: string,
   gameId: string,
   npcCharacterId: string,
   sessionId: string,
+  npcMessageId: string,
   npcReply: string,
   playerMessage: string,
   existingEntries: readonly SharedEntryRow[],
   pools: readonly PoolSpec[],
   stepOccurred: number,
-  knowledgebaseId: string,
-  currentRelationshipScore: number,
 ): Promise<void> {
   if (pools.length === 0) return;
 
@@ -201,22 +420,11 @@ async function extractAndPropagateKnowledge(
     return;
   }
 
-  let parsed: { entries: ExtractedKnowledgeEntry[]; relationship?: RelationshipAssessment | null };
+  let parsed: { entries: ExtractedKnowledgeEntry[] };
   try {
     parsed = JSON.parse(result.content) as typeof parsed;
   } catch {
     return;
-  }
-
-  const relationship = parsed.relationship;
-  if (relationship !== null && relationship !== undefined && Number.isFinite(relationship.scoreDelta)) {
-    const nextScore = clampRelationshipScore(currentRelationshipScore + Math.max(-20, Math.min(20, relationship.scoreDelta)));
-    if (nextScore !== currentRelationshipScore) {
-      await updateNpcKnowledgebase(db, knowledgebaseId, {
-        relationshipScore: nextScore,
-        relationshipLabel: relationshipLabelForScore(nextScore),
-      });
-    }
   }
 
   for (const entry of parsed.entries) {
@@ -236,6 +444,34 @@ async function extractAndPropagateKnowledge(
         body, npcCharacterId, sessionId, stepOccurred,
       );
     }
+
+    // The speaking NPC durably believes what they just said -- a canonical
+    // belief, proposed through the same social-event ledger every other
+    // canonical mutation uses (character-sim phase 2). Sharing a pool entry
+    // is descriptive/performance only and never itself grants knowledge.
+    await insertCharacterSocialEvent(db, randomUUID(), gameId, {
+      sourceSessionId: sessionId,
+      sourceMessageId: npcMessageId,
+      participantCharacterIds: [npcCharacterId],
+      kind: "conversation",
+      visibility: "private",
+      knownByCharacterIds: [npcCharacterId],
+      relationCauses: [],
+      knowledgeClaims: [],
+      proposedBeliefs: [{
+        subjectEntityId: null,
+        claim: body,
+        kind: "fact",
+        channel: "event_participant",
+        explicitRecipientCharacterIds: [npcCharacterId],
+        expiresInSteps: null,
+      }],
+      pressureChanges: [],
+      commitmentProposal: null,
+      introducedCharacter: null,
+      introducedProfile: null,
+      createdAtStep: stepOccurred,
+    });
   }
 }
 
@@ -394,6 +630,9 @@ interface DialogueCallInput {
   currentStep: number;
   continuityTier: "ordinary" | "remembered" | "principal";
   worldCharacters: readonly WorldCharacterRef[];
+  /** Character-sim phase 2: full canonical lists, filtered down to the speaking NPC's own state below. */
+  characterPressures: readonly CharacterPressure[];
+  characterBeliefs: readonly CharacterBelief[];
 }
 
 export interface DialogueCallResult {
@@ -420,7 +659,7 @@ export async function generateDialogueReply(input: DialogueCallInput & { readonl
   const {
     db, userId, gameId, playerId, playerCharacterId, playerCharacterName, playerKnowledgebase,
     npcCharacterId, sessionId, channel, playerMessageBody, period, currentStep, continuityTier,
-    worldCharacters,
+    worldCharacters, characterPressures, characterBeliefs,
   } = input;
 
   let kb = await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcCharacterId);
@@ -442,23 +681,46 @@ export async function generateDialogueReply(input: DialogueCallInput & { readonl
     }
   }
 
-  if (!kb.isAvailable) {
+  // Reachability is derived from the canonical character record -- alive
+  // status and location -- never from the legacy `isAvailable` flag alone.
+  // `kb.isAvailable` remains a fallback only for a contact not yet found in
+  // canonical state (e.g. mid-migration).
+  const npcRef = worldCharacters.find((c) => c.id === npcCharacterId);
+  const reachability = npcRef !== undefined
+    ? isCharacterReachable(npcRef, channel as DialogueChannel, worldCharacters.find((c) => c.id === playerCharacterId)?.locationProvinceId ?? null)
+    : { reachable: kb.isAvailable, reason: kb.isAvailable ? null : `${kb.canonicalName} is not reachable right now.` };
+
+  if (!reachability.reachable) {
     const playerMsg = input.appendPlayerMessage === false ? null : await appendMessage(db, sessionId, playerCharacterId, true, playerMessageBody);
     await touchSession(db, sessionId);
     return {
       playerMessage: playerMsg === null ? { id: "", sessionId, sequence: -1, speakerCharacterId: playerCharacterId, isPlayerMessage: true, body: playerMessageBody } : toMsgShape(playerMsg),
       npcReply: null,
-      unavailableReason: `${kb.canonicalName} is not reachable right now.`,
+      unavailableReason: reachability.reason ?? `${kb.canonicalName} is not reachable right now.`,
     };
   }
+
+  // Authoritative opinion, folded from the NPC's directed relation causes --
+  // never the legacy stored `relationshipScore` (falls back to it only when
+  // the NPC has no canonical relation ledger to read yet).
+  const opinionScore = npcRef !== undefined ? computeOpinion(npcRef, playerCharacterId) : kb.relationshipScore;
+  const opinion = { score: opinionScore, label: opinionLabel(opinionScore) };
 
   // Resolve shared knowledge pools for this NPC and fetch existing entries
   const pools = computeNpcPools(npcCharacterId, kb, worldCharacters);
   const sharedEntries = await listPoolEntries(db, gameId, pools);
 
   const recentMessages = await listSessionMessages(db, sessionId, 20);
+  // Subjective context (character-sim phase 2): only this NPC's own mind,
+  // traits, active pressures, and beliefs -- never another character's.
+  const mindContext = {
+    mind: npcRef?.mind ?? NEUTRAL_MIND,
+    traits: npcRef?.traits ?? [],
+    pressures: getActivePressures({ characterPressures }, npcCharacterId),
+    beliefs: queryBeliefs({ characterBeliefs }, npcCharacterId),
+  };
   const systemPrompt = buildDialogueSystemPrompt(
-    kb, playerCharacterName, playerCharacterId, playerKnowledgebase, channel, period, recentMessages, worldCharacters, sharedEntries,
+    kb, playerCharacterName, playerCharacterId, playerKnowledgebase, channel, period, recentMessages, worldCharacters, mindContext, opinion,
   );
   const operation = continuityTier === "ordinary" ? "dialogue_ordinary" : "dialogue_principal";
 
@@ -473,27 +735,25 @@ export async function generateDialogueReply(input: DialogueCallInput & { readonl
   const npcMsg = await appendMessage(db, sessionId, npcCharacterId, false, npcBody);
   await touchSession(db, sessionId);
 
-  // Detect consequences and update per-player knowledgebase
-  const newConsequences = detectConsequences(npcBody, playerMessageBody, npcCharacterId, playerCharacterId, currentStep);
-  const updatedMemory = buildUpdatedMemory(kb.conversationMemory, playerMessageBody, npcBody, currentStep);
-  const relevancyDelta = 5 + (newConsequences.length > 0 ? 10 : 0) + (kb.relationshipScore < 0 ? 15 : 0);
+  // Propose social events (the chat/simulation boundary) and update the
+  // per-player conversation memory. Relation deltas are never written here --
+  // only turn resolution applies a proposed event to canonical state.
+  const proposedEvents = await proposeAndPersistSocialEvents(
+    db, userId, gameId, npcCharacterId, playerCharacterId, sessionId, npcMsg.id, playerMessageBody, npcBody, currentStep,
+    npcRef?.personalAccountId ?? null,
+  );
+  const updatedMemory = buildUpdatedMemory(kb.conversationMemory, playerMessageBody, npcBody, currentStep, proposedEvents.length > 0);
+  const relevancyDelta = 5 + (proposedEvents.length > 0 ? 10 : 0) + (opinionScore < 0 ? 15 : 0);
 
-  await updateNpcKnowledgebase(db, kb.id, {
-    conversationMemory: updatedMemory,
-    consequences: [...kb.consequences, ...newConsequences],
-  });
+  await updateNpcKnowledgebase(db, kb.id, { conversationMemory: updatedMemory });
   await recordInteraction(db, kb.id, relevancyDelta);
-  const commitment = extractDialogueCommitment(npcBody, playerMessageBody);
-  if (commitment) await createNpcCommitment(db, {
-    gameId, sessionId, npcMessageId: npcMsg.id, playerCharacterId, npcCharacterId, createdAtStep: currentStep, ...commitment,
-  });
 
   // Keep the request connection alive until extraction has completed. A
   // propagation failure must not discard an otherwise valid dialogue reply.
   try {
     await extractAndPropagateKnowledge(
-      db, userId, gameId, npcCharacterId, sessionId,
-      npcBody, playerMessageBody, sharedEntries, pools, currentStep, kb.id, kb.relationshipScore,
+      db, userId, gameId, npcCharacterId, sessionId, npcMsg.id,
+      npcBody, playerMessageBody, sharedEntries, pools, currentStep,
     );
   } catch (error) {
     console.warn("[extract_knowledge] failed to persist propagated knowledge:", error);
@@ -511,10 +771,10 @@ function buildUpdatedMemory(
   playerBody: string,
   npcBody: string,
   step: number,
+  hadSocialEvent: boolean,
 ): ConversationMemoryEntry[] {
   const summary = `${playerBody.slice(0, 80)}… → ${npcBody.slice(0, 100)}…`;
-  const salience: ConversationMemoryEntry["salience"] =
-    CONSEQUENCE_PATTERNS.some(({ pattern }) => pattern.test(`${playerBody}\n${npcBody}`)) ? "high" : "low";
+  const salience: ConversationMemoryEntry["salience"] = hadSocialEvent ? "high" : "low";
 
   const entry: ConversationMemoryEntry = { exchange: summary, stepOccurred: step, salience };
   const updated = [...existing, entry];
@@ -564,16 +824,22 @@ const normalizeContactQuery = (value: string): string => value.toLocaleLowerCase
 
 export async function discoverContact(input: DiscoverContactInput): Promise<DiscoverContactOutput> {
   const {
-    db, userId, gameId, playerId, playerCharacterName,
+    db, userId, gameId, playerId, playerCharacterId, playerCharacterName,
     playerLocationProvinceId, playerRoleLabel, period, query, characterId,
   } = input;
 
   const worldView = await getWorldView(db, gameId);
   if (!worldView) return { status: "unavailable", explanation: "This world is unavailable." };
-  const registered = await listGameNpcRecords(db, gameId);
+  // Candidates resolve exclusively from canonical `world.characters`, plus any
+  // NPC a discovery event has already introduced but turn resolution has not
+  // yet folded into the snapshot -- so a person discovered moments ago in
+  // this same session is still contactable before the next turn resolves.
+  // `gameNpcRecords` is no longer consulted (character-sim phase 1).
+  const pendingDiscoveries = (await listUnappliedCharacterSocialEvents(db, gameId))
+    .filter((event): event is typeof event & { introducedCharacter: Character } => event.kind === "discovery" && event.introducedCharacter !== null);
   const candidates = [
     ...worldView.world.characters.map((character) => ({ character, roleLabel: character.officeId ?? "contact" })),
-    ...registered.map((record) => ({ character: record.character, roleLabel: record.roleLabel })),
+    ...pendingDiscoveries.map((event) => ({ character: event.introducedCharacter, roleLabel: event.introducedProfile?.roleLabel ?? "contact" })),
   ];
   const unique = [...new Map(candidates.map((candidate) => [candidate.character.id, candidate])).values()];
   if (characterId) {
@@ -663,19 +929,47 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
     return { status: "found", sessionId: existingSession.id, knownName: existing.character.name };
   }
 
-  // New character — generate an ID and seed their knowledgebase
+  // New character — canonical Character + profile, proposed as a "discovery"
+  // social event rather than written directly to WorldState.characters. Turn
+  // resolution is the sole authority that folds it into the snapshot
+  // (apps/web/lib/resolution/pipeline.ts); until then it is only reachable
+  // through this same game's pending-discoveries list above.
   const npcCharacterId = `npc:discovered:${randomUUID().replace(/-/g, "").slice(0, 16)}`;
   const province = worldView.world.map.provinces.find((p) => p.id === parsed.locationProvinceId)
     ?? worldView.world.map.provinces.find((p) => p.id === playerLocationProvinceId)
     ?? worldView.world.map.provinces[0];
   if (!province) return { status: "unavailable", explanation: "No valid location is available for that contact." };
+  const npcSkills = { martial: 35, intrigue: 35, learning: 35, piety: 35, stewardship: 35, diplomacy: 35, body: 50, subSkills: {} };
   const character: Character = {
     id: npcCharacterId, name: parsed.name, cultureId: "local", faithId: null, dynastyId: null,
     locationProvinceId: province.id, polityId: province.controllerPolityId, ageYearsAtStart: 35, officeId: null,
-    personalAccountId: `${npcCharacterId}:abstract`, skills: { martial: 35, intrigue: 35, learning: 35, piety: 35, stewardship: 35, diplomacy: 35, body: 50, subSkills: {} },
-    traits: [], healthBps: 8_000, prestigeBps: 3_000, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null,
+    personalAccountId: `${npcCharacterId}:abstract`, skills: npcSkills,
+    traits: [], mind: deriveDefaultMind({ officeId: null, skills: npcSkills, ageYears: 35, cultureId: "local" }),
+    healthBps: 8_000, prestigeBps: 3_000, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null,
   };
-  await insertGameNpcRecord(db, gameId, character, parsed.roleLabel);
+  const profile: CharacterProfile = {
+    gameId, characterId: npcCharacterId, version: 1, roleLabel: parsed.roleLabel,
+    biography: null, voiceSummary: parsed.personalitySummary || null, presentationDetails: {},
+    updatedAtStep: worldView.world.elapsedStep,
+  };
+  await upsertCharacterProfile(db, profile);
+  await insertCharacterSocialEvent(db, randomUUID(), gameId, {
+    sourceSessionId: null,
+    sourceMessageId: null,
+    participantCharacterIds: [playerCharacterId, npcCharacterId],
+    kind: "discovery",
+    visibility: "private",
+    knownByCharacterIds: [playerCharacterId, npcCharacterId],
+    relationCauses: [],
+    knowledgeClaims: [],
+    proposedBeliefs: [],
+    pressureChanges: [],
+    commitmentProposal: null,
+    introducedCharacter: character,
+    introducedProfile: profile,
+    createdAtStep: worldView.world.elapsedStep,
+  });
+
   const newKb = await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcCharacterId, {
     canonicalName: parsed.name,
     personalitySummary: parsed.personalitySummary,
@@ -687,7 +981,7 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
 
   if (newKb.biography === null) {
     const historicalContext = await lookupHistoricalFigure(parsed.name, parsed.roleLabel, period);
-    const profile = await enrichNpcProfileViaAi(userId, gameId, {
+    const enrichedProfile = await enrichNpcProfileViaAi(userId, gameId, {
       npcName: parsed.name,
       declaredConnection: parsed.roleLabel,
       connectionNotes: parsed.personalitySummary,
@@ -695,7 +989,12 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
       playerCulture: "local",
       ...(historicalContext !== null ? { historicalContext } : {}),
     });
-    if (profile !== null) await updateNpcKnowledgebase(db, newKb.id, profile);
+    if (enrichedProfile !== null) {
+      await updateNpcKnowledgebase(db, newKb.id, enrichedProfile);
+      if (enrichedProfile.biography !== null) {
+        await upsertCharacterProfile(db, { ...profile, biography: enrichedProfile.biography, version: 2 });
+      }
+    }
   }
 
   return { status: "found", sessionId: session.id, knownName: parsed.name };
@@ -732,6 +1031,8 @@ export interface DialogueContext {
   currentStep: number;
   continuityTier: "ordinary" | "remembered" | "principal";
   worldCharacters: readonly WorldCharacterRef[];
+  characterPressures: readonly CharacterPressure[];
+  characterBeliefs: readonly CharacterBelief[];
 }
 
 export async function resolveDialogueContext(gameId: string): Promise<DialogueContext | null> {
@@ -749,10 +1050,10 @@ export async function resolveDialogueContext(gameId: string): Promise<DialogueCo
       .limit(1);
     if (player === undefined) { await close(); return null; }
 
-    const [worldView, playerKnowledgebase, registeredNpcs] = await Promise.all([
+    const [worldView, playerKnowledgebase, pendingSocialEvents] = await Promise.all([
       getWorldView(db, gameId),
       getCharacterKnowledgebase(db, gameId, player.id),
-      listGameNpcRecords(db, gameId),
+      listUnappliedCharacterSocialEvents(db, gameId),
     ]);
     if (worldView === undefined) { await close(); return null; }
 
@@ -769,7 +1070,13 @@ export async function resolveDialogueContext(gameId: string): Promise<DialogueCo
     const tier = (continuity?.tier ?? "ordinary");
     const currentStep = world.elapsedStep ?? 0;
 
-    const allCharacters = [...world.characters, ...registeredNpcs.map((record) => record.character)];
+    // Canonical characters, plus any NPC a discovery event has already
+    // introduced but turn resolution has not yet folded into the snapshot.
+    // `gameNpcRecords` is no longer consulted (character-sim phase 1).
+    const pendingCharacters = pendingSocialEvents
+      .filter((event) => event.kind === "discovery" && event.introducedCharacter !== null)
+      .map((event) => event.introducedCharacter!);
+    const allCharacters = [...world.characters, ...pendingCharacters];
     const worldCharacters: WorldCharacterRef[] = allCharacters.map((c) => ({
       id: c.id,
       name: c.name,
@@ -778,9 +1085,17 @@ export async function resolveDialogueContext(gameId: string): Promise<DialogueCo
       officeId: c.officeId,
       locationProvinceId: c.locationProvinceId,
       alive: c.alive,
+      relations: c.relations,
+      mind: c.mind,
+      traits: c.traits,
+      personalAccountId: c.personalAccountId,
     }));
 
-    return { db, close, userId, playerId: player.id, characterId, characterName, playerKnowledgebase, locationProvinceId, roleLabel, period, currentStep, continuityTier: tier, worldCharacters };
+    return {
+      db, close, userId, playerId: player.id, characterId, characterName, playerKnowledgebase, locationProvinceId, roleLabel, period, currentStep, continuityTier: tier, worldCharacters,
+      characterPressures: world.characterPressures,
+      characterBeliefs: world.characterBeliefs,
+    };
   } catch (error) {
     await close();
     throw error;

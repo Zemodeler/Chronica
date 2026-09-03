@@ -14,7 +14,7 @@ export async function POST(
   const parsed = SendChatMessageRequestSchema.safeParse(body);
   if (!parsed.success) return Response.json({ error: "Invalid request body." }, { status: 400 });
 
-  const { db, close, userId, playerId, characterId, characterName, playerKnowledgebase, period, currentStep, continuityTier, worldCharacters } = ctx;
+  const { db, close, userId, playerId, characterId, characterName, playerKnowledgebase, period, currentStep, continuityTier, worldCharacters, characterPressures, characterBeliefs } = ctx;
   try {
     const session = await getSession(db, sessionId, playerId);
     if (session === undefined) return Response.json({ error: "Session not found." }, { status: 404 });
@@ -31,7 +31,7 @@ export async function POST(
         const result = await generateDialogueReply({
           db, userId, gameId, playerId, playerCharacterId: characterId, playerCharacterName: characterName, playerKnowledgebase,
           npcCharacterId, sessionId, channel: session.channel, playerMessageBody: parsed.data.body,
-          period, currentStep, continuityTier, worldCharacters, appendPlayerMessage: false,
+          period, currentStep, continuityTier, worldCharacters, characterPressures, characterBeliefs, appendPlayerMessage: false,
         });
         results.push(result);
       }
@@ -42,7 +42,7 @@ export async function POST(
       db, userId, gameId, playerId, playerCharacterId: characterId, playerCharacterName: characterName, playerKnowledgebase,
       npcCharacterId: session.npcCharacterId!,
       sessionId, channel: session.channel, playerMessageBody: parsed.data.body,
-      period, currentStep, continuityTier, worldCharacters,
+      period, currentStep, continuityTier, worldCharacters, characterPressures, characterBeliefs,
     });
     return Response.json({ playerMessage: result.playerMessage, npcReply: result.npcReply });
   } catch (error) {

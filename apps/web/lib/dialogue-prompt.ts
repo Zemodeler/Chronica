@@ -1,5 +1,6 @@
-import type { KnowledgebaseRow, MessageRow, SharedEntryRow } from "@chronica/db";
-import type { CharacterKnowledgebase, CharacterSkills } from "@chronica/shared";
+import type { KnowledgebaseRow, MessageRow } from "@chronica/db";
+import type { CharacterBelief, CharacterKnowledgebase, CharacterMind, CharacterPressure, CharacterSkills, DirectedRelation } from "@chronica/shared";
+import { resolveTraits } from "@chronica/shared";
 
 const CHANNEL_LABELS: Record<string, string> = {
   in_person_private: "in private",
@@ -17,18 +18,40 @@ export interface WorldCharacterRef {
   readonly officeId: string | null;
   readonly locationProvinceId: string | null;
   readonly alive: boolean;
+  /** The NPC's own personal account, if any -- character-sim phase 3, so a dialogue-proposed payment commitment can name a real account rather than inventing one. */
+  readonly personalAccountId: string | null;
+  /** The canonical directed-relation ledger, so opinion can be read from causes rather than a stored score. */
+  readonly relations: readonly DirectedRelation[];
+  /** Character-sim phase 2: canonical mind and trait ids, read only for this character's own dialogue context. */
+  readonly mind: CharacterMind;
+  readonly traits: readonly string[];
 }
 
-function buildSharedKnowledgeSection(entries: readonly SharedEntryRow[]): string {
-  const current = entries.filter((entry) => !entry.isContradicted);
-  const conflicting = entries.filter((entry) => entry.isContradicted);
-  if (current.length === 0 && conflicting.length === 0) return "";
-  let section = "";
-  if (current.length > 0)
-    section += `\n\nThings your network knows:\n${current.map((entry) => `- ${entry.body}`).join("\n")}`;
-  if (conflicting.length > 0)
-    section += `\n\nConflicting reports you have heard (accuracy uncertain):\n${conflicting.map((entry) => `- ${entry.body}`).join("\n")}`;
-  return section;
+/**
+ * What this NPC actually knows -- their own `characterBelief` records, never
+ * an unconditional dump of a shared knowledge pool (character-sim phase 2).
+ * A pool entry becomes speakable only once some channel has actually granted
+ * this NPC a matching belief; until then it is not knowledge they hold.
+ */
+function buildBeliefsSection(beliefs: readonly CharacterBelief[]): string {
+  if (beliefs.length === 0) return "";
+  const rendered = beliefs.map((belief) => {
+    if (belief.kind === "secret") return `- (in confidence) ${belief.claim}`;
+    if (belief.confidence >= 75) return `- ${belief.claim}`;
+    if (belief.confidence >= 40) return `- You believe: ${belief.claim}`;
+    return `- You've heard, though you are not sure it's true: ${belief.claim}`;
+  });
+  return `\n\nWhat you actually know (do not state anything here as fact beyond its own confidence, and never reveal a secret carelessly):\n${rendered.join("\n")}`;
+}
+
+/** Own private psychology (character-sim phase 2) -- never built for another character. */
+function buildMindSection(mind: CharacterMind, traitIds: readonly string[], pressures: readonly CharacterPressure[]): string {
+  const traitLine = resolveTraits(traitIds).map((t) => t.dialogueGuidance ?? t.label).join(" ");
+  const pressureLine = pressures.length > 0
+    ? `Right now you are under pressure: ${pressures.map((p) => `${p.label} (${p.kind}, weighing on you at ${p.intensity}/100)`).join("; ")}.`
+    : "";
+  const parts = [traitLine, pressureLine].filter(Boolean);
+  return parts.length > 0 ? `\n\n${parts.join(" ")}` : "";
 }
 
 function buildKnownCharactersSection(
@@ -140,14 +163,17 @@ export function buildDialogueSystemPrompt(
   period: string,
   recentMessages: readonly MessageRow[],
   worldCharacters: readonly WorldCharacterRef[],
-  sharedEntries: readonly SharedEntryRow[],
+  mindContext: { mind: CharacterMind; traits: readonly string[]; pressures: readonly CharacterPressure[]; beliefs: readonly CharacterBelief[] },
+  opinion: { score: number; label: string },
 ): string {
   const channelCtx = CHANNEL_LABELS[channel] ?? "by correspondence";
   const memory = kb.conversationMemory.slice(-6);
   const memorySection = memory.length > 0
     ? `\n\nPast conversation notes:\n${memory.map((entry) => `- ${entry.exchange}`).join("\n")}`
     : "";
-  const relationship = `Your enduring connection to ${playerCharacterName}: ${kb.declaredConnection}. ${kb.declaredConnectionNotes} Your current sentiment is ${kb.relationshipLabel} (score ${kb.relationshipScore > 0 ? "+" : ""}${kb.relationshipScore}/100).`;
+  // Sourced from the character's authoritative directed relation causes
+  // (computeOpinion), never from the legacy stored `relationshipScore`.
+  const relationship = `Your enduring connection to ${playerCharacterName}: ${kb.declaredConnection}. ${kb.declaredConnectionNotes} Your current sentiment is ${opinion.label} (score ${opinion.score > 0 ? "+" : ""}${opinion.score}/100).`;
   const events = kb.relevancyScore < 50 && kb.significantEvents.length > 0
     ? `\n\nSignificant events you know of:\n${kb.significantEvents.map((event) => `- ${event}`).join("\n")}`
     : "";
@@ -158,7 +184,8 @@ export function buildDialogueSystemPrompt(
     : "";
 
   const knownCharacters = buildKnownCharactersSection(kb.npcCharacterId, playerCharacterId, worldCharacters);
-  const networkKnowledge = buildSharedKnowledgeSection(sharedEntries);
+  const beliefsSection = buildBeliefsSection(mindContext.beliefs);
+  const mindSection = buildMindSection(mindContext.mind, mindContext.traits, mindContext.pressures);
   const playerKnowledge = buildPlayerKnowledgeSection(playerKnowledgebase);
   const npcIdentity = buildNpcIdentitySection(kb);
 
@@ -166,7 +193,7 @@ export function buildDialogueSystemPrompt(
 
 ${kb.personalitySummary || "You are a person of the time, with your own interests, loyalties, and knowledge."}
 
-${relationship}${npcIdentity}${playerKnowledge}${events}${networkKnowledge}${memorySection}${knownCharacters}${recentContext}
+${relationship}${npcIdentity}${mindSection}${playerKnowledge}${events}${beliefsSection}${memorySection}${knownCharacters}${recentContext}
 
 Rules you must follow without exception:
 - Always stay fully in character. Never refer to yourself as an AI or acknowledge this is a game.
@@ -184,6 +211,7 @@ Rules you must follow without exception:
 - Close family and trusted allies help with trivial, urgent needs as a matter of course. Only refuse if a concrete, specific hardship, conflict, or inability prevents it — never out of abstract caution or principle.
 - If you refuse or delay, give one specific in-world reason. When plausible, offer a smaller help or alternative. Do not lecture.
 - Treat the established knowledge about the player as fact you know. Do not claim ignorance of a named person or relationship recorded there.
+- You may only speak from what is listed under "What you actually know" (plus your established background and the conversation itself). Never state something as true that isn't listed there, was not just said in this conversation, or isn't part of your established background -- if you don't know it, say so, deflect, or guess and mark it as a guess. You may lie or mislead if that fits your character, but a lie does not change what is actually true in the world -- it only changes what the player believes you said.
 - If the player asks you to do something that contradicts your interests, you may refuse, negotiate, or comply reluctantly — but keep your response proportional to the stakes.
 - Do not repeat what was just said back at the player. Do not use modern idioms, anachronisms, or fourth-wall references.
 - Always consider your relationship with the player and your own interests when deciding how to respond. You may be inclined to help a close ally, but cautious with a rival or someone of low standing. Be more generous to a friend than a stranger, and to someone of high social rank than low rank.

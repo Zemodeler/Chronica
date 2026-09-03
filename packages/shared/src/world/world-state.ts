@@ -9,6 +9,11 @@ import { MapConflictsOverlaySchema } from "./map-presentation";
 import { WorldStorylineSchema } from "./storylines";
 import { CharacterGoalSchema, CharacterPlotSchema, NemesisStateSchema, DEFAULT_NEMESIS_STATE, NemesisEntrySchema, CharacterRelevanceEntrySchema } from "../character-agency/schemas";
 import { ChronicleChainSchema } from "./chronicle-chains";
+import { CharacterPressureSchema } from "../characters/pressures";
+import { CharacterBeliefSchema } from "../characters/beliefs";
+import { SocialLinkSchema } from "../characters/relationship-dimensions";
+import { CommitmentSchema } from "../character-agency/commitments";
+import { CharacterIntentSchema } from "../character-agency/intents";
 
 /**
  * Bumped when an old snapshot needs upgrading on load.
@@ -79,6 +84,18 @@ export const WorldStateSchema = z
     characterRelevance: z.array(CharacterRelevanceEntrySchema).default([]),
     // Active chronicle chains for the World Director to see open pressures.
     chronicleChains: z.array(ChronicleChainSchema).default([]),
+    // Character-sim phase 2: canonical pressures, individually-owned beliefs,
+    // and typed social links. Defaulted so archived snapshots load cleanly;
+    // see packages/shared/src/characters/{pressures,beliefs,relationship-dimensions}.ts.
+    characterPressures: z.array(CharacterPressureSchema).default([]),
+    characterBeliefs: z.array(CharacterBeliefSchema).default([]),
+    socialLinks: z.array(SocialLinkSchema).default([]),
+    // Character-sim phase 3: canonical commitments and the concrete intents
+    // characters form to fulfil/defer/break them or otherwise pursue an
+    // active plot. Defaulted so archived snapshots load cleanly; see
+    // packages/shared/src/character-agency/{commitments,intents}.ts.
+    commitments: z.array(CommitmentSchema).default([]),
+    characterIntents: z.array(CharacterIntentSchema).default([]),
     /**
      * Compact account of the turn that produced this snapshot.  It is kept in
      * the snapshot so the following turn's AI calls can use committed history

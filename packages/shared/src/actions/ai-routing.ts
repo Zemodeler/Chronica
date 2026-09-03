@@ -26,6 +26,10 @@ export const AiOperationSchema = z.enum([
   "dialogue_ordinary",
   "dialogue_principal",
   "extract_knowledge",
+  // Dialogue's structured social-event proposal (character-sim phase 1) —
+  // the only channel through which a conversation may suggest a relation
+  // cause; turn resolution validates and applies it.
+  "propose_social_events",
   // Character creation operations — executed locally in the web server (not worker).
   "declare_character",
   "confirm_character",
