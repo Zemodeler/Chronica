@@ -5,6 +5,8 @@ import { resolveTraits, type TraitDefinition } from "./traits";
 import { getActivePressures, type CharacterPressure } from "./pressures";
 import { queryBeliefs, type CharacterBelief } from "./beliefs";
 import type { ContinuityTier } from "../continuity/continuity";
+import type { Commitment } from "../character-agency/commitments";
+import type { CharacterIntent } from "../character-agency/intents";
 
 // A structured, developer-facing view of everything canonical known about one
 // character (character-sim phase 2). Never rendered in ordinary player UI --
@@ -41,7 +43,12 @@ export interface CharacterInspectorView {
   readonly activePressures: readonly CharacterPressure[];
   readonly relationships: readonly InspectorRelationshipTie[];
   readonly beliefs: readonly CharacterBelief[];
+  /** Legacy DB-sourced commitments, kept for backward-compat with saves predating character-sim phase 3. */
   readonly commitments: readonly InspectorCommitment[];
+  /** Canonical, replayable commitments (character-sim phase 3) -- the resolver's own authority/resource-checked ledger. */
+  readonly canonicalCommitments: readonly Commitment[];
+  /** This character's recent intents: what they chose, why, and how each was ultimately resolved. */
+  readonly recentIntents: readonly CharacterIntent[];
   readonly continuityTier: ContinuityTier | null;
 }
 
@@ -51,6 +58,8 @@ export interface InspectorWorldView {
   readonly characterBeliefs: readonly CharacterBelief[];
   readonly socialLinks: readonly SocialLink[];
   readonly continuity: readonly { readonly characterId: string; readonly tier: ContinuityTier }[];
+  readonly commitments?: readonly Commitment[];
+  readonly characterIntents?: readonly CharacterIntent[];
 }
 
 export function buildCharacterInspectorView(
@@ -92,6 +101,8 @@ export function buildCharacterInspectorView(
     commitments: pendingCommitments
       .filter((c) => c.npcCharacterId === characterId)
       .map((c) => ({ id: c.id, promiseType: c.promiseType, promisedResult: c.promisedResult, status: c.status })),
+    canonicalCommitments: (world.commitments ?? []).filter((c) => c.promisorCharacterId === characterId || c.beneficiaryCharacterId === characterId),
+    recentIntents: (world.characterIntents ?? []).filter((i) => i.actorCharacterId === characterId),
     continuityTier: world.continuity.find((c) => c.characterId === characterId)?.tier ?? null,
   };
 }

@@ -6,6 +6,8 @@ import type { SocialLink } from "./relationship-dimensions";
 import type { CharacterBelief } from "./beliefs";
 import { KNOWLEDGE_CHANNEL_DEFAULTS, resolveRecipients } from "./beliefs";
 import { createPressure, refreshPressure, resolvePressure } from "./pressures";
+import type { Commitment } from "../character-agency/commitments";
+import { createCommitment } from "../character-agency/commitments";
 
 // The single point where a proposed social event becomes canonical world
 // state (character-sim phase 1, extended in phase 2 with beliefs, pressure
@@ -48,8 +50,12 @@ function withAppendedCause(character: Character, targetCharacterId: string, caus
  * Validates and applies a batch of unapplied `CharacterSocialEvent`s against
  * `world`. Never touches `material`, `officeId`, territories, or any field
  * outside `characters`/`continuity`/`encounters`/`characterBeliefs`/
- * `characterPressures`/`socialLinks` -- the event schema itself has no field
- * to carry any other effect, so this is structural, not just a runtime check.
+ * `characterPressures`/`socialLinks`/`commitments` -- the event schema itself
+ * has no field to carry any other effect, so this is structural, not just a
+ * runtime check. A commitment proposal only ever *reads* `material` (to
+ * confirm the promisor genuinely controls what they promise); it never
+ * spends it -- that only happens later, when the commitment is fulfilled
+ * (`character-agency/commitments.ts`).
  */
 export function applySocialEvents(
   world: WorldState,
@@ -62,6 +68,7 @@ export function applySocialEvents(
   let characterBeliefs: readonly CharacterBelief[] = world.characterBeliefs;
   let characterPressures: readonly WorldState["characterPressures"][number][] = world.characterPressures;
   let socialLinks: readonly SocialLink[] = world.socialLinks;
+  let commitments: readonly Commitment[] = world.commitments;
   const appliedIds: string[] = [];
   const rejectedIds: { id: string; reason: string }[] = [];
   const introducedProfiles: CharacterProfile[] = [];
@@ -111,6 +118,44 @@ export function applySocialEvents(
     if (invalidPressureChange !== undefined) {
       rejectedIds.push({ id: event.id, reason: "Pressure change references an unknown character." });
       continue;
+    }
+
+    // A commitment proposal must name only known participants, and its
+    // promisor must genuinely control what it names -- checked in full
+    // before any of this event's other effects apply, so a promise no one
+    // can keep never leaves a partially-applied event behind.
+    let commitmentToAppend: Commitment | null = null;
+    if (event.commitmentProposal !== null) {
+      const proposal = event.commitmentProposal;
+      if (
+        (!knownCharacterIds.has(proposal.promisorCharacterId) && proposal.promisorCharacterId !== introducing?.id)
+        || (!knownCharacterIds.has(proposal.beneficiaryCharacterId) && proposal.beneficiaryCharacterId !== introducing?.id)
+      ) {
+        rejectedIds.push({ id: event.id, reason: "Commitment proposal names an unknown character." });
+        continue;
+      }
+      const authorityCheck = createCommitment(
+        { characters, commitments, material: world.material },
+        {
+          id: `${event.id}:commitment`,
+          promisorCharacterId: proposal.promisorCharacterId,
+          beneficiaryCharacterId: proposal.beneficiaryCharacterId,
+          actionKind: proposal.actionKind,
+          description: proposal.promisedResult,
+          conditions: proposal.conditions,
+          requiredOfficeId: proposal.requiredOfficeId,
+          requiredResource: proposal.requiredResource,
+          visibility: event.visibility,
+          sourceEventId: event.id,
+          atStep,
+          reviewInSteps: proposal.reviewInSteps,
+        },
+      );
+      if ("rejectionReason" in authorityCheck) {
+        rejectedIds.push({ id: event.id, reason: `Commitment cannot be kept: ${authorityCheck.rejectionReason}` });
+        continue;
+      }
+      commitmentToAppend = authorityCheck.commitment;
     }
 
     // Discovery: append the introduced character (idempotent by id).
@@ -236,6 +281,10 @@ export function applySocialEvents(
       }
     }
 
+    if (commitmentToAppend !== null) {
+      commitments = [...commitments, commitmentToAppend];
+    }
+
     encounters = [
       ...encounters,
       {
@@ -266,6 +315,7 @@ export function applySocialEvents(
       characterBeliefs: [...characterBeliefs],
       characterPressures: [...characterPressures],
       socialLinks: [...socialLinks],
+      commitments: [...commitments],
     },
     appliedIds,
     rejectedIds,

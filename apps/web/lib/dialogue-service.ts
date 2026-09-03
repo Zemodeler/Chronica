@@ -6,7 +6,6 @@ import {
   appendMessage,
   createDatabase,
   createGroupSession,
-  createNpcCommitment,
   findOrOpenSession,
   getCharacterKnowledgebase,
   getOrCreateNpcKnowledgebase,
@@ -54,7 +53,6 @@ import type { ChronicaDatabase } from "@chronica/db";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { headers } from "next/headers";
 import { buildDialogueSystemPrompt, type WorldCharacterRef } from "./dialogue-prompt";
-import { extractDialogueCommitment } from "./dialogue-commitment";
 import { clampRelationshipScore, relationshipLabelForScore, scoreForDeclaredConnection } from "./relationship-score";
 
 export type { WorldCharacterRef } from "./dialogue-prompt";
@@ -169,6 +167,24 @@ const ProposedPressureChangeSchema = z.object({
   label: z.string().trim().min(1).max(200).optional(),
 });
 
+// Character-sim phase 3: a commitment is only ever proposed by the NPC
+// speaking, about the NPC's own resources -- dialogue never promises on the
+// player's behalf, and never names an account id itself (the resolver fills
+// in the NPC's own personal account for a payment; anything else is a
+// resource-free social/informational commitment).
+const COMMITMENT_ACTION_KIND_VALUES = [
+  "payment", "military_support", "political_support",
+  "information_sharing", "protection", "office_favour", "other",
+] as const;
+
+const ProposedCommitmentSchema = z.object({
+  actionKind: z.enum(COMMITMENT_ACTION_KIND_VALUES),
+  promisedResult: z.string().trim().min(1).max(400),
+  conditions: z.string().trim().max(400).default(""),
+  /** Only meaningful when actionKind is "payment"; the NPC's own funds back it. */
+  amount: z.number().int().positive().nullable().default(null),
+});
+
 const ProposeSocialEventsResponseSchema = z.object({
   events: z.array(z.object({
     kind: z.enum(SOCIAL_EVENT_KIND_VALUES),
@@ -177,6 +193,8 @@ const ProposeSocialEventsResponseSchema = z.object({
     proposedBeliefs: z.array(ProposedBeliefSchema).max(2).default([]),
     /** Only the speaking NPC's own pressure -- never the player's, never a third party's. */
     pressureChange: ProposedPressureChangeSchema.nullable().default(null),
+    /** Only a promise the NPC just made to the player -- never on the player's behalf. */
+    commitmentProposal: ProposedCommitmentSchema.nullable().default(null),
   })).max(3),
 });
 
@@ -195,11 +213,13 @@ Respond ONLY with JSON matching this schema:
       "relationCauses": [ { "subjectCharacterId": "who now holds this opinion", "targetCharacterId": "who it is about", "label": "short reason, e.g. 'You publicly insulted him.'", "score": -20 to 20, "decayPerYearBps": 0 to 10000 } ],
       "visibility": "public" | "polity" | "private",
       "proposedBeliefs": [ { "subjectEntityId": "id this is about, or null", "claim": "third-person statement", "kind": "fact"|"rumour"|"suspicion"|"secret", "channel": "direct_witness"|"event_participant"|"private_disclosure"|"trusted_report", "recipientCharacterIds": ["${npcCharacterId}" and/or "${playerCharacterId}" -- only these two ids] } ],
-      "pressureChange": { "action": "create"|"refresh"|"resolve", "kind": "debt"|"threat"|"grief"|"illness"|"political_danger"|"family_obligation"|"opportunity"|"humiliation"|"military_emergency", "intensity": 0-100, "label": "short reason" } | null
+      "pressureChange": { "action": "create"|"refresh"|"resolve", "kind": "debt"|"threat"|"grief"|"illness"|"political_danger"|"family_obligation"|"opportunity"|"humiliation"|"military_emergency", "intensity": 0-100, "label": "short reason" } | null,
+      "commitmentProposal": { "actionKind": "payment"|"military_support"|"political_support"|"information_sharing"|"protection"|"office_favour"|"other", "promisedResult": "what was actually promised, in the NPC's own words", "conditions": "any stated condition, or empty string", "amount": integer or null (only for "payment", the exact amount if a specific number was promised) } | null
     }
   ]
 }
 "pressureChange" may only ever describe a pressure on "${npcCharacterId}" (the NPC speaking), never on "${playerCharacterId}" or anyone else -- omit it (null) unless this exchange concretely changes what the NPC is under pressure from.
+"commitmentProposal" may only ever describe a promise "${npcCharacterId}" just made to "${playerCharacterId}" -- never a promise on the player's behalf, and only when the NPC's reply contains an explicit, concrete commitment (not a vague offer of sympathy). Omit it (null) otherwise.
 Return { "events": [] } if nothing consequential happened.`;
 }
 
@@ -219,6 +239,7 @@ async function proposeAndPersistSocialEvents(
   playerMessage: string,
   npcReply: string,
   currentStep: number,
+  npcPersonalAccountId: string | null,
 ): Promise<CharacterSocialEvent[]> {
   const adapter = createAiAdapter();
   let result: Awaited<ReturnType<typeof callWithCoinGate>>;
@@ -288,6 +309,28 @@ async function proposeAndPersistSocialEvents(
         }]
       : [];
 
+    // Commitments (character-sim phase 3): only ever a promise the NPC just
+    // made to the player, about the NPC's own resources. A payment names the
+    // NPC's own personal account -- never one the AI supplies -- and is
+    // dropped silently (not rejected) if the NPC has no account to name,
+    // since `applySocialEvents` would reject an accountless payment anyway.
+    const commitmentProposal = draft.commitmentProposal !== null
+      && (draft.commitmentProposal.actionKind !== "payment" || (draft.commitmentProposal.amount !== null && npcPersonalAccountId !== null))
+      ? {
+          actionKind: draft.commitmentProposal.actionKind,
+          promisedResult: draft.commitmentProposal.promisedResult,
+          conditions: draft.commitmentProposal.conditions,
+          rationale: "",
+          promisorCharacterId: npcCharacterId,
+          beneficiaryCharacterId: playerCharacterId,
+          requiredOfficeId: null,
+          requiredResource: draft.commitmentProposal.actionKind === "payment" && draft.commitmentProposal.amount !== null && npcPersonalAccountId !== null
+            ? { accountId: npcPersonalAccountId, minAmount: draft.commitmentProposal.amount }
+            : null,
+          reviewInSteps: 6,
+        }
+      : null;
+
     const id = randomUUID();
     const event = {
       id,
@@ -303,7 +346,7 @@ async function proposeAndPersistSocialEvents(
       knowledgeClaims: [],
       proposedBeliefs,
       pressureChanges,
-      commitmentProposal: null,
+      commitmentProposal,
       introducedCharacter: null,
       introducedProfile: null,
       createdAtStep: currentStep,
@@ -697,16 +740,13 @@ export async function generateDialogueReply(input: DialogueCallInput & { readonl
   // only turn resolution applies a proposed event to canonical state.
   const proposedEvents = await proposeAndPersistSocialEvents(
     db, userId, gameId, npcCharacterId, playerCharacterId, sessionId, npcMsg.id, playerMessageBody, npcBody, currentStep,
+    npcRef?.personalAccountId ?? null,
   );
   const updatedMemory = buildUpdatedMemory(kb.conversationMemory, playerMessageBody, npcBody, currentStep, proposedEvents.length > 0);
   const relevancyDelta = 5 + (proposedEvents.length > 0 ? 10 : 0) + (opinionScore < 0 ? 15 : 0);
 
   await updateNpcKnowledgebase(db, kb.id, { conversationMemory: updatedMemory });
   await recordInteraction(db, kb.id, relevancyDelta);
-  const commitment = extractDialogueCommitment(npcBody, playerMessageBody);
-  if (commitment) await createNpcCommitment(db, {
-    gameId, sessionId, npcMessageId: npcMsg.id, playerCharacterId, npcCharacterId, createdAtStep: currentStep, ...commitment,
-  });
 
   // Keep the request connection alive until extraction has completed. A
   // propagation failure must not discard an otherwise valid dialogue reply.
@@ -1048,6 +1088,7 @@ export async function resolveDialogueContext(gameId: string): Promise<DialogueCo
       relations: c.relations,
       mind: c.mind,
       traits: c.traits,
+      personalAccountId: c.personalAccountId,
     }));
 
     return {

@@ -14,6 +14,7 @@ Chronica is a single-player, AI-driven grand strategy game seen through one char
 10. [NPC social dialogue and commitments](10-npc-social-dialogue-and-commitments.md)
 11. [Character simulation, phase 1](11-character-simulation-phase-1.md)
 12. [Character simulation, phase 2](12-character-simulation-phase-2.md)
+13. [Character simulation, phase 3](13-character-simulation-phase-3.md)
 
 Confirmed decisions are stated directly. Future possibilities and unresolved choices are kept in the roadmap or open-decisions document.
 

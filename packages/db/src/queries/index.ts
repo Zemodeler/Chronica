@@ -1,6 +1,7 @@
 export * from "./billing";
 export * from "./accounts";
 export * from "./backfill-character-minds";
+export * from "./backfill-legacy-commitments";
 export * from "./backfill-npc-characters";
 export * from "./character";
 export * from "./character-social";
