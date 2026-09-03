@@ -99,12 +99,31 @@ export const KnowledgeClaimProposalSchema = z
   .strict();
 export type KnowledgeClaimProposal = z.infer<typeof KnowledgeClaimProposalSchema>;
 
+/**
+ * Character-sim phase 3: a canonical `Commitment`, not merely a DB row.
+ * `promisorCharacterId` is always the proposing NPC (dialogue may never
+ * promise on the player's behalf); `requiredOfficeId`/`requiredResource`
+ * name what the promisor must actually control for this to be more than
+ * words -- `applySocialEvents` rejects the proposal outright if they don't.
+ */
 export const CommitmentProposalSchema = z
   .object({
-    promiseType: z.string().trim().min(1).max(80),
+    actionKind: z.enum([
+      "payment", "military_support", "political_support",
+      "information_sharing", "protection", "office_favour", "other",
+    ]),
     promisedResult: z.string().trim().min(1).max(400),
     conditions: z.string().trim().max(400).default(""),
     rationale: z.string().trim().max(400).default(""),
+    promisorCharacterId: EntityIdSchema,
+    beneficiaryCharacterId: EntityIdSchema,
+    requiredOfficeId: EntityIdSchema.nullable().default(null),
+    requiredResource: z
+      .object({ accountId: EntityIdSchema, minAmount: z.number().int().positive() })
+      .strict()
+      .nullable()
+      .default(null),
+    reviewInSteps: z.number().int().positive().max(100).default(6),
   })
   .strict();
 export type CommitmentProposal = z.infer<typeof CommitmentProposalSchema>;

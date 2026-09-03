@@ -3,10 +3,12 @@ import { createDatabase, getWorldView, listPendingNpcCommitments } from "@chroni
 import { buildCharacterInspectorView } from "@chronica/shared";
 import { resolveAccount } from "../../../../../../lib/account-service";
 
-// Developer/admin-only diagnostics (character-sim phase 2): canonical
-// identity, mind, traits, active pressures, directed relationship
-// dimensions with their strongest causes, beliefs, commitments, and
-// continuity tier for one character. Never linked from ordinary player UI.
+// Developer/admin-only diagnostics (character-sim phase 2, extended in
+// phase 3): canonical identity, mind, traits, active pressures, directed
+// relationship dimensions with their strongest causes, beliefs, canonical
+// commitments, recent intents (chosen action, rationale, and how each was
+// ultimately resolved), and continuity tier for one character. Never linked
+// from ordinary player UI.
 
 function requiredDatabaseUrl(): string {
   const value = process.env.DATABASE_URL?.trim();

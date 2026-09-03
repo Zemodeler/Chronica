@@ -3,7 +3,6 @@ import { buildDialogueSystemPrompt, buildPlayerKnowledgeSection } from "./dialog
 import type { CharacterKnowledgebase } from "@chronica/shared";
 import { NEUTRAL_MIND } from "@chronica/shared";
 import type { KnowledgebaseRow } from "@chronica/db";
-import { extractDialogueCommitment } from "./dialogue-commitment";
 
 const playerKnowledgebase: CharacterKnowledgebase = {
   version: 1,
@@ -107,12 +106,5 @@ describe("buildPlayerKnowledgeSection", () => {
 
     expect(prompt).toContain("Gaius Aurelius: younger brother");
     expect(prompt).toContain("Do not claim ignorance of a named person or relationship recorded there.");
-  });
-});
-
-describe("extractDialogueCommitment", () => {
-  it("records an explicit bounded promise but not ordinary dialogue", () => {
-    expect(extractDialogueCommitment("I will lend you twenty denarii before dawn.", "Could you lend me money?")?.promiseType).toBe("money");
-    expect(extractDialogueCommitment("I understand your difficulty.", "Could you help?")).toBeNull();
   });
 });

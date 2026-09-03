@@ -18,6 +18,8 @@ export interface WorldCharacterRef {
   readonly officeId: string | null;
   readonly locationProvinceId: string | null;
   readonly alive: boolean;
+  /** The NPC's own personal account, if any -- character-sim phase 3, so a dialogue-proposed payment commitment can name a real account rather than inventing one. */
+  readonly personalAccountId: string | null;
   /** The canonical directed-relation ledger, so opinion can be read from causes rather than a stored score. */
   readonly relations: readonly DirectedRelation[];
   /** Character-sim phase 2: canonical mind and trait ids, read only for this character's own dialogue context. */

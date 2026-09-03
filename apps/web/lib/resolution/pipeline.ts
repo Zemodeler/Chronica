@@ -15,6 +15,9 @@ import type {
   CharacterKnowledgebase,
   WorkflowAuditBlob,
   ConsolidatedProposalPackage,
+  CandidateAction,
+  IntentClaim,
+  CharacterIntent,
 } from "@chronica/shared";
 import {
   OrderInterpretationSchema,
@@ -33,8 +36,15 @@ import {
   advancePressureLifecycle,
   derivePressureTriggers,
   createPressure,
+  dueCommitments,
+  fulfillCommitment,
+  deferCommitment,
+  breakCommitment,
+  generateCandidateActions,
+  rankCandidates,
+  resolveIntentConflicts,
 } from "@chronica/shared";
-import { collectPlayerCandidates, collectWorldCandidates, previewPlayerWorkflows, runWorkflowManager } from "./workflow-manager";
+import { collectCharacterAgencyCandidates, collectPlayerCandidates, collectWorldCandidates, previewPlayerWorkflows, runWorkflowManager } from "./workflow-manager";
 
 const InterpretParseSchema = OrderInterpretationSchema.omit({ directiveId: true });
 const AssessParseSchema = OrderAssessmentSchema.omit({ directiveId: true });
@@ -76,6 +86,7 @@ import { buildSimulatorSystemPrompt } from "./simulator-prompt";
 import { buildReactionDirectorSystemPrompt, shouldRunReactionDirector } from "./reaction-director-prompt";
 import { consolidateProposals } from "./consolidator-prompt";
 import { buildWorldDirectorSystemPrompt } from "./world-director-prompt";
+import { buildCharacterSuggestionInvocation, buildIntentInvocation, buildIntentSocialEvent } from "./character-agency";
 
 export type ProgressCallback = (progress: ResolutionProgress) => void;
 
@@ -1132,6 +1143,16 @@ export async function resolveTurn(
     // ── Steps 5–7: Reaction Director, Simulator, Character Director (parallel) ──
     // These all run on worldAfterPlayer — post player-execution snapshot.
 
+    // Hoisted so the character-agency intent phase (after World Director) can
+    // reuse the same bounded, deterministic working set the Character
+    // Director advised on -- selection happens once per turn, not twice.
+    const selectedCharacters: SelectedCharacter[] = selectRelevantCharacters(
+      worldAfterPlayer,
+      actorCharacterId,
+      undefined,
+      pendingCommitments.map((commitment) => commitment.npcCharacterId),
+    );
+
     const runReaction = async (): Promise<ReactionProposal[]> => {
       const proposals: ReactionProposal[] = [];
       const shouldReact = shouldRunReactionDirector(verdicts);
@@ -1172,12 +1193,6 @@ export async function resolveTurn(
 
     const runCharacterDirector = async (): Promise<CharacterSuggestion[]> => {
       const suggestions: CharacterSuggestion[] = [];
-      const selectedCharacters: SelectedCharacter[] = selectRelevantCharacters(
-        worldAfterPlayer,
-        actorCharacterId,
-        undefined,
-        pendingCommitments.map((commitment) => commitment.npcCharacterId),
-      );
       console.log(`${tag()} [character_advise] IN: selectedCharacters=${selectedCharacters.length} — ${selectedCharacters.map((sc) => `${sc.characterId}(tier:${sc.tier})`).join(", ") || "none"}`);
       if (selectedCharacters.length > 0) {
         try {
@@ -1298,25 +1313,165 @@ export async function resolveTurn(
     }
     emit(onProgress, "world_direct", true);
 
+    // ── Step 9.5: Character agency — goals/plots, commitments, intents ─────
+    // The Character Director only advises; this is the one place an approved
+    // suggestion or a scored, conflict-resolved intent becomes either a real
+    // workflow invocation (fed into the same manager/executor as every other
+    // action this turn) or a canonical commitment/relation-cause change
+    // (character-sim phase 3). `agencyWorld` becomes the base every
+    // subsequent step executes against, replacing `resolutionWorld`.
+    emit(onProgress, "character_agency");
+    const characterAgencyInvocations: Array<{ invocation: ProposedInvocation; sourceRef: string; sourceRationale: string }> = [];
+    let agencyWorld: WorldState = resolutionWorld;
+
+    for (const suggestion of characterSuggestions) {
+      if (!approvedCharacterIds.has(suggestion.characterId)) continue;
+      const invocation = buildCharacterSuggestionInvocation(suggestion, suggestion.characterId);
+      if (invocation) {
+        characterAgencyInvocations.push({ invocation, sourceRef: suggestion.characterId, sourceRationale: suggestion.rationale });
+      }
+    }
+
+    const dueThisTurn = dueCommitments(agencyWorld.commitments ?? [], atStep);
+    const intents: CharacterIntent[] = [];
+    const claims: IntentClaim[] = [];
+    const candidateByIntentId = new Map<string, CandidateAction>();
+
+    // Bounded to this turn's already-selected, already-capped working set
+    // (`selectRelevantCharacters`, max 8) -- only characters at continuity
+    // tier "principal" get full candidate generation and up to one primary
+    // action; "remembered" characters only advance their existing coarse
+    // plan; "ordinary" characters (or unselected characters) get none.
+    for (const selected of selectedCharacters) {
+      const character = agencyWorld.characters.find((c) => c.id === selected.characterId);
+      if (!character || !character.alive) continue;
+      const continuityEntry = agencyWorld.continuity.find((c) => c.characterId === character.id);
+      const tier = continuityEntry?.tier ?? "ordinary";
+      if (tier !== "principal") continue;
+
+      const owed = dueThisTurn.filter((c) => c.promisorCharacterId === character.id);
+      const candidates = generateCandidateActions({ world: agencyWorld, character, atStep, commitments: owed });
+      const top = rankCandidates(agencyWorld, character, candidates, atStep)[0];
+      if (!top) continue;
+
+      const intentId = `intent-${character.id}-${atStep}`;
+      candidateByIntentId.set(intentId, top.candidate);
+      intents.push({
+        id: intentId, actorCharacterId: character.id,
+        sourceGoalId: top.candidate.sourceGoalId, sourcePlotId: top.candidate.sourcePlotId,
+        sourceCommitmentId: top.candidate.sourceCommitmentId,
+        actionType: top.candidate.actionType, targetIds: [...top.candidate.targetIds],
+        rationale: top.candidate.rationale, prerequisites: [],
+        intendedWorkflowIds: [...top.candidate.legalWorkflowIds],
+        priority: Math.max(0, Math.min(100, Math.round(top.score.total + 50))),
+        status: "proposed", createdAtStep: atStep, reviewedAtStep: null, expiresAtStep: null,
+        visibility: "private", sourceEventIds: [], resolutionReason: null,
+      });
+      claims.push({
+        intentId, actorCharacterId: character.id, actionType: top.candidate.actionType,
+        requiredResource: top.candidate.requiredResource, requiredOfficeId: top.candidate.requiredOfficeId,
+        targetIds: top.candidate.targetIds, score: top.score.total, createdAtStep: atStep,
+      });
+    }
+
+    // "remembered" characters advance their existing coarse plan by one step
+    // -- no candidate generation, no scoring, never a rewritten history.
+    let continuityAfterCoarseAdvance = agencyWorld.continuity;
+    for (const selected of selectedCharacters) {
+      const continuityEntry = continuityAfterCoarseAdvance.find((c) => c.characterId === selected.characterId);
+      if (continuityEntry?.tier !== "remembered" || continuityEntry.plan === null) continue;
+      continuityAfterCoarseAdvance = continuityAfterCoarseAdvance.map((c) =>
+        c.characterId === selected.characterId && c.plan !== null
+          ? { ...c, plan: { ...c.plan, progressSteps: c.plan.progressSteps + 1 } }
+          : c,
+      );
+    }
+    agencyWorld = { ...agencyWorld, continuity: continuityAfterCoarseAdvance };
+
+    const conflictOutcomes = resolveIntentConflicts(agencyWorld, claims);
+    const resolvedIntents: CharacterIntent[] = [];
+    const intentAuditBySourceRef = new Map<string, string>(); // intentId -> workflow invocation's sourceRef, for post-execution status lookup
+
+    for (const intent of intents) {
+      const candidate = candidateByIntentId.get(intent.id)!;
+      const conflict = conflictOutcomes.get(intent.id);
+      if (conflict && !conflict.accepted) {
+        resolvedIntents.push({ ...intent, status: "blocked", resolutionReason: conflict.reason });
+        continue;
+      }
+
+      const commitment = intent.sourceCommitmentId !== null
+        ? dueThisTurn.find((c) => c.id === intent.sourceCommitmentId)
+        : undefined;
+      if (commitment && (intent.actionType === "fulfill_commitment" || intent.actionType === "defer_commitment" || intent.actionType === "break_commitment")) {
+        const result = intent.actionType === "fulfill_commitment"
+          ? fulfillCommitment(agencyWorld, commitment.id, atStep)
+          : intent.actionType === "break_commitment"
+            ? breakCommitment(agencyWorld, commitment.id, atStep, intent.rationale)
+            : deferCommitment(agencyWorld, commitment.id, atStep, intent.rationale);
+        agencyWorld = {
+          ...agencyWorld,
+          characters: [...result.characters],
+          commitments: [...result.commitments],
+          characterPressures: [...result.characterPressures],
+          material: result.material,
+        };
+        resolvedIntents.push({ ...intent, status: "executed", resolutionReason: `Commitment ${intent.actionType.replace("_commitment", "")}ed.` });
+        continue;
+      }
+
+      if (candidate.legalWorkflowIds.length > 0) {
+        const invocation = buildIntentInvocation(candidate, agencyWorld);
+        if (invocation) {
+          characterAgencyInvocations.push({ invocation, sourceRef: intent.id, sourceRationale: intent.rationale });
+          intentAuditBySourceRef.set(intent.id, intent.id);
+          resolvedIntents.push({ ...intent, status: "prepared" });
+          continue;
+        }
+      }
+
+      const socialEvent = buildIntentSocialEvent(candidate, atStep, gameId);
+      if (socialEvent) {
+        const applied = applySocialEvents(agencyWorld, [socialEvent], atStep, "in-progress-turn");
+        agencyWorld = applied.world;
+        const failed = applied.rejectedIds[0];
+        resolvedIntents.push({
+          ...intent,
+          status: failed ? "failed" : "executed",
+          resolutionReason: failed?.reason ?? "Applied as a direct social consequence.",
+        });
+        continue;
+      }
+
+      resolvedIntents.push({ ...intent, status: "executed", resolutionReason: "No mechanical effect modeled for this action; recorded for continuity only." });
+    }
+    console.log(`${tag()} [character_agency] OUT: goalPlotInvocations=${characterAgencyInvocations.length - intentAuditBySourceRef.size} intents=${intents.length} blocked=${resolvedIntents.filter((i) => i.status === "blocked").length}`);
+    emit(onProgress, "character_agency", true);
+
     // ── Step 10: Final AI workflow review and execution ───────────────────
     emit(onProgress, "manage");
-    console.log(`${tag()} [manage] IN: player=${playerCandidates.length} world=${worldDirectorInvocations.length} candidate(s)`);
+    console.log(`${tag()} [manage] IN: player=${playerCandidates.length} world=${worldDirectorInvocations.length} character_agency=${characterAgencyInvocations.length} candidate(s)`);
     const worldCandidates = collectWorldCandidates(worldDirectorInvocations);
+    const characterAgencyCandidates = collectCharacterAgencyCandidates(characterAgencyInvocations);
     // Resolve entity name references to IDs before the Manager sees them.
     // Models occasionally emit readable names ("Panormus") instead of UUID-style
     // IDs; resolving here ensures both the Manager's dry-run and final execution
     // see valid references.
     const resolvedPlayerCandidates = playerCandidates.map((c) => ({
       ...c,
-      requestedInvocation: resolveInvocationEntities(c.requestedInvocation, resolutionWorld),
+      requestedInvocation: resolveInvocationEntities(c.requestedInvocation, agencyWorld),
     }));
     const resolvedWorldCandidates = worldCandidates.map((c) => ({
       ...c,
-      requestedInvocation: resolveInvocationEntities(c.requestedInvocation, resolutionWorld),
+      requestedInvocation: resolveInvocationEntities(c.requestedInvocation, agencyWorld),
     }));
-    const finalCandidates = [...resolvedPlayerCandidates, ...resolvedWorldCandidates];
+    const resolvedCharacterAgencyCandidates = characterAgencyCandidates.map((c) => ({
+      ...c,
+      requestedInvocation: resolveInvocationEntities(c.requestedInvocation, agencyWorld),
+    }));
+    const finalCandidates = [...resolvedPlayerCandidates, ...resolvedWorldCandidates, ...resolvedCharacterAgencyCandidates];
     const managerResult = await runWorkflowManager(
-      coinGatedAdapter, resolutionWorld, finalCandidates, atStep, gameId, activeInventedWorkflows,
+      coinGatedAdapter, agencyWorld, finalCandidates, atStep, gameId, activeInventedWorkflows,
     );
     console.log(`${tag()} [manage] OUT: ${managerResult.acceptedInvocations.length}/${finalCandidates.length} workflow(s) accepted`);
     emit(onProgress, "manage", true);
@@ -1333,8 +1488,8 @@ export async function resolveTurn(
       const atkId = params["attackingForceId"] as string | undefined;
       const defId = params["defendingForceId"] as string | undefined;
       if (!atkId || !defId) continue;
-      const atk = resolutionWorld.material.forces.find((f) => f.id === atkId);
-      const def = resolutionWorld.material.forces.find((f) => f.id === defId);
+      const atk = agencyWorld.material.forces.find((f) => f.id === atkId);
+      const def = agencyWorld.material.forces.find((f) => f.id === defId);
       if (!atk || !def || atk.locationId === def.locationId) continue;
       // Move attacker to defender's province before the battle starts.
       const moveInvocation: ProposedInvocation = {
@@ -1347,7 +1502,7 @@ export async function resolveTurn(
       console.log(`${tag()} [battle-proximity] auto-prepended move_force(${atkId} → ${def.locationId}) before start_battle`);
     }
 
-    const executed = executeWorkflows(invocationsToExecute, resolutionWorld, atStep, managerResult.runtimeInventedWorkflows);
+    const executed = executeWorkflows(invocationsToExecute, agencyWorld, atStep, managerResult.runtimeInventedWorkflows);
     let newWorld = executed.world;
     let allWorkflowLog = [...executed.log];
     for (const entry of allWorkflowLog) {
@@ -1393,6 +1548,26 @@ export async function resolveTurn(
           : { ...entry, executionOk: false, executionReason: "Approved invocation was not sent to the executor." };
       }),
     };
+    // A "prepared" intent's real fate is only known once the workflow
+    // manager and executor have actually run -- resolve it now, by the
+    // intent id carried through as the candidate's sourceRef.
+    for (let i = 0; i < resolvedIntents.length; i++) {
+      const intent = resolvedIntents[i]!;
+      if (intent.status !== "prepared") continue;
+      const auditEntry = finalWorkflowAudit.candidates.find((entry) => entry.sourceRef === intent.id);
+      if (auditEntry === undefined) {
+        resolvedIntents[i] = { ...intent, status: "blocked", resolutionReason: "Never reached the workflow manager." };
+      } else if (auditEntry.managerDecision === "reject" || auditEntry.managerDecision === "no_action") {
+        resolvedIntents[i] = { ...intent, status: "blocked", resolutionReason: auditEntry.managerReason ?? "Rejected by the workflow manager." };
+      } else if (auditEntry.executionOk === false) {
+        resolvedIntents[i] = { ...intent, status: "failed", resolutionReason: auditEntry.executionReason ?? "Execution failed." };
+      } else if (auditEntry.executionOk === true) {
+        resolvedIntents[i] = { ...intent, status: "executed", resolutionReason: "Executed through the workflow manager." };
+      } else {
+        resolvedIntents[i] = { ...intent, status: "deferred", resolutionReason: "Approved but not yet executed this turn." };
+      }
+    }
+
     const inventedByActionId = new Map(managerResult.runtimeInventedWorkflows.map((workflow) => [workflow.definition.actionId, workflow]));
     const inventedWorkflowUses = allWorkflowLog.flatMap((entry) => {
       const workflow = inventedByActionId.get(entry.invocation.actionId);
@@ -1561,6 +1736,13 @@ export async function resolveTurn(
       ...worldWithTriggeredPressures,
       elapsedStep: atStep,
       characterRelevance: updatedRelevance,
+      // Character-sim phase 3: this turn's resolved intents (executed,
+      // blocked, deferred, failed, abandoned), each carrying the reason it
+      // ended up where it did, appended to recent history and capped so this
+      // never grows into a whole-population log. Bounded to this turn's
+      // principal working set (at most `MAX_CHARACTERS_PER_TURN`), so the cap
+      // covers many turns of real history, not just one.
+      characterIntents: [...(worldWithTriggeredPressures.characterIntents ?? []), ...resolvedIntents].slice(-200),
       lastTurnSummary: summarizeResolvedTurn(chronicleInputs, atStep),
     };
 
