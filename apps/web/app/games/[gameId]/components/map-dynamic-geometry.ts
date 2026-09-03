@@ -35,7 +35,9 @@ export function interpolateMovement(movement: MapMovementOverlay): { coordinate:
 /**
  * Chooses movement progress, then an explicit coordinate, then province
  * centroid, then (general fallback, works for any scenario) another
- * province held by the force's own polity that does have geometry.
+ * province held by the force's own polity that does have geometry. If a
+ * malformed or legacy overlay has no such province, use the first drawable
+ * province rather than silently dropping the army from the map.
  *
  * A gameplay province id with no matching map polygon -- e.g. a scenario
  * that authors finer-grained provinces than the rendered map's partition,
@@ -52,10 +54,10 @@ export function resolveForceMapPosition(
   const movement = force.movement === null ? null : interpolateMovement(force.movement);
   let coordinate = movement?.coordinate ?? force.coordinate ?? world.provinceById.get(force.provinceId)?.centroid;
   if (coordinate === undefined && overlay) {
-    const sameOwnerProvince = overlay.provinces.find(
+    const drawableProvince = overlay.provinces.find(
       (province) => province.controllerPolityId === force.ownerPolityId && world.provinceById.has(province.provinceId),
-    );
-    coordinate = sameOwnerProvince ? world.provinceById.get(sameOwnerProvince.provinceId)?.centroid : undefined;
+    ) ?? overlay.provinces.find((province) => world.provinceById.has(province.provinceId));
+    coordinate = drawableProvince ? world.provinceById.get(drawableProvince.provinceId)?.centroid : undefined;
   }
   if (coordinate === undefined) return null;
   const [x, y] = projectCoordinate(coordinate[0], coordinate[1]);

@@ -20,7 +20,7 @@ describe("World Director Chronicle casting", () => {
           newCharacter: {
             name: "Publius Cornelius",
             polityId: "rome",
-            locationProvinceId: "ita-72843720b863019116732",
+            locationProvinceId: "ita-local-23120603B86473916475875",
             officeId: null,
           },
         },
@@ -38,7 +38,7 @@ describe("World Director Chronicle casting", () => {
         characterId: "char-cast-publius",
         name: "Publius Cornelius",
         polityId: "rome",
-        locationProvinceId: "ita-72843720b863019116732",
+        locationProvinceId: "ita-local-23120603B86473916475875",
         officeId: null,
         provenance: {
           reason: "Chronicle casting for a Senate debate.",

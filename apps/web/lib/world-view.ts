@@ -47,10 +47,18 @@ function toPhase(turnStatus: string): GamePhase {
  * turn creates a newer snapshot.
  */
 const LEGACY_FIRST_PUNIC_OPENING_OVERLAY = [
-  { provinceId: "ita-72843720b863019116732", controllerPolityId: "rome", controlFirmnessBps: 9_000, terrainId: "coastal-plain", tier: "far" as const },
+  { provinceId: "ita-local-23120603B86473916475875", controllerPolityId: "rome", controlFirmnessBps: 9_000, terrainId: "coastal-plain", tier: "far" as const },
   ...FIRST_PUNIC_CARTHAGINIAN_OVERLAY,
   ...FIRST_PUNIC_SICILY_OVERLAY,
 ] as const;
+
+// Scenario version 1 used an abstract Latium ID that had no matching polygon
+// in its delivered GeoJSON. Keep existing saves immutable, but translate that
+// historical ID at the presentation boundary so territory and forces retain
+// their real geographic position.
+const LEGACY_FIRST_PUNIC_GEOMETRY_ID_BY_PROVINCE_ID: Readonly<Record<string, string>> = {
+  "ita-72843720b863019116732": "ita-local-23120603B86473916475875",
+};
 
 /** Mulberry32 seeded PRNG — deterministic replacement for Math.random(). */
 function mulberry32(seed: number): () => number {
@@ -257,18 +265,21 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
   const usesLegacyFirstPunicOpening = world.map.provinces.some((province) => province.id === "drepanum");
   const isFirstPunicOpening = world.pins.scenarioId === "00000000-0000-4000-8000-000000000101" && world.elapsedStep === 0;
   const isPunicWars = world.pins.scenarioId === "00000000-0000-4000-8000-000000000102";
+  const mapProvinceId = (provinceId: string) => world.pins.scenarioId === "00000000-0000-4000-8000-000000000101"
+    ? (LEGACY_FIRST_PUNIC_GEOMETRY_ID_BY_PROVINCE_ID[provinceId] ?? provinceId)
+    : provinceId;
   const isPunicWarsOpening = isPunicWars && world.elapsedStep === 0;
   const punicWarsBaseOverlay = isPunicWars ? punicWarsOpeningOverlay(meta.turnIndex) : null;
   const displayProvinces = usesLegacyFirstPunicOpening
     ? [...LEGACY_FIRST_PUNIC_OPENING_OVERLAY]
     : punicWarsBaseOverlay !== null
       ? [...new Map([
-        ...(isPunicWarsOpening ? world.map.provinces.map((province) => ({ provinceId: province.id, controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier })) : punicWarsBaseOverlay.provinces),
-        ...(isPunicWarsOpening ? punicWarsBaseOverlay.provinces : world.map.provinces.map((province) => ({ provinceId: province.id, controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier }))),
+        ...(isPunicWarsOpening ? world.map.provinces.map((province) => ({ provinceId: mapProvinceId(province.id), controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier })) : punicWarsBaseOverlay.provinces),
+        ...(isPunicWarsOpening ? punicWarsBaseOverlay.provinces : world.map.provinces.map((province) => ({ provinceId: mapProvinceId(province.id), controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier }))),
       ].map((province) => [province.provinceId, province])).values()]
     : isFirstPunicOpening
-      ? [...new Map([...FIRST_PUNIC_CARTHAGINIAN_OVERLAY, ...FIRST_PUNIC_SICILY_OVERLAY, ...world.map.provinces.map((province) => ({ provinceId: province.id, controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier }))].map((province) => [province.provinceId, province])).values()]
-      : world.map.provinces.map((province) => ({ provinceId: province.id, controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier }));
+      ? [...new Map([...FIRST_PUNIC_CARTHAGINIAN_OVERLAY, ...FIRST_PUNIC_SICILY_OVERLAY, ...world.map.provinces.map((province) => ({ provinceId: mapProvinceId(province.id), controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier }))].map((province) => [province.provinceId, province])).values()]
+      : world.map.provinces.map((province) => ({ provinceId: mapProvinceId(province.id), controllerPolityId: province.controllerPolityId, controlFirmnessBps: province.controlFirmnessBps, terrainId: province.terrainId, tier: province.tier }));
   const worldSettlements = world.map.provinces.flatMap((province) => province.settlements.map((settlement) => {
     const capitalPolity = world.map.polities.find((polity) => polity.capitalSettlementId === settlement.id);
     return {
@@ -391,7 +402,7 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
         const commander = world.characters.find((character) => character.id === force.commanderCharacterId)?.name ?? force.commanderCharacterId;
         return {
           forceId: force.id,
-          provinceId: force.locationId,
+          provinceId: mapProvinceId(force.locationId),
           ownerPolityId: force.polityId,
           name: force.name,
           commanderLabel: commander,

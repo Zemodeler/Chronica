@@ -32,4 +32,27 @@ describe("dynamic map geometry", () => {
     expect(resolveForceMapPosition({ ...force, movement: null }, world)?.x).toBe(9);
     expect(resolveForceMapPosition({ ...force, coordinate: undefined, movement: null }, world)?.x).toBe(1);
   });
+
+  it("keeps an army visible when a legacy location has no polygon", () => {
+    const world = prepareStaticWorldGeometry({ type: "FeatureCollection", features: [
+      { type: "Feature", id: "rome", geometry: { type: "Polygon", coordinates: [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]] }, properties: { kind: "province", name: "Rome" } },
+      { type: "Feature", id: "carthage", geometry: { type: "Polygon", coordinates: [[[4, 0], [6, 0], [6, 2], [4, 2], [4, 0]]] }, properties: { kind: "province", name: "Carthage" } },
+    ] });
+    const force: MapForceOverlay = { forceId: "lost-legion", provinceId: "retired-location", ownerPolityId: "rome", name: "Lost Legion", commanderLabel: null, strengthLabel: "100", relation: "friendly", selected: false, movement: null };
+    const overlay = {
+      revision: 1,
+      polities: [{ polityId: "rome", name: "Rome" }, { polityId: "carthage", name: "Carthage" }],
+      politicalRelations: [],
+      provinces: [
+        { provinceId: "rome", controllerPolityId: "rome", controlFirmnessBps: 10_000, terrainId: "plain", tier: "focus" as const },
+        { provinceId: "carthage", controllerPolityId: "carthage", controlFirmnessBps: 10_000, terrainId: "plain", tier: "focus" as const },
+      ],
+      settlements: [],
+      forces: [force],
+      conflicts: { battles: [], sieges: [], wars: [] },
+    };
+
+    expect(resolveForceMapPosition(force, world, overlay)?.x).toBe(1);
+    expect(resolveForceMapPosition({ ...force, ownerPolityId: "unknown" }, world, overlay)?.x).toBe(1);
+  });
 });
