@@ -62,6 +62,23 @@ export function buildSimulatorSystemPrompt(
     ? openChains.map((c) => `  - ${c.rootCause}: ${c.openPressure}`).join("\n")
     : "  (none)";
 
+  // Ground truth for who commands what, and where, and who controls each
+  // settled place -- without this, the model has invented contradictory
+  // command history (e.g. claiming a force was never under a commander's
+  // imperium a turn after that same commander led it to capture a city) and
+  // has narrated sieges of settlements that don't exist as still-contested.
+  const forcesBlock = world.material.forces
+    .map((force) => {
+      const commander = world.characters.find((c) => c.id === force.commanderCharacterId)?.name ?? force.commanderCharacterId;
+      const location = world.map.provinces.find((p) => p.id === force.locationId)?.name ?? force.locationId;
+      return `  ${force.name} [id: ${force.id}] — commanded by ${commander}, stationed at ${location} (${world.map.polities.find((p) => p.id === force.polityId)?.name ?? force.polityId})`;
+    })
+    .join("\n");
+
+  const settlementControlBlock = world.map.provinces
+    .flatMap((province) => province.settlements.map((settlement) => `  ${settlement.name} (${province.name}) — controlled by ${world.map.polities.find((p) => p.id === settlement.controllerPolityId)?.name ?? "no one"}`))
+    .join("\n");
+
   return `You are the Simulator for Chronica. You generate independent world events and advance persistent storylines that are NOT driven by the player's most recent action. Your job is to make the world feel alive: politics shift, wars develop, famines spread, successions happen, plots mature — all independent of what the player just did.
 
 CURRENT STEP: ${world.elapsedStep + 1}
@@ -69,6 +86,12 @@ PLAYER CHARACTER: ${world.characters.find((c) => c.id === playerCharacterId)?.na
 
 LIVING CHARACTERS (use one of these exact IDs as actorId whenever a workflow is proposed):
 ${world.characters.filter((character) => character.alive).map((character) => `  ${character.name} [id: ${character.id}]`).join("\n") || "  (none)"}
+
+MILITARY FORCES (ground truth — do not invent a different commander, location, or command authority for these):
+${forcesBlock || "  (none)"}
+
+SETTLEMENT CONTROL (ground truth — a settlement already listed under a polity is NOT contested; do not narrate it as still under siege, still undecided, or awaiting a decision that has already been made):
+${settlementControlBlock || "  (none)"}
 
 THEATRE SCOPE (polities by tier):
 ${scopeSummary(scope, world)}
@@ -113,6 +136,8 @@ RULES:
 7. Do not resolve a storyline unless the narrative clearly calls for it.
 8. Propose at most 12 total events.
 9. proposedWorkflows may use only exact actionIds from the registered workflow catalog. Do not invent actions such as "evaluate_force". Use [] only for an event with no world-state mutation, or a clearly identified novel action that cannot be represented by a registered workflow.
+10. A storyline whose stakes have already been settled by the SETTLEMENT CONTROL or MILITARY FORCES ground truth above (e.g. a contested city now shows a controller, or a force already reached and holds a location) must be advanced with "resolve_storyline" or dropped, never re-narrated as still open or reversed.
+11. Never contradict the MILITARY FORCES or SETTLEMENT CONTROL ground truth above — do not invent a different commander, a lack of command authority, or a still-undecided status for something it already shows as settled.
 
 Respond with strict JSON only: { "proposals": [...] }`;
 }

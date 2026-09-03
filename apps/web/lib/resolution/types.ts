@@ -54,3 +54,30 @@ export const STEP_LABELS: Record<ResolutionStep, string> = {
   manage: "Reviewing proposed actions…",
   execute: "Applying changes…",
 };
+
+/**
+ * The player-facing order of the current resolver pipeline.
+ *
+ * The reaction, simulation, and character-advice work starts together, so
+ * they share a group. The UI can then show all three as in progress until the
+ * pipeline advances to consolidation rather than incorrectly marking the
+ * first two as complete as soon as the third one is announced.
+ */
+export const RESOLUTION_PROGRESS_STAGES = [
+  { step: "interpret", group: "interpret" },
+  { step: "assess", group: "assess" },
+  { step: "adjudicate", group: "adjudicate" },
+  { step: "preview_player", group: "preview_player" },
+  { step: "reaction", group: "world_proposals" },
+  { step: "simulate", group: "world_proposals" },
+  { step: "character_advise", group: "world_proposals" },
+  { step: "consolidate", group: "consolidate" },
+  { step: "world_direct", group: "world_direct" },
+  { step: "life_review", group: "life_review" },
+  { step: "character_agency", group: "character_agency" },
+  { step: "manage", group: "manage" },
+  { step: "resolve_politics", group: "resolve_politics" },
+  { step: "execute_world", group: "execute_world" },
+  { step: "chronicle", group: "chronicle" },
+  { step: "commit", group: "commit" },
+] as const satisfies readonly { readonly step: ResolutionStep; readonly group: string }[];

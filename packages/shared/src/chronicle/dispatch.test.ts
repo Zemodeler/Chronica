@@ -6,6 +6,7 @@ const entry = (overrides: Partial<DispatchEntryInput> = {}): DispatchEntryInput 
   body: "Something happened.",
   playerRelevance: "none",
   knowledgeStatus: "confirmed",
+  consequences: [],
   ...overrides,
 });
 
@@ -19,19 +20,30 @@ describe("buildCurrentDispatch", () => {
 
   it("prioritises the highest player-relevance entry as the headline", () => {
     const dispatch = buildCurrentDispatch({
-      entriesThisTurn: [entry({ title: "Low", playerRelevance: "low" }), entry({ title: "High", playerRelevance: "high" })],
+      entriesThisTurn: [
+        entry({ title: "Low", playerRelevance: "low", consequences: ["Low consequence"] }),
+        entry({ title: "High", playerRelevance: "high" }),
+      ],
       authorityChangesForPlayer: [],
     });
     expect(dispatch.headline).toBe("High");
-    expect(dispatch.items).toContain("Low");
+    expect(dispatch.items).toContain("Low consequence");
   });
 
   it("surfaces authority changes ahead of ordinary entries", () => {
     const dispatch = buildCurrentDispatch({
-      entriesThisTurn: [entry({ title: "Ordinary", playerRelevance: "medium" })],
+      entriesThisTurn: [entry({ title: "Ordinary", playerRelevance: "medium", consequences: ["Ordinary consequence"] })],
       authorityChangesForPlayer: ["Now: Consul of Rome"],
     });
     expect(dispatch.items[0]).toBe("Now: Consul of Rome");
+  });
+
+  it("does not surface entry titles as items, only authority changes and direct consequences", () => {
+    const dispatch = buildCurrentDispatch({
+      entriesThisTurn: [entry({ title: "A truncated and garbled slice of prose", playerRelevance: "high", consequences: ["Messana captured"] })],
+      authorityChangesForPlayer: [],
+    });
+    expect(dispatch.items).toEqual(["Messana captured"]);
   });
 
   it("notes uncertainty when any surfaced entry is not confirmed", () => {
@@ -43,7 +55,7 @@ describe("buildCurrentDispatch", () => {
   });
 
   it("never exceeds maxLength", () => {
-    const many = Array.from({ length: 50 }, (_, i) => entry({ title: `Event number ${i} with a fairly long title`, playerRelevance: "high" }));
+    const many = Array.from({ length: 50 }, (_, i) => entry({ playerRelevance: "high", consequences: [`Event number ${i} with a fairly long consequence label`] }));
     const dispatch = buildCurrentDispatch({ entriesThisTurn: many, authorityChangesForPlayer: [], maxLength: 100 });
     const totalLength = dispatch.headline.length + dispatch.items.reduce((sum, item) => sum + item.length, 0);
     expect(totalLength).toBeLessThanOrEqual(100 + dispatch.items.length * 2);

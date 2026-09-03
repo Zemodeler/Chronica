@@ -331,11 +331,20 @@ export function GameShell({
         clearMapHover();
         return;
       }
-      const name = regionNames.get(provinceId) ?? provinceId;
       setHoveredProvinceId(provinceId);
+      // A province with a known owner is already named by its curved
+      // territory label (e.g. "ROMAN REPUBLIC") -- a second, redundant name
+      // tooltip stacked on top of it is just clutter. Only pop up the raw
+      // region name for genuinely unclaimed territory, which has no label.
+      const owner = political?.ownerByProvince.get(provinceId);
+      if (owner != null) {
+        setTooltip(null);
+        return;
+      }
+      const name = regionNames.get(provinceId) ?? provinceId;
       setTooltip({ x: event.clientX, y: event.clientY, name });
     },
-    [clearMapHover, regionNames],
+    [clearMapHover, regionNames, political],
   );
 
   const handleProvinceClick = useCallback(

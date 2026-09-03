@@ -79,9 +79,9 @@ function ArmyStandardHitTarget({ asset, x, y, width, conflictClass, onActivate }
  */
 export function GeoMap({ world, political, viewBox, overlay, selectedProvinceId, hoveredProvinceId, zoomBand, scale, tx, ty, forceFlagUrls, onProvinceHover, onProvinceClick, onForceClick, onMapPointerDown }: GeoMapProps) {
   const forceMarkers = useMemo(() => (overlay?.forces ?? []).flatMap((force) => {
-    const position = resolveForceMapPosition(force, world);
+    const position = resolveForceMapPosition(force, world, overlay);
     return position === null ? [] : [{ ...force, ...position }];
-  }), [overlay?.forces, world]);
+  }), [overlay, world]);
   const conflictByForceId = useMemo(() => deriveForceConflictStatuses(overlay), [overlay]);
 
   // Container size via ResizeObserver — uses contentRect (layout box, unaffected

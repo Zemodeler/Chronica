@@ -100,7 +100,6 @@ export function drawSettlements(
   pixelsPerDegree: number,
   visibleRect: VisibleWorldRect,
   nowMs: number,
-  polityLabelFontSizes: Map<string, number>,
 ): void {
   const settlementOverlay = new Map((overlay?.settlements ?? []).map((s) => [s.settlementId, s]));
   const besiegedSettlementIds = new Set(overlay?.conflicts.sieges.map((siege) => siege.settlementId) ?? []);
@@ -160,14 +159,12 @@ export function drawSettlements(
     if (!capital && !showTowns) continue;
 
     const legibleFloor = MIN_SETTLEMENT_LABEL_PIXEL_FONT / pixelsPerDegree;
-    let labelSize = Math.max((state?.importance ?? 50) * .0035, legibleFloor);
-    // A settlement's own importance doesn't know how small the polity that
-    // holds it is, so an important capital in a tiny kingdom could otherwise
-    // render its name bigger than the kingdom's — never let a city's label
-    // outgrow (a fraction of) its own polity's territory-name label.
-    const polityId = state?.controllerPolityId ?? state?.capitalPolityId ?? undefined;
-    const polityFontSize = polityId ? polityLabelFontSizes.get(polityId) : undefined;
-    if (polityFontSize !== undefined) labelSize = Math.min(labelSize, Math.max(polityFontSize * .8, legibleFloor));
+    // Sized purely from the settlement's own importance, the same formula for
+    // every polity, so a city's label reads at the same size regardless of
+    // how big or narrow the territory around it is (a long, thin peninsula
+    // like Roman Italy used to shrink its cities' labels via a now-removed
+    // cap tied to the polity's own territory-label size).
+    const labelSize = Math.max((state?.importance ?? 50) * .0035, legibleFloor);
     const labelY = y + radius + SETTLEMENT_LABEL_GAP_PIXELS / pixelsPerDegree;
     labelCandidates.push({ name: settlement.name, x, labelY, fontSize: labelSize, priority: capital ? Number.POSITIVE_INFINITY : (state?.importance ?? 50) });
   }
@@ -230,7 +227,7 @@ export function drawForces(
   const pulse = pulseOpacity(nowMs);
 
   for (const force of overlay?.forces ?? []) {
-    const position = resolveForceMapPosition(force, world);
+    const position = resolveForceMapPosition(force, world, overlay);
     if (position === null) continue;
     const { x, y } = position;
     if (x < visibleRect.minX || x > visibleRect.maxX || y < visibleRect.minY || y > visibleRect.maxY) continue;

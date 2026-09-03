@@ -159,6 +159,9 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
       const data = await res.json() as ChronicleData;
       setChronicle(data);
       setCursor(0);
+      // Defensive: a fresh chronicle load always starts from "Done reading",
+      // never stuck showing "Closing…" from a stale state.
+      setMarking(false);
     } catch {
       // Silently ignore
     }
@@ -200,6 +203,7 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
         return;
       }
       setOpen(false);
+      setMarking(false);
       router.refresh();
     } catch {
       setError("Failed to mark chronicle as read.");
@@ -215,6 +219,14 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
   const hasConsequences = (currentEntry?.directConsequences?.length ?? 0) > 0;
   const causal = currentEntry ? causalNeighbors(currentEntry, entries) : { consequences: [] };
   const dispatch = chronicle?.dispatch;
+  // The dispatch headline is usually the title of the first chronicle entry.
+  // Showing it again as an unlabelled strip makes the Chronicle look clipped
+  // or duplicated, especially when it has no supporting items.
+  const showDispatch = hasEntries && isAtEnd && dispatch !== undefined && (
+    dispatch.headline !== currentEntry?.title
+    || dispatch.items.length > 0
+    || dispatch.uncertaintyNote !== null
+  );
 
   return (
     <>
@@ -266,20 +278,6 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
               Chronicle — {hasEntries ? `${cursor + 1} / ${totalEntries}` : "Loading…"}
               {currentEntry && ` · ${currentEntry.dateLabel}`}
             </p>
-
-            {dispatch && (
-              <div style={{ borderBottom: "1px solid var(--border, rgba(255,255,255,0.08))", paddingBottom: "0.75rem" }}>
-                <p style={{ fontSize: "0.9375rem", fontWeight: 600, margin: 0, color: "var(--text)" }}>{dispatch.headline}</p>
-                {dispatch.items.length > 0 && (
-                  <ul style={{ margin: "0.4rem 0 0", paddingLeft: "1.1rem", fontSize: "0.8125rem", color: "var(--text-secondary, var(--text-muted))" }}>
-                    {dispatch.items.map((item) => <li key={item}>{item}</li>)}
-                  </ul>
-                )}
-                {dispatch.uncertaintyNote && (
-                  <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontStyle: "italic", margin: "0.4rem 0 0" }}>{dispatch.uncertaintyNote}</p>
-                )}
-              </div>
-            )}
 
             {!hasEntries && (
               <p style={{ color: "var(--text-muted)", fontSize: "0.9375rem", margin: 0 }}>
@@ -343,6 +341,21 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
 
                 {hasConsequences && (
                   <DirectConsequencesSection consequences={currentEntry.directConsequences!} />
+                )}
+
+                {showDispatch && dispatch && (
+                  <section aria-label="Turn summary" style={{ borderTop: "1px solid var(--border, rgba(255,255,255,0.08))", paddingTop: "0.75rem" }}>
+                    <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", letterSpacing: "0.08em", textTransform: "uppercase", margin: "0 0 0.35rem" }}>Turn summary</p>
+                    <p style={{ fontSize: "0.9375rem", fontWeight: 600, margin: 0, color: "var(--text)" }}>{dispatch.headline}</p>
+                    {dispatch.items.length > 0 && (
+                      <ul style={{ margin: "0.4rem 0 0", paddingLeft: "1.1rem", fontSize: "0.8125rem", color: "var(--text-secondary, var(--text-muted))" }}>
+                        {dispatch.items.map((item) => <li key={item}>{item}</li>)}
+                      </ul>
+                    )}
+                    {dispatch.uncertaintyNote && (
+                      <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontStyle: "italic", margin: "0.4rem 0 0" }}>{dispatch.uncertaintyNote}</p>
+                    )}
+                  </section>
                 )}
 
                 {error && (
