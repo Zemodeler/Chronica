@@ -7,8 +7,6 @@ import {
   CharacterPlotStageSchema,
 } from "../../character-agency/schemas";
 
-const randomUUID = () => globalThis.crypto.randomUUID();
-
 // Character agency workflows.
 //
 // These workflows manage persistent goals, plots, and the Nemesis role.
@@ -38,7 +36,10 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
       );
       if (activeGoals.length >= 4) return null;
 
-      const goalId = `goal-${params.characterId.slice(0, 8)}-${randomUUID().slice(0, 8)}`;
+      // Derived from data already fixed by the deterministic replay inputs
+      // (world, params, atStep) rather than a random UUID, so replaying the
+      // same recorded invocation always mints the same goal id.
+      const goalId = `goal-${params.characterId.slice(0, 8)}-${context.atStep}-${(world.characterGoals ?? []).length}`;
       const newGoal = {
         id: goalId,
         characterId: params.characterId,
@@ -130,7 +131,9 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
       );
       if (activePlots.length >= 3) return null;
 
-      const plotId = `plot-${params.characterId.slice(0, 8)}-${randomUUID().slice(0, 8)}`;
+      // See create_character_goal: derived from deterministic replay inputs,
+      // never a random UUID.
+      const plotId = `plot-${params.characterId.slice(0, 8)}-${context.atStep}-${(world.characterPlots ?? []).length}`;
       const newPlot = {
         id: plotId,
         characterId: params.characterId,

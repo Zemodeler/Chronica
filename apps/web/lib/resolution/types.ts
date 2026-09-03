@@ -15,6 +15,7 @@ export type ResolutionStep =
   | "character_advise"
   | "consolidate"
   | "world_direct"
+  | "character_agency"
   | "execute_world"
   | "chronicle"
   | "commit"
@@ -40,6 +41,7 @@ export const STEP_LABELS: Record<ResolutionStep, string> = {
   character_advise: "Consulting character intentions…",
   consolidate: "Consolidating proposals…",
   world_direct: "World Director deciding…",
+  character_agency: "Characters weighing their own next move…",
   execute_world: "Applying world changes…",
   chronicle: "Writing the chronicle…",
   commit: "Saving the new world…",

@@ -2,6 +2,7 @@ import "server-only";
 
 import type { WorldState } from "@chronica/shared";
 import type { SelectedCharacter } from "@chronica/shared";
+import { getActivePressures, queryBeliefs, resolveTraits } from "@chronica/shared";
 import { buildPlayerResolutionContext, type ResolutionPlayerContext } from "./prompts";
 
 // Character Director prompt builder.
@@ -38,26 +39,51 @@ function characterContext(world: WorldState, charId: string): string {
     lines.push(`  Key relations: ${publicRelations.slice(0, 6).map((r) => r.subjectCharacterId).join(", ")}`);
   }
 
-  const publicGoals = (world.characterGoals ?? []).filter(
-    (g) => g.characterId === charId && g.status === "active" && g.visibility !== "private",
-  );
-  for (const goal of publicGoals) {
+  // Every goal/plot/encounter here already belongs to `charId` (filtered by
+  // `characterId === charId`), so it is that character's own state and stays
+  // visible regardless of its stated visibility -- visibility gates whether
+  // *another* character or director-facing summary may see it, never
+  // whether the character themself may. This is the fix: previously this
+  // block filtered out the character's own private goals/plots/encounters
+  // identically to how it would filter them for someone else.
+  const ownGoals = (world.characterGoals ?? []).filter((g) => g.characterId === charId && g.status === "active");
+  for (const goal of ownGoals) {
     lines.push(`  Goal [id: ${goal.id}]: ${goal.objective} (priority ${goal.priority}, ${goal.visibility})`);
   }
 
-  const visiblePlots = (world.characterPlots ?? []).filter(
-    (p) => p.characterId === charId && (p.status === "active" || p.status === "stalled") && p.visibility !== "private",
+  const ownPlots = (world.characterPlots ?? []).filter(
+    (p) => p.characterId === charId && (p.status === "active" || p.status === "stalled"),
   );
-  for (const plot of visiblePlots) {
+  for (const plot of ownPlots) {
     lines.push(`  Plot [id: ${plot.id}]: ${plot.objective.slice(0, 80)} | stage: ${plot.stage}`);
   }
 
+  // Visibility gates whether a *non*-participant could ever learn of an
+  // encounter; a participant always sees their own encounter regardless.
   const encounters = world.encounters
-    .filter((e) => e.participantIds.includes(charId) && e.visibility !== "private")
+    .filter((e) => e.participantIds.includes(charId))
     .sort((a, b) => b.occurredAtStep - a.occurredAtStep)
     .slice(0, 3);
   for (const enc of encounters) {
     lines.push(`  Encounter [step ${enc.occurredAtStep}]: ${enc.kind} — ${enc.outcome.slice(0, 120)}`);
+  }
+
+  // Own mind, traits, active pressures, and beliefs (character-sim phase 2).
+  // Never built for any character other than the one this block is for.
+  const { drives, temperament, riskTolerance } = character.mind;
+  lines.push(`  Drives: security ${drives.security}, status ${drives.status}, wealth ${drives.wealth}, family ${drives.family}, faith ${drives.faith}, duty ${drives.duty}, revenge ${drives.revenge}`);
+  lines.push(`  Temperament: boldness ${temperament.boldness}, caution ${temperament.caution}, honesty ${temperament.honesty}, sociability ${temperament.sociability}, discipline ${temperament.discipline}, cruelty ${temperament.cruelty} | risk tolerance ${riskTolerance}`);
+  const traitDefs = resolveTraits(character.traits);
+  if (traitDefs.length > 0) lines.push(`  Traits: ${traitDefs.map((t) => t.label).join(", ")}`);
+
+  const activePressures = getActivePressures(world, charId);
+  if (activePressures.length > 0) {
+    lines.push(`  Active pressures: ${activePressures.map((p) => `${p.kind} (${p.intensity}) — ${p.label}`).join("; ")}`);
+  }
+
+  const beliefs = queryBeliefs(world, charId).slice(0, 5);
+  if (beliefs.length > 0) {
+    lines.push(`  Beliefs: ${beliefs.map((b) => `[${b.kind}, confidence ${b.confidence}] ${b.claim}`).join("; ")}`);
   }
 
   return lines.join("\n");

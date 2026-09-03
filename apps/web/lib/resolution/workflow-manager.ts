@@ -58,6 +58,26 @@ export function collectPlayerCandidates(verdicts: readonly Verdict[]): WorkflowC
   return candidates;
 }
 
+/**
+ * Character-sim phase 3: workflow invocations chosen by the character agency
+ * system (goal/plot bookkeeping from an approved `CharacterSuggestion`, or a
+ * material action from a scored, conflict-resolved `CharacterIntent`).
+ * Tagged with the correct `"character_director"` source so policy, audit,
+ * and diagnostics attribute them to the character who chose them rather than
+ * to the World Director.
+ */
+export function collectCharacterAgencyCandidates(
+  invocations: readonly { invocation: ProposedInvocation; sourceRef: string; sourceRationale: string }[],
+): WorkflowCandidate[] {
+  return invocations.map(({ invocation, sourceRef, sourceRationale }) => ({
+    correlationId: randomUUID(),
+    source: "character_director",
+    sourceRef,
+    sourceRationale: sourceRationale.slice(0, 400),
+    requestedInvocation: invocation,
+  }));
+}
+
 /** Retain World Director proposal provenance for the final review. */
 export function collectWorldCandidates(
   invocations: readonly { invocation: ProposedInvocation; sourceRef: string; sourceRationale: string }[],

@@ -20,6 +20,7 @@ const JSON_MODE_OPERATIONS = new Set<AiOperation>([
   "enrich_npc_profile",
   "resolve_contact",
   "extract_knowledge",
+  "propose_social_events",
   "workflow_manager",
   "declare_character",
   "confirm_character",
