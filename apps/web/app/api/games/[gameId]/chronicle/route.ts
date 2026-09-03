@@ -25,13 +25,16 @@ export async function GET(
   const { db, close } = createDatabase(requiredDatabaseUrl());
   try {
     const [player] = await db
-      .select({ id: schema.players.id })
+      .select({ id: schema.players.id, characterId: schema.players.characterId })
       .from(schema.players)
       .where(and(eq(schema.players.gameId, gameId), eq(schema.players.userId, userId), eq(schema.players.status, "active")))
       .limit(1);
     if (!player) return Response.json({ error: "Unauthorized." }, { status: 401 });
 
-    const chronicle = await getChronicleForLatestTurn(db, gameId);
+    const viewerCharacterId = player.characterId.startsWith("pending:") || player.characterId.startsWith("declared-")
+      ? undefined
+      : player.characterId;
+    const chronicle = await getChronicleForLatestTurn(db, gameId, viewerCharacterId);
     if (!chronicle) return Response.json({ error: "Game not found." }, { status: 404 });
 
     return Response.json({

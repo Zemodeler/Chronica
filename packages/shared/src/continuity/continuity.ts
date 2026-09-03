@@ -126,6 +126,15 @@ export const ContinuityConfigSchema = z
      * simulator. Additive/defaulted so every pre-phase-5 scenario stays valid.
      */
     maxTotalCharacters: z.number().int().positive().max(500).default(64),
+    /**
+     * Chronicle output bounds (character-sim phase 6) -- kept here rather
+     * than a new top-level scenario key, alongside the other "how big may
+     * this running game grow" limits. Defaulted so every pre-phase-6
+     * scenario stays valid unchanged.
+     */
+    maxChronicleEntriesPerTurn: z.number().int().positive().max(50).default(12),
+    maxChronicleChainDepth: z.number().int().positive().max(20).default(5),
+    maxDispatchLength: z.number().int().positive().max(4_000).default(600),
   })
   .strict();
 export type ContinuityConfig = z.infer<typeof ContinuityConfigSchema>;
@@ -143,6 +152,11 @@ export const MAX_PRINCIPALS = 32;
  * regardless.
  */
 export const DEFAULT_MAX_TOTAL_CHARACTERS = 64;
+
+/** Engine-level Chronicle output bounds, mirroring `ContinuityConfigSchema`'s defaults (character-sim phase 6). */
+export const DEFAULT_MAX_CHRONICLE_ENTRIES_PER_TURN = 12;
+export const DEFAULT_MAX_CHRONICLE_CHAIN_DEPTH = 5;
+export const DEFAULT_MAX_DISPATCH_LENGTH = 600;
 
 /** True if the world may still gain one more named character under the given bound. */
 export function canCreateCharacter(characterCount: number, maxTotalCharacters: number = DEFAULT_MAX_TOTAL_CHARACTERS): boolean {

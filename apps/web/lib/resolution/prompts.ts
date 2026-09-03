@@ -387,6 +387,8 @@ export interface NarratorEntry {
   readonly sourceDirector?: string | undefined;
   /** A server-selected cast. These are authoritative, not names to invent. */
   readonly characterMentions?: readonly { name: string; role: string }[] | undefined;
+  /** Entry-intrinsic knowledge classification (character-sim phase 6); governs how hedged the prose must be. */
+  readonly knowledgeStatus?: "confirmed" | "report" | "rumour" | "suspicion" | undefined;
 }
 
 export function buildChronicleNarratorPrompt(
@@ -448,7 +450,8 @@ export function buildChronicleNarratorPrompt(
     const cast = e.characterMentions && e.characterMentions.length > 0
       ? `\n   CAST: ${e.characterMentions.map((member) => `${member.name} (${member.role})`).join(", ")}`
       : "";
-    return `${i + 1}. [${kind}${chainNote}] ${e.body}${cast}`;
+    const status = e.knowledgeStatus && e.knowledgeStatus !== "confirmed" ? ` [KNOWLEDGE: ${e.knowledgeStatus.toUpperCase()}]` : "";
+    return `${i + 1}. [${kind}${chainNote}${status}] ${e.body}${cast}`;
   });
 
   return `You are the chronicler of Chronica. Rewrite raw event summaries as grounded, historically-flavoured prose for the official chronicle. Events within the same chain [chain: ...] are causally linked — write them so they flow as a coherent sequence. Each entry still stands alone as a paragraph.
@@ -472,6 +475,11 @@ Rules:
 - The chronicle must reflect the ACTUAL outcome stated in the raw summary — do not upgrade a failure to a success or vice versa
 - For REACTION and SPREAD entries: acknowledge what caused them without restating the root event in full
 - For OPEN PRESSURE entries: end with something in motion — a question unanswered, a threat not yet resolved
+- Write history for a reader, never a debug log: never use the words "AI", "planner", "planner score", "workflow", "internal state", or any other engine/implementation term
+- An entry marked [KNOWLEDGE: REPORT] must read as something reported to the court, not witnessed firsthand — hedge it ("word reached...", "it was reported that...")
+- An entry marked [KNOWLEDGE: RUMOUR] must read as unverified gossip, explicitly uncertain ("rumour holds...", "some claim...", with no confirmation offered)
+- An entry marked [KNOWLEDGE: SUSPICION] must read as a suspicion, not a fact — attribute it to suspicion or fear, never assert it happened
+- Never state a private motive, hidden deal, or undisclosed reason as settled fact — if the raw summary does not give you a visible cause, do not invent one
 
 Respond as JSON: { "entries": [{ "body": "...", "isPlayerAction": true/false }] }`;
 }

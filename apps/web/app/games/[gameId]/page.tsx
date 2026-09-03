@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { gameRepository } from "../../../lib/game-repository";
-import { ageAtScenarioStart, getCharacterPanelData, getScenarioTimelineStartYear } from "../../../lib/character-service";
+import { ageAtScenarioStart, getCharacterPanelData, getPlayerAuthoritySummary, getScenarioTimelineStartYear } from "../../../lib/character-service";
 import { GameShell } from "./components/game-shell";
 import type { CharacterPanelProps } from "./components/character-panel";
 
@@ -36,6 +36,14 @@ export default async function GamePage({
 
   let characterPanel: CharacterPanelProps | undefined;
   if (knowledgebase !== null && knowledgebase.confirmedByPlayer) {
+    const canonicalAuthority = await getPlayerAuthoritySummary(gameId, knowledgebase.characterId);
+    const hasCanonicalAuthority = canonicalAuthority.length > 0 && canonicalAuthority[0] !== "No current public office";
+    // Legacy free-text authority claims never grant power; once canonical
+    // state names any authority, the AI-generated text is downgraded to a
+    // background note rather than shown as the primary Authority list.
+    const legacyAuthorityNote = !hasCanonicalAuthority && knowledgebase.authority.length > 0
+      ? knowledgebase.authority
+      : [];
     const locationLabel = knowledgebase.locationProvinceId === null
       ? "Location not yet established"
       : world.provinces.find((province) => province.id === knowledgebase.locationProvinceId)?.name
@@ -60,7 +68,8 @@ export default async function GamePage({
       ageAtStart: ageAtScenarioStart(knowledgebase.birthYearApprox, timelineStartYear),
       biography: knowledgebase.biography,
       notableEvents: knowledgebase.notableEvents,
-      authority: knowledgebase.authority ?? [],
+      authority: canonicalAuthority,
+      authorityBackgroundNote: legacyAuthorityNote,
     };
   }
 

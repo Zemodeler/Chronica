@@ -5,12 +5,14 @@ import {
   createDatabase,
   getCharacterKnowledgebase,
   getOrCreateNpcKnowledgebase,
+  getWorldView,
   findOrOpenSession,
   upsertCharacterKnowledgebase,
 } from "@chronica/db";
 import {
   CharacterKnowledgebaseSchema,
   WorldStateSchema,
+  deriveAuthoritySummary,
   type CharacterKnowledgebase,
 } from "@chronica/shared";
 import { eq, and, isNull } from "drizzle-orm";
@@ -534,6 +536,25 @@ export async function getCharacterPanelData(gameId: string): Promise<CharacterKn
     const playerId = await resolvePlayerInGame(db, gameId, userId);
     if (playerId === null) return null;
     return await getCharacterKnowledgebase(db, gameId, playerId);
+  } finally {
+    await close();
+  }
+}
+
+/**
+ * Canonical Authority projection (character-sim phase 6): concise,
+ * server-derived labels for what `characterId` can presently and visibly
+ * exercise, replacing the free-text AI-generated `knowledgebase.authority` as
+ * the source of the personal screen's Authority field. Never reads
+ * `knowledgebase.authority` -- see `deriveAuthoritySummary`.
+ */
+export async function getPlayerAuthoritySummary(gameId: string, characterId: string): Promise<readonly string[]> {
+  if (gameId === DEMO_GAME_ID) return [];
+  const { db, close } = createDatabase(requiredDatabaseUrl());
+  try {
+    const view = await getWorldView(db, gameId);
+    if (view === undefined) return [];
+    return deriveAuthoritySummary(view.world, characterId, view.scenarioGovernment);
   } finally {
     await close();
   }

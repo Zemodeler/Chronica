@@ -1,5 +1,6 @@
 export * from "./age";
 export * from "./apply-social-events";
+export * from "./authority-projection";
 export * from "./beliefs";
 export * from "./character";
 export * from "./character-profile";

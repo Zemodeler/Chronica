@@ -28,12 +28,39 @@ interface ChronicleEntry {
   readonly directConsequences?: readonly DirectConsequence[];
   readonly openPressure?: boolean;
   readonly sourceDirector?: string;
+  // Chronicle-first legibility fields (character-sim phase 6)
+  readonly title?: string;
+  readonly knowledgeStatus?: "confirmed" | "report" | "rumour" | "suspicion";
+}
+
+interface ChronicleDispatch {
+  readonly headline: string;
+  readonly items: readonly string[];
+  readonly uncertaintyNote: string | null;
 }
 
 interface ChronicleData {
   readonly turnId: string;
   readonly turnIndex: number;
   readonly entries: readonly ChronicleEntry[];
+  readonly dispatch?: ChronicleDispatch;
+}
+
+const KNOWLEDGE_STATUS_LABEL: Record<NonNullable<ChronicleEntry["knowledgeStatus"]>, string> = {
+  confirmed: "Confirmed",
+  report: "Reported",
+  rumour: "Rumour",
+  suspicion: "Suspected",
+};
+
+/** Earlier/Consequences links within the same chronicle chain, resolved client-side from what's already loaded. */
+function causalNeighbors(entry: ChronicleEntry, allEntries: readonly ChronicleEntry[]): { earlier?: ChronicleEntry; consequences: readonly ChronicleEntry[] } {
+  if (entry.chainId == null) return { consequences: [] };
+  const chain = allEntries.filter((candidate) => candidate.chainId === entry.chainId).sort((a, b) => a.sequence - b.sequence);
+  const index = chain.findIndex((candidate) => candidate.sequence === entry.sequence);
+  if (index === -1) return { consequences: [] };
+  const earlier = chain[index - 1];
+  return { ...(earlier !== undefined ? { earlier } : {}), consequences: chain.slice(index + 1, index + 6) };
 }
 
 interface ChroniclePanelProps {
@@ -186,6 +213,8 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
   const isAtEnd = cursor >= totalEntries - 1;
   const hasEntries = totalEntries > 0;
   const hasConsequences = (currentEntry?.directConsequences?.length ?? 0) > 0;
+  const causal = currentEntry ? causalNeighbors(currentEntry, entries) : { consequences: [] };
+  const dispatch = chronicle?.dispatch;
 
   return (
     <>
@@ -238,6 +267,20 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
               {currentEntry && ` · ${currentEntry.dateLabel}`}
             </p>
 
+            {dispatch && (
+              <div style={{ borderBottom: "1px solid var(--border, rgba(255,255,255,0.08))", paddingBottom: "0.75rem" }}>
+                <p style={{ fontSize: "0.9375rem", fontWeight: 600, margin: 0, color: "var(--text)" }}>{dispatch.headline}</p>
+                {dispatch.items.length > 0 && (
+                  <ul style={{ margin: "0.4rem 0 0", paddingLeft: "1.1rem", fontSize: "0.8125rem", color: "var(--text-secondary, var(--text-muted))" }}>
+                    {dispatch.items.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                )}
+                {dispatch.uncertaintyNote && (
+                  <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontStyle: "italic", margin: "0.4rem 0 0" }}>{dispatch.uncertaintyNote}</p>
+                )}
+              </div>
+            )}
+
             {!hasEntries && (
               <p style={{ color: "var(--text-muted)", fontSize: "0.9375rem", margin: 0 }}>
                 Loading chronicle…
@@ -247,6 +290,17 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
             {currentEntry && (
               <article style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
                 <EntryHeader entry={currentEntry} />
+
+                {currentEntry.title && (
+                  <header style={{ display: "flex", alignItems: "baseline", gap: "0.6rem" }}>
+                    <h3 style={{ margin: 0, fontSize: "1rem", color: "var(--text)" }}>{currentEntry.title}</h3>
+                    {currentEntry.knowledgeStatus && currentEntry.knowledgeStatus !== "confirmed" && (
+                      <span style={{ fontSize: "0.6875rem", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-muted)", border: "1px solid var(--border, rgba(255,255,255,0.2))", borderRadius: "0.25rem", padding: "0.1rem 0.4rem" }}>
+                        {KNOWLEDGE_STATUS_LABEL[currentEntry.knowledgeStatus]}
+                      </span>
+                    )}
+                  </header>
+                )}
 
                 <p
                   style={{
@@ -258,6 +312,20 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
                 >
                   {currentEntry.body}
                 </p>
+
+                {(causal.earlier || causal.consequences.length > 0) && (
+                  <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", margin: 0 }}>
+                    {causal.earlier && (
+                      <button type="button" onClick={() => setCursor(entries.findIndex((e) => e.sequence === causal.earlier!.sequence))} style={{ background: "none", border: "none", padding: 0, color: "inherit", textDecoration: "underline", cursor: "pointer", font: "inherit" }}>
+                        Earlier: {causal.earlier.title ?? causal.earlier.body.slice(0, 60)}
+                      </button>
+                    )}
+                    {causal.earlier && causal.consequences.length > 0 && " · "}
+                    {causal.consequences.length > 0 && (
+                      <span>Consequences: {causal.consequences.map((c) => c.title ?? c.body.slice(0, 40)).join("; ")}</span>
+                    )}
+                  </p>
+                )}
 
                 {currentEntry.openPressure && (
                   <p

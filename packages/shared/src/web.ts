@@ -192,6 +192,7 @@ export const ChronicleEntryViewSchema = z
     sequence: z.number().int().nonnegative(),
     title: z.string().trim().min(1),
     body: z.string().trim().min(1),
+    knowledgeStatus: z.enum(["confirmed", "report", "rumour", "suspicion"]).optional(),
     audience: z.enum(["all_players", "knowledge_scoped"]),
     characterKnows: z.boolean(),
     involvementLabel: z.string().trim().min(1),
