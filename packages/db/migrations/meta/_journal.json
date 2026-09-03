@@ -96,96 +96,110 @@
     {
       "idx": 13,
       "version": "7",
+      "when": 1787900000000,
+      "tag": "0013_npc_chat",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1787900001000,
+      "tag": "0014_shared_knowledgebase",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
       "when": 1787900002000,
       "tag": "0015_dialogue_connections_and_npcs",
       "breakpoints": true
     },
     {
-      "idx": 14,
+      "idx": 16,
       "version": "7",
       "when": 1787900003000,
       "tag": "0016_npc_commitments",
       "breakpoints": true
     },
     {
-      "idx": 15,
+      "idx": 17,
       "version": "7",
       "when": 1787900004000,
       "tag": "0017_npc_profile_enrichment",
       "breakpoints": true
     },
     {
-      "idx": 16,
+      "idx": 18,
       "version": "7",
       "when": 1787900005000,
       "tag": "0018_workflow_manager",
       "breakpoints": true
     },
     {
-      "idx": 17,
+      "idx": 19,
       "version": "7",
       "when": 1787900006000,
       "tag": "0019_temporary_workflow_patches",
       "breakpoints": true
     },
     {
-      "idx": 18,
+      "idx": 20,
       "version": "7",
       "when": 1788249600000,
       "tag": "0020_lock_built_in_scenario",
       "breakpoints": true
     },
     {
-      "idx": 19,
+      "idx": 21,
       "version": "7",
       "when": 1788249601000,
       "tag": "0021_fix_built_in_scenario_lock",
       "breakpoints": true
     },
     {
-      "idx": 20,
+      "idx": 22,
       "version": "7",
       "when": 1756742400000,
       "tag": "0022_turn_progress_step",
       "breakpoints": true
     },
     {
-      "idx": 21,
+      "idx": 23,
       "version": "7",
       "when": 1788250000000,
       "tag": "0023_reconcile_turn_progress_step",
       "breakpoints": true
     },
     {
-      "idx": 22,
+      "idx": 24,
       "version": "7",
       "when": 1788278400000,
       "tag": "0024_delete_owned_saves",
       "breakpoints": true
     },
     {
-      "idx": 23,
+      "idx": 25,
       "version": "7",
       "when": 1788278401000,
       "tag": "0025_cascade_player_owned_save_data",
       "breakpoints": true
     },
     {
-      "idx": 24,
+      "idx": 26,
       "version": "7",
       "when": 1788278402000,
       "tag": "0026_persistent_invented_workflows",
       "breakpoints": true
     },
     {
-      "idx": 25,
+      "idx": 27,
       "version": "7",
       "when": 1788389649874,
       "tag": "0027_character_social",
       "breakpoints": true
     },
     {
-      "idx": 26,
+      "idx": 28,
       "version": "7",
       "when": 1788392032485,
       "tag": "0028_character_social_beliefs_pressures",

@@ -1,6 +1,7 @@
 export * from "./clock";
 export * from "./geojson";
 export * from "./map";
+export * from "./map-bindings";
 export * from "./storylines";
 export * from "./map-presentation";
 export * from "./region-control";

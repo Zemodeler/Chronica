@@ -36,11 +36,12 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
       boundingBox: [-25, 20, 45, 72],
       rightsConfirmedAt: new Date(),
     }).onConflictDoNothing();
-    await tx.insert(scenarios).values({ id: FIRST_PUNIC_WAR_SCENARIO_ID, slug: FIRST_PUNIC_WAR_SLUG, title: "The Numidian Decision", period: "264 BCE · First Punic War", authorId: CHRONICA_SYSTEM_USER_ID, visibility: "public", currentVersion: 1 }).onConflictDoNothing();
-    // Seeding may create the built-in scenario, but it must never silently
-    // rewrite a published version. Changing a scenario requires an explicit,
-    // reviewed versioning/migration operation instead of an ordinary page load.
-    await tx.insert(scenarioVersions).values({ scenarioId: FIRST_PUNIC_WAR_SCENARIO_ID, version: 1, mapAssetId: FIRST_PUNIC_WAR_MAP_ASSET_ID, definition: firstPunicWarScenario.definition, initialWorld: firstPunicWarScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "Built-in scenario with its own copy of the DEMO opening map." }).onConflictDoNothing();
+    await tx.insert(scenarios).values({ id: FIRST_PUNIC_WAR_SCENARIO_ID, slug: FIRST_PUNIC_WAR_SLUG, title: "The Numidian Decision", period: "264 BCE · First Punic War", authorId: CHRONICA_SYSTEM_USER_ID, visibility: "public", currentVersion: 2 }).onConflictDoNothing();
+    // Version 2 replaces the former Latium ID with the ID in the delivered
+    // GeoJSON. Existing version-1 saves remain pinned to their immutable
+    // record; new databases begin directly with the corrected version.
+    await tx.insert(scenarioVersions).values({ scenarioId: FIRST_PUNIC_WAR_SCENARIO_ID, version: 2, mapAssetId: FIRST_PUNIC_WAR_MAP_ASSET_ID, definition: firstPunicWarScenario.definition, initialWorld: firstPunicWarScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "Aligns every simulated province with the delivered map geometry so armies always have a renderable location." }).onConflictDoNothing();
+    await tx.update(scenarios).set({ title: "The Numidian Decision", period: "264 BCE · First Punic War", currentVersion: 2, updatedAt: new Date() }).where(eq(scenarios.id, FIRST_PUNIC_WAR_SCENARIO_ID));
     await tx.insert(scenarioMapAssets).values({
       id: PUNIC_WARS_MAP_ASSET_ID,
       ownerId: CHRONICA_SYSTEM_USER_ID,

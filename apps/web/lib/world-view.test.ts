@@ -17,6 +17,37 @@ function project(conflicts: typeof firstPunicWarScenario.initialWorld.conflicts)
 }
 
 describe("projectWorldView map conflicts", () => {
+  it("maps the retired Latium ID in version-1 saves onto its real polygon", () => {
+    const legacyWorld = structuredClone(firstPunicWarScenario.initialWorld);
+    const latium = legacyWorld.map.provinces.find((province) => province.name === "Latium");
+    const legion = legacyWorld.material.forces[0];
+    expect(latium).toBeDefined();
+    expect(legion).toBeDefined();
+    if (latium === undefined || legion === undefined) return;
+
+    latium.id = "ita-72843720b863019116732";
+    latium.settlements[0]!.provinceId = latium.id;
+    legacyWorld.pins.scenarioVersion = 1;
+    legacyWorld.characters = legacyWorld.characters.map((character) =>
+      character.locationProvinceId === "ita-local-23120603B86473916475875"
+        ? { ...character, locationProvinceId: latium.id }
+        : character,
+    );
+    legion.locationId = latium.id;
+
+    const view = projectWorldView(legacyWorld, {
+      gameId: "legacy-first-punic-game",
+      gameTitle: "First Punic War",
+      turnIndex: 1,
+      turnStatus: "collecting",
+      submittedPlayers: 0,
+      totalPlayers: 1,
+    }, "marcus-atilius");
+
+    expect(view.mapOverlay?.provinces.some((province) => province.provinceId === "ita-local-23120603B86473916475875")).toBe(true);
+    expect(view.mapOverlay?.forces.find((force) => force.forceId === legion.id)?.provinceId).toBe("ita-local-23120603B86473916475875");
+  });
+
   it("allows sieges only against real settlements", () => {
     const world = structuredClone(firstPunicWarScenario.initialWorld);
     const againstSettlement = executeWorkflow({
@@ -70,7 +101,7 @@ describe("Punic Wars opening map", () => {
 
     expect(view.mapOverlay?.conflicts.wars).toEqual([]);
     expect(view.mapOverlay?.politicalRelations).toEqual([]);
-    expect(view.mapOverlay?.provinces.some((province) => province.provinceId === "punic-iberia-turdetani" && province.controllerPolityId === "carthage")).toBe(true);
+    expect(view.mapOverlay?.provinces.some((province) => province.provinceId === "punic-iberia-andalucia" && province.controllerPolityId === "carthage")).toBe(true);
     expect(view.mapOverlay?.polities.some((polity) => polity.polityId === "mamertines")).toBe(true);
   });
 
