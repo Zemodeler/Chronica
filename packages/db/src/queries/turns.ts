@@ -1,7 +1,7 @@
 ﻿import { randomUUID } from "node:crypto";
 import { and, count, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import type { OrderBatch, ScenarioClock, ScenarioGovernmentRules, ScenarioLifeRules, WorldState } from "@chronica/shared";
-import { ScenarioDefinitionSchema, WorldStateSchema } from "@chronica/shared";
+import { ScenarioDefinitionSchema, WorldStateSchema, projectChronicleEntry, resolveChronicleVisibility, type ChronicleEntryProjection } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
 import {
   characterClaims,
@@ -376,6 +376,12 @@ export interface ChronicleView {
   readonly gameStatus: "lobby" | "active" | "finished" | "abandoned";
   /** Presentation metadata from the scenario pinned to this game, never world state. */
   readonly scenarioClock?: ScenarioClock;
+  /** Compact, player-safe per-turn header (character-sim phase 6); absent for legacy turns. */
+  readonly dispatch?: {
+    readonly headline: string;
+    readonly items: readonly string[];
+    readonly uncertaintyNote: string | null;
+  };
   readonly entries: readonly {
     readonly id: string;
     readonly sequence: number;
@@ -392,9 +398,46 @@ export interface ChronicleView {
     readonly location?: string | null;
     readonly chainId?: string | null;
     readonly chainPosition?: "root" | "reaction" | "spread" | "distant" | "pressure" | null;
-    readonly directConsequences?: Array<{ kind: string; label: string; entityId: string | null; quantified: boolean }>;
+    readonly directConsequences?: readonly { kind: string; label: string; entityId: string | null; quantified: boolean }[];
     readonly sourceDirector?: string;
     readonly openPressure?: boolean;
+    // Chronicle-first legibility fields (character-sim phase 6, all optional — absent on legacy entries).
+    readonly title?: string;
+    readonly knowledgeStatus?: "confirmed" | "report" | "rumour" | "suspicion";
+    readonly participants?: readonly { readonly name: string; readonly role?: string }[];
+    readonly places?: readonly { readonly name: string }[];
+    readonly institutions?: readonly { readonly name: string }[];
+    readonly playerRelevance?: "high" | "medium" | "low" | "none";
+    readonly politicalOutcome?: {
+      readonly procedureId: string;
+      readonly procedureType: string;
+      readonly institutionName: string | null;
+      readonly sponsorName: string;
+      readonly outcome: "passed" | "failed" | "blocked" | "withdrawn";
+      readonly publicReason: string;
+      readonly netSupportWeight: number;
+      readonly netOppositionWeight: number;
+    };
+    readonly lifeEvent?: {
+      readonly characterId: string;
+      readonly characterName: string;
+      readonly kind: "death" | "incapacitation" | "recovery";
+      readonly cause: string;
+      readonly estateOutcome: string | null;
+      readonly vacatedOfficeIds: readonly string[];
+    };
+    readonly commandChange?: {
+      readonly forceName: string;
+      readonly previousCommanderName: string | null;
+      readonly newCommanderName: string | null;
+      readonly reason: string;
+    };
+    readonly familyEvent?: {
+      readonly contractId: string;
+      readonly type: string;
+      readonly partyNames: readonly string[];
+      readonly outcome: string;
+    };
   }[];
 }
 
@@ -405,7 +448,11 @@ export interface ChronicleView {
  * is no open turn left, and the closing summary apps/worker appends
  * (writeFinalSummary) lives on the last turn's chronicle, not a turn of its own.
  */
-export async function getChronicleForLatestTurn(db: ChronicaDatabase, gameId: string): Promise<ChronicleView | undefined> {
+export async function getChronicleForLatestTurn(
+  db: ChronicaDatabase,
+  gameId: string,
+  viewerCharacterId?: string,
+): Promise<ChronicleView | undefined> {
   // game and turn are both independent — fetch in parallel.
   const [gameRows, turnRows] = await Promise.all([
     db
@@ -424,12 +471,16 @@ export async function getChronicleForLatestTurn(db: ChronicaDatabase, gameId: st
   const [turn] = turnRows;
   if (game === undefined || turn === undefined) return undefined;
 
-  // chronicle entries (needs turn.id) and scenario version (needs game.scenarioId) — fetch in parallel.
-  const [rows, scenarioVersionRows] = await Promise.all([
+  // chronicle entries, scenario version, and this turn's post-resolution world
+  // snapshot (needed only for its `characterBeliefs`, to gate knowledge-scoped
+  // visibility) are all independent — fetch in parallel.
+  const [rows, scenarioVersionRows, snapshotRows] = await Promise.all([
     db
       .select({
         id: chronicleEntries.id,
         sequence: chronicleEntries.sequence,
+        scope: chronicleEntries.scope,
+        scopeRef: chronicleEntries.scopeRef,
         body: chronicleEntries.body,
         audience: chronicleEntries.audience,
         playerInvolvement: chronicleEntries.playerInvolvement,
@@ -443,61 +494,188 @@ export async function getChronicleForLatestTurn(db: ChronicaDatabase, gameId: st
       .from(scenarioVersions)
       .where(and(eq(scenarioVersions.scenarioId, game.scenarioId), eq(scenarioVersions.version, game.scenarioVersion)))
       .limit(1),
+    db
+      .select({ state: worldSnapshots.state })
+      .from(worldSnapshots)
+      .where(eq(worldSnapshots.turnId, turn.id))
+      .limit(1),
   ]);
   const [scenarioVersion] = scenarioVersionRows;
   const parsedScenario = scenarioVersion === undefined ? null : ScenarioDefinitionSchema.safeParse(scenarioVersion.definition);
   const scenarioClock = parsedScenario?.success ? parsedScenario.data.clock : undefined;
 
+  const [snapshot] = snapshotRows;
+  const parsedWorld = snapshot === undefined ? null : WorldStateSchema.safeParse(snapshot.state);
+  const characterBeliefs = parsedWorld?.success ? parsedWorld.data.characterBeliefs : [];
+
+  type FactsBlob = {
+    materialConsequence?: boolean;
+    displayPatch?: unknown;
+    eventDate?: string | null;
+    location?: string | null;
+    chainId?: string | null;
+    chainPosition?: "root" | "reaction" | "spread" | "distant" | "pressure" | null;
+    directConsequences?: Array<{ kind: string; label: string; entityId: string | null; quantified: boolean }>;
+    sourceDirector?: string;
+    openPressure?: boolean;
+    title?: string;
+    knowledgeStatus?: "confirmed" | "report" | "rumour" | "suspicion";
+    participants?: readonly { name: string; role?: string }[];
+    places?: readonly { name: string }[];
+    institutions?: readonly { name: string }[];
+    playerRelevance?: "high" | "medium" | "low" | "none";
+    politicalOutcome?: ChronicleView["entries"][number]["politicalOutcome"];
+    lifeEvent?: ChronicleView["entries"][number]["lifeEvent"];
+    commandChange?: ChronicleView["entries"][number]["commandChange"];
+    familyEvent?: ChronicleView["entries"][number]["familyEvent"];
+    dispatch?: { items?: readonly string[]; uncertaintyNote?: string | null };
+  };
+
+  let dispatch: ChronicleView["dispatch"];
+  const projected: ChronicleView["entries"][number][] = [];
+
+  for (const row of rows) {
+    const factsData = row.facts;
+    const isNewFormat =
+      factsData !== null &&
+      typeof factsData === "object" &&
+      !Array.isArray(factsData) &&
+      "ids" in factsData;
+    const atStep = chronicleAtStep(factsData, turn.elapsedStepEnd ?? 0);
+    const f = isNewFormat ? (factsData as FactsBlob) : null;
+
+    if (row.scope === "dispatch") {
+      dispatch = { headline: row.body, items: f?.dispatch?.items ?? [], uncertaintyNote: f?.dispatch?.uncertaintyNote ?? null };
+      continue;
+    }
+
+    const view = projectChronicleEntry(
+      {
+        id: row.id,
+        sequence: row.sequence,
+        audience: row.audience as "all_players" | "knowledge_scoped",
+        body: row.body,
+        ...(row.scopeRef != null ? { scopeRef: row.scopeRef } : {}),
+        atStep,
+        ...(f?.title !== undefined ? { title: f.title } : {}),
+        ...(f?.knowledgeStatus !== undefined ? { knowledgeStatus: f.knowledgeStatus } : {}),
+        ...(f !== null ? { materialConsequence: Boolean(f.materialConsequence) } : {}),
+        ...(f?.displayPatch !== undefined ? { displayPatch: f.displayPatch } : {}),
+        ...(f?.eventDate != null ? { eventDate: f.eventDate } : {}),
+        ...(f?.location != null ? { location: f.location } : {}),
+        ...(f?.chainId != null ? { chainId: f.chainId } : {}),
+        ...(f?.chainPosition != null ? { chainPosition: f.chainPosition } : {}),
+        ...(f?.directConsequences !== undefined ? { directConsequences: f.directConsequences } : {}),
+        ...(f?.sourceDirector !== undefined ? { sourceDirector: f.sourceDirector } : {}),
+        ...(f?.openPressure !== undefined ? { openPressure: f.openPressure } : {}),
+        ...(f?.participants !== undefined ? { participants: f.participants } : {}),
+        ...(f?.places !== undefined ? { places: f.places } : {}),
+        ...(f?.institutions !== undefined ? { institutions: f.institutions } : {}),
+        ...(f?.playerRelevance !== undefined ? { playerRelevance: f.playerRelevance } : {}),
+        ...(f?.politicalOutcome !== undefined ? { politicalOutcome: f.politicalOutcome } : {}),
+        ...(f?.lifeEvent !== undefined ? { lifeEvent: f.lifeEvent } : {}),
+        ...(f?.commandChange !== undefined ? { commandChange: f.commandChange } : {}),
+        ...(f?.familyEvent !== undefined ? { familyEvent: f.familyEvent } : {}),
+      },
+      viewerCharacterId ?? null,
+      characterBeliefs,
+    );
+    if (view === null) continue;
+    projected.push({ ...view, playerInvolvement: row.playerInvolvement });
+  }
+
   return {
     turnId: turn.id,
     turnIndex: turn.index,
     gameStatus: game.status,
-    entries: rows.map((row) => {
-      const factsData = row.facts;
-      const isNewFormat =
-        factsData !== null &&
-        typeof factsData === "object" &&
-        !Array.isArray(factsData) &&
-        "ids" in factsData;
-      const atStep = chronicleAtStep(factsData, turn.elapsedStepEnd ?? 0);
-      type FactsBlob = {
-        materialConsequence?: boolean;
-        displayPatch?: unknown;
-        eventDate?: string | null;
-        location?: string | null;
-        chainId?: string | null;
-        chainPosition?: "root" | "reaction" | "spread" | "distant" | "pressure" | null;
-        directConsequences?: Array<{ kind: string; label: string; entityId: string | null; quantified: boolean }>;
-        sourceDirector?: string;
-        openPressure?: boolean;
-      };
-      const f = isNewFormat ? (factsData as FactsBlob) : null;
-      return {
-        id: row.id,
-        sequence: row.sequence,
-        body: row.body,
-        audience: row.audience as "all_players" | "knowledge_scoped",
-        playerInvolvement: row.playerInvolvement,
-        atStep,
-        ...(f !== null
-          ? {
-              materialConsequence: Boolean(f.materialConsequence),
-              ...(f.displayPatch !== undefined ? { displayPatch: f.displayPatch } : {}),
-              ...(f.eventDate != null ? { eventDate: f.eventDate } : {}),
-              ...(f.location != null ? { location: f.location } : {}),
-              ...(f.chainId != null ? { chainId: f.chainId } : {}),
-              ...(f.chainPosition != null ? { chainPosition: f.chainPosition } : {}),
-              ...(Array.isArray(f.directConsequences) && f.directConsequences.length > 0
-                ? { directConsequences: f.directConsequences }
-                : {}),
-              ...(f.sourceDirector != null ? { sourceDirector: f.sourceDirector } : {}),
-              ...(f.openPressure ? { openPressure: true } : {}),
-            }
-          : {}),
-      };
-    }),
+    entries: projected,
+    ...(dispatch === undefined ? {} : { dispatch }),
     ...(scenarioClock === undefined ? {} : { scenarioClock }),
   };
+}
+
+export interface ChronicleInspectorEntry {
+  readonly id: string;
+  readonly sequence: number;
+  readonly scope: string;
+  readonly audience: "all_players" | "knowledge_scoped";
+  readonly rawBody: string;
+  readonly rawFacts: unknown;
+  readonly visible: boolean;
+  readonly reason: string;
+  readonly projected: ChronicleEntryProjection | null;
+}
+
+/**
+ * Developer/admin-only diagnostics (character-sim phase 6): the latest news
+ * turn's raw, pre-redaction Chronicle rows alongside the projection decision
+ * and output a given `viewerCharacterId` would actually receive. Never used
+ * by any ordinary player-facing route.
+ */
+export async function getChronicleInspectorView(
+  db: ChronicaDatabase,
+  gameId: string,
+  viewerCharacterId: string | null,
+): Promise<{ turnId: string; entries: readonly ChronicleInspectorEntry[] } | undefined> {
+  const [turnRows] = await Promise.all([
+    db
+      .select({ id: turns.id, elapsedStepEnd: turns.elapsedStepEnd })
+      .from(turns)
+      .where(and(eq(turns.gameId, gameId), eq(turns.status, "news")))
+      .orderBy(desc(turns.index))
+      .limit(1),
+  ]);
+  const [turn] = turnRows;
+  if (turn === undefined) return undefined;
+
+  const [rows, snapshotRows] = await Promise.all([
+    db
+      .select({
+        id: chronicleEntries.id,
+        sequence: chronicleEntries.sequence,
+        scope: chronicleEntries.scope,
+        scopeRef: chronicleEntries.scopeRef,
+        body: chronicleEntries.body,
+        audience: chronicleEntries.audience,
+        facts: chronicleEntries.facts,
+      })
+      .from(chronicleEntries)
+      .where(eq(chronicleEntries.turnId, turn.id))
+      .orderBy(chronicleEntries.sequence),
+    db.select({ state: worldSnapshots.state }).from(worldSnapshots).where(eq(worldSnapshots.turnId, turn.id)).limit(1),
+  ]);
+  const [snapshot] = snapshotRows;
+  const parsedWorld = snapshot === undefined ? null : WorldStateSchema.safeParse(snapshot.state);
+  const characterBeliefs = parsedWorld?.success ? parsedWorld.data.characterBeliefs : [];
+
+  const entries: ChronicleInspectorEntry[] = rows.map((row) => {
+    const atStep = chronicleAtStep(row.facts, turn.elapsedStepEnd ?? 0);
+    const record = {
+      id: row.id,
+      sequence: row.sequence,
+      audience: row.audience as "all_players" | "knowledge_scoped",
+      body: row.body,
+      ...(row.scopeRef != null ? { scopeRef: row.scopeRef } : {}),
+      atStep,
+    };
+    const visible = resolveChronicleVisibility(record, viewerCharacterId, characterBeliefs);
+    const projected = projectChronicleEntry(record, viewerCharacterId, characterBeliefs);
+    return {
+      id: row.id,
+      sequence: row.sequence,
+      scope: row.scope,
+      audience: row.audience as "all_players" | "knowledge_scoped",
+      rawBody: row.body,
+      rawFacts: row.facts,
+      visible,
+      reason: visible
+        ? "Visible: public entry, or viewer holds a matching belief."
+        : "Hidden: knowledge-scoped entry and the viewer holds no matching belief.",
+      projected,
+    };
+  });
+
+  return { turnId: turn.id, entries };
 }
 
 function chronicleAtStep(value: unknown, fallback: number): number {

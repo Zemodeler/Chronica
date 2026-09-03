@@ -521,8 +521,9 @@ export function projectNewsView(
     return {
       id: entry.id,
       sequence: entry.sequence,
-      title: entry.audience === "all_players" ? "Reported to all players" : "Reported through your position",
+      title: entry.title ?? (entry.audience === "all_players" ? "Reported to all players" : "Reported through your position"),
       body: entry.body,
+      ...(entry.knowledgeStatus === undefined ? {} : { knowledgeStatus: entry.knowledgeStatus }),
       audience: entry.audience,
       characterKnows: entry.audience !== "knowledge_scoped",
       involvementLabel: entry.audience === "knowledge_scoped"

@@ -69,6 +69,30 @@ export interface ChronicleEntryInput {
     readonly estateOutcome: string | null;
     readonly vacatedOfficeIds: readonly string[];
   };
+  /** Player-visible summary of a force changing commander (character-sim phase 6). */
+  readonly commandChange?: {
+    readonly forceName: string;
+    readonly previousCommanderName: string | null;
+    readonly newCommanderName: string | null;
+    readonly reason: string;
+  };
+  /** Player-visible summary of a public/polity-visible marriage, partnership, or guardianship change (character-sim phase 6). */
+  readonly familyEvent?: {
+    readonly contractId: string;
+    readonly type: string;
+    readonly partyNames: readonly string[];
+    readonly outcome: string;
+  };
+  // Chronicle-first legibility fields (character-sim phase 6). All additive,
+  // stored inside the existing `facts` jsonb blob -- no new DB columns.
+  readonly title?: string;
+  readonly knowledgeStatus?: "confirmed" | "report" | "rumour" | "suspicion";
+  readonly participants?: readonly { readonly name: string; readonly role?: string }[];
+  readonly places?: readonly { readonly name: string }[];
+  readonly institutions?: readonly { readonly name: string }[];
+  readonly playerRelevance?: "high" | "medium" | "low" | "none";
+  /** Present only on the one synthetic `scope: "dispatch"` entry per turn (character-sim phase 6). */
+  readonly dispatch?: { readonly items: readonly string[]; readonly uncertaintyNote: string | null };
 }
 
 export interface CommitResolutionInput {
@@ -156,6 +180,15 @@ export async function commitResolution(
               : {}),
             ...(entry.politicalOutcome !== undefined ? { politicalOutcome: entry.politicalOutcome } : {}),
             ...(entry.lifeEvent !== undefined ? { lifeEvent: entry.lifeEvent } : {}),
+            ...(entry.commandChange !== undefined ? { commandChange: entry.commandChange } : {}),
+            ...(entry.familyEvent !== undefined ? { familyEvent: entry.familyEvent } : {}),
+            ...(entry.title !== undefined ? { title: entry.title } : {}),
+            ...(entry.knowledgeStatus !== undefined ? { knowledgeStatus: entry.knowledgeStatus } : {}),
+            ...(entry.participants && entry.participants.length > 0 ? { participants: entry.participants } : {}),
+            ...(entry.places && entry.places.length > 0 ? { places: entry.places } : {}),
+            ...(entry.institutions && entry.institutions.length > 0 ? { institutions: entry.institutions } : {}),
+            ...(entry.playerRelevance !== undefined ? { playerRelevance: entry.playerRelevance } : {}),
+            ...(entry.dispatch !== undefined ? { dispatch: entry.dispatch } : {}),
           },
         })),
       );

@@ -19,7 +19,8 @@
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "npm run test:e2e --workspace @chronica/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "maps:simplify": "node scripts/simplify-geojson.mjs"
+    "maps:simplify": "node scripts/simplify-geojson.mjs",
+    "validate:scenario": "tsx scripts/validate-scenario.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

@@ -55,6 +55,9 @@ import {
   currentAgeYears,
   canSponsorProcedure,
   resolveEligibility,
+  deriveAuthoritySummary,
+  buildCurrentDispatch,
+  DEFAULT_MAX_CHRONICLE_ENTRIES_PER_TURN,
   type ScenarioClock,
   type ScenarioLifeRules,
   type ScenarioGovernmentRules,
@@ -700,8 +703,8 @@ function buildChronicleEntries(
   // then longer developments. Salience only breaks ties within a duration.
   raw.sort((a, b) => a.simulatedDurationDays - b.simulatedDurationDays || b.sortKey - a.sortKey);
 
-  // Soft cap at 12 chronicle entries
-  return raw.slice(0, 12).map((r, i) => ({ ...r.input, sequence: i, simulatedDurationDays: r.simulatedDurationDays }));
+  // Soft cap at `maxChronicleEntriesPerTurn` (default 12).
+  return raw.slice(0, DEFAULT_MAX_CHRONICLE_ENTRIES_PER_TURN).map((r, i) => ({ ...r.input, sequence: i, simulatedDurationDays: r.simulatedDurationDays }));
 }
 
 function estimatePlayerEventDurationDays(verdict: Verdict): number {
@@ -1456,6 +1459,10 @@ export async function resolveTurn(
             atStep,
             materialConsequence: roll.kind === "death",
             simulatedDurationDays: 1,
+            title: `${character.name}: ${roll.kind === "death" ? "Death" : roll.kind === "incapacitation" ? "Incapacitated" : "Recovery"}`,
+            knowledgeStatus: "confirmed",
+            participants: [{ name: character.name, role: "subject" }],
+            playerRelevance: character.id === actorCharacterId ? "high" : "medium",
             lifeEvent: {
               characterId: character.id,
               characterName: character.name,
@@ -1817,6 +1824,11 @@ export async function resolveTurn(
         atStep,
         materialConsequence: outcome === "passed",
         simulatedDurationDays: 1,
+        title: `${sponsor?.name ?? "A sponsor"}: ${readableType} ${outcomeVerb}`,
+        knowledgeStatus: "confirmed",
+        participants: sponsor ? [{ name: sponsor.name, role: "sponsor" }] : [],
+        institutions: institution ? [{ name: institution.name }] : [],
+        playerRelevance: procedure.sponsorCharacterId === actorCharacterId || procedure.eligibleParticipantIds.includes(actorCharacterId) ? "high" : "medium",
         politicalOutcome: {
           procedureId: procedure.id,
           procedureType: procedure.type,
@@ -1826,6 +1838,71 @@ export async function resolveTurn(
           publicReason: procedure.outcomeReason ?? "",
           netSupportWeight: weights.support,
           netOppositionWeight: weights.oppose,
+        },
+      });
+    }
+
+    // Player-visible account of any force that changed commander this turn
+    // (character-sim phase 6), derived by diff rather than a workflow hook so
+    // every commander-changing path -- `assign_command`, or any future one --
+    // is covered without duplicating chronicle-writing logic per workflow.
+    const commandChangeChronicle: ChronicleEntryInput[] = [];
+    for (const forceAfter of newWorld.material.forces) {
+      const forceBefore = resolutionWorld.material.forces.find((f) => f.id === forceAfter.id);
+      if (forceBefore === undefined || forceBefore.commanderCharacterId === forceAfter.commanderCharacterId) continue;
+      const previousCommander = newWorld.characters.find((c) => c.id === forceBefore.commanderCharacterId);
+      const newCommander = newWorld.characters.find((c) => c.id === forceAfter.commanderCharacterId);
+      commandChangeChronicle.push({
+        sequence: 0,
+        scope: "command_change",
+        scopeRef: forceAfter.id,
+        audience: "all_players",
+        body: `Command of the ${forceAfter.name} passes${previousCommander ? ` from ${previousCommander.name}` : ""}${newCommander ? ` to ${newCommander.name}` : ""}.`,
+        atStep,
+        materialConsequence: true,
+        simulatedDurationDays: 1,
+        title: `Command changes: ${forceAfter.name}`,
+        knowledgeStatus: "confirmed",
+        participants: [previousCommander, newCommander].filter((c): c is NonNullable<typeof c> => c !== undefined).map((c) => ({ name: c.name })),
+        playerRelevance: [forceBefore.commanderCharacterId, forceAfter.commanderCharacterId].includes(actorCharacterId) ? "high" : "low",
+        commandChange: {
+          forceName: forceAfter.name,
+          previousCommanderName: previousCommander?.name ?? null,
+          newCommanderName: newCommander?.name ?? null,
+          reason: "Reassigned by institutional procedure.",
+        },
+      });
+    }
+
+    // Player-visible account of any public/polity-visible marriage,
+    // partnership, or guardianship formed/dissolved this turn.
+    const familyEventChronicle: ChronicleEntryInput[] = [];
+    for (const contractAfter of newWorld.lifeContracts) {
+      const contractBefore = resolutionWorld.lifeContracts.find((c) => c.id === contractAfter.id);
+      if (contractBefore?.status === contractAfter.status) continue;
+      if (contractAfter.visibility === "private") continue;
+      const partyNames = contractAfter.partyCharacterIds
+        .map((id) => newWorld.characters.find((c) => c.id === id)?.name)
+        .filter((name): name is string => name !== undefined);
+      const readableType = contractAfter.type.replace(/_/g, " ");
+      familyEventChronicle.push({
+        sequence: 0,
+        scope: "family_event",
+        scopeRef: contractAfter.id,
+        audience: contractAfter.visibility === "polity" ? "knowledge_scoped" : "all_players",
+        body: `${partyNames.join(" and ") || "The parties"} ${contractAfter.status === "active" ? `form a ${readableType}` : `end their ${readableType} (${contractAfter.status})`}.`,
+        atStep,
+        materialConsequence: false,
+        simulatedDurationDays: 1,
+        title: `${readableType[0]!.toUpperCase()}${readableType.slice(1)}: ${partyNames.join(" & ")}`,
+        knowledgeStatus: "confirmed",
+        participants: partyNames.map((name) => ({ name })),
+        playerRelevance: contractAfter.partyCharacterIds.includes(actorCharacterId) ? "high" : "low",
+        familyEvent: {
+          contractId: contractAfter.id,
+          type: contractAfter.type,
+          partyNames,
+          outcome: contractAfter.status,
         },
       });
     }
@@ -1862,7 +1939,14 @@ export async function resolveTurn(
       displayPatchByInvocation,
       playerId,
     );
-    chronicleInputs = scheduleChronicleEntries([...chronicleInputs, ...commitmentChronicle, ...politicalChronicle, ...lifeEventChronicle]);
+    chronicleInputs = scheduleChronicleEntries([
+      ...chronicleInputs,
+      ...commitmentChronicle,
+      ...politicalChronicle,
+      ...lifeEventChronicle,
+      ...commandChangeChronicle,
+      ...familyEventChronicle,
+    ]);
 
     if (displayPatch && chronicleInputs.length > 0) {
       const lastIdx = chronicleInputs.length - 1;
@@ -1880,6 +1964,7 @@ export async function resolveTurn(
         chainPosition: e.chainPosition ?? null,
         chainId: e.chainId ?? null,
         sourceDirector: e.sourceDirector,
+        knowledgeStatus: e.knowledgeStatus,
         characterMentions: e.characterMentions
           ?.map((mention) => {
             const character = newWorld.characters.find((candidate) => candidate.id === mention.characterId && candidate.alive);
@@ -1905,6 +1990,43 @@ export async function resolveTurn(
       console.error(`${tag()} [chronicle:narrator] failed, keeping raw bodies:`, err);
     }
     console.log(`${tag()} [chronicle] OUT: ${chronicleInputs.length} entries narrator=${narratorOk ? "ok" : "skipped"}`);
+
+    // Current Chronicle dispatch (character-sim phase 6): a compact,
+    // knowledge-safe per-turn header built deterministically from this turn's
+    // already-classified entries plus the player's own canonical Authority
+    // change -- no separate AI call, modeled on the existing
+    // (player-invisible) `summarizeResolvedTurn`.
+    const authorityBefore = deriveAuthoritySummary(resolutionWorld, actorCharacterId, input.scenarioGovernment);
+    const authorityAfter = deriveAuthoritySummary(newWorld, actorCharacterId, input.scenarioGovernment);
+    const authorityChangesForPlayer = [
+      ...authorityAfter.filter((label) => !authorityBefore.includes(label)).map((label) => `Now: ${label}`),
+      ...authorityBefore.filter((label) => !authorityAfter.includes(label)).map((label) => `No longer: ${label}`),
+    ];
+    const dispatch = buildCurrentDispatch({
+      entriesThisTurn: chronicleInputs.map((e) => ({
+        title: e.title ?? e.body.slice(0, 60),
+        body: e.body,
+        playerRelevance: e.playerRelevance ?? "none",
+        knowledgeStatus: e.knowledgeStatus ?? "confirmed",
+      })),
+      authorityChangesForPlayer,
+    });
+    chronicleInputs = scheduleChronicleEntries([
+      {
+        sequence: 0,
+        scope: "dispatch",
+        audience: "all_players",
+        body: dispatch.headline,
+        atStep,
+        materialConsequence: false,
+        simulatedDurationDays: 0,
+        title: "Current dispatch",
+        knowledgeStatus: dispatch.uncertaintyNote !== null ? "report" : "confirmed",
+        playerRelevance: "high",
+        dispatch: { items: dispatch.items, uncertaintyNote: dispatch.uncertaintyNote },
+      },
+      ...chronicleInputs,
+    ]);
 
     emit(onProgress, "chronicle", true);
 

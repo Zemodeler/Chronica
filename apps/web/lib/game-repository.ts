@@ -710,14 +710,15 @@ async function resolveViewerUserId(): Promise<string | null> {
 }
 
 /** Resolves the signed-in player to their active player row. */
-async function resolvePlayer(gameId: string): Promise<{ db: ReturnType<typeof createDatabase>["db"]; close: () => Promise<void>; playerId: string } | null> {
+async function resolvePlayer(gameId: string): Promise<{ db: ReturnType<typeof createDatabase>["db"]; close: () => Promise<void>; playerId: string; characterId?: string } | null> {
   const userId = await resolveViewerUserId();
   if (userId === null) return null;
   const { db, close } = createDatabase(requiredDatabaseUrl());
   try {
-    const [player] = await db.select({ id: schema.players.id }).from(schema.players).where(and(eq(schema.players.gameId, gameId), eq(schema.players.userId, userId), eq(schema.players.status, "active"))).limit(1);
+    const [player] = await db.select({ id: schema.players.id, characterId: schema.players.characterId }).from(schema.players).where(and(eq(schema.players.gameId, gameId), eq(schema.players.userId, userId), eq(schema.players.status, "active"))).limit(1);
     if (player === undefined) { await close(); return null; }
-    return { db, close, playerId: player.id };
+    const characterId = player.characterId.startsWith("pending:") || player.characterId.startsWith("declared-") ? undefined : player.characterId;
+    return { db, close, playerId: player.id, ...(characterId !== undefined ? { characterId } : {}) };
   } catch (error) {
     await close();
     throw error;
@@ -1006,10 +1007,10 @@ export const postgresGameRepository: GameRepository = {
     if (gameId === DEMO_GAME_ID) return fixtureGameRepository.getNews(gameId);
     const resolved = await resolvePlayer(gameId);
     if (resolved === null) throw new Error("This account or guest session cannot access the save.");
-    const { db, close, playerId } = resolved;
+    const { db, close, playerId, characterId } = resolved;
     try {
       const [chronicle, uiState] = await Promise.all([
-        getChronicleForLatestTurn(db, gameId),
+        getChronicleForLatestTurn(db, gameId, characterId),
         getPlayerGameUiState(db, gameId, playerId),
       ]);
       if (chronicle === undefined) return null;
@@ -1027,11 +1028,11 @@ export const postgresGameRepository: GameRepository = {
   async acknowledgeNews(gameId) {
     const resolved = await resolvePlayer(gameId);
     if (resolved === null) throw new Error("This account or guest session cannot access the save.");
-    const { db, close, playerId } = resolved;
+    const { db, close, playerId, characterId } = resolved;
     try {
       // Persist the durable chronicle read position so a browser closed
       // right after acknowledging still resumes past what was just read.
-      const chronicle = await getChronicleForLatestTurn(db, gameId);
+      const chronicle = await getChronicleForLatestTurn(db, gameId, characterId);
       const lastSequence = chronicle?.entries.at(-1)?.sequence;
       if (lastSequence !== undefined) {
         await upsertPlayerGameUiState(db, { gameId, playerId, chronicleReadSequence: lastSequence });

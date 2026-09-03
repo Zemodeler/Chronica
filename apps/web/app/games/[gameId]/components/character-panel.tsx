@@ -33,6 +33,8 @@ export interface CharacterPanelProps {
   readonly biography: string;
   readonly notableEvents: readonly string[];
   readonly authority?: readonly string[];
+  /** Legacy free-text authority claims, shown only as background -- never a source of mechanical power. */
+  readonly authorityBackgroundNote?: readonly string[];
 }
 
 const DETAIL_TITLES: Record<DetailKey, string> = { location: "Location", culture: "Culture", money: "Money", authority: "Authority", origin: "Origin", relations: "Key Relations" };
@@ -93,7 +95,7 @@ export function CharacterPanel(props: CharacterPanelProps) {
           {detail === "location" && <><p className="character-detail-value">{locationLabel}</p><p>Your position at the scenario opening.</p></>}
           {detail === "culture" && <><p className="character-detail-value">{culture}</p><p>The cultural context used to ground this character’s identity and history.</p></>}
           {detail === "money" && <MoneyDetail moneyLabel={moneyLabel} balance={moneyBalance} changes={moneyChanges} />}
-          {detail === "authority" && <AuthorityDetail role={role} authority={authorityHoldings} />}
+          {detail === "authority" && <AuthorityDetail role={role} authority={authorityHoldings} backgroundNote={props.authorityBackgroundNote ?? []} />}
           {detail === "origin" && <OriginDetail origin={origin} ageAtStart={ageAtStart} birthYearApprox={birthYearApprox} biography={props.biography} notableEvents={props.notableEvents} birthYearOpen={birthYearOpen} onToggleBirthYear={() => setBirthYearOpen((current) => !current)} />}
           {detail === "relations" && <RelationsDetail family={family} others={others} tab={relationsTab} onTabChange={setRelationsTab} familyView={familyView} onFamilyViewChange={setFamilyView} />}
         </div>
@@ -116,7 +118,14 @@ function MoneyDetail({ moneyLabel, balance, changes }: { moneyLabel: string; bal
   return <><p className="character-detail-value">{moneyLabel}</p><div className="money-graph" aria-label="Personal balance graph"><svg viewBox="0 0 240 80" role="img" aria-label={changes.length === 0 ? "Current balance only" : "Recent balance changes"}><path d={changes.length === 0 ? "M12 50 L228 50" : `M${points}`} fill="none" stroke="currentColor" strokeWidth="3" /><circle cx="228" cy={changes.length === 0 ? "50" : points.split(" L").at(-1)?.split(",")[1] ?? "50"} r="5" fill="currentColor" /></svg><span>{changes.length === 0 ? "No balance history yet" : "Recent account movement"}</span></div>{changes.length > 0 && <ul className="character-detail-list">{recent.map((change) => <li key={change.id}><strong>{change.amount >= 0 ? "+" : ""}{change.amount.toLocaleString()}</strong><span>{change.label} · {change.whenLabel}</span></li>)}</ul>}<p className="character-detail-note">{changes.length === 0 ? "The graph will gain history as transactions occur." : "Balance history is shown from your personal-account transactions."}</p></>;
 }
 
-function AuthorityDetail({ role, authority }: { role: string; authority: readonly string[] }) { const entries = authority.length > 0 ? authority : [role]; return <><p className="character-detail-value">{role}</p><ul className="character-detail-list">{entries.map((entry) => <li key={entry}><strong>{entry}</strong></li>)}</ul></>; }
+function AuthorityDetail({ role, authority, backgroundNote }: { role: string; authority: readonly string[]; backgroundNote: readonly string[] }) {
+  const entries = authority.length > 0 ? authority : [role];
+  return <>
+    <p className="character-detail-value">{role}</p>
+    <ul className="character-detail-list">{entries.map((entry) => <li key={entry}><strong>{entry}</strong></li>)}</ul>
+    {backgroundNote.length > 0 && <p className="character-detail-note">Reputed background (unverified): {backgroundNote.join("; ")}</p>}
+  </>;
+}
 function OriginDetail({ origin, ageAtStart, birthYearApprox, biography, notableEvents, birthYearOpen, onToggleBirthYear }: { origin: CharacterPanelProps["origin"]; ageAtStart: number | null; birthYearApprox: number | null; biography: string; notableEvents: readonly string[]; birthYearOpen: boolean; onToggleBirthYear: () => void }) { return <><p className="character-detail-value">{originLabel(origin)}</p><div className="origin-age"><span>Age at scenario opening</span><strong>{ageAtStart === null ? "Unknown" : `c. ${ageAtStart}`}</strong></div><button type="button" className="origin-birth-year" onClick={onToggleBirthYear} aria-expanded={birthYearOpen}>Birth year <b>{birthYearOpen ? "−" : "+"}</b></button>{birthYearOpen && <p className="origin-birth-year-value">{formatYear(birthYearApprox)}</p>}<section className="origin-backstory"><h4>Backstory</h4><p>{biography}</p></section>{notableEvents.length > 0 && <section className="origin-backstory"><h4>Notable events</h4><ul className="character-detail-list">{notableEvents.map((event) => <li key={event}><strong>{event}</strong></li>)}</ul></section>}</>; }
 
 function RelationsDetail({ family, others, tab, onTabChange, familyView, onFamilyViewChange }: { family: readonly CharacterRelation[]; others: readonly CharacterRelation[]; tab: RelationCategory; onTabChange: (tab: RelationCategory) => void; familyView: FamilyView; onFamilyViewChange: (view: FamilyView) => void }) { return <><div className="relation-tabs" role="tablist" aria-label="Key relation categories"><button type="button" role="tab" aria-selected={tab === "family"} onClick={() => onTabChange("family")}>Family ({family.length})</button><button type="button" role="tab" aria-selected={tab === "other"} onClick={() => onTabChange("other")}>Other NPCs ({others.length})</button></div>{tab === "family" && <div className="family-view-toggle" role="group" aria-label="Family view"><button type="button" aria-pressed={familyView === "tree"} onClick={() => onFamilyViewChange("tree")}>Family tree</button><button type="button" aria-pressed={familyView === "list"} onClick={() => onFamilyViewChange("list")}>List</button></div>}{tab === "family" ? familyView === "tree" ? <FamilyTree relations={family} /> : <RelationCards relations={family} emptyLabel="No family members are recorded." /> : <RelationCards relations={others} emptyLabel="No other significant NPCs are recorded." />}</>; }

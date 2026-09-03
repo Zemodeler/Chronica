@@ -47,6 +47,18 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
     ],
     reviewIntervalSteps: 4,
   },
+  // Chronicle-first legibility vertical slice (character-sim phase 6): the
+  // player's opening dispatch, not a new fact system -- the Senate rivalry
+  // named here is exactly what `senate-censure-marcus` (above) can resolve.
+  chronicle: {
+    openingContext: "Rome and Carthage contest Sicily. The Senate is divided between the patrician bloc that backs Marcus Atilius's command and a popular bloc that blames him for the stalemate at Drepanum.",
+    historicalBackground: [
+      { title: "The stalemate at Drepanum", body: "Marcus Atilius's fleet has held the line at Drepanum for a full season without a decisive engagement.", knowledgeStatus: "confirmed" },
+      { title: "Whispers of censure", body: "Some in the Senate murmur that Quintus Fabius means to move against Marcus before the next vote.", knowledgeStatus: "rumour" },
+    ],
+    openingTensions: ["The Senate's patience with the Sicilian stalemate is running out.", "Carthage's own command over its army in the west is not yet settled."],
+    terminology: { institution: "Senate", office: "command" },
+  },
 });
 
 const initialWorld: WorldState = WorldStateSchema.parse({
