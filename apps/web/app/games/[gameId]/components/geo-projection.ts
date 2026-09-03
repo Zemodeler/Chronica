@@ -149,6 +149,17 @@ const CONSOLIDATED_POLITY_PALETTE_SLOTS: Readonly<Record<string, number>> = {
   "iberia-vaccei": 4, "iberia-vettones": 5, "iberia-lusitani": 6, "iberia-carpetani": 7,
   "iberia-celtiberi": 8, "iberia-ilergetes": 9,
   "thrace-dacian-highland-communities": 0, "thrace-getae": 1, "thrace-eastern-carpathian-communities": 2,
+  // Mainland Greece is unusually dense: neighbouring leagues and city-states
+  // need deliberately separated swatches rather than incidental hash picks.
+  athens: 0, "achaean-league": 1, "aetolian-league": 2, "thessalian-league": 3,
+  epirus: 4, acarnania: 5, "boeotian-league": 6, "phocian-league": 7,
+  "corinthian-league": 8, "arcadian-league": 9, thebes: 10, argos: 11,
+  elis: 12, messenia: 13, sparta: 14, megalopolis: 15,
+  // Reuse the mainland's separated swatches only for non-adjacent island and
+  // coastal states, where their parent palette is still legible at a glance.
+  "euboean-cities": 12, "ionian-islands": 6, "cycladic-islanders": 13,
+  "dodecanese-islanders": 8, "aeolis-communities": 4, "ionia-communities": 1,
+  "cretan-cities-west": 12, "cretan-cities-east": 11,
 };
 
 function historicalFamilyForPolity(polityId: string): HistoricalPolityFamily {
