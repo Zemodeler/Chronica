@@ -119,12 +119,35 @@ export const ContinuityConfigSchema = z
   .object({
     startingSeatCount: z.number().int().positive().max(32),
     extraPrincipalsPerPlayer: z.number().int().min(0).max(3),
+    /**
+     * The total named characters a running game may ever hold (character-sim
+     * phase 5) -- the bound that stops runtime character creation (births,
+     * world-director introductions) from becoming an unbounded population
+     * simulator. Additive/defaulted so every pre-phase-5 scenario stays valid.
+     */
+    maxTotalCharacters: z.number().int().positive().max(500).default(64),
   })
   .strict();
 export type ContinuityConfig = z.infer<typeof ContinuityConfigSchema>;
 
 /** The hard cap that stops continuity becoming a disguised whole-world simulation. */
 export const MAX_PRINCIPALS = 32;
+
+/**
+ * Engine-level default population bound, used by any workflow that creates a
+ * character (`create_world_character`, `create_child_character`) since a
+ * workflow's pure `apply(world, params, context)` does not receive the
+ * scenario's `ContinuityConfig` today -- only `WorldState`. A caller with the
+ * scenario in hand (e.g. the resolution pipeline) may enforce the scenario's
+ * own `maxTotalCharacters` instead; this is the floor every workflow applies
+ * regardless.
+ */
+export const DEFAULT_MAX_TOTAL_CHARACTERS = 64;
+
+/** True if the world may still gain one more named character under the given bound. */
+export function canCreateCharacter(characterCount: number, maxTotalCharacters: number = DEFAULT_MAX_TOTAL_CHARACTERS): boolean {
+  return characterCount < maxTotalCharacters;
+}
 
 /**
  * A relationship an heir inherits, and the reason it carries.

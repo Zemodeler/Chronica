@@ -45,6 +45,19 @@ import {
   resolveIntentConflicts,
   resolveDueProcedures,
   netSupportWeight,
+  dueLifeReviews,
+  rollLifeEvent,
+  classifyLifeStage,
+  nextReviewStep,
+  settleEstate,
+  deriveLegacyCauses,
+  findPlayerSuccessors,
+  currentAgeYears,
+  canSponsorProcedure,
+  resolveEligibility,
+  type ScenarioClock,
+  type ScenarioLifeRules,
+  type ScenarioGovernmentRules,
 } from "@chronica/shared";
 import { collectCharacterAgencyCandidates, collectPlayerCandidates, collectWorldCandidates, previewPlayerWorkflows, runWorkflowManager } from "./workflow-manager";
 
@@ -411,6 +424,8 @@ function materializePlayerCharacter(
     alive: true,
     diedAtStep: null,
     disqualifyingStatuses: [],
+    birthStep: null,
+    nextLifeReviewAtStep: null,
   };
 
   return {
@@ -776,6 +791,10 @@ export interface ResolveTurnInput {
   readonly batch: OrderBatch;
   readonly actorCharacterId: string;
   readonly playerId: string;
+  /** Scenario clock/life/government rules (character-sim phase 5), when available. Absent -- no automatic life events. */
+  readonly scenarioClock?: ScenarioClock | undefined;
+  readonly scenarioLife?: ScenarioLifeRules | undefined;
+  readonly scenarioGovernment?: ScenarioGovernmentRules | undefined;
 }
 
 export async function resolveTurn(
@@ -1316,6 +1335,151 @@ export async function resolveTurn(
     }
     emit(onProgress, "world_direct", true);
 
+    // ── Step 9.4: Life review — aging, health, incapacity, death (character-sim phase 5) ──
+    //
+    // Deterministic and rules-backed, never AI-proposed: a due character's
+    // life stage and the scenario's own authored rates (default 0 — no rates
+    // authored means no automatic life events) decide the roll
+    // (`rollLifeEvent`), and the roll commits through the exact same
+    // `kill_character`/`incapacitate_character`/`recover_from_incapacity`
+    // workflows any other death/incapacity goes through — office vacancy is
+    // therefore always recorded truthfully, in one place. A death then
+    // settles its estate and, if a natural claimant exists, opens (not
+    // grants) their bid for any vacated office through a real Phase 4
+    // procedure — `heirCharacterId`/family seniority only ever nominates a
+    // sponsor, never a holder.
+    emit(onProgress, "life_review");
+    let lifeReviewedWorld: WorldState = resolutionWorld;
+    const lifeEventChronicle: ChronicleEntryInput[] = [];
+    const lifeStages = input.scenarioLife?.lifeStages ?? [];
+    const stepsPerYear = input.scenarioClock?.stepsPerYear ?? 4;
+    const reviewIntervalSteps = input.scenarioLife?.reviewIntervalSteps ?? 4;
+    let playerSuccessorCandidates: readonly string[] = [];
+    let playerCharacterDied = false;
+
+    if (lifeStages.length > 0) {
+      for (const character of dueLifeReviews(lifeReviewedWorld.characters, atStep)) {
+        const ageYears = currentAgeYears(character, stepsPerYear, atStep);
+        const stage = classifyLifeStage(ageYears, lifeStages);
+        const roll = rollLifeEvent(character, stage, atStep);
+
+        if (roll !== null) {
+          const actionId = roll.kind === "death" ? "kill_character" : roll.kind === "incapacitation" ? "incapacitate_character" : "recover_from_incapacity";
+          const parameters = roll.kind === "recovery" ? { characterId: character.id } : { characterId: character.id, cause: roll.cause };
+          const rolled = executeWorkflows([{ actionId, actorId: "system", parameters }], lifeReviewedWorld, atStep);
+          lifeReviewedWorld = rolled.world;
+          console.log(`${tag()} [life_review] ${character.name} (${character.id}): ${roll.kind} — ${roll.cause}`);
+          let estateOutcome: string | null = null;
+          let vacatedOfficeIds: string[] = [];
+
+          if (roll.kind === "death") {
+            const settlement = settleEstate(lifeReviewedWorld, character.id, stepsPerYear, atStep);
+            lifeReviewedWorld = { ...lifeReviewedWorld, material: settlement.material };
+            const successorId = settlement.beneficiaryIds[0];
+            if (settlement.transfers.length > 0) {
+              estateOutcome = successorId !== undefined
+                ? `${lifeReviewedWorld.characters.find((c) => c.id === successorId)?.name ?? successorId} inherits the estate.`
+                : "The estate is escheated for lack of a valid heir.";
+            }
+            vacatedOfficeIds = lifeReviewedWorld.material.officeSeats
+              .filter((seat) => seat.status === "vacant" && seat.vacancyCause === "death" && seat.termExpiresAtStep === atStep)
+              .map((seat) => seat.officeId);
+
+            if (successorId !== undefined) {
+              const legacy = deriveLegacyCauses(lifeReviewedWorld, character.id, successorId, atStep);
+              if (legacy.length > 0) {
+                lifeReviewedWorld = {
+                  ...lifeReviewedWorld,
+                  legacyCauses: [...lifeReviewedWorld.legacyCauses, ...legacy],
+                  characters: lifeReviewedWorld.characters.map((c) => {
+                    const entry = legacy.find((l) => l.holderCharacterId === c.id);
+                    if (!entry) return c;
+                    const existing = c.relations.find((r) => r.subjectCharacterId === successorId);
+                    return existing
+                      ? { ...c, relations: c.relations.map((r) => (r.subjectCharacterId === successorId ? { ...r, causes: [...r.causes, entry.cause] } : r)) }
+                      : { ...c, relations: [...c.relations, { subjectCharacterId: successorId, causes: [entry.cause] }] };
+                  }),
+                };
+              }
+
+              // Open (never grant) the natural claimant's bid for any office this death vacated.
+              const vacatedSeats = lifeReviewedWorld.material.officeSeats.filter(
+                (seat) => seat.status === "vacant" && seat.vacancyCause === "death" && seat.termExpiresAtStep === atStep,
+              );
+              for (const seat of vacatedSeats) {
+                const office = input.scenarioGovernment?.offices.find((o) => o.id === seat.officeId);
+                const rule = office ? input.scenarioGovernment?.successionRules.find((r) => r.id === office.successionRuleId) : undefined;
+                if (office === undefined || rule === undefined) continue;
+                const eligibility = resolveEligibility(lifeReviewedWorld, successorId, office.eligibilityRequirementIds);
+                const sponsorship = canSponsorProcedure(lifeReviewedWorld, successorId, "appointment", rule.institutionId);
+                if (!eligibility.eligible || !sponsorship.eligible) continue;
+                const resolutionMechanism = rule.kind === "elective" ? "vote" : rule.kind === "appointment" ? "appointment_authority" : "seniority";
+                if (resolutionMechanism === "vote" && rule.institutionId === null) continue;
+                const sponsorProcedureResult = executeWorkflows(
+                  [{
+                    actionId: "sponsor_procedure",
+                    actorId: successorId,
+                    parameters: {
+                      procedureId: `succession:${seat.officeId}:${successorId}:${atStep}`,
+                      type: "appointment",
+                      institutionId: rule.institutionId,
+                      sponsorCharacterId: successorId,
+                      subjectKind: "office_seat",
+                      subjectId: seat.officeId,
+                      linkedWorkflowId: "appoint_to_office",
+                      linkedWorkflowParams: { characterId: successorId, officeId: seat.officeId },
+                      eligibilityRequirementIds: office.eligibilityRequirementIds,
+                      eligibleParticipantIds: [successorId],
+                      resolutionMechanism,
+                      visibility: "polity",
+                    },
+                  }],
+                  lifeReviewedWorld,
+                  atStep,
+                );
+                lifeReviewedWorld = sponsorProcedureResult.world;
+              }
+            }
+
+            if (character.id === actorCharacterId) {
+              playerCharacterDied = true;
+              playerSuccessorCandidates = findPlayerSuccessors(lifeReviewedWorld, character.id, stepsPerYear, atStep);
+            }
+          }
+
+          lifeEventChronicle.push({
+            sequence: 0,
+            scope: "life_event",
+            scopeRef: character.id,
+            audience: "all_players",
+            body: `${character.name} ${roll.kind === "death" ? "dies" : roll.kind === "incapacitation" ? "is incapacitated" : "recovers"}. ${roll.cause}`,
+            atStep,
+            materialConsequence: roll.kind === "death",
+            simulatedDurationDays: 1,
+            lifeEvent: {
+              characterId: character.id,
+              characterName: character.name,
+              kind: roll.kind,
+              cause: roll.cause,
+              estateOutcome,
+              vacatedOfficeIds,
+            },
+          });
+        }
+
+        lifeReviewedWorld = {
+          ...lifeReviewedWorld,
+          characters: lifeReviewedWorld.characters.map((c) =>
+            c.id === character.id ? { ...c, nextLifeReviewAtStep: nextReviewStep(atStep, reviewIntervalSteps) } : c,
+          ),
+        };
+      }
+    }
+    if (playerCharacterDied) {
+      console.log(`${tag()} [life_review] player character died; ${playerSuccessorCandidates.length} successor candidate(s) found`);
+    }
+    emit(onProgress, "life_review", true);
+
     // ── Step 9.5: Character agency — goals/plots, commitments, intents ─────
     // The Character Director only advises; this is the one place an approved
     // suggestion or a scored, conflict-resolved intent becomes either a real
@@ -1325,7 +1489,7 @@ export async function resolveTurn(
     // subsequent step executes against, replacing `resolutionWorld`.
     emit(onProgress, "character_agency");
     const characterAgencyInvocations: Array<{ invocation: ProposedInvocation; sourceRef: string; sourceRationale: string }> = [];
-    let agencyWorld: WorldState = resolutionWorld;
+    let agencyWorld: WorldState = lifeReviewedWorld;
 
     for (const suggestion of characterSuggestions) {
       if (!approvedCharacterIds.has(suggestion.characterId)) continue;
@@ -1698,7 +1862,7 @@ export async function resolveTurn(
       displayPatchByInvocation,
       playerId,
     );
-    chronicleInputs = scheduleChronicleEntries([...chronicleInputs, ...commitmentChronicle, ...politicalChronicle]);
+    chronicleInputs = scheduleChronicleEntries([...chronicleInputs, ...commitmentChronicle, ...politicalChronicle, ...lifeEventChronicle]);
 
     if (displayPatch && chronicleInputs.length > 0) {
       const lastIdx = chronicleInputs.length - 1;

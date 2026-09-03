@@ -155,6 +155,82 @@ export const HoldingSchema = z.object({
 });
 export type Holding = z.infer<typeof HoldingSchema>;
 
+// Estates and inheritance (character-sim phase 5).
+//
+// An estate never duplicates a balance or a holding; it only names the
+// existing accounts/holdings/obligations a character owned or controlled, and
+// the rule that decides who inherits them. Offices are never inherited here --
+// an office becomes vacant on death (characters/character.ts `OfficeSeat`) and
+// is refilled only through a Phase 4 institutional procedure.
+
+export const InheritanceRuleKindSchema = z.enum([
+  "primogeniture",
+  "equal_division",
+  "appointment",
+  "elective",
+  "seniority",
+  "custom_scenario_rule",
+]);
+export type InheritanceRuleKind = z.infer<typeof InheritanceRuleKindSchema>;
+
+export const InheritanceRuleSchema = z
+  .object({
+    id: EntityIdSchema,
+    kind: InheritanceRuleKindSchema,
+    /** Required when `kind` is "elective": the institution whose procedure decides. */
+    institutionId: EntityIdSchema.nullable(),
+    /** Whether the deceased's debts move to the beneficiary or are forgiven. */
+    debtsTransfer: z.boolean(),
+  })
+  .strict()
+  .superRefine((rule, context) => {
+    if (rule.kind === "elective" && rule.institutionId === null) {
+      context.addIssue({
+        code: "custom",
+        path: ["institutionId"],
+        message: "An elective inheritance rule must name the institution that decides.",
+      });
+    }
+  });
+export type InheritanceRule = z.infer<typeof InheritanceRuleSchema>;
+
+export const EstateStatusSchema = z.enum(["intact", "settling", "settled", "disputed", "escheated"]);
+
+export const EstateSchema = z
+  .object({
+    id: EntityIdSchema,
+    ownerCharacterId: EntityIdSchema,
+    accountIds: z.array(EntityIdSchema).default([]),
+    holdingIds: z.array(EntityIdSchema).default([]),
+    obligationIds: z.array(EntityIdSchema).default([]),
+    inheritanceRuleId: EntityIdSchema,
+    /** Priority-ordered named beneficiaries, used by the "appointment" rule kind. */
+    testamentaryBeneficiaryIds: z.array(EntityIdSchema).default([]),
+    status: EstateStatusSchema,
+    settledAtStep: ElapsedStepSchema.nullable().default(null),
+  })
+  .strict();
+export type Estate = z.infer<typeof EstateSchema>;
+
+export const InheritanceAssetKindSchema = z.enum(["account_balance", "holding", "obligation"]);
+
+/** The immutable ledger of what happened to one asset -- transferred, or denied. */
+export const InheritanceTransferSchema = z
+  .object({
+    id: EntityIdSchema,
+    estateId: EntityIdSchema,
+    deceasedCharacterId: EntityIdSchema,
+    /** Null means escheated/confiscated -- no valid beneficiary existed. */
+    beneficiaryCharacterId: EntityIdSchema.nullable(),
+    assetKind: InheritanceAssetKindSchema,
+    assetId: EntityIdSchema,
+    reason: z.string().trim().min(1).max(240),
+    resolvedAtStep: ElapsedStepSchema,
+    sourceEventId: EntityIdSchema.nullable().default(null),
+  })
+  .strict();
+export type InheritanceTransfer = z.infer<typeof InheritanceTransferSchema>;
+
 export const PoliticalCauseSchema = z.object({
   id: EntityIdSchema,
   label: z.string().trim().min(1).max(160),
@@ -377,6 +453,8 @@ export const OfficeSeatVacancyCauseSchema = z.enum([
   "resignation",
   "term_expired",
   "never_filled",
+  "incapacity",
+  "capture",
 ]);
 
 /**
@@ -653,6 +731,9 @@ export const MaterialWorldStateSchema = z
     supportPositions: z.array(SupportPositionSchema).default([]),
     polityLegitimacy: z.array(PolityLegitimacySchema).default([]),
     institutionLegitimacy: z.array(InstitutionLegitimacySchema).default([]),
+    inheritanceRules: z.array(InheritanceRuleSchema).default([]),
+    estates: z.array(EstateSchema).default([]),
+    inheritanceTransfers: z.array(InheritanceTransferSchema).default([]),
   })
   .superRefine((state, context) => {
     const ids = <T extends { id: string }>(values: T[]) => new Set(values.map((value) => value.id));
@@ -664,6 +745,9 @@ export const MaterialWorldStateSchema = z
     const groupIds = ids(state.politicalGroups);
     const eligibilityRequirementIds = ids(state.eligibilityRequirements);
     const procedureIds = ids(state.politicalProcedures);
+    const holdingIds = ids(state.holdings);
+    const inheritanceRuleIds = ids(state.inheritanceRules);
+    const estateIds = ids(state.estates);
     const requireReference = (exists: boolean, path: (string | number)[], message: string) => {
       if (!exists) context.addIssue({ code: "custom", path, message });
     };
@@ -764,6 +848,26 @@ export const MaterialWorldStateSchema = z
     });
     state.institutionLegitimacy.forEach((entry, index) => {
       requireReference(institutionIds.has(entry.institutionId), ["institutionLegitimacy", index, "institutionId"], "Institution legitimacy must reference an existing institution.");
+    });
+    state.inheritanceRules.forEach((rule, index) => {
+      if (rule.institutionId !== null) {
+        requireReference(institutionIds.has(rule.institutionId), ["inheritanceRules", index, "institutionId"], "An elective inheritance rule must reference an existing institution.");
+      }
+    });
+    state.estates.forEach((estate, index) => {
+      requireReference(inheritanceRuleIds.has(estate.inheritanceRuleId), ["estates", index, "inheritanceRuleId"], "An estate must reference an existing inheritance rule.");
+      estate.accountIds.forEach((accountId, accountIndex) => {
+        requireReference(accountIds.has(accountId), ["estates", index, "accountIds", accountIndex], "An estate must reference existing accounts.");
+      });
+      estate.holdingIds.forEach((holdingId, holdingIndex) => {
+        requireReference(holdingIds.has(holdingId), ["estates", index, "holdingIds", holdingIndex], "An estate must reference existing holdings.");
+      });
+      estate.obligationIds.forEach((obligationId, obligationIndex) => {
+        requireReference(obligationIds.has(obligationId), ["estates", index, "obligationIds", obligationIndex], "An estate must reference existing obligations.");
+      });
+    });
+    state.inheritanceTransfers.forEach((transfer, index) => {
+      requireReference(estateIds.has(transfer.estateId), ["inheritanceTransfers", index, "estateId"], "An inheritance transfer must reference an existing estate.");
     });
   });
 export type MaterialWorldState = z.infer<typeof MaterialWorldStateSchema>;

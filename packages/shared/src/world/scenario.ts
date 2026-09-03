@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ScenarioGovernmentRulesSchema } from "../characters/character";
+import { ScenarioLifeRulesSchema } from "../characters/family";
 import { ContinuityConfigSchema } from "../continuity/continuity";
 import { ScenarioDialogueRulesSchema } from "../dialogue/dialogue";
 import { ScenarioWarfareRulesSchema } from "../warfare/battle";
@@ -31,6 +32,8 @@ export const ScenarioDefinitionSchema = z
     dialogue: ScenarioDialogueRulesSchema,
     continuity: ContinuityConfigSchema,
     knowledge: z.array(ScenarioKnowledgeFactSchema).max(200).default([]),
+    /** Life stages, mortality/incapacity rates, and inheritance rules (character-sim phase 5). */
+    life: ScenarioLifeRulesSchema.default({ lifeStages: [], inheritanceRules: [], reviewIntervalSteps: 4 }),
   })
   .strict();
 export type ScenarioDefinition = z.infer<typeof ScenarioDefinitionSchema>;

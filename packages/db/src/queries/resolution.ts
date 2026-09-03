@@ -53,6 +53,22 @@ export interface ChronicleEntryInput {
     readonly netSupportWeight: number;
     readonly netOppositionWeight: number;
   };
+  /**
+   * Player-visible summary of one life event resolved this turn
+   * (character-sim phase 5): death/incapacitation/recovery, and (for a death)
+   * the estate outcome and any office vacancy it opened. Deliberately carries
+   * nothing private -- no hidden heirs, no secret parentage, no will
+   * contents. See `packages/shared/src/characters/life-inspector.ts` for the
+   * admin-only view that does carry those.
+   */
+  readonly lifeEvent?: {
+    readonly characterId: string;
+    readonly characterName: string;
+    readonly kind: "death" | "incapacitation" | "recovery";
+    readonly cause: string;
+    readonly estateOutcome: string | null;
+    readonly vacatedOfficeIds: readonly string[];
+  };
 }
 
 export interface CommitResolutionInput {
@@ -139,6 +155,7 @@ export async function commitResolution(
               ? { causalFactIds: [...entry.causalFactIds] }
               : {}),
             ...(entry.politicalOutcome !== undefined ? { politicalOutcome: entry.politicalOutcome } : {}),
+            ...(entry.lifeEvent !== undefined ? { lifeEvent: entry.lifeEvent } : {}),
           },
         })),
       );

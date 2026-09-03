@@ -1,6 +1,6 @@
 ﻿import { randomUUID } from "node:crypto";
 import { and, count, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
-import type { OrderBatch, ScenarioClock, WorldState } from "@chronica/shared";
+import type { OrderBatch, ScenarioClock, ScenarioGovernmentRules, ScenarioLifeRules, WorldState } from "@chronica/shared";
 import { ScenarioDefinitionSchema, WorldStateSchema } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
 import {
@@ -36,6 +36,10 @@ export interface WorldViewSource {
   readonly world: WorldState;
   readonly mapAssetId: string | null;
   readonly scenarioClock?: ScenarioClock;
+  /** Life stages, mortality/incapacity rates, and inheritance rules (character-sim phase 5). */
+  readonly scenarioLife?: ScenarioLifeRules;
+  /** Offices and succession rules, so a vacated seat can be matched to its lawful refill route. */
+  readonly scenarioGovernment?: ScenarioGovernmentRules;
 }
 
 /** The scenario row a slug resolves to, so createGame can pin a game to it. */
@@ -333,9 +337,15 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
   const hasPendingNews = newsTurnRows[0] !== undefined;
   const submittedPlayers = submittedRows.length;
   let scenarioClock: ScenarioClock | undefined;
+  let scenarioLife: ScenarioLifeRules | undefined;
+  let scenarioGovernment: ScenarioGovernmentRules | undefined;
   if (svRow !== undefined) {
     const parsed = ScenarioDefinitionSchema.safeParse(svRow.definition);
-    if (parsed.success) scenarioClock = parsed.data.clock;
+    if (parsed.success) {
+      scenarioClock = parsed.data.clock;
+      scenarioLife = parsed.data.life;
+      scenarioGovernment = parsed.data.government;
+    }
   }
 
   const fallbackWorld = svRow === undefined ? undefined : WorldStateSchema.safeParse(svRow.initialWorld);
@@ -355,6 +365,8 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
     world: renderedWorld,
     mapAssetId: svRow?.mapAssetId ?? null,
     ...(scenarioClock !== undefined ? { scenarioClock } : {}),
+    ...(scenarioLife !== undefined ? { scenarioLife } : {}),
+    ...(scenarioGovernment !== undefined ? { scenarioGovernment } : {}),
   };
 }
 

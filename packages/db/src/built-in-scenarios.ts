@@ -30,8 +30,23 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
     decreeMinimumPrestigeBps: 2_000,
   },
   dialogue: { roleSlots: [], namePools: { roman: ["Marcus", "Gaius"], carthaginian: ["Hanno", "Hamilcar"] } },
-  continuity: { startingSeatCount: 1, extraPrincipalsPerPlayer: 1 },
+  continuity: { startingSeatCount: 1, extraPrincipalsPerPlayer: 1, maxTotalCharacters: 64 },
   knowledge: [{ id: "sicily-frontier", summary: "Rome and Carthage contest Sicily at the opening of the First Punic War.", subjectIds: ["rome", "carthage"], provinceIds: ["drepanum", "agrigentum"] }],
+  // Life vertical slice (character-sim phase 5): modest, clearly-labeled
+  // mortality/incapacity rates -- authored only for this demo scenario, so
+  // punic-wars-scenario.ts's own behaviour is unchanged unless a follow-up
+  // authors rates there too. One inheritance rule for Marcus's estate.
+  life: {
+    lifeStages: [
+      { id: "youth", label: "youth", minAgeYears: 0, maxAgeYears: 17, mortalityRatePerYearBps: 20, incapacityRatePerYearBps: 0, recoveryRatePerYearBps: 0 },
+      { id: "adult", label: "adulthood", minAgeYears: 18, maxAgeYears: 54, mortalityRatePerYearBps: 40, incapacityRatePerYearBps: 20, recoveryRatePerYearBps: 4_000 },
+      { id: "elder", label: "old age", minAgeYears: 55, maxAgeYears: null, mortalityRatePerYearBps: 250, incapacityRatePerYearBps: 150, recoveryRatePerYearBps: 1_500 },
+    ],
+    inheritanceRules: [
+      { id: "marcus-estate-rule", kind: "primogeniture", institutionId: null, debtsTransfer: true },
+    ],
+    reviewIntervalSteps: 4,
+  },
 });
 
 const initialWorld: WorldState = WorldStateSchema.parse({
@@ -60,7 +75,11 @@ const initialWorld: WorldState = WorldStateSchema.parse({
   },
   actions: [],
   characters: [
-    { id: "marcus-atilius", name: "Marcus Atilius", cultureId: "roman", faithId: null, dynastyId: null, locationProvinceId: "ita-72843720b81376294924159-sicily-northeast", polityId: "rome", ageYearsAtStart: 38, officeId: "roman-command", personalAccountId: "marcus-purse", skills: { martial: 70, intrigue: 35, learning: 45, piety: 40, stewardship: 55, diplomacy: 50, body: 70, subSkills: {} }, traits: [], healthBps: 9_000, prestigeBps: 6_000, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null, disqualifyingStatuses: [] },
+    { id: "marcus-atilius", name: "Marcus Atilius", cultureId: "roman", faithId: null, dynastyId: "atilii", locationProvinceId: "ita-72843720b81376294924159-sicily-northeast", polityId: "rome", ageYearsAtStart: 38, officeId: "roman-command", personalAccountId: "marcus-purse", skills: { martial: 70, intrigue: 35, learning: 45, piety: 40, stewardship: 55, diplomacy: 50, body: 70, subSkills: {} }, traits: [], healthBps: 9_000, prestigeBps: 6_000, relations: [], ambitions: [], heirCharacterId: "marcus-atilius-minor", alive: true, diedAtStep: null, disqualifyingStatuses: [] },
+    // Life vertical slice (character-sim phase 5): Marcus's son and named
+    // heir -- a distinct character with no copied relations/mind, an
+    // ordinary continuity tier, and his own estate claim through primogeniture.
+    { id: "marcus-atilius-minor", name: "Marcus Atilius the Younger", cultureId: "roman", faithId: null, dynastyId: "atilii", locationProvinceId: "ita-72843720b863019116732", polityId: "rome", ageYearsAtStart: 16, officeId: null, personalAccountId: "marcus-minor-purse", skills: { martial: 30, intrigue: 20, learning: 35, piety: 30, stewardship: 25, diplomacy: 25, body: 40, subSkills: {} }, traits: [], healthBps: 10_000, prestigeBps: 500, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null, disqualifyingStatuses: [] },
     { id: "hanno", name: "Hanno", cultureId: "carthaginian", faithId: null, dynastyId: null, locationProvinceId: "ita-72843720b81376294924159-sicily-west", polityId: "carthage", ageYearsAtStart: 45, officeId: null, personalAccountId: "hanno-purse", skills: { martial: 65, intrigue: 45, learning: 45, piety: 40, stewardship: 50, diplomacy: 55, body: 60, subSkills: {} }, traits: [], healthBps: 8_500, prestigeBps: 6_500, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null, disqualifyingStatuses: [] },
     // Political vertical slice (character-sim phase 4): a rival senator who
     // sponsors the Senate's censure procedure against Marcus, and a
@@ -68,7 +87,15 @@ const initialWorld: WorldState = WorldStateSchema.parse({
     { id: "quintus-fabius", name: "Quintus Fabius", cultureId: "roman", faithId: null, dynastyId: null, locationProvinceId: "ita-72843720b863019116732", polityId: "rome", ageYearsAtStart: 52, officeId: null, personalAccountId: "quintus-purse", skills: { martial: 40, intrigue: 55, learning: 60, piety: 45, stewardship: 60, diplomacy: 65, body: 45, subSkills: {} }, traits: [], healthBps: 8_000, prestigeBps: 5_500, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null, disqualifyingStatuses: [] },
     { id: "hamilcar", name: "Hamilcar", cultureId: "carthaginian", faithId: null, dynastyId: null, locationProvinceId: "ita-72843720b81376294924159-sicily-west", polityId: "carthage", ageYearsAtStart: 30, officeId: null, personalAccountId: "hamilcar-purse", skills: { martial: 60, intrigue: 40, learning: 40, piety: 40, stewardship: 40, diplomacy: 45, body: 65, subSkills: {} }, traits: [], healthBps: 9_500, prestigeBps: 3_500, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null, disqualifyingStatuses: [] },
   ],
-  continuity: [], encounters: [], storylines: [],
+  continuity: [
+    { characterId: "marcus-atilius-minor", tier: "ordinary", notability: 0, encounterIds: [], lastingChanges: [], plan: null },
+  ],
+  encounters: [], storylines: [],
+  // Life vertical slice (character-sim phase 5): one canonical parent/child
+  // tie, matching the authored heirCharacterId above.
+  familyLinks: [
+    { id: "marcus-atilius:parent:marcus-atilius-minor", characterId: "marcus-atilius", relatedCharacterId: "marcus-atilius-minor", kind: "parent", startedAtStep: 0, endedAtStep: null, visibility: "polity", provenanceEventId: null },
+  ],
   conflicts: { battles: [{ battleId: "sicilian-frontier", participantForceIds: ["legio-i", "carthaginian-army"] }], sieges: [], wars: [{ polityAId: "carthage", polityBId: "rome" }] },
   material: {
     currency: { id: "denarius", name: "Denarii", unitName: "denarius", unitNamePlural: "denarii", symbol: "D" },
@@ -77,12 +104,14 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { id: "hanno-purse", owner: { kind: "character", id: "hanno" }, currencyId: "denarius", balance: 900, status: "active", visibility: "private" },
       { id: "quintus-purse", owner: { kind: "character", id: "quintus-fabius" }, currencyId: "denarius", balance: 800, status: "active", visibility: "private" },
       { id: "hamilcar-purse", owner: { kind: "character", id: "hamilcar" }, currencyId: "denarius", balance: 400, status: "active", visibility: "private" },
+      { id: "marcus-minor-purse", owner: { kind: "character", id: "marcus-atilius-minor" }, currencyId: "denarius", balance: 50, status: "active", visibility: "private" },
     ],
     accountAccess: [
       { id: "marcus-purse-access", characterId: "marcus-atilius", accountId: "marcus-purse", permissions: ["view", "spend_without_vote"], sourceKind: "ownership", sourceId: "marcus-atilius" },
       { id: "hanno-purse-access", characterId: "hanno", accountId: "hanno-purse", permissions: ["view", "spend_without_vote"], sourceKind: "ownership", sourceId: "hanno" },
       { id: "quintus-purse-access", characterId: "quintus-fabius", accountId: "quintus-purse", permissions: ["view", "spend_without_vote"], sourceKind: "ownership", sourceId: "quintus-fabius" },
       { id: "hamilcar-purse-access", characterId: "hamilcar", accountId: "hamilcar-purse", permissions: ["view", "spend_without_vote"], sourceKind: "ownership", sourceId: "hamilcar" },
+      { id: "marcus-minor-purse-access", characterId: "marcus-atilius-minor", accountId: "marcus-minor-purse", permissions: ["view", "spend_without_vote"], sourceKind: "ownership", sourceId: "marcus-atilius-minor" },
     ],
     incomeSources: [],
     obligations: [{ id: "legio-pay", kind: "army_pay", label: "Pay for Legio I", payerAccountId: "marcus-purse", amount: 100, cadenceSteps: 1, nextDueStep: 1, priority: 1, arrears: 0, missedPeriods: 0, active: true }, { id: "carthaginian-pay", kind: "army_pay", label: "Pay for the Carthaginian army", payerAccountId: "hanno-purse", amount: 100, cadenceSteps: 1, nextDueStep: 1, priority: 1, arrears: 0, missedPeriods: 0, active: true }],
@@ -180,6 +209,15 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { polityId: "carthage", legitimacyBps: 7_000, institutionalConfidenceBps: 6_500, causes: [] },
     ],
     institutionLegitimacy: [{ institutionId: "roman-senate", legitimacyBps: 7_000, causes: [] }],
+    // Life vertical slice (character-sim phase 5): Marcus's estate, settled
+    // by primogeniture on death -- his son inherits the purse, never the
+    // office (roman-command is refilled only through the Senate's own
+    // procedure, per the political vertical slice above).
+    inheritanceRules: [{ id: "marcus-estate-rule", kind: "primogeniture", institutionId: null, debtsTransfer: true }],
+    estates: [
+      { id: "marcus-estate", ownerCharacterId: "marcus-atilius", accountIds: ["marcus-purse"], holdingIds: [], obligationIds: ["legio-pay"], inheritanceRuleId: "marcus-estate-rule", testamentaryBeneficiaryIds: [], status: "intact", settledAtStep: null },
+    ],
+    inheritanceTransfers: [],
     forces: [{ id: "legio-i", name: "Legio I", polityId: "rome", commanderCharacterId: "marcus-atilius", controllerCharacterId: "marcus-atilius", locationId: "ita-72843720b81376294924159-sicily-northeast", authorizedStrength: 4_000, personnel: [{ categoryId: "infantry", label: "Legionaries", fit: 3_200, unavailable: [] }], moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 1_000, provisionStatus: "provisioned", provisionedThroughStep: 4, payObligationId: "legio-pay", payArrearsPeriods: 0, history: [] }, { id: "carthaginian-army", name: "Carthaginian Army", polityId: "carthage", commanderCharacterId: "hanno", controllerCharacterId: "hanno", locationId: "ita-72843720b81376294924159-sicily-west", authorizedStrength: 3_000, personnel: [{ categoryId: "infantry", label: "Infantry", fit: 2_500, unavailable: [] }], moraleBps: 7_500, cohesionBps: 7_500, fatigueBps: 1_500, provisionStatus: "provisioned", provisionedThroughStep: 4, payObligationId: "carthaginian-pay", payArrearsPeriods: 0, history: [] }],
   },
 });

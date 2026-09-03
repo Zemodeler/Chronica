@@ -2,6 +2,7 @@ import { z } from "zod";
 import { EntityIdSchema } from "../../material-state";
 import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
 import { requireProcedureAuthorization } from "./political-procedures";
+import { vacateOfficeSeatsFor } from "../../characters/succession";
 
 export const characterWorkflows: AnyWorkflowDefinition[] = [
   defineWorkflow({
@@ -23,9 +24,97 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
               ? { ...c, alive: false, diedAtStep: context.atStep }
               : c,
           ),
+          material: vacateOfficeSeatsFor(world.material, params.characterId, "death", context.atStep),
         },
         result: {
           summary: `${character.name} dies. ${params.cause}`,
+          applied: true,
+        },
+      };
+    },
+  }),
+
+  defineWorkflow({
+    id: "incapacitate_character",
+    description: "Mark a living character incapacitated -- alive but unable to hold office or act freely.",
+    category: "character",
+    parametersSchema: z.object({
+      characterId: EntityIdSchema,
+      cause: z.string().min(1).max(240),
+    }).strict(),
+    apply(world, params, context) {
+      const character = world.characters.find((c) => c.id === params.characterId);
+      if (!character || !character.alive) return null;
+      if (character.disqualifyingStatuses.includes("incapacitated")) return null;
+      return {
+        world: {
+          ...world,
+          characters: world.characters.map((c) =>
+            c.id === params.characterId
+              ? { ...c, disqualifyingStatuses: [...c.disqualifyingStatuses, "incapacitated"] }
+              : c,
+          ),
+          material: vacateOfficeSeatsFor(world.material, params.characterId, "incapacity", context.atStep),
+        },
+        result: {
+          summary: `${character.name} is incapacitated. ${params.cause}`,
+          applied: true,
+        },
+      };
+    },
+  }),
+
+  defineWorkflow({
+    id: "recover_from_incapacity",
+    description: "Clear a character's incapacitated status. Does not restore any office already refilled.",
+    category: "character",
+    parametersSchema: z.object({
+      characterId: EntityIdSchema,
+    }).strict(),
+    apply(world, params) {
+      const character = world.characters.find((c) => c.id === params.characterId);
+      if (!character || !character.disqualifyingStatuses.includes("incapacitated")) return null;
+      return {
+        world: {
+          ...world,
+          characters: world.characters.map((c) =>
+            c.id === params.characterId
+              ? { ...c, disqualifyingStatuses: c.disqualifyingStatuses.filter((tag) => tag !== "incapacitated") }
+              : c,
+          ),
+        },
+        result: {
+          summary: `${character.name} recovers from incapacity.`,
+          applied: true,
+        },
+      };
+    },
+  }),
+
+  defineWorkflow({
+    id: "retire_character",
+    description: "Mark a living character retired from active office-holding, vacating any office they hold.",
+    category: "character",
+    parametersSchema: z.object({
+      characterId: EntityIdSchema,
+      reason: z.string().min(1).max(240),
+    }).strict(),
+    apply(world, params, context) {
+      const character = world.characters.find((c) => c.id === params.characterId);
+      if (!character || !character.alive) return null;
+      if (character.disqualifyingStatuses.includes("retired")) return null;
+      return {
+        world: {
+          ...world,
+          characters: world.characters.map((c) =>
+            c.id === params.characterId
+              ? { ...c, officeId: null, disqualifyingStatuses: [...c.disqualifyingStatuses, "retired"] }
+              : c,
+          ),
+          material: vacateOfficeSeatsFor(world.material, params.characterId, "resignation", context.atStep),
+        },
+        result: {
+          summary: `${character.name} retires. ${params.reason}`,
           applied: true,
         },
       };
@@ -89,8 +178,9 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
 
   defineWorkflow({
     id: "add_age",
-    description: "Increment a character's age by a given number of years.",
+    description: "LEGACY/system-only: directly correct a character's frozen start age. Normal play never advances age this way -- age derives from the scenario clock (characters/age.ts currentAgeYears).",
     category: "character",
+    invokerAuthority: ["system"],
     parametersSchema: z.object({
       characterId: EntityIdSchema,
       years: z.number().int().min(1).max(50),
@@ -295,7 +385,7 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
       capturedByPolityId: EntityIdSchema,
       reason: z.string().min(1).max(240),
     }).strict(),
-    apply(world, params) {
+    apply(world, params, context) {
       const character = world.characters.find((c) => c.id === params.characterId);
       if (!character || !character.alive) return null;
       return {
@@ -312,6 +402,7 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
                 }
               : c,
           ),
+          material: vacateOfficeSeatsFor(world.material, params.characterId, "capture", context.atStep),
         },
         result: {
           summary: `${character.name} is captured. ${params.reason}`,
