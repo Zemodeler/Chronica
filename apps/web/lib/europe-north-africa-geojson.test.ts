@@ -70,52 +70,51 @@ describe("Europe and North Africa demo map features", () => {
     expect(europeNorthAfricaGeoJson.features.filter((feature) => feature.id.startsWith("ita-local-") && feature.properties.kind === "province")).toHaveLength(18);
   });
 
-  it("condenses Athens' municipality-scale regions into metro-sized territories", () => {
-    const athensMetro = europeNorthAfricaGeoJson.features.filter((feature) => feature.properties.kind === "province" && [
-      "grc-local-53547021B2738722376900",
-      "grc-local-53547021B60272535960699",
-      "grc-local-53547021B73781600558558",
-      "grc-local-53547021B42397561694605",
-      "grc-local-53547021B46293618367520",
-    ].includes(feature.id));
-    expect(athensMetro.map((feature) => feature.properties.name).sort()).toEqual([
-      "Athens",
-      "Eastern Athens",
-      "Northern Athens",
-      "Piraeus and Western Athens",
-      "Southern Athens",
-    ]);
-    expect(athensMetro.filter((feature) => feature.geometry.type === "Polygon")).toHaveLength(3);
-    expect(europeNorthAfricaGeoJson.features.some((feature) => feature.id === "grc-local-53547021B24220934156468")).toBe(false);
-    expect(europeNorthAfricaGeoJson.features.some((feature) => feature.id === "grc-local-53547021B46856554305408")).toBe(true);
-    expect(europeNorthAfricaGeoJson.features.some((feature) => feature.id === "grc-local-53547021B9274256728427")).toBe(true);
+  it("condenses all of Attica into a single Athens territory", () => {
+    const athens = europeNorthAfricaGeoJson.features.find((feature) => feature.properties.kind === "province" && feature.id === "grc-local-53547021B2738722376900");
+    expect(athens?.properties.name).toBe("Athens");
+    // Former metro-sub-group survivors and standalone Attic municipalities (Marathon, Acharnes) are all absorbed now.
+    for (const absorbedId of [
+      "grc-local-53547021B60272535960699", "grc-local-53547021B73781600558558", "grc-local-53547021B42397561694605", "grc-local-53547021B46293618367520",
+      "grc-local-53547021B24220934156468", "grc-local-53547021B46856554305408", "grc-local-53547021B9274256728427",
+    ]) {
+      expect(europeNorthAfricaGeoJson.features.some((feature) => feature.id === absorbedId)).toBe(false);
+    }
   });
 
-  it("condenses the Acarnanian islands, keeping the rest of the southern/central mainland at municipality scale", () => {
+  it("condenses every other southern Greek city-state/league and Aegean/Ionian island group into one territory apiece", () => {
     const greekProvinceNames = europeNorthAfricaGeoJson.features
       .filter((feature) => feature.id.startsWith("grc-local-") && feature.properties.kind === "province")
       .map((feature) => feature.properties.name);
 
     expect(greekProvinceNames).toEqual(expect.arrayContaining([
-      "Acarnanian Islands",
-      "Pineios",
+      "Acarnania", "Achaea", "Aetolia", "Midelion", "Argos", "Boeotia", "Thebes", "Corinthia", "Elis", "Euboea",
+      "Messenia", "Phocis", "Sparta", "Megalopolis", "Eastern Crete", "Western Crete", "Cyclades", "Dodecanese", "Aeolis", "Ionia", "Ionian Islands",
     ]));
-    expect(europeNorthAfricaGeoJson.features.some((feature) => feature.id === "grc-local-53547021B5259778029298")).toBe(false);
+    // The old "Acarnanian Islands" micro-merge is now folded into the bigger Ionian Islands region.
+    expect(greekProvinceNames).not.toEqual(expect.arrayContaining(["Acarnanian Islands"]));
+    expect(europeNorthAfricaGeoJson.features.some((feature) => feature.id === "grc-local-53547021B5259778029298")).toBe(false); // Ithaca, absorbed
+    expect(europeNorthAfricaGeoJson.features.some((feature) => feature.id === "grc-local-53547021B91453036712640")).toBe(false); // Naxos, absorbed into Cyclades
   });
 
-  it("condenses Macedon, Thessaly, Epirus, and Aegean Thrace into one broad province apiece", () => {
+  it("condenses Macedon, Thessaly, Epirus, and Aegean Thrace into several broad sub-regions apiece", () => {
     const greekProvinces = europeNorthAfricaGeoJson.features
       .filter((feature) => feature.id.startsWith("grc-local-") && feature.properties.kind === "province");
     const greekProvinceNames = greekProvinces.map((feature) => feature.properties.name);
 
-    expect(greekProvinceNames).toEqual(expect.arrayContaining(["Macedon", "Thessaly", "Epirus", "Aegean Thrace"]));
-    // The individual modern municipalities that used to stand for these kingdoms/leagues are gone.
-    expect(greekProvinceNames).not.toEqual(expect.arrayContaining(["Thessaloniki", "Samothrakis", "Arta", "Trikala", "Ioannina"]));
-    // The merge produced a single contiguous Macedon (its geometry may still
-    // be a MultiPolygon because Chalkidiki's fingers and offshore islets
-    // aren't edge-adjacent to the mainland ring).
-    const macedon = greekProvinces.find((feature) => feature.properties.name === "Macedon");
-    expect(macedon?.geometry.type === "Polygon" || macedon?.geometry.type === "MultiPolygon").toBe(true);
+    expect(greekProvinceNames).toEqual(expect.arrayContaining([
+      "Upper Macedonia", "Bottiaea", "Pieria", "Amphaxitis", "Chalcidice", "Bisaltia",
+      "Perrhaebia", "Trikala", "Magnesia", "Sporades",
+      "Molossia", "Thesprotia", "Ambracia", "Preveza",
+      "Xanthi", "Rodopi", "Evros", "Nestos",
+    ]));
+    // The individual modern municipalities absorbed into these sub-regions are gone, and no
+    // single monolithic "Macedon"/"Thessaly"/"Epirus"/"Aegean Thrace" province exists either.
+    expect(greekProvinceNames).not.toEqual(expect.arrayContaining(["Thessaloniki", "Samothrakis", "Ioannina", "Macedon", "Thessaly", "Epirus", "Aegean Thrace"]));
+    // Chalcidice's own geometry may still be a MultiPolygon (its three
+    // fingers, plus offshore islets, aren't all edge-adjacent).
+    const chalcidice = greekProvinces.find((feature) => feature.properties.name === "Chalcidice");
+    expect(chalcidice?.geometry.type === "Polygon" || chalcidice?.geometry.type === "MultiPolygon").toBe(true);
     expect(europeNorthAfricaGeoJson.features.some((feature) => feature.id === "grc-local-53547021B66289561682340")).toBe(false);
   });
 });

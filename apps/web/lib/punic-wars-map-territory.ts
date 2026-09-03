@@ -123,7 +123,7 @@ const POLITY_NAMES: Record<string, string> = {
   "boeotian-league": "Boeotian League",
   "phocian-league": "Phocian League",
   "corinthian-league": "Corinthian League",
-  "arcadian-league": "Arcadian League",
+  "arcadian-league": "Midelion",
   "euboean-cities": "Euboean cities",
   "ionian-islands": "Ionian Islands",
   "cycladic-islanders": "Cycladic islanders",
@@ -263,80 +263,37 @@ function provinceCentre(feature: (typeof punicWarsGeoJson.features)[number]): re
   return [0, 0];
 }
 
-// Euboea and the Ionian Sea islands sit at longitudes that overlap Attica and
-// coastal Epirus/Acarnania respectively, so a lon/lat rectangle can't tell
-// them apart from their mainland neighbours. Both groups are small, fixed
-// municipality lists, so they're named directly instead.
-const EUBOEAN_MUNICIPALITIES = new Set([
-  "Chalcis", "Istiaia-Aidipsos", "Mantoudi-Limni-Agia Anna", "Eretria", "Dirfys-Messapia", "Kymi-Aliveri", "Skyros", "Karystos",
-]);
-const IONIAN_SEA_ISLAND_MUNICIPALITIES = new Set(["Corfu", "Paxos", "Lefkada", "Meganisi", "Ithaca", "Cephalonia", "Zakynthos"]);
-
 /**
- * A geographic reconstruction of the 270 BCE Greek world: broad kingdoms in
- * the north (Macedon, Epirus, Thessaly, Aegean Thrace — pre-merged into one
- * province apiece, see GREEK_METRO_REGION_GROUPS), fragmenting into the
- * leagues and city-states that actually held the south and the Aegean at
- * municipality scale. Every rule below was checked against real coordinates
- * for all 326 underlying municipalities so no province falls through to a
- * default bucket. See the historical-control research notes for sourcing;
- * boundaries between adjacent leagues are necessarily approximate.
+ * Every Greek political entity in the 270 BCE opening is now a single merged
+ * province (see GREEK_METRO_REGION_GROUPS): the four northern kingdoms each
+ * split into several broad sub-regions, every southern/Aegean league,
+ * city-state, and island group collapsed into exactly one region apiece. So
+ * geometry and politics line up 1:1 — this is a straight name lookup, not a
+ * lon/lat reconstruction.
  */
+const GREEK_PROVINCE_POLITY_BY_NAME: Readonly<Record<string, string>> = {
+  // Macedon
+  "Upper Macedonia": "macedon", Bottiaea: "macedon", Pieria: "macedon", Amphaxitis: "macedon", Chalcidice: "macedon", Bisaltia: "macedon",
+  // Thessaly
+  Perrhaebia: "thessalian-league", Trikala: "thessalian-league", Magnesia: "thessalian-league", Sporades: "thessalian-league",
+  // Epirus
+  Molossia: "epirus", Thesprotia: "epirus", Ambracia: "epirus", Preveza: "epirus",
+  // Aegean Thrace
+  Xanthi: "thracian-communities", Rodopi: "thracian-communities", Evros: "thracian-communities", Nestos: "thracian-communities",
+  // Central and southern Greece
+  Athens: "athens", Acarnania: "acarnania", Achaea: "achaean-league", Aetolia: "aetolian-league", Midelion: "arcadian-league",
+  Argos: "argos", Boeotia: "boeotian-league", Thebes: "thebes", Corinthia: "corinthian-league", Elis: "elis", Euboea: "euboean-cities",
+  Messenia: "messenia", Phocis: "phocian-league", Sparta: "sparta", Megalopolis: "megalopolis",
+  // Aegean and Ionian islands
+  "Eastern Crete": "cretan-cities-east", "Western Crete": "cretan-cities-west", Cyclades: "cycladic-islanders",
+  Dodecanese: "dodecanese-islanders", Aeolis: "aeolis-communities", Ionia: "ionia-communities", "Ionian Islands": "ionian-islands",
+};
+
 function greekControllerFor(feature: (typeof punicWarsGeoJson.features)[number]): string {
-  const [longitude, latitude] = provinceCentre(feature);
   const name = feature.properties.name;
-  if (name === "Thebes") return "thebes";
-  if (name === "Athens") return "athens";
-  if (name === "Sparta" || name === "Elafonisos") return "sparta";
-  if (name === "Megalopolis") return "megalopolis";
-  if (name === "Argos-Mykines" || name === "Nafplio" || name === "Epidaurus") return "argos";
-  if (name === "Corinth") return "corinthian-league";
-  if (name !== undefined && EUBOEAN_MUNICIPALITIES.has(name)) return "euboean-cities";
-  if (name !== undefined && IONIAN_SEA_ISLAND_MUNICIPALITIES.has(name)) return "ionian-islands";
-  // Macedon, Thessaly, Epirus, and Aegean Thrace are pre-merged (see
-  // GREEK_METRO_REGION_GROUPS) into one broad kingdom/hinterland apiece, so
-  // they're matched directly rather than by a lon/lat rectangle.
-  if (name === "Macedon") return "macedon";
-  if (name === "Thessaly") return "thessalian-league";
-  if (name === "Epirus") return "epirus";
-  if (name === "Aegean Thrace") return "thracian-communities";
-
-  // Crete
-  if (latitude < 35.75) return longitude < 24.6 ? "cretan-cities-west" : "cretan-cities-east";
-  // Cyclades (including their northernmost outliers, Andros/Tinos/Kea, which
-  // sit at a higher latitude than the rest of the group)
-  if (longitude >= 24.1 && longitude < 26.0 && latitude < 38.0) return "cycladic-islanders";
-  // Dodecanese
-  if (longitude >= 26.0 && latitude < 37.6) return "dodecanese-islanders";
-  // North-eastern Aegean: Lesbos/Lemnos (Aeolis) and Chios/Samos (Ionia)
-  if (longitude > 24.9 && latitude >= 38.3 && latitude < 40.0) return "aeolis-communities";
-  if (longitude >= 26.0 && latitude >= 37.6 && latitude < 38.9) return "ionia-communities";
-
-  // Acarnania
-  if (longitude < 21.45 && latitude >= 38.05) return "acarnania";
-  // Achaea: the Peloponnesian shore of the Gulf of Corinth
-  if (latitude >= 37.95 && latitude < 38.35 && longitude >= 21.5 && longitude < 22.35) return "achaean-league";
-  // Elis
-  if (longitude < 22.05 && latitude >= 37.1 && latitude < 38.05) return "elis";
-  // Corinthia
-  if (longitude >= 22.35 && longitude < 23.15 && latitude >= 37.75 && latitude < 38.15) return "corinthian-league";
-  // Phocis (Delphi and the slopes of Parnassus)
-  if (latitude >= 38.3 && latitude < 38.8 && longitude >= 22.15 && longitude < 22.95) return "phocian-league";
-  // Boeotia
-  if (latitude >= 38.0 && latitude < 38.7 && longitude >= 22.55 && longitude < 23.6) return "boeotian-league";
-  // Aetolia, plus Phthiotis/Evrytania to its east (a 270 BCE Aetolian sphere)
-  if (longitude < 22.75 && latitude >= 38.3) return "aetolian-league";
-  // Attica
-  if (longitude >= 23.25 && latitude >= 37.6 && latitude < 38.3) return "athens";
-  // Argolis
-  if (longitude >= 22.55 && latitude >= 37.3 && latitude < 37.9) return "argos";
-  // Arcadia
-  if (longitude >= 22.0 && longitude < 22.7 && latitude >= 37.3 && latitude < 37.95) return "arcadian-league";
-  // Messenia
-  if (longitude < 22.25 && latitude < 37.4) return "messenia";
-  // Laconia
-  if (longitude >= 22.0 && latitude < 37.5) return "sparta";
-  return "achaean-league";
+  const polityId = name === undefined ? undefined : GREEK_PROVINCE_POLITY_BY_NAME[name];
+  if (polityId === undefined) throw new Error(`Unrecognised Greek province name "${name ?? feature.id}" — add it to GREEK_PROVINCE_POLITY_BY_NAME.`);
+  return polityId;
 }
 
 function groundedControllerFor(feature: (typeof punicWarsGeoJson.features)[number]): string | null {
