@@ -204,7 +204,16 @@ const MapWarSchema = z.object({
 
 const MapBattleConflictSchema = z.object({
   battleId: EntityIdSchema,
+  /** Every force in the battle, either side. Order-independent; side is carried separately below. */
   participantForceIds: z.array(EntityIdSchema).min(2),
+  /**
+   * Which of `participantForceIds` fight on the attacking side (docs/19
+   * Phase 3 multi-force battles: a side may be more than one force, merged
+   * into the resolver as one combined contribution per side). The
+   * defending side is `participantForceIds` minus this set, never stored
+   * separately, so the two can never drift apart.
+   */
+  attackerForceIds: z.array(EntityIdSchema).min(1),
 }).strict();
 
 const MapSiegeConflictSchema = z.object({
@@ -260,6 +269,10 @@ export const DynamicMapOverlaySchema = z.object({
     if (battleIds.has(battle.battleId)) context.addIssue({ code: "custom", path: ["conflicts", "battles", index, "battleId"], message: "A map overlay may include each battle only once." });
     battleIds.add(battle.battleId);
     for (const forceId of battle.participantForceIds) if (!forceIds.has(forceId)) context.addIssue({ code: "custom", path: ["conflicts", "battles", index], message: "A battle participant must be present in the map overlay." });
+    const participantSet = new Set(battle.participantForceIds);
+    for (const forceId of battle.attackerForceIds) if (!participantSet.has(forceId)) context.addIssue({ code: "custom", path: ["conflicts", "battles", index, "attackerForceIds"], message: "Every attacker must also be a battle participant." });
+    const defenderCount = battle.participantForceIds.filter((id) => !battle.attackerForceIds.includes(id)).length;
+    if (defenderCount < 1) context.addIssue({ code: "custom", path: ["conflicts", "battles", index], message: "A battle needs at least one defender not also listed as an attacker." });
   }
   for (const [index, siege] of overlay.conflicts.sieges.entries()) {
     if (siegeSettlements.has(siege.settlementId)) context.addIssue({ code: "custom", path: ["conflicts", "sieges", index, "settlementId"], message: "A map overlay may include each besieged settlement only once." });

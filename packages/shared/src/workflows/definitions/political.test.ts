@@ -1,8 +1,32 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import { executeWorkflow } from "../executor";
+import { validateCandidate } from "../policy";
 
 const world = () => structuredClone(firstPunicWarScenario.initialWorld);
+
+describe("end_war", () => {
+  it("still executes directly (the shape a resolved political procedure's authorized invocation uses)", () => {
+    const w = world();
+    const outcome = executeWorkflow(
+      { actionId: "end_war", actorId: "system", parameters: { polityAId: "rome", polityBId: "carthage", termsLabel: "A negotiated peace." } },
+      w,
+      0,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.conflicts.wars).toEqual([]);
+  });
+
+  it("cannot be proposed directly by a player order or the world director -- peace requires a procedure (docs/14 Phase 6)", () => {
+    const w = world();
+    const invocation = { actionId: "end_war", actorId: "marcus-atilius", parameters: { polityAId: "rome", polityBId: "carthage", termsLabel: "I hereby declare peace." } };
+    const asPlayer = validateCandidate({ correlationId: "11111111-1111-1111-1111-111111111111", source: "player_directive", sourceRef: "d", sourceRationale: "", requestedInvocation: invocation }, w);
+    const asWorldDirector = validateCandidate({ correlationId: "22222222-2222-2222-2222-222222222222", source: "world_director_synthesis", sourceRef: "d", sourceRationale: "", requestedInvocation: invocation }, w);
+    expect(asPlayer?.kind).toBe("authority_mismatch");
+    expect(asWorldDirector?.kind).toBe("authority_mismatch");
+  });
+});
 
 describe("rename_polity", () => {
   it("renames a polity", () => {

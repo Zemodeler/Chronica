@@ -36,6 +36,41 @@ export const SettlementSchema = z
 export type Settlement = z.infer<typeof SettlementSchema>;
 
 /**
+ * An intra-province operational position (docs/19 Phase 3): where in a
+ * province a force actually stands, distinct from the province itself. See
+ * `warfare/position.ts` for assignment logic and the deterministic fallback
+ * used when a province declares none.
+ */
+export const PositionTypeSchema = z.enum([
+  "settlement",
+  "outskirts",
+  "camp",
+  "pass",
+  "road_approach",
+  "river_crossing",
+  "coast",
+  "harbour",
+  "siege_line",
+  "battlefield",
+  "interior",
+]);
+export type PositionType = z.infer<typeof PositionTypeSchema>;
+
+export const PositionSchema = z
+  .object({
+    id: EntityIdSchema,
+    provinceId: EntityIdSchema,
+    label: z.string().trim().min(1).max(120),
+    type: PositionTypeSchema,
+    /** Signed basis points: a defensive edge (siege_line, pass) is positive; an exposed one (coast) may be negative. */
+    combatModifierBps: z.number().int().min(-2_000).max(2_000).default(0),
+    /** How many forces can hold this position at once meaningfully; null = unbounded (an open interior). */
+    capacity: z.number().int().positive().nullable().default(null),
+  })
+  .strict();
+export type Position = z.infer<typeof PositionSchema>;
+
+/**
  * Presentation-only geography (ADR-0015).
  *
  * The simulation reads none of it, and CI asserts that attaching it leaves
@@ -64,6 +99,8 @@ export const ProvinceSchema = z
     controlFirmnessBps: BasisPointsSchema,
     tier: DetailTierSchema,
     geo: ProvinceGeoSchema.optional(),
+    /** Scenario-authored operational positions; omit to use the deterministic fallback (`warfare/position.ts`). */
+    positions: z.array(PositionSchema).optional(),
   })
   .strict();
 export type Province = z.infer<typeof ProvinceSchema>;

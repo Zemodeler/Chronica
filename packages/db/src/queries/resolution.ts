@@ -93,6 +93,24 @@ export interface ChronicleEntryInput {
   readonly playerRelevance?: "high" | "medium" | "low" | "none";
   /** Present only on the one synthetic `scope: "dispatch"` entry per turn (character-sim phase 6). */
   readonly dispatch?: { readonly items: readonly string[]; readonly uncertaintyNote: string | null };
+  /** How much narrative space this entry earns (docs/14 Phase 4): a compact dispatch, a real paragraph, or a multi-paragraph scene. Defaults to "paragraph" when absent (pre-Phase-4 behavior). */
+  readonly depth?: "dispatch" | "paragraph" | "scene";
+  /**
+   * Structured, deterministic facts about a resolved battle (docs/19 Phase
+   * 3's `resolveBattle`), for the narrator to write from directly instead of
+   * a pre-flattened summary string. Present only on a battle's own entry.
+   */
+  readonly battleBrief?: {
+    readonly provinceName: string;
+    readonly outcome: "attacker_victory" | "defender_victory" | "inconclusive";
+    readonly attackerName: string;
+    readonly defenderName: string;
+    readonly attackerCommanderName: string | null;
+    readonly defenderCommanderName: string | null;
+    readonly attackerCasualties: number;
+    readonly defenderCasualties: number;
+    readonly retreated: readonly string[];
+  };
 }
 
 export interface CommitResolutionInput {
@@ -189,6 +207,8 @@ export async function commitResolution(
             ...(entry.institutions && entry.institutions.length > 0 ? { institutions: entry.institutions } : {}),
             ...(entry.playerRelevance !== undefined ? { playerRelevance: entry.playerRelevance } : {}),
             ...(entry.dispatch !== undefined ? { dispatch: entry.dispatch } : {}),
+            ...(entry.depth !== undefined ? { depth: entry.depth } : {}),
+            ...(entry.battleBrief !== undefined ? { battleBrief: entry.battleBrief } : {}),
           },
         })),
       );

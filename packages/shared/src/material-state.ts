@@ -503,6 +503,15 @@ export const PoliticalProcedureTypeSchema = z.enum([
   "command_assignment",
   "endorsement",
   "denunciation",
+  /**
+   * System-triggered, never sponsored by a player/NPC directly: opens
+   * automatically when a ruling polity's legitimacy falls too far (docs/18
+   * Phase 2 follow-on -- "taxation costs legitimacy but never opens a real
+   * political procedure"). The friction an authority-holder faces from
+   * spending down legitimacy is surfaced as this Chronicle-visible event,
+   * not as a confirmation step blocking the order that caused it.
+   */
+  "opposition_motion",
 ]);
 export type PoliticalProcedureType = z.infer<typeof PoliticalProcedureTypeSchema>;
 
@@ -687,6 +696,8 @@ export const ForceSchema = z.object({
   commanderCharacterId: EntityIdSchema,
   controllerCharacterId: EntityIdSchema,
   locationId: EntityIdSchema,
+  /** Where within `locationId` this force stands (docs/19 Phase 3); null resolves to the province's default position. */
+  positionId: EntityIdSchema.nullable().default(null),
   authorizedStrength: z.number().int().positive(),
   personnel: z.array(ForcePersonnelCategorySchema).min(1),
   moraleBps: BasisPointsSchema,
@@ -699,6 +710,32 @@ export const ForceSchema = z.object({
   history: z.array(ForcePersonnelEventSchema),
 });
 export type Force = z.infer<typeof ForceSchema>;
+
+/**
+ * Compact, canonical, per-province material state (docs/14 Phase 2:
+ * background material society).
+ *
+ * Bounded/scaled deliberately, matching `Settlement.size`'s "coarse on
+ * purpose" values -- this is not a population simulator. `population` and
+ * `availableManpower` are counts; every other field is basis points (10 000
+ * = full baseline) so recruitment, taxation, war, and recovery can move them
+ * by a proportion rather than needing a second unit system.
+ */
+export const ProvinceMaterialSchema = z
+  .object({
+    provinceId: EntityIdSchema,
+    population: z.number().int().nonnegative(),
+    availableManpower: z.number().int().nonnegative(),
+    productiveCapacityBps: BasisPointsSchema,
+    foodSecurityBps: BasisPointsSchema,
+    stabilityBps: BasisPointsSchema,
+    taxCapacity: MoneyAmountSchema,
+    displacedPopulation: z.number().int().nonnegative(),
+    warDamageBps: BasisPointsSchema,
+    lastMaterialUpdateStep: ElapsedStepSchema,
+  })
+  .strict();
+export type ProvinceMaterial = z.infer<typeof ProvinceMaterialSchema>;
 
 export const MaterialEffectProposalSchema = z.object({
   sourceEntityId: EntityIdSchema,
@@ -734,6 +771,11 @@ export const MaterialWorldStateSchema = z
     inheritanceRules: z.array(InheritanceRuleSchema).default([]),
     estates: z.array(EstateSchema).default([]),
     inheritanceTransfers: z.array(InheritanceTransferSchema).default([]),
+    // docs/14 Phase 2: background material society, one entry per province.
+    // Defaulted so archived snapshots (which never had one) load cleanly;
+    // packages/shared/src/material/province-material.ts backfills any
+    // missing entry the first time a snapshot is resolved.
+    provinceMaterial: z.array(ProvinceMaterialSchema).default([]),
   })
   .superRefine((state, context) => {
     const ids = <T extends { id: string }>(values: T[]) => new Set(values.map((value) => value.id));

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type RelationCategory = "family" | "other";
 type FamilyRole = "parent" | "partner" | "sibling" | "child" | "other_relative";
@@ -113,9 +113,44 @@ function MoneyDetail({ moneyLabel, balance, changes }: { moneyLabel: string; bal
   const recent = changes.slice(-5);
   const start = balance - recent.reduce((total, change) => total + change.amount, 0);
   const balances = recent.reduce<number[]>((series, change) => [...series, (series.at(-1) ?? start) + change.amount], [start]);
-  const low = Math.min(...balances); const high = Math.max(...balances); const range = high - low || 1;
-  const points = balances.map((value, index) => `${12 + index * (216 / Math.max(1, balances.length - 1))},${66 - ((value - low) / range) * 48}`).join(" L");
-  return <><p className="character-detail-value">{moneyLabel}</p><div className="money-graph" aria-label="Personal balance graph"><svg viewBox="0 0 240 80" role="img" aria-label={changes.length === 0 ? "Current balance only" : "Recent balance changes"}><path d={changes.length === 0 ? "M12 50 L228 50" : `M${points}`} fill="none" stroke="currentColor" strokeWidth="3" /><circle cx="228" cy={changes.length === 0 ? "50" : points.split(" L").at(-1)?.split(",")[1] ?? "50"} r="5" fill="currentColor" /></svg><span>{changes.length === 0 ? "No balance history yet" : "Recent account movement"}</span></div>{changes.length > 0 && <ul className="character-detail-list">{recent.map((change) => <li key={change.id}><strong>{change.amount >= 0 ? "+" : ""}{change.amount.toLocaleString()}</strong><span>{change.label} · {change.whenLabel}</span></li>)}</ul>}<p className="character-detail-note">{changes.length === 0 ? "The graph will gain history as transactions occur." : "Balance history is shown from your personal-account transactions."}</p></>;
+  return <><p className="character-detail-value">{moneyLabel}</p><BalanceGraph balances={balances} hasChanges={changes.length > 0} />{changes.length > 0 && <ul className="character-detail-list">{recent.map((change) => <li key={change.id}><strong>{change.amount >= 0 ? "+" : ""}{change.amount.toLocaleString()}</strong><span>{change.label} · {change.whenLabel}</span></li>)}</ul>}<p className="character-detail-note">{changes.length === 0 ? "The graph will gain history as transactions occur." : "Balance history is shown from your personal-account transactions."}</p></>;
+}
+
+function BalanceGraph({ balances, hasChanges }: { balances: readonly number[]; hasChanges: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const draw = () => {
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      if (width === 0 || height === 0) return;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const low = Math.min(...balances); const high = Math.max(...balances); const range = high - low || 1;
+      const pointAt = (value: number, index: number) => ({ x: 12 + index * ((width - 24) / Math.max(1, balances.length - 1)), y: hasChanges ? height - 14 - ((value - low) / range) * (height - 28) : height / 2 });
+      ctx.strokeStyle = getComputedStyle(canvas).color;
+      ctx.lineWidth = 3;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      for (const [index, value] of balances.entries()) {
+        const point = pointAt(value, index);
+        if (index === 0) ctx.moveTo(point.x, point.y); else ctx.lineTo(point.x, point.y);
+      }
+      ctx.stroke();
+      const end = pointAt(balances.at(-1) ?? 0, balances.length - 1);
+      ctx.beginPath(); ctx.arc(end.x, end.y, 5, 0, Math.PI * 2); ctx.fillStyle = ctx.strokeStyle; ctx.fill();
+    };
+    const observer = new ResizeObserver(draw);
+    observer.observe(canvas);
+    draw();
+    return () => observer.disconnect();
+  }, [balances, hasChanges]);
+  return <div className="money-graph"><canvas ref={canvasRef} role="img" aria-label={hasChanges ? "Recent balance changes" : "Current balance only"} /><span>{hasChanges ? "Recent account movement" : "No balance history yet"}</span></div>;
 }
 
 function AuthorityDetail({ role, authority, backgroundNote }: { role: string; authority: readonly string[]; backgroundNote: readonly string[] }) {

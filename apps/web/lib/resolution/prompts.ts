@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { WorldState } from "@chronica/shared";
-import { buildWorkflowCatalog, type RuntimeInventedWorkflow } from "@chronica/shared";
+import { buildWorkflowCatalog, chronicleWordBudget, type RuntimeInventedWorkflow } from "@chronica/shared";
 import type { CharacterKnowledgebase } from "@chronica/shared";
 
 /** Durable player context supplied to every director during turn resolution. */
@@ -163,7 +163,7 @@ function worldContext(world: WorldState, actorId: string, context?: ResolutionPl
     lines.push(`\nACTIVE WARS: ${warDescs.join("; ")}`);
   }
   if (battles.length > 0) {
-    lines.push(`ACTIVE BATTLES: ${battles.map((b) => b.participantForceIds.join(" vs ")).join("; ")}`);
+    lines.push(`ACTIVE BATTLES: ${battles.map((b) => `${b.attackerForceIds.join(",")} vs ${b.participantForceIds.filter((id) => !b.attackerForceIds.includes(id)).join(",")}`).join("; ")}`);
   }
   if (sieges.length > 0) {
     lines.push(`ACTIVE SIEGES: ${sieges.map((s) => s.settlementId).join(", ")}`);
@@ -389,6 +389,20 @@ export interface NarratorEntry {
   readonly characterMentions?: readonly { name: string; role: string }[] | undefined;
   /** Entry-intrinsic knowledge classification (character-sim phase 6); governs how hedged the prose must be. */
   readonly knowledgeStatus?: "confirmed" | "report" | "rumour" | "suspicion" | undefined;
+  /** Depth tier (docs/14 Phase 4): how much space this entry earns. Defaults to "paragraph" when absent. */
+  readonly depth?: "dispatch" | "paragraph" | "scene" | undefined;
+  /** Structured, deterministic battle facts (docs/19 Phase 3) to write from directly instead of inventing tactics. */
+  readonly battleBrief?: {
+    readonly provinceName: string;
+    readonly outcome: "attacker_victory" | "defender_victory" | "inconclusive";
+    readonly attackerName: string;
+    readonly defenderName: string;
+    readonly attackerCommanderName: string | null;
+    readonly defenderCommanderName: string | null;
+    readonly attackerCasualties: number;
+    readonly defenderCasualties: number;
+    readonly retreated: readonly string[];
+  } | undefined;
 }
 
 export function buildChronicleNarratorPrompt(
@@ -441,6 +455,15 @@ export function buildChronicleNarratorPrompt(
     }
   };
 
+  const depthLabel = (depth: NarratorEntry["depth"]): string => {
+    const { min, max } = chronicleWordBudget(depth ?? "paragraph");
+    return `${depth ?? "paragraph"}, ${min}-${max} words`;
+  };
+  const battleBriefLine = (brief: NonNullable<NarratorEntry["battleBrief"]>): string => {
+    const outcomeLabel = brief.outcome === "inconclusive" ? "inconclusive" : brief.outcome === "attacker_victory" ? `${brief.attackerName} prevails` : `${brief.defenderName} prevails`;
+    return `\n   BATTLE BRIEF (deterministic facts — do not contradict or invent beyond these): province=${brief.provinceName}; ${brief.attackerName}${brief.attackerCommanderName ? ` (commanded by ${brief.attackerCommanderName})` : ""} vs ${brief.defenderName}${brief.defenderCommanderName ? ` (commanded by ${brief.defenderCommanderName})` : ""}; outcome=${outcomeLabel}; casualties: ${brief.attackerName} ${brief.attackerCasualties}, ${brief.defenderName} ${brief.defenderCasualties}${brief.retreated.length > 0 ? `; retreated: ${brief.retreated.join(", ")}` : ""}`;
+  };
+
   const eventLines = entries.map((e, i) => {
     const chainGroup = e.chainId ? chainMap.get(e.chainId) : undefined;
     const chainNote = chainGroup && chainGroup.length > 1
@@ -451,17 +474,19 @@ export function buildChronicleNarratorPrompt(
       ? `\n   CAST: ${e.characterMentions.map((member) => `${member.name} (${member.role})`).join(", ")}`
       : "";
     const status = e.knowledgeStatus && e.knowledgeStatus !== "confirmed" ? ` [KNOWLEDGE: ${e.knowledgeStatus.toUpperCase()}]` : "";
-    return `${i + 1}. [${kind}${chainNote}${status}] ${e.body}${cast}`;
+    const depth = ` [DEPTH: ${depthLabel(e.depth)}]`;
+    const brief = e.battleBrief ? battleBriefLine(e.battleBrief) : "";
+    return `${i + 1}. [${kind}${chainNote}${status}${depth}] ${e.body}${brief}${cast}`;
   });
 
-  return `You are the chronicler of Chronica. Rewrite raw event summaries as grounded, historically-flavoured prose for the official chronicle. Events within the same chain [chain: ...] are causally linked — write them so they flow as a coherent sequence. Each entry still stands alone as a paragraph.
+  return `You are the chronicler of Chronica. Rewrite raw event summaries as grounded, historically-flavoured prose for the official chronicle. Events within the same chain [chain: ...] are causally linked — write them so they flow as a coherent sequence. Each entry still stands alone.
 
 ${characterBlock}
 
 EVENTS (${entries.length} total):
 ${eventLines.join("\n")}
 
-Rewrite each event as one paragraph of chronicle prose. Return EXACTLY ${entries.length} entries, one per input — do not add or remove entries.
+Rewrite each event as chronicle prose, at the length its own [DEPTH: ...] tag states — a "dispatch" is a compact one- or two-sentence notice, a "paragraph" is one substantial paragraph, and a "scene" may run several paragraphs with atmosphere, named participants, and a decisive turn. Return EXACTLY ${entries.length} entries, one per input — do not add or remove entries. An entry with a BATTLE BRIEF must use exactly those facts (province, sides, commanders, outcome, casualties, retreats) and invent no tactic, unit, or result beyond them — atmosphere and phrasing are yours, the facts are not.
 
 Rules:
 - ALWAYS use proper names: refer to the player character as "${actorName}" (never substitute another name), name their polity "${polityName}", use real place names from the world above
@@ -470,8 +495,8 @@ Rules:
 - NEVER append meta-commentary to names or nouns (e.g. do NOT write "Gaius — historically accurate name" or "Rome (polity)"; write only the name itself)
 - NEVER use generic placeholders ("an individual", "a person", "the realm") — name everything specifically
 - Write in third person, past tense, historical style appropriate to the period
-- Each entry max 300 words
-- Do not invent facts beyond what the raw summary gives you; use the character background for tone and cultural colour only
+- Respect each entry's own [DEPTH: ...] word range; never pad a dispatch or truncate a scene to make lengths uniform
+- Do not invent facts beyond what the raw summary (and, if present, its BATTLE BRIEF) gives you; use the character background for tone and cultural colour only
 - The chronicle must reflect the ACTUAL outcome stated in the raw summary — do not upgrade a failure to a success or vice versa
 - For REACTION and SPREAD entries: acknowledge what caused them without restating the root event in full
 - For OPEN PRESSURE entries: end with something in motion — a question unanswered, a threat not yet resolved

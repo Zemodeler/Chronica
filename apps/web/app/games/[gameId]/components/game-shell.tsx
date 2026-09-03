@@ -207,7 +207,7 @@ export function GameShell({
   if (world && political && viewBox) {
     const w = world; const p = political; const vb = viewBox; const cbp = countryBorderPath; const ov = overlay; const flags = forceFlagUrls;
     drawCanvasFnRef.current = (canvas, transform, containerW, containerH) => {
-      drawTerrainToCanvas(canvas, containerW, containerH, transform, vb, w, p, cbp, baseImageRef.current, detailImageRef.current, ov, flags, requestRedraw);
+      drawTerrainToCanvas(canvas, containerW, containerH, transform, vb, w, p, cbp, baseImageRef.current, detailImageRef.current, ov, flags, selectedProvinceId, hoveredProvinceId, requestRedraw);
     };
   }
 
@@ -220,7 +220,7 @@ export function GameShell({
   // Trigger canvas redraw whenever the underlying data changes (new overlay, etc.)
   useEffect(() => {
     mapViewportRef.current?.redrawCanvas();
-  }, [world, political, countryBorderPath, overlay, forceFlagUrls]);
+  }, [world, political, countryBorderPath, overlay, forceFlagUrls, selectedProvinceId, hoveredProvinceId]);
 
   // Settlement-siege and army-conflict frames pulse (see map-canvas-entities.ts's
   // pulseOpacity) — that animation used to be a free CSS `animation` on the SVG
@@ -447,11 +447,8 @@ export function GameShell({
             {world && political && (
               <GeoMap
                 world={world}
-                political={political}
                 viewBox={viewBox}
                 overlay={overlay}
-                selectedProvinceId={selectedProvinceId}
-                hoveredProvinceId={hoveredProvinceId}
                 zoomBand={zoomBand}
                 scale={viewport.scale}
                 tx={viewport.tx}

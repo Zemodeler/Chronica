@@ -125,6 +125,16 @@ function parseManagerOutput(text: string): ManagerDecisionBatch {
   return parsed.data;
 }
 
+/**
+ * Matches decisions to candidates by array position — the prompt requires the
+ * manager to return them "in the supplied order" — rather than by
+ * `correlationId` equality. Models occasionally mistranscribe the id; when
+ * that happens we still trust the position and just note the mismatch,
+ * instead of failing schema validation and falling back to auto-approval for
+ * the whole batch. The returned map is keyed by each candidate's true
+ * (pipeline-assigned) correlationId, so downstream lookups stay correct even
+ * when the AI's echoed id was wrong.
+ */
 function assertCompleteDecisionSet(
   candidates: readonly WorkflowCandidate[],
   decisions: readonly ManagerDecision[],
@@ -132,20 +142,23 @@ function assertCompleteDecisionSet(
   if (decisions.length !== candidates.length) {
     throw new WorkflowManagerOutputError(`Workflow Manager returned ${decisions.length} decisions for ${candidates.length} candidates.`);
   }
-  const expected = new Set(candidates.map((candidate) => candidate.correlationId));
   const byCorrelation = new Map<string, ManagerDecision>();
-  for (const decision of decisions) {
-    if (!expected.has(decision.correlationId)) throw new WorkflowManagerOutputError(`Unknown correlationId: ${decision.correlationId}.`);
-    if (byCorrelation.has(decision.correlationId)) throw new WorkflowManagerOutputError(`Duplicate decision for ${decision.correlationId}.`);
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i]!;
+    const decision = decisions[i]!;
     if (decision.decision === "replace" && decision.replacementInvocation === null) {
-      throw new WorkflowManagerOutputError(`Replacement for ${decision.correlationId} is missing an invocation.`);
+      throw new WorkflowManagerOutputError(`Replacement for candidate at position ${i} is missing an invocation.`);
     }
     if (decision.decision !== "replace" && decision.replacementInvocation !== null) {
-      throw new WorkflowManagerOutputError(`Non-replacement decision ${decision.correlationId} supplied a replacement.`);
+      throw new WorkflowManagerOutputError(`Non-replacement decision at position ${i} supplied a replacement.`);
     }
-    byCorrelation.set(decision.correlationId, decision);
+    if (decision.correlationId !== candidate.correlationId) {
+      console.warn(
+        `[workflow-manager] correlationId mismatch at position ${i} — matching positionally (expected ${candidate.correlationId}, got ${decision.correlationId}).`,
+      );
+    }
+    byCorrelation.set(candidate.correlationId, decision);
   }
-  if (byCorrelation.size !== expected.size) throw new WorkflowManagerOutputError("A candidate is missing a decision.");
   return byCorrelation;
 }
 
@@ -159,26 +172,29 @@ function auditBase(candidate: WorkflowCandidate): WorkflowAuditEntry {
   };
 }
 
+interface ManagerReviewResult {
+  readonly decisionsByCorrelation: Map<string, ManagerDecision>;
+  readonly inventedWorkflowProposals: ManagerDecisionBatch["inventedWorkflowProposals"];
+}
+
 async function requestCompleteDecisions(
   adapter: AiAdapter,
   prompt: string,
   candidates: readonly WorkflowCandidate[],
   atStep: number,
-): Promise<ManagerDecisionBatch> {
+): Promise<ManagerReviewResult> {
   const initialMessage = `Step ${atStep}: review and repair the proposed workflow sequence.`;
-  const parse = (content: string) => {
+  const parse = (content: string): ManagerReviewResult => {
     const batch = parseManagerOutput(content);
-    assertCompleteDecisionSet(candidates, batch.decisions);
+    const decisionsByCorrelation = assertCompleteDecisionSet(candidates, batch.decisions);
     if (batch.novelActionProposals.length > 0) throw new WorkflowManagerOutputError("One-turn temporary patches are retired; use inventedWorkflowProposals.");
     for (const proposal of batch.inventedWorkflowProposals) {
       const matchingCandidates = candidates.filter((candidate) => candidate.source === proposal.source && candidate.sourceRef === proposal.sourceRef);
-      const replacesRejectedCandidate = matchingCandidates.some((candidate) =>
-        batch.decisions.find((item) => item.correlationId === candidate.correlationId)?.decision === "reject",
-      );
+      const replacesRejectedCandidate = matchingCandidates.some((candidate) => decisionsByCorrelation.get(candidate.correlationId)?.decision === "reject");
       if (!replacesRejectedCandidate) throw new WorkflowManagerOutputError("An invented workflow must replace a rejected candidate.");
       if (proposal.initialInvocation.actionId !== proposal.workflow.actionId) throw new WorkflowManagerOutputError("Invented workflow initial invocation must use its actionId.");
     }
-    return batch;
+    return { decisionsByCorrelation, inventedWorkflowProposals: batch.inventedWorkflowProposals };
   };
 
   try {
@@ -187,10 +203,11 @@ async function requestCompleteDecisions(
   } catch (error) {
     if (!(error instanceof WorkflowManagerOutputError)) throw error;
 
-    // Models occasionally copy or fabricate a UUID. A single correction pass
-    // is safe because nothing has been dry-run or committed at this point.
+    // Models occasionally copy or fabricate a UUID; decisions are matched by
+    // array position (see assertCompleteDecisionSet), so this retry mainly
+    // guards against a wrong decision *count* or a malformed replacement.
     const allowedIds = candidates.map((candidate) => candidate.correlationId).join(", ");
-    const retryMessage = `Your previous Workflow Manager response was invalid: ${error.message}\nReturn the complete JSON again. Use exactly one of these correlationIds for each decision, with no others: ${allowedIds}`;
+    const retryMessage = `Your previous Workflow Manager response was invalid: ${error.message}\nReturn the complete JSON again, with exactly one decision per candidate in the same order they were supplied. Candidate correlationIds, in order: ${allowedIds}`;
     const retry = await adapter.call("workflow_manager", prompt, retryMessage);
     return parse(retry.content);
   }
@@ -215,26 +232,30 @@ export async function runWorkflowManager(
     violation: originalPolicy.get(candidate.correlationId) ?? null,
   }));
   const prompt = buildWorkflowManagerSystemPrompt(world, candidates, diagnostics, activeInventedWorkflows);
-  let managerBatch: ManagerDecisionBatch;
+  let reviewResult: ManagerReviewResult;
   let managerFailed = false;
   try {
-    managerBatch = await requestCompleteDecisions(adapter, prompt, candidates, atStep);
+    reviewResult = await requestCompleteDecisions(adapter, prompt, candidates, atStep);
   } catch (error) {
     if (!(error instanceof WorkflowManagerOutputError)) throw error;
     console.error(`[workflow-manager] AI review failed after retry — auto-approving policy-valid candidates: ${error.message}`);
     managerFailed = true;
-    managerBatch = {
-      decisions: candidates.map((candidate) => ({
-        correlationId: candidate.correlationId,
-        decision: "approve" as const,
-        reason: "Workflow Manager unavailable — approved by policy validation.",
-        replacementInvocation: null,
-      })),
-      novelActionProposals: [],
+    reviewResult = {
+      decisionsByCorrelation: new Map(
+        candidates.map((candidate) => [
+          candidate.correlationId,
+          {
+            correlationId: candidate.correlationId,
+            decision: "approve" as const,
+            reason: "Workflow Manager unavailable — approved by policy validation.",
+            replacementInvocation: null,
+          },
+        ]),
+      ),
       inventedWorkflowProposals: [],
     };
   }
-  const decisions = new Map(managerBatch.decisions.map((decision) => [decision.correlationId, decision]));
+  const decisions = reviewResult.decisionsByCorrelation;
 
   const auditEntries: WorkflowAuditEntry[] = [];
   const acceptedInvocations: ProposedInvocation[] = [];
@@ -284,7 +305,7 @@ export async function runWorkflowManager(
 
   // Newly invented workflows are valid only when they replace a rejected
   // candidate and their first, parameterised invocation dry-runs successfully.
-  for (const proposal of managerBatch.inventedWorkflowProposals) {
+  for (const proposal of reviewResult.inventedWorkflowProposals) {
     const matchingCandidates = candidates.filter((candidate) => candidate.source === proposal.source && candidate.sourceRef === proposal.sourceRef);
     const replacesRejectedCandidate = matchingCandidates.some((candidate) => decisions.get(candidate.correlationId)?.decision === "reject");
     const actionTaken = runtimeInventedWorkflows.some((workflow) => workflow.definition.actionId === proposal.workflow.actionId)

@@ -93,7 +93,10 @@ const OFFSCREEN_MAX = 4096;
 const OFFSCREEN_PAD = 1;
 // Re-render once the cached texture's resolution drops below this fraction
 // of what the current zoom actually needs, instead of only on pan overflow.
-const OFFSCREEN_MIN_RESOLUTION_RATIO = .8;
+// A 4K terrain cache is expensive to rebuild. Let terrain texture scale a
+// little further between rebuilds; borders, hover, labels, and markers are
+// all painted directly at device resolution, so their quality never suffers.
+const OFFSCREEN_MIN_RESOLUTION_RATIO = .5;
 // Below this many visible provinces, fill them directly on the main canvas
 // every frame instead of baking them into the fixed-resolution offscreen —
 // see the comment in drawTerrainToCanvas.
@@ -213,6 +216,8 @@ export function drawTerrainToCanvas(
   detailImage: HTMLImageElement | null,
   overlay: DynamicMapOverlay | null,
   forceFlagUrls: ReadonlyMap<string, ForceFlagAsset>,
+  selectedProvinceId: string | null,
+  hoveredProvinceId: string | null,
   requestRedraw: () => void,
 ): void {
   const ctx = canvas.getContext("2d");
@@ -297,6 +302,27 @@ export function drawTerrainToCanvas(
     ctx.setLineDash([1.5 / m, 2 / m]);
     ctx.stroke(borderPath);
     ctx.setLineDash([]);
+  }
+
+  // Province hover/selection used to be a CSS-transformed SVG overlay. During
+  // a zoom gesture the browser rasterised that whole overlay, which made the
+  // otherwise sharp border turn into the blurred white band seen in the map.
+  // Drawing it in the same device-pixel canvas as the terrain keeps the fill
+  // and non-scaling outline crisp at every zoom level.
+  const selectionProvinceId = selectedProvinceId ?? hoveredProvinceId;
+  if (selectionProvinceId) {
+    const province = world.provinceById.get(selectionProvinceId);
+    if (province) {
+      const selected = selectionProvinceId === selectedProvinceId;
+      const path = getProvincePath(world, province.id, province.svgPath);
+      const exterior = getProvincePath(world, `${province.id}:exterior`, province.exteriorSvgPath);
+      ctx.fillStyle = selected ? "rgb(244 207 104 / 11%)" : "rgb(255 255 255 / 7%)";
+      ctx.fill(path);
+      ctx.strokeStyle = selected ? "#f4cf68" : "#f5fbff";
+      ctx.lineWidth = (selected ? .75 : .5) / m;
+      ctx.lineJoin = "round";
+      ctx.stroke(exterior);
+    }
   }
 
   // 8 — political territory name labels (see map-canvas-labels.ts for why

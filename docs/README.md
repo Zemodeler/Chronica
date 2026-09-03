@@ -15,6 +15,12 @@ Chronica is a single-player, AI-driven grand strategy game seen through one char
 11. [Character simulation, phase 1](11-character-simulation-phase-1.md)
 12. [Character simulation, phase 2](12-character-simulation-phase-2.md)
 13. [Character simulation, phase 3](13-character-simulation-phase-3.md)
+14. [Actions, orders, and the unified resolution architecture](14-actions.md)
+15. [Background material society](18-material-society.md)
+16. [Operational warfare](19-warfare.md)
+17. [Chronicle depth and structured battle facts](21-chronicle-depth.md)
+18. [Interrupt and the Chronicles button](22-interrupt-and-chronicles-ui.md)
+19. [Scenarios, diagnostics, and the test matrix](23-scenarios-diagnostics-and-tests.md)
 
 Confirmed decisions are stated directly. Future possibilities and unresolved choices are kept in the roadmap or open-decisions document.
 

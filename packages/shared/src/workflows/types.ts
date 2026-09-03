@@ -39,7 +39,7 @@ export interface WorkflowDefinition<TParams extends z.ZodTypeAny = z.ZodTypeAny>
   /** One-line description shown to the AI when it selects workflows. */
   readonly description: string;
   /** Category for grouping in registry documentation. */
-  readonly category: "military" | "political" | "economic" | "character" | "narrative" | "map";
+  readonly category: "military" | "political" | "economic" | "character" | "narrative" | "map" | "material";
   /**
    * Which invoker kinds may propose this workflow (skill authority).
    * Omit to allow any invoker. Used by the Workflow Manager policy validator.

@@ -1,7 +1,7 @@
 import type { DynamicMapOverlay } from "@chronica/shared";
 import type { StaticWorldGeometry } from "./world-geometry";
 import { politicalColourWithAlpha } from "./political-geometry";
-import { resolveForceMapPosition } from "./map-dynamic-geometry";
+import { resolveMapForcePlacements } from "./map-dynamic-geometry";
 import { deriveForceConflictStatuses } from "./map-conflict-state";
 import { armyStandardBounds, armyStandardWidthForZoom, type ForceFlagAsset } from "./army-standard";
 
@@ -236,11 +236,16 @@ export function drawForces(
   const conflictByForceId = deriveForceConflictStatuses(overlay);
   const armyStandardWidth = armyStandardWidthForZoom(pixelsPerDegree);
   const pulse = pulseOpacity(nowMs);
+  const placements = resolveMapForcePlacements(overlay?.forces ?? [], world, overlay ?? null);
+  const forceById = new Map((overlay?.forces ?? []).map((force) => [force.forceId, force]));
 
-  for (const force of overlay?.forces ?? []) {
-    const position = resolveForceMapPosition(force, world, overlay);
-    if (position === null) continue;
-    const { x, y } = position;
+  for (const placement of placements) {
+    // A non-primary member of a deliberate group (docs/19 Phase 3) is
+    // represented by its group's one marker only, never drawn twice.
+    if (placement.group?.isPrimary === false) continue;
+    const force = forceById.get(placement.forceId);
+    if (!force) continue;
+    const { x, y } = placement;
     if (x < visibleRect.minX || x > visibleRect.maxX || y < visibleRect.minY || y > visibleRect.maxY) continue;
 
     const asset = forceFlagUrls.get(force.forceId) ?? { url: "/maps/generic-merchant-ship-standard.png", aspectRatio: 4 / 3 };
@@ -262,5 +267,23 @@ export function drawForces(
 
     const img = getFlagImage(asset.url, requestRedraw);
     if (img) ctx.drawImage(img, bounds.x, bounds.y, bounds.width, bounds.height);
+
+    // A group's marker (both sides of a battle, or several forces jointly
+    // besieging one settlement) carries a small count badge instead of a
+    // second flag, per docs/19 Phase 3's "one marker with count/summary".
+    if (placement.group && placement.group.size > 1) {
+      const badgeRadius = Math.max(4, armyStandardWidth * 0.16) / pixelsPerDegree;
+      const badgeX = bounds.x + bounds.width - badgeRadius * 0.4;
+      const badgeY = bounds.y - badgeRadius * 0.4;
+      ctx.beginPath();
+      ctx.fillStyle = "#1a1a1a";
+      ctx.arc(badgeX, badgeY, badgeRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `${badgeRadius * 1.1}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(placement.group.size), badgeX, badgeY);
+    }
   }
 }

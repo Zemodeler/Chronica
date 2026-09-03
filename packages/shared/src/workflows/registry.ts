@@ -8,6 +8,8 @@ import { characterAgencyWorkflows } from "./definitions/character-agency";
 import { worldCreationWorkflows } from "./definitions/world-creation";
 import { politicalProcedureWorkflows } from "./definitions/political-procedures";
 import { familyWorkflows } from "./definitions/family";
+import { materialWorkflows } from "./definitions/material";
+import { battleResolutionWorkflows } from "./definitions/battle-resolution";
 import { z } from "zod";
 import type { AnyWorkflowDefinition } from "./types";
 import type { RuntimeInventedWorkflow } from "./invented-workflow";
@@ -30,6 +32,8 @@ const allWorkflows: AnyWorkflowDefinition[] = [
   ...worldCreationWorkflows,
   ...politicalProcedureWorkflows,
   ...familyWorkflows,
+  ...materialWorkflows,
+  ...battleResolutionWorkflows,
 ];
 
 /** Immutable registry map: actionId → WorkflowDefinition. */
@@ -51,7 +55,7 @@ export function buildWorkflowCatalog(inventedWorkflows: readonly RuntimeInvented
     "Authority key — [P]=player [W]=world_director [C]=character_director [S]=system",
     "Scope key (world_director only) — near|far|coarse (coarse = any tier)",
   ];
-  for (const category of ["military", "political", "economic", "character", "narrative", "map"] as const) {
+  for (const category of ["military", "political", "economic", "material", "character", "narrative", "map"] as const) {
     lines.push(`\n[${category.toUpperCase()}]`);
     for (const w of allWorkflows.filter((x) => x.category === category)) {
       const shape = w.parametersSchema instanceof z.ZodObject ? w.parametersSchema.shape : undefined;

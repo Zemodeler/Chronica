@@ -1058,7 +1058,7 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .character-detail-list span, .relation-cards span { color: var(--text-muted); font-size: .78rem; }
 .relation-cards p { margin: .25rem 0 0; color: var(--text-meta); font-size: .8rem; line-height: 1.4; }
 .money-graph { display: grid; gap: .25rem; margin: .75rem 0; padding: .8rem; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 8%, var(--surface-raised)); color: var(--accent); }
-.money-graph svg { width: 100%; height: 84px; }
+.money-graph canvas { display: block; width: 100%; height: 84px; }
 .money-graph span { color: var(--text-muted); font-size: .75rem; }
 .origin-age { display: flex; align-items: center; justify-content: space-between; padding: .7rem .75rem; border: 1px solid var(--border-subtle); background: var(--surface-raised); }
 .origin-age span { color: var(--text-muted); font-size: .8rem; }
@@ -1095,6 +1095,8 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .chat-open-button:hover { border-color: var(--accent); }
 .chat-panel-toggle { position: fixed; bottom: 5.5rem; z-index: 30; display: grid; width: 44px; height: 44px; place-items: center; border: 2px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--text-title); box-shadow: 0 2px 8px rgb(0 0 0 / 40%); cursor: pointer; font-size: 1.1rem; }
 .orders-panel-toggle { top: calc(8rem + 44px + .75rem); bottom: auto; left: 1rem; }
+/* Directly beneath Orders (docs/22): one button-height plus the same gap. */
+.chronicle-panel-toggle { top: calc(8rem + 44px + .75rem + 44px + .75rem); bottom: auto; left: 1rem; right: auto; }
 .chat-panel-toggle:hover { border-color: var(--accent); }
 .chat-panel-dialog { position: fixed; top: 4.5rem; left: 1rem; width: min(52rem, calc(100vw - 2rem)); height: calc(100dvh - 6rem); margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--text); box-shadow: 0 8px 32px rgb(0 0 0 / 55%); overflow: hidden; }
 .chat-panel-dialog[open] { display: flex; flex-direction: column; }

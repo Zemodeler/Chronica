@@ -38,6 +38,13 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
   const [error, setError] = useState<string | null>(null);
   const [currentOrder, setCurrentOrder] = useState<{ rawText: string } | null>(null);
   const [turnStatus, setTurnStatus] = useState<string | null>(null);
+  // Interrupt (docs/22): dismisses the full-screen progress overlay and
+  // returns to the normal map/control interface without touching
+  // resolution itself, which keeps running server-side and still commits
+  // when it finishes -- nothing is undone by looking away from it. The
+  // Chronicles button (chronicle-panel.tsx) reads whatever has already
+  // committed at any time, resolution running or not.
+  const [dismissed, setDismissed] = useState(false);
   const sseRef = useRef<EventSource | null>(null);
 
   const fetchCurrentOrder = useCallback(async () => {
@@ -74,6 +81,7 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
     setCurrentStep(null);
     setError(null);
     setResolving(true);
+    setDismissed(false);
 
     const sse = new EventSource(`/api/games/${encodeURIComponent(gameId)}/resolution/stream`);
     sseRef.current = sse;
@@ -193,6 +201,7 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
     const dismissTimeout = window.setTimeout(() => {
       setSteps([]);
       setCurrentStep(null);
+      setDismissed(false);
     }, 1_500);
     return () => window.clearTimeout(dismissTimeout);
   }, [resolutionDone]);
@@ -345,8 +354,10 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
         </div>
       </dialog>
 
-      {/* Full-screen resolution overlay */}
-      {(resolving || resolutionDone) && (
+      {/* Full-screen resolution overlay -- dismissible (docs/22 interrupt):
+          closing it only stops watching; resolution keeps running and still
+          commits, so nothing here is ever undone by returning to the map. */}
+      {(resolving || resolutionDone) && !dismissed && (
         <div
           style={{
             position: "fixed",
@@ -367,17 +378,38 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
               minWidth: "20rem",
             }}
           >
-            <p
-              style={{
-                fontSize: "0.75rem",
-                color: "var(--text-muted)",
-                marginBottom: "0.75rem",
-                letterSpacing: "0.05em",
-                textTransform: "uppercase",
-              }}
-            >
-              {resolving ? "Resolving your orders…" : "Resolution complete"}
-            </p>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "1rem" }}>
+              <p
+                style={{
+                  fontSize: "0.75rem",
+                  color: "var(--text-muted)",
+                  marginBottom: "0.75rem",
+                  letterSpacing: "0.05em",
+                  textTransform: "uppercase",
+                }}
+              >
+                {resolving ? "Resolving your orders…" : "Resolution complete"}
+              </p>
+              {resolving && (
+                <button
+                  type="button"
+                  onClick={() => setDismissed(true)}
+                  aria-label="Return to map; resolution continues in the background"
+                  title="Return to map"
+                  style={{
+                    background: "none",
+                    border: "1px solid var(--border-subtle)",
+                    borderRadius: "0.25rem",
+                    color: "var(--text-muted)",
+                    cursor: "pointer",
+                    fontSize: "0.75rem",
+                    padding: "0.25rem 0.5rem",
+                  }}
+                >
+                  Return to map
+                </button>
+              )}
+            </div>
             <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
               {RESOLUTION_PROGRESS_STAGES.map(({ step, group }, index) => {
                 const stepState = steps.find((s) => s.step === step);
