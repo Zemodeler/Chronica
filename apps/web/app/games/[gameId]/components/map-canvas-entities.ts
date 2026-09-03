@@ -60,10 +60,31 @@ function pulseOpacity(nowMs: number): number {
   return 0.55 + 0.45 * triangle;
 }
 
+function settlementTypeBaseRadius(type: string): number {
+  return type === "capital" ? .06 : type === "city" ? .035 : type === "town" ? .015 : type === "fort" || type === "port" ? .04 : .020;
+}
+
 function settlementRadius(type: string, pixelsPerDegree: number): number {
-  const base = type === "capital" ? .06 : type === "city" ? .035 : type === "town" ? .015 : type === "fort" || type === "port" ? .04 : .020;
+  const base = settlementTypeBaseRadius(type);
   const onScreenPixels = Math.min(Math.max(base * pixelsPerDegree, MIN_SETTLEMENT_PIXEL_RADIUS), MAX_SETTLEMENT_PIXEL_RADIUS);
   return onScreenPixels / pixelsPerDegree;
+}
+
+// A settlement's label size scales directly off the same per-type base radius
+// used for its marker above, so labels keep the exact size hierarchy the
+// markers already have (capital > port/fort > city > village > town). The
+// scale factor is calibrated so a capital's label renders at 0.35 world-space
+// units — the size a capital always rendered at under the old importance-based
+// formula (importance 100 × 0.0035) whenever it wasn't shrunk by the
+// now-removed cap tied to its polity's own territory-label size (which is
+// what happened to Rome's cities but never to Carthage's single, uncapped
+// capital) — so this restores that liked size for every settlement of a given
+// type, everywhere, independent of which polity owns it or how its territory
+// is shaped.
+const LABEL_FONT_SIZE_PER_RADIUS_UNIT = 0.35 / settlementTypeBaseRadius("capital");
+
+function settlementLabelBaseFontSize(type: string): number {
+  return settlementTypeBaseRadius(type) * LABEL_FONT_SIZE_PER_RADIUS_UNIT;
 }
 
 function drawDiamond(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number): void {
@@ -159,12 +180,7 @@ export function drawSettlements(
     if (!capital && !showTowns) continue;
 
     const legibleFloor = MIN_SETTLEMENT_LABEL_PIXEL_FONT / pixelsPerDegree;
-    // Sized purely from the settlement's own importance, the same formula for
-    // every polity, so a city's label reads at the same size regardless of
-    // how big or narrow the territory around it is (a long, thin peninsula
-    // like Roman Italy used to shrink its cities' labels via a now-removed
-    // cap tied to the polity's own territory-label size).
-    const labelSize = Math.max((state?.importance ?? 50) * .0035, legibleFloor);
+    const labelSize = Math.max(settlementLabelBaseFontSize(settlement.type), legibleFloor);
     const labelY = y + radius + SETTLEMENT_LABEL_GAP_PIXELS / pixelsPerDegree;
     labelCandidates.push({ name: settlement.name, x, labelY, fontSize: labelSize, priority: capital ? Number.POSITIVE_INFINITY : (state?.importance ?? 50) });
   }
