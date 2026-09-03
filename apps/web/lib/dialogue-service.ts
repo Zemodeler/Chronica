@@ -946,7 +946,7 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
     personalAccountId: `${npcCharacterId}:abstract`, skills: npcSkills,
     traits: [], mind: deriveDefaultMind({ officeId: null, skills: npcSkills, ageYears: 35, cultureId: "local" }),
     healthBps: 8_000, prestigeBps: 3_000, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null,
-    disqualifyingStatuses: [],
+    disqualifyingStatuses: [], birthStep: null, nextLifeReviewAtStep: null,
   };
   const profile: CharacterProfile = {
     gameId, characterId: npcCharacterId, version: 1, roleLabel: parsed.roleLabel,

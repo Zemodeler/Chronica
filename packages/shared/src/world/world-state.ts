@@ -14,6 +14,8 @@ import { CharacterBeliefSchema } from "../characters/beliefs";
 import { SocialLinkSchema } from "../characters/relationship-dimensions";
 import { CommitmentSchema } from "../character-agency/commitments";
 import { CharacterIntentSchema } from "../character-agency/intents";
+import { FamilyLinkSchema, HouseholdSchema, LifeContractSchema } from "../characters/family";
+import { LegacyCauseSchema } from "../continuity/continuity";
 
 /**
  * Bumped when an old snapshot needs upgrading on load.
@@ -96,6 +98,14 @@ export const WorldStateSchema = z
     // packages/shared/src/character-agency/{commitments,intents}.ts.
     commitments: z.array(CommitmentSchema).default([]),
     characterIntents: z.array(CharacterIntentSchema).default([]),
+    // Character-sim phase 5: canonical family/household graph, life
+    // contracts, and activated legacy causes. Defaulted so archived snapshots
+    // load cleanly; see packages/shared/src/characters/family.ts and
+    // packages/shared/src/continuity/continuity.ts's LegacyCauseSchema.
+    familyLinks: z.array(FamilyLinkSchema).default([]),
+    households: z.array(HouseholdSchema).default([]),
+    lifeContracts: z.array(LifeContractSchema).default([]),
+    legacyCauses: z.array(LegacyCauseSchema).default([]),
     /**
      * Compact account of the turn that produced this snapshot.  It is kept in
      * the snapshot so the following turn's AI calls can use committed history
@@ -103,5 +113,55 @@ export const WorldStateSchema = z
      */
     lastTurnSummary: z.string().trim().min(1).max(1_800).nullable().default(null),
   })
-  .strict();
+  .strict()
+  .superRefine((world, context) => {
+    const characterIds = new Set(world.characters.map((c) => c.id));
+    const requireCharacter = (id: string, path: (string | number)[], message: string) => {
+      if (!characterIds.has(id)) context.addIssue({ code: "custom", path, message });
+    };
+
+    const seenActiveLinks = new Set<string>();
+    world.familyLinks.forEach((link, index) => {
+      requireCharacter(link.characterId, ["familyLinks", index, "characterId"], "A family link must reference an existing character.");
+      requireCharacter(link.relatedCharacterId, ["familyLinks", index, "relatedCharacterId"], "A family link must reference an existing character.");
+      if (link.characterId === link.relatedCharacterId) {
+        context.addIssue({ code: "custom", path: ["familyLinks", index, "relatedCharacterId"], message: "A character cannot hold a family link to themselves." });
+      }
+      if (link.endedAtStep === null) {
+        const key = `${link.characterId}:${link.relatedCharacterId}:${link.kind}`;
+        if (seenActiveLinks.has(key)) {
+          context.addIssue({ code: "custom", path: ["familyLinks", index], message: "Duplicate active family link of the same kind between the same two characters." });
+        }
+        seenActiveLinks.add(key);
+        // The one impossible case this guards: a direct two-node cycle, e.g.
+        // A parent-of B and B parent-of A simultaneously active. Deeper
+        // n-node cycles are out of scope -- named-character family ties stay
+        // bounded, not an exhaustively-validated tree.
+        if (link.kind === "parent") {
+          const reverseKey = `${link.relatedCharacterId}:${link.characterId}:parent`;
+          if (seenActiveLinks.has(reverseKey)) {
+            context.addIssue({ code: "custom", path: ["familyLinks", index], message: "A parent/child relationship cannot run in both directions between the same two characters." });
+          }
+        }
+      }
+    });
+
+    world.households.forEach((household, index) => {
+      if (household.headCharacterId !== null) {
+        requireCharacter(household.headCharacterId, ["households", index, "headCharacterId"], "A household's head must reference an existing character.");
+      }
+    });
+
+    world.lifeContracts.forEach((contract, index) => {
+      contract.partyCharacterIds.forEach((partyId, partyIndex) => {
+        requireCharacter(partyId, ["lifeContracts", index, "partyCharacterIds", partyIndex], "A life contract's party must reference an existing character.");
+      });
+    });
+
+    world.legacyCauses.forEach((entry, index) => {
+      requireCharacter(entry.holderCharacterId, ["legacyCauses", index, "holderCharacterId"], "A legacy cause's holder must reference an existing character.");
+      requireCharacter(entry.successorCharacterId, ["legacyCauses", index, "successorCharacterId"], "A legacy cause's successor must reference an existing character.");
+      requireCharacter(entry.predecessorCharacterId, ["legacyCauses", index, "predecessorCharacterId"], "A legacy cause's predecessor must reference an existing character.");
+    });
+  });
 export type WorldState = z.infer<typeof WorldStateSchema>;

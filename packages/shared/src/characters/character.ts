@@ -149,11 +149,28 @@ export const CharacterSchema = z
     polityId: EntityIdSchema.nullable(),
 
     /**
-     * Age at the scenario's step zero. Current age is derived from elapsedStep
-     * and the scenario's steps-per-year, so nothing has to be recomputed into
-     * the snapshot every step -- and no character needs a negative birth step.
+     * Age at the scenario's step zero. Frozen at creation -- never mutate this
+     * after a character exists; use `characters/age.ts`'s `currentAgeYears` to
+     * get today's age. (The `add_age` workflow that once mutated this directly
+     * is now a system-only data-correction path, not part of normal play.)
      */
     ageYearsAtStart: z.number().int().min(0).max(120),
+
+    /**
+     * The exact elapsedStep this character was born, for a character born
+     * during play (character-sim phase 5). `null` (the default, so every
+     * pre-phase-5 character stays valid) means "derive age from
+     * `ageYearsAtStart` as of elapsedStep 0" -- today's behaviour.
+     */
+    birthStep: z.number().int().safe().nullable().default(null),
+
+    /**
+     * Next step this character's life (aging, health, incapacity, death) is
+     * due for deterministic review (character-sim phase 5). `null` means not
+     * yet opted into review -- every pre-phase-5 character stays valid; the
+     * turn pipeline schedules it going forward.
+     */
+    nextLifeReviewAtStep: ElapsedStepSchema.nullable().default(null),
 
     /** The office held, if any. A character's reach is their office. */
     officeId: EntityIdSchema.nullable(),
