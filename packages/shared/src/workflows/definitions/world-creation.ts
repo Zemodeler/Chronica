@@ -92,6 +92,7 @@ export const worldCreationWorkflows: AnyWorkflowDefinition[] = [
         createdByDirector: true,
         createdAtStep: context.atStep,
         creationReason: params.provenance.reason,
+        disqualifyingStatuses: [],
       };
 
       return {

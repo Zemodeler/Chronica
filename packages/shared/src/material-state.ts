@@ -277,6 +277,306 @@ export const VoteRecordSchema = z
   });
 export type VoteRecord = z.infer<typeof VoteRecordSchema>;
 
+// Political institutions, factions and procedures (character-sim phase 4).
+//
+// Offices/institutions/voting blocs already existed as inert scaffold; this
+// section adds the pieces that make them load-bearing: reusable eligibility
+// requirements, political groups distinct from institutions, an authoritative
+// office-seat/term record, a generic typed procedure lifecycle, and canonical
+// per-supporter support/opposition records. A procedure's `resolutionMechanism`
+// is scenario data -- a vote is one mechanism among several, never the default.
+
+export const EligibilityRequirementKindSchema = z.enum([
+  "alive",
+  "polity_membership",
+  "culture_membership",
+  "faith_membership",
+  "group_membership",
+  "min_prestige",
+  "holds_office",
+  "not_disqualified",
+  "sponsorship_required",
+  "custom_scenario_flag",
+]);
+export type EligibilityRequirementKind = z.infer<typeof EligibilityRequirementKindSchema>;
+
+/**
+ * A single reusable eligibility test, referenced by id from an office or a
+ * procedure. `params` is a loose bag because each kind needs different data
+ * (a polity id, a minimum prestige, a required office id, a custom flag) --
+ * the kind enum is the closed, validated part; params are scenario data.
+ */
+export const EligibilityRequirementSchema = z
+  .object({
+    id: EntityIdSchema,
+    kind: EligibilityRequirementKindSchema,
+    label: z.string().trim().min(1).max(160),
+    params: z.record(z.string(), z.unknown()).default({}),
+  })
+  .strict();
+export type EligibilityRequirement = z.infer<typeof EligibilityRequirementSchema>;
+
+export const PoliticalGroupTypeSchema = z.enum([
+  "faction",
+  "household",
+  "military_command",
+  "religious_body",
+  "merchant_interest",
+  "landholder_interest",
+  "other",
+]);
+export type PoliticalGroupType = z.infer<typeof PoliticalGroupTypeSchema>;
+
+/**
+ * A faction, household, military command, or other coalition a character can
+ * belong to. Distinct from a `GovernmentInstitution`: a group is a social
+ * coalition with a platform and leadership, not a body with formal voting
+ * power (though a group's members may compose an institution's voting blocs).
+ */
+export const PoliticalGroupSchema = z
+  .object({
+    id: EntityIdSchema,
+    name: z.string().trim().min(1).max(120),
+    polityId: EntityIdSchema.nullable(),
+    type: PoliticalGroupTypeSchema,
+    leaderCharacterId: EntityIdSchema.nullable(),
+    platform: z.array(z.string().trim().min(1).max(200)).max(12),
+    resourceAccountId: EntityIdSchema.nullable(),
+    publicReputationBps: BasisPointsSchema,
+    active: z.boolean(),
+  })
+  .strict();
+export type PoliticalGroup = z.infer<typeof PoliticalGroupSchema>;
+
+/**
+ * A character's membership in a group. Membership is reach, not agreement --
+ * a member can still oppose any single procedure their group's leadership
+ * sponsors (see `SupportPosition`). A character may hold many of these.
+ */
+export const GroupMembershipSchema = z
+  .object({
+    characterId: EntityIdSchema,
+    groupId: EntityIdSchema,
+    role: z.string().trim().min(1).max(120),
+    influenceBps: BasisPointsSchema,
+    loyaltyBps: SignedScoreSchema,
+    visibility: VisibilitySchema,
+    joinedAtStep: ElapsedStepSchema,
+    leftAtStep: ElapsedStepSchema.nullable().default(null),
+    joinProvenanceEventId: EntityIdSchema.nullable(),
+    leaveProvenanceEventId: EntityIdSchema.nullable().default(null),
+  })
+  .strict();
+export type GroupMembership = z.infer<typeof GroupMembershipSchema>;
+
+export const OfficeSeatStatusSchema = z.enum(["held", "vacant"]);
+export const OfficeSeatVacancyCauseSchema = z.enum([
+  "none",
+  "death",
+  "removal",
+  "resignation",
+  "term_expired",
+  "never_filled",
+]);
+
+/**
+ * The authoritative holder/term/provenance record for one seat of an office.
+ * `Character.officeId` remains the compatibility mirror consumers already
+ * read; this is the record workflows actually appoint/remove/expire through.
+ * `seatIndex` supports multi-seat offices (e.g. two co-equal magistrates).
+ */
+export const OfficeSeatSchema = z
+  .object({
+    id: EntityIdSchema,
+    officeId: EntityIdSchema,
+    seatIndex: z.number().int().nonnegative().default(0),
+    holderCharacterId: EntityIdSchema.nullable(),
+    status: OfficeSeatStatusSchema,
+    vacancyCause: OfficeSeatVacancyCauseSchema,
+    termStartedAtStep: ElapsedStepSchema.nullable(),
+    termExpiresAtStep: ElapsedStepSchema.nullable(),
+    appointmentProcedureId: EntityIdSchema.nullable(),
+    removalProcedureId: EntityIdSchema.nullable(),
+    eligibilityRequirementIds: z.array(EntityIdSchema).default([]),
+  })
+  .strict()
+  .superRefine((seat, context) => {
+    if (seat.status === "held" && seat.holderCharacterId === null) {
+      context.addIssue({ code: "custom", path: ["holderCharacterId"], message: "A held seat must name its holder." });
+    }
+    if (seat.status === "vacant" && seat.holderCharacterId !== null) {
+      context.addIssue({ code: "custom", path: ["holderCharacterId"], message: "A vacant seat cannot have a holder." });
+    }
+    if (seat.status === "vacant" && seat.vacancyCause === "none") {
+      context.addIssue({ code: "custom", path: ["vacancyCause"], message: "A vacant seat must record why it is vacant." });
+    }
+  });
+export type OfficeSeat = z.infer<typeof OfficeSeatSchema>;
+
+export const PoliticalProcedureTypeSchema = z.enum([
+  "nomination",
+  "appointment",
+  "removal",
+  "vote",
+  "council_deliberation",
+  "decree",
+  "petition",
+  "treaty_ratification",
+  "command_assignment",
+  "endorsement",
+  "denunciation",
+]);
+export type PoliticalProcedureType = z.infer<typeof PoliticalProcedureTypeSchema>;
+
+export const PoliticalProcedureStageSchema = z.enum([
+  "proposed",
+  "gathering_support",
+  "deliberating",
+  "voting_or_deciding",
+  "resolved",
+  "withdrawn",
+  "blocked",
+]);
+export type PoliticalProcedureStage = z.infer<typeof PoliticalProcedureStageSchema>;
+
+/**
+ * How a procedure is decided. A scenario may use `vote` for a council, but
+ * `appointment_authority`/`seniority`/`decree_authority`/`sponsor_discretion`
+ * are equally valid and require no voting bloc at all -- the engine never
+ * assumes a legislature (docs/07).
+ */
+export const PoliticalResolutionMechanismSchema = z.enum([
+  "vote",
+  "appointment_authority",
+  "seniority",
+  "decree_authority",
+  "sponsor_discretion",
+]);
+export type PoliticalResolutionMechanism = z.infer<typeof PoliticalResolutionMechanismSchema>;
+
+export const PoliticalProcedureSubjectKindSchema = z.enum([
+  "office_seat",
+  "character",
+  "force",
+  "treaty",
+  "polity",
+  "group",
+]);
+
+export const PoliticalProcedureOutcomeSchema = z.enum(["passed", "failed", "blocked", "withdrawn"]);
+
+/**
+ * A generic, typed political procedure: the legal route through which a
+ * sponsor, an institution (where one applies) and eligible participants turn
+ * an intent into an authorized workflow invocation. `linkedWorkflowId` +
+ * `linkedWorkflowParams` name the single action this procedure may authorize
+ * on success -- resolved once, replayed deterministically from stored state.
+ */
+export const PoliticalProcedureSchema = z
+  .object({
+    id: EntityIdSchema,
+    type: PoliticalProcedureTypeSchema,
+    institutionId: EntityIdSchema.nullable(),
+    sponsorCharacterId: EntityIdSchema,
+    subjectKind: PoliticalProcedureSubjectKindSchema,
+    subjectId: EntityIdSchema.nullable(),
+    linkedWorkflowId: EntityIdSchema,
+    linkedWorkflowParams: z.record(z.string(), z.unknown()).default({}),
+    eligibilityRequirementIds: z.array(EntityIdSchema).default([]),
+    eligibleParticipantIds: z.array(EntityIdSchema).default([]),
+    stage: PoliticalProcedureStageSchema,
+    resolutionMechanism: PoliticalResolutionMechanismSchema,
+    openedAtStep: ElapsedStepSchema,
+    deadlineStep: ElapsedStepSchema.nullable().default(null),
+    resolvedAtStep: ElapsedStepSchema.nullable().default(null),
+    visibility: VisibilitySchema,
+    voteRecordId: EntityIdSchema.nullable().default(null),
+    outcome: PoliticalProcedureOutcomeSchema.nullable().default(null),
+    outcomeReason: z.string().trim().max(400).nullable().default(null),
+    sourceEventIds: z.array(EntityIdSchema).max(8).default([]),
+    resultingEventIds: z.array(EntityIdSchema).max(8).default([]),
+  })
+  .strict()
+  .superRefine((procedure, context) => {
+    if (procedure.resolutionMechanism === "vote" && procedure.institutionId === null) {
+      context.addIssue({
+        code: "custom",
+        path: ["institutionId"],
+        message: "A vote-resolved procedure must name the institution voting on it.",
+      });
+    }
+    const resolvedStages: PoliticalProcedureStage[] = ["resolved", "withdrawn", "blocked"];
+    if (resolvedStages.includes(procedure.stage) && procedure.stage === "resolved" && procedure.outcome === null) {
+      context.addIssue({ code: "custom", path: ["outcome"], message: "A resolved procedure must record an outcome." });
+    }
+    if (!resolvedStages.includes(procedure.stage) && procedure.outcome !== null) {
+      context.addIssue({ code: "custom", path: ["outcome"], message: "An unresolved procedure cannot have an outcome yet." });
+    }
+  });
+export type PoliticalProcedure = z.infer<typeof PoliticalProcedureSchema>;
+
+export const SupportPositionKindSchema = z.enum(["character", "group"]);
+export const SupportPositionChoiceSchema = z.enum(["support", "oppose", "abstain", "undecided"]);
+export const SupportReasonKindSchema = z.enum([
+  "belief",
+  "relationship",
+  "commitment",
+  "threat",
+  "favour",
+  "ideology",
+  "group_loyalty",
+  "material_interest",
+]);
+
+export const SupportReasonSchema = z.object({
+  kind: SupportReasonKindSchema,
+  label: z.string().trim().min(1).max(200),
+  score: SignedScoreSchema,
+  sourceId: EntityIdSchema,
+});
+export type SupportReason = z.infer<typeof SupportReasonSchema>;
+
+/**
+ * A canonical, provenance-carrying support/opposition record for one
+ * procedure. Records are append-only: the current position for a supporter
+ * is its latest row by `changedAtStep`, so a change of mind before resolution
+ * is a new row, not a mutation, and the full history survives for diagnostics.
+ */
+export const SupportPositionSchema = z
+  .object({
+    id: EntityIdSchema,
+    procedureId: EntityIdSchema,
+    supporterKind: SupportPositionKindSchema,
+    supporterId: EntityIdSchema,
+    position: SupportPositionChoiceSchema,
+    influenceWeight: z.number().int().nonnegative(),
+    visibility: VisibilitySchema,
+    reasons: z.array(SupportReasonSchema).max(12),
+    provenanceEventIds: z.array(EntityIdSchema).max(8).default([]),
+    changedAtStep: ElapsedStepSchema,
+  })
+  .strict();
+export type SupportPosition = z.infer<typeof SupportPositionSchema>;
+
+export const PolityLegitimacySchema = z
+  .object({
+    polityId: EntityIdSchema,
+    legitimacyBps: BasisPointsSchema,
+    institutionalConfidenceBps: BasisPointsSchema,
+    causes: z.array(PoliticalCauseSchema),
+  })
+  .strict();
+export type PolityLegitimacy = z.infer<typeof PolityLegitimacySchema>;
+
+export const InstitutionLegitimacySchema = z
+  .object({
+    institutionId: EntityIdSchema,
+    legitimacyBps: BasisPointsSchema,
+    causes: z.array(PoliticalCauseSchema),
+  })
+  .strict();
+export type InstitutionLegitimacy = z.infer<typeof InstitutionLegitimacySchema>;
+
 export const UnavailablePersonnelGroupSchema = z.object({
   id: EntityIdSchema,
   count: z.number().int().positive(),
@@ -345,6 +645,14 @@ export const MaterialWorldStateSchema = z
     motions: z.array(MotionSchema),
     voteRecords: z.array(VoteRecordSchema),
     forces: z.array(ForceSchema),
+    eligibilityRequirements: z.array(EligibilityRequirementSchema).default([]),
+    politicalGroups: z.array(PoliticalGroupSchema).default([]),
+    groupMemberships: z.array(GroupMembershipSchema).default([]),
+    officeSeats: z.array(OfficeSeatSchema).default([]),
+    politicalProcedures: z.array(PoliticalProcedureSchema).default([]),
+    supportPositions: z.array(SupportPositionSchema).default([]),
+    polityLegitimacy: z.array(PolityLegitimacySchema).default([]),
+    institutionLegitimacy: z.array(InstitutionLegitimacySchema).default([]),
   })
   .superRefine((state, context) => {
     const ids = <T extends { id: string }>(values: T[]) => new Set(values.map((value) => value.id));
@@ -353,6 +661,9 @@ export const MaterialWorldStateSchema = z
     const obligationIds = ids(state.obligations);
     const institutionIds = ids(state.institutions);
     const motionIds = ids(state.motions);
+    const groupIds = ids(state.politicalGroups);
+    const eligibilityRequirementIds = ids(state.eligibilityRequirements);
+    const procedureIds = ids(state.politicalProcedures);
     const requireReference = (exists: boolean, path: (string | number)[], message: string) => {
       if (!exists) context.addIssue({ code: "custom", path, message });
     };
@@ -395,6 +706,64 @@ export const MaterialWorldStateSchema = z
       if (force.payObligationId !== null) {
         requireReference(obligationIds.has(force.payObligationId), ["forces", index, "payObligationId"], "Force pay must reference an existing obligation.");
       }
+    });
+
+    // A group's leaderCharacterId is cross-checked against the character list
+    // at the WorldState level, not here -- MaterialWorldState has no view of it.
+    state.politicalGroups.forEach((group, index) => {
+      if (group.resourceAccountId !== null) {
+        requireReference(accountIds.has(group.resourceAccountId), ["politicalGroups", index, "resourceAccountId"], "A political group's resource account must exist.");
+      }
+    });
+    state.groupMemberships.forEach((membership, index) => {
+      requireReference(groupIds.has(membership.groupId), ["groupMemberships", index, "groupId"], "A group membership must reference an existing political group.");
+    });
+    const seenSeats = new Set<string>();
+    state.officeSeats.forEach((seat, index) => {
+      const seatKey = `${seat.officeId}:${seat.seatIndex}`;
+      requireReference(!seenSeats.has(seatKey), ["officeSeats", index, "seatIndex"], "An office seat index must be unique per office.");
+      seenSeats.add(seatKey);
+      seat.eligibilityRequirementIds.forEach((requirementId, requirementIndex) => {
+        requireReference(
+          eligibilityRequirementIds.has(requirementId),
+          ["officeSeats", index, "eligibilityRequirementIds", requirementIndex],
+          "An office seat's eligibility requirement must exist.",
+        );
+      });
+      if (seat.appointmentProcedureId !== null) {
+        requireReference(procedureIds.has(seat.appointmentProcedureId), ["officeSeats", index, "appointmentProcedureId"], "A seat's appointment procedure must exist.");
+      }
+      if (seat.removalProcedureId !== null) {
+        requireReference(procedureIds.has(seat.removalProcedureId), ["officeSeats", index, "removalProcedureId"], "A seat's removal procedure must exist.");
+      }
+    });
+    state.politicalProcedures.forEach((procedure, index) => {
+      if (procedure.institutionId !== null) {
+        requireReference(institutionIds.has(procedure.institutionId), ["politicalProcedures", index, "institutionId"], "A procedure's institution must exist.");
+      }
+      if (procedure.voteRecordId !== null) {
+        requireReference(
+          state.voteRecords.some((record) => record.id === procedure.voteRecordId),
+          ["politicalProcedures", index, "voteRecordId"],
+          "A procedure's vote record must exist.",
+        );
+      }
+      procedure.eligibilityRequirementIds.forEach((requirementId, requirementIndex) => {
+        requireReference(
+          eligibilityRequirementIds.has(requirementId),
+          ["politicalProcedures", index, "eligibilityRequirementIds", requirementIndex],
+          "A procedure's eligibility requirement must exist.",
+        );
+      });
+    });
+    state.supportPositions.forEach((position, index) => {
+      requireReference(procedureIds.has(position.procedureId), ["supportPositions", index, "procedureId"], "A support position must reference an existing procedure.");
+      if (position.supporterKind === "group") {
+        requireReference(groupIds.has(position.supporterId), ["supportPositions", index, "supporterId"], "A group support position must reference an existing political group.");
+      }
+    });
+    state.institutionLegitimacy.forEach((entry, index) => {
+      requireReference(institutionIds.has(entry.institutionId), ["institutionLegitimacy", index, "institutionId"], "Institution legitimacy must reference an existing institution.");
     });
   });
 export type MaterialWorldState = z.infer<typeof MaterialWorldStateSchema>;

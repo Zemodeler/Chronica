@@ -38,6 +38,8 @@ export const CharacterIntentActionTypeSchema = z.enum([
   "seek_office",
   "military_action",
   "economic_action",
+  "sponsor_procedure",
+  "pledge_support",
 ]);
 export type CharacterIntentActionType = z.infer<typeof CharacterIntentActionTypeSchema>;
 

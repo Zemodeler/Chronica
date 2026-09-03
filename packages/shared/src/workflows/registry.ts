@@ -6,6 +6,7 @@ import { narrativeWorkflows } from "./definitions/narrative";
 import { mapWorkflows } from "./definitions/map";
 import { characterAgencyWorkflows } from "./definitions/character-agency";
 import { worldCreationWorkflows } from "./definitions/world-creation";
+import { politicalProcedureWorkflows } from "./definitions/political-procedures";
 import { z } from "zod";
 import type { AnyWorkflowDefinition } from "./types";
 import type { RuntimeInventedWorkflow } from "./invented-workflow";
@@ -26,6 +27,7 @@ const allWorkflows: AnyWorkflowDefinition[] = [
   ...mapWorkflows,
   ...characterAgencyWorkflows,
   ...worldCreationWorkflows,
+  ...politicalProcedureWorkflows,
 ];
 
 /** Immutable registry map: actionId → WorkflowDefinition. */

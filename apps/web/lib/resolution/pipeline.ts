@@ -43,6 +43,8 @@ import {
   generateCandidateActions,
   rankCandidates,
   resolveIntentConflicts,
+  resolveDueProcedures,
+  netSupportWeight,
 } from "@chronica/shared";
 import { collectCharacterAgencyCandidates, collectPlayerCandidates, collectWorldCandidates, previewPlayerWorkflows, runWorkflowManager } from "./workflow-manager";
 
@@ -408,6 +410,7 @@ function materializePlayerCharacter(
     heirCharacterId: null,
     alive: true,
     diedAtStep: null,
+    disqualifyingStatuses: [],
   };
 
   return {
@@ -1476,12 +1479,28 @@ export async function resolveTurn(
     console.log(`${tag()} [manage] OUT: ${managerResult.acceptedInvocations.length}/${finalCandidates.length} workflow(s) accepted`);
     emit(onProgress, "manage", true);
 
+    // ── Step 10.5: Resolve due political procedures ───────────────────────
+    // Deterministic, no AI involved: any procedure at voting_or_deciding (or
+    // past its deadline) resolves here by its declared resolutionMechanism,
+    // producing at most one authorized workflow invocation per procedure
+    // (character-sim phase 4, packages/shared/src/character-agency/political-resolver.ts).
+    emit(onProgress, "resolve_politics");
+    const politicsResolution = resolveDueProcedures({ characters: agencyWorld.characters, material: agencyWorld.material }, atStep);
+    agencyWorld = { ...agencyWorld, material: politicsResolution.material };
+    const politicalInvocations: ProposedInvocation[] = politicsResolution.invocations.map((inv) => ({
+      actionId: inv.actionId,
+      actorId: inv.actorId,
+      parameters: inv.parameters,
+    }));
+    console.log(`${tag()} [resolve_politics] OUT: ${politicalInvocations.length} procedure(s) resolved to an authorized invocation`);
+    emit(onProgress, "resolve_politics", true);
+
     emit(onProgress, "execute_world");
 
     // Battle proximity: if start_battle is in the accepted invocations and the
     // two forces are currently in different provinces, prepend a move_force so
     // both appear co-located on the map when the battle begins.
-    const invocationsToExecute = [...managerResult.acceptedInvocations];
+    const invocationsToExecute = [...managerResult.acceptedInvocations, ...politicalInvocations];
     for (const inv of managerResult.acceptedInvocations) {
       if (inv.actionId !== "start_battle") continue;
       const params = inv.parameters;
@@ -1609,6 +1628,44 @@ export async function resolveTurn(
       }
     }
 
+    // Player-visible, provenance-carrying account of every political procedure
+    // resolved this turn -- institution, sponsor, net support/opposition,
+    // outcome and public reason only. Never the per-supporter reasons or
+    // undisclosed positions the admin political inspector shows
+    // (packages/shared/src/characters/political-inspector.ts).
+    const politicalChronicle: ChronicleEntryInput[] = [];
+    for (const procedure of politicsResolution.material.politicalProcedures) {
+      if (procedure.resolvedAtStep !== atStep) continue;
+      const sponsor = newWorld.characters.find((c) => c.id === procedure.sponsorCharacterId);
+      const institution = procedure.institutionId
+        ? newWorld.material.institutions.find((i) => i.id === procedure.institutionId)
+        : undefined;
+      const outcome = procedure.outcome ?? "failed";
+      const weights = netSupportWeight({ characters: newWorld.characters, material: newWorld.material }, procedure);
+      const readableType = procedure.type.replace(/_/g, " ");
+      const outcomeVerb = outcome === "passed" ? "succeeds" : outcome === "blocked" ? "is blocked" : outcome === "withdrawn" ? "is withdrawn" : "fails";
+      politicalChronicle.push({
+        sequence: 0,
+        scope: "political_procedure",
+        scopeRef: procedure.id,
+        audience: procedure.visibility === "private" ? "knowledge_scoped" : "all_players",
+        body: `${sponsor?.name ?? "A sponsor"}'s ${readableType} ${outcomeVerb}${institution ? ` before the ${institution.name}` : ""}. ${procedure.outcomeReason ?? ""}`.trim(),
+        atStep,
+        materialConsequence: outcome === "passed",
+        simulatedDurationDays: 1,
+        politicalOutcome: {
+          procedureId: procedure.id,
+          procedureType: procedure.type,
+          institutionName: institution?.name ?? null,
+          sponsorName: sponsor?.name ?? "Unknown",
+          outcome,
+          publicReason: procedure.outcomeReason ?? "",
+          netSupportWeight: weights.support,
+          netOppositionWeight: weights.oppose,
+        },
+      });
+    }
+
     const displayPatch = buildDisplayPatch(resolutionWorld, newWorld);
     const displayPatchByInvocation = new Map<string, unknown>();
     for (const entry of allWorkflowLog) {
@@ -1641,7 +1698,7 @@ export async function resolveTurn(
       displayPatchByInvocation,
       playerId,
     );
-    chronicleInputs = scheduleChronicleEntries([...chronicleInputs, ...commitmentChronicle]);
+    chronicleInputs = scheduleChronicleEntries([...chronicleInputs, ...commitmentChronicle, ...politicalChronicle]);
 
     if (displayPatch && chronicleInputs.length > 0) {
       const lastIdx = chronicleInputs.length - 1;

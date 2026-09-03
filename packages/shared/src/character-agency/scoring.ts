@@ -46,6 +46,8 @@ const ACTION_DRIVES: Record<CharacterIntentActionType, readonly (keyof Character
   seek_office: ["status", "wealth"],
   military_action: ["security", "revenge"],
   economic_action: ["wealth"],
+  sponsor_procedure: ["status", "duty"],
+  pledge_support: ["status", "duty"],
 };
 
 /** Trait decision-modifier key each action type is most sensitive to (`traits.ts`'s `decisionModifiers`). */
@@ -70,6 +72,8 @@ const ACTION_MODIFIER_KEYS: Record<CharacterIntentActionType, readonly string[]>
   seek_office: ["status"],
   military_action: ["risk"],
   economic_action: ["status"],
+  sponsor_procedure: ["discipline"],
+  pledge_support: ["sociability"],
 };
 
 /** Cooperative actions read existing affection/trust as a bonus; aggressive ones read it as a discount (less to lose). */
