@@ -59,8 +59,8 @@ describe("Punic Wars opening political map", () => {
     expect(controller.get("punic-greece-grc-local-53547021b2738722376900")).toBe("athens");
     expect(controller.get("punic-greece-grc-local-53547021b92158672895518")).toBe("sparta");
     expect(controller.get("punic-greece-grc-local-53547021b34089236971204")).toBe("megalopolis");
-    const groups = ["punic-hungary-", "punic-illyria-", "punic-britain-", "punic-greece-"] as const;
-    for (const prefix of groups) {
+    // Hungary, Illyria, and Britain remain many small local territories consolidated under few polities.
+    for (const prefix of ["punic-hungary-", "punic-illyria-", "punic-britain-"] as const) {
       const records = PUNIC_WARS_CONTROL_MANIFEST.filter((record) => record.provinceId.startsWith(prefix));
       expect(records).not.toHaveLength(0);
       expect(new Set(records.map((record) => record.controllerPolityId)).size).toBeLessThan(records.length / 2);
@@ -70,45 +70,63 @@ describe("Punic Wars opening political map", () => {
     ]));
   });
 
-  it("gives the southern Greek mainland and the Aegean their own fragmented polities rather than one catch-all bucket", () => {
+  it("gives every southern Greek city-state/league and every Aegean/Ionian island group exactly one region, while the north keeps several", () => {
     const overlay = punicWarsOpeningOverlay(0);
     const controller = new Map(overlay.provinces.map((province) => [province.provinceId, province.controllerPolityId]));
-    // Central/southern mainland leagues and city-states carved out of the old achaean-league catch-all.
-    expect(controller.get("punic-greece-grc-local-53547021b76628339296380")).toBe("argos"); // Argos-Mykines
-    expect(controller.get("punic-greece-grc-local-53547021b7583828069802")).toBe("corinthian-league"); // Corinth
-    expect(controller.get("punic-greece-grc-local-53547021b21928215171810")).toBe("arcadian-league"); // Tripoli
-    expect(controller.get("punic-greece-grc-local-53547021b62210225540795")).toBe("phocian-league"); // Delphi
-    expect(controller.get("punic-greece-grc-local-53547021b4929221298038")).toBe("euboean-cities"); // Chalcis
-    // The Aegean and Ionian Sea are fragmented into several island polities, not one "hellenic-islanders" blob.
-    expect(controller.get("punic-greece-grc-local-53547021b4893314686518")).toBe("ionian-islands"); // Corfu
-    expect(controller.get("punic-greece-grc-local-53547021b91453036712640")).toBe("cycladic-islanders"); // Naxos and Lesser Cyclades
-    expect(controller.get("punic-greece-grc-local-53547021b33259065854290")).toBe("dodecanese-islanders"); // Rhodes
-    expect(controller.get("punic-greece-grc-local-53547021b48314635979132")).toBe("aeolis-communities"); // Lesbos
-    expect(controller.get("punic-greece-grc-local-53547021b1583318227364")).toBe("ionia-communities"); // Samos
-    expect(controller.get("punic-greece-grc-local-53547021b22915983963117")).toBe("cretan-cities-east"); // Heraklion
-    expect(controller.get("punic-greece-grc-local-53547021b84334822638882")).toBe("cretan-cities-west"); // Chania
-    const greekPolities = new Set(PUNIC_WARS_CONTROL_MANIFEST.filter((record) => record.provinceId.startsWith("punic-greece-")).map((record) => record.controllerPolityId));
-    expect(greekPolities.size).toBeGreaterThan(20);
-    expect(overlay.polities.map((polity) => polity.name)).toEqual(expect.arrayContaining(["Argos", "Corinthian League", "Arcadian League", "Phocian League", "Euboean cities"]));
+    const provincesByName = new Map(punicWarsGeoJson.features.filter((feature) => feature.properties.kind === "province" && feature.id.startsWith("punic-greece-")).map((feature) => [feature.properties.name, feature.id]));
+
+    // Every southern/Aegean polity is backed by exactly one province.
+    const SOUTHERN_AND_ISLAND_POLITIES: Readonly<Record<string, string>> = {
+      Athens: "athens", Acarnania: "acarnania", Achaea: "achaean-league", Aetolia: "aetolian-league", Midelion: "arcadian-league",
+      Argos: "argos", Boeotia: "boeotian-league", Thebes: "thebes", Corinthia: "corinthian-league", Elis: "elis",
+      Euboea: "euboean-cities", Messenia: "messenia", Phocis: "phocian-league", Sparta: "sparta", Megalopolis: "megalopolis",
+      "Eastern Crete": "cretan-cities-east", "Western Crete": "cretan-cities-west", Cyclades: "cycladic-islanders",
+      Dodecanese: "dodecanese-islanders", Aeolis: "aeolis-communities", Ionia: "ionia-communities", "Ionian Islands": "ionian-islands",
+    };
+    for (const [regionName, polityId] of Object.entries(SOUTHERN_AND_ISLAND_POLITIES)) {
+      const provinceId = provincesByName.get(regionName);
+      expect(provinceId, `${regionName} should exist as its own province`).toBeDefined();
+      expect(controller.get(provinceId!)).toBe(polityId);
+    }
+    expect(new Set(Object.values(SOUTHERN_AND_ISLAND_POLITIES)).size).toBe(Object.keys(SOUTHERN_AND_ISLAND_POLITIES).length);
+
+    // A handful of absorbed (non-surviving) southern municipalities no longer exist as separate provinces.
+    expect(overlay.provinces.some((province) => province.provinceId === "punic-greece-grc-local-53547021b91453036712640")).toBe(false); // Naxos, absorbed into Cyclades
+    // Thessaloniki's own id survives, but only as Amphaxitis's (Macedon's) merged geometry, not as its own city-state.
+    expect(controller.get("punic-greece-grc-local-53547021b56010870315220")).toBe("macedon");
+    expect(provincesByName.get("Amphaxitis")).toBe("punic-greece-grc-local-53547021b56010870315220");
+
+    expect(overlay.polities.map((polity) => polity.name)).toEqual(expect.arrayContaining(["Argos", "Corinthian League", "Midelion", "Phocian League", "Euboean cities"]));
   });
 
-  it("merges Macedon, Thessaly, Epirus, and Aegean Thrace into single broad provinces instead of dozens of modern municipalities", () => {
+  it("splits Macedon, Thessaly, Epirus, and Aegean Thrace into several broad sub-regions instead of one monolith or dozens of modern municipalities", () => {
     const overlay = punicWarsOpeningOverlay(0);
     const provinceIds = new Set(overlay.provinces.map((province) => province.provinceId));
-    const byName = new Map(punicWarsGeoJson.features.filter((feature) => feature.properties.kind === "province" && feature.id.startsWith("punic-greece-")).map((feature) => [feature.properties.name, feature.id]));
-    expect(byName.get("Macedon")).toBe("punic-greece-grc-local-53547021b48713005805080");
-    expect(byName.get("Thessaly")).toBe("punic-greece-grc-local-53547021b50324925273652");
-    expect(byName.get("Epirus")).toBe("punic-greece-grc-local-53547021b74781806510115");
-    expect(byName.get("Aegean Thrace")).toBe("punic-greece-grc-local-53547021b38986077120400");
+    const provincesByName = new Map(punicWarsGeoJson.features.filter((feature) => feature.properties.kind === "province" && feature.id.startsWith("punic-greece-")).map((feature) => [feature.properties.name, feature.id]));
     const controller = new Map(overlay.provinces.map((province) => [province.provinceId, province.controllerPolityId]));
-    expect(controller.get("punic-greece-grc-local-53547021b48713005805080")).toBe("macedon");
-    expect(controller.get("punic-greece-grc-local-53547021b50324925273652")).toBe("thessalian-league");
-    expect(controller.get("punic-greece-grc-local-53547021b74781806510115")).toBe("epirus");
-    expect(controller.get("punic-greece-grc-local-53547021b38986077120400")).toBe("thracian-communities");
-    // Absorbed municipalities (Trikala into Thessaly, Ioannina's Zitsa into Epirus, Thessaloniki's Kalamaria into Macedon) no longer exist as separate provinces.
-    expect(provinceIds.has("punic-greece-grc-local-53547021b2020511099741")).toBe(false);
-    expect(provinceIds.has("punic-greece-grc-local-53547021b33840684001600")).toBe(false);
-    expect(provinceIds.has("punic-greece-grc-local-53547021b82210761635723")).toBe(false);
+
+    const kingdoms: Readonly<Record<string, { polity: string; subregions: readonly string[] }>> = {
+      macedon: { polity: "macedon", subregions: ["Upper Macedonia", "Bottiaea", "Pieria", "Amphaxitis", "Chalcidice", "Bisaltia"] },
+      thessaly: { polity: "thessalian-league", subregions: ["Perrhaebia", "Trikala", "Magnesia", "Sporades"] },
+      epirus: { polity: "epirus", subregions: ["Molossia", "Thesprotia", "Ambracia", "Preveza"] },
+      thrace: { polity: "thracian-communities", subregions: ["Xanthi", "Rodopi", "Evros", "Nestos"] },
+    };
+    for (const { polity, subregions } of Object.values(kingdoms)) {
+      expect(subregions.length).toBeGreaterThanOrEqual(4);
+      for (const subregion of subregions) {
+        const provinceId = provincesByName.get(subregion);
+        expect(provinceId, `${subregion} should exist as its own province`).toBeDefined();
+        expect(controller.get(provinceId!)).toBe(polity);
+      }
+    }
+    // The four kingdoms no longer appear as one single monolithic province each.
+    expect(provincesByName.has("Macedon")).toBe(false);
+    expect(provincesByName.has("Thessaly")).toBe(false);
+    expect(provincesByName.has("Epirus")).toBe(false);
+    expect(provincesByName.has("Aegean Thrace")).toBe(false);
+    // Absorbed (non-surviving) municipalities no longer exist as separate provinces.
+    expect(provinceIds.has("punic-greece-grc-local-53547021b33840684001600")).toBe(false); // Zitsa, absorbed into Molossia
+    expect(provinceIds.has("punic-greece-grc-local-53547021b82210761635723")).toBe(false); // Kalamaria, absorbed into Amphaxitis
   });
 
   it("consolidates Germania, Iberia, and Romania into attested regional powers", () => {
