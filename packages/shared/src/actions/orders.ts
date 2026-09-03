@@ -200,11 +200,62 @@ export const ActionProgressSchema = z
   .strict();
 
 /**
+ * Who or what issued an order, and who or what it targets (docs/14, Phase 1
+ * of the unified-resolution redesign).
+ *
+ * Kept as one narrow shape reused by both `issuerRef` and `targetRefs` --
+ * the order model does not need a richer polymorphic reference system, only
+ * enough to say whose authority is in play and what it acts on.
+ */
+export const OrderPartyRefSchema = z
+  .object({
+    kind: z.enum(["character", "faction", "polity", "institution", "force", "province", "settlement", "account", "office", "procedure"]),
+    id: EntityIdSchema,
+  })
+  .strict();
+export type OrderPartyRef = z.infer<typeof OrderPartyRefSchema>;
+
+/**
+ * Whether the order's issuer actually had standing to make it, and on what
+ * basis. Populated from the same authority/policy checks the pipeline
+ * already runs (`political-authority.ts`'s `resolveEligibility`, and the
+ * Workflow Manager's `validateCandidate` policy violations) -- this is a
+ * record of that decision, not a second authority engine.
+ */
+export const OrderAuthorityBasisSchema = z
+  .object({
+    /** What kind of standing was claimed: an office, delegation, de facto command, or none. */
+    claimedType: z.string().trim().min(1).max(60),
+    validated: z.boolean(),
+    /** Why validation succeeded or failed, in a form fit for Chronicle grounding. */
+    basis: z.string().trim().max(300).optional(),
+  })
+  .strict();
+export type OrderAuthorityBasis = z.infer<typeof OrderAuthorityBasisSchema>;
+
+/** A resource an order draws on: an account, a force, or a free-form other reference. */
+export const OrderResourceRefSchema = z
+  .object({
+    accountId: EntityIdSchema.optional(),
+    forceId: EntityIdSchema.optional(),
+    other: z.string().trim().min(1).max(120).optional(),
+  })
+  .strict();
+export type OrderResourceRef = z.infer<typeof OrderResourceRefSchema>;
+
+/**
  * Work already in progress, as authoritative snapshot state (ADR-0030).
  *
  * The identity is stable across compatible revisions and every snapshot, so a
  * salience interruption resumes the same action without another order or model
  * call. Standing orders describe future choices; this is not the same shape.
+ *
+ * Phase 1 of the unified-resolution redesign (docs/14) adds the universal
+ * order fields -- issuer, target, desired outcome, authority basis, required
+ * procedure, resources, and a link to a persistent operation -- so this one
+ * shape serves player orders, NPC actions, and faction/polity orders alike.
+ * All of them are optional so that a pre-Phase-1 snapshot (which never
+ * populated any of them) still parses.
  */
 export const OngoingActionSchema = z
   .object({
@@ -225,6 +276,26 @@ export const OngoingActionSchema = z
     waitingReason: z.string().trim().min(1).max(300).nullable(),
     terminalReason: z.string().trim().min(1).max(300).nullable(),
     replacedByActionId: EntityIdSchema.nullable(),
+    /** Who issued this order. Defaults to the actor when absent (a self-directed action). */
+    issuerRef: OrderPartyRefSchema.optional(),
+    /** What the order acts on. May be empty for an order with no distinct target. */
+    targetRefs: z.array(OrderPartyRefSchema).max(10).optional(),
+    /** A short, human-readable statement of what the issuer is trying to achieve. */
+    desiredOutcome: z.string().trim().min(1).max(400).optional(),
+    /** Free-form method/manner of execution, e.g. "by forced march". */
+    method: z.string().trim().max(200).optional(),
+    /** Free-form stance, e.g. "avoid battle unless attacked". Warfare-specific postures arrive in Phase 3. */
+    posture: z.string().trim().max(60).optional(),
+    authorityBasis: OrderAuthorityBasisSchema.optional(),
+    /** Set when a political/institutional procedure must run before this order can execute. */
+    requiredProcedureId: EntityIdSchema.optional(),
+    resourceRefs: z.array(OrderResourceRefSchema).max(10).optional(),
+    /** Set when this order is (or becomes) part of a multi-turn `PersistentOperation`. */
+    operationId: EntityIdSchema.optional(),
+    /** Last step this action's status/progress changed, alongside `startedAtStep`. */
+    updatedAtStep: ElapsedStepSchema.optional(),
+    /** Links this action's history into a Chronicle causal chain (`world/chronicle-chains.ts`). */
+    chronicleChainId: EntityIdSchema.optional(),
   })
   .strict()
   .superRefine((action, context) => {

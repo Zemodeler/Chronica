@@ -42,8 +42,9 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
 
   defineWorkflow({
     id: "end_war",
-    description: "End an active war between two polities via treaty or defeat.",
+    description: "End an active war between two polities via treaty or defeat. System-invoked only: peace requires a passed political procedure (e.g. a treaty_ratification) naming this as its linked workflow, never a direct player/AI proposal.",
     category: "political",
+    invokerAuthority: ["system"],
     parametersSchema: z.object({
       polityAId: EntityIdSchema,
       polityBId: EntityIdSchema,

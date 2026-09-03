@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ElapsedStepSchema, MaterialWorldStateSchema } from "../material-state";
 import { OngoingActionSchema } from "../actions/orders";
+import { PersistentOperationSchema } from "../actions/operations";
 import { CharacterSchema } from "../characters/character";
 import { CharacterContinuitySchema, EncounterMemorySchema } from "../continuity/continuity";
 import { WorldPinsSchema } from "./clock";
@@ -61,6 +62,12 @@ export const WorldStateSchema = z
      * come back out of a replay.
      */
     actions: z.array(OngoingActionSchema),
+    /**
+     * Multi-turn efforts an `OngoingAction` opened (docs/14, Phase 1): moving
+     * an army, a siege, a recruitment drive. Defaulted so archived snapshots
+     * (none of which ever populated this) load cleanly.
+     */
+    operations: z.array(PersistentOperationSchema).default([]),
     /** Everyone the world currently holds as an individual, players included. */
     characters: z.array(CharacterSchema),
     /**

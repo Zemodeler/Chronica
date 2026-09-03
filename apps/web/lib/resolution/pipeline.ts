@@ -58,6 +58,14 @@ import {
   deriveAuthoritySummary,
   buildCurrentDispatch,
   DEFAULT_MAX_CHRONICLE_ENTRIES_PER_TURN,
+  projectOrdersAndOperations,
+  applyCancellationDirectives,
+  applyRevisionDirectives,
+  ensureProvinceMaterial,
+  advanceProvinceMaterial,
+  applyWarDamageForExecutedWorkflows,
+  deriveChronicleDepth,
+  type OrderRefusalFact,
   type ScenarioClock,
   type ScenarioLifeRules,
   type ScenarioGovernmentRules,
@@ -631,6 +639,7 @@ function buildChronicleEntries(
         // The player's own actions are always shown in full, exempt from the
         // Chronicle visibility cap -- see capChronicleVisibility.
         playerRelevance: "high",
+        depth: "scene",
       }, world, undefined, playerId),
     });
   }
@@ -656,6 +665,7 @@ function buildChronicleEntries(
         chainPosition: "pressure",
         characterMentions: [{ characterId: suggestion.characterId, role: "participant" }],
         playerRelevance: salienceTier(suggestion.salience),
+        depth: deriveChronicleDepth({ playerRelevance: salienceTier(suggestion.salience), materialConsequence: false, isPlayerAction: false }),
       },
     });
   }
@@ -683,6 +693,7 @@ function buildChronicleEntries(
         sourceDirector: "reaction_director",
         chainPosition: "reaction",
         playerRelevance: salienceTier(rp.salience),
+        depth: deriveChronicleDepth({ playerRelevance: salienceTier(rp.salience), materialConsequence: logEntries.length > 0, isPlayerAction: false }),
       }, world, cast, playerId),
     });
   }
@@ -713,6 +724,7 @@ function buildChronicleEntries(
         chainPosition: sp.scopeTag === "star" || sp.scopeTag === "near" ? "spread" : "distant",
         displayPatch: displayPatchByInvocation.get(sp.proposedWorkflows[0]?.actionId ?? ""),
         playerRelevance: salienceTier(sp.salience),
+        depth: deriveChronicleDepth({ playerRelevance: salienceTier(sp.salience), materialConsequence: logEntries.length > 0, isPlayerAction: false }),
       }, world, cast, playerId),
     });
   }
@@ -954,11 +966,11 @@ export async function resolveTurn(
     // character selection, so a stale or spent pressure never shapes this
     // turn's Character Director context.
     const pressureAdvanced = advancePressureLifecycle(socialEventOutcome.world, materializedWorld.elapsedStep + 1);
-    const resolutionWorld: WorldState = {
+    const resolutionWorld: WorldState = ensureProvinceMaterial({
       ...socialEventOutcome.world,
       characters: [...pressureAdvanced.characters],
       characterPressures: [...pressureAdvanced.characterPressures],
-    };
+    }, materializedWorld.elapsedStep + 1);
     const actor = resolutionWorld.characters.find((character) => character.id === actorCharacterId)!;
     console.log(
       `${tag()} ══ RESOLUTION START ══ gameId=${gameId} actor="${actor.name}" step=${resolutionWorld.elapsedStep} directives=${batch.directives.length} storylines=${(resolutionWorld.storylines ?? []).length} characters=${resolutionWorld.characters.filter((character) => character.alive).length}`,
@@ -971,7 +983,11 @@ export async function resolveTurn(
     const systemPrompt = buildInterpretSystemPrompt(resolutionWorld, actorCharacterId, resolutionContext);
 
     for (const [idx, directive] of batch.directives.entries()) {
-      if (directive.kind !== "new" && directive.kind !== "revise") continue;
+      // A "revise" directive, like "cancel", names an existing action
+      // directly and needs no AI interpretation of its own -- it is applied
+      // deterministically below, alongside cancellation, via
+      // `applyRevisionDirectives`.
+      if (directive.kind !== "new") continue;
       const userMsg = `Order ${idx + 1}: ${directive.text}\nDirective ID: directive-${idx}`;
       try {
         const result = await coinGatedAdapter.call("interpret_order", systemPrompt, userMsg);
@@ -1820,6 +1836,33 @@ export async function resolveTurn(
       console.log(`${tag()} [battle-proximity] auto-prepended move_force(${atkId} → ${def.locationId}) before start_battle`);
     }
 
+    // Deterministic battle resolution (docs/19 Phase 3): every accepted
+    // start_battle is immediately followed by a system-invoked resolve_battle,
+    // never proposed by any AI candidate (resolve_battle's invokerAuthority is
+    // "system", which no WorkflowCandidateSource maps to -- see
+    // workflows/policy.ts's SOURCE_TO_INVOKER) -- so the battle's outcome is
+    // always the deterministic engine's, never an AI's.
+    for (const inv of managerResult.acceptedInvocations) {
+      if (inv.actionId !== "start_battle") continue;
+      const battleId = inv.parameters["battleId"] as string | undefined;
+      if (!battleId) continue;
+      // Posture (docs/14 Phase 1's OngoingAction.posture, docs/19 Phase 3's
+      // bounded set) rides along on start_battle's own params rather than a
+      // separate lookup -- forwarded verbatim into the deterministic resolver.
+      const resolveInvocation: ProposedInvocation = {
+        actionId: "resolve_battle",
+        actorId: "system",
+        parameters: {
+          battleId,
+          ...(inv.parameters["attackerPosture"] !== undefined ? { attackerPosture: inv.parameters["attackerPosture"] } : {}),
+          ...(inv.parameters["defenderPosture"] !== undefined ? { defenderPosture: inv.parameters["defenderPosture"] } : {}),
+        },
+      };
+      const insertAfterIdx = invocationsToExecute.indexOf(inv) + 1;
+      invocationsToExecute.splice(insertAfterIdx, 0, resolveInvocation);
+      console.log(`${tag()} [battle-proximity] auto-queued resolve_battle(${battleId}) after start_battle`);
+    }
+
     const executed = executeWorkflows(invocationsToExecute, agencyWorld, atStep, managerResult.runtimeInventedWorkflows);
     let newWorld = executed.world;
     let allWorkflowLog = [...executed.log];
@@ -1854,6 +1897,14 @@ export async function resolveTurn(
 
     console.log(`${tag()} [execute_world] OUT: ${allWorkflowLog.filter((e) => e.outcome.ok).length}/${allWorkflowLog.length} workflows applied`);
     newWorld = autoResolveDecidedStorylines(world, newWorld, atStep);
+
+    // Background material society (docs/14 Phase 2): coarse war damage for
+    // exactly the provinces this turn's military workflows touched, then a
+    // cheap, bounded recovery tick for every other province -- never a
+    // full-world recompute per event.
+    const successfulInvocations = allWorkflowLog.filter((entry) => entry.outcome.ok).map((entry) => entry.invocation);
+    const warDamageResult = applyWarDamageForExecutedWorkflows(newWorld, successfulInvocations, atStep);
+    newWorld = advanceProvinceMaterial(warDamageResult.world, atStep, warDamageResult.affectedProvinceIds);
     const executionByInvocation = new Map(
       allWorkflowLog.map((entry) => [JSON.stringify(entry.invocation), entry.outcome]),
     );
@@ -1867,6 +1918,101 @@ export async function resolveTurn(
           : { ...entry, executionOk: false, executionReason: "Approved invocation was not sent to the executor." };
       }),
     };
+
+    // Explicit cancellation (docs/14 Phase 6): a "cancel" directive names an
+    // existing OngoingAction id directly, so it needs no AI interpretation --
+    // applied deterministically here, before this turn's own new actions are
+    // projected, so a cancelled operation stops without touching what
+    // already happened to it.
+    const cancelActionIds = batch.directives.filter((directive) => directive.kind === "cancel").map((directive) => directive.actionId);
+    const cancellation = applyCancellationDirectives(resolutionWorld.actions ?? [], resolutionWorld.operations ?? [], cancelActionIds, atStep);
+
+    // Explicit revision (docs/14 Phase 6 follow-on): a "revise" directive
+    // also names an existing action directly, so -- like cancellation -- it
+    // needs no AI interpretation, and is applied deterministically here,
+    // right after cancellation and before this turn's new actions are
+    // projected.
+    const reviseDirectives = batch.directives
+      .filter((directive) => directive.kind === "revise")
+      .map((directive) => ({ actionId: directive.actionId, text: directive.text }));
+    const revision = applyRevisionDirectives(cancellation.actions, cancellation.operations, reviseDirectives, atStep, atStep);
+    const revisionChronicle: ChronicleEntryInput[] = revision.revised.map((revised) => {
+      const actor = newWorld.characters.find((character) => character.id === revised.actorId);
+      const actorName = actor?.name ?? revised.actorId;
+      return {
+        sequence: 0,
+        scope: "order_revision",
+        scopeRef: `${revised.actionId}:${atStep}`,
+        audience: "all_players",
+        body: `${actorName} revises an order already under way: ${revised.text}`,
+        atStep,
+        materialConsequence: false,
+        simulatedDurationDays: 1,
+        title: `${actorName} Revises an Order`,
+        knowledgeStatus: "confirmed",
+        participants: actor ? [{ name: actor.name }] : [],
+        playerRelevance: revised.actorId === actorCharacterId ? "high" : "low",
+        depth: deriveChronicleDepth({ playerRelevance: revised.actorId === actorCharacterId ? "high" : "low", materialConsequence: false, isPlayerAction: revised.actorId === actorCharacterId }),
+        ...(revised.chronicleChainId ? { chainId: revised.chronicleChainId } : {}),
+      };
+    });
+    const cancellationChronicle: ChronicleEntryInput[] = cancellation.cancelled.map((cancelled) => {
+      const actor = newWorld.characters.find((character) => character.id === cancelled.actorId);
+      const actorName = actor?.name ?? cancelled.actorId;
+      return {
+        sequence: 0,
+        scope: "order_cancellation",
+        scopeRef: `${cancelled.actionId}:${atStep}`,
+        audience: "all_players",
+        body: `${actorName} calls off an order already under way.`,
+        atStep,
+        materialConsequence: false,
+        simulatedDurationDays: 1,
+        title: `${actorName} Calls Off an Order`,
+        knowledgeStatus: "confirmed",
+        participants: actor ? [{ name: actor.name }] : [],
+        playerRelevance: cancelled.actorId === actorCharacterId ? "high" : "low",
+        depth: deriveChronicleDepth({ playerRelevance: cancelled.actorId === actorCharacterId ? "high" : "low", materialConsequence: false, isPlayerAction: cancelled.actorId === actorCharacterId }),
+        ...(cancelled.chronicleChainId ? { chainId: cancelled.chronicleChainId } : {}),
+      };
+    });
+
+    // Universal order/operation model (docs/14, Phase 1): project this
+    // turn's complete audit trail -- player, NPC, and world-director
+    // candidates alike, already resolved above through the single Workflow
+    // Manager gate -- into persisted `OngoingAction`/`PersistentOperation`
+    // records. An authority/policy rejection becomes a grounded refusal fact
+    // instead of vanishing from the audit blob unseen.
+    const orderProjection = projectOrdersAndOperations({
+      previousActions: revision.actions,
+      previousOperations: revision.operations,
+      candidates: finalWorkflowAudit.candidates,
+      turnIndex: atStep,
+      atStep,
+      isLongRunningAction: (actionId) => estimateWorkflowDurationDays([{ actionId }]) >= 14,
+    });
+    const orderRefusalChronicle: ChronicleEntryInput[] = orderProjection.refusals.map((refusal: OrderRefusalFact) => {
+      const actor = newWorld.characters.find((character) => character.id === refusal.actorId);
+      const actorName = actor?.name ?? refusal.actorId;
+      const readableAction = refusal.actionId.replace(/_/g, " ");
+      const verb = refusal.kind === "authority" ? "refused" : "failed";
+      return {
+        sequence: 0,
+        scope: "order_refusal",
+        scopeRef: `${refusal.actorId}:${refusal.actionId}:${atStep}`,
+        audience: "all_players",
+        body: `${actorName}'s attempt to ${readableAction} ${verb}: ${refusal.reason}`,
+        atStep,
+        materialConsequence: false,
+        simulatedDurationDays: 1,
+        title: `The Refusal of ${actorName}`,
+        knowledgeStatus: "confirmed",
+        participants: actor ? [{ name: actor.name }] : [],
+        playerRelevance: refusal.actorId === actorCharacterId ? "high" : "low",
+        depth: deriveChronicleDepth({ playerRelevance: refusal.actorId === actorCharacterId ? "high" : "low", materialConsequence: false, isPlayerAction: refusal.actorId === actorCharacterId }),
+      };
+    });
+
     // A "prepared" intent's real fate is only known once the workflow
     // manager and executor have actually run -- resolve it now, by the
     // intent id carried through as the candidate's sourceRef.
@@ -1971,6 +2117,43 @@ export async function resolveTurn(
       });
     }
 
+    // A procedure's *opening* otherwise has no Chronicle entry at all --
+    // only its resolution does, above (docs/18 Phase 2 follow-on: "taxation
+    // ... never opens a real political procedure", now that one can).
+    // Read from `newWorld` rather than `politicsResolution`: a procedure a
+    // workflow opens during this turn's own execution (e.g.
+    // `collect_emergency_taxation`'s automatic opposition motion) is not
+    // yet in `politicsResolution`, which only reflects the *pre*-execution
+    // political-resolver pass the "resolved" loop above reads from.
+    for (const procedure of newWorld.material.politicalProcedures) {
+      if (procedure.openedAtStep !== atStep || procedure.resolvedAtStep === atStep) continue;
+      const institution = procedure.institutionId
+        ? newWorld.material.institutions.find((i) => i.id === procedure.institutionId)
+        : undefined;
+      const polity = procedure.subjectKind === "polity" && procedure.subjectId
+        ? newWorld.map.polities.find((p) => p.id === procedure.subjectId)
+        : undefined;
+      const readableType = procedure.type.replace(/_/g, " ");
+      const against = polity?.name ?? institution?.name ?? "the ruling authority";
+      politicalChronicle.push({
+        sequence: 0,
+        scope: "political_procedure_opened",
+        scopeRef: procedure.id,
+        audience: procedure.visibility === "private" ? "knowledge_scoped" : "all_players",
+        body: procedure.sponsorCharacterId === "system"
+          ? `Opposition rises against ${against}: a ${readableType} opens${institution ? ` before the ${institution.name}` : ""}.`
+          : `${newWorld.characters.find((c) => c.id === procedure.sponsorCharacterId)?.name ?? "A sponsor"} opens a ${readableType} against ${against}.`,
+        atStep,
+        materialConsequence: false,
+        simulatedDurationDays: 1,
+        title: procedure.sponsorCharacterId === "system" ? `Opposition Rises Against ${against}` : `A New ${readableType[0]!.toUpperCase()}${readableType.slice(1)} Opens`,
+        knowledgeStatus: "confirmed",
+        institutions: institution ? [{ name: institution.name }] : [],
+        playerRelevance: procedure.eligibleParticipantIds.includes(actorCharacterId) ? "high" : "medium",
+        depth: deriveChronicleDepth({ playerRelevance: "medium", materialConsequence: false, isPlayerAction: false }),
+      });
+    }
+
     // Player-visible account of any force that changed commander this turn
     // (character-sim phase 6), derived by diff rather than a workflow hook so
     // every commander-changing path -- `assign_command`, or any future one --
@@ -1999,6 +2182,94 @@ export async function resolveTurn(
           previousCommanderName: previousCommander?.name ?? null,
           newCommanderName: newCommander?.name ?? null,
           reason: "Reassigned by institutional procedure.",
+        },
+      });
+    }
+
+    // Deterministic battle chronicle (docs/19 Phase 3, docs/14 Phase 4): a
+    // resolved battle otherwise has no Chronicle entry at all, because
+    // resolve_battle is spliced directly into execution rather than
+    // proposed by any director (see the battle-proximity block above) --
+    // none of the streams above would ever pick it up. Reconstructed from
+    // the before/after world (the same diff pattern commandChangeChronicle
+    // already uses) plus the resolver's own deterministic summary, never
+    // from AI narration.
+    const battleChronicle: ChronicleEntryInput[] = [];
+    for (const entry of allWorkflowLog) {
+      if (entry.invocation.actionId !== "resolve_battle" || !entry.outcome.ok) continue;
+      const battleId = entry.invocation.parameters["battleId"] as string | undefined;
+      const battleBefore = resolutionWorld.conflicts.battles.find((b) => b.battleId === battleId);
+      if (!battleBefore) continue;
+      const attackerForceIds = battleBefore.attackerForceIds;
+      const defenderForceIds = battleBefore.participantForceIds.filter((id) => !attackerForceIds.includes(id));
+      if (attackerForceIds.length === 0 || defenderForceIds.length === 0) continue;
+      // A side is one or more forces (docs/19 Phase 3 multi-force battles);
+      // the lead (first-listed) force on each side names and anchors the
+      // Chronicle entry, but casualties/retreat below are read across every
+      // force on that side, not just the lead.
+      const attackerId = attackerForceIds[0]!;
+      const defenderId = defenderForceIds[0]!;
+      const attackerBefore = resolutionWorld.material.forces.find((f) => f.id === attackerId);
+      const defenderBefore = resolutionWorld.material.forces.find((f) => f.id === defenderId);
+      const attackerAfter = newWorld.material.forces.find((f) => f.id === attackerId);
+      const defenderAfter = newWorld.material.forces.find((f) => f.id === defenderId);
+      if (!attackerBefore || !defenderBefore || !attackerAfter || !defenderAfter) continue;
+      const province = newWorld.map.provinces.find((p) => p.id === defenderBefore.locationId);
+      const casualtiesOf = (before: typeof attackerBefore, after: typeof attackerAfter) =>
+        before.personnel.reduce((sum, category) => {
+          const afterCategory = after.personnel.find((c) => c.categoryId === category.categoryId);
+          return sum + Math.max(0, category.fit - (afterCategory?.fit ?? category.fit));
+        }, 0);
+      const sideCasualties = (forceIds: readonly string[]) =>
+        forceIds.reduce((sum, id) => {
+          const before = resolutionWorld.material.forces.find((f) => f.id === id);
+          const after = newWorld.material.forces.find((f) => f.id === id);
+          return sum + (before && after ? casualtiesOf(before, after) : 0);
+        }, 0);
+      const sideRetreated = (forceIds: readonly string[]) =>
+        forceIds.some((id) => {
+          const before = resolutionWorld.material.forces.find((f) => f.id === id);
+          const after = newWorld.material.forces.find((f) => f.id === id);
+          return before && after && after.locationId !== before.locationId;
+        });
+      const attackerCasualties = sideCasualties(attackerForceIds);
+      const defenderCasualties = sideCasualties(defenderForceIds);
+      const attackerRetreated = sideRetreated(attackerForceIds);
+      const defenderRetreated = sideRetreated(defenderForceIds);
+      const outcome: "attacker_victory" | "defender_victory" | "inconclusive" =
+        defenderRetreated && !attackerRetreated ? "attacker_victory"
+        : attackerRetreated && !defenderRetreated ? "defender_victory"
+        : "inconclusive";
+      const attackerCommander = newWorld.characters.find((c) => c.id === attackerBefore.commanderCharacterId);
+      const defenderCommander = newWorld.characters.find((c) => c.id === defenderBefore.commanderCharacterId);
+      const involvesPlayer = actorCharacterId === attackerCommander?.id || actorCharacterId === defenderCommander?.id
+        || newWorld.material.forces.some((f) => f.controllerCharacterId === actorCharacterId && (attackerForceIds.includes(f.id) || defenderForceIds.includes(f.id)));
+      const attackerName = attackerForceIds.length > 1 ? `${attackerBefore.name} and allies` : attackerBefore.name;
+      const defenderName = defenderForceIds.length > 1 ? `${defenderBefore.name} and allies` : defenderBefore.name;
+      battleChronicle.push({
+        sequence: 0,
+        scope: "battle",
+        scopeRef: battleId ?? attackerId,
+        audience: "all_players",
+        body: entry.outcome.result.summary,
+        atStep,
+        materialConsequence: true,
+        simulatedDurationDays: estimateWorkflowDurationDays([{ actionId: "start_battle" }]),
+        title: `Battle of ${province?.name ?? "the frontier"}`,
+        knowledgeStatus: "confirmed",
+        participants: [attackerCommander, defenderCommander].filter((c): c is NonNullable<typeof c> => c !== undefined).map((c) => ({ name: c.name })),
+        playerRelevance: involvesPlayer ? "high" : "medium",
+        depth: "scene",
+        battleBrief: {
+          provinceName: province?.name ?? "the frontier",
+          outcome,
+          attackerName,
+          defenderName,
+          attackerCommanderName: attackerCommander?.name ?? null,
+          defenderCommanderName: defenderCommander?.name ?? null,
+          attackerCasualties,
+          defenderCasualties,
+          retreated: [attackerRetreated ? attackerName : null, defenderRetreated ? defenderName : null].filter((n): n is string => n !== null),
         },
       });
     }
@@ -2075,6 +2346,10 @@ export async function resolveTurn(
       ...lifeEventChronicle,
       ...commandChangeChronicle,
       ...familyEventChronicle,
+      ...orderRefusalChronicle,
+      ...battleChronicle,
+      ...cancellationChronicle,
+      ...revisionChronicle,
     ], DEFAULT_MAX_CHRONICLE_ENTRIES_PER_TURN));
 
     if (displayPatch && chronicleInputs.length > 0) {
@@ -2094,6 +2369,8 @@ export async function resolveTurn(
         chainId: e.chainId ?? null,
         sourceDirector: e.sourceDirector,
         knowledgeStatus: e.knowledgeStatus,
+        depth: e.depth,
+        battleBrief: e.battleBrief,
         characterMentions: e.characterMentions
           ?.map((mention) => {
             const character = newWorld.characters.find((candidate) => candidate.id === mention.characterId && candidate.alive);
@@ -2209,6 +2486,11 @@ export async function resolveTurn(
       ...worldWithTriggeredPressures,
       elapsedStep: atStep,
       characterRelevance: updatedRelevance,
+      // Universal order/operation model (docs/14, Phase 1): this turn's
+      // complete order history plus every still-open persistent operation,
+      // carried forward from prior turns and extended above.
+      actions: orderProjection.actions,
+      operations: orderProjection.operations,
       // Character-sim phase 3: this turn's resolved intents (executed,
       // blocked, deferred, failed, abandoned), each carrying the reason it
       // ended up where it did, appended to recent history and capped so this

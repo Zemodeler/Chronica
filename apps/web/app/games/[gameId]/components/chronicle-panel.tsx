@@ -230,18 +230,22 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
 
   return (
     <>
-      {phase === "news" && (
-        <button
-          type="button"
-          className="chat-panel-toggle"
-          style={{ right: "calc(4rem + 7rem + 1rem)" }}
-          onClick={() => { void fetchChronicle().then(() => setOpen(true)); }}
-          aria-label="Open chronicle"
-          title="Chronicle"
-        >
-          📜
-        </button>
-      )}
+      {/*
+        Persistent, directly beneath Orders (docs/22): available between
+        turns to read the last completed turn's chronicle, and while a
+        resolution is paused/dismissed mid-flow to read what has already
+        committed -- opening it never resumes simulation, it only reads
+        already-persisted chronicle entries.
+      */}
+      <button
+        type="button"
+        className="chat-panel-toggle chronicle-panel-toggle"
+        onClick={() => { void fetchChronicle().then(() => setOpen(true)); }}
+        aria-label="Open chronicle"
+        title="Chronicle"
+      >
+        📜
+      </button>
 
       {open && (
         <div

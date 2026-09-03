@@ -15,7 +15,7 @@ const overlay: DynamicMapOverlay = {
     { forceId: "defender", provinceId: "sicily", ownerPolityId: "carthage", name: "Garrison", commanderLabel: "Bomilcar", strengthLabel: "800", relation: "hostile", selected: false, movement: null },
   ],
   conflicts: {
-    battles: [{ battleId: "battle", participantForceIds: ["battle-a", "battle-b"] }],
+    battles: [{ battleId: "battle", participantForceIds: ["battle-a", "battle-b"], attackerForceIds: ["battle-a"] }],
     sieges: [{ settlementId: "fort", invadingForceIds: ["attacker"], defendingForceIds: ["defender"] }],
     wars: [{ polityAId: "carthage", polityBId: "rome" }],
   },

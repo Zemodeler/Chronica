@@ -108,7 +108,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
   familyLinks: [
     { id: "marcus-atilius:parent:marcus-atilius-minor", characterId: "marcus-atilius", relatedCharacterId: "marcus-atilius-minor", kind: "parent", startedAtStep: 0, endedAtStep: null, visibility: "polity", provenanceEventId: null },
   ],
-  conflicts: { battles: [{ battleId: "sicilian-frontier", participantForceIds: ["legio-i", "carthaginian-army"] }], sieges: [], wars: [{ polityAId: "carthage", polityBId: "rome" }] },
+  conflicts: { battles: [{ battleId: "sicilian-frontier", participantForceIds: ["legio-i", "carthaginian-army"], attackerForceIds: ["legio-i"] }], sieges: [], wars: [{ polityAId: "carthage", polityBId: "rome" }] },
   material: {
     currency: { id: "denarius", name: "Denarii", unitName: "denarius", unitNamePlural: "denarii", symbol: "D" },
     accounts: [

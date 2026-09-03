@@ -1,6 +1,6 @@
 ﻿import { randomUUID } from "node:crypto";
 import { and, count, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
-import type { OrderBatch, ScenarioClock, ScenarioGovernmentRules, ScenarioLifeRules, WorldState } from "@chronica/shared";
+import type { OrderBatch, ScenarioClock, ScenarioGovernmentRules, ScenarioLifeRules, WorkflowAuditBlob, WorldState } from "@chronica/shared";
 import { ScenarioDefinitionSchema, WorldStateSchema, projectChronicleEntry, resolveChronicleVisibility, type ChronicleEntryProjection } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
 import {
@@ -368,6 +368,23 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
     ...(scenarioLife !== undefined ? { scenarioLife } : {}),
     ...(scenarioGovernment !== undefined ? { scenarioGovernment } : {}),
   };
+}
+
+/**
+ * The workflow audit blob `commitResolution` persists every turn
+ * (`packages/db/src/queries/resolution.ts`), for the admin
+ * order-operation-inspector's per-battle audit surface (docs/19 Phase 3
+ * follow-on: this data was already written but unreachable from any query).
+ * Defaults to the game's latest turn; pass `turnIndex` for a specific one.
+ */
+export async function getWorkflowAudit(db: ChronicaDatabase, gameId: string, turnIndex?: number): Promise<WorkflowAuditBlob | undefined> {
+  const [row] = await db
+    .select({ workflowAudit: turns.workflowAudit })
+    .from(turns)
+    .where(turnIndex === undefined ? eq(turns.gameId, gameId) : and(eq(turns.gameId, gameId), eq(turns.index, turnIndex)))
+    .orderBy(desc(turns.index))
+    .limit(1);
+  return row?.workflowAudit ?? undefined;
 }
 
 export interface ChronicleView {

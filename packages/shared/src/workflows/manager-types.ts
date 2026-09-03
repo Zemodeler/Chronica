@@ -41,7 +41,13 @@ export type WorkflowCandidate = z.infer<typeof WorkflowCandidateSchema>;
 /** The manager's decision on a single candidate. */
 export const ManagerDecisionSchema = z
   .object({
-    correlationId: z.string().uuid(),
+    /**
+     * Echoed back by the AI; matched primarily by array position against the
+     * candidate list (decisions must come back "in the supplied order"), so
+     * this is a secondary sanity check rather than the join key. Not required
+     * to be a well-formed UUID — models occasionally mistranscribe it.
+     */
+    correlationId: z.string().trim().min(1).max(100),
     decision: z.enum(["approve", "reject", "replace", "no_action"]),
     /** Required; must state why. */
     reason: z.string().trim().min(1).max(400),

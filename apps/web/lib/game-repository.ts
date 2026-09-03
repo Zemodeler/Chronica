@@ -394,6 +394,7 @@ function demoMapOverlay(revision: number): DynamicMapOverlay {
       battles: [{
         battleId: "first-punic-battle-in-sicily",
         participantForceIds: [demoMaterialView.forces[0]!.id, "carthaginian-army-sicily"],
+        attackerForceIds: [demoMaterialView.forces[0]!.id],
       }],
       sieges: [{ settlementId: "settlement-caralis", invadingForceIds: [demoMaterialView.forces[1]!.id], defendingForceIds: [] }],
       wars: [{ polityAId: "carthage", polityBId: "rome" }],

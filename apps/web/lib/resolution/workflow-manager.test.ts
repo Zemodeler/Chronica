@@ -126,14 +126,36 @@ describe("AI Workflow Manager", () => {
     }), world(), [input], 1)).resolves.toMatchObject({ acceptedInvocations: [] });
   });
 
-  it("retries once when the model invents a correlation ID", async () => {
+  it("matches a single decision to its candidate by position even with a fabricated correlation ID", async () => {
     const input = candidate("00000000-0000-4000-8000-000000000208", "add_gold", { accountId: ACCOUNT_ID, amount: 1, reason: "Test" });
-    const reviewed = await runWorkflowManager(adapterWithSequence(
-      { decisions: [{ correlationId: "00000000-0000-4000-8000-000000000999", decision: "approve", reason: "Wrong id.", replacementInvocation: null }], novelActionProposals: [] },
-      { decisions: [{ correlationId: input.correlationId, decision: "approve", reason: "Correct id.", replacementInvocation: null }], novelActionProposals: [] },
-    ), world(), [input], 1);
+    const reviewed = await runWorkflowManager(adapterWith({
+      decisions: [{ correlationId: "not-a-real-uuid", decision: "approve", reason: "Wrong id, right position.", replacementInvocation: null }],
+      novelActionProposals: [],
+    }), world(), [input], 1);
 
     expect(reviewed.acceptedInvocations).toHaveLength(1);
+  });
+
+  it("matches decisions to the right candidate by position when one of several correlation IDs is malformed", async () => {
+    const candidates = [
+      candidate("00000000-0000-4000-8000-000000000221", "add_gold", { accountId: ACCOUNT_ID, amount: 10, reason: "First" }),
+      candidate("00000000-0000-4000-8000-000000000222", "army_change_name", { forceId: LEGION_ID, newName: "Legio I Victrix" }),
+      candidate("00000000-0000-4000-8000-000000000223", "move_force", { forceId: LEGION_ID, destinationProvinceId: DESTINATION_ID }),
+    ];
+    const reviewed = await runWorkflowManager(adapterWith({
+      decisions: [
+        { correlationId: candidates[0]!.correlationId, decision: "approve", reason: "Fine.", replacementInvocation: null },
+        // Malformed / mistranscribed id in the middle position — must still bind to candidates[1] by order.
+        { correlationId: "bad-id-not-uuid", decision: "reject", reason: "Rename not grounded.", replacementInvocation: null },
+        { correlationId: candidates[2]!.correlationId, decision: "approve", reason: "Fine.", replacementInvocation: null },
+      ],
+      novelActionProposals: [],
+    }), world(), candidates, 1);
+
+    expect(reviewed.auditBlob.managerFailed).toBe(false);
+    expect(reviewed.acceptedInvocations).toHaveLength(2);
+    expect(reviewed.acceptedInvocations.map((invocation) => invocation.actionId)).toEqual(["add_gold", "move_force"]);
+    expect(reviewed.auditBlob.candidates.find((entry) => entry.correlationId === candidates[1]!.correlationId)?.managerDecision).toBe("reject");
   });
 
   it("falls back to policy-valid candidates when the Manager does not decide every candidate", async () => {

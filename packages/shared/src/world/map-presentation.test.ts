@@ -152,7 +152,7 @@ describe("map presentation contracts", () => {
       provinces: [],
       settlements: [],
       forces: [],
-      conflicts: { battles: [{ battleId: "battle", participantForceIds: ["missing-a", "missing-b"] }], sieges: [], wars: [] },
+      conflicts: { battles: [{ battleId: "battle", participantForceIds: ["missing-a", "missing-b"], attackerForceIds: ["missing-a"] }], sieges: [], wars: [] },
     }).success).toBe(false);
   });
 
@@ -167,10 +167,47 @@ describe("map presentation contracts", () => {
         { forceId: "carthage-army", provinceId: "sicily", ownerPolityId: "CAR", name: "Carthaginian army", commanderLabel: "Hanno", strengthLabel: "3,000", relation: "hostile", movement: null },
       ],
       conflicts: {
-        battles: [{ battleId: "sicily-battle", participantForceIds: ["rome-army", "carthage-army"] }],
+        battles: [{ battleId: "sicily-battle", participantForceIds: ["rome-army", "carthage-army"], attackerForceIds: ["rome-army"] }],
         sieges: [{ settlementId: "lilybaeum", invadingForceIds: ["rome-army"], defendingForceIds: ["carthage-army"] }],
         wars: [{ polityAId: "CAR", polityBId: "ROM" }],
       },
     }).success).toBe(true);
+  });
+
+  it("accepts a multi-force side merged behind one attacker/defender split", () => {
+    expect(DynamicMapOverlaySchema.safeParse({
+      revision: 0,
+      polities: [{ polityId: "CAR", name: "Carthage" }, { polityId: "ROM", name: "Rome" }],
+      provinces: [],
+      settlements: [],
+      forces: [
+        { forceId: "legio-i", provinceId: "sicily", ownerPolityId: "ROM", name: "Legio I", commanderLabel: "Scipio", strengthLabel: "3,000", relation: "friendly", movement: null },
+        { forceId: "legio-ii", provinceId: "sicily", ownerPolityId: "ROM", name: "Legio II", commanderLabel: "Cato", strengthLabel: "3,000", relation: "friendly", movement: null },
+        { forceId: "carthage-army", provinceId: "sicily", ownerPolityId: "CAR", name: "Carthaginian army", commanderLabel: "Hanno", strengthLabel: "3,000", relation: "hostile", movement: null },
+      ],
+      conflicts: {
+        battles: [{ battleId: "sicily-battle", participantForceIds: ["legio-i", "legio-ii", "carthage-army"], attackerForceIds: ["legio-i", "legio-ii"] }],
+        sieges: [],
+        wars: [],
+      },
+    }).success).toBe(true);
+  });
+
+  it("rejects a battle whose attackers are its every participant", () => {
+    expect(DynamicMapOverlaySchema.safeParse({
+      revision: 0,
+      polities: [],
+      provinces: [],
+      settlements: [],
+      forces: [
+        { forceId: "legio-i", provinceId: "sicily", ownerPolityId: "ROM", name: "Legio I", commanderLabel: "Scipio", strengthLabel: "3,000", relation: "friendly", movement: null },
+        { forceId: "legio-ii", provinceId: "sicily", ownerPolityId: "ROM", name: "Legio II", commanderLabel: "Cato", strengthLabel: "3,000", relation: "friendly", movement: null },
+      ],
+      conflicts: {
+        battles: [{ battleId: "sicily-battle", participantForceIds: ["legio-i", "legio-ii"], attackerForceIds: ["legio-i", "legio-ii"] }],
+        sieges: [],
+        wars: [],
+      },
+    }).success).toBe(false);
   });
 });

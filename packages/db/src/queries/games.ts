@@ -1,5 +1,5 @@
 import type { CharacterClaim } from "@chronica/shared";
-import { and, count, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { ScenarioDefinitionSchema } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
 import { users } from "../schema/auth";
@@ -24,6 +24,13 @@ export type PublicScenarioSummary = Readonly<{
 /** Ensures the First Punic War copy exists as a normal, versioned public scenario. */
 export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void> {
   await db.transaction(async (tx) => {
+    // The built-in scenario rows are locked against mutation by
+    // prevent_unapproved_built_in_scenario_mutation() (see migrations 0020/0021)
+    // to stop an accidental admin edit from silently changing curated content.
+    // This function is the one already-reviewed, source-controlled path that is
+    // allowed to advance the built-in scenario's version, so it carries its own
+    // approval for its transaction only; SET LOCAL reverts automatically at commit.
+    await tx.execute(sql`SET LOCAL chronica.scenario_mutation_approved = 'yes'`);
     await tx.insert(users).values({ id: CHRONICA_SYSTEM_USER_ID, name: "Chronica", email: "scenarios@chronica.local", username: "chronica", role: "admin" }).onConflictDoNothing();
     await tx.insert(scenarioMapAssets).values({
       id: FIRST_PUNIC_WAR_MAP_ASSET_ID,

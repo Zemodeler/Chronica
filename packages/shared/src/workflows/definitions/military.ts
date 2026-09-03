@@ -1,10 +1,30 @@
 import { z } from "zod";
 import { EntityIdSchema } from "../../material-state";
 import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
+import { BattlePostureSchema } from "../../warfare/battle-resolver";
 
 const FORCE_KIND_SCHEMA = z.enum(["infantry", "cavalry", "siege", "naval", "militia", "mercenary", "other"]);
 
 const randomUUID = () => globalThis.crypto.randomUUID();
+
+interface BattleConflict {
+  readonly battleId: string;
+  readonly participantForceIds: readonly string[];
+  readonly attackerForceIds: readonly string[];
+}
+
+function removeForceFromBattle<T extends BattleConflict>(battle: T, forceId: string): T {
+  return {
+    ...battle,
+    participantForceIds: battle.participantForceIds.filter((id) => id !== forceId),
+    attackerForceIds: battle.attackerForceIds.filter((id) => id !== forceId),
+  };
+}
+
+/** A battle needs at least one force still fighting on each side. */
+function battleHasBothSides(battle: BattleConflict): boolean {
+  return battle.attackerForceIds.length >= 1 && battle.participantForceIds.length > battle.attackerForceIds.length;
+}
 
 export const militaryWorkflows: AnyWorkflowDefinition[] = [
   defineWorkflow({
@@ -69,6 +89,7 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
         commanderCharacterId: context.actorId,
         controllerCharacterId: context.actorId,
         locationId: params.locationProvinceId,
+        positionId: null,
         authorizedStrength: params.size,
         personnel: [{ categoryId, label: params.kind, fit: params.size, unavailable: [] }],
         moraleBps: 7_000,
@@ -288,10 +309,9 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
           },
           conflicts: {
             ...world.conflicts,
-            battles: world.conflicts.battles.map((b) => ({
-              ...b,
-              participantForceIds: b.participantForceIds.filter((id) => id !== params.forceId),
-            })),
+            battles: world.conflicts.battles
+              .map((b) => removeForceFromBattle(b, params.forceId))
+              .filter(battleHasBothSides),
           },
         },
         result: {
@@ -304,21 +324,26 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
 
   defineWorkflow({
     id: "start_battle",
-    description: "Start a battle between two forces. Creates a conflict entry in the world.",
+    description: "Start a battle between two sides, each one or more forces. A multi-force side is merged into the resolver as one combined contribution (docs/19 Phase 3); no new phase-arrival model is needed. An optional posture per side (offer_battle, avoid_battle, defend, hold) is carried through to the battle's deterministic resolution.",
     category: "military",
     parametersSchema: z.object({
       battleId: EntityIdSchema,
-      attackingForceId: EntityIdSchema,
-      defendingForceId: EntityIdSchema,
+      attackingForceIds: z.array(EntityIdSchema).min(1),
+      defendingForceIds: z.array(EntityIdSchema).min(1),
+      attackerPosture: BattlePostureSchema.optional(),
+      defenderPosture: BattlePostureSchema.optional(),
     }).strict(),
     apply(world, params) {
-      const atk = world.material.forces.find((f) => f.id === params.attackingForceId);
-      const def = world.material.forces.find((f) => f.id === params.defendingForceId);
-      if (!atk || !def) return null;
+      const attackers = params.attackingForceIds.map((id) => world.material.forces.find((f) => f.id === id));
+      const defenders = params.defendingForceIds.map((id) => world.material.forces.find((f) => f.id === id));
+      if (attackers.some((f) => !f) || defenders.some((f) => !f)) return null;
       const alreadyExists = world.conflicts.battles.some(
-        (b) => b.participantForceIds.includes(params.attackingForceId) && b.participantForceIds.includes(params.defendingForceId),
+        (b) => params.attackingForceIds.some((id) => b.participantForceIds.includes(id))
+          && params.defendingForceIds.some((id) => b.participantForceIds.includes(id)),
       );
       if (alreadyExists) return null;
+      const attackerNames = attackers.map((f) => f!.name).join(" and ");
+      const defenderNames = defenders.map((f) => f!.name).join(" and ");
       return {
         world: {
           ...world,
@@ -326,12 +351,16 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
             ...world.conflicts,
             battles: [
               ...world.conflicts.battles,
-              { battleId: params.battleId, participantForceIds: [params.attackingForceId, params.defendingForceId] },
+              {
+                battleId: params.battleId,
+                participantForceIds: [...params.attackingForceIds, ...params.defendingForceIds],
+                attackerForceIds: [...params.attackingForceIds],
+              },
             ],
           },
         },
         result: {
-          summary: `${atk.name} engages ${def.name} in battle.`,
+          summary: `${attackerNames} engages ${defenderNames} in battle.`,
           applied: true,
         },
       };
@@ -483,10 +512,9 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
           },
           conflicts: {
             ...world.conflicts,
-            battles: world.conflicts.battles.map((b) => ({
-              ...b,
-              participantForceIds: b.participantForceIds.filter((id) => id !== params.sourceForceId),
-            })),
+            battles: world.conflicts.battles
+              .map((b) => removeForceFromBattle(b, params.sourceForceId))
+              .filter(battleHasBothSides),
           },
         },
         result: {
@@ -555,11 +583,16 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
           },
           conflicts: {
             ...world.conflicts,
-            // A battle requires at least two participants; one that would drop
-            // below that after disbanding no longer has anyone left to fight.
+            // A battle requires both a live attacker and a live defender; one
+            // that would drop below that after disbanding no longer has
+            // anyone left to fight.
             battles: world.conflicts.battles
-              .map((b) => ({ ...b, participantForceIds: b.participantForceIds.filter((id) => !idsToDisband.has(id)) }))
-              .filter((b) => b.participantForceIds.length >= 2),
+              .map((b) => ({
+                ...b,
+                participantForceIds: b.participantForceIds.filter((id) => !idsToDisband.has(id)),
+                attackerForceIds: b.attackerForceIds.filter((id) => !idsToDisband.has(id)),
+              }))
+              .filter(battleHasBothSides),
             sieges: world.conflicts.sieges.map((s) => ({
               ...s,
               invadingForceIds: s.invadingForceIds.filter((id) => !idsToDisband.has(id)),
