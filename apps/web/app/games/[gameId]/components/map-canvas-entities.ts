@@ -25,7 +25,7 @@ interface VisibleWorldRect { minX: number; maxX: number; minY: number; maxY: num
 // blob that swallows whatever's under it.
 const MIN_SETTLEMENT_PIXEL_RADIUS = 6;
 const MAX_SETTLEMENT_PIXEL_RADIUS = 22;
-const MIN_SETTLEMENT_LABEL_PIXEL_FONT = 9;
+const MIN_SETTLEMENT_LABEL_PIXEL_FONT = 4.5;
 // Screen-pixel gap between a marker's edge and its label's baseline. Must be
 // pixel-based (divided through by pixelsPerDegree at use, like the radius
 // constants above) rather than a flat world-space degree offset — a flat
@@ -73,15 +73,10 @@ function settlementRadius(type: string, pixelsPerDegree: number): number {
 // A settlement's label size scales directly off the same per-type base radius
 // used for its marker above, so labels keep the exact size hierarchy the
 // markers already have (capital > port/fort > city > village > town). The
-// scale factor is calibrated so a capital's label renders at 0.35 world-space
-// units — the size a capital always rendered at under the old importance-based
-// formula (importance 100 × 0.0035) whenever it wasn't shrunk by the
-// now-removed cap tied to its polity's own territory-label size (which is
-// what happened to Rome's cities but never to Carthage's single, uncapped
-// capital) — so this restores that liked size for every settlement of a given
-// type, everywhere, independent of which polity owns it or how its territory
-// is shaped.
-const LABEL_FONT_SIZE_PER_RADIUS_UNIT = 0.35 / settlementTypeBaseRadius("capital");
+// scale factor is calibrated so a capital's label renders at 0.175 world-space
+// units — half the former 0.35 world-space size — for every settlement of a
+// given type, everywhere, independent of polity ownership or territory shape.
+const LABEL_FONT_SIZE_PER_RADIUS_UNIT = 0.175 / settlementTypeBaseRadius("capital");
 
 function settlementLabelBaseFontSize(type: string): number {
   return settlementTypeBaseRadius(type) * LABEL_FONT_SIZE_PER_RADIUS_UNIT;
