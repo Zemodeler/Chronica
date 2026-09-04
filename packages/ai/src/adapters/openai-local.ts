@@ -1,6 +1,14 @@
 import OpenAI from "openai";
 import type { AiOperation, AiTier } from "@chronica/shared";
-import type { AiAdapter, AiCallResult } from "../adapter";
+import type {
+  AiAdapter,
+  AiCallResult,
+  AiConversationMessage,
+  AiToolCall,
+  AiToolCallResult,
+  AiToolDefinition,
+} from "../adapter";
+import { parseToolArguments } from "../adapter";
 import { getConfiguredApiKey, getSelectedLocalAiModel } from "../local-key-selection";
 
 const JSON_MODE_OPERATIONS = new Set<AiOperation>([
@@ -33,6 +41,8 @@ const TIER_MODELS: Record<AiTier, string> = {
 
 // Operations that use standard tier (everything else is basic).
 const STANDARD_TIER_OPERATIONS = new Set<AiOperation>([
+  // The Game Master reasons over a whole turn with tools; never basic tier.
+  "game_master",
   "adjudicate",
   "narrate",
   "resolve_solo_turn",
@@ -60,11 +70,71 @@ const MAX_COMPLETION_TOKENS: Partial<Record<AiOperation, number>> = {
   chronicle_narrator: 3_000,
 };
 
+// Responses-API budget for the tool loop: one step, not the whole turn. Set
+// well above what the visible tool calls need, because reasoning tokens are
+// drawn from the same budget.
+const MAX_OUTPUT_TOKENS: Partial<Record<AiOperation, number>> = {
+  game_master: 8_000,
+};
+
 function resolveModel(operation: AiOperation): string {
   const selectedModel = getSelectedLocalAiModel("openai");
   if (selectedModel !== null) return selectedModel;
   const tier: AiTier = STANDARD_TIER_OPERATIONS.has(operation) ? "standard" : "basic";
   return TIER_MODELS[tier];
+}
+
+// The Game Master's tool loop runs on the Responses API, not chat completions.
+//
+// A reasoning model refuses function tools on /v1/chat/completions unless
+// reasoning is switched off entirely:
+//
+//   400 Function tools with reasoning_effort are not supported for
+//   <model> in /v1/chat/completions. To use function tools, use
+//   /v1/responses or set reasoning_effort to 'none'.
+//
+// Turning reasoning off would be the cheap fix and the wrong one: deciding a
+// whole turn against tool results is the one operation in this codebase that
+// most needs to think. So the loop uses /v1/responses, which supports both,
+// and carries the model's own reasoning items forward between steps through
+// the opaque `providerItems` channel.
+
+type ResponseInputItem = OpenAI.Responses.ResponseInputItem;
+
+/**
+ * Translate the caller-owned conversation into Responses input items.
+ *
+ * An assistant step is replayed from `providerItems` when the provider gave us
+ * some — that preserves the reasoning items alongside the calls. Reconstructed
+ * function calls are the fallback, which is correct but forgetful.
+ */
+function toResponsesInput(messages: readonly AiConversationMessage[]): ResponseInputItem[] {
+  const input: ResponseInputItem[] = [];
+  for (const message of messages) {
+    if (message.role === "user") {
+      input.push({ role: "user", content: message.content });
+      continue;
+    }
+    if (message.role === "assistant") {
+      if (Array.isArray(message.providerItems)) {
+        input.push(...(message.providerItems as ResponseInputItem[]));
+        continue;
+      }
+      for (const toolCall of message.toolCalls) {
+        input.push({
+          type: "function_call",
+          call_id: toolCall.id,
+          name: toolCall.name,
+          arguments: JSON.stringify(toolCall.arguments),
+        });
+      }
+      continue;
+    }
+    for (const result of message.results) {
+      input.push({ type: "function_call_output", call_id: result.callId, output: result.content });
+    }
+  }
+  return input;
 }
 
 export function createOpenAiLocalAdapter(): AiAdapter {
@@ -78,6 +148,53 @@ export function createOpenAiLocalAdapter(): AiAdapter {
   }
 
   return {
+    async callWithTools(
+      operation: AiOperation,
+      systemPrompt: string,
+      messages: readonly AiConversationMessage[],
+      tools: readonly AiToolDefinition[],
+    ): Promise<AiToolCallResult> {
+      const model = resolveModel(operation);
+      const response = await getClient().responses.create({
+        model,
+        instructions: systemPrompt,
+        input: toResponsesInput(messages),
+        tools: tools.map((tool) => ({
+          type: "function" as const,
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+          // The registry's own Zod schemas are the validator, and several are
+          // richer than the strict-mode subset allows. Parameters are parsed
+          // and refused deterministically by the staged session anyway.
+          strict: false,
+        })),
+        tool_choice: "auto",
+        // Reasoning tokens are drawn from this budget too, so it is well above
+        // what the visible tool calls alone would need.
+        max_output_tokens: MAX_OUTPUT_TOKENS[operation] ?? 8_000,
+        reasoning: { effort: "low" },
+      });
+
+      const toolCalls: AiToolCall[] = response.output.flatMap((item) =>
+        item.type === "function_call"
+          ? [{ id: item.call_id, name: item.name, arguments: parseToolArguments(item.arguments) }]
+          : [],
+      );
+      const cacheReadTokens = response.usage?.input_tokens_details?.cached_tokens ?? 0;
+      return {
+        content: response.output_text ?? "",
+        model,
+        inputTokens: Math.max(0, (response.usage?.input_tokens ?? 0) - cacheReadTokens),
+        outputTokens: response.usage?.output_tokens ?? 0,
+        cacheReadTokens,
+        cacheWriteTokens: 0,
+        toolCalls,
+        stopReason: toolCalls.length > 0 ? "tool_calls" : response.status === "incomplete" ? "length" : "stop",
+        // Replayed verbatim next step, reasoning items included.
+        providerItems: response.output,
+      };
+    },
     async call(operation, systemPrompt, userMessage): Promise<AiCallResult> {
       const model = resolveModel(operation);
       const isJsonMode = JSON_MODE_OPERATIONS.has(operation);

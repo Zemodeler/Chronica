@@ -19,12 +19,44 @@ export const WorkflowResultSchema = z.object({
   summary: z.string().min(1).max(400),
   /** Whether the action succeeded (false = partially applied or failed). */
   applied: z.boolean(),
+  /**
+   * True when the call was valid and applied but changed nothing at all --
+   * renaming something to the name it already has, for instance. The world is
+   * unchanged, so the Chronicle stays silent rather than reporting a change
+   * that never occurred.
+   */
+  noOp: z.boolean().optional(),
 });
 export type WorkflowResult = z.infer<typeof WorkflowResultSchema>;
 
 export interface WorkflowApplyContext {
   readonly actorId: string;
   readonly atStep: number;
+}
+
+/**
+ * A workflow declining to act, and saying why.
+ *
+ * `apply` returning `null` means "cannot be applied", which is all the
+ * executor could ever tell the caller -- so a Game Master whose order failed
+ * had nothing to correct and simply reported the failure to the player. A
+ * refusal that names the precondition that failed is the difference between a
+ * turn that recovers itself and a Chronicle entry about nothing.
+ *
+ * The reason is read by an AI and, when nothing recovers it, by a player.
+ * Write it as a fact about the world -- "no settlement of that id exists",
+ * "you do not sponsor that procedure" -- never as a fact about the code.
+ */
+export interface WorkflowRefusal {
+  readonly refused: string;
+}
+
+export function refuse(reason: string): WorkflowRefusal {
+  return { refused: reason };
+}
+
+export function isWorkflowRefusal(value: unknown): value is WorkflowRefusal {
+  return typeof value === "object" && value !== null && typeof (value as WorkflowRefusal).refused === "string";
 }
 
 /** Which AI sources are permitted to invoke a workflow (skills framing, ADR-0032). */
@@ -55,14 +87,18 @@ export interface WorkflowDefinition<TParams extends z.ZodTypeAny = z.ZodTypeAny>
   readonly parametersSchema: TParams;
   /**
    * Pure transformation: given valid params and current world, return the next
-   * world. Must not throw on a valid world + valid params. Returns null if the
-   * workflow cannot be applied (caller records a failed result, not an error).
+   * world. Must not throw on a valid world + valid params.
+   *
+   * To decline, return `refuse("why")` -- the caller passes that reason back
+   * to whoever attempted it, which is what lets a wrong id or a missing step
+   * be corrected instead of merely reported. Returning `null` still works and
+   * still means "cannot be applied", but says nothing anyone can act on.
    */
   readonly apply: (
     world: WorldState,
     params: z.infer<TParams>,
     context: WorkflowApplyContext,
-  ) => { world: WorldState; result: WorkflowResult } | null;
+  ) => { world: WorldState; result: WorkflowResult } | WorkflowRefusal | null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -55,6 +55,8 @@ export type OrderBatch = z.infer<typeof OrderBatchSchema>;
  * illegal invocation into a trusted one.
  */
 export const InvocationSourceSchema = z.enum([
+  // The single tool-using agent that replaced the director committee.
+  "game_master",
   "grammar",
   "assessment",
   "npc",

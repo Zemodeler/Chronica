@@ -4,6 +4,7 @@ export * from "./map";
 export * from "./map-bindings";
 export * from "./storylines";
 export * from "./map-presentation";
+export * from "./references";
 export * from "./region-control";
 export * from "./scope";
 export * from "./world-state";

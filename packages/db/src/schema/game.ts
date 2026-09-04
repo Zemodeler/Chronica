@@ -161,6 +161,8 @@ export const turns = pgTable("turns", {
   progressStep: text("progress_step"),
   /** Durable audit blob from the Workflow Manager stage (Issue #6). */
   workflowAudit: jsonb("workflow_audit").$type<import("@chronica/shared").WorkflowAuditBlob>(),
+  /** Structured Game Master turn report plus the factual event log it was built from. */
+  gameMasterReport: jsonb("game_master_report").$type<import("@chronica/shared").CommittedGameMasterReport>(),
 }, (table) => [
   uniqueIndex("turns_game_index_unique").on(table.gameId, table.index),
   index("turns_claimable_idx").on(table.status, table.claimExpiresAt),
@@ -289,4 +291,32 @@ export const inventedWorkflowUses = pgTable("invented_workflow_uses", {
 }, (table) => [
   index("invented_workflow_uses_workflow_idx").on(table.workflowId, table.createdAt),
   index("invented_workflow_uses_turn_idx").on(table.turnId),
+]);
+
+/**
+ * Capability-gap requests (Game Master refactor).
+ *
+ * A row here is the record of an action the Game Master needed and no
+ * registered workflow covers. Writing one changed nothing: it exists so the
+ * attempt is honest in the audit and the Chronicle, and so a developer can
+ * decide offline whether to write a real typed workflow for it. There is
+ * deliberately no status that makes a row executable.
+ */
+export const capabilityRequests = pgTable("capability_requests", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  gameId: uuid("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+  turnId: uuid("turn_id").notNull().references(() => turns.id, { onDelete: "cascade" }),
+  atStep: integer("at_step").notNull(),
+  actorId: text("actor_id").notNull(),
+  proposedToolName: text("proposed_tool_name").notNull(),
+  requestedIntent: text("requested_intent").notNull(),
+  request: jsonb("request").notNull().$type<import("@chronica/shared").CapabilityRequest>(),
+  status: text("status").notNull().default("unsupported"),
+  reviewNote: text("review_note"),
+  reviewedBy: uuid("reviewed_by").references(() => users.id, { onDelete: "set null" }),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("capability_requests_game_idx").on(table.gameId, table.createdAt),
+  index("capability_requests_tool_idx").on(table.proposedToolName),
 ]);

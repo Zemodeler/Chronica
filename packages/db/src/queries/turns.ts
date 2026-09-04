@@ -1,6 +1,6 @@
 ﻿import { randomUUID } from "node:crypto";
 import { and, count, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
-import type { OrderBatch, ScenarioClock, ScenarioGovernmentRules, ScenarioLifeRules, WorkflowAuditBlob, WorldState } from "@chronica/shared";
+import type { OrderBatch, ScenarioChronicleRules, ScenarioClock, ScenarioGovernmentRules, ScenarioLifeRules, WorkflowAuditBlob, WorldState } from "@chronica/shared";
 import { ScenarioDefinitionSchema, WorldStateSchema, projectChronicleEntry, resolveChronicleVisibility, type ChronicleEntryProjection } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
 import {
@@ -40,6 +40,8 @@ export interface WorldViewSource {
   readonly scenarioLife?: ScenarioLifeRules;
   /** Offices and succession rules, so a vacated seat can be matched to its lawful refill route. */
   readonly scenarioGovernment?: ScenarioGovernmentRules;
+  /** Opening context, tensions, and terminology — the scenario constitution the Game Master reads. */
+  readonly scenarioChronicle?: ScenarioChronicleRules;
 }
 
 /** The scenario row a slug resolves to, so createGame can pin a game to it. */
@@ -339,12 +341,14 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
   let scenarioClock: ScenarioClock | undefined;
   let scenarioLife: ScenarioLifeRules | undefined;
   let scenarioGovernment: ScenarioGovernmentRules | undefined;
+  let scenarioChronicle: ScenarioChronicleRules | undefined;
   if (svRow !== undefined) {
     const parsed = ScenarioDefinitionSchema.safeParse(svRow.definition);
     if (parsed.success) {
       scenarioClock = parsed.data.clock;
       scenarioLife = parsed.data.life;
       scenarioGovernment = parsed.data.government;
+      scenarioChronicle = parsed.data.chronicle;
     }
   }
 
@@ -367,6 +371,7 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
     ...(scenarioClock !== undefined ? { scenarioClock } : {}),
     ...(scenarioLife !== undefined ? { scenarioLife } : {}),
     ...(scenarioGovernment !== undefined ? { scenarioGovernment } : {}),
+    ...(scenarioChronicle !== undefined ? { scenarioChronicle } : {}),
   };
 }
 

@@ -5,6 +5,10 @@
 // exists. No packages/shared code imports from here.
 
 export type ResolutionStep =
+  // The single agent that replaced interpret/assess/adjudicate/preview and
+  // the director committee. The retired steps stay in the union so an
+  // archived turn row's progress value still reads.
+  | "game_master"
   | "interpret"
   | "assess"
   | "adjudicate"
@@ -33,6 +37,7 @@ export interface ResolutionProgress {
 }
 
 export const STEP_LABELS: Record<ResolutionStep, string> = {
+  game_master: "The Game Master is simulating the turn…",
   interpret: "Interpreting your orders…",
   assess: "Assessing feasibility…",
   adjudicate: "Calculating consequences…",
@@ -58,24 +63,15 @@ export const STEP_LABELS: Record<ResolutionStep, string> = {
 /**
  * The player-facing order of the current resolver pipeline.
  *
- * The reaction, simulation, and character-advice work starts together, so
- * they share a group. The UI can then show all three as in progress until the
- * pipeline advances to consolidation rather than incorrectly marking the
- * first two as complete as soon as the third one is announced.
+ * Deterministic work first (life review, character agency), then the one
+ * Game Master step that does all the deciding, then the deterministic work
+ * that depends on it. Retired steps are absent here but remain in
+ * `ResolutionStep` so old audit rows still read.
  */
 export const RESOLUTION_PROGRESS_STAGES = [
-  { step: "interpret", group: "interpret" },
-  { step: "assess", group: "assess" },
-  { step: "adjudicate", group: "adjudicate" },
-  { step: "preview_player", group: "preview_player" },
-  { step: "reaction", group: "world_proposals" },
-  { step: "simulate", group: "world_proposals" },
-  { step: "character_advise", group: "world_proposals" },
-  { step: "consolidate", group: "consolidate" },
-  { step: "world_direct", group: "world_direct" },
   { step: "life_review", group: "life_review" },
   { step: "character_agency", group: "character_agency" },
-  { step: "manage", group: "manage" },
+  { step: "game_master", group: "game_master" },
   { step: "resolve_politics", group: "resolve_politics" },
   { step: "execute_world", group: "execute_world" },
   { step: "chronicle", group: "chronicle" },

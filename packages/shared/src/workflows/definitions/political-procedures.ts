@@ -12,7 +12,7 @@ import {
 } from "../../material-state";
 import { canParticipate, canSponsorProcedure, resolveEligibility } from "../../characters/political-authority";
 import { evaluateSupport, positionFromScore } from "../../character-agency/political-resolver";
-import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
+import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
 
 // Political procedure workflows (character-sim phase 4).
 //
@@ -74,11 +74,20 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
       })
       .strict(),
     apply(world, params, context) {
-      if (world.material.politicalProcedures.some((p) => p.id === params.procedureId)) return null;
+      if (world.material.politicalProcedures.some((p) => p.id === params.procedureId)) {
+        return refuse(`A procedure already carries the id "${params.procedureId}". Give this one an id of its own.`);
+      }
+      if (params.institutionId !== null && !world.material.institutions.some((i) => i.id === params.institutionId)) {
+        const names = world.material.institutions.map((i) => `${i.name} (${i.id})`).join("; ");
+        return refuse(`There is no institution "${params.institutionId}". The institutions that exist are: ${names || "none"}. Pass one of those, or null to bring the matter before no institution.`);
+      }
       const sponsorship = canSponsorProcedure(world, params.sponsorCharacterId, params.type, params.institutionId);
-      if (!sponsorship.eligible) return null;
+      if (!sponsorship.eligible) return refuse(sponsorship.failedReasons.join(" "));
       for (const requirementId of params.eligibilityRequirementIds) {
-        if (!world.material.eligibilityRequirements.some((r) => r.id === requirementId)) return null;
+        if (!world.material.eligibilityRequirements.some((r) => r.id === requirementId)) {
+          const known = world.material.eligibilityRequirements.map((r) => r.id).join(", ");
+          return refuse(`There is no eligibility requirement "${requirementId}". The ones that exist are: ${known || "none"}. Name only those, or pass an empty list.`);
+        }
       }
 
       const procedure: PoliticalProcedure = {
@@ -245,12 +254,24 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
     parametersSchema: z.object({ procedureId: EntityIdSchema, callerCharacterId: EntityIdSchema }).strict(),
     apply(world, params) {
       const procedure = world.material.politicalProcedures.find((p) => p.id === params.procedureId);
-      if (!procedure) return null;
-      if (procedure.stage !== "proposed" && procedure.stage !== "gathering_support" && procedure.stage !== "deliberating") return null;
-      if (procedure.sponsorCharacterId !== params.callerCharacterId) return null;
+      if (!procedure) {
+        const open = world.material.politicalProcedures.filter((p) => p.resolvedAtStep === null);
+        return refuse(
+          open.length === 0
+            ? "No procedure of that id exists, and none is open at all. Sponsor one first with sponsor_procedure; a vote can only be called on a procedure that already exists."
+            : `No procedure of that id exists. The procedures now open are: ${open.map((p) => `${p.id} (${p.type}, ${p.stage})`).join("; ")}.`,
+        );
+      }
+      if (procedure.stage !== "proposed" && procedure.stage !== "gathering_support" && procedure.stage !== "deliberating") {
+        return refuse(`That procedure is at stage "${procedure.stage}"; a vote can only be called while it is still proposed, gathering support, or deliberating.`);
+      }
+      if (procedure.sponsorCharacterId !== params.callerCharacterId) {
+        const sponsor = world.characters.find((c) => c.id === procedure.sponsorCharacterId);
+        return refuse(`Only its sponsor may call that procedure to a decision, and its sponsor is ${sponsor?.name ?? procedure.sponsorCharacterId}.`);
+      }
       const actions = canParticipate(world, params.callerCharacterId, procedure);
-      const canCall = procedure.sponsorCharacterId === params.callerCharacterId && (actions.length > 0 || procedure.resolutionMechanism !== "vote");
-      if (!canCall) return null;
+      const canCall = actions.length > 0 || procedure.resolutionMechanism !== "vote";
+      if (!canCall) return refuse("The caller is not among those eligible to take part in this vote, so it cannot be put to a decision by them.");
 
       const updated: PoliticalProcedure = { ...procedure, stage: "voting_or_deciding" };
       return {
@@ -272,11 +293,28 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
       })
       .strict(),
     apply(world, params, context) {
-      const authorized = requireProcedureAuthorization(world.material.politicalProcedures, context.actorId, "assign_command", params.authorization);
-      if (authorized === null) return null;
       const force = world.material.forces.find((f) => f.id === params.forceId);
       const commander = world.characters.find((c) => c.id === params.commanderCharacterId);
       if (!force || !commander || !commander.alive) return null;
+
+      // A sitting magistrate of the polity that owns the force may give it a
+      // commander on his own authority. A consul who cannot put himself at the
+      // head of his republic's legions without first carrying a motion is not
+      // a consul, and the procedure route -- which resolves a turn later --
+      // made the most ordinary act of the office impossible to perform.
+      // Everyone else still needs a resolved procedure that authorises it.
+      const actor = world.characters.find((c) => c.id === context.actorId);
+      const actorIsMagistrateOfForcePolity =
+        actor !== undefined
+        && actor.alive
+        && actor.polityId !== null
+        && actor.polityId === force.polityId
+        && world.material.officeSeats.some((seat) => seat.status === "held" && seat.holderCharacterId === actor.id);
+
+      if (!actorIsMagistrateOfForcePolity) {
+        const authorized = requireProcedureAuthorization(world.material.politicalProcedures, context.actorId, "assign_command", params.authorization);
+        if (authorized === null) return null;
+      }
       return {
         world: {
           ...world,

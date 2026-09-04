@@ -1,5 +1,12 @@
 # Actions, orders, and the unified resolution architecture
 
+> **Superseded in part by [the Game Master](24-game-master.md).** The order
+> and workflow model described here — registered typed workflows, the single
+> executor gate, persistent operations, the order/refusal projection — is
+> current. The AI orchestration around it is not: the interpret/assess/
+> adjudicate chain, the director committee, and the Workflow Manager have been
+> replaced by one tool-using agent acting against a staged world.
+
 This is two things in one document, because they are the same subsystem seen
 at two grains. Sections 1-4 are the concrete reference for what a player (or
 NPC, or faction) submits and what the simulation makes of it -- the doc many

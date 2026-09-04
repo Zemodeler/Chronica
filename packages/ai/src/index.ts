@@ -1,8 +1,17 @@
-export type { AiAdapter, AiCallResult } from "./adapter";
-export { callWithCoinGate, InsufficientCoinsError, AiParseError } from "./coin-gate";
+export type {
+  AiAdapter,
+  AiCallResult,
+  AiConversationMessage,
+  AiToolCall,
+  AiToolCallResult,
+  AiToolDefinition,
+  AiToolResultMessage,
+} from "./adapter";
+export { parseToolArguments } from "./adapter";
+export { callWithCoinGate, callWithToolsAndCoinGate, InsufficientCoinsError, AiParseError } from "./coin-gate";
 export { createAnthropicLocalAdapter } from "./adapters/anthropic-local";
 export { createOpenAiLocalAdapter } from "./adapters/openai-local";
-export { createMockAdapter } from "./adapters/mock";
+export { createMockAdapter, type MockAdapterOptions, type MockToolStep } from "./adapters/mock";
 export {
   getConfiguredApiKey,
   getLocalAiProviderConfiguration,

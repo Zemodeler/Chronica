@@ -280,8 +280,11 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
           },
         },
         result: {
-          summary: `${polity.name} is renamed to ${params.newName}.`,
+          summary: polity.name === params.newName
+            ? `${polity.name} keeps the name it already bears.`
+            : `${polity.name} is renamed to ${params.newName}.`,
           applied: true,
+          ...(polity.name === params.newName ? { noOp: true } : {}),
         },
       };
     },

@@ -4,7 +4,6 @@ import type {
   CandidateAction,
   CharacterIntentActionType,
   CharacterSocialEvent,
-  CharacterSuggestion,
   ProposedInvocation,
   WorldState,
 } from "@chronica/shared";
@@ -15,9 +14,9 @@ import type {
 // before either function below is called:
 //
 //  - A material/bookkeeping change goes through a real, registered workflow
-//    (the same `runWorkflowManager`/`executeWorkflows` gate every player and
-//    World Director action already passes through) -- `buildXInvocation`
-//    below only ever builds the invocation; it never mutates anything.
+//    Since the Game Master refactor the invocation it builds is offered to
+//    the agent as a formed intention rather than executed for it, so this
+//    still only ever builds; it never mutates anything.
 //  - A pure social consequence (a threat, an attempt at reconciliation) has
 //    no material effect and instead becomes a `CharacterSocialEvent`,
 //    applied through the exact same `applySocialEvents` ledger dialogue
@@ -27,88 +26,6 @@ import type {
 // Neither path invents a target, an office, a resource, or a workflow that
 // candidate generation (`character-agency/candidates.ts`) did not already
 // name from real world state.
-
-/** An approved goal/plot suggestion becomes an invocation of the existing character-agency workflows. */
-export function buildCharacterSuggestionInvocation(
-  suggestion: CharacterSuggestion,
-  actorCharacterId: string,
-): ProposedInvocation | null {
-  switch (suggestion.suggestionKind) {
-    case "create_goal": {
-      if (suggestion.proposedGoal === null) return null;
-      return {
-        actionId: "create_character_goal",
-        actorId: actorCharacterId,
-        parameters: {
-          characterId: suggestion.characterId,
-          objective: suggestion.proposedGoal.objective,
-          category: suggestion.proposedGoal.category,
-          targetEntityIds: suggestion.proposedGoal.targetEntityIds,
-          priority: suggestion.proposedGoal.priority,
-          visibility: suggestion.proposedGoal.visibility,
-        },
-      };
-    }
-    case "update_goal": {
-      if (suggestion.goalId === null) return null;
-      return {
-        actionId: "update_character_goal",
-        actorId: actorCharacterId,
-        parameters: {
-          goalId: suggestion.goalId,
-          ...(suggestion.goalStatus !== null ? { status: suggestion.goalStatus } : {}),
-          note: suggestion.rationale.slice(0, 240) || "Updated.",
-        },
-      };
-    }
-    case "create_plot": {
-      if (suggestion.proposedPlot === null) return null;
-      return {
-        actionId: "create_character_plot",
-        actorId: actorCharacterId,
-        parameters: {
-          characterId: suggestion.characterId,
-          goalId: suggestion.proposedPlot.goalId,
-          objective: suggestion.proposedPlot.objective,
-          participantIds: suggestion.proposedPlot.participantIds,
-          targetIds: suggestion.proposedPlot.targetIds,
-          visibility: suggestion.proposedPlot.visibility,
-          stakes: suggestion.proposedPlot.stakes,
-          currentObstacle: suggestion.proposedPlot.currentObstacle,
-          worldStorylineId: suggestion.storylineId,
-        },
-      };
-    }
-    case "advance_plot": {
-      if (suggestion.plotId === null || suggestion.plotStage === null) return null;
-      return {
-        actionId: "advance_character_plot",
-        actorId: actorCharacterId,
-        parameters: {
-          plotId: suggestion.plotId,
-          newStage: suggestion.plotStage,
-          note: suggestion.rationale.slice(0, 240) || `Advanced to ${suggestion.plotStage}.`,
-        },
-      };
-    }
-    case "resolve_plot": {
-      if (suggestion.plotId === null || suggestion.plotResolutionStatus === null) return null;
-      return {
-        actionId: "resolve_character_plot",
-        actorId: actorCharacterId,
-        parameters: {
-          plotId: suggestion.plotId,
-          status: suggestion.plotResolutionStatus,
-          note: suggestion.rationale.slice(0, 240) || `Resolved: ${suggestion.plotResolutionStatus}.`,
-        },
-      };
-    }
-    // "react" and "develop_relationship" carry no goal/plot mutation -- they
-    // are narrative-only advisory notes, same as before this phase.
-    default:
-      return null;
-  }
-}
 
 const PLOT_STAGE_SEQUENCE = ["forming", "preparing", "attempting", "consequence", "adapting", "resolved"] as const;
 

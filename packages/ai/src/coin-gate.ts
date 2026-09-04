@@ -2,7 +2,13 @@ import { calculateCoinUsage } from "@chronica/billing";
 import { authorizeCoinHold, settleCoinHold, releaseCoinHold, getCoinWalletSnapshot, type ChronicaDatabase } from "@chronica/db";
 import type { AiOperation } from "@chronica/shared";
 import { randomUUID } from "node:crypto";
-import type { AiAdapter, AiCallResult } from "./adapter";
+import type {
+  AiAdapter,
+  AiCallResult,
+  AiConversationMessage,
+  AiToolCallResult,
+  AiToolDefinition,
+} from "./adapter";
 import { logDevAiCost } from "./dev-cost";
 
 type ModelTokenRate = Readonly<{
@@ -139,4 +145,86 @@ export async function callWithCoinGate(
   }
 
   throw new AiParseError();
+}
+
+/**
+ * One coin-gated step of a tool-using conversation (GM refactor).
+ *
+ * Each step is authorised, called, and settled on its own, exactly as a
+ * single-shot call is. A Game Master turn is therefore charged for what it
+ * actually spent step by step, and a wallet that empties mid-loop stops the
+ * loop at the next step rather than after the whole turn's tokens are gone.
+ *
+ * There is deliberately no validate/retry here: a tool step is not parsed for
+ * a schema, it is either a set of tool calls or it is not, and the staged
+ * session refuses anything malformed with a factual message the model can act
+ * on inside the same loop.
+ */
+export async function callWithToolsAndCoinGate(
+  db: ChronicaDatabase,
+  userId: string,
+  gameId: string,
+  operation: AiOperation,
+  adapter: AiAdapter,
+  systemPrompt: string,
+  messages: readonly AiConversationMessage[],
+  tools: readonly AiToolDefinition[],
+): Promise<AiToolCallResult> {
+  const snapshot = await getCoinWalletSnapshot(db, userId);
+  if (snapshot.availableMicroUnits === 0n) throw new InsufficientCoinsError();
+
+  const maxHold = calculateCoinUsage(HOLD_RATE, {
+    inputTokens: MAX_HOLD_INPUT_TOKENS,
+    outputTokens: MAX_HOLD_OUTPUT_TOKENS,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  }).coinChargeMicroUnits;
+
+  const workId = randomUUID();
+  let holdId: string;
+  try {
+    const hold = await authorizeCoinHold(db, {
+      gameId,
+      workId,
+      maximumMicroUnits: maxHold,
+      idempotencyKey: `${operation}:${gameId}:${workId}`,
+    });
+    holdId = hold.holdId;
+  } catch {
+    throw new InsufficientCoinsError();
+  }
+
+  let result: AiToolCallResult;
+  try {
+    result = await adapter.callWithTools(operation, systemPrompt, messages, tools);
+  } catch (error) {
+    await releaseCoinHold(db, holdId).catch(() => { /* best effort */ });
+    throw error;
+  }
+
+  const actualRate = MODEL_TOKEN_RATES[result.model] ?? MODEL_TOKEN_RATES["gpt-5.6-sol"]!;
+  const { providerCostMicroUnits, coinChargeMicroUnits } = calculateCoinUsage(actualRate, {
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    cacheReadTokens: result.cacheReadTokens,
+    cacheWriteTokens: result.cacheWriteTokens,
+  });
+
+  await settleCoinHold(db, {
+    holdId,
+    callId: `${workId}:settled`,
+    operation,
+    routingProfileVersion: 1,
+    usage: {
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      cacheReadTokens: result.cacheReadTokens,
+      cacheWriteTokens: result.cacheWriteTokens,
+    },
+    providerCostMicroUnits,
+    coinChargeMicroUnits,
+  });
+
+  logDevAiCost(operation, result, { providerCostMicroUnits, coinChargeMicroUnits });
+  return result;
 }

@@ -3,6 +3,7 @@ import "server-only";
 import { createAiAdapter, callWithCoinGate, InsufficientCoinsError, AiParseError } from "@chronica/ai";
 import {
   createDatabase,
+  type ChronicaDatabase,
   getCharacterKnowledgebase,
   getOrCreateNpcKnowledgebase,
   getWorldView,
@@ -13,7 +14,10 @@ import {
   CharacterKnowledgebaseSchema,
   WorldStateSchema,
   deriveAuthoritySummary,
+  materializePlayerCharacter,
   type CharacterKnowledgebase,
+  type ScenarioGovernmentRules,
+  type WorldState,
 } from "@chronica/shared";
 import { eq, and, isNull } from "drizzle-orm";
 import { schema } from "@chronica/db";
@@ -554,8 +558,42 @@ export async function getPlayerAuthoritySummary(gameId: string, characterId: str
   try {
     const view = await getWorldView(db, gameId);
     if (view === undefined) return [];
-    return deriveAuthoritySummary(view.world, characterId, view.scenarioGovernment);
+    // Before the first turn commits there is no snapshot, so the world here is
+    // the scenario's authored initial world -- which knows nothing about a
+    // character the player declared. Reading Authority straight off it always
+    // answered "No current public office", whatever the player had declared
+    // themselves to be. Project the player in first, exactly as resolution
+    // does, so the screen and the simulation agree from turn zero.
+    const world = await materializeDeclaredPlayer(db, gameId, view.world, characterId, view.scenarioGovernment);
+    return deriveAuthoritySummary(world, characterId, view.scenarioGovernment);
   } finally {
     await close();
+  }
+}
+
+/**
+ * The world with this player's declared character projected into it.
+ *
+ * Falls back to the world as-is whenever the projection cannot be made — an
+ * unconfirmed draft, a knowledgebase for somebody else, a starting location
+ * the scenario does not have. A read path must never fail because a character
+ * is half-created.
+ */
+async function materializeDeclaredPlayer(
+  db: ChronicaDatabase,
+  gameId: string,
+  world: WorldState,
+  characterId: string,
+  scenarioGovernment: ScenarioGovernmentRules | undefined,
+): Promise<WorldState> {
+  if (world.characters.some((character) => character.id === characterId)) return world;
+  const playerId = characterId.startsWith("declared-") ? characterId.slice("declared-".length) : null;
+  if (playerId === null) return world;
+  const knowledgebase = await getCharacterKnowledgebase(db, gameId, playerId).catch(() => null);
+  if (knowledgebase === null || !knowledgebase.confirmedByPlayer) return world;
+  try {
+    return materializePlayerCharacter(world, characterId, knowledgebase, scenarioGovernment);
+  } catch {
+    return world;
   }
 }

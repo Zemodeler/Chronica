@@ -12,6 +12,12 @@ export interface DispatchEntryInput {
   readonly body: string;
   readonly playerRelevance: "high" | "medium" | "low" | "none";
   readonly knowledgeStatus: ChronicleKnowledgeStatus;
+  /**
+   * Only the countable, checkable consequences. A consequence that is simply
+   * the entry's own sentence restated belongs in the entry, not in the brief:
+   * repeating it here made the strip read as a second copy of what the reader
+   * had just finished reading.
+   */
   readonly consequences: readonly string[];
 }
 

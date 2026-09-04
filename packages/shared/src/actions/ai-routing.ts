@@ -9,6 +9,10 @@ import { z } from "zod";
 // that could name a tier or a model would defeat all three.
 
 export const AiOperationSchema = z.enum([
+  // Game Master — the single tool-using agent that simulates a turn against a
+  // staged world. It replaced the director committee whose operations remain
+  // listed below, so archived routing profiles and audit rows still parse.
+  "game_master",
   "resolve_solo_turn",
   "assess_orders",
   "adjudicate",

@@ -3,6 +3,7 @@ import { EntityIdSchema } from "../../material-state";
 import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
 import { deriveDefaultMind } from "../../characters/mind";
 import { canCreateCharacter } from "../../continuity/continuity";
+import { openCharacterAccount } from "../../material/character-accounts";
 
 // World Director entity-creation workflows.
 //
@@ -58,6 +59,12 @@ export const worldCreationWorkflows: AnyWorkflowDefinition[] = [
       if (world.characters.some((character) => character.id === characterId)) return null;
       if (!canCreateCharacter(world.characters.length)) return null;
 
+      // A character without a purse is invisible to candidate scoring,
+      // commitments, inheritance, and every balance read. Open it here, in the
+      // same atomic mutation, rather than naming an account that does not exist.
+      const purse = openCharacterAccount(world.material, characterId);
+      if (purse === null) return null;
+
       const skills = {
         martial: 35,
         intrigue: 45,
@@ -82,7 +89,7 @@ export const worldCreationWorkflows: AnyWorkflowDefinition[] = [
         birthStep: null,
         nextLifeReviewAtStep: null,
         officeId: params.officeId,
-        personalAccountId: `account-${characterId}`,
+        personalAccountId: purse.accountId,
         skills,
         traits: [],
         mind: deriveDefaultMind({ officeId: params.officeId, skills, ageYears: 35, cultureId: "culture-local" }),
@@ -100,7 +107,7 @@ export const worldCreationWorkflows: AnyWorkflowDefinition[] = [
       };
 
       return {
-        world: { ...world, characters: [...world.characters, newCharacter] },
+        world: { ...world, characters: [...world.characters, newCharacter], material: purse.material },
         result: {
           summary: `${params.name} enters the world as a new character.`,
           applied: true,

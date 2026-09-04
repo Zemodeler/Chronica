@@ -2,13 +2,18 @@ import { z } from "zod";
 import type { WorldState } from "../world/world-state";
 import { WORKFLOW_REGISTRY } from "./registry";
 import type { WorkflowCandidate, WorkflowCandidateSource } from "./manager-types";
-import { inventedWorkflowAuthority, inventedWorkflowScope, validateInventedWorkflowParameters, type RuntimeInventedWorkflow } from "./invented-workflow";
 
-// Workflow Manager policy validator (Issue #6).
+// Deterministic workflow policy (Issue #6; extended by the GM refactor).
 //
-// Deterministic checks that run before the Workflow Manager AI call.
-// Candidates that fail are auto-rejected with an audit record; the AI
-// never sees them. All checks are stateless given (candidate, world).
+// These checks run before any mutation, against the current (staged) world.
+// Nothing here consults an AI: a candidate that fails is refused with an exact
+// reason, and that reason is what the Game Master and the Chronicle both see.
+//
+// GM refactor: the `game_master` source is the one invoker that speaks for the
+// player, the world, and named characters alike, because the roles those
+// invokers named have been folded into a single agent. It still cannot invoke
+// a `system`-only workflow -- deterministic engine paths such as
+// `resolve_battle` stay out of any model's hands.
 
 export type PolicyViolationKind =
   | "unknown_action"
@@ -44,6 +49,7 @@ export function workflowInvocationKey(invocation: WorkflowCandidate["requestedIn
 
 /** Map from WorkflowCandidateSource to the invokerAuthority kind it represents. */
 const SOURCE_TO_INVOKER: Record<WorkflowCandidateSource, string> = {
+  game_master: "game_master",
   player_directive: "player",
   character_director: "character_director",
   near_event: "world_director",
@@ -68,6 +74,19 @@ const SOURCE_TO_SCOPE: Partial<Record<WorkflowCandidateSource, string>> = {
 };
 
 /**
+ * Whether an invoker may propose a workflow declaring `authority`.
+ *
+ * The Game Master satisfies every declared authority except a workflow that
+ * only `system` may invoke: those are the deterministic engine's own entry
+ * points (battle resolution, life events, procedure resolution), spliced in by
+ * the pipeline, and no model may call them directly.
+ */
+function invokerSatisfiesAuthority(invoker: string, authority: readonly string[]): boolean {
+  if (invoker === "game_master") return authority.some((kind) => kind !== "system");
+  return authority.includes(invoker);
+}
+
+/**
  * Validate a single candidate against world state.
  * Returns null if valid, or a PolicyViolation describing the first failure.
  *
@@ -77,14 +96,13 @@ const SOURCE_TO_SCOPE: Partial<Record<WorkflowCandidateSource, string>> = {
 export function validateCandidate(
   candidate: WorkflowCandidate,
   world: WorldState,
-  inventedWorkflows: readonly RuntimeInventedWorkflow[] = [],
 ): PolicyViolation | null {
   const { requestedInvocation: inv, source } = candidate;
 
-  // 1. Registered action
+  // 1. Registered action. An unregistered actionId has no execution path at
+  //    all now (see executor.ts): there is no runtime-template fallback.
   const definition = WORKFLOW_REGISTRY.get(inv.actionId);
-  const invented = inventedWorkflows.find((workflow) => workflow.status === "active" && workflow.definition.actionId === inv.actionId);
-  if (!definition && !invented) {
+  if (!definition) {
     return {
       kind: "unknown_action",
       message: `Workflow "${inv.actionId}" is not registered in the skill catalog.`,
@@ -92,15 +110,12 @@ export function validateCandidate(
   }
 
   // 2. Parameter schema
-  const schema = definition?.parametersSchema as z.ZodType<unknown> | undefined;
-  const parsed = schema?.safeParse(inv.parameters);
-  const inventedParameterError = invented ? validateInventedWorkflowParameters(invented.definition, inv.parameters) : null;
-  const zodFailure = parsed && !parsed.success ? parsed : undefined;
-  if (zodFailure || inventedParameterError) {
-    const issues = inventedParameterError ?? zodFailure?.error.issues.map((i) => i.message).join("; ") ?? "Invalid parameters.";
+  const schema = definition.parametersSchema as z.ZodType<unknown>;
+  const parsed = schema.safeParse(inv.parameters);
+  if (!parsed.success) {
     return {
       kind: "invalid_params",
-      message: `Invalid parameters for "${inv.actionId}": ${issues}`,
+      message: `Invalid parameters for "${inv.actionId}": ${parsed.error.issues.map((i) => i.message).join("; ")}`,
     };
   }
 
@@ -122,10 +137,10 @@ export function validateCandidate(
   }
 
   // 5. invokerAuthority — source must map to an allowed invoker kind
-  const authority = definition?.invokerAuthority ?? (invented ? inventedWorkflowAuthority(invented.definition) : undefined);
+  const authority = definition.invokerAuthority;
   if (authority && authority.length > 0) {
     const invoker = SOURCE_TO_INVOKER[source];
-    if (!authority.includes(invoker as never)) {
+    if (!invokerSatisfiesAuthority(invoker, authority)) {
       return {
         kind: "authority_mismatch",
         message: `Skill "${inv.actionId}" may only be invoked by [${authority.join(", ")}]; source "${source}" maps to "${invoker}".`,
@@ -134,7 +149,7 @@ export function validateCandidate(
   }
 
   // 6. scopeLimit — world_director invokers must be within the allowed scope tier
-  const scopeLimit = definition?.scopeLimit ?? (invented ? inventedWorkflowScope(invented.definition) : undefined);
+  const scopeLimit = definition.scopeLimit;
   if (scopeLimit) {
     const sourceTier = SOURCE_TO_SCOPE[source];
     if (sourceTier !== undefined) {
@@ -143,19 +158,18 @@ export function validateCandidate(
       if (actual > allowed) {
         return {
           kind: "scope_violation",
-        message: `Skill "${inv.actionId}" requires scope ≤ "${scopeLimit}"; source "${source}" is scope "${sourceTier}".`,
+          message: `Skill "${inv.actionId}" requires scope ≤ "${scopeLimit}"; source "${source}" is scope "${sourceTier}".`,
         };
       }
     }
   }
 
   // 7. Office authorisedActionIds — requires scenario.government.offices, not available
-  // in WorldState alone. Intentionally deferred; the Workflow Manager AI prompt describes
-  // office authority, and the executor enforces a null return for inapplicable mutations.
-  // TODO: pass scenario offices when scenario is available in the pipeline.
+  // in WorldState alone. Intentionally deferred; the executor enforces a null return for
+  // inapplicable mutations, and political procedures carry their own grants.
 
   // 8. Treasury permissions — if params reference an accountId, verify the actor has access
-  const params = (parsed?.success ? parsed.data : inv.parameters) as Record<string, unknown>;
+  const params = parsed.data as Record<string, unknown>;
   const paramAccountId = params["accountId"];
   if (typeof paramAccountId === "string") {
     const spending = params["amount"];
@@ -191,13 +205,12 @@ export function validateCandidate(
 export function validateAllCandidates(
   candidates: readonly WorkflowCandidate[],
   world: WorldState,
-  inventedWorkflows: readonly RuntimeInventedWorkflow[] = [],
 ): Map<string, PolicyViolation | null> {
   const results = new Map<string, PolicyViolation | null>();
   const seen = new Map<string, string>(); // exact invocation → correlationId
 
   for (const candidate of candidates) {
-    const violation = validateCandidate(candidate, world, inventedWorkflows);
+    const violation = validateCandidate(candidate, world);
     if (violation) {
       results.set(candidate.correlationId, violation);
       continue;

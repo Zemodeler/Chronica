@@ -10,9 +10,9 @@ import { politicalProcedureWorkflows } from "./definitions/political-procedures"
 import { familyWorkflows } from "./definitions/family";
 import { materialWorkflows } from "./definitions/material";
 import { battleResolutionWorkflows } from "./definitions/battle-resolution";
+import { diplomacyWorkflows } from "./definitions/diplomacy";
 import { z } from "zod";
 import type { AnyWorkflowDefinition } from "./types";
-import type { RuntimeInventedWorkflow } from "./invented-workflow";
 
 // Workflow registry (docs/14, ADR-0032).
 //
@@ -34,6 +34,7 @@ const allWorkflows: AnyWorkflowDefinition[] = [
   ...familyWorkflows,
   ...materialWorkflows,
   ...battleResolutionWorkflows,
+  ...diplomacyWorkflows,
 ];
 
 /** Immutable registry map: actionId → WorkflowDefinition. */
@@ -49,7 +50,7 @@ export const WORKFLOW_IDS: readonly string[] = allWorkflows.map((w) => w.id);
  * Each entry includes authority and scope metadata so the Workflow Manager
  * knows which invokers may use each skill.
  */
-export function buildWorkflowCatalog(inventedWorkflows: readonly RuntimeInventedWorkflow[] = []): string {
+export function buildWorkflowCatalog(): string {
   const lines: string[] = [
     "Available workflow skills (invoke by exact id and parameter names shown):",
     "Authority key — [P]=player [W]=world_director [C]=character_director [S]=system",
@@ -72,13 +73,6 @@ export function buildWorkflowCatalog(inventedWorkflows: readonly RuntimeInvented
         : "";
       const scopeHint = w.scopeLimit ? ` | scope≤${w.scopeLimit}` : "";
       lines.push(`  ${w.id}: ${w.description}${paramHint}${authHint}${scopeHint}`);
-    }
-  }
-  if (inventedWorkflows.length > 0) {
-    lines.push("\n[INVENTED — game-local]");
-    for (const workflow of inventedWorkflows.filter((workflow) => workflow.status === "active")) {
-      const parameters = workflow.definition.parameters.map((parameter) => parameter.name).join(", ");
-      lines.push(`  ${workflow.definition.actionId}: ${workflow.definition.description} | params: ${parameters} | authority: ${workflow.definition.invokerAuthority.join(",")}`);
     }
   }
   return lines.join("\n");
