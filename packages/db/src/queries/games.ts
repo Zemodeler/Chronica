@@ -64,7 +64,19 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     // Version 5 fixes settlements missing a provinceId in some provinces,
     // which failed WorldStateSchema validation and blocked hosting entirely.
     await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 5, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "Fixes settlements missing provinceId that broke world-state validation on game creation." }).onConflictDoNothing();
-    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 5, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
+    // Version 6 adds the Roman Senate institution and eligibility requirement
+    // records that were missing entirely, which made every sponsor_procedure
+    // (Senate petitions, command authorizations, office elections) fail its
+    // dry run unconditionally -- canSponsorProcedure rejects any institutionId
+    // that doesn't exist in world.material.institutions.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 6, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "Adds the Roman Senate institution and eligibility requirements, which were missing and made every political procedure fail." }).onConflictDoNothing();
+    // Version 7 adds the province adjacency graph (map.edges), which was
+    // entirely empty -- every "which nearby polities might react" computation
+    // (Reaction Director, near/far/coarse event scoping) silently had nothing
+    // to read, so no neighboring polity could ever be proposed as a reactor
+    // no matter what happened in its territory.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 7, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "Adds the province adjacency graph, which was empty and silently disabled every neighbor-based reaction system." }).onConflictDoNothing();
+    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 7, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
   });
 }
 

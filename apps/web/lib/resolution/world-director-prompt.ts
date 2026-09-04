@@ -98,8 +98,8 @@ Output schema (return strict JSON { "decisions": [...] }):
 - proposalId: the id from the proposals list above
 - decision: "approve" | "modify" | "defer" | "reject"
 - rationale: max 400 chars — your reasoning
-- finalWorkflows: array of workflow invocations to actually execute: { "actionId", "actorId", "parameters" }. Use [] to execute nothing for this proposal.
-- chronicleCast: null for non-political proposals; otherwise { "role", "characterId" } for an existing NPC, OR { "role", "newCharacter": { "name", "polityId", "locationProvinceId", "officeId" } } when no existing NPC fits. "role" MUST be exactly one of: "supporter", "opponent", "spokesperson", "presiding_official", "witness", "negotiator".
+- finalWorkflows: array of workflow invocations to actually execute: { "actionId", "actorId", "parameters" }. Use [] to execute nothing for this proposal. actorId may be the literal placeholder "$cast" when this same decision's chronicleCast introduces a newCharacter and that character is the one performing this workflow (e.g. a newly-cast local leader whose first act raises a force) — the pipeline substitutes it with the character it creates. Never use "$cast" unless chronicleCast.newCharacter is set on this same decision.
+- chronicleCast: null for non-political, non-military proposals; otherwise { "role", "characterId" } for an existing NPC, OR { "role", "newCharacter": { "name", "polityId", "locationProvinceId", "officeId" } } when no existing NPC fits. "role" MUST be exactly one of: "supporter", "opponent", "spokesperson", "presiding_official", "witness", "negotiator", "commander".
 
 RULES:
 1. Aim for at most 12 total Chronicle-worthy outcomes (high-salience approved proposals) per turn.
@@ -107,14 +107,15 @@ RULES:
 3. At least one approved proposal should leave an open pressure for the next turn.
 4. Prefer modifying over rejecting when a proposal has merit but wrong parameters.
 5. Defer proposals that are plausible but would create too much simultaneous change.
-6. All actor IDs in finalWorkflows must exist in world state.
+6. All actor IDs in finalWorkflows must exist in world state, except the literal placeholder "$cast" described above.
 7. In conflicts between proposals, prefer the higher-salience one unless the lower-salience is more narratively grounded.
 8. Do not approve both sides of a conflict without explicitly resolving it in the rationale.
-9. finalWorkflows must be a subset of that proposal's listed workflows, with exactly the same actionId, actorId, and parameters. Never invent an actionId. An approved proposal that makes a world-state change must retain the matching proposed workflow; if none was proposed, defer or reject it instead of treating the change as narrative-only.
+9. finalWorkflows must be a subset of that proposal's listed workflows, with exactly the same actionId, actorId, and parameters (including a proposed "$cast"). Never invent an actionId. An approved proposal that makes a world-state change must retain the matching proposed workflow; if none was proposed, defer or reject it instead of treating the change as narrative-only.
 10. An approved Character Director proposal is recorded as a Chronicle character event even when its finalWorkflows array is empty. Approve it when the character development itself is grounded and meaningful.
-11. Every approved political, deliberative, diplomatic, or institutional proposal needs a chronicleCast. Select a living NPC from AVAILABLE CHRONICLE CAST only when one is a genuinely good fit — right polity, right standing, right relationship to the event. A senate debate should have a named supporter, opponent, spokesperson, or presiding official — never an anonymous institution. Use only the six exact role tokens in the output schema; never write a descriptive role or title. For example, an envoy is "negotiator", an observer is "witness", and a military or political advocate is "supporter" or "spokesperson" as appropriate.
+11. Every approved political, deliberative, diplomatic, or institutional proposal needs a chronicleCast. Select a living NPC from AVAILABLE CHRONICLE CAST only when one is a genuinely good fit — right polity, right standing, right relationship to the event. A senate debate should have a named supporter, opponent, spokesperson, or presiding official — never an anonymous institution. Use only the seven exact role tokens in the output schema; never write a descriptive role or title. For example, an envoy is "negotiator", an observer is "witness", and a military or political advocate is "supporter" or "spokesperson" as appropriate.
 12. Do not force-fit an existing NPC who doesn't belong in the scene just to avoid creating someone new — a wrong-polity or wrong-office character is worse than a new one. If no existing NPC plausibly fits, favor introducing a newCharacter: provide a proper period-appropriate name and a real polity and province ID. The pipeline will automatically invoke the guarded create_world_character workflow; do not put that creation in finalWorkflows. Introduce at most one NPC per proposal, only where the event genuinely needs a human voice — the roster being thin or empty is itself a reason to introduce someone, not a reason to skip casting.
 13. For a newCharacter, officeId must be null unless a real office ID is known. Never fabricate an office ID.
+14. No polity is ever undefended just because it has no character on the roster yet. A proposal reacting to a real military threat against a polity with no living character (a hostile force entering its territory, a declared war, a siege) needs a chronicleCast with role "commander" — a newly-cast local leader — and that proposal's finalWorkflows should have them act at once (e.g. actorId "$cast" raising a defending force via a registered workflow), not leave the threat unanswered for lack of an existing NPC.
 
 Respond with strict JSON only: { "decisions": [...] }`;
 }

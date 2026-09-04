@@ -58,7 +58,25 @@ export function executeWorkflow(
   }
 
   const schema = definition.parametersSchema as z.ZodType<unknown>;
-  const parsed = schema.safeParse(invocation.parameters);
+  let parsed = schema.safeParse(invocation.parameters);
+  // A resolved political procedure's linked-workflow invocation
+  // (character-agency/political-resolver.ts's buildInvocation) always
+  // attaches an `authorization: { procedureId }` field to prove the grant.
+  // Only the handful of workflows that gate on it (e.g. assign_command)
+  // declare that key; every other workflow's .strict() schema rejects it as
+  // unrecognized. Retry once with it stripped so an authorization-linked
+  // workflow that doesn't itself care about the grant (start_war, move_force,
+  // ...) isn't broken by a key it never asked for.
+  if (
+    !parsed.success
+    && invocation.parameters !== null
+    && typeof invocation.parameters === "object"
+    && "authorization" in invocation.parameters
+  ) {
+    const { authorization: _authorization, ...withoutAuthorization } = invocation.parameters as Record<string, unknown>;
+    const retried = schema.safeParse(withoutAuthorization);
+    if (retried.success) parsed = retried;
+  }
   if (!parsed.success) {
     return {
       ok: false,

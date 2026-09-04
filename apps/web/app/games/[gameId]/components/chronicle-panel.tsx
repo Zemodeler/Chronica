@@ -151,19 +151,36 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
   const [cursor, setCursor] = useState(0);
   const [marking, setMarking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Distinct from `error`: a 404 here just means no turn has resolved yet
+  // (e.g. a brand-new game), not a failure worth alarming the player about.
+  const [notYetAvailable, setNotYetAvailable] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const fetchChronicle = useCallback(async () => {
+    setLoading(true);
     try {
       const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/chronicle`, { cache: "no-store" });
-      if (!res.ok) return;
+      if (!res.ok) {
+        setLoading(false);
+        if (res.status === 404) {
+          setNotYetAvailable(true);
+        } else {
+          setError("Failed to load the chronicle. Try again in a moment.");
+        }
+        return;
+      }
       const data = await res.json() as ChronicleData;
       setChronicle(data);
       setCursor(0);
+      setNotYetAvailable(false);
+      setError(null);
+      setLoading(false);
       // Defensive: a fresh chronicle load always starts from "Done reading",
       // never stuck showing "Closing…" from a stale state.
       setMarking(false);
     } catch {
-      // Silently ignore
+      setLoading(false);
+      setError("Failed to load the chronicle. Try again in a moment.");
     }
   }, [gameId]);
 
@@ -270,22 +287,46 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
               width: "calc(100% - 3rem)",
             }}
           >
-            <p
-              style={{
-                fontSize: "0.7rem",
-                color: "var(--text-muted)",
-                letterSpacing: "0.1em",
-                textTransform: "uppercase",
-                margin: 0,
-              }}
-            >
-              Chronicle — {hasEntries ? `${cursor + 1} / ${totalEntries}` : "Loading…"}
-              {currentEntry && ` · ${currentEntry.dateLabel}`}
-            </p>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "1rem" }}>
+              <p
+                style={{
+                  fontSize: "0.7rem",
+                  color: "var(--text-muted)",
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  margin: 0,
+                }}
+              >
+                Chronicle — {hasEntries ? `${cursor + 1} / ${totalEntries}` : "No entries yet"}
+                {currentEntry && ` · ${currentEntry.dateLabel}`}
+              </p>
+              {!hasEntries && (
+                <button
+                  type="button"
+                  className="chat-panel-close"
+                  onClick={() => setOpen(false)}
+                  aria-label="Close chronicle"
+                >
+                  ×
+                </button>
+              )}
+            </div>
 
-            {!hasEntries && (
+            {!hasEntries && loading && (
               <p style={{ color: "var(--text-muted)", fontSize: "0.9375rem", margin: 0 }}>
                 Loading chronicle…
+              </p>
+            )}
+
+            {!hasEntries && !loading && notYetAvailable && (
+              <p style={{ color: "var(--text-muted)", fontSize: "0.9375rem", margin: 0 }}>
+                No chronicle yet — nothing has happened in this world until you submit your first orders.
+              </p>
+            )}
+
+            {!hasEntries && !loading && error && (
+              <p style={{ color: "var(--text-error, #e53e3e)", fontSize: "0.9375rem", margin: 0 }}>
+                {error}
               </p>
             )}
 

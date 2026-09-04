@@ -32,15 +32,18 @@ export function buildPlayerResolutionContext(
     lines.push("\nPLAYER KNOWLEDGEBASE (authoritative personal context):");
     lines.push(`  Identity: ${kb.canonicalName} — ${kb.role}`);
     lines.push(`  Authority: ${kb.authority.join("; ") || "none recorded"}`);
-    lines.push(`  Background: ${kb.biography.slice(0, 1_000)}`);
-    lines.push(`  Key relations: ${kb.relations.map((r) => `${r.name} (${r.relationship}: ${r.notes})`).join("; ")}`);
+    // This context is sent to several directors in one turn.  The opening
+    // portion of a biography establishes voice and role reliably; sending a
+    // second copy of a long backstory to every call costs more than it helps.
+    lines.push(`  Background: ${kb.biography.slice(0, 500)}`);
+    lines.push(`  Key relations: ${kb.relations.slice(0, 8).map((r) => `${r.name} (${r.relationship}: ${r.notes.slice(0, 160)})`).join("; ")}`);
   }
 
   if (context.pendingCommitments.length > 0) {
     lines.push("\nPENDING DIALOGUE COMMITMENTS (treat as live pressures, not fulfilled facts):");
-    for (const commitment of context.pendingCommitments.slice(0, 8)) {
+    for (const commitment of context.pendingCommitments.slice(0, 4)) {
       const npcName = world.characters.find((c) => c.id === commitment.npcCharacterId)?.name ?? commitment.npcCharacterId;
-      lines.push(`  ${npcName} [id: ${commitment.npcCharacterId}] promised ${commitment.promiseType}: ${commitment.promisedResult}. Conditions: ${commitment.conditions}. Basis: ${commitment.rationale}`);
+      lines.push(`  ${npcName} [id: ${commitment.npcCharacterId}] promised ${commitment.promiseType}: ${commitment.promisedResult.slice(0, 200)}. Conditions: ${commitment.conditions.slice(0, 160)}. Basis: ${commitment.rationale.slice(0, 160)}`);
     }
   }
 
@@ -82,13 +85,11 @@ function worldContext(world: WorldState, actorId: string, context?: ResolutionPl
     lines.push(`  ${p.name} [id: ${p.id}]`);
   }
 
-  lines.push(`\nPROVINCES HELD (name [id] — controller polity):`);
-  for (const polityEntry of world.map.polities) {
-    const held = world.map.provinces.filter((p) => p.controllerPolityId === polityEntry.id);
-    for (const p of held) {
-      lines.push(`  ${p.name} [id: ${p.id}] — ${polityEntry.name}`);
-    }
-  }
+  // Keep every place name and ID (orders may legitimately target any of
+  // them), but avoid repeating polity names already listed above for every
+  // province. This is one of the largest repeated prompt sections.
+  lines.push(`\nPROVINCES (name [id; controller-id]):`);
+  for (const p of world.map.provinces) lines.push(`  ${p.name} [${p.id}; ${p.controllerPolityId ?? "none"}]`);
 
   // Accounts visible to actor (for create_force and economic workflows).
   // Include: non-private accounts, polity accounts for the actor's polity, and the actor's own character accounts.
@@ -126,7 +127,7 @@ function worldContext(world: WorldState, actorId: string, context?: ResolutionPl
   const otherForces = world.material.forces.filter((f) => !forces.some((uf) => uf.id === f.id));
   if (otherForces.length > 0) {
     lines.push(`\nOTHER FORCES IN WORLD:`);
-    for (const f of otherForces.slice(0, 12)) {
+    for (const f of otherForces.slice(0, 8)) {
       const loc = world.map.provinces.find((p) => p.id === f.locationId);
       const polityName = world.map.polities.find((p) => p.id === f.polityId)?.name ?? f.polityId;
       lines.push(`  ${f.name} [id: ${f.id}] (${polityName}): ${f.personnel.reduce((n, p) => n + p.fit, 0)} troops in ${loc?.name ?? f.locationId} [id: ${f.locationId}]`);
@@ -144,7 +145,7 @@ function worldContext(world: WorldState, actorId: string, context?: ResolutionPl
   }
 
   // Key characters with IDs.
-  const keyChars = world.characters.filter((c) => c.alive && c.id !== actorId).slice(0, 16);
+  const keyChars = world.characters.filter((c) => c.alive && c.id !== actorId).slice(0, 12);
   if (keyChars.length > 0) {
     lines.push(`\nKEY CHARACTERS:`);
     for (const c of keyChars) {
@@ -180,10 +181,10 @@ ${worldContext(world, actorId, context)}
 Parse the order into:
 - intent: a clear one-sentence summary of what the player wants to achieve (max 600 chars)
 - targetIds: entity IDs that are the object of the action (provinces, characters, forces, polities)
-- priorities: what the player values most about this action (up to 8, max 180 chars each)
-- conditions: preconditions that must be true for the action to succeed (up to 8, max 240 chars each)
-- proposedSteps: the concrete steps required to carry this out (1-12, max 240 chars each)
-- risks: potential negative outcomes (up to 12, max 240 chars each)
+- priorities: what the player values most about this action (up to 4, max 120 chars each)
+- conditions: preconditions that must be true for the action to succeed (up to 4, max 160 chars each)
+- proposedSteps: the concrete steps required to carry this out (1-4, max 160 chars each)
+- risks: potential negative outcomes (up to 4, max 160 chars each)
 - duration: estimated duration as a JSON object { "min": N, "max": N } where N is a positive integer (game seasons)
 
 Be grounded: use actual province names, character names, and force names from the world context above. If the player references something that does not exist, note it as a risk.
@@ -214,7 +215,7 @@ ${WORKFLOW_MUTATION_RULE}
 PERSONAL / DOMESTIC ACTIONS: If the order is a personal, social, or domestic activity (hosting a dinner, spending time with family, playing a game, personal rituals, leisure, prayer, rest, etc.) with no world-state implications, it is always "feasible" with workflows: [] and needsAdjudication: false. Never mark these as "impossible" just because the broader political context is serious.
 
 For each interpreted order, assess:
-- interpretation: restate the intent concisely (max 600 chars)
+- interpretation: restate the intent concisely (max 300 chars)
 - feasibility: one of "feasible" | "conditional" | "unlawful" | "impossible" | "uncertain"
   * feasible: straightforwardly achievable (includes all personal/social/domestic actions)
   * conditional: possible but requires specific conditions to be met
@@ -265,9 +266,10 @@ For the order, produce a verdict:
   * For "start battle" / "engage forces" orders: use actionId "start_battle" with attackingForceId and defendingForceId (both from world context) and a newly invented battleId (kebab-case slug, e.g. "battle-rome-carthage-261bc"). The battleId is the only parameter you may invent — all other IDs must come from world context.
   * For "remove gold" / "spend funds" / "pay" orders: use actionId "remove_gold" with accountId (from the ACCOUNTS section above), amount (integer), and reason (short description of the expenditure, max 240 chars).
   * ECONOMIC INCOME RULE — applies to ANY order involving: selling, trading, receiving payment, earning income, collecting funds, spoils, gifts, or any money gain: you MUST produce { kind: "workflow", invocation: { actionId: "add_gold", actorId: "<actor-id>", parameters: { accountId: "<actor-account-id>", amount: <plausible integer>, reason: "<brief description>" } } }. Use the account-id marked "(YOU)" in the ACCOUNTS section above. If no account is marked "(YOU)", still use add_gold with any account-id present — never fall back to material_effect for income. Do NOT invoke any military workflow for a peaceful economic transaction.
+  * COMPOUND AUTHORIZATION ORDERS — CRITICAL: when the order both asks for authorization the actor currently lacks (a Senate/council vote, a superior's permission, a command grant) AND immediately acts on it in the same breath (e.g. "ask the Senate to let me invade the Boii and march my army in" / "get the assembly's backing and attack"), the player must experience this as ONE uninterrupted turn, never a wait across several real turns for the vote alone. Produce BOTH: (1) a sponsor_procedure delta for the authorization, with deadlineStep set to the CURRENT STEP shown above (never higher) so the political engine resolves it before this same turn ends, and linkedWorkflowId/linkedWorkflowParams set to whatever workflow the granted authority would itself invoke (e.g. assign_command); AND (2) a second delta for the actual follow-up action the order describes (e.g. move_force, start_battle), using the actor's own id as usual. It is fine and expected for (2) to depend on authority the actor does not yet hold — the Workflow Manager and the political engine decide within this same turn whether it actually goes through; you are not responsible for gating it. Reserve a longer deadlineStep (several steps out) only when the request is genuinely contested — active political rivals on record, a clearly divided institution, or comparable real opposition already established in world state — never merely because the request is significant. The number of Chronicle beats the deliberation gets (a single vote, or several rounds of debate) is a narrative choice made later and independent of how many turns this takes; it always takes this one turn.
 - tacticalModifiers: array of tactical modifier proposals (empty if not a battle)
 - timeCost: { min, max } in seasons
-- rationale: explain the decisive factor (max 1200 chars)
+- rationale: explain the decisive factor (max 500 chars)
 - knowledgeVisibility: choose exactly one of these strings: "public", "polity", or "private". Do not combine values, add qualifiers, or use any other value. When uncertain, use "private".
 
 Do not output playerInvolvement. The server records the submitting player and actor after validating your verdict.

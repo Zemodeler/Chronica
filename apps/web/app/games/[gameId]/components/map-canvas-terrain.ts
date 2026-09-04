@@ -286,6 +286,10 @@ export function drawTerrainToCanvas(
   ctx.lineCap = "round";
   ctx.setLineDash([]);
   for (const river of world.rivers) {
+    if (
+      river.bounds.minX > visibleRect.maxX || river.bounds.maxX < visibleRect.minX ||
+      river.bounds.minY > visibleRect.maxY || river.bounds.maxY < visibleRect.minY
+    ) continue;
     const w = RIVER_WIDTH[river.className] ?? 0.55;
     const alpha = RIVER_ALPHA[river.className] ?? 1;
     ctx.globalAlpha = alpha;

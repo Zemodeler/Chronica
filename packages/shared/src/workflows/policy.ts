@@ -25,6 +25,23 @@ export interface PolicyViolation {
   readonly message: string;
 }
 
+/**
+ * A stable identity for an invocation when deciding whether it is a true
+ * duplicate.  Action + actor alone is too coarse: one commander may quite
+ * legitimately raise two differently named forces or issue distinct orders
+ * in a turn.  Only the same action, actor, and parameters are duplicates.
+ */
+function stableParameterEncoding(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableParameterEncoding).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableParameterEncoding(record[key])}`).join(",")}}`;
+}
+
+export function workflowInvocationKey(invocation: WorkflowCandidate["requestedInvocation"]): string {
+  return `${invocation.actionId}:${invocation.actorId}:${stableParameterEncoding(invocation.parameters)}`;
+}
+
 /** Map from WorkflowCandidateSource to the invokerAuthority kind it represents. */
 const SOURCE_TO_INVOKER: Record<WorkflowCandidateSource, string> = {
   player_directive: "player",
@@ -177,7 +194,7 @@ export function validateAllCandidates(
   inventedWorkflows: readonly RuntimeInventedWorkflow[] = [],
 ): Map<string, PolicyViolation | null> {
   const results = new Map<string, PolicyViolation | null>();
-  const seen = new Map<string, string>(); // "actionId:keyParam" → correlationId
+  const seen = new Map<string, string>(); // exact invocation → correlationId
 
   for (const candidate of candidates) {
     const violation = validateCandidate(candidate, world, inventedWorkflows);
@@ -186,8 +203,9 @@ export function validateAllCandidates(
       continue;
     }
 
-    // Duplicate detection: same actionId + actorId is a duplicate
-    const dupeKey = `${candidate.requestedInvocation.actionId}:${candidate.requestedInvocation.actorId}`;
+    // Distinct orders by the same actor are allowed.  Reject only an exact
+    // repeat, rather than turning a second legitimate levy into a refusal.
+    const dupeKey = workflowInvocationKey(candidate.requestedInvocation);
     const prior = seen.get(dupeKey);
     if (prior !== undefined) {
       results.set(candidate.correlationId, {

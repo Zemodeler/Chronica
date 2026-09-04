@@ -18,6 +18,7 @@ import {
   executeWorkflow,
   validateAllCandidates,
   validateCandidate,
+  workflowInvocationKey,
   WORKFLOW_REGISTRY,
 } from "@chronica/shared";
 import { buildWorkflowManagerSystemPrompt } from "./workflow-manager-prompt";
@@ -282,7 +283,7 @@ export async function runWorkflowManager(
     const finalInvocation = decision.decision === "replace" ? decision.replacementInvocation! : candidate.requestedInvocation;
     const finalCandidate: WorkflowCandidate = { ...candidate, requestedInvocation: finalInvocation };
     const policyViolation = validateCandidate(finalCandidate, dryRunWorld, runtimeInventedWorkflows);
-    const duplicateKey = `${finalInvocation.actionId}:${finalInvocation.actorId}`;
+    const duplicateKey = workflowInvocationKey(finalInvocation);
     const duplicateViolation = seen.has(duplicateKey)
       ? { kind: "duplicate", message: `Duplicate final invocation: ${finalInvocation.actionId} by ${finalInvocation.actorId}.` }
       : null;

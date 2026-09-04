@@ -19,6 +19,12 @@ const ZOOM_STEP = 1.35;
 const PAN_PX = 40;
 const MEDIUM_THRESHOLD = 2.5;
 const CLOSE_THRESHOLD = 5;
+// Wheel deltas vary dramatically between a mouse wheel and a trackpad.  An
+// exponential response gives both devices continuous, predictable zoom rather
+// than applying one large fixed step for every browser event.
+const WHEEL_ZOOM_SENSITIVITY = 0.0025;
+const MIN_WHEEL_FACTOR = 0.7;
+const MAX_WHEEL_FACTOR = 1.4;
 
 export interface ViewportTransform {
   scale: number;
@@ -168,6 +174,33 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
       }
     }, [transform, applyTransform]);
 
+    // A layout change (resizing the window or opening a panel) used to leave
+    // the canvas at its old backing-store size until the next map gesture.
+    // Redrawing on the next frame keeps the map sharp throughout the resize
+    // without synchronously painting for every ResizeObserver notification.
+    useEffect(() => {
+      const container = containerRef.current;
+      if (!container || typeof ResizeObserver === "undefined") return;
+      let resizeFrame: number | null = null;
+      const observer = new ResizeObserver(() => {
+        if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
+        resizeFrame = requestAnimationFrame(() => {
+          resizeFrame = null;
+          scheduleCanvasDraw(liveRef.current);
+        });
+      });
+      observer.observe(container);
+      return () => {
+        observer.disconnect();
+        if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
+      };
+    }, [scheduleCanvasDraw]);
+
+    useEffect(() => () => {
+      if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    }, []);
+
     const zoomAroundPoint = useCallback(
       (clientX: number, clientY: number, factor: number) => {
         const container = containerRef.current;
@@ -192,7 +225,12 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
     const handleWheel = useCallback(
       (e: WheelEvent) => {
         e.preventDefault();
-        zoomAroundPoint(e.clientX, e.clientY, e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
+        // DOM_DELTA_LINE and DOM_DELTA_PAGE are intentionally normalized to
+        // pixels. Trackpads already report pixel deltas, so their fine motion
+        // remains fine instead of becoming a sequence of 35% jumps.
+        const delta = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 320 : 1);
+        const factor = Math.min(MAX_WHEEL_FACTOR, Math.max(MIN_WHEEL_FACTOR, Math.exp(-delta * WHEEL_ZOOM_SENSITIVITY)));
+        zoomAroundPoint(e.clientX, e.clientY, factor);
       },
       [zoomAroundPoint],
     );
