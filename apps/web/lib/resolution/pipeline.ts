@@ -69,6 +69,7 @@ import {
   type ScenarioClock,
   type ScenarioLifeRules,
   type ScenarioGovernmentRules,
+  type Office,
 } from "@chronica/shared";
 import { collectCharacterAgencyCandidates, collectPlayerCandidates, collectWorldCandidates, previewPlayerWorkflows, runWorkflowManager } from "./workflow-manager";
 
@@ -300,13 +301,14 @@ function resolveInvocationEntities(invocation: ProposedInvocation, world: WorldS
 }
 
 const VALID_CAST_ROLES = new Set([
-  "supporter", "opponent", "spokesperson", "presiding_official", "witness", "negotiator",
+  "supporter", "opponent", "spokesperson", "presiding_official", "witness", "negotiator", "commander",
 ]);
 
 function repairChronicleCastRole(role: string): string {
   if (VALID_CAST_ROLES.has(role)) return role;
   const lower = role.toLowerCase();
   if (lower.includes("presid") || lower.includes("chair") || lower.includes("official")) return "presiding_official";
+  if (lower.includes("command") || lower.includes("chieftain") || lower.includes("warlord") || lower.includes("general")) return "commander";
   if (lower.includes("support") || lower.includes("backer") || lower.includes("ally")) return "supporter";
   if (lower.includes("oppos") || lower.includes("critic") || lower.includes("rival") || lower.includes("enemy")) return "opponent";
   if (lower.includes("negotiat") || lower.includes("envoy") || lower.includes("diplomat")) return "negotiator";
@@ -394,10 +396,39 @@ function safeParseJson<T>(
  * workflow sees the turn, so an existing NPC can never become the fallback
  * actor for the player's orders.
  */
+/**
+ * A vacant office whose label the player's researched `role` explicitly
+ * names (exact case-insensitive substring, never fuzzy/semantic guessing)
+ * in the character's own polity. Deliberately conservative: this is the only
+ * point where character creation may seat a player in real authority, so a
+ * false match would hand out power the scenario never granted. "Vacant"
+ * means no living character -- NPC or otherwise -- currently holds it,
+ * whether via `officeSeats` or the legacy `character.officeId` field.
+ */
+function findVacantOfficeMatchingRole(
+  world: WorldState,
+  scenarioGovernment: ScenarioGovernmentRules | undefined,
+  polityId: string | null,
+  role: string,
+): Office | undefined {
+  if (!scenarioGovernment || polityId === null) return undefined;
+  const roleLower = role.toLowerCase();
+  const heldOfficeIds = new Set<string>([
+    ...world.material.officeSeats.filter((seat) => seat.status === "held").map((seat) => seat.officeId),
+    ...world.characters.filter((c) => c.alive && c.officeId !== null).map((c) => c.officeId!),
+  ]);
+  return scenarioGovernment.offices.find((office) => (
+    office.polityId === polityId
+    && !heldOfficeIds.has(office.id)
+    && roleLower.includes(office.label.toLowerCase())
+  ));
+}
+
 function materializePlayerCharacter(
   world: WorldState,
   actorCharacterId: string,
   knowledgebase: CharacterKnowledgebase | null,
+  scenarioGovernment: ScenarioGovernmentRules | undefined,
 ): WorldState {
   if (world.characters.some((character) => character.id === actorCharacterId)) return world;
   if (!knowledgebase || knowledgebase.characterId !== actorCharacterId) {
@@ -420,20 +451,30 @@ function materializePlayerCharacter(
     status: "active" as const,
     visibility: "private" as const,
   };
+  const cultureId = `culture-${knowledgebase.culture.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "local"}`;
+  // A researched character whose role explicitly names a real, currently
+  // vacant office in their own polity starts holding it -- e.g. "Consul of
+  // the Roman Republic" when the consulship is open. This is the only
+  // mechanical link between character creation and the canonical Authority
+  // projection (packages/shared/src/characters/authority-projection.ts);
+  // anything short of an exact office-label match leaves officeId null, same
+  // as before, rather than guess at power the scenario didn't actually grant.
+  const matchedOffice = findVacantOfficeMatchingRole(world, scenarioGovernment, location.controllerPolityId, knowledgebase.role);
+  const officeId = matchedOffice?.id ?? null;
   const playerCharacter: WorldState["characters"][number] = {
     id: actorCharacterId,
     name: knowledgebase.canonicalName,
-    cultureId: `culture-${knowledgebase.culture.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "local"}`,
+    cultureId,
     faithId: null,
     dynastyId: null,
     locationProvinceId: location.id,
     polityId: location.controllerPolityId,
     ageYearsAtStart: 35,
-    officeId: null,
+    officeId,
     personalAccountId: accountId,
     skills: knowledgebase.skills,
     traits: [],
-    mind: deriveDefaultMind({ officeId: null, skills: knowledgebase.skills, ageYears: 35, cultureId: `culture-${knowledgebase.culture.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "local"}` }),
+    mind: deriveDefaultMind({ officeId, skills: knowledgebase.skills, ageYears: 35, cultureId }),
     healthBps: 10_000,
     prestigeBps: 3_000,
     relations: [],
@@ -445,12 +486,35 @@ function materializePlayerCharacter(
     birthStep: null,
     nextLifeReviewAtStep: null,
   };
+  const existingSeatForOffice = matchedOffice
+    ? world.material.officeSeats.find((seat) => seat.officeId === matchedOffice.id && seat.status !== "held")
+    : undefined;
+  const officeSeats = matchedOffice === undefined
+    ? world.material.officeSeats
+    : existingSeatForOffice
+      ? world.material.officeSeats.map((seat) => (seat.id === existingSeatForOffice.id
+        ? { ...seat, holderCharacterId: actorCharacterId, status: "held" as const, vacancyCause: "none" as const, termStartedAtStep: world.elapsedStep }
+        : seat))
+      : [...world.material.officeSeats, {
+        id: `${matchedOffice.id}:seat:${world.material.officeSeats.filter((s) => s.officeId === matchedOffice.id).length}`,
+        officeId: matchedOffice.id,
+        seatIndex: world.material.officeSeats.filter((s) => s.officeId === matchedOffice.id).length,
+        holderCharacterId: actorCharacterId,
+        status: "held" as const,
+        vacancyCause: "none" as const,
+        termStartedAtStep: world.elapsedStep,
+        termExpiresAtStep: null,
+        appointmentProcedureId: null,
+        removalProcedureId: null,
+        eligibilityRequirementIds: matchedOffice.eligibilityRequirementIds,
+      }];
 
   return {
     ...world,
     characters: [...world.characters, playerCharacter],
     material: {
       ...world.material,
+      officeSeats,
       accounts: existingAccount ? world.material.accounts : [...world.material.accounts, personalAccount],
       accountAccess: world.material.accountAccess.some((access) => access.accountId === accountId && access.characterId === actorCharacterId)
         ? world.material.accountAccess
@@ -503,6 +567,38 @@ function deriveExecutedWorkflowConsequences(
     }
   }
   return consequences;
+}
+
+/**
+ * Player Chronicle entries must report the workflows that actually ran, not
+ * the adjudicator's speculative rationale.  In particular, a newly created
+ * force is already named, commanded, and usable in the same atomic workflow;
+ * prose must never turn its internal UUID into an in-world waiting state.
+ */
+function executedWorkflowSummaries(
+  auditEntries: readonly WorkflowAuditBlob["candidates"][number][],
+  workflowLog: readonly { invocation: ProposedInvocation; outcome: { ok: boolean; result?: { summary: string } } }[],
+): string[] {
+  const summaries: string[] = [];
+  for (const entry of auditEntries) {
+    const invocation = entry.finalInvocation;
+    if (!invocation || entry.executionOk !== true) continue;
+    const outcome = workflowLog.find((item) => JSON.stringify(item.invocation) === JSON.stringify(invocation))?.outcome;
+    if (outcome?.ok && outcome.result?.summary) summaries.push(outcome.result.summary);
+  }
+  return summaries;
+}
+
+function playerChronicleTitle(
+  auditEntries: readonly WorkflowAuditBlob["candidates"][number][],
+  world: WorldState,
+): string {
+  const createdForce = auditEntries.find((entry) => entry.executionOk === true && entry.finalInvocation?.actionId === "create_force");
+  const forceName = createdForce?.finalInvocation?.parameters["name"];
+  if (typeof forceName === "string" && forceName.trim()) return `The Raising of ${forceName}`;
+  const actorId = auditEntries.find((entry) => entry.executionOk === true)?.finalInvocation?.actorId;
+  const actorName = actorId ? world.characters.find((character) => character.id === actorId)?.name : undefined;
+  return actorName ? `The Order of ${actorName}` : "The Recorded Order";
 }
 
 interface ChronicleCharacterMention {
@@ -592,7 +688,6 @@ function applyChronicleCast(
 function buildChronicleEntries(
   world: WorldState,
   verdicts: readonly Verdict[],
-  interpretations: readonly OrderInterpretation[],
   characterSuggestions: readonly CharacterSuggestion[],
   approvedCharacterIds: ReadonlySet<string>,
   consolidatedPackage: ConsolidatedProposalPackage,
@@ -618,10 +713,13 @@ function buildChronicleEntries(
       (entry) => entry.source === "player_directive" && entry.sourceRef === verdict.directiveId && entry.executionOk === true,
     );
     const hasExecutedWorkflow = executedWorkflowEntries.length > 0;
-    const interpretation = interpretations.find((i) => i.directiveId === verdict.directiveId);
-    const body = interpretation
-      ? `${interpretation.intent} — ${verdict.rationale}`
-      : verdict.rationale;
+    const summaries = executedWorkflowSummaries(executedWorkflowEntries, workflowLog);
+    // A directive is a factual record of its committed effect.  Do not hand
+    // the narrator an interpretation/rationale and let it invent a process
+    // that the executor does not model.
+    const body = summaries.length > 0
+      ? summaries.join(" ")
+      : "No recorded world change followed this order.";
     raw.push({
       sortKey: 600,
       simulatedDurationDays: estimatePlayerEventDurationDays(verdict),
@@ -630,6 +728,7 @@ function buildChronicleEntries(
         scopeRef: verdict.directiveId,
         audience: verdict.knowledgeVisibility === "private" ? "knowledge_scoped" : "all_players",
         body,
+        title: playerChronicleTitle(executedWorkflowEntries, world),
         atStep,
         materialConsequence: hasExecutedWorkflow,
         playerInvolvement: verdict.playerInvolvement,
@@ -945,7 +1044,7 @@ export async function resolveTurn(
     const pendingCommitments = await listPendingNpcCommitments(db, gameId);
     const activeInventedWorkflows = await listActiveInventedWorkflows(db, gameId);
     const resolutionContext: ResolutionPlayerContext = { knowledgebase: playerKnowledgebase, pendingCommitments };
-    const materializedWorld = materializePlayerCharacter(world, actorCharacterId, playerKnowledgebase);
+    const materializedWorld = materializePlayerCharacter(world, actorCharacterId, playerKnowledgebase, input.scenarioGovernment);
 
     // ── Step 0: Apply pending dialogue social events ────────────────────────
     //
@@ -1427,10 +1526,16 @@ export async function resolveTurn(
             if (proposal?.sources.includes("character_director") && proposal.characterId) {
               approvedCharacterIds.add(proposal.characterId);
             }
+            // Tracks the character this decision's cast resolved to (existing
+            // or newly created), so finalWorkflows below may reference them
+            // via the "$cast" actorId placeholder without needing to predict
+            // a newly-created character's id in advance.
+            let castCharacterIdForSubstitution: string | undefined;
             if (proposal && decision.chronicleCast?.characterId) {
               const castCharacter = worldAfterPlayer.characters.find((character) => character.id === decision.chronicleCast?.characterId && character.alive);
               if (castCharacter) {
                 chronicleCasts.set(proposal.id, { characterId: castCharacter.id, role: decision.chronicleCast.role });
+                castCharacterIdForSubstitution = castCharacter.id;
               }
             } else if (proposal && decision.chronicleCast?.newCharacter) {
               // Deterministic across replay: derived from the proposal id and
@@ -1438,6 +1543,7 @@ export async function resolveTurn(
               const createdCharacterId = `char-cast-${atStep}-${proposal.id.slice(0, 12)}`;
               const created = decision.chronicleCast.newCharacter;
               chronicleCasts.set(proposal.id, { characterId: createdCharacterId, role: decision.chronicleCast.role });
+              castCharacterIdForSubstitution = createdCharacterId;
               worldDirectorInvocations.push({
                 invocation: {
                   actionId: "create_world_character",
@@ -1460,8 +1566,16 @@ export async function resolveTurn(
               });
             }
             for (const invocation of decision.finalWorkflows) {
+              // "$cast" lets a proposal's own workflows act as the character
+              // this same decision just cast (e.g. a newly-introduced local
+              // leader whose first act is raising a force to resist an
+              // invasion) — the AI can't predict a newly-created character's
+              // deterministic id, so it names this placeholder instead.
+              const resolvedInvocation = invocation.actorId === "$cast" && castCharacterIdForSubstitution
+                ? { ...invocation, actorId: castCharacterIdForSubstitution }
+                : invocation;
               worldDirectorInvocations.push({
-                invocation,
+                invocation: resolvedInvocation,
                 sourceRef: decision.proposalId,
                 sourceRationale: `${proposal?.mergedRationale ?? "World Director proposal"} ${decision.rationale}`.slice(0, 400),
               });
@@ -1896,6 +2010,39 @@ export async function resolveTurn(
     }
 
     console.log(`${tag()} [execute_world] OUT: ${allWorkflowLog.filter((e) => e.outcome.ok).length}/${allWorkflowLog.length} workflows applied`);
+
+    // ── Step 10.6: Resolve procedures that became due this same turn ──────
+    // resolve_politics (Step 10.5, above) only sees procedures that already
+    // existed at the START of this turn -- a procedure sponsored just now
+    // (e.g. a compound "ask the Senate for X and act on it" order given an
+    // immediate deadlineStep) isn't in world state until the execute_world
+    // batch above applies it, so it would otherwise sit unresolved until a
+    // future turn's resolve_politics pass, forcing the player to wait several
+    // real turns for what the fiction treats as one sitting. Re-running the
+    // same deterministic resolver against the post-execution world catches
+    // exactly that case; it's a no-op for anything already resolved, since
+    // dueProcedures excludes "resolved"/"withdrawn"/"blocked" procedures.
+    const immediatePoliticsResolution = resolveDueProcedures({ characters: newWorld.characters, material: newWorld.material }, atStep);
+    newWorld = { ...newWorld, material: immediatePoliticsResolution.material };
+    const immediatePoliticalInvocations: ProposedInvocation[] = immediatePoliticsResolution.invocations.map((inv) => ({
+      actionId: inv.actionId,
+      actorId: inv.actorId,
+      parameters: inv.parameters,
+    }));
+    if (immediatePoliticalInvocations.length > 0) {
+      console.log(`${tag()} [resolve_politics_immediate] OUT: ${immediatePoliticalInvocations.length} same-turn procedure(s) resolved`);
+      const immediateExecuted = executeWorkflows(immediatePoliticalInvocations, newWorld, atStep, managerResult.runtimeInventedWorkflows);
+      newWorld = immediateExecuted.world;
+      allWorkflowLog = [...allWorkflowLog, ...immediateExecuted.log];
+      for (const entry of immediateExecuted.log) {
+        if (entry.outcome.ok) {
+          console.log(`${tag()} [execute:ok] actionId=${entry.invocation.actionId} actorId=${entry.invocation.actorId} summary="${entry.outcome.result.summary}"`);
+        } else {
+          console.error(`${tag()} [execute:fail] actionId=${entry.invocation.actionId} actorId=${entry.invocation.actorId} reason=${entry.outcome.reason}`);
+        }
+      }
+    }
+
     newWorld = autoResolveDecidedStorylines(world, newWorld, atStep);
 
     // Background material society (docs/14 Phase 2): coarse war damage for
@@ -1913,9 +2060,16 @@ export async function resolveTurn(
       candidates: managerResult.auditBlob.candidates.map((entry) => {
         if (!entry.finalInvocation) return entry;
         const outcome = executionByInvocation.get(JSON.stringify(entry.finalInvocation));
-        return outcome
-          ? { ...entry, executionOk: outcome.ok, ...(outcome.ok ? {} : { executionReason: outcome.message }) }
-          : { ...entry, executionOk: false, executionReason: "Approved invocation was not sent to the executor." };
+        if (outcome) {
+          return { ...entry, executionOk: outcome.ok, ...(outcome.ok ? {} : { executionReason: outcome.message }) };
+        }
+        // A candidate that already failed its dry run in workflow-manager.ts
+        // was correctly never queued for execution and already carries the
+        // real, specific failure reason -- don't clobber it with the generic
+        // fallback below, which is reserved for a candidate that passed its
+        // dry run (and so should have executed) but left no matching log entry.
+        if (entry.dryRunOk === false) return entry;
+        return { ...entry, executionOk: false, executionReason: "Approved invocation was not sent to the executor." };
       }),
     };
 
@@ -2326,7 +2480,6 @@ export async function resolveTurn(
     let chronicleInputs = buildChronicleEntries(
       newWorld,
       verdicts,
-      interpretations,
       characterSuggestions,
       approvedCharacterIds,
       consolidatedPackage,
@@ -2362,7 +2515,14 @@ export async function resolveTurn(
     // Narrator pass
     let narratorOk = false;
     try {
-      const narratorEntries: NarratorEntry[] = chronicleInputs.map((e) => ({
+      // Player directives and rule refusals are already exact, player-facing
+      // records.  Keeping them out of the free-form narrator prevents a
+      // rejected action from acquiring an invented institutional explanation
+      // or a completed action from being recast as an unfinished process.
+      const narratorTargets = chronicleInputs
+        .map((entry, index) => ({ entry, index }))
+        .filter(({ entry }) => entry.scope !== "directive" && entry.scope !== "order_refusal");
+      const narratorEntries: NarratorEntry[] = narratorTargets.map(({ entry: e }) => ({
         body: e.body,
         isPlayerAction: e.scope === "directive",
         chainPosition: e.chainPosition ?? null,
@@ -2378,19 +2538,24 @@ export async function resolveTurn(
           })
           .filter((mention): mention is { name: string; role: string } => mention !== null),
       }));
-      const narratorSystemPrompt = buildChronicleNarratorPrompt(narratorEntries, resolutionWorld, actorCharacterId, playerKnowledgebase);
-      const narratorResult = await coinGatedAdapter.call("chronicle_narrator", narratorSystemPrompt, "Rewrite the events as chronicle prose.");
-      const narratorParsed = JSON.parse(stripToJson(narratorResult.content)) as { entries?: { body: string; isPlayerAction: boolean }[] };
-      if (Array.isArray(narratorParsed.entries) && narratorParsed.entries.length === chronicleInputs.length) {
-        for (let i = 0; i < chronicleInputs.length; i++) {
-          const rewritten = narratorParsed.entries[i]?.body;
-          if (rewritten && typeof rewritten === "string") {
-            chronicleInputs[i] = { ...chronicleInputs[i]!, body: rewritten };
+      if (narratorEntries.length > 0) {
+        const narratorSystemPrompt = buildChronicleNarratorPrompt(narratorEntries, resolutionWorld, actorCharacterId, playerKnowledgebase);
+        const narratorResult = await coinGatedAdapter.call("chronicle_narrator", narratorSystemPrompt, "Rewrite the events as chronicle prose.");
+        const narratorParsed = JSON.parse(stripToJson(narratorResult.content)) as { entries?: { body: string; isPlayerAction: boolean }[] };
+        if (Array.isArray(narratorParsed.entries) && narratorParsed.entries.length === narratorTargets.length) {
+          for (let i = 0; i < narratorTargets.length; i++) {
+            const rewritten = narratorParsed.entries[i]?.body;
+            const chronicleIndex = narratorTargets[i]!.index;
+            if (rewritten && typeof rewritten === "string") {
+              chronicleInputs[chronicleIndex] = { ...chronicleInputs[chronicleIndex]!, body: rewritten };
+            }
           }
+          narratorOk = true;
+        } else {
+          console.warn(`${tag()} [chronicle:narrator] length mismatch — expected ${narratorTargets.length}, got ${narratorParsed.entries?.length ?? "?"}; using raw bodies`);
         }
-        narratorOk = true;
       } else {
-        console.warn(`${tag()} [chronicle:narrator] length mismatch — expected ${chronicleInputs.length}, got ${narratorParsed.entries?.length ?? "?"}; using raw bodies`);
+        narratorOk = true;
       }
     } catch (err) {
       console.error(`${tag()} [chronicle:narrator] failed, keeping raw bodies:`, err);
@@ -2557,7 +2722,7 @@ function updateCharacterRelevance(
 
   for (const entry of entries) {
     for (const mention of entry.characterMentions ?? []) {
-      const role: RelevanceRole = mention.role === "opponent"
+      const role: RelevanceRole = mention.role === "opponent" || mention.role === "commander"
         ? "antagonist"
         : mention.role === "supporter" || mention.role === "spokesperson" || mention.role === "presiding_official" || mention.role === "negotiator"
           ? "participant"

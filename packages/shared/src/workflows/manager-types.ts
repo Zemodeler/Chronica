@@ -210,6 +210,8 @@ export const ChronicleCastRoleSchema = z.enum([
   "presiding_official",
   "witness",
   "negotiator",
+  /** A newly-cast local leader whose first act commands a military response (e.g. raising a defending force against an invasion or blockade). */
+  "commander",
 ]);
 export type ChronicleCastRole = z.infer<typeof ChronicleCastRoleSchema>;
 

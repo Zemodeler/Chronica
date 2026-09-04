@@ -50,8 +50,8 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
     phases: ["contact", "engagement", "cohesion", "withdrawal", "aftermath"], routCohesionBps: 2_000, arrearsMoralePeriods: 1, arrearsDesertionPeriods: 2,
   },
   government: {
-    offices: [{ id: "roman-consul", label: "Roman consul", polityId: "rome", authorisedActionIds: [], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "roman-election" }],
-    successionRules: [{ id: "roman-election", label: "Consular election", kind: "elective", institutionId: null }], decreeAuthorityCostBps: 500, decreeMinimumPrestigeBps: 2_000,
+    offices: [{ id: "roman-consul", label: "Roman consul", polityId: "rome", authorisedActionIds: [], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "roman-election", eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-not-disqualified"] }],
+    successionRules: [{ id: "roman-election", label: "Election by the Senate", kind: "elective", institutionId: "roman-senate" }], decreeAuthorityCostBps: 500, decreeMinimumPrestigeBps: 2_000,
   },
   dialogue: { roleSlots: [], namePools: { roman: ["Gaius", "Lucius"], carthaginian: ["Hanno", "Hamilcar"], greek: ["Hieron", "Sosistratus"] } },
   continuity: { startingSeatCount: 1, extraPrincipalsPerPlayer: 1 },
@@ -83,7 +83,44 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { id: "ita-72843720b81376294924159-sicily-southeast", name: "Syracuse and the south-east", formerNames: [], terrainId: "coastal-plain", settlements: [{ id: "settlement-syracuse", name: "Syracuse", kind: "city", provinceId: "ita-72843720b81376294924159-sicily-southeast", controllerPolityId: "syracuse", size: 90, fortificationLevel: 5 }], controllerPolityId: "syracuse", controlFirmnessBps: 8_500, tier: "focus" },
       { id: "ita-72843720b81376294924159-sicily-northeast", name: "Messana and the strait", formerNames: [], terrainId: "coastal-plain", settlements: [{ id: "settlement-messana", name: "Messana", kind: "port", provinceId: "ita-72843720b81376294924159-sicily-northeast", controllerPolityId: "mamertines", size: 50, fortificationLevel: 3 }], controllerPolityId: "mamertines", controlFirmnessBps: 7_500, tier: "focus" },
     ],
-    edges: [],
+    // Real Italian geography, chained north-to-south with a Messana-strait and
+    // a Carthage-Sicily crossing closing the loop to Africa. "land" is used
+    // throughout, including the two water crossings, because a legal edge
+    // needs its crossing type admitted by BOTH sides' terrain
+    // (packages/shared/src/world/map.ts) and most of these provinces are
+    // "hills" (land + pass only, no strait/sea_lane) -- this graph exists so
+    // adjacency-based systems (the Reaction Director's "nearby entities who
+    // might react", near/far/coarse event scoping) have something to read at
+    // all, not to model precise naval logistics.
+    edges: [
+      ["punic-italy-ligurian-coast", "punic-italy-insubrian-plain"],
+      ["punic-italy-ligurian-coast", "punic-italy-etrurian-uplands"],
+      ["punic-italy-insubrian-plain", "punic-italy-middle-padus"],
+      ["punic-italy-insubrian-plain", "punic-italy-venetian-lagoon"],
+      ["punic-italy-middle-padus", "punic-italy-venetian-lagoon"],
+      ["punic-italy-middle-padus", "punic-italy-etrurian-uplands"],
+      ["punic-italy-etrurian-uplands", "punic-italy-umbrian-valleys"],
+      ["punic-italy-etrurian-uplands", "punic-italy-latium"],
+      ["punic-italy-umbrian-valleys", "punic-italy-picenum-coast"],
+      ["punic-italy-umbrian-valleys", "punic-italy-latium"],
+      ["punic-italy-umbrian-valleys", "punic-italy-marsian-highlands"],
+      ["punic-italy-picenum-coast", "punic-italy-marsian-highlands"],
+      ["punic-italy-latium", "punic-italy-marsian-highlands"],
+      ["punic-italy-latium", "punic-italy-campanian-plain"],
+      ["punic-italy-marsian-highlands", "punic-italy-samnium"],
+      ["punic-italy-samnium", "punic-italy-campanian-plain"],
+      ["punic-italy-samnium", "punic-italy-apulian-coast"],
+      ["punic-italy-samnium", "punic-italy-lucanian-uplands"],
+      ["punic-italy-campanian-plain", "punic-italy-lucanian-uplands"],
+      ["punic-italy-apulian-coast", "punic-italy-lucanian-uplands"],
+      ["punic-italy-lucanian-uplands", "punic-italy-bruttian-highlands"],
+      ["punic-italy-bruttian-highlands", "ita-72843720b81376294924159-sicily-northeast"],
+      ["tun-13205935b88806172084765", "ita-72843720b81376294924159-sicily-west"],
+      ["ita-72843720b81376294924159-sicily-west", "ita-72843720b81376294924159-sicily-northwest"],
+      ["ita-72843720b81376294924159-sicily-northwest", "ita-72843720b81376294924159-sicily-central"],
+      ["ita-72843720b81376294924159-sicily-central", "ita-72843720b81376294924159-sicily-southeast"],
+      ["ita-72843720b81376294924159-sicily-southeast", "ita-72843720b81376294924159-sicily-northeast"],
+    ].map(([from, to]) => ({ from, to, crossing: "land" as const, distance: 1 })),
   },
   actions: [],
   characters: [
@@ -123,7 +160,31 @@ const initialWorld: WorldState = WorldStateSchema.parse({
     accountAccess: [
       ["gaius", "gaius-genucius"], ["hanno", "hanno-carthage"], ["hieron", "hieron-ii"], ["mamertine", "mamertine-spokesman"],
     ].map(([id, characterId]) => ({ id: `${id}-purse-access`, characterId, accountId: `${id}-purse`, permissions: ["view", "spend_without_vote"], sourceKind: "ownership", sourceId: characterId })),
-    incomeSources: [], obligations: [], transactions: [], capturableValues: [], holdings: [], institutions: [], reservedPowers: [], motions: [], voteRecords: [],
+    incomeSources: [], obligations: [], transactions: [], capturableValues: [], holdings: [],
+    institutions: [
+      {
+        id: "roman-senate",
+        polityId: "rome",
+        name: "Senate",
+        votingBlocs: [
+          { id: "patrician-bloc", name: "Patrician bloc", representedInterest: "landed nobility", weight: 60, baseSupport: 20, yesThreshold: 15, noThreshold: -15, causes: [] },
+          { id: "popular-bloc", name: "Popular bloc", representedInterest: "the people", weight: 40, baseSupport: -10, yesThreshold: 15, noThreshold: -15, causes: [] },
+        ],
+        totalVotingWeight: 100,
+        quorumBps: 5_000,
+        passageThresholdBps: 5_001,
+        denominator: "total",
+      },
+    ],
+    reservedPowers: [], motions: [], voteRecords: [],
+    eligibilityRequirements: [
+      { id: "req-alive", kind: "alive", label: "Must be alive", params: {} },
+      { id: "req-roman-polity", kind: "polity_membership", label: "Must belong to Rome", params: { polityId: "rome" } },
+      { id: "req-not-disqualified", kind: "not_disqualified", label: "Must carry no disqualifying status", params: {} },
+    ],
+    officeSeats: [
+      { id: "roman-consul:seat:0", officeId: "roman-consul", seatIndex: 0, holderCharacterId: "gaius-genucius", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: 4, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-not-disqualified"] },
+    ],
     forces: [
       { id: "roman-field-army", name: "Roman field army", polityId: "rome", commanderCharacterId: "gaius-genucius", controllerCharacterId: "gaius-genucius", locationId: "punic-italy-latium", authorizedStrength: 4_000, personnel: [{ categoryId: "infantry", label: "Legionaries", fit: 3_500, unavailable: [] }], moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 4, payObligationId: null, payArrearsPeriods: 0, history: [] },
       { id: "carthaginian-garrison", name: "Carthaginian field force", polityId: "carthage", commanderCharacterId: "hanno-carthage", controllerCharacterId: "hanno-carthage", locationId: "tun-13205935b88806172084765", authorizedStrength: 3_500, personnel: [{ categoryId: "infantry", label: "Infantry", fit: 3_000, unavailable: [] }], moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 4, payObligationId: null, payArrearsPeriods: 0, history: [] },

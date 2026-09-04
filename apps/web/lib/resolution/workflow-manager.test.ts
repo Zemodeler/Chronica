@@ -71,6 +71,26 @@ describe("AI Workflow Manager", () => {
     expect(result.world.material.accounts.find((account) => account.id === ACCOUNT_ID)?.balance).toBe(1_275);
   });
 
+  it("allows one commander to raise distinct forces in the same turn", async () => {
+    const candidates = [
+      candidate("00000000-0000-4000-8000-000000000301", "create_force", {
+        polityId: "rome", locationProvinceId: DESTINATION_ID, name: "Sicilian Reserves", size: 500, kind: "infantry", payerAccountId: ACCOUNT_ID,
+      }),
+      candidate("00000000-0000-4000-8000-000000000302", "create_force", {
+        polityId: "rome", locationProvinceId: DESTINATION_ID, name: "Bruttian Guard", size: 300, kind: "militia", payerAccountId: ACCOUNT_ID,
+      }),
+    ];
+    const reviewed = await runWorkflowManager(adapterWith({
+      decisions: candidates.map((item) => ({ correlationId: item.correlationId, decision: "approve", reason: "A distinct, valid levy.", replacementInvocation: null })),
+      novelActionProposals: [],
+    }), world(), candidates, 1);
+
+    const result = executeWorkflows(reviewed.acceptedInvocations, world(), 1);
+    expect(reviewed.acceptedInvocations).toHaveLength(2);
+    expect(result.world.material.forces).toHaveLength(world().material.forces.length + 2);
+    expect(result.world.material.forces.map((force) => force.name)).toEqual(expect.arrayContaining(["Sicilian Reserves", "Bruttian Guard"]));
+  });
+
   it("repairs an unknown requested action with a valid registered workflow", async () => {
     const input = candidate("00000000-0000-4000-8000-000000000204", "grant_war_chest", { accountId: ACCOUNT_ID, amount: 40 });
     const reviewed = await runWorkflowManager(adapterWith({

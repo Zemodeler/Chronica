@@ -5,7 +5,7 @@ export interface WorldBounds { readonly minX: number; readonly minY: number; rea
 export interface StaticProvince { readonly id: string; readonly name: string; readonly geometry: GeoJsonGeometry; readonly svgPath: string; /** Only the outside edge of a possibly multi-part territory, for hover/selection outlines. */ readonly exteriorSvgPath: string; readonly area: number; readonly centroid: GeoJsonPosition; readonly bounds: WorldBounds; readonly neighborIds: readonly string[]; /** Other provinces close enough to share a single political label. Never use for game adjacency. */ readonly labelNeighborIds: readonly string[]; }
 export interface SharedBoundary { readonly provinceA: string; readonly provinceB: string | null; readonly points: readonly [GeoJsonPosition, GeoJsonPosition]; readonly svgPath: string; }
 export interface StaticSettlement { readonly id: string; readonly name: string; readonly type: string; readonly provinceId: string; readonly coordinate: GeoJsonPosition; readonly projected: readonly [number, number]; }
-export interface StaticRiver { readonly id: string; readonly className: string; readonly svgPath: string; }
+export interface StaticRiver { readonly id: string; readonly className: string; readonly svgPath: string; readonly bounds: WorldBounds; }
 export interface StaticWorldGeometry { readonly provinces: readonly StaticProvince[]; readonly provinceById: ReadonlyMap<string, StaticProvince>; readonly sharedBoundaries: readonly SharedBoundary[]; readonly boundariesByProvince: ReadonlyMap<string, readonly SharedBoundary[]>; readonly settlements: readonly StaticSettlement[]; readonly rivers: readonly StaticRiver[]; }
 interface BoundaryOccurrence { readonly provinceId: string; readonly points: readonly [GeoJsonPosition, GeoJsonPosition]; }
 
@@ -30,6 +30,24 @@ function geometryMetrics(geometry: GeoJsonGeometry) {
     for (const ring of polygon) for (const [x, y] of ring) { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); }
   }
   return { area, centroid: area > Number.EPSILON ? [weightedX / area, weightedY / area] as GeoJsonPosition : [0, 0] as GeoJsonPosition, bounds: { minX, minY, maxX, maxY } };
+}
+
+function geometryBounds(geometry: GeoJsonGeometry): WorldBounds {
+  const positions: readonly GeoJsonPosition[] = geometry.type === "Point"
+    ? [geometry.coordinates]
+    : geometry.type === "LineString"
+      ? geometry.coordinates
+      : geometry.type === "MultiLineString"
+        ? geometry.coordinates.flat()
+        : geometry.type === "Polygon"
+          ? geometry.coordinates.flat()
+          : geometry.coordinates.flat(2);
+  let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
+  for (const [x, y] of positions) {
+    minX = Math.min(minX, x); minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+  }
+  return { minX, minY, maxX, maxY };
 }
 
 function geometryRings(geometry: GeoJsonGeometry): readonly (readonly GeoJsonPosition[])[] { return geometry.type === "Polygon" ? geometry.coordinates : geometry.type === "MultiPolygon" ? geometry.coordinates.flat() : []; }
@@ -81,7 +99,7 @@ export function prepareStaticWorldGeometry(map: GeoJsonMap, geometryAliases?: Re
       for (const ring of geometryRings(feature.geometry)) for (let index = 0; index < ring.length - 1; index++) { const points = [ring[index]!, ring[index + 1]!] as const; const entries = boundaries.get(edgeKey(points[0], points[1])) ?? []; entries.push({ provinceId: feature.id, points }); boundaries.set(edgeKey(points[0], points[1]), entries); }
     } else if (feature.properties.kind === "settlement" && feature.geometry.type === "Point") {
       const coordinate = feature.geometry.coordinates; settlements.push({ id: feature.id, name: feature.properties.name, type: feature.properties.type, provinceId: feature.properties.provinceId, coordinate, projected: projectCoordinate(coordinate[0], coordinate[1]) });
-    } else if (feature.properties.kind === "river") rivers.push({ id: feature.id, className: feature.properties.class, svgPath: geometryToSvgPath(feature.geometry) });
+    } else if (feature.properties.kind === "river") rivers.push({ id: feature.id, className: feature.properties.class, svgPath: geometryToSvgPath(feature.geometry), bounds: geometryBounds(feature.geometry) });
   }
   const neighbors = new Map(preliminary.map((province) => [province.id, new Set<string>()])); const sharedBoundaries: SharedBoundary[] = [];
   for (const occurrences of boundaries.values()) {
