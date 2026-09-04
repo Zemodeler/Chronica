@@ -4,6 +4,7 @@ import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
 import { canCreateCharacter } from "../../continuity/continuity";
 import { resolveEligibility } from "../../characters/political-authority";
 import { deriveDefaultMind } from "../../characters/mind";
+import { openCharacterAccount } from "../../material/character-accounts";
 import { FamilyLinkKindSchema, LifeContractTypeSchema } from "../../characters/family";
 
 // Family, household, and life-contract workflows (character-sim phase 5).
@@ -150,6 +151,12 @@ export const familyWorkflows: AnyWorkflowDefinition[] = [
       const livingParent = parents.find((p) => p !== undefined && p.alive);
       if (livingParent === undefined) return null;
 
+      // A newborn owns an empty purse from birth. Without it, their
+      // `personalAccountId` names nothing and inheritance to them silently
+      // drops (see material/character-accounts.ts).
+      const purse = openCharacterAccount(world.material, params.childCharacterId);
+      if (purse === null) return null;
+
       const skills = { martial: 10, intrigue: 10, learning: 10, piety: 10, stewardship: 10, diplomacy: 10, body: 10, subSkills: {} };
       const cultureId = params.cultureId ?? livingParent.cultureId;
       const child = {
@@ -164,7 +171,7 @@ export const familyWorkflows: AnyWorkflowDefinition[] = [
         birthStep: context.atStep,
         nextLifeReviewAtStep: null,
         officeId: null,
-        personalAccountId: `account-${params.childCharacterId}`,
+        personalAccountId: purse.accountId,
         skills,
         traits: [],
         healthBps: 10_000,
@@ -195,6 +202,7 @@ export const familyWorkflows: AnyWorkflowDefinition[] = [
         world: {
           ...world,
           characters: [...world.characters, child],
+          material: purse.material,
           familyLinks: [...world.familyLinks, ...parentLinks],
           continuity: [
             ...world.continuity,

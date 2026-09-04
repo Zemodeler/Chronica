@@ -1,0 +1,296 @@
+import "server-only";
+
+import type { ChronicleEntryInput } from "@chronica/db";
+import type { FactualEvent, GameMasterTurnReport, WorldState } from "@chronica/shared";
+import { chronicleHeadline, deriveChronicleDepth, humanizeRefusalReason, stripEngineJargon } from "@chronica/shared";
+
+// Chronicle from facts (GM refactor, requirement 8).
+//
+// The Chronicle is downstream of the engine, always. An entry's body is built
+// from the factual event log -- the executor's own summaries of mutations that
+// actually applied, and the exact limitation text of an attempt that was not
+// supported. The Game Master's report contributes framing only: which events
+// belong together, who was involved, where it happened, how prominent it is,
+// and which player directive it answers.
+//
+// This is what keeps a completed action from being narrated as an unfinished
+// one. `create_force` returns "Legio II (4000 infantry) raised in Panormus for
+// Rome." -- so that is the body, and the narrator later restyles that sentence
+// rather than inventing a levy that has not finished mustering.
+
+const PLAYER_SCOPE = "directive";
+const REFUSAL_SCOPE = "order_refusal";
+const UNSUPPORTED_SCOPE = "unsupported_action";
+const WORLD_SCOPE = "world_event";
+
+/** Reasons a directive produced no world change. These stay executor-worded. */
+const NON_SUCCESS_OUTCOMES = new Set(["refused", "failed", "unsupported"]);
+
+function factBody(events: readonly FactualEvent[], refs: readonly string[]): string {
+  const byId = new Map(events.map((event) => [event.id, event]));
+  const summaries = refs
+    .map((ref) => byId.get(ref))
+    .filter((event): event is FactualEvent => event !== undefined && event.noOp !== true)
+    .map((event) => stripEngineJargon(event.summary))
+    .filter((summary) => summary.trim().length > 0);
+  // The same executor sentence cited twice is one fact, not two.
+  return [...new Set(summaries)].join(" ");
+}
+
+/**
+ * A resolved battle carries the resolver's own derived brief, so the narrator
+ * writes from casualties and retreats rather than from a flattened sentence.
+ */
+function battleBriefOf(events: readonly FactualEvent[]): { battleBrief?: NonNullable<ChronicleEntryInput["battleBrief"]> } {
+  const brief = events.find((event) => event.battleBrief !== undefined)?.battleBrief;
+  return brief === undefined ? {} : { battleBrief: brief };
+}
+
+function participantsOf(world: WorldState, characterIds: readonly string[]): { name: string }[] {
+  return characterIds
+    .map((id) => world.characters.find((character) => character.id === id)?.name)
+    .filter((name): name is string => name !== undefined)
+    .map((name) => ({ name }));
+}
+
+function salienceTier(salience: number): "high" | "medium" | "low" {
+  return salience >= 8 ? "high" : salience >= 5 ? "medium" : "low";
+}
+
+function durationDaysFor(actionIds: readonly string[]): number {
+  const actionDays: Record<string, number> = {
+    add_gold: 1,
+    remove_gold: 1,
+    transfer_gold: 1,
+    appoint_to_office: 2,
+    remove_from_office: 2,
+    raise_morale: 2,
+    lower_morale: 2,
+    move_character: 4,
+    create_force: 7,
+    move_force: 14,
+    start_battle: 14,
+    resolve_battle: 14,
+    end_battle: 14,
+    sign_treaty: 21,
+    start_siege: 30,
+    end_siege: 30,
+    start_war: 45,
+    end_war: 45,
+    give_territory: 45,
+    change_province_control: 45,
+  };
+  return Math.max(1, ...actionIds.map((actionId) => actionDays[actionId] ?? 7));
+}
+
+/**
+ * Actions whose effect is a countable, checkable change in the world -- the
+ * kind of fact that belongs in the turn's brief strip as well as in its prose.
+ * Everything else is narrated once and left there, so the Chronicle does not
+ * print its own paragraph back to the reader as a bullet list.
+ */
+const QUANTIFIED_ACTIONS = new Set([
+  "add_gold",
+  "remove_gold",
+  "transfer_gold",
+  "create_force",
+  "disband_force",
+  "change_province_control",
+  "give_territory",
+  "start_war",
+  "end_war",
+  "sign_treaty",
+  "appoint_to_office",
+  "remove_from_office",
+]);
+
+function directConsequencesOf(events: readonly FactualEvent[]): NonNullable<ChronicleEntryInput["directConsequences"]> {
+  const seen = new Set<string>();
+  const consequences: NonNullable<ChronicleEntryInput["directConsequences"]> = [];
+  for (const event of events) {
+    if (event.kind !== "action" || event.noOp === true) continue;
+    if (event.actionId === "add_gold" || event.actionId === "remove_gold") {
+      const amount = event.parameters["amount"];
+      const sign = event.actionId === "add_gold" ? "+" : "-";
+      const label = `${sign}${String(amount)} gold`;
+      if (seen.has(label)) continue;
+      seen.add(label);
+      consequences.push({ kind: "material", label, entityId: null, quantified: true });
+      continue;
+    }
+    // One clause, in plain words: a ledger line, never a second copy of the
+    // narrated sentence.
+    const label = stripEngineJargon(event.summary).split(/(?<=[.;])\s/)[0]?.trim().slice(0, 120) ?? "";
+    if (label.length === 0 || seen.has(label)) continue;
+    seen.add(label);
+    consequences.push({ kind: "material", label, entityId: event.actorId, quantified: QUANTIFIED_ACTIONS.has(event.actionId) });
+  }
+  return consequences;
+}
+
+/**
+ * A player's own action entry is titled by what it did, not by what it was
+ * for. A raised force names itself, so the Chronicle headline and the body
+ * agree that it exists.
+ */
+function playerTitle(events: readonly FactualEvent[], world: WorldState, actorCharacterId: string): string {
+  const created = events.find((event) => event.actionId === "create_force" && event.kind === "action");
+  const forceName = created?.parameters["name"];
+  if (typeof forceName === "string" && forceName.trim().length > 0) return `The Raising of ${forceName}`;
+  // Otherwise the headline names what was done, not merely who did it: "The
+  // Order of Barbula" tells a reader nothing a chronicle entry should withhold.
+  const principal = events.find((event) => event.kind === "action" && event.noOp !== true);
+  if (principal !== undefined) return chronicleHeadline(principal.summary);
+  const actorName = world.characters.find((character) => character.id === actorCharacterId)?.name;
+  return actorName ? `The Order of ${actorName}` : "The Recorded Order";
+}
+
+export interface ChronicleFromFactsInput {
+  readonly world: WorldState;
+  readonly atStep: number;
+  readonly actorCharacterId: string;
+  readonly events: readonly FactualEvent[];
+  readonly report: GameMasterTurnReport | null;
+  /** Directive ids submitted this turn, so an unaccounted one is still recorded. */
+  readonly directiveIds: readonly string[];
+}
+
+export function buildChronicleFromFacts(input: ChronicleFromFactsInput): ChronicleEntryInput[] {
+  const { world, atStep, events, report } = input;
+  const byId = new Map(events.map((event) => [event.id, event]));
+  const entries: Omit<ChronicleEntryInput, "sequence">[] = [];
+  const consumed = new Set<string>();
+
+  // -- the player's own directives ------------------------------------------
+  for (const directiveId of input.directiveIds) {
+    const outcome = report?.directiveOutcomes.find((candidate) => candidate.directiveId === directiveId);
+    const allRefs = outcome?.factRefs ?? [];
+    // A Game Master that cites the same tool result under two directives has
+    // reported one event, not two. The first directive to claim a fact owns
+    // it; a later directive left with nothing of its own is not a separate
+    // entry in the record and is dropped below.
+    const refs = allRefs.filter((ref) => !consumed.has(ref));
+    for (const ref of allRefs) consumed.add(ref);
+    const refEvents = refs.map((ref) => byId.get(ref)).filter((event): event is FactualEvent => event !== undefined);
+    const applied = refEvents.filter((event) => event.kind === "action" && event.noOp !== true);
+    const unsupported = refEvents.filter((event) => event.kind === "capability_gap");
+
+    const succeeded = outcome !== undefined && !NON_SUCCESS_OUTCOMES.has(outcome.outcome) && applied.length > 0;
+    // A successful directive whose every fact was already recorded under an
+    // earlier one would be the same paragraph told twice.
+    if (!succeeded && refs.length === 0 && allRefs.length > 0 && outcome !== undefined && !NON_SUCCESS_OUTCOMES.has(outcome.outcome)) continue;
+    // A refusal or a failure is an executor-derived fact and stays worded that
+    // way; it is deliberately kept out of the narrator pass downstream so no
+    // invented institutional explanation can attach to it.
+    const actorName = world.characters.find((character) => character.id === input.actorCharacterId)?.name ?? "The order's author";
+    const body = succeeded
+      ? factBody(events, refs)
+      : unsupported.length > 0
+        ? unsupported.map((event) => stripEngineJargon(event.summary)).join(" ")
+        : outcome?.reason !== undefined
+          ? `${actorName} gave the order, and it came to nothing: ${humanizeRefusalReason(outcome.reason)}. No change followed in the world.`
+          : "The order was given, and no change followed in the world.";
+
+    entries.push({
+      scope: succeeded ? PLAYER_SCOPE : unsupported.length > 0 ? UNSUPPORTED_SCOPE : REFUSAL_SCOPE,
+      scopeRef: directiveId,
+      audience: "all_players",
+      body,
+      atStep,
+      materialConsequence: succeeded,
+      simulatedDurationDays: durationDaysFor(applied.map((event) => event.actionId)),
+      title: succeeded ? playerTitle(applied, world, input.actorCharacterId) : `The Order That Came to Nothing`,
+      knowledgeStatus: "confirmed",
+      sourceDirector: "player",
+      chainPosition: "root",
+      playerRelevance: "high",
+      depth: "scene",
+      directConsequences: directConsequencesOf(applied),
+    });
+  }
+
+  // -- everything else the world did ----------------------------------------
+  for (const event of report?.events ?? []) {
+    const refs = event.factRefs.filter((ref) => !consumed.has(ref));
+    if (refs.length === 0) continue;
+    for (const ref of refs) consumed.add(ref);
+    const refEvents = refs
+      .map((ref) => byId.get(ref))
+      .filter((candidate): candidate is FactualEvent => candidate !== undefined && candidate.noOp !== true);
+    if (refEvents.length === 0) continue;
+    const material = refEvents.some((candidate) => candidate.materialConsequence);
+    const unsupportedOnly = refEvents.length > 0 && refEvents.every((candidate) => candidate.kind === "capability_gap");
+    entries.push({
+      scope: unsupportedOnly ? UNSUPPORTED_SCOPE : WORLD_SCOPE,
+      scopeRef: refs[0] ?? `${atStep}`,
+      audience: event.visibility === "private" ? "knowledge_scoped" : "all_players",
+      body: factBody(events, refs),
+      atStep,
+      materialConsequence: material,
+      simulatedDurationDays: durationDaysFor(refEvents.map((candidate) => candidate.actionId)),
+      // The report may name the event; it may never state its outcome, which
+      // is why the title is a headline drawn from it and the body comes from
+      // the engine. A headline is cut on a word, never mid-word, and never
+      // carries an engine identifier into the record.
+      title: chronicleHeadline(event.summary),
+      knowledgeStatus: "confirmed",
+      sourceDirector: "game_master",
+      chainPosition: event.chainPosition,
+      participants: participantsOf(world, event.participantCharacterIds),
+      characterMentions: event.participantCharacterIds
+        .filter((id) => world.characters.some((character) => character.id === id && character.alive))
+        .slice(0, 4)
+        .map((id) => ({ characterId: id, role: "participant" })),
+      playerRelevance: salienceTier(event.salience),
+      depth: deriveChronicleDepth({ playerRelevance: salienceTier(event.salience), materialConsequence: material, isPlayerAction: false }),
+      ...battleBriefOf(refEvents),
+    });
+  }
+
+  // -- facts the report forgot ----------------------------------------------
+  // Anything the engine actually did is recorded whether or not the Game
+  // Master remembered to report it. A silent mutation would be a lie by
+  // omission in a Chronicle that claims to be the record.
+  for (const event of events) {
+    if (consumed.has(event.id)) continue;
+    // ...except a call that changed nothing. There is no omission in staying
+    // silent about a world that did not move.
+    if (event.noOp === true) continue;
+    entries.push({
+      scope: event.kind === "capability_gap" ? UNSUPPORTED_SCOPE : WORLD_SCOPE,
+      scopeRef: event.id,
+      audience: "all_players",
+      body: stripEngineJargon(event.summary),
+      atStep,
+      materialConsequence: event.materialConsequence,
+      simulatedDurationDays: durationDaysFor([event.actionId]),
+      title: chronicleHeadline(event.summary),
+      knowledgeStatus: "confirmed",
+      sourceDirector: "game_master",
+      chainPosition: "spread",
+      playerRelevance: "low",
+      depth: deriveChronicleDepth({ playerRelevance: "low", materialConsequence: event.materialConsequence, isPlayerAction: false }),
+      ...battleBriefOf([event]),
+    });
+  }
+
+  return entries.map((entry, sequence) => ({ ...entry, sequence }));
+}
+
+/**
+ * Scopes whose wording is executor-derived and must never reach the narrator.
+ * A refusal and an unsupported attempt say exactly why nothing happened; a
+ * free-form rewrite could only add an institutional cause the engine never
+ * gave, so they are already worded as history here and left alone.
+ */
+export const NARRATOR_EXEMPT_SCOPES: ReadonlySet<string> = new Set([REFUSAL_SCOPE, UNSUPPORTED_SCOPE]);
+
+/**
+ * Scopes the narrator may write, but only under a hard outcome lock: the
+ * facts in the body are complete and final, and the rewrite may add voice and
+ * consequence, never doubt, delay, or a different result. The player's own
+ * carried-out orders belong here -- they are the entries a chronicle exists to
+ * tell, and leaving them as raw executor sentences is what made the record
+ * read as a receipt rather than as history.
+ */
+export const NARRATOR_OUTCOME_LOCKED_SCOPES: ReadonlySet<string> = new Set([PLAYER_SCOPE]);

@@ -1,6 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { AiOperation, AiTier } from "@chronica/shared";
-import type { AiAdapter, AiCallResult } from "../adapter";
+import type {
+  AiAdapter,
+  AiCallResult,
+  AiConversationMessage,
+  AiToolCall,
+  AiToolCallResult,
+  AiToolDefinition,
+} from "../adapter";
 import { getConfiguredApiKey, getSelectedLocalAiModel } from "../local-key-selection";
 
 // Operations that must return raw JSON — we use an assistant prefill of "{" to
@@ -33,6 +40,8 @@ const TIER_MODELS: Record<AiTier, string> = {
 };
 
 const STANDARD_TIER_OPERATIONS = new Set<AiOperation>([
+  // The Game Master reasons over a whole turn with tools; never basic tier.
+  "game_master",
   "adjudicate",
   "narrate",
   "resolve_solo_turn",
@@ -52,6 +61,37 @@ function resolveModel(operation: AiOperation): string {
   return TIER_MODELS[tier];
 }
 
+/** Translate the caller-owned conversation into Anthropic messages. */
+function toAnthropicMessages(messages: readonly AiConversationMessage[]): Anthropic.MessageParam[] {
+  const out: Anthropic.MessageParam[] = [];
+  for (const message of messages) {
+    if (message.role === "user") {
+      out.push({ role: "user", content: message.content });
+      continue;
+    }
+    if (message.role === "assistant") {
+      const content: Anthropic.ContentBlockParam[] = [];
+      if (message.content.length > 0) content.push({ type: "text", text: message.content });
+      for (const toolCall of message.toolCalls) {
+        content.push({ type: "tool_use", id: toolCall.id, name: toolCall.name, input: toolCall.arguments });
+      }
+      // An assistant turn with no content at all is not a valid message; the
+      // loop only records a step that produced something, but guard anyway.
+      if (content.length > 0) out.push({ role: "assistant", content });
+      continue;
+    }
+    out.push({
+      role: "user",
+      content: message.results.map((result) => ({
+        type: "tool_result" as const,
+        tool_use_id: result.callId,
+        content: result.content,
+      })),
+    });
+  }
+  return out;
+}
+
 export function createAnthropicLocalAdapter(): AiAdapter {
   let client: Anthropic | undefined;
 
@@ -63,6 +103,51 @@ export function createAnthropicLocalAdapter(): AiAdapter {
   }
 
   return {
+    async callWithTools(
+      operation: AiOperation,
+      systemPrompt: string,
+      messages: readonly AiConversationMessage[],
+      tools: readonly AiToolDefinition[],
+    ): Promise<AiToolCallResult> {
+      const model = resolveModel(operation);
+      const response = await getClient().messages.create({
+        model,
+        max_tokens: 8_192,
+        system: systemPrompt,
+        tools: tools.map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          input_schema: tool.parameters as Anthropic.Tool.InputSchema,
+        })),
+        messages: toAnthropicMessages(messages),
+      });
+      const toolCalls: AiToolCall[] = response.content.flatMap((block) =>
+        block.type === "tool_use"
+          ? [{
+              id: block.id,
+              name: block.name,
+              arguments:
+                typeof block.input === "object" && block.input !== null && !Array.isArray(block.input)
+                  ? (block.input as Record<string, unknown>)
+                  : {},
+            }]
+          : [],
+      );
+      const text = response.content
+        .flatMap((block) => (block.type === "text" ? [block.text] : []))
+        .join("\n");
+      return {
+        content: text,
+        model,
+        inputTokens: response.usage.input_tokens,
+        outputTokens: response.usage.output_tokens,
+        cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
+        cacheWriteTokens: response.usage.cache_creation_input_tokens ?? 0,
+        toolCalls,
+        stopReason: response.stop_reason === "tool_use" ? "tool_calls" : response.stop_reason === "max_tokens" ? "length" : "stop",
+      };
+    },
+
     async call(operation, systemPrompt, userMessage): Promise<AiCallResult> {
       const model = resolveModel(operation);
       const isJsonMode = JSON_MODE_OPERATIONS.has(operation);

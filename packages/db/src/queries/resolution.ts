@@ -1,10 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
-import type { WorldState, WorkflowAuditBlob, NovelActionProposal, RuntimeInventedWorkflow } from "@chronica/shared";
+import type {
+  CommittedGameMasterReport,
+  NovelActionProposal,
+  RecordedCapabilityRequest,
+  RuntimeInventedWorkflow,
+  WorkflowAuditBlob,
+  WorldState,
+} from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
 import { chronicleEntries, games, turns, worldSnapshots } from "../schema/game";
 import { insertNovelActionProposals } from "./workflow-proposals";
+import { insertCapabilityRequests } from "./capability-requests";
 import { insertInventedWorkflows, recordInventedWorkflowUses, type InventedWorkflowUseInput } from "./invented-workflows";
 
 // Persistence for the resolution pipeline.
@@ -34,7 +42,7 @@ export interface ChronicleEntryInput {
   /** Ephemeral Chronicle ordering aid. It is deliberately not persisted as world state. */
   readonly simulatedDurationDays?: number;
   readonly causalFactIds?: readonly string[];
-  readonly sourceDirector?: "player" | "character_director" | "reaction_director" | "simulator" | "world_director";
+  readonly sourceDirector?: "player" | "game_master" | "character_director" | "reaction_director" | "simulator" | "world_director";
   readonly openPressure?: boolean;
   /**
    * Player-visible summary of one resolved political procedure (character-sim
@@ -128,6 +136,14 @@ export interface CommitResolutionInput {
   readonly inventedWorkflows?: readonly RuntimeInventedWorkflow[];
   /** Complete runtime-template use audit for this turn. */
   readonly inventedWorkflowUses?: readonly InventedWorkflowUseInput[];
+  /**
+   * Non-mutating capability-gap records from this turn (Game Master refactor).
+   * Written inside the same transaction as the snapshot so the audit can never
+   * disagree with the world about what was attempted.
+   */
+  readonly capabilityRequests?: readonly RecordedCapabilityRequest[];
+  /** Structured Game Master report plus the factual event log the Chronicle was built from. */
+  readonly gameMasterReport?: CommittedGameMasterReport;
 }
 
 export interface CommitResolutionResult {
@@ -156,6 +172,7 @@ export async function commitResolution(
         stopReason: input.stopReason,
         resolutionCommittedAt: new Date(),
         ...(input.workflowAudit !== undefined ? { workflowAudit: input.workflowAudit } : {}),
+        ...(input.gameMasterReport !== undefined ? { gameMasterReport: input.gameMasterReport } : {}),
       })
       .where(eq(turns.id, input.turnId));
 
@@ -220,6 +237,9 @@ export async function commitResolution(
     }
     if (input.inventedWorkflows && input.inventedWorkflows.length > 0) {
       await insertInventedWorkflows(tx as unknown as ChronicaDatabase, input.inventedWorkflows, input.turnId);
+    }
+    if (input.capabilityRequests && input.capabilityRequests.length > 0) {
+      await insertCapabilityRequests(tx as unknown as ChronicaDatabase, input.capabilityRequests, input.gameId, input.turnId);
     }
     if (input.inventedWorkflowUses && input.inventedWorkflowUses.length > 0) {
       await recordInventedWorkflowUses(tx as unknown as ChronicaDatabase, input.inventedWorkflowUses, input.turnId);

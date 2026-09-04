@@ -17,6 +17,8 @@ import { CommitmentSchema } from "../character-agency/commitments";
 import { CharacterIntentSchema } from "../character-agency/intents";
 import { FamilyLinkSchema, HouseholdSchema, LifeContractSchema } from "../characters/family";
 import { LegacyCauseSchema } from "../continuity/continuity";
+import { CampaignMemorySchema, EMPTY_CAMPAIGN_MEMORY } from "../gm/campaign-memory";
+import { DiplomaticMessageSchema } from "./diplomacy";
 
 /**
  * Bumped when an old snapshot needs upgrading on load.
@@ -119,6 +121,19 @@ export const WorldStateSchema = z
      * without having to reconstruct it from Chronicle projections.
      */
     lastTurnSummary: z.string().trim().min(1).max(1_800).nullable().default(null),
+    /**
+     * Compact campaign memory for the Game Master (GM refactor, requirement
+     * 6). Derived from committed facts -- executed tool results and the
+     * deterministic turn record -- never from Chronicle prose. Defaulted so
+     * every archived snapshot, none of which carried this, still parses.
+     */
+    campaignMemory: CampaignMemorySchema.default(EMPTY_CAMPAIGN_MEMORY),
+    /**
+     * Standing diplomacy: every message one power has sent another, and how
+     * it was answered. Defaulted so every snapshot written before diplomacy
+     * existed still parses.
+     */
+    diplomacy: z.array(DiplomaticMessageSchema).default([]),
   })
   .strict()
   .superRefine((world, context) => {

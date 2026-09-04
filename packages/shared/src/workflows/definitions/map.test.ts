@@ -138,19 +138,19 @@ describe("change_province_tier", () => {
   it("changes a province's detail tier", () => {
     const w = world();
     const outcome = executeWorkflow(
-      { actionId: "change_province_tier", actorId: "test-actor", parameters: { provinceId: "ita-72843720b863019116732", newTier: "near" } },
+      { actionId: "change_province_tier", actorId: "test-actor", parameters: { provinceId: "ita-local-23120603B86473916475875", newTier: "near" } },
       w,
       0,
     );
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    expect(outcome.world.map.provinces.find((p) => p.id === "ita-72843720b863019116732")?.tier).toBe("near");
+    expect(outcome.world.map.provinces.find((p) => p.id === "ita-local-23120603B86473916475875")?.tier).toBe("near");
   });
 
   it("is not applicable when the tier is unchanged", () => {
     const w = world();
     const outcome = executeWorkflow(
-      { actionId: "change_province_tier", actorId: "test-actor", parameters: { provinceId: "ita-72843720b863019116732", newTier: "far" } },
+      { actionId: "change_province_tier", actorId: "test-actor", parameters: { provinceId: "ita-local-23120603B86473916475875", newTier: "far" } },
       w,
       0,
     );
@@ -162,20 +162,20 @@ describe("fortify_province_capital", () => {
   it("sets a settlement's fortification level directly", () => {
     const w = world();
     const outcome = executeWorkflow(
-      { actionId: "fortify_province_capital", actorId: "test-actor", parameters: { provinceId: "ita-72843720b863019116732", settlementId: "settlement-rome", newFortificationLevel: 9 } },
+      { actionId: "fortify_province_capital", actorId: "test-actor", parameters: { provinceId: "ita-local-23120603B86473916475875", settlementId: "settlement-rome", newFortificationLevel: 9 } },
       w,
       0,
     );
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    const settlement = outcome.world.map.provinces.find((p) => p.id === "ita-72843720b863019116732")?.settlements[0];
+    const settlement = outcome.world.map.provinces.find((p) => p.id === "ita-local-23120603B86473916475875")?.settlements[0];
     expect(settlement?.fortificationLevel).toBe(9);
   });
 
   it("is not applicable to an unknown settlement", () => {
     const w = world();
     const outcome = executeWorkflow(
-      { actionId: "fortify_province_capital", actorId: "test-actor", parameters: { provinceId: "ita-72843720b863019116732", settlementId: "nowhere", newFortificationLevel: 5 } },
+      { actionId: "fortify_province_capital", actorId: "test-actor", parameters: { provinceId: "ita-local-23120603B86473916475875", settlementId: "nowhere", newFortificationLevel: 5 } },
       w,
       0,
     );

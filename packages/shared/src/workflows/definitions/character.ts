@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { EntityIdSchema } from "../../material-state";
-import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
+import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
 import { requireProcedureAuthorization } from "./political-procedures";
 import { vacateOfficeSeatsFor } from "../../characters/succession";
 
@@ -201,6 +201,34 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
           summary: `${character.name} ages ${params.years} year(s).`,
           applied: true,
         },
+      };
+    },
+  }),
+
+  defineWorkflow({
+    id: "rename_character",
+    description:
+      "Give a character their proper name. Use it on a leader the engine seeded for a power that had none (named '<Power> leader') as soon as you know who they are, so the record calls them by a name rather than a role.",
+    category: "character",
+    parametersSchema: z.object({
+      characterId: EntityIdSchema,
+      newName: z.string().trim().min(1).max(120),
+    }).strict(),
+    apply(world, params) {
+      const character = world.characters.find((c) => c.id === params.characterId);
+      if (!character) return refuse(`No character exists with the id "${params.characterId}".`);
+      if (!character.alive) return refuse(`${character.name} is dead; the record of a dead figure is not rewritten.`);
+      if (character.name === params.newName) {
+        return { world, result: { summary: `${character.name} keeps the name they already bear.`, applied: true, noOp: true } };
+      }
+      const taken = world.characters.some((c) => c.alive && c.id !== character.id && c.name === params.newName);
+      if (taken) return refuse(`Another living character is already called ${params.newName}. Two people of one name in one record cannot be told apart.`);
+      return {
+        world: {
+          ...world,
+          characters: world.characters.map((c) => (c.id === character.id ? { ...c, name: params.newName } : c)),
+        },
+        result: { summary: `${character.name} is known thereafter as ${params.newName}.`, applied: true },
       };
     },
   }),

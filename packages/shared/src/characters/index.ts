@@ -13,6 +13,7 @@ export * from "./knowledgebase";
 export * from "./life-events";
 export * from "./mind";
 export * from "./opinion";
+export * from "./player-materialization";
 export * from "./political-authority";
 export * from "./political-inspector";
 export * from "./pressures";

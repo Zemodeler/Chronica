@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { EntityIdSchema } from "../../material-state";
 import { DetailTierSchema, SettlementKindSchema } from "../../world/map";
-import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
+import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
 
 const allSettlements = (world: Parameters<AnyWorkflowDefinition["apply"]>[0]) =>
   world.map.provinces.flatMap((province) => province.settlements.map((settlement) => ({ settlement, province })));
@@ -19,10 +19,15 @@ export const mapWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params) {
       const province = world.map.provinces.find((p) => p.id === params.provinceId);
-      if (!province) return null;
+      if (!province) {
+        return refuse(`No province exists with the id "${params.provinceId}". The world state lists every province id; use the one you mean.`);
+      }
       if (params.newControllerPolityId !== null) {
         const polity = world.map.polities.find((p) => p.id === params.newControllerPolityId);
-        if (!polity) return null;
+        if (!polity) {
+          const known = world.map.polities.map((p) => `${p.name} (${p.id})`).join("; ");
+          return refuse(`No power exists with the id "${params.newControllerPolityId}" to take control. The powers that exist are: ${known}.`);
+        }
       }
       const oldControllerName = province.controllerPolityId
         ? (world.map.polities.find((p) => p.id === province.controllerPolityId)?.name ?? province.controllerPolityId)
@@ -132,6 +137,14 @@ export const mapWorkflows: AnyWorkflowDefinition[] = [
     apply(world, params) {
       const province = world.map.provinces.find((p) => p.id === params.provinceId);
       if (!province) return null;
+      // Renaming a province to the name it already bears changes nothing, and
+      // must not push a duplicate onto formerNames as though it had.
+      if (province.name === params.newName) {
+        return {
+          world,
+          result: { summary: `${province.name} keeps the name it already bears.`, applied: true, noOp: true },
+        };
+      }
       return {
         world: {
           ...world,

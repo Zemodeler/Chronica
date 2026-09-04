@@ -1,24 +1,33 @@
 import { z } from "zod";
 import type { WorldState } from "../world/world-state";
 import { WorldStateSchema } from "../world/world-state";
+import { referenceViolationsIntroduced } from "../world/references";
 import type { ProposedInvocation } from "../actions/orders";
 import { WORKFLOW_REGISTRY } from "./registry";
-import type { WorkflowResult } from "./types";
-import { applyInventedWorkflow, type InventedPatchOperation, type RuntimeInventedWorkflow } from "./invented-workflow";
+import { isWorkflowRefusal, type WorkflowResult } from "./types";
+import { diagnoseFailedInvocation } from "./diagnose";
 
 // Workflow executor (docs/14, ADR-0032).
 //
 // This is the single gate between a ProposedInvocation and a world mutation.
 // It resolves the workflow, validates parameters, applies the mutation, and
 // returns the result. The executor never throws on a valid workflow + valid
-// world — it returns null from apply() for logically impossible operations
+// world -- it returns null from apply() for logically impossible operations
 // (e.g. moving a force that does not exist). The caller records a failed result.
+//
+// GM refactor, requirement 7: the executor has no invented-workflow path any
+// more. A runtime-generated template or JSON patch can no longer reach world
+// state through ordinary play by any route -- an unregistered actionId is
+// simply `not_found`. Persisted invented workflows stay readable for
+// migration (see `invented-workflow.ts` and the db queries that list them),
+// but making one real now means a developer writing a registered, typed
+// workflow. See `gm/capability-request.ts` for the non-mutating safeguard
+// that replaced the escape hatch.
 
 export interface ExecutionSuccess {
   readonly ok: true;
   readonly world: WorldState;
   readonly result: WorkflowResult;
-  readonly resolvedInventedPatch?: readonly InventedPatchOperation[];
 }
 
 export interface ExecutionFailure {
@@ -39,21 +48,9 @@ export function executeWorkflow(
   invocation: ProposedInvocation,
   world: WorldState,
   atStep: number,
-  inventedWorkflows: readonly RuntimeInventedWorkflow[] = [],
 ): ExecutionOutcome {
   const definition = WORKFLOW_REGISTRY.get(invocation.actionId);
-  const invented = inventedWorkflows.find((workflow) => workflow.status === "active" && workflow.definition.actionId === invocation.actionId);
   if (!definition) {
-    if (invented) {
-      const appliedInvented = applyInventedWorkflow(invented.definition, world, invocation.parameters);
-      if ("error" in appliedInvented) return { ok: false, reason: "not_applicable", message: appliedInvented.error };
-      return {
-        ok: true,
-        world: appliedInvented.world,
-        result: { summary: invented.definition.description, applied: true },
-        resolvedInventedPatch: appliedInvented.resolvedOperations,
-      };
-    }
     return { ok: false, reason: "not_found", message: `No workflow "${invocation.actionId}".` };
   }
 
@@ -73,7 +70,7 @@ export function executeWorkflow(
     && typeof invocation.parameters === "object"
     && "authorization" in invocation.parameters
   ) {
-    const { authorization: _authorization, ...withoutAuthorization } = invocation.parameters as Record<string, unknown>;
+    const { authorization: _authorization, ...withoutAuthorization } = invocation.parameters;
     const retried = schema.safeParse(withoutAuthorization);
     if (retried.success) parsed = retried;
   }
@@ -87,11 +84,20 @@ export function executeWorkflow(
 
   const applied = definition.apply(world, parsed.data, { actorId: invocation.actorId, atStep });
   if (applied === null) {
+    // A bare null says only "no". Before giving up on it, check the one thing
+    // that is wrong most of the time and that the caller can actually fix.
+    const diagnosis = diagnoseFailedInvocation(world, invocation.actionId, parsed.data);
     return {
       ok: false,
       reason: "not_applicable",
-      message: `Workflow "${invocation.actionId}" cannot be applied to the current world state.`,
+      message: diagnosis.message ?? `Workflow "${invocation.actionId}" cannot be applied to the current world state.`,
     };
+  }
+  // A workflow that named its own reason: pass it through untouched. This is
+  // the text the Game Master reads to correct itself, and the text a player
+  // eventually sees if nothing does.
+  if (isWorkflowRefusal(applied)) {
+    return { ok: false, reason: "not_applicable", message: applied.refused };
   }
 
   const validated = WorldStateSchema.safeParse(applied.world);
@@ -100,6 +106,21 @@ export function executeWorkflow(
       ok: false,
       reason: "not_applicable",
       message: `Workflow "${invocation.actionId}" produced an invalid world state: ${validated.error.issues.map((i) => i.message).join("; ")}`,
+    };
+  }
+
+  // Zod validates each collection's shape; it does not check that the ids one
+  // collection holds resolve in another. A workflow that leaves a character
+  // pointing at a province, purse, or heir that does not exist has produced a
+  // world the rest of the engine will read wrongly and silently, so it is
+  // refused here. Checked as a delta, so a snapshot that already carried
+  // breakage stays playable while it is repaired.
+  const introduced = referenceViolationsIntroduced(world, validated.data);
+  if (introduced.length > 0) {
+    return {
+      ok: false,
+      reason: "not_applicable",
+      message: `Workflow "${invocation.actionId}" would leave a dangling reference: ${introduced.join("; ")}`,
     };
   }
 
@@ -117,13 +138,12 @@ export function executeWorkflows(
   invocations: readonly ProposedInvocation[],
   world: WorldState,
   atStep: number,
-  inventedWorkflows: readonly RuntimeInventedWorkflow[] = [],
 ): { world: WorldState; log: { invocation: ProposedInvocation; outcome: ExecutionOutcome }[] } {
   let current = world;
   const log: { invocation: ProposedInvocation; outcome: ExecutionOutcome }[] = [];
 
   for (const invocation of invocations) {
-    const outcome = executeWorkflow(invocation, current, atStep, inventedWorkflows);
+    const outcome = executeWorkflow(invocation, current, atStep);
     log.push({ invocation, outcome });
     if (outcome.ok) {
       current = outcome.world;

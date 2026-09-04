@@ -34,6 +34,7 @@ export interface OrderRefusalFact {
  * already uses. A later phase should unify these two enums; Phase 1 only
  * needs `OngoingAction.invocation` to be a valid `ActionInvocation`. */
 const CANDIDATE_SOURCE_TO_INVOCATION_SOURCE: Record<WorkflowCandidateSource, InvocationSource> = {
+  game_master: "game_master",
   player_directive: "grammar",
   character_director: "npc",
   near_event: "event_director",

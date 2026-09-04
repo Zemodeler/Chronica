@@ -14,4 +14,5 @@ export * from "./turns";
 export * from "./ui-state";
 export * from "./workflow-proposals";
 export * from "./invented-workflows";
+export * from "./capability-requests";
 export * from "../built-in-scenarios";

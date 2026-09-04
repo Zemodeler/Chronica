@@ -1,20 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
-import type { CandidateAction, CharacterSuggestion } from "@chronica/shared";
-import { buildCharacterSuggestionInvocation, buildIntentInvocation, buildIntentSocialEvent } from "./character-agency";
+import type { CandidateAction } from "@chronica/shared";
+import { buildIntentInvocation, buildIntentSocialEvent } from "./character-agency";
 
 const world = () => structuredClone(firstPunicWarScenario.initialWorld);
-
-function suggestion(overrides: Partial<CharacterSuggestion>): CharacterSuggestion {
-  return {
-    characterId: "marcus-atilius", suggestionKind: "create_goal",
-    goalId: null, plotId: null, proposedGoal: null, proposedPlot: null,
-    goalStatus: null, plotStage: null, plotResolutionStatus: null,
-    rationale: "Because of a meaningful trigger.", causalFactIds: [], affectedEntityIds: [],
-    storylineId: null, visibility: "private", salience: 5,
-    ...overrides,
-  };
-}
 
 function candidate(overrides: Partial<CandidateAction>): CandidateAction {
   return {
@@ -26,40 +15,6 @@ function candidate(overrides: Partial<CandidateAction>): CandidateAction {
     ...overrides,
   };
 }
-
-describe("buildCharacterSuggestionInvocation", () => {
-  it("builds create_character_goal from a create_goal suggestion", () => {
-    const invocation = buildCharacterSuggestionInvocation(
-      suggestion({
-        suggestionKind: "create_goal",
-        proposedGoal: { objective: "Secure the frontier.", category: "preserve_power", targetEntityIds: [], priority: 3, visibility: "private" },
-      }),
-      "marcus-atilius",
-    );
-    expect(invocation?.actionId).toBe("create_character_goal");
-    expect(invocation?.parameters["objective"]).toBe("Secure the frontier.");
-  });
-
-  it("returns null for create_goal with no proposed goal payload", () => {
-    expect(buildCharacterSuggestionInvocation(suggestion({ suggestionKind: "create_goal", proposedGoal: null }), "marcus-atilius")).toBeNull();
-  });
-
-  it("builds resolve_character_plot only when plotId and a resolution status are both present", () => {
-    expect(buildCharacterSuggestionInvocation(
-      suggestion({ suggestionKind: "resolve_plot", plotId: "plot-1", plotResolutionStatus: "succeeded" }),
-      "marcus-atilius",
-    )?.actionId).toBe("resolve_character_plot");
-    expect(buildCharacterSuggestionInvocation(
-      suggestion({ suggestionKind: "resolve_plot", plotId: null, plotResolutionStatus: "succeeded" }),
-      "marcus-atilius",
-    )).toBeNull();
-  });
-
-  it("never builds an invocation for a purely narrative suggestion kind", () => {
-    expect(buildCharacterSuggestionInvocation(suggestion({ suggestionKind: "react" }), "marcus-atilius")).toBeNull();
-    expect(buildCharacterSuggestionInvocation(suggestion({ suggestionKind: "develop_relationship" }), "marcus-atilius")).toBeNull();
-  });
-});
 
 describe("buildIntentInvocation", () => {
   it("builds appoint_to_office for seek_office with a required office", () => {

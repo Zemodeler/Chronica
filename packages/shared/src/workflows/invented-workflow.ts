@@ -1,6 +1,16 @@
 import { z } from "zod";
 import { WorldStateSchema, type WorldState } from "../world/world-state";
 import type { WorkflowInvokerAuthority, WorkflowScopeLimit } from "./types";
+import { findWorldReferenceViolations } from "../world/references";
+
+// RETIRED FOR ORDINARY PLAY (Game Master refactor, docs/24).
+//
+// Nothing here is reachable from turn resolution any more: the executor has
+// no invented-workflow path, and migration 0029 disables every persisted
+// template. It is kept so existing rows stay readable for migration review,
+// and so a developer converting one into a registered typed workflow can see
+// exactly what it did. The safeguard that replaced it is
+// `gm/capability-request.ts`, which records an unmet need and mutates nothing.
 
 /** A deliberately small, serialisable parameter language for runtime workflows. */
 export const InventedWorkflowParameterSchema = z.object({
@@ -108,30 +118,6 @@ function interpolate(value: unknown, parameters: Record<string, unknown>): unkno
 
 function decodeSegment(segment: string): string { return segment.replace(/~1/g, "/").replace(/~0/g, "~"); }
 
-/** Cross-collection references not fully expressible by the individual Zod shapes. */
-function validateWorldReferences(world: WorldState): string | null {
-  const provinceIds = new Set(world.map.provinces.map((province) => province.id));
-  const polityIds = new Set(world.map.polities.map((polity) => polity.id));
-  const characterIds = new Set(world.characters.map((character) => character.id));
-  const accountIds = new Set(world.material.accounts.map((account) => account.id));
-  for (const character of world.characters) {
-    if (!provinceIds.has(character.locationProvinceId)) return `Character ${character.id} references a missing province.`;
-    if (character.polityId !== null && !polityIds.has(character.polityId)) return `Character ${character.id} references a missing polity.`;
-    if (!accountIds.has(character.personalAccountId)) return `Character ${character.id} references a missing account.`;
-    if (character.heirCharacterId !== null && !characterIds.has(character.heirCharacterId)) return `Character ${character.id} references a missing heir.`;
-  }
-  for (const storyline of world.storylines ?? []) {
-    if (storyline.provinceId !== null && !provinceIds.has(storyline.provinceId)) return `Storyline ${storyline.id} references a missing province.`;
-    if (storyline.participantIds.some((id) => !characterIds.has(id))) return `Storyline ${storyline.id} references a missing participant.`;
-  }
-  for (const force of world.material.forces) {
-    if (!provinceIds.has(force.locationId)) return `Force ${force.id} references a missing province.`;
-    if (force.commanderCharacterId !== null && !characterIds.has(force.commanderCharacterId)) return `Force ${force.id} references a missing commander.`;
-    if (force.controllerCharacterId !== null && !characterIds.has(force.controllerCharacterId)) return `Force ${force.id} references a missing controller.`;
-  }
-  return null;
-}
-
 /** Resolve a pointer with collection selectors such as /characters[id={{characterId}}]/healthBps. */
 function resolveParent(root: unknown, rawPath: string, parameters: Record<string, unknown>): { parent: Record<string, unknown> | unknown[]; key: string } {
   const segments = rawPath.split("/").slice(1).map((part) => decodeSegment(interpolateString(part, parameters)));
@@ -208,8 +194,8 @@ export function applyInventedWorkflow(
   }
   const parsed = WorldStateSchema.safeParse(next);
   if (!parsed.success) return { error: `Patch produced an invalid world: ${parsed.error.issues.map((issue) => issue.message).join("; ")}` };
-  const referenceError = validateWorldReferences(parsed.data);
-  if (referenceError) return { error: `Patch produced invalid references: ${referenceError}` };
+  const referenceErrors = findWorldReferenceViolations(parsed.data);
+  if (referenceErrors.length > 0) return { error: `Patch produced invalid references: ${referenceErrors.join("; ")}` };
   return { world: parsed.data, resolvedOperations };
 }
 

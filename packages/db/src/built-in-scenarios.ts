@@ -24,7 +24,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
     arrearsDesertionPeriods: 2,
   },
   government: {
-    offices: [{ id: "roman-command", label: "Roman field command", polityId: "rome", authorisedActionIds: [], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "roman-election", eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-min-prestige-3000", "req-not-disqualified"] }],
+    offices: [{ id: "roman-command", label: "Roman field command", polityId: "rome", authorisedActionIds: ["assign_command", "create_force", "move_force", "start_battle"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "roman-election", eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-min-prestige-3000", "req-not-disqualified"] }],
     successionRules: [{ id: "roman-election", label: "Election by the Senate", kind: "elective", institutionId: "roman-senate" }],
     decreeAuthorityCostBps: 500,
     decreeMinimumPrestigeBps: 2_000,

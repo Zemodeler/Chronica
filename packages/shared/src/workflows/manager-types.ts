@@ -12,6 +12,9 @@ import { InventedWorkflowDefinitionSchema } from "./invented-workflow";
 // that no skill currently covers for developer review.
 
 export const WorkflowCandidateSourceSchema = z.enum([
+  // The single agent that replaced the director committee (GM refactor).
+  // Every other member is kept so archived audit blobs stay readable.
+  "game_master",
   "player_directive",
   "character_director",
   "near_event",

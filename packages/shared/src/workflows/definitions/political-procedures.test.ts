@@ -168,3 +168,39 @@ describe("assign_command — restricted shortcut", () => {
     expect(outcome.ok).toBe(true);
   });
 });
+
+describe("assign_command — a magistrate's own authority", () => {
+  // A consul who cannot put a commander at the head of his republic's legions
+  // without first carrying a motion is not a consul. The procedure route
+  // resolves a turn later, which made the most ordinary act of the office
+  // impossible to perform at all.
+  it("lets a seated magistrate command his own polity's force with no procedure", () => {
+    const w = world();
+    const consul = w.characters.find((c) => c.id === "marcus-atilius");
+    const romanForce = w.material.forces.find((f) => f.polityId === consul?.polityId);
+    expect(consul).toBeDefined();
+    expect(romanForce).toBeDefined();
+    expect(w.material.officeSeats.some((seat) => seat.status === "held" && seat.holderCharacterId === "marcus-atilius")).toBe(true);
+
+    const outcome = executeWorkflow(
+      { actionId: "assign_command", actorId: "marcus-atilius", parameters: { forceId: romanForce!.id, commanderCharacterId: "marcus-atilius" } },
+      w,
+      1,
+    );
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.material.forces.find((f) => f.id === romanForce!.id)?.commanderCharacterId).toBe("marcus-atilius");
+  });
+
+  it("still refuses someone holding no office in the force's polity", () => {
+    const w = world();
+    const romanForce = w.material.forces.find((f) => f.polityId === "rome");
+    const outcome = executeWorkflow(
+      { actionId: "assign_command", actorId: "hanno", parameters: { forceId: romanForce!.id, commanderCharacterId: "hanno" } },
+      w,
+      1,
+    );
+    expect(outcome.ok).toBe(false);
+  });
+});
