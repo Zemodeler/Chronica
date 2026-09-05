@@ -62,3 +62,14 @@ describe("FORMED NPC INTENTIONS", () => {
     expect(prompt).toMatch(/prose about the actor's intention is not executing it/i);
   });
 });
+
+describe("world activity requirements", () => {
+  it("requires multiple state-backed world developments and recurring Roman politics", () => {
+    const prompt = buildGameMasterSystemPrompt(baseInput());
+    expect(prompt).toContain("ACTIVITY BUDGET");
+    expect(prompt).toContain("3–8 distinct, state-backed developments");
+    expect(prompt).toContain("REGIONAL REACTION");
+    expect(prompt).toContain("ROMAN REPUBLIC");
+    expect(prompt).toMatch(/at least every second season/i);
+  });
+});
