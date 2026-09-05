@@ -73,3 +73,73 @@ export type DiplomaticMessage = z.infer<typeof DiplomaticMessageSchema>;
 export function unansweredMessages(messages: readonly DiplomaticMessage[]): readonly DiplomaticMessage[] {
   return messages.filter((message) => message.status === "awaiting_reply").slice().sort((a, b) => a.sentAtStep - b.sentAtStep);
 }
+
+/** One power's demand rebuffed again, on what is mechanically the same standing thread. */
+export interface DiplomaticEscalationTrigger {
+  readonly senderCharacterId: string;
+  readonly senderPolityId: string;
+  readonly recipientPolityId: string;
+  readonly subject: string;
+  /** How many times in a row, counting this one, the thread has ended in refusal or silence. */
+  readonly refusalCount: number;
+  readonly messageId: string;
+}
+
+/**
+ * A rejected ultimatum must not simply repeat itself: the offended power is
+ * meant to escalate. This reads no more than the message record already
+ * says -- it never invents that a demand was repeated, it counts how many
+ * times, in the same fromPolity/toPolity thread (linked by
+ * `inReplyToMessageId`, the same chain a follow-up ultimatum uses), the
+ * answer already recorded was `refused` or `ignored`.
+ *
+ * Returns one trigger per message answered THIS step whose thread has now
+ * been rebuffed at least twice -- the caller turns each into a pressure on
+ * the sender's own leader, exactly the same deterministic path the other
+ * pressure triggers already use, so the sender's power is agency-eligible
+ * (and pressed toward a real reaction) starting next turn without any of
+ * this depending on the Game Master having chosen to notice on its own.
+ */
+export function deriveDiplomaticEscalations(
+  messages: readonly DiplomaticMessage[],
+  atStep: number,
+): readonly DiplomaticEscalationTrigger[] {
+  const byId = new Map(messages.map((message) => [message.id, message]));
+  const escalations: DiplomaticEscalationTrigger[] = [];
+
+  for (const message of messages) {
+    if (message.status !== "answered" || message.answeredAtStep !== atStep) continue;
+    if (message.answer !== "refused" && message.answer !== "ignored") continue;
+
+    let count = 1;
+    let cursor: DiplomaticMessage = message;
+    const seen = new Set<string>([message.id]);
+    for (;;) {
+      if (cursor.inReplyToMessageId === null) break;
+      const ancestor = byId.get(cursor.inReplyToMessageId);
+      if (
+        ancestor === undefined
+        || seen.has(ancestor.id)
+        || ancestor.fromPolityId !== message.fromPolityId
+        || ancestor.toPolityId !== message.toPolityId
+        || ancestor.status !== "answered"
+        || (ancestor.answer !== "refused" && ancestor.answer !== "ignored")
+      ) break;
+      seen.add(ancestor.id);
+      count += 1;
+      cursor = ancestor;
+    }
+    if (count < 2) continue;
+
+    escalations.push({
+      senderCharacterId: message.fromCharacterId,
+      senderPolityId: message.fromPolityId,
+      recipientPolityId: message.toPolityId,
+      subject: message.subject,
+      refusalCount: count,
+      messageId: message.id,
+    });
+  }
+
+  return escalations;
+}

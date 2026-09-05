@@ -285,10 +285,21 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
   }];
 
   // ── Phase 2: engagement ─────────────────────────────────────────────────
+  //
+  // A committed battle is meant to be decisive, not a skirmish: an evenly
+  // matched fight (each side's opposing-strength share ~0.5) costs each side
+  // roughly a fifth of its committed fit, and a genuinely lopsided one (the
+  // outmatched side's own strength approaching zero) can cost the losing
+  // side close to half. MAX_EXCHANGE_RATE is the rate at share == 1 (the
+  // opposing side contributed effectively all the total strength); the rate
+  // scales linearly with share below that, so it already reflects every
+  // input `computeForceContribution` folds in -- headcount, terrain,
+  // commander quality, morale, cohesion, supply, and posture -- without a
+  // second, separate "mismatch" term.
   const totalStrength = Math.max(1, attackerEffectiveStrength + defenderEffectiveStrength);
-  const BASE_EXCHANGE_RATE = 0.10;
-  const attackerCasualtyRate = clampBps(BASE_EXCHANGE_RATE * (defenderEffectiveStrength / totalStrength) * 2 * 10_000, 0, 3_500) / 10_000;
-  const defenderCasualtyRate = clampBps(BASE_EXCHANGE_RATE * (attackerEffectiveStrength / totalStrength) * 2 * 10_000, 0, 3_500) / 10_000;
+  const MAX_EXCHANGE_RATE = 0.45;
+  const attackerCasualtyRate = clampBps(MAX_EXCHANGE_RATE * (defenderEffectiveStrength / totalStrength) * 10_000, 0, 4_500) / 10_000;
+  const defenderCasualtyRate = clampBps(MAX_EXCHANGE_RATE * (attackerEffectiveStrength / totalStrength) * 10_000, 0, 4_500) / 10_000;
 
   const casualties: CasualtyResult[] = [];
   const casualtyCountByForce = new Map<string, number>();
@@ -374,10 +385,13 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
   // ── Phase 4: withdrawal ─────────────────────────────────────────────────
   const retreatDestination = [...adjacentProvinceIds].sort()[0] ?? null;
   const retreats: RetreatResult[] = [];
+  // The floor scales with MAX_EXCHANGE_RATE the same way DECISIVE_CASUALTY_RATE
+  // does above: 0.30 of a 0.45 ceiling is the same "took the clear majority
+  // of the exchange" bar the old 0.15-of-0.20 floor meant.
   const orderlyWithdrawal = !attackerBroken && !defenderBroken
     && attackerCasualtyRate > 0 && defenderCasualtyRate > 0
     && Math.max(attackerCasualtyRate, defenderCasualtyRate) > 1.5 * Math.min(attackerCasualtyRate, defenderCasualtyRate)
-    && Math.max(attackerCasualtyRate, defenderCasualtyRate) > 0.15;
+    && Math.max(attackerCasualtyRate, defenderCasualtyRate) > 0.30;
   const attackerWithdraws = attackerBroken || (orderlyWithdrawal && attackerCasualtyRate > defenderCasualtyRate);
   const defenderWithdraws = defenderBroken || (orderlyWithdrawal && defenderCasualtyRate > attackerCasualtyRate);
   if (attackerWithdraws) {
@@ -436,12 +450,11 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
   }
 
   // "Heavy losses" relative to the exchange formula's own reachable range:
-  // attackerCasualtyRate/defenderCasualtyRate are BASE_EXCHANGE_RATE(0.10) *
-  // share * 2, so their maximum as one side's share of total strength
-  // approaches 1 is 0.20 -- a fixed 0.25 threshold here would be
-  // unreachable by construction. 0.15 is reachable (share > ~0.75) and
-  // still means the losing side bore the clear majority of the exchange.
-  const DECISIVE_CASUALTY_RATE = 0.15;
+  // attackerCasualtyRate/defenderCasualtyRate are MAX_EXCHANGE_RATE(0.45) *
+  // share, so a threshold of 0.30 requires the losing side's opposing-
+  // strength share to have exceeded about two-thirds -- the clear majority
+  // of the exchange, not merely more than half.
+  const DECISIVE_CASUALTY_RATE = 0.30;
   const siegeAndControlChanges: SiegeOrControlChange[] = [];
   if (outcome === "attacker_victory" && defenderCasualtyRate > DECISIVE_CASUALTY_RATE && province.controllerPolityId) {
     siegeAndControlChanges.push({

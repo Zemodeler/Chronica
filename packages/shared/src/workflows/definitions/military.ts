@@ -434,9 +434,18 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
       }
       const alreadyBesieged = world.conflicts.sieges.some((s) => s.settlementId === params.settlementId);
       if (alreadyBesieged) return refuse(`${settlementWithProvince.settlement.name} is already under siege; it cannot be besieged twice.`);
-      const missingBesiegers = params.invadingForceIds.filter((id) => !world.material.forces.some((f) => f.id === id));
+      const invadingForces = params.invadingForceIds.map((id) => world.material.forces.find((f) => f.id === id));
+      const missingBesiegers = params.invadingForceIds.filter((id, index) => !invadingForces[index]);
       if (missingBesiegers.length > 0) {
         return refuse(`No force exists with the id ${missingBesiegers.map((id) => `"${id}"`).join(", ")}, so nothing can lay the siege.`);
+      }
+      // A siege is a real army sitting outside a real wall: naming a force
+      // that is somewhere else entirely is not a siege, it is a claim.
+      const outOfRange = invadingForces.filter((force) => force!.locationId !== settlementWithProvince.province.id).map((force) => force!.name);
+      if (outOfRange.length > 0) {
+        return refuse(
+          `${outOfRange.join(", ")} ${outOfRange.length === 1 ? "is" : "are"} not at ${settlementWithProvince.province.name}, so ${outOfRange.length === 1 ? "it" : "they"} cannot besiege ${settlementWithProvince.settlement.name} from where ${outOfRange.length === 1 ? "it stands" : "they stand"}. Move the force to ${settlementWithProvince.province.name} first.`,
+        );
       }
       return {
         world: {
@@ -473,6 +482,23 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
     apply(world, params) {
       const siege = world.conflicts.sieges.find((s) => s.settlementId === params.settlementId);
       if (!siege) return null;
+      if (params.successfulCapture && params.newControllerPolityId) {
+        // A siege that "succeeds" without anyone left besieging it, or that
+        // hands the prize to a power that was never party to it, is not a
+        // capture -- it is control changing hands by nothing more than the
+        // claim. At least one besieger must still be a real, living force,
+        // and the power receiving the settlement must be one of them.
+        const livingBesiegers = siege.invadingForceIds
+          .map((id) => world.material.forces.find((f) => f.id === id))
+          .filter((force): force is NonNullable<typeof force> => force !== undefined && force.personnel.some((category) => category.fit > 0));
+        if (livingBesiegers.length === 0) {
+          return refuse(`No besieging force at "${params.settlementId}" is still standing; there is no one left to have captured it.`);
+        }
+        if (!livingBesiegers.some((force) => force.polityId === params.newControllerPolityId)) {
+          const besiegerPolities = [...new Set(livingBesiegers.map((force) => force.polityId))].join(", ");
+          return refuse(`${params.newControllerPolityId} did not besiege "${params.settlementId}" -- the besieging power(s) were: ${besiegerPolities}. Capture can only pass it to one of them.`);
+        }
+      }
       let nextWorld = {
         ...world,
         conflicts: {

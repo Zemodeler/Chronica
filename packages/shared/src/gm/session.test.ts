@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstPunicWarScenario } from "@chronica/db";
+import { firstPunicWarScenario, punicWarsScenario } from "@chronica/db";
 import { WorldStateSchema, type WorldState } from "../world/world-state";
 import { createGameMasterSession } from "./session";
 import { FINISH_TURN_TOOL, REQUEST_CAPABILITY_TOOL, buildGameMasterTools } from "./tools";
@@ -22,6 +22,19 @@ function session(overrides: { directiveIds?: string[] } = {}) {
     atStep: 1,
     actorCharacterId: PLAYER,
     directiveIds: overrides.directiveIds ?? [],
+  });
+}
+
+function punicWorld(): WorldState {
+  return structuredClone(punicWarsScenario.initialWorld);
+}
+
+function punicSession() {
+  return createGameMasterSession({
+    world: punicWorld(),
+    atStep: 1,
+    actorCharacterId: "gaius-genucius",
+    directiveIds: [],
   });
 }
 
@@ -302,6 +315,195 @@ describe("the turn report", () => {
     // A finished turn accepts nothing further.
     expect(gm.invoke(call("create_force", { actorId: PLAYER, polityId: ROME, locationProvinceId: LATIUM, name: "Late Legion", size: 4_000, kind: "infantry" })).ok).toBe(false);
     expect(gm.stagedWorld.material.forces.some((force) => force.name === "Late Legion")).toBe(false);
+  });
+});
+
+// Regression: a siege attempted with the display name "messana" was refused
+// because the authoritative id is "settlement-messana", and that refusal
+// reached the player as history -- "the siege was refused" -- when nothing
+// about the world had actually said no. A bad/missing id or invalid call
+// arguments must never be reported as a real refusal without at least one
+// corrected retry.
+describe("a recoverable lookup failure (start_siege named the wrong settlement id)", () => {
+  it("is refused, naming the real id, when start_siege is called with the display name instead of the authoritative id", () => {
+    const gm = punicSession();
+    const outcome = gm.invoke(call("start_siege", {
+      actorId: "hieron-ii",
+      settlementId: "messana",
+      invadingForceIds: ["syracusan-army"],
+    }));
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.factual).toContain('No settlement exists with the id "messana"');
+    expect(outcome.factual).toContain("settlement-messana");
+  });
+
+  it("refuses to finish the turn until that recoverable failure is retried", () => {
+    const gm = punicSession();
+    gm.invoke(call("start_siege", { actorId: "hieron-ii", settlementId: "messana", invadingForceIds: ["syracusan-army"] }));
+
+    const attempted = gm.invoke(call(FINISH_TURN_TOOL, {
+      report: { directiveOutcomes: [], events: [], openThreads: [], turnSummary: "Nothing happened." },
+    }));
+
+    expect(attempted.ok).toBe(false);
+    expect(attempted.factual).toContain("start_siege by hieron-ii");
+    expect(attempted.factual).toMatch(/bad or missing id/);
+    expect(gm.isFinished).toBe(false);
+  });
+
+  it("recovers via inspect_province, retries with the id it returned, and the retry succeeds", () => {
+    const gm = punicSession();
+    // The besieging force must actually stand at the target before a siege
+    // is a siege rather than a claim (see the "route and target are valid"
+    // requirement this covers alongside the id-recovery bug).
+    gm.invoke(call("move_force", { actorId: "hieron-ii", forceId: "syracusan-army", destinationProvinceId: "ita-72843720b81376294924159-sicily-northeast" }));
+    gm.invoke(call("start_siege", { actorId: "hieron-ii", settlementId: "messana", invadingForceIds: ["syracusan-army"] }));
+
+    const inspected = gm.invoke(call("inspect_province", { provinceId: "ita-72843720b81376294924159-sicily-northeast" }));
+    expect(inspected.ok).toBe(true);
+    expect(inspected.factual).toContain("settlement-messana");
+
+    const retried = gm.invoke(call("start_siege", {
+      actorId: "hieron-ii",
+      settlementId: "settlement-messana",
+      invadingForceIds: ["syracusan-army"],
+      defendingForceIds: ["mamertine-garrison"],
+    }));
+
+    expect(retried.ok).toBe(true);
+    expect(gm.stagedWorld.conflicts.sieges.some((siege) => siege.settlementId === "settlement-messana")).toBe(true);
+
+    // The debt is cleared: nothing blocks finishing the turn now.
+    const finished = gm.invoke(call(FINISH_TURN_TOOL, {
+      report: {
+        directiveOutcomes: [],
+        events: [{
+          factRefs: [retried.factId!],
+          summary: "Syracuse besieges Messana.",
+          participantCharacterIds: ["hieron-ii"],
+          provinceId: "ita-72843720b81376294924159-sicily-northeast",
+          visibility: "public",
+          salience: 8,
+          directiveRef: null,
+          chainPosition: "root",
+        }],
+        openThreads: [],
+        turnSummary: "Syracuse lays siege to Messana.",
+      },
+    }));
+
+    expect(finished.ok).toBe(true);
+    expect(gm.isFinished).toBe(true);
+  });
+
+  it("never treats a genuine world refusal (already besieged) as recoverable", () => {
+    const gm = punicSession();
+    gm.invoke(call("move_force", { actorId: "hieron-ii", forceId: "syracusan-army", destinationProvinceId: "ita-72843720b81376294924159-sicily-northeast" }));
+    const first = gm.invoke(call("start_siege", {
+      actorId: "hieron-ii",
+      settlementId: "settlement-messana",
+      invadingForceIds: ["syracusan-army"],
+      defendingForceIds: ["mamertine-garrison"],
+    }));
+    expect(first.ok).toBe(true);
+
+    // A second siege of the same settlement is a real refusal, not a lookup mistake.
+    const second = gm.invoke(call("start_siege", {
+      actorId: "hieron-ii",
+      settlementId: "settlement-messana",
+      invadingForceIds: ["syracusan-army"],
+    }));
+    expect(second.ok).toBe(false);
+    expect(second.factual).toContain("already under siege");
+
+    // Nothing blocks finishing the turn: the only failure this turn was genuine.
+    const finished = gm.invoke(call(FINISH_TURN_TOOL, {
+      report: {
+        directiveOutcomes: [],
+        events: [{
+          factRefs: [first.factId!],
+          summary: "Syracuse besieges Messana.",
+          participantCharacterIds: ["hieron-ii"],
+          provinceId: "ita-72843720b81376294924159-sicily-northeast",
+          visibility: "public",
+          salience: 8,
+          directiveRef: null,
+          chainPosition: "root",
+        }],
+        openThreads: [],
+        turnSummary: "Syracuse lays siege to Messana.",
+      },
+    }));
+    expect(finished.ok).toBe(true);
+  });
+});
+
+// Regression: nothing stopped the Game Master from calling
+// answer_diplomatic_message with the player's own character as the answerer
+// -- the player's character is alive, belongs to the recipient polity, and
+// is a perfectly legal answerer by every other rule, so a message addressed
+// to the player could be accepted, refused, or countered without the player
+// ever having chosen anything.
+describe("a diplomatic message addressed to the player", () => {
+  it("refuses answer_diplomatic_message outright when the player's own character is named as the answerer", () => {
+    const gm = session();
+    const sent = gm.invoke(call("send_diplomatic_message", {
+      actorId: "hanno",
+      messageId: "msg-1",
+      kind: "ultimatum",
+      fromPolityId: "carthage",
+      fromCharacterId: "hanno",
+      toPolityId: ROME,
+      toCharacterId: null,
+      subject: "Withdraw from Sicily",
+      terms: "Carthage demands Rome withdraw from Sicily.",
+    }));
+    expect(sent.ok).toBe(true);
+
+    const answered = gm.invoke(call("answer_diplomatic_message", {
+      actorId: PLAYER,
+      messageId: "msg-1",
+      answer: "accepted",
+      answeredByCharacterId: PLAYER,
+      answerText: "Marcus accepts the terms.",
+    }));
+
+    expect(answered.ok).toBe(false);
+    expect(answered.factual).toContain("cannot be called with the player's own character");
+    const message = gm.stagedWorld.diplomacy.find((candidate) => candidate.id === "msg-1");
+    expect(message?.status).toBe("awaiting_reply");
+    expect(message?.answer).toBeNull();
+  });
+
+  it("still lets another character of the player's own polity answer on the polity's behalf", () => {
+    const gm = session();
+    const sent = gm.invoke(call("send_diplomatic_message", {
+      actorId: "hanno",
+      messageId: "msg-1",
+      kind: "ultimatum",
+      fromPolityId: "carthage",
+      fromCharacterId: "hanno",
+      toPolityId: ROME,
+      toCharacterId: null,
+      subject: "Withdraw from Sicily",
+      terms: "Carthage demands Rome withdraw from Sicily.",
+    }));
+    expect(sent.ok).toBe(true);
+
+    // quintus-fabius belongs to Rome too, but is not the player's own character.
+    const answered = gm.invoke(call("answer_diplomatic_message", {
+      actorId: "quintus-fabius",
+      messageId: "msg-1",
+      answer: "refused",
+      answeredByCharacterId: "quintus-fabius",
+      answerText: "Rome will not be dictated to.",
+    }));
+
+    expect(answered.ok).toBe(true);
+    const message = gm.stagedWorld.diplomacy.find((candidate) => candidate.id === "msg-1");
+    expect(message?.status).toBe("answered");
+    expect(message?.answer).toBe("refused");
   });
 });
 

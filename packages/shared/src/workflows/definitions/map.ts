@@ -1,15 +1,21 @@
 import { z } from "zod";
-import { EntityIdSchema } from "../../material-state";
+import { EntityIdSchema, type Force } from "../../material-state";
 import { DetailTierSchema, SettlementKindSchema } from "../../world/map";
 import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
 
 const allSettlements = (world: Parameters<AnyWorkflowDefinition["apply"]>[0]) =>
   world.map.provinces.flatMap((province) => province.settlements.map((settlement) => ({ settlement, province })));
 
+/** A force with at least one living soldier still fit to fight -- a record reduced to zero fit everywhere is not a defender any more. */
+function forceIsLive(force: Force): boolean {
+  return force.personnel.some((category) => category.fit > 0);
+}
+
 export const mapWorkflows: AnyWorkflowDefinition[] = [
   defineWorkflow({
     id: "change_province_control",
-    description: "Transfer control of a province to a different polity, adjusting firmness.",
+    description:
+      "Transfer control of a province to a different polity, adjusting firmness. Refused unless the province is verifiably undefended and reachable: a living force of the new controller must already stand there, and no living force of any other power may. A province with a real defending force still present must be taken by a decisive siege or battle first, or ceded diplomatically with give_territory.",
     category: "map",
     parametersSchema: z.object({
       provinceId: EntityIdSchema,
@@ -29,6 +35,32 @@ export const mapWorkflows: AnyWorkflowDefinition[] = [
           return refuse(`No power exists with the id "${params.newControllerPolityId}" to take control. The powers that exist are: ${known}.`);
         }
       }
+
+      // A conquest, not merely a firmness adjustment: control is actually
+      // changing to a real new power. This is the one path this workflow
+      // offers for "the ground was undefended and my army already stands on
+      // it" (docs/14 Phase 1 rule 10) -- so it is the one place that claim
+      // is verified, not narrated. A cession where the old power still has
+      // troops present belongs to give_territory's diplomatic-authorization
+      // path instead; this workflow never bypasses a real defender.
+      if (params.newControllerPolityId !== null && params.newControllerPolityId !== province.controllerPolityId) {
+        const forcesPresent = world.material.forces.filter((f) => f.locationId === province.id && forceIsLive(f));
+        const opposing = forcesPresent.filter((f) => f.polityId !== params.newControllerPolityId);
+        if (opposing.length > 0) {
+          return refuse(
+            `${province.name} is not undefended: ${opposing.map((f) => `${f.name} (${f.polityId})`).join(", ")} still stands there. `
+            + "It cannot be handed to a new power by fiat. Win a siege (start_siege, end_siege) or a decisive battle first, or cede it diplomatically with give_territory and an accepted message.",
+          );
+        }
+        const attackerPresent = forcesPresent.some((f) => f.polityId === params.newControllerPolityId);
+        if (!attackerPresent) {
+          const newControllerName = world.map.polities.find((p) => p.id === params.newControllerPolityId)?.name ?? params.newControllerPolityId;
+          return refuse(
+            `No force of ${newControllerName} stands in ${province.name}, so there is nothing to confirm as having taken it unopposed. Move a force there first, or resolve a siege, battle, or diplomatic cession (give_territory).`,
+          );
+        }
+      }
+
       const oldControllerName = province.controllerPolityId
         ? (world.map.polities.find((p) => p.id === province.controllerPolityId)?.name ?? province.controllerPolityId)
         : "neutral";

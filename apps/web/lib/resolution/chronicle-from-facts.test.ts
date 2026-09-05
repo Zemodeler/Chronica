@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { firstPunicWarScenario } from "@chronica/db";
-import type { FactualEvent, GameMasterTurnReport, WorldState } from "@chronica/shared";
-import { NARRATOR_EXEMPT_SCOPES, NARRATOR_OUTCOME_LOCKED_SCOPES, buildChronicleFromFacts } from "./chronicle-from-facts";
+import { firstPunicWarScenario, punicWarsScenario } from "@chronica/db";
+import { createGameMasterSession, type FactualEvent, type GameMasterTurnReport, type WorldState } from "@chronica/shared";
+import {
+  NARRATOR_EXEMPT_SCOPES,
+  NARRATOR_OUTCOME_LOCKED_SCOPES,
+  buildChronicleFromFacts,
+  rewriteClaimsUnsupportedWar,
+} from "./chronicle-from-facts";
 
 // The Chronicle is downstream. These tests pin the one property that matters:
 // what a reader is told happened is what the engine actually did.
@@ -226,5 +231,128 @@ describe("the chronicle body", () => {
     expect(entries[0]?.battleBrief?.outcome).toBe("attacker_victory");
     expect(entries[0]?.battleBrief?.defenderCasualties).toBe(1_100);
     expect(entries[0]?.body).toBe(battleEvent.summary);
+  });
+});
+
+describe("a siege recovered from a bad settlement id (the messana/settlement-messana bug)", () => {
+  // Regression: start_siege named with the display name "messana" was
+  // refused because the authoritative id is "settlement-messana", and the
+  // engine's own refusal text -- not a real siege -- used to be exactly what
+  // reached the Chronicle. Driving the actual GameMasterSession through the
+  // corrected retry proves the Chronicle body it produces describes the real
+  // siege, never the lookup mistake that preceded it.
+  it("describes the real siege, not the earlier engine-error refusal", () => {
+    const session = createGameMasterSession({
+      world: structuredClone(punicWarsScenario.initialWorld),
+      atStep: 1,
+      actorCharacterId: "gaius-genucius",
+      directiveIds: [],
+    });
+
+    // The besieging force must actually stand at Messana first -- a siege is
+    // a real army outside a real wall, not a claim.
+    session.invoke({ id: "call-0", name: "move_force", arguments: { actorId: "hieron-ii", forceId: "syracusan-army", destinationProvinceId: "ita-72843720b81376294924159-sicily-northeast" } });
+
+    const refused = session.invoke({ id: "call-1", name: "start_siege", arguments: { actorId: "hieron-ii", settlementId: "messana", invadingForceIds: ["syracusan-army"] } });
+    expect(refused.ok).toBe(false);
+
+    const retried = session.invoke({
+      id: "call-2",
+      name: "start_siege",
+      arguments: { actorId: "hieron-ii", settlementId: "settlement-messana", invadingForceIds: ["syracusan-army"], defendingForceIds: ["mamertine-garrison"] },
+    });
+    expect(retried.ok).toBe(true);
+
+    const result = session.result();
+    const siegeEvent = result.events.find((event) => event.actionId === "start_siege");
+    expect(siegeEvent).toBeDefined();
+
+    const entries = buildChronicleFromFacts({
+      world: result.world,
+      atStep: 1,
+      actorCharacterId: "gaius-genucius",
+      events: result.events,
+      report: report({
+        events: [{
+          factRefs: [siegeEvent!.id],
+          summary: siegeEvent!.summary,
+          participantCharacterIds: ["hieron-ii"],
+          provinceId: "ita-72843720b81376294924159-sicily-northeast",
+          visibility: "public",
+          salience: 8,
+          directiveRef: null,
+          chainPosition: "root",
+        }],
+      }),
+      directiveIds: [],
+    });
+
+    // The setup move_force also produced its own (correctly reported)
+    // entry -- the point under test is the siege's own entry, which must
+    // describe the real siege, never the earlier lookup mistake.
+    const siegeEntry = entries.find((entry) => entry.factActionIds?.includes("start_siege"));
+    expect(siegeEntry).toBeDefined();
+    expect(siegeEntry?.scope).toBe("world_event");
+    expect(siegeEntry?.body).toBe(siegeEvent!.summary);
+    expect(siegeEntry?.body).not.toMatch(/No settlement exists|refused|Refused/);
+    expect(siegeEntry?.factActionIds).toEqual(["start_siege"]);
+  });
+});
+
+describe("rewriteClaimsUnsupportedWar", () => {
+  // Regression: a world-event entry about a polity's newly named leader --
+  // created, renamed, or merely selected as the power's voice -- must never
+  // be restyled by the narrator into a war declaration with nothing in the
+  // factual record to back it. A start_war claim is only ever true when a
+  // successful start_war fact is among the entry's own factActionIds.
+  it("rejects a war-declaration rewrite when no start_war fact backs the entry", () => {
+    expect(rewriteClaimsUnsupportedWar("Brennos declares war on Rome.", ["rename_character"])).toBe(true);
+    expect(rewriteClaimsUnsupportedWar("The Boii leader is created to answer for her people.", undefined)).toBe(false);
+  });
+
+  it("accepts a war-declaration rewrite when a successful start_war fact backs the entry", () => {
+    expect(rewriteClaimsUnsupportedWar("Brennos declares war on Rome.", ["start_war"])).toBe(false);
+  });
+
+  it("does not flag prose that never claims a war was declared", () => {
+    expect(rewriteClaimsUnsupportedWar("Brennos is named to speak for the Boii.", [])).toBe(false);
+  });
+});
+
+describe("a world event naming a newly seeded leader", () => {
+  it("carries only that leader's own action ids as its factual basis, never start_war", () => {
+    const renameEvent: FactualEvent = {
+      id: "fact-2-1",
+      atStep: 2,
+      kind: "action",
+      actionId: "rename_character",
+      actorId: "system",
+      parameters: { characterId: "leader-boii", name: "Brennos" },
+      summary: "The Boii leader takes the name Brennos.",
+      materialConsequence: false,
+    };
+    const entries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 2,
+      actorCharacterId: PLAYER,
+      events: [renameEvent],
+      report: report({
+        events: [{
+          factRefs: ["fact-2-1"],
+          summary: "The Boii leader takes the name Brennos.",
+          participantCharacterIds: ["leader-boii"],
+          provinceId: null,
+          visibility: "public",
+          salience: 5,
+          directiveRef: null,
+          chainPosition: "spread",
+        }],
+      }),
+      directiveIds: [],
+    });
+
+    const entry = entries.find((candidate) => candidate.scopeRef?.includes("fact-2-1"));
+    expect(entry?.factActionIds).toEqual(["rename_character"]);
+    expect(rewriteClaimsUnsupportedWar("Brennos declares war on Rome in this moment of naming.", entry?.factActionIds)).toBe(true);
   });
 });

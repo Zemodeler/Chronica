@@ -131,6 +131,30 @@ function deriveBattleBrief(before: WorldState, after: WorldState, battleId: stri
   };
 }
 
+/**
+ * A refusal or failure caused only by a bad/missing entity id or malformed
+ * call arguments -- never by the world genuinely declining the attempt. Every
+ * such message in the registry follows one of a small number of fixed
+ * phrasings (`refuse()` calls across `workflows/definitions/*.ts`,
+ * `diagnoseFailedInvocation`, and `validateCandidate`'s own "does not exist"
+ * and "Invalid parameters" checks), so this is a closed, deterministic
+ * classification rather than a guess at intent.
+ *
+ * The bug this exists to prevent: a siege attempted against "messana" was
+ * refused because the authoritative id is "settlement-messana", and the Game
+ * Master reported that lookup mistake straight to the player as history --
+ * "the siege was refused" -- when nothing about the world had actually said
+ * no. A genuine refusal (no authority, no eligible sponsor, insufficient
+ * resource, already done) must never be swept into this: only the id/argument
+ * shape of the message qualifies.
+ */
+function isRecoverableLookupOrArgumentFailure(message: string): boolean {
+  return /\bwith the id\b/i.test(message)
+    || /\banswers to\b/i.test(message)
+    || /\bdoes not exist in world state\b/i.test(message)
+    || /^invalid param/i.test(message);
+}
+
 /** A tool call the Game Master asked for. Ids come from the provider. */
 export interface GameMasterToolCall {
   readonly id: string;
@@ -216,6 +240,15 @@ export class GameMasterSession {
   private actionCount = 0;
   /** A turn is pushed back for world agency at most once; see `finish`. */
   private pushedForWorldAgency = false;
+  /**
+   * Keyed `${actionId}::${actorId}`. Set when a game-master-sourced call fails
+   * only because of a bad/missing id or invalid arguments; cleared the moment
+   * that same actor attempts that same action again (whatever the retry's own
+   * outcome). `finish` refuses to accept a report while this is non-empty, so
+   * a recoverable mistake can never be reported as history without at least
+   * one corrected attempt.
+   */
+  private readonly pendingRecoverableRetries = new Set<string>();
   /** Actions this campaign has: the ones carried in from earlier turns, plus any defined now. */
   private readonly definedActions: Map<string, InventedWorkflowDefinition>;
   private readonly definedThisTurn: InventedWorkflowDefinition[] = [];
@@ -334,9 +367,34 @@ export class GameMasterSession {
       return { ok: false, finished: false, factual: `${actionId} requires "actorId": the living character who takes this action.` };
     }
 
+    // A diplomatic message answered in the player's own name is the
+    // player's own decision, not the agent's to make. Nothing about the
+    // generic actor/authority checks above catches this -- the player's
+    // character is alive, belongs to the recipient polity, and is a
+    // perfectly legal `answeredByCharacterId` by every other rule -- so it
+    // is refused here, by identity, unconditionally.
+    if (actionId === "answer_diplomatic_message" && parameters["answeredByCharacterId"] === this.actorCharacterId) {
+      return {
+        ok: false,
+        finished: false,
+        factual:
+          `Refused: "answer_diplomatic_message" cannot be called with the player's own character (${this.actorCharacterId}) as the answerer. `
+          + "A message addressed to the player is the player's decision, never the Game Master's: report it in your turn report as an unresolved thread awaiting the player's own reply, and do not choose, accept, refuse, counter, or otherwise resolve it on their behalf.",
+      };
+    }
+
+    // Whatever this call's own outcome, it IS the retry: clear any debt this
+    // exact actor/action owed from an earlier lookup or argument mistake
+    // before recording a fresh one below.
+    const retryKey = `${actionId}::${actorId}`;
+    this.pendingRecoverableRetries.delete(retryKey);
+
     const invocation: ProposedInvocation = { actionId, actorId, parameters };
     const outcome = this.applyInvocation(invocation, "game_master");
-    if (!outcome.ok) return { ok: false, finished: false, factual: outcome.factual };
+    if (!outcome.ok) {
+      if (outcome.recoverable) this.pendingRecoverableRetries.add(retryKey);
+      return { ok: false, finished: false, factual: outcome.factual };
+    }
 
     // Deterministic follow-ups the engine owns. A started battle is fought by
     // the resolver immediately, in the same call, so the Game Master's next
@@ -376,7 +434,7 @@ export class GameMasterSession {
   private applyInvocation(
     invocation: ProposedInvocation,
     source: "game_master" | "system",
-  ): { ok: boolean; factual: string; factId?: string } {
+  ): { ok: boolean; factual: string; factId?: string; recoverable?: boolean } {
     const auditBase: WorkflowAuditEntry = {
       correlationId: `gm-${this.atStep}-${this.auditEntries.length}`,
       source: "game_master",
@@ -402,7 +460,7 @@ export class GameMasterSession {
     }
     if (violation !== null) {
       this.auditEntries.push({ ...auditBase, policyViolation: violation, dryRunOk: false, executionOk: false, executionReason: violation.message });
-      return { ok: false, factual: `Refused: ${violation.message}` };
+      return { ok: false, factual: `Refused: ${violation.message}`, recoverable: isRecoverableLookupOrArgumentFailure(violation.message) };
     }
 
     const duplicateKey = workflowInvocationKey(invocation);
@@ -415,6 +473,8 @@ export class GameMasterSession {
         executionOk: false,
         executionReason: message,
       });
+      // Already carried out is a genuine, real-world refusal -- not a lookup
+      // or argument mistake -- so it is never treated as recoverable.
       return { ok: false, factual: message };
     }
 
@@ -437,7 +497,7 @@ export class GameMasterSession {
       // A workflow that named its own reason has already said what to do; the
       // generic nudge would only bury it.
       const alreadyDiagnosed = /\b(inspect|instead|rather than|give this one|use one of)\b/i.test(executed.message);
-      const recoverable = executed.reason === "not_applicable"
+      const hint = executed.reason === "not_applicable"
         ? alreadyDiagnosed
           ? " Nothing changed."
           : " Nothing changed. This is usually a guessed id, or a step that must come first (a vote needs a procedure you already sponsored; a command needs a force that exists). Inspect the entity, then try again or use a different tool."
@@ -448,7 +508,12 @@ export class GameMasterSession {
           // player through the Game Master's mouth.
           ? " Nothing was decided here — these are your own arguments being rejected, not the world refusing. Correct them and call the tool again. If no correction can satisfy it, the action is the wrong one for what is being attempted; choose another."
           : "";
-      return { ok: false, factual: `Failed: ${executed.message}${recoverable}` };
+      // "invalid_params" is always a call-shape mistake. A "not_applicable"
+      // failure is recoverable only when its own message is one of the
+      // registry's id-lookup phrasings -- never for a genuine refusal (no
+      // authority, ineligible sponsor, insufficient resource, already done).
+      const recoverable = executed.reason === "invalid_params" || isRecoverableLookupOrArgumentFailure(executed.message);
+      return { ok: false, factual: `Failed: ${executed.message}${hint}`, recoverable };
     }
 
     // Committed to the stage only now, after the executor has re-validated
@@ -664,6 +729,24 @@ export class GameMasterSession {
         ok: false,
         finished: false,
         factual: `The report leaves these player directives unaccounted for: ${missingDirectives.join(", ")}. Every submitted directive needs an outcome. Correct the report and call ${FINISH_TURN_TOOL} again.`,
+      };
+    }
+
+    // A recoverable mistake -- a bad/missing id, or arguments the call itself
+    // rejected -- must never be reported as the world's own refusal. This is
+    // checked on every attempt, not pushed back only once like the world-
+    // agency reminder below: an unretried lookup error must never ride
+    // through on that single reminder and leave an otherwise-empty turn
+    // reported as a real refusal.
+    if (this.pendingRecoverableRetries.size > 0) {
+      const owed = [...this.pendingRecoverableRetries]
+        .map((key) => { const [actionId, actorId] = key.split("::"); return `${actionId} by ${actorId}`; })
+        .join("; ");
+      return {
+        ok: false,
+        finished: false,
+        factual:
+          `Before finishing, correct and retry: ${owed}. That attempt failed only because of a bad or missing id, or arguments the call itself rejected -- not because the world refused it. Inspect the entity to get its real id (or fix the arguments) and call the tool again. Only report a directive as refused or failed once the corrected retry itself does not succeed.`,
       };
     }
 

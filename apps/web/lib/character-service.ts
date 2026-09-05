@@ -24,6 +24,7 @@ import { schema } from "@chronica/db";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { headers } from "next/headers";
 import { relationshipLabelForScore, scoreForDeclaredConnection } from "./relationship-score";
+import { canvasRegions, materializeCanvasProvince } from "./canvas-world";
 
 // The fixture demo game uses a plain string ID, not a UUID, so no DB queries
 // are valid against it. All service functions return early for this ID.
@@ -91,7 +92,7 @@ export function ageAtScenarioStart(birthYearApprox: number | null, timelineStart
 
 async function getScenarioContext(db: ReturnType<typeof createDatabase>["db"], gameId: string): Promise<ScenarioContext> {
   const [row] = await db
-    .select({ period: schema.scenarios.period, initialWorld: schema.scenarioVersions.initialWorld })
+    .select({ period: schema.scenarios.period, initialWorld: schema.scenarioVersions.initialWorld, mapAssetId: schema.scenarioVersions.mapAssetId })
     .from(schema.games)
     .innerJoin(schema.scenarios, eq(schema.games.scenarioId, schema.scenarios.id))
     .innerJoin(schema.scenarioVersions, and(eq(schema.scenarioVersions.scenarioId, schema.games.scenarioId), eq(schema.scenarioVersions.version, schema.games.scenarioVersion)))
@@ -113,7 +114,7 @@ async function getScenarioContext(db: ReturnType<typeof createDatabase>["db"], g
   return {
     period: row?.period ?? "an unspecified historical period",
     timelineStartYear,
-    regions: world.success ? world.data.map.provinces.map(({ id, name }) => ({ id, name })) : [],
+    regions: world.success ? canvasRegions(row?.mapAssetId ?? null, world.data) : [],
     currency,
   };
 }
@@ -564,7 +565,7 @@ export async function getPlayerAuthoritySummary(gameId: string, characterId: str
     // answered "No current public office", whatever the player had declared
     // themselves to be. Project the player in first, exactly as resolution
     // does, so the screen and the simulation agree from turn zero.
-    const world = await materializeDeclaredPlayer(db, gameId, view.world, characterId, view.scenarioGovernment);
+    const world = await materializeDeclaredPlayer(db, gameId, view.world, characterId, view.scenarioGovernment, view.mapAssetId);
     return deriveAuthoritySummary(world, characterId, view.scenarioGovernment);
   } finally {
     await close();
@@ -585,6 +586,7 @@ async function materializeDeclaredPlayer(
   world: WorldState,
   characterId: string,
   scenarioGovernment: ScenarioGovernmentRules | undefined,
+  mapAssetId: string | null,
 ): Promise<WorldState> {
   if (world.characters.some((character) => character.id === characterId)) return world;
   const playerId = characterId.startsWith("declared-") ? characterId.slice("declared-".length) : null;
@@ -592,7 +594,12 @@ async function materializeDeclaredPlayer(
   const knowledgebase = await getCharacterKnowledgebase(db, gameId, playerId).catch(() => null);
   if (knowledgebase === null || !knowledgebase.confirmedByPlayer) return world;
   try {
-    return materializePlayerCharacter(world, characterId, knowledgebase, scenarioGovernment);
+    return materializePlayerCharacter(
+      materializeCanvasProvince(world, mapAssetId, knowledgebase.locationProvinceId),
+      characterId,
+      knowledgebase,
+      scenarioGovernment,
+    );
   } catch {
     return world;
   }

@@ -42,6 +42,13 @@ export interface ChronicleEntryInput {
   /** Ephemeral Chronicle ordering aid. It is deliberately not persisted as world state. */
   readonly simulatedDurationDays?: number;
   readonly causalFactIds?: readonly string[];
+  /**
+   * Ephemeral: the successful action ids this entry's body is actually drawn
+   * from, used only to hold the narrator's rewrite to an outcome lock (e.g. a
+   * "declares war" rewrite requires a successful `start_war` among these). Not
+   * persisted as world state.
+   */
+  readonly factActionIds?: readonly string[];
   readonly sourceDirector?: "player" | "game_master" | "character_director" | "reaction_director" | "simulator" | "world_director";
   readonly openPressure?: boolean;
   /**

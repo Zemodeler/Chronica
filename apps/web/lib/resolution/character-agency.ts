@@ -3,8 +3,11 @@ import "server-only";
 import type {
   CandidateAction,
   CharacterIntentActionType,
+  CharacterSelectionTier,
   CharacterSocialEvent,
+  ContinuityTier,
   ProposedInvocation,
+  WorkflowAuditEntry,
   WorldState,
 } from "@chronica/shared";
 
@@ -26,6 +29,109 @@ import type {
 // Neither path invents a target, an office, a resource, or a workflow that
 // candidate generation (`character-agency/candidates.ts`) did not already
 // name from real world state.
+
+/**
+ * A formed NPC intention offered to the Game Master as a concrete, executable
+ * proposal -- never executed here. The agent is the one authority on what the
+ * world does this turn, so this carries the exact `ProposedInvocation`
+ * `buildIntentInvocation` produced, not a paraphrase the Game Master would
+ * have to reconstruct from a description.
+ */
+export interface FormedNpcProposal {
+  readonly intentId: string;
+  readonly actorCharacterId: string;
+  readonly actionType: string;
+  readonly rationale: string;
+  readonly workflowIds: readonly string[];
+  readonly invocation: ProposedInvocation;
+}
+
+/**
+ * Whether a character has explicit, scenario-authored agency state right
+ * now: an active goal, an active or stalled plot, or an active pressure. This
+ * is deliberately narrow -- commanding a force, or scoring well in selection,
+ * is not enough on its own -- so it admits exactly the characters someone
+ * gave a real stake in something, never "every background commander" a
+ * scenario happens to name.
+ */
+export function hasActiveAgencyState(world: WorldState, characterId: string): boolean {
+  if ((world.characterGoals ?? []).some((goal) => goal.characterId === characterId && goal.status === "active")) return true;
+  if ((world.characterPlots ?? []).some((plot) => plot.characterId === characterId && (plot.status === "active" || plot.status === "stalled"))) return true;
+  return (world.characterPressures ?? []).some((pressure) => pressure.characterId === characterId && pressure.status === "active");
+}
+
+/**
+ * Whether a selected character gets full candidate generation (up to one
+ * primary action) this turn, rather than only advancing an existing coarse
+ * plan or being skipped entirely.
+ *
+ * Continuity tier "principal" is earned over several turns of sustained
+ * relevance, so gating agency on it alone left a leader seeded THIS turn
+ * (`ensurePolityLeadership`) -- with no continuity history yet -- a
+ * character the deterministic selector itself just ranked as this turn's
+ * most relevant ("persistent") -- and an ordinary "important"-tier NPC the
+ * scenario itself gave a real stake in something (a goal, a plot, a pressure)
+ * -- silent for no reason but bookkeeping lag. All three are treated as
+ * eligible here, alongside the existing continuity-earned "principal" path.
+ * The last one is deliberately data-driven rather than tier-driven: it admits
+ * exactly the characters someone gave explicit scenario relevance, not every
+ * "important"-tier force commander a selector happens to notice.
+ */
+export function isEligibleForNpcAgency(
+  continuityTier: ContinuityTier | undefined,
+  isSeededThisTurn: boolean,
+  selectionTier: CharacterSelectionTier,
+  hasActiveAgencyStateFlag: boolean,
+): boolean {
+  return continuityTier === "principal" || isSeededThisTurn || selectionTier === "persistent" || hasActiveAgencyStateFlag;
+}
+
+/** A subset match: every key the proposal named must agree; the executed call may carry additional fields the proposal did not constrain. */
+function parametersMatch(proposed: Record<string, unknown>, executed: Record<string, unknown>): boolean {
+  return Object.entries(proposed).every(([key, value]) => JSON.stringify(executed[key]) === JSON.stringify(value));
+}
+
+export interface FormedNpcIntentOutcome {
+  readonly status: "executed" | "deferred";
+  readonly reason: string;
+}
+
+/**
+ * Resolve a formed NPC proposal against what the Game Master actually did
+ * this turn -- never against what was proposed. Matched on actor, workflow
+ * id, and the proposal's own parameters (a subset match: the agent may
+ * reasonably have added or adjusted fields the proposal did not constrain).
+ *
+ * A proposal that was attempted and refused carries the engine's own reason
+ * forward rather than a generic one, so a deferral is never silently
+ * indistinguishable from continuity-only bookkeeping.
+ */
+export function resolveFormedNpcIntentOutcome(
+  proposal: FormedNpcProposal,
+  executedInvocations: readonly ProposedInvocation[],
+  auditEntries: readonly WorkflowAuditEntry[],
+): FormedNpcIntentOutcome {
+  const acted = executedInvocations.some(
+    (invocation) =>
+      invocation.actorId === proposal.actorCharacterId
+      && invocation.actionId === proposal.invocation.actionId
+      && parametersMatch(proposal.invocation.parameters, invocation.parameters),
+  );
+  if (acted) return { status: "executed", reason: "Carried out this turn." };
+
+  const conflictingAudit = auditEntries.find(
+    (entry) =>
+      entry.requestedInvocation.actorId === proposal.actorCharacterId
+      && entry.requestedActionId === proposal.invocation.actionId
+      && entry.executionOk === false,
+  );
+  return {
+    status: "deferred",
+    reason: conflictingAudit !== undefined
+      ? `Attempted but refused: ${conflictingAudit.executionReason ?? "no reason recorded."}`
+      : "Formed but not carried out this turn; the Game Master did not invoke the proposed workflow.",
+  };
+}
 
 const PLOT_STAGE_SEQUENCE = ["forming", "preparing", "attempting", "consequence", "adapting", "resolved"] as const;
 

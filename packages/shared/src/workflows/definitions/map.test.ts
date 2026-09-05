@@ -4,6 +4,74 @@ import { executeWorkflow } from "../executor";
 
 const world = () => structuredClone(firstPunicWarScenario.initialWorld);
 
+describe("change_province_control", () => {
+  // Regression: territory used to change hands with zero linkage to combat
+  // state -- no check that a defending force was gone, no check that an
+  // attacker was even present. These pin the engine-verified "undefended and
+  // reachable" requirement (docs: valid resolution path #1) down to cases a
+  // free-form narrative claim used to sail straight through.
+
+  it("refuses a transfer while a real defending force still stands in the province", () => {
+    const w = world();
+    // legio-i (Rome) stands in this province, which Rome already controls.
+    const outcome = executeWorkflow(
+      { actionId: "change_province_control", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-northeast", newControllerPolityId: "carthage", reason: "Claimed by Carthage." } },
+      w,
+      0,
+    );
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.message).toContain("not undefended");
+    expect(outcome.message).toContain("Legio I");
+    // World state is untouched -- the refusal changes nothing.
+    expect(w.map.provinces.find((p) => p.id === "ita-72843720b81376294924159-sicily-northeast")?.controllerPolityId).toBe("rome");
+  });
+
+  it("refuses a transfer when no force of the claimed new controller is anywhere near the province", () => {
+    const w = world();
+    // sicily-central has no force of any polity present at all.
+    const outcome = executeWorkflow(
+      { actionId: "change_province_control", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-central", newControllerPolityId: "rome", reason: "Claimed by Rome." } },
+      w,
+      0,
+    );
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.message).toMatch(/No force of.*Roman Republic.*stands/);
+  });
+
+  it("succeeds when the new controller's own force already stands there and no one else's does", () => {
+    const w = world();
+    const moved = executeWorkflow(
+      { actionId: "move_force", actorId: "test-actor", parameters: { forceId: "legio-i", destinationProvinceId: "ita-72843720b81376294924159-sicily-central" } },
+      w,
+      0,
+    );
+    expect(moved.ok).toBe(true);
+    if (!moved.ok) return;
+    const outcome = executeWorkflow(
+      { actionId: "change_province_control", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-central", newControllerPolityId: "rome", reason: "Taken unopposed." } },
+      moved.world,
+      0,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.map.provinces.find((p) => p.id === "ita-72843720b81376294924159-sicily-central")?.controllerPolityId).toBe("rome");
+  });
+
+  it("does not require any force present when only firmness changes for the existing controller", () => {
+    const w = world();
+    const outcome = executeWorkflow(
+      { actionId: "change_province_control", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-central", newControllerPolityId: "carthage", firmnessBps: 8_000, reason: "Reinforces existing control." } },
+      w,
+      0,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.map.provinces.find((p) => p.id === "ita-72843720b81376294924159-sicily-central")?.controlFirmnessBps).toBe(8_000);
+  });
+});
+
 describe("found_settlement", () => {
   it("adds a settlement to an existing province", () => {
     const w = world();

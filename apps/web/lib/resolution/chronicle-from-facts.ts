@@ -199,6 +199,7 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
       atStep,
       materialConsequence: succeeded,
       simulatedDurationDays: durationDaysFor(applied.map((event) => event.actionId)),
+      factActionIds: [...new Set(applied.map((event) => event.actionId))],
       title: succeeded ? playerTitle(applied, world, input.actorCharacterId) : `The Order That Came to Nothing`,
       knowledgeStatus: "confirmed",
       sourceDirector: "player",
@@ -228,6 +229,12 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
       atStep,
       materialConsequence: material,
       simulatedDurationDays: durationDaysFor(refEvents.map((candidate) => candidate.actionId)),
+      // The narrator's own outcome lock (below): the exact set of successful
+      // action ids this entry's facts are actually drawn from, so a rewrite
+      // that claims a material outcome none of them recorded -- a war
+      // declared with no successful `start_war` among them -- can be caught
+      // and rejected deterministically rather than trusted on the model's word.
+      factActionIds: [...new Set(refEvents.filter((candidate) => candidate.kind === "action").map((candidate) => candidate.actionId))],
       // The report may name the event; it may never state its outcome, which
       // is why the title is a headline drawn from it and the body comes from
       // the engine. A headline is cut on a word, never mid-word, and never
@@ -264,6 +271,7 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
       atStep,
       materialConsequence: event.materialConsequence,
       simulatedDurationDays: durationDaysFor([event.actionId]),
+      factActionIds: event.kind === "action" ? [event.actionId] : [],
       title: chronicleHeadline(event.summary),
       knowledgeStatus: "confirmed",
       sourceDirector: "game_master",
@@ -294,3 +302,26 @@ export const NARRATOR_EXEMPT_SCOPES: ReadonlySet<string> = new Set([REFUSAL_SCOP
  * read as a receipt rather than as history.
  */
 export const NARRATOR_OUTCOME_LOCKED_SCOPES: ReadonlySet<string> = new Set([PLAYER_SCOPE]);
+
+/**
+ * A rewrite claiming a power declared or went to war reads as history the
+ * instant it is printed, so it must be true history: backed by an actual,
+ * successful `start_war` fact. Without this a world-event entry about a
+ * polity's newly named leader, or any character being created, renamed, or
+ * selected, could be restyled by the narrator into "X declares war on Y" with
+ * nothing in the factual record to support it -- the exact failure mode a
+ * chronicle exists to prevent.
+ */
+const WAR_DECLARATION_PATTERN =
+  /\bdeclares?\s+war\b|\bdeclared\s+war\b|\bgoes?\s+to\s+war\b|\bgone\s+to\s+war\b|\bwar\s+(?:is|was)\s+declared\b|\btakes?\s+up\s+arms\s+against\b|\bopens?\s+hostilities\b/i;
+
+/**
+ * True when a narrator rewrite claims a war was declared but the entry's own
+ * factual basis -- the exact successful action ids it was built from --
+ * contains no successful `start_war`. The caller should reject the rewrite and
+ * keep the factual body in that case.
+ */
+export function rewriteClaimsUnsupportedWar(rewrittenBody: string, factActionIds: readonly string[] | undefined): boolean {
+  if (!WAR_DECLARATION_PATTERN.test(rewrittenBody)) return false;
+  return !(factActionIds ?? []).includes("start_war");
+}

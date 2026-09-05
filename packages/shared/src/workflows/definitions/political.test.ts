@@ -5,6 +5,102 @@ import { validateCandidate } from "../policy";
 
 const world = () => structuredClone(firstPunicWarScenario.initialWorld);
 
+describe("give_territory", () => {
+  // Regression: territory used to change hands with zero linkage to any
+  // agreement at all -- give_territory is now the diplomatic-cession path
+  // (valid resolution path #3), and it is refused without a real, accepted
+  // message between exactly the two powers involved.
+
+  function sentMessage(w: ReturnType<typeof world>, overrides: { fromPolityId: string; fromCharacterId: string; toPolityId: string }) {
+    return executeWorkflow(
+      {
+        actionId: "send_diplomatic_message",
+        actorId: overrides.fromCharacterId,
+        parameters: {
+          messageId: "msg-cession-1",
+          kind: "letter",
+          fromPolityId: overrides.fromPolityId,
+          fromCharacterId: overrides.fromCharacterId,
+          toPolityId: overrides.toPolityId,
+          subject: "Cession of western Sicily",
+          terms: "Carthage cedes western Sicily to Rome in exchange for peace.",
+        },
+      },
+      w,
+      0,
+    );
+  }
+
+  it("refuses when no message with the given id exists", () => {
+    const w = world();
+    const outcome = executeWorkflow(
+      { actionId: "give_territory", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-west", newControllerPolityId: "rome", authorizingMessageId: "nope" } },
+      w,
+      0,
+    );
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.message).toContain('No diplomatic message with the id "nope"');
+  });
+
+  it("refuses when the referenced message was never accepted", () => {
+    const sent = sentMessage(world(), { fromPolityId: "carthage", fromCharacterId: "hanno", toPolityId: "rome" });
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+    const outcome = executeWorkflow(
+      { actionId: "give_territory", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-west", newControllerPolityId: "rome", authorizingMessageId: "msg-cession-1" } },
+      sent.world,
+      0,
+    );
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.message).toContain("not accepted");
+  });
+
+  it("refuses when the accepted message was between different powers than the cession names", () => {
+    const sent = sentMessage(world(), { fromPolityId: "carthage", fromCharacterId: "hanno", toPolityId: "rome" });
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+    const answered = executeWorkflow(
+      { actionId: "answer_diplomatic_message", actorId: "marcus-atilius", parameters: { messageId: "msg-cession-1", answer: "accepted", answeredByCharacterId: "marcus-atilius", answerText: "Rome accepts." } },
+      sent.world,
+      0,
+    );
+    expect(answered.ok).toBe(true);
+    if (!answered.ok) return;
+    // A real, accepted message -- but for a different province than named here, and the workflow can only check the polities, so instead assert the party mismatch path directly: cede a province currently held by neither party to the message.
+    const outcome = executeWorkflow(
+      { actionId: "give_territory", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-southeast", newControllerPolityId: "rome", authorizingMessageId: "msg-cession-1" } },
+      answered.world,
+      0,
+    );
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.message).toContain("cannot authorize ceding");
+  });
+
+  it("succeeds when the message was accepted between exactly the old controller and the new one", () => {
+    const sent = sentMessage(world(), { fromPolityId: "carthage", fromCharacterId: "hanno", toPolityId: "rome" });
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+    const answered = executeWorkflow(
+      { actionId: "answer_diplomatic_message", actorId: "marcus-atilius", parameters: { messageId: "msg-cession-1", answer: "accepted", answeredByCharacterId: "marcus-atilius", answerText: "Rome accepts." } },
+      sent.world,
+      0,
+    );
+    expect(answered.ok).toBe(true);
+    if (!answered.ok) return;
+    const outcome = executeWorkflow(
+      { actionId: "give_territory", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-west", newControllerPolityId: "rome", authorizingMessageId: "msg-cession-1" } },
+      answered.world,
+      0,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.map.provinces.find((p) => p.id === "ita-72843720b81376294924159-sicily-west")?.controllerPolityId).toBe("rome");
+  });
+});
+
 describe("end_war", () => {
   it("still executes directly (the shape a resolved political procedure's authorized invocation uses)", () => {
     const w = world();
