@@ -38,7 +38,7 @@ export async function resolveQueuedTurn(
     gameId, turnId: queuedTurn.id, world: worldView.world, batch: batchParse.data,
     actorCharacterId: player.characterId ?? worldView.world.characters[0]?.id ?? "", playerId: player.id,
     scenarioClock: worldView.scenarioClock, scenarioLife: worldView.scenarioLife, scenarioGovernment: worldView.scenarioGovernment,
-    scenarioChronicle: worldView.scenarioChronicle,
+    scenarioChronicle: worldView.scenarioChronicle, mapAssetId: worldView.mapAssetId,
   }, progressWriter);
 }
 

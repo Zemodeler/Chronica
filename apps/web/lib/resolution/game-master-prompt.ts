@@ -9,6 +9,7 @@ import type {
 } from "@chronica/shared";
 import { deriveOpenThreads, renderOpenThreads } from "@chronica/shared";
 import { buildPlayerResolutionContext, type ResolutionPlayerContext } from "./prompts";
+import type { FormedNpcProposal } from "./character-agency";
 
 // The Game Master's single coherent prompt (GM refactor, requirement 1).
 //
@@ -29,6 +30,8 @@ export interface GameMasterPromptInput {
   readonly atStep: number;
   readonly directives: readonly { readonly id: string; readonly directive: OrderDirective }[];
   readonly selectedCharacters: readonly SelectedCharacter[];
+  /** Concrete NPC workflow proposals already formed by character agency this turn (never executed here). */
+  readonly npcProposals: readonly FormedNpcProposal[];
   readonly playerContext: ResolutionPlayerContext | undefined;
   readonly scenarioGovernment: ScenarioGovernmentRules | undefined;
   readonly scenarioChronicle: ScenarioChronicleRules | undefined;
@@ -63,11 +66,14 @@ function constitution(input: GameMasterPromptInput): string {
     "5. Battles, deaths, inheritance, and procedure outcomes are decided by the deterministic engine, not by you. Start a battle and the engine fights it and tells you what happened; react to that result.",
     "6. If nothing in your tool list can do what an actor is attempting, and it is a real act with a real effect on the world, define it with define_action and then carry it out with invoke_defined_action. Describe only the change to world state; the engine validates it exactly as strictly as a built-in action and refuses anything that would leave the world inconsistent. What you define stays part of this campaign. Reserve request_capability for an attempt you genuinely cannot express as a change to the world at all: it records the attempt as unresolved and changes nothing.",
     "6a. Diplomacy is a first-class act, not a capability gap. A letter, an offer of alliance, a demand for tribute, a protest, an ultimatum — all of these go through send_diplomatic_message, which obliges the other power to answer and decides nothing on their behalf. Their reply is answer_diplomatic_message, taken in their own interest, and it may well be no. An accepted offer is carried out afterwards with the workflow that models it: sign_treaty, end_war, impose_tribute, arrange_marriage_alliance.",
+    "6b. A message addressed to the player is never yours to answer. answer_diplomatic_message is refused outright if you name the player's own character as the answerer -- the engine enforces this, it is not a matter of judgment. Report an unanswered message to or from the player as an open thread awaiting the player's own reply; you may answer only on behalf of an AI-controlled power, and only after weighing that power's own interest.",
     "7. Never invent an id. Every id you pass to a tool must have come from this prompt or from a tool result you received: a settlement id from inspect_province, a procedure id from the list of open procedures, a force id from the forces listed. A guessed id is the single most common reason a player's order is refused as inapplicable — inspect first, then act.",
     "8. The world is not only the player. Before you finish, the named characters listed below act on their own goals, pressures, and commitments, and the open threads move — whether or not the player's orders succeeded. A turn in which nothing happened except the player's own orders is an incomplete turn.",
     "8a. A power with no named leader still has interests. The engine gives one a leader the moment it is invaded, addressed, or at war — you will find them among the actors below, named after their power ('Boii leader') because the record does not yet know who they are. Give them their proper name with rename_character as soon as you decide who they are, then let them act for their people.",
     "9. A power does not ignore an army on its own ground. Every foreign force listed under UNRESOLVED THREADS is being answered by someone this turn: a levy raised, a border watched, an envoy sent, a war declared, or a deliberate decision to submit. If the power in question has no living named leader, create one with create_world_character and let them answer — a polity with no character cannot act, and its silence is your omission, not its policy.",
     "10. An army that meets no opposition fights no battle. start_battle requires at least one force on each side; if the ground you are taking is undefended, do not call it. Besiege the settlement (start_siege takes an empty defender list) or take the province with change_province_control, and say plainly that it was taken unopposed.",
+    "10a. change_province_control is not a narrative shortcut: the engine itself now verifies the claim of 'unopposed.' It refuses the transfer unless a living force of the new controller already stands in that exact province AND no living force of any other power stands there too -- so it succeeds precisely when a battle or siege has actually cleared the ground, or when the province genuinely had no defender and your own force already walked in. It never succeeds by your saying so. A province still held by a real defending force can change hands only by winning a siege (start_siege, then end_siege with successfulCapture), by a decisive battle that breaks or removes the defender first, or by a diplomatic cession -- give_territory requires an authorization naming an accepted diplomatic message ceding exactly that ground between exactly those two powers; it has no other path.",
+    "10b. A rejected ultimatum is not the end of the story. A power that has been refused, ignored, or countered without result more than once must be shown reacting in proportion: mobilising a force, moving it toward the disputed ground, seeking an ally, raiding, opening a siege, or declaring war -- never a repeat of the same protest with nothing behind it. The engine tracks repeated refusals on a thread and raises pressure on the refused power's own leader for exactly this reason; read that pressure and act on it.",
     "11. A tool that rejects your arguments has not decided anything. Correct them and call it again. Never report a rejected call as the outcome of a player's order until you have tried to fix it, and never repeat the tool's complaint about its own arguments as if it were a reason the world refused — the player reads what you report.",
     "12. Finish with finish_turn. Every event you report must cite a factRef from a tool result you actually received.",
   );
@@ -89,9 +95,17 @@ function orientation(world: WorldState, actorCharacterId: string): string {
   lines.push("Polities:");
   for (const polity of world.map.polities) lines.push(`  ${polity.name} [id: ${polity.id}]`);
 
-  lines.push(`Provinces (name [id; controlling polity id]):`);
+  // A settlement's authoritative id is the one start_siege (and any other
+  // settlement-naming tool) actually accepts -- it is rarely the settlement's
+  // plain name, lowercased. Listing it here, not only from inspect_province,
+  // means a siege proposed the same turn a province first becomes relevant
+  // never has to guess at an id that was never shown.
+  lines.push(`Provinces (name [id; controlling polity id]; settlements as name [id]):`);
   for (const province of world.map.provinces.slice(0, MAX_PROVINCES_LISTED)) {
-    lines.push(`  ${province.name} [${province.id}; ${province.controllerPolityId ?? "none"}]`);
+    const settlements = province.settlements.length > 0
+      ? ` -- settlements: ${province.settlements.map((settlement) => `${settlement.name} [${settlement.id}]`).join(", ")}`
+      : "";
+    lines.push(`  ${province.name} [${province.id}; ${province.controllerPolityId ?? "none"}]${settlements}`);
   }
   if (world.map.provinces.length > MAX_PROVINCES_LISTED) {
     lines.push(`  ...and ${world.map.provinces.length - MAX_PROVINCES_LISTED} more; use inspect_province by id.`);
@@ -226,6 +240,35 @@ function npcContext(world: WorldState, selected: readonly SelectedCharacter[], a
   return lines.join("\n");
 }
 
+/**
+ * Concrete NPC actions character agency already selected this turn, each
+ * carrying the exact workflow and parameters `buildIntentInvocation` produced
+ * -- not a description the Game Master must reconstruct into a tool call. The
+ * bug this closes: an NPC's formed intention used to be summarized as loose
+ * prose the agent could act on only by independently reinventing the same
+ * workflow, which it rarely did, so a leader's own chosen action sat
+ * "prepared" and then silently "deferred" turn after turn.
+ */
+function npcFormedIntentions(world: WorldState, proposals: readonly FormedNpcProposal[]): string {
+  const lines: string[] = ["FORMED NPC INTENTIONS"];
+  if (proposals.length === 0) {
+    lines.push("  None this turn.");
+    return lines.join("\n");
+  }
+  lines.push(
+    "These are concrete actions already selected by character agency, not suggestions: each names the actor, what they intend, why, and the exact workflow and parameters to invoke. You must either call the named tool with these (or corrected) parameters, or leave it unexecuted -- and only when a conflicting validated event this turn, a deterministic tool refusal, or a clearly recorded deferral you report justifies that. Writing prose about the actor's intention is not executing it and satisfies nothing here.",
+  );
+  for (const proposal of proposals) {
+    const actor = world.characters.find((character) => character.id === proposal.actorCharacterId);
+    const actorName = actor?.name ?? proposal.actorCharacterId;
+    lines.push(
+      `  ${actorName} [id: ${proposal.actorCharacterId}] intends: ${proposal.actionType} -- ${proposal.rationale}`,
+      `    invoke: ${proposal.invocation.actionId}(${JSON.stringify(proposal.invocation.parameters)}) [workflows considered: ${proposal.workflowIds.join(", ")}]`,
+    );
+  }
+  return lines.join("\n");
+}
+
 function orders(input: GameMasterPromptInput): string {
   const actor = input.world.characters.find((character) => character.id === input.actorCharacterId);
   const lines: string[] = [
@@ -267,6 +310,8 @@ export function buildGameMasterSystemPrompt(input: GameMasterPromptInput): strin
     renderOpenThreads(threads),
     "",
     npcContext(input.world, input.selectedCharacters, input.actorCharacterId),
+    "",
+    npcFormedIntentions(input.world, input.npcProposals),
     "",
     buildPlayerResolutionContext(input.world, input.playerContext).trim(),
     "",

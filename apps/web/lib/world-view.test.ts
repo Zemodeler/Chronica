@@ -49,7 +49,19 @@ describe("projectWorldView map conflicts", () => {
   });
 
   it("allows sieges only against real settlements", () => {
-    const world = structuredClone(firstPunicWarScenario.initialWorld);
+    const base = structuredClone(firstPunicWarScenario.initialWorld);
+    // The besieging force must actually stand at the target province:
+    // drepanum-city and sicily-central are both in Carthage's west, where
+    // legio-i does not start.
+    const moved = executeWorkflow({
+      actionId: "move_force",
+      actorId: "marcus-atilius",
+      parameters: { forceId: "legio-i", destinationProvinceId: "ita-72843720b81376294924159-sicily-west" },
+    }, base, 1);
+    expect(moved.ok).toBe(true);
+    if (!moved.ok) return;
+    const world = moved.world;
+
     const againstSettlement = executeWorkflow({
       actionId: "start_siege",
       actorId: "marcus-atilius",

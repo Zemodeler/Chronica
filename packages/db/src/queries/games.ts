@@ -81,7 +81,17 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     // college full and started the game holding no office -- and therefore no
     // Authority at all.
     await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 8, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "Seats the second Roman consul, so a player who declares a consulship has a lawful seat to take." }).onConflictDoNothing();
-    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 8, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
+    // Version 9 fixes the Mamertine spokesman's ambition, which named the
+    // wrong-scenario settlement id "messana-city" instead of this scenario's
+    // own "settlement-messana" (start_siege and any other settlement-naming
+    // tool refuse an id that doesn't resolve). It also gives Carthage real
+    // agency from the opening turn: an active goal, plot, and pressure over
+    // the Messana crisis, and Hanno's own place among the storyline's
+    // participants -- previously Carthage was a force with nothing for
+    // character agency to act on, so it never proposed anything the Game
+    // Master could invoke.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 9, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "Fixes the Mamertine spokesman's ambition to name this scenario's own settlement id, and gives Carthage/Hanno an authored goal, plot, and pressure over the Messana crisis so Carthage has real agency from the opening turn." }).onConflictDoNothing();
+    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 9, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
   });
 }
 

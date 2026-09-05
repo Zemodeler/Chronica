@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { EntityIdSchema } from "../../material-state";
-import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
+import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
 
 export const politicalWorkflows: AnyWorkflowDefinition[] = [
   defineWorkflow({
@@ -84,19 +84,38 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
 
   defineWorkflow({
     id: "give_territory",
-    description: "Transfer control of a province from one polity to another.",
+    description:
+      "Transfer control of a province from one polity to another by diplomatic cession -- an accepted diplomatic message between exactly the two powers involved is required as authorization. There is no other path through this workflow: an unopposed occupation or a won siege/battle goes through change_province_control instead.",
     category: "political",
     parametersSchema: z.object({
       provinceId: EntityIdSchema,
       newControllerPolityId: EntityIdSchema,
       firmnessBps: z.number().int().min(0).max(10_000).default(5_000),
+      /** The accepted diplomatic message that actually ceded this ground. Never optional: this workflow has no other legitimate path. */
+      authorizingMessageId: EntityIdSchema,
     }).strict(),
     apply(world, params) {
       const province = world.map.provinces.find((p) => p.id === params.provinceId);
+      if (!province) return refuse(`No province exists with the id "${params.provinceId}".`);
       const newPolity = world.map.polities.find((p) => p.id === params.newControllerPolityId);
-      if (!province || !newPolity) return null;
+      if (!newPolity) return refuse(`No power exists with the id "${params.newControllerPolityId}" to receive this ground.`);
       const oldPolityId = province.controllerPolityId;
       const oldPolity = world.map.polities.find((p) => p.id === oldPolityId);
+
+      const message = world.diplomacy.find((candidate) => candidate.id === params.authorizingMessageId);
+      if (!message) {
+        return refuse(`No diplomatic message with the id "${params.authorizingMessageId}" exists. give_territory requires an accepted message ceding this exact ground as its authorization.`);
+      }
+      if (message.status !== "answered" || message.answer !== "accepted") {
+        return refuse(`Message "${params.authorizingMessageId}" was not accepted (it is ${message.status === "awaiting_reply" ? "still awaiting a reply" : `answered: ${message.answer}`}). A cession requires an accepted message, not merely a sent one.`);
+      }
+      const parties = new Set([message.fromPolityId, message.toPolityId]);
+      if (oldPolityId !== null && (!parties.has(oldPolityId) || !parties.has(params.newControllerPolityId))) {
+        return refuse(
+          `Message "${params.authorizingMessageId}" was exchanged between ${world.map.polities.find((p) => p.id === message.fromPolityId)?.name ?? message.fromPolityId} and ${world.map.polities.find((p) => p.id === message.toPolityId)?.name ?? message.toPolityId}, not between ${oldPolity?.name ?? "the current controller"} and ${newPolity.name}. It cannot authorize ceding ${province.name} between different powers.`,
+        );
+      }
+
       return {
         world: {
           ...world,

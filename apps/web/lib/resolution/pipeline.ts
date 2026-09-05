@@ -30,6 +30,7 @@ import {
   applySocialEvents,
   advancePressureLifecycle,
   derivePressureTriggers,
+  deriveDiplomaticEscalations,
   createPressure,
   dueCommitments,
   fulfillCommitment,
@@ -103,8 +104,15 @@ import {
   type ResolutionPlayerContext,
 } from "./prompts";
 import { runGameMaster } from "./game-master";
-import { NARRATOR_EXEMPT_SCOPES, NARRATOR_OUTCOME_LOCKED_SCOPES, buildChronicleFromFacts } from "./chronicle-from-facts";
-import { buildIntentInvocation, buildIntentSocialEvent } from "./character-agency";
+import {
+  NARRATOR_EXEMPT_SCOPES,
+  NARRATOR_OUTCOME_LOCKED_SCOPES,
+  buildChronicleFromFacts,
+  rewriteClaimsUnsupportedWar,
+} from "./chronicle-from-facts";
+import { buildIntentInvocation, buildIntentSocialEvent, hasActiveAgencyState, isEligibleForNpcAgency, resolveFormedNpcIntentOutcome } from "./character-agency";
+import type { FormedNpcProposal } from "./character-agency";
+import { materializeCanvasProvince } from "../canvas-world";
 
 export type ProgressCallback = (progress: ResolutionProgress) => void;
 
@@ -294,6 +302,8 @@ export interface ResolveTurnInput {
   readonly scenarioGovernment?: ScenarioGovernmentRules | undefined;
   /** Opening context, tensions, and terminology the Game Master treats as the scenario constitution. */
   readonly scenarioChronicle?: ScenarioChronicleRules | undefined;
+  /** The immutable canvas whose province IDs the opening world may materialize on demand. */
+  readonly mapAssetId?: string | null;
 }
 
 export async function resolveTurn(
@@ -326,7 +336,8 @@ export async function resolveTurn(
     const playerKnowledgebase = await getCharacterKnowledgebase(db, gameId, playerId).catch(() => null);
     const pendingCommitments = await listPendingNpcCommitments(db, gameId);
     const resolutionContext: ResolutionPlayerContext = { knowledgebase: playerKnowledgebase, pendingCommitments };
-    const materializedWorld = materializePlayerCharacter(world, actorCharacterId, playerKnowledgebase, input.scenarioGovernment);
+    const canvasWorld = materializeCanvasProvince(world, input.mapAssetId ?? null, playerKnowledgebase?.locationProvinceId ?? null);
+    const materializedWorld = materializePlayerCharacter(canvasWorld, actorCharacterId, playerKnowledgebase, input.scenarioGovernment);
 
     // ── Step 0: Apply pending dialogue social events ────────────────────────
     //
@@ -585,8 +596,8 @@ export async function resolveTurn(
     // or be overtaken by events. `agencyWorld` is the world the agent stages
     // its turn against.
     emit(onProgress, "character_agency");
-    /** Formed NPC intentions offered to the Game Master as context, never executed for it. */
-    const npcFormedIntentions: Array<{ characterId: string; actionType: string; rationale: string; workflowIds: readonly string[] }> = [];
+    /** Formed NPC intentions offered to the Game Master as concrete, executable proposals -- never executed here. */
+    const npcFormedIntentions: FormedNpcProposal[] = [];
     let agencyWorld: WorldState = lifeReviewedWorld;
 
     const dueThisTurn = dueCommitments(agencyWorld.commitments ?? [], atStep);
@@ -594,17 +605,22 @@ export async function resolveTurn(
     const claims: IntentClaim[] = [];
     const candidateByIntentId = new Map<string, CandidateAction>();
 
+    // Brennos, freshly named for an invaded or addressed power, has no
+    // continuity history yet but is the most relevant actor on the board
+    // this turn by construction -- see `isEligibleForNpcAgency`.
+    const seededCharacterIds = new Set(leadership.seeded.map((leader) => leader.characterId));
+
     // Bounded to this turn's already-selected, already-capped working set
-    // (`selectRelevantCharacters`, max 8) -- only characters at continuity
-    // tier "principal" get full candidate generation and up to one primary
-    // action; "remembered" characters only advance their existing coarse
-    // plan; "ordinary" characters (or unselected characters) get none.
+    // (`selectRelevantCharacters`, max 8) -- only characters eligible for
+    // agency (continuity "principal", newly seeded, or top-tier "persistent"
+    // selection) get full candidate generation and up to one primary action;
+    // "remembered" characters only advance their existing coarse plan;
+    // everyone else (or unselected characters) gets none.
     for (const selected of selectedCharacters) {
       const character = agencyWorld.characters.find((c) => c.id === selected.characterId);
       if (!character || !character.alive) continue;
       const continuityEntry = agencyWorld.continuity.find((c) => c.characterId === character.id);
-      const tier = continuityEntry?.tier ?? "ordinary";
-      if (tier !== "principal") continue;
+      if (!isEligibleForNpcAgency(continuityEntry?.tier, seededCharacterIds.has(character.id), selected.tier, hasActiveAgencyState(agencyWorld, character.id))) continue;
 
       const owed = dueThisTurn.filter((c) => c.promisorCharacterId === character.id);
       const candidates = generateCandidateActions({ world: agencyWorld, character, atStep, commitments: owed });
@@ -680,13 +696,19 @@ export async function resolveTurn(
       // Game Master rather than executed here. The agent is the one authority
       // on what the world does this turn, so an NPC acts when the agent has
       // it act -- and the intent is resolved below against what actually
-      // happened, not against what was proposed.
-      if (candidate.legalWorkflowIds.length > 0 && buildIntentInvocation(candidate, agencyWorld) !== null) {
+      // happened, not against what was proposed. The exact invocation
+      // `buildIntentInvocation` produced is carried verbatim: the Game
+      // Master is handed a concrete, executable proposal, not a paraphrase of
+      // one it must reconstruct.
+      const invocation = candidate.legalWorkflowIds.length > 0 ? buildIntentInvocation(candidate, agencyWorld) : null;
+      if (invocation !== null) {
         npcFormedIntentions.push({
-          characterId: intent.actorCharacterId,
+          intentId: intent.id,
+          actorCharacterId: intent.actorCharacterId,
           actionType: intent.actionType,
           rationale: intent.rationale,
           workflowIds: candidate.legalWorkflowIds,
+          invocation,
         });
         resolvedIntents.push({ ...intent, status: "prepared" });
         continue;
@@ -738,6 +760,7 @@ export async function resolveTurn(
       actorCharacterId,
       directives: gameMasterDirectives,
       selectedCharacters,
+      npcProposals: npcFormedIntentions,
       playerContext: resolutionContext,
       scenarioGovernment: input.scenarioGovernment,
       scenarioChronicle: input.scenarioChronicle,
@@ -794,15 +817,17 @@ export async function resolveTurn(
 
     // A formed NPC intention is resolved against what the Game Master actually
     // did, never against what was proposed for it.
+    const npcProposalByIntentId = new Map(npcFormedIntentions.map((proposal) => [proposal.intentId, proposal]));
     for (let i = 0; i < resolvedIntents.length; i++) {
       const intent = resolvedIntents[i]!;
       if (intent.status !== "prepared") continue;
-      const acted = gameMasterOutcome.executedInvocations.some(
-        (invocation) => invocation.actorId === intent.actorCharacterId && intent.intendedWorkflowIds.includes(invocation.actionId),
-      );
-      resolvedIntents[i] = acted
-        ? { ...intent, status: "executed", resolutionReason: "Carried out this turn." }
-        : { ...intent, status: "deferred", resolutionReason: "Formed but overtaken by events; still intended." };
+      const proposal = npcProposalByIntentId.get(intent.id);
+      if (proposal === undefined) {
+        resolvedIntents[i] = { ...intent, status: "deferred", resolutionReason: "Formed but its proposal was lost before the Game Master ran." };
+        continue;
+      }
+      const outcome = resolveFormedNpcIntentOutcome(proposal, gameMasterOutcome.executedInvocations, gameMasterOutcome.auditEntries);
+      resolvedIntents[i] = { ...intent, status: outcome.status, resolutionReason: outcome.reason };
     }
 
     // ── Step 5: Resolve due political procedures ──────────────────────────
@@ -1268,14 +1293,26 @@ export async function resolveTurn(
             const headline = narratorParsed.entries[i]?.headline;
             const chronicleIndex = narratorTargets[i]!.index;
             if (rewritten && typeof rewritten === "string") {
+              const originalEntry = chronicleInputs[chronicleIndex]!;
+              // The narrator is free to add voice, but never a material
+              // outcome the engine never recorded: a `start_war` claim -- "X
+              // declares war" -- must be backed by an actual, successful
+              // `start_war` fact. A character merely created, renamed, or
+              // selected as a polity's new voice must never be rewritten as
+              // having declared war on anyone. Reject the rewrite and keep
+              // the factual body when it isn't.
+              if (rewriteClaimsUnsupportedWar(rewritten, originalEntry.factActionIds)) {
+                console.warn(`${tag()} [chronicle:narrator] rejected rewrite for entry ${chronicleIndex} (scope=${originalEntry.scope}) -- claims war without a successful start_war fact`);
+                continue;
+              }
               // A headline the chronicler wrote is a title; anything else is
               // put through the same deterministic scrub as the rest, so no
               // identifier or half-word ever reaches the panel as a heading.
               const title = typeof headline === "string" && headline.trim().length > 0
                 ? chronicleHeadline(headline)
-                : chronicleInputs[chronicleIndex]!.title;
+                : originalEntry.title;
               chronicleInputs[chronicleIndex] = {
-                ...chronicleInputs[chronicleIndex]!,
+                ...originalEntry,
                 body: stripEngineJargon(rewritten),
                 ...(title ? { title } : {}),
               };
@@ -1368,8 +1405,34 @@ export async function resolveTurn(
       failedOrCancelledCommitments: brokenCommitments,
       warringPolityIds,
     });
+    // An ultimatum rejected (or left standing unanswered) more than once on
+    // the same thread must not just repeat itself: this reads what the
+    // message record already says -- never invents a repeat -- and presses
+    // the offended sender's own leader toward a real reaction, the same
+    // deterministic path every other pressure trigger already takes. It is
+    // what makes the sender's leader agency-eligible next turn even at
+    // continuity tier "ordinary" (`isEligibleForNpcAgency`'s explicit-
+    // relevance path), not merely a flavor note the Game Master might notice.
+    const diplomaticEscalations = deriveDiplomaticEscalations(newWorld.diplomacy, atStep);
+    const diplomaticEscalationTriggers = diplomaticEscalations
+      .filter((escalation) => newWorld.characters.some((character) => character.id === escalation.senderCharacterId && character.alive))
+      .map((escalation) => {
+        const recipientName = newWorld.map.polities.find((polity) => polity.id === escalation.recipientPolityId)?.name ?? escalation.recipientPolityId;
+        return {
+          id: `pressure-diplomatic-escalation-${escalation.messageId}-${atStep}`,
+          characterId: escalation.senderCharacterId,
+          kind: "political_danger" as const,
+          intensity: Math.min(100, 50 + escalation.refusalCount * 15),
+          label: `${recipientName} has rebuffed the same demand over "${escalation.subject}" ${escalation.refusalCount} time${escalation.refusalCount === 1 ? "" : "s"} running; repeating it again settles nothing.`,
+          sourceEventId: escalation.messageId,
+          atStep,
+          reviewInSteps: 3,
+          expiresInSteps: 16,
+          visibility: "polity" as const,
+        };
+      });
     let worldWithTriggeredPressures: WorldState = newWorld;
-    for (const trigger of pressureTriggers) {
+    for (const trigger of [...pressureTriggers, ...diplomaticEscalationTriggers]) {
       const result = createPressure(worldWithTriggeredPressures, trigger);
       worldWithTriggeredPressures = {
         ...worldWithTriggeredPressures,
