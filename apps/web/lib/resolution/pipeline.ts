@@ -113,6 +113,7 @@ import {
 import { buildIntentInvocation, buildIntentSocialEvent, hasActiveAgencyState, isEligibleForNpcAgency, resolveFormedNpcIntentOutcome } from "./character-agency";
 import type { FormedNpcProposal } from "./character-agency";
 import { materializeCanvasProvince } from "../canvas-world";
+import { advanceWorldDynamics } from "./world-dynamics";
 
 export type ProgressCallback = (progress: ResolutionProgress) => void;
 
@@ -378,7 +379,12 @@ export async function resolveTurn(
     for (const leader of leadership.seeded) {
       console.log(`${tag()} [leadership] seeded "${leader.characterName}" for ${leader.polityName} (${leader.trigger})`);
     }
-    const resolutionWorld: WorldState = leadership.world;
+    // Turn foreign occupations and Roman public business into durable,
+    // state-backed pressures before character selection.  The Game Master
+    // therefore receives leaders who have something concrete to answer this
+    // turn, rather than merely a map that it may choose to ignore.
+    const worldDynamics = advanceWorldDynamics(leadership.world, materializedWorld.elapsedStep + 1);
+    const resolutionWorld: WorldState = worldDynamics.world;
     const actor = resolutionWorld.characters.find((character) => character.id === actorCharacterId)!;
     console.log(
       `${tag()} ══ RESOLUTION START ══ gameId=${gameId} actor="${actor.name}" step=${resolutionWorld.elapsedStep} directives=${batch.directives.length} storylines=${(resolutionWorld.storylines ?? []).length} characters=${resolutionWorld.characters.filter((character) => character.alive).length}`,
@@ -767,7 +773,10 @@ export async function resolveTurn(
       definedActions,
     });
     let newWorld: WorldState = gameMasterOutcome.world;
-    const factualEvents = gameMasterOutcome.events;
+    const factualEvents = [
+      ...gameMasterOutcome.events,
+      ...worldDynamics.events.map((event, index) => ({ ...event, id: `fact-${atStep}-${gameMasterOutcome.events.length + index + 1}` })),
+    ];
     const capabilityRequests = gameMasterOutcome.capabilityRequests;
     console.log(
       `${tag()} [game_master] OUT: termination=${gameMasterOutcome.termination} actions=${gameMasterOutcome.executedInvocations.length} facts=${factualEvents.length} capabilityGaps=${capabilityRequests.length}`,

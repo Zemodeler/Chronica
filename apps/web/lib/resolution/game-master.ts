@@ -53,7 +53,10 @@ export interface RunGameMasterResult extends GameMasterSessionResult {
   readonly providerError: string | null;
 }
 
-const DEFAULT_MAX_STEPS = 12;
+// A living world needs room for the player's order, foreign reactions, and a
+// domestic development.  Twelve model steps routinely ended after the first
+// reaction, leaving the newly required activity budget unreachable.
+const DEFAULT_MAX_STEPS = 18;
 
 function tag(atStep: number): string {
   return `[game-master:step-${atStep}]`;
