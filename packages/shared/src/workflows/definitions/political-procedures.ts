@@ -5,14 +5,15 @@ import {
   PoliticalProcedureSubjectKindSchema,
   PoliticalProcedureTypeSchema,
   PoliticalResolutionMechanismSchema,
+  SupportPositionChoiceSchema,
   SupportPositionKindSchema,
+  SupportReasonKindSchema,
   VisibilitySchema,
   type MaterialWorldState,
   type PoliticalProcedure,
   type SupportPosition,
 } from "../../material-state";
 import { canParticipate, canSponsorProcedure, resolveEligibility } from "../../characters/political-authority";
-import { evaluateSupport, positionFromScore } from "../../character-agency/political-resolver";
 import { describePoliticalQuestion } from "../../chronicle/political-procedure-description";
 import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
 
@@ -225,13 +226,16 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
 
   defineWorkflow({
     id: "pledge_support",
-    description: "Record a character's or group's canonical, resolver-computed support position on an open procedure.",
+    description: "Record a character's or group's canonical support position on an open procedure, with the stated reason for it. Use inspect_political_procedure first: it surfaces each participant's relationship/legitimacy context as a suggestion, never a decision -- the position and reason here are yours to choose.",
     category: "political",
     parametersSchema: z
       .object({
         procedureId: EntityIdSchema,
         supporterKind: SupportPositionKindSchema,
         supporterId: EntityIdSchema,
+        position: SupportPositionChoiceSchema,
+        reasonKind: SupportReasonKindSchema,
+        reasonLabel: z.string().trim().min(1).max(200),
       })
       .strict(),
     apply(world, params, context) {
@@ -249,22 +253,22 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
         if (!group || !group.active) return null;
       }
 
-      const { score, reasons } = evaluateSupport(world, procedure, params.supporterId);
+      const nominalScore = params.position === "support" ? 20 : params.position === "oppose" ? -20 : 0;
       const position: SupportPosition = {
         id: `${procedure.id}:support:${params.supporterId}:${context.atStep}`,
         procedureId: procedure.id,
         supporterKind: params.supporterKind,
         supporterId: params.supporterId,
-        position: positionFromScore(score),
-        influenceWeight: Math.max(1, Math.abs(score)),
+        position: params.position,
+        influenceWeight: Math.max(1, Math.abs(nominalScore)),
         visibility: procedure.visibility,
-        reasons,
+        reasons: [{ kind: params.reasonKind, label: params.reasonLabel, score: nominalScore, sourceId: params.supporterId }],
         provenanceEventIds: [],
         changedAtStep: context.atStep,
       };
       return {
         world: { ...world, material: { ...world.material, supportPositions: [...world.material.supportPositions, position] } },
-        result: { summary: `${params.supporterId} records a "${position.position}" position on procedure "${procedure.id}".`, applied: true },
+        result: { summary: `${params.supporterId} records a "${position.position}" position on procedure "${procedure.id}": ${params.reasonLabel}`, applied: true },
       };
     },
   }),

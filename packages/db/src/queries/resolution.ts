@@ -7,6 +7,7 @@ import type {
   RecordedCapabilityRequest,
   RuntimeInventedWorkflow,
   WorkflowAuditBlob,
+  WorkflowAuditEntry,
   WorldState,
 } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
@@ -151,6 +152,8 @@ export interface CommitResolutionInput {
   readonly capabilityRequests?: readonly RecordedCapabilityRequest[];
   /** Structured Game Master report plus the factual event log the Chronicle was built from. */
   readonly gameMasterReport?: CommittedGameMasterReport;
+  /** Per-call audit trail from the current GM tool loop (docs/27) -- distinct from `workflowAudit`. */
+  readonly gameMasterAudit?: readonly WorkflowAuditEntry[];
 }
 
 export interface CommitResolutionResult {
@@ -180,6 +183,7 @@ export async function commitResolution(
         resolutionCommittedAt: new Date(),
         ...(input.workflowAudit !== undefined ? { workflowAudit: input.workflowAudit } : {}),
         ...(input.gameMasterReport !== undefined ? { gameMasterReport: input.gameMasterReport } : {}),
+        ...(input.gameMasterAudit !== undefined ? { gameMasterAudit: input.gameMasterAudit } : {}),
       })
       .where(eq(turns.id, input.turnId));
 

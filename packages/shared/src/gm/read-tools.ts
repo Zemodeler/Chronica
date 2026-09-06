@@ -2,6 +2,8 @@ import { z } from "zod";
 import { EntityIdSchema } from "../material-state";
 import type { WorldState } from "../world/world-state";
 import { currentAgeYears } from "../characters/age";
+import { buildPoliticalInspectorView } from "../characters/political-inspector";
+import { evaluateSupport, positionFromScore } from "../character-agency/political-resolver";
 
 // Bounded read tools (GM refactor, requirement 5).
 //
@@ -345,11 +347,17 @@ const inspectActiveConflicts: AnyReadToolDefinition = {
         provinceId: anyForce?.locationId ?? null,
       };
     });
-    const sieges = world.conflicts.sieges.map((siege) => ({
-      settlementId: siege.settlementId,
-      invadingForceIds: siege.invadingForceIds,
-      defendingForceIds: siege.defendingForceIds,
-    }));
+    const sieges = world.conflicts.sieges.map((siege) => {
+      const settlementWithProvince = world.map.provinces
+        .flatMap((province) => province.settlements.map((settlement) => ({ settlement, province })))
+        .find(({ settlement }) => settlement.id === siege.settlementId);
+      return {
+        settlementId: siege.settlementId,
+        invadingForceIds: siege.invadingForceIds,
+        defendingForceIds: siege.defendingForceIds,
+        provinceId: settlementWithProvince?.province.id ?? null,
+      };
+    });
     const wars = world.conflicts.wars.map((war) => ({
       polityAId: war.polityAId,
       polityBId: war.polityBId,
@@ -364,7 +372,7 @@ const inspectActiveConflicts: AnyReadToolDefinition = {
           .map((battle) => `${battle.battleId} at ${provinceName(world, battle.provinceId)} - attackers [${battle.attackerForceIds.join(", ")}] against defenders [${battle.defenderForceIds.join(", ")}]`)
           .join("; ") || "none"}.`,
         `Sieges (${sieges.length}): ${sieges
-          .map((siege) => `${siege.settlementId} - besiegers [${siege.invadingForceIds.join(", ")}] against defenders [${siege.defendingForceIds.join(", ")}]`)
+          .map((siege) => `${siege.settlementId} at ${provinceName(world, siege.provinceId)} - besiegers [${siege.invadingForceIds.join(", ")}] against defenders [${siege.defendingForceIds.join(", ")}]`)
           .join("; ") || "none"}.`,
       ]),
     };
@@ -520,6 +528,68 @@ const inspectActorMemory: AnyReadToolDefinition = {
   },
 };
 
+// -- inspect_political_procedure ---------------------------------------------
+
+const inspectPoliticalProcedure: AnyReadToolDefinition = {
+  name: "inspect_political_procedure",
+  description:
+    "One open political procedure: its stage, eligible participants, each participant's currently recorded position (if any), and, for anyone without one yet, a suggested lean from their relationships and legitimacy context. The suggestion is context only -- it is never a recorded position. Use this before calling pledge_support.",
+  parametersSchema: z.object({ procedureId: EntityIdSchema }).strict(),
+  read(context, params: { procedureId: string }) {
+    const { world } = context;
+    const view = buildPoliticalInspectorView(world, params.procedureId);
+    if (view === undefined) return notFound("political procedure", params.procedureId);
+
+    const supportPositions = view.supportPositions.filter((position) => visible(context, position.visibility));
+    const positionedIds = new Set(supportPositions.map((position) => position.supporterId));
+    const suggestions = view.eligibleParticipants
+      .filter((participant) => !positionedIds.has(participant.characterId))
+      .map((participant) => {
+        const { score, reasons } = evaluateSupport(world, view.procedure, participant.characterId);
+        return {
+          characterId: participant.characterId,
+          name: participant.name,
+          suggestedLean: positionFromScore(score),
+          reasons: reasons.map((reason) => reason.label),
+        };
+      });
+
+    const data = {
+      procedureId: view.procedure.id,
+      type: view.procedure.type,
+      stage: view.procedure.stage,
+      sponsorCharacterId: view.procedure.sponsorCharacterId,
+      institution: view.institution ? { id: view.institution.id, name: view.institution.name, totalVotingWeight: view.institution.totalVotingWeight, quorumBps: view.institution.quorumBps, passageThresholdBps: view.institution.passageThresholdBps } : null,
+      eligibleParticipants: view.eligibleParticipants,
+      supportPositions: supportPositions.map((position) => ({
+        supporterId: position.supporterId,
+        supporterName: position.supporterName,
+        position: position.position,
+        reasons: position.reasons.map((reason) => reason.label),
+      })),
+      suggestions,
+      netSupportWeight: view.netSupportWeight,
+      netOppositionWeight: view.netOppositionWeight,
+      withheldPrivateInformation: context.privateInformation === "omit",
+    };
+
+    return {
+      ok: true,
+      data,
+      factual: lines([
+        `Procedure "${data.procedureId}" (${data.type}, stage: ${data.stage}), sponsored by ${characterName(world, data.sponsorCharacterId)}.`,
+        `Eligible participants: ${data.eligibleParticipants.map((p) => p.name ?? p.characterId).join(", ") || "none"}.`,
+        `Recorded positions: ${data.supportPositions.map((p) => `${p.supporterName ?? p.supporterId}: ${p.position}`).join("; ") || "none"}.`,
+        `Suggested leans for those without a recorded position (context only, not a decision): ${
+          data.suggestions.map((s) => `${s.name ?? s.characterId}: ${s.suggestedLean}${s.reasons.length > 0 ? ` (${s.reasons.join("; ")})` : ""}`).join("; ") || "none"
+        }.`,
+        `Net weight -- support: ${data.netSupportWeight}, oppose: ${data.netOppositionWeight}.`,
+        context.privateInformation === "omit" ? "Private-visibility positions are withheld by scenario rules." : null,
+      ]),
+    };
+  },
+};
+
 export const GAME_MASTER_READ_TOOLS: readonly AnyReadToolDefinition[] = [
   inspectWorld,
   inspectForce,
@@ -530,6 +600,7 @@ export const GAME_MASTER_READ_TOOLS: readonly AnyReadToolDefinition[] = [
   inspectRecentHistory,
   inspectChronicleChain,
   inspectActorMemory,
+  inspectPoliticalProcedure,
 ];
 
 export const READ_TOOL_BY_NAME: ReadonlyMap<string, AnyReadToolDefinition> = new Map(

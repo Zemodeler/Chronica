@@ -12,10 +12,12 @@ import { ElapsedStepSchema, EntityIdSchema, VisibilitySchema } from "../material
 //
 // An intent is a proposal, not an outcome: it names one concrete action a
 // character wants to take this turn, where it came from, and what it needs.
-// It becomes `executed` only after `character-agency/conflicts.ts` resolves
-// resource/target contention and the resulting workflow candidate clears the
-// existing `runWorkflowManager`/`executeWorkflows` gate -- the same rules-backed
-// path every player and world-director action already goes through.
+// It becomes `executed` only once the Game Master actually invokes the
+// resulting workflow candidate (docs/30) -- the same command-contract gate
+// every player and world-director action already goes through. A separate
+// deterministic conflict-resolution pass used to run before that; it is
+// retired (docs/31) since a genuinely conflicting second attempt is now
+// refused by that command's own precondition check.
 
 export const CharacterIntentActionTypeSchema = z.enum([
   "fulfill_commitment",

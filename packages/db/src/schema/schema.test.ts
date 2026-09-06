@@ -2,7 +2,7 @@ import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import { authAccounts, authSessions, authVerifications } from "./auth";
 import { aiCalls, billingEvents, creditHolds, creditLedgerEntries, creditWallets } from "./billing";
-import { characterClaims, gameInvites, games, orders, scenarioMapAssets, scenarioVersions, turnNewsReadiness } from "./game";
+import { characterClaims, gameInvites, games, orders, scenarioMapAssets, scenarioVersions, turnNewsReadiness, turns } from "./game";
 
 describe("database-enforced M1 boundaries", () => {
   it("keeps authentication and invite tokens unique", () => {
@@ -53,6 +53,13 @@ describe("database-enforced M1 boundaries", () => {
     // open a new game's turn 0 -- see the column comment in schema/game.ts.
     expect(getTableConfig(scenarioVersions).columns.map((column) => column.name)).toEqual(
       expect.arrayContaining(["definition", "initial_world"]),
+    );
+  });
+
+  it("keeps the current GM tool loop's audit trail distinct from the legacy Workflow Manager blob (docs/27)", () => {
+    expect(column(turns, "game_master_audit").notNull).toBe(false);
+    expect(getTableConfig(turns).columns.map((c) => c.name)).toEqual(
+      expect.arrayContaining(["workflow_audit", "game_master_report", "game_master_audit"]),
     );
   });
 

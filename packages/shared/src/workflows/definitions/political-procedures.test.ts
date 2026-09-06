@@ -140,22 +140,39 @@ describe("sponsor_procedure", () => {
 });
 
 describe("pledge_support / withdraw_support", () => {
-  it("records a resolver-computed position for an eligible participant", () => {
+  it("records the caller's own stated position for an eligible participant", () => {
     const w = world();
     const outcome = executeWorkflow(
-      { actionId: "pledge_support", actorId: "marcus-atilius", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "marcus-atilius" } },
+      { actionId: "pledge_support", actorId: "marcus-atilius", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "marcus-atilius", position: "support", reasonKind: "material_interest", reasonLabel: "It clears his name and costs him nothing." } },
       w,
       1,
     );
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    expect(outcome.world.material.supportPositions.some((p) => p.procedureId === "senate-censure-marcus" && p.supporterId === "marcus-atilius")).toBe(true);
+    const recorded = outcome.world.material.supportPositions.find((p) => p.procedureId === "senate-censure-marcus" && p.supporterId === "marcus-atilius");
+    expect(recorded?.position).toBe("support");
+    expect(recorded?.reasons[0]?.label).toBe("It clears his name and costs him nothing.");
+  });
+
+  // docs/29: the position is the caller's choice, not a computed one -- proven
+  // by recording the opposite of whatever relationship/legitimacy scoring
+  // would have suggested for the same participant.
+  it("records exactly the requested position, even one evaluateSupport's scoring would not have chosen", () => {
+    const w = world();
+    const outcome = executeWorkflow(
+      { actionId: "pledge_support", actorId: "marcus-atilius", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "marcus-atilius", position: "oppose", reasonKind: "belief", reasonLabel: "He believes the charge is just." } },
+      w,
+      1,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.material.supportPositions.find((p) => p.supporterId === "marcus-atilius")?.position).toBe("oppose");
   });
 
   it("refuses a supporter who is not an eligible participant of the procedure", () => {
     const w = world();
     const outcome = executeWorkflow(
-      { actionId: "pledge_support", actorId: "hamilcar", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "hamilcar" } },
+      { actionId: "pledge_support", actorId: "hamilcar", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "hamilcar", position: "support", reasonKind: "belief", reasonLabel: "n/a" } },
       w,
       1,
     );
@@ -165,7 +182,7 @@ describe("pledge_support / withdraw_support", () => {
   it("withdraws a previously recorded position before resolution", () => {
     const w = world();
     const pledged = executeWorkflow(
-      { actionId: "pledge_support", actorId: "marcus-atilius", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "marcus-atilius" } },
+      { actionId: "pledge_support", actorId: "marcus-atilius", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "marcus-atilius", position: "support", reasonKind: "belief", reasonLabel: "n/a" } },
       w,
       1,
     );

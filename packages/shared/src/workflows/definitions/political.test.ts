@@ -101,6 +101,40 @@ describe("give_territory", () => {
   });
 });
 
+describe("start_war", () => {
+  // docs/27: a refusal must identify the existing conflict, not degrade to a
+  // generic "cannot be applied" message.
+  it("names both polities when they are already at war", () => {
+    // The First Punic War scenario opens with Rome and Carthage already at
+    // war, so this exercises the conflict path directly without staging one.
+    const w = world();
+    expect(w.conflicts.wars).toEqual([{ polityAId: "carthage", polityBId: "rome" }]);
+    const outcome = executeWorkflow({ actionId: "start_war", actorId: "test-actor", parameters: { polityAId: "carthage", polityBId: "rome" } }, w, 0);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.message).toContain("already at war");
+    expect(outcome.message).toContain("Carthage");
+    expect(outcome.message).toContain("Roman Republic");
+  });
+
+  it("names the missing polity id, classified as a recoverable lookup failure", () => {
+    const w = world();
+    const outcome = executeWorkflow({ actionId: "start_war", actorId: "test-actor", parameters: { polityAId: "atlantis", polityBId: "rome" } }, w, 0);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.message).toContain('with the id "atlantis"');
+  });
+
+  // docs/28: a replay fixture -- the same command against the same snapshot
+  // must yield byte-identical resulting state, run twice independently.
+  it("produces byte-identical resulting state given the same snapshot and parameters", () => {
+    const invocation = { actionId: "start_war" as const, actorId: "test-actor", parameters: { polityAId: "rome", polityBId: "syracuse" } };
+    const outcomeA = executeWorkflow(invocation, world(), 0);
+    const outcomeB = executeWorkflow(invocation, world(), 0);
+    expect(outcomeA).toEqual(outcomeB);
+  });
+});
+
 describe("end_war", () => {
   it("still executes directly (the shape a resolved political procedure's authorized invocation uses)", () => {
     const w = world();

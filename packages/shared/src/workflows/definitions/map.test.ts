@@ -59,6 +59,23 @@ describe("change_province_control", () => {
     expect(outcome.world.map.provinces.find((p) => p.id === "ita-72843720b81376294924159-sicily-central")?.controllerPolityId).toBe("rome");
   });
 
+  // docs/28: a replay fixture -- the same command against the same snapshot
+  // must yield byte-identical resulting state, run twice independently.
+  it("produces byte-identical resulting state given the same snapshot and parameters", () => {
+    const moveInvocation = { actionId: "move_force" as const, actorId: "test-actor", parameters: { forceId: "legio-i", destinationProvinceId: "ita-72843720b81376294924159-sicily-central" } };
+    const controlInvocation = { actionId: "change_province_control" as const, actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-central", newControllerPolityId: "rome", reason: "Taken unopposed." } };
+
+    const movedA = executeWorkflow(moveInvocation, world(), 0);
+    const movedB = executeWorkflow(moveInvocation, world(), 0);
+    expect(movedA).toEqual(movedB);
+    expect(movedA.ok).toBe(true);
+    if (!movedA.ok || !movedB.ok) return;
+
+    const outcomeA = executeWorkflow(controlInvocation, movedA.world, 0);
+    const outcomeB = executeWorkflow(controlInvocation, movedB.world, 0);
+    expect(outcomeA).toEqual(outcomeB);
+  });
+
   it("does not require any force present when only firmness changes for the existing controller", () => {
     const w = world();
     const outcome = executeWorkflow(

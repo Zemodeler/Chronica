@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import { WorldStateSchema, type WorldState } from "../world/world-state";
-import { DEFINE_ACTION_TOOL, INVOKE_DEFINED_ACTION_TOOL } from "./tools";
+import { DEFINE_ACTION_TOOL, INVOKE_DEFINED_ACTION_TOOL, buildGameMasterTools } from "./tools";
 import { createGameMasterSession } from "./session";
 
 // Defining an action the engine does not have.
@@ -14,13 +14,17 @@ import { createGameMasterSession } from "./session";
 // escape hatch wide enough to be useful is also wide enough to write anything
 // it likes into the world. Every use is re-validated against the whole
 // document, exactly as a built-in action is.
+//
+// docs/27: the escape hatch is off by default. Every test below exercises it
+// with `allowInventedActions: true` on purpose; the "off by default" describe
+// block covers the normal-play behaviour instead.
 
 const PLAYER = "marcus-atilius";
 
 const world = (): WorldState => structuredClone(firstPunicWarScenario.initialWorld);
 
 const session = (definedActions: Parameters<typeof createGameMasterSession>[0]["definedActions"] = []) =>
-  createGameMasterSession({ world: world(), atStep: 1, actorCharacterId: PLAYER, directiveIds: [], definedActions });
+  createGameMasterSession({ world: world(), atStep: 1, actorCharacterId: PLAYER, directiveIds: [], definedActions, allowInventedActions: true });
 
 const call = (name: string, args: Record<string, unknown>) => ({ id: `call-${name}`, name, arguments: args });
 
@@ -154,5 +158,43 @@ describe("the limits on what a defined action may do", () => {
     const fourth = gm.invoke(call(DEFINE_ACTION_TOOL, { ...HONOUR_DEFINITION, actionId: "honour_variant_4" }));
     expect(fourth.ok).toBe(false);
     expect(fourth.factual).toMatch(/limit/i);
+  });
+});
+
+describe("off by default (docs/27)", () => {
+  const defaultSession = () =>
+    createGameMasterSession({ world: world(), atStep: 1, actorCharacterId: PLAYER, directiveIds: [] });
+
+  it("omits both tools from the default surface", () => {
+    const names = buildGameMasterTools().map((tool) => tool.name);
+    expect(names).not.toContain(DEFINE_ACTION_TOOL);
+    expect(names).not.toContain(INVOKE_DEFINED_ACTION_TOOL);
+  });
+
+  it("includes both tools only when explicitly enabled", () => {
+    const names = buildGameMasterTools({ allowInventedActions: true }).map((tool) => tool.name);
+    expect(names).toContain(DEFINE_ACTION_TOOL);
+    expect(names).toContain(INVOKE_DEFINED_ACTION_TOOL);
+  });
+
+  it("refuses define_action without staging anything", () => {
+    const gm = defaultSession();
+    const outcome = gm.invoke(call(DEFINE_ACTION_TOOL, HONOUR_DEFINITION));
+    expect(outcome.ok).toBe(false);
+    expect(outcome.factual).toMatch(new RegExp("request_capability"));
+    expect(gm.stagedWorld).toEqual(world());
+  });
+
+  it("refuses invoke_defined_action even for a campaign's own earlier definition", () => {
+    const gm = createGameMasterSession({ world: world(), atStep: 1, actorCharacterId: PLAYER, directiveIds: [], definedActions: [HONOUR_DEFINITION] });
+    const outcome = gm.invoke(call(INVOKE_DEFINED_ACTION_TOOL, {
+      actionId: "confer_public_honour",
+      actorId: PLAYER,
+      parameters: { characterId: PLAYER, prestigeBps: 8_000 },
+    }));
+    expect(outcome.ok).toBe(false);
+    expect(gm.stagedWorld.characters.find((character) => character.id === PLAYER)?.prestigeBps).toBe(
+      world().characters.find((character) => character.id === PLAYER)?.prestigeBps,
+    );
   });
 });

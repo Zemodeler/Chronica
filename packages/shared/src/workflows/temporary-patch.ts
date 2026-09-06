@@ -1,9 +1,18 @@
 import { z } from "zod";
 import { EntityIdSchema, VisibilitySchema } from "../material-state";
-import type { WorldState } from "../world/world-state";
 
-// A temporary patch is deliberately data, not generated JavaScript. It gives a
-// one-off workflow bounded, reviewable powers for the current turn only.
+// Retired (docs/27, docs/28): this was a generic, four-operation-kind patch
+// applier for the Workflow Manager/director-committee pipeline's "novel
+// action proposal" mechanism -- a way to give a one-off, AI-described action
+// bounded, reviewable powers for the current turn without writing a real
+// workflow. That pipeline is gone; `applyTemporaryWorkflowPatch` had zero
+// call sites (confirmed by repo-wide search) even before this file was
+// trimmed, because `pipeline.ts` now hardcodes `novelActionProposals: []` on
+// every turn. The schema below stays only so `NovelActionProposalSchema`
+// (manager-types.ts) can still parse any `novelActionProposals` row a
+// campaign persisted before the Game Master refactor; nothing parses one into
+// a mutation any more, the same "keep the type, remove the executable path"
+// treatment `invented-workflow.ts` received.
 const AccountDeltaPatchSchema = z.object({
   kind: z.literal("account_delta"),
   accountId: EntityIdSchema,
@@ -53,115 +62,3 @@ export const TemporaryWorkflowPatchSchema = z.object({
   ])).min(1).max(6),
 }).strict();
 export type TemporaryWorkflowPatch = z.infer<typeof TemporaryWorkflowPatchSchema>;
-
-export interface TemporaryPatchResult {
-  readonly world: WorldState;
-  readonly summary: string;
-}
-
-/** Return a precise invalid-reference reason before a patch is considered for application. */
-export function validateTemporaryWorkflowPatchReferences(
-  world: WorldState,
-  patch: TemporaryWorkflowPatch,
-): string | null {
-  if (!world.characters.some((character) => character.id === patch.actorId && character.alive)) {
-    return `actorId ${patch.actorId} is not a living character`;
-  }
-  for (const operation of patch.operations) {
-    if (operation.kind === "account_delta" && !world.material.accounts.some((account) => account.id === operation.accountId)) {
-      return `accountId ${operation.accountId} does not exist`;
-    }
-    if (operation.kind === "province_control") {
-      if (!world.map.provinces.some((province) => province.id === operation.provinceId)) return `provinceId ${operation.provinceId} does not exist`;
-      if (!world.map.polities.some((polity) => polity.id === operation.controllerPolityId)) return `controllerPolityId ${operation.controllerPolityId} does not exist`;
-    }
-    if (operation.kind === "character_state") {
-      if (!world.characters.some((character) => character.id === operation.characterId)) return `characterId ${operation.characterId} does not exist`;
-      if (operation.locationProvinceId && !world.map.provinces.some((province) => province.id === operation.locationProvinceId)) return `locationProvinceId ${operation.locationProvinceId} does not exist`;
-      if (operation.polityId && !world.map.polities.some((polity) => polity.id === operation.polityId)) return `polityId ${operation.polityId} does not exist`;
-    }
-    if (operation.kind === "create_storyline") {
-      if (world.storylines?.some((storyline) => storyline.id === operation.storylineId)) return `storylineId ${operation.storylineId} already exists`;
-      if (operation.provinceId && !world.map.provinces.some((province) => province.id === operation.provinceId)) return `provinceId ${operation.provinceId} does not exist`;
-      const missingParticipant = operation.participantIds.find((id) => !world.characters.some((character) => character.id === id));
-      if (missingParticipant) return `storyline participant ${missingParticipant} does not exist`;
-    }
-  }
-  return null;
-}
-
-/** Apply a validated patch atomically, or return null when any target is invalid. */
-export function applyTemporaryWorkflowPatch(
-  world: WorldState,
-  patch: TemporaryWorkflowPatch,
-  atStep: number,
-): TemporaryPatchResult | null {
-  if (validateTemporaryWorkflowPatchReferences(world, patch) !== null) return null;
-  let current = world;
-
-  for (const operation of patch.operations) {
-    if (operation.kind === "account_delta") {
-      const account = current.material.accounts.find((candidate) => candidate.id === operation.accountId);
-      if (!account || account.balance + operation.amount < 0) return null;
-      const transaction = operation.amount > 0
-        ? { id: globalThis.crypto.randomUUID(), atStep, kind: "income" as const, amount: operation.amount, destinationAccountId: account.id, cause: { kind: "action" as const, id: patch.actorId, explanation: operation.reason }, visibility: "private" as const }
-        : { id: globalThis.crypto.randomUUID(), atStep, kind: "purchase" as const, amount: Math.abs(operation.amount), sourceAccountId: account.id, cause: { kind: "action" as const, id: patch.actorId, explanation: operation.reason }, visibility: "private" as const };
-      current = {
-        ...current,
-        material: {
-          ...current.material,
-          accounts: current.material.accounts.map((candidate) => candidate.id === account.id ? { ...candidate, balance: candidate.balance + operation.amount } : candidate),
-          transactions: [...current.material.transactions, transaction],
-        },
-      };
-    } else if (operation.kind === "province_control") {
-      if (!current.map.polities.some((polity) => polity.id === operation.controllerPolityId)) return null;
-      if (!current.map.provinces.some((province) => province.id === operation.provinceId)) return null;
-      current = {
-        ...current,
-        map: {
-          ...current.map,
-          provinces: current.map.provinces.map((province) => province.id === operation.provinceId
-            ? { ...province, controllerPolityId: operation.controllerPolityId, controlFirmnessBps: operation.firmnessBps }
-            : province),
-        },
-      };
-    } else if (operation.kind === "character_state") {
-      const character = current.characters.find((candidate) => candidate.id === operation.characterId);
-      if (!character) return null;
-      if (operation.locationProvinceId && !current.map.provinces.some((province) => province.id === operation.locationProvinceId)) return null;
-      if (operation.polityId && !current.map.polities.some((polity) => polity.id === operation.polityId)) return null;
-      current = {
-        ...current,
-        characters: current.characters.map((candidate) => candidate.id === operation.characterId
-          ? { ...candidate, ...(operation.healthBps !== undefined ? { healthBps: operation.healthBps } : {}), ...(operation.locationProvinceId ? { locationProvinceId: operation.locationProvinceId } : {}), ...(operation.polityId ? { polityId: operation.polityId } : {}) }
-          : candidate),
-      };
-    } else {
-      if (current.storylines?.some((storyline) => storyline.id === operation.storylineId)) return null;
-      if (operation.provinceId && !current.map.provinces.some((province) => province.id === operation.provinceId)) return null;
-      if (operation.participantIds.some((id) => !current.characters.some((character) => character.id === id))) return null;
-      current = {
-        ...current,
-        storylines: [...(current.storylines ?? []), {
-          id: operation.storylineId,
-          title: operation.title,
-          participantIds: operation.participantIds,
-          provinceId: operation.provinceId,
-          phase: operation.phase,
-          stakes: operation.stakes,
-          history: [patch.rationale],
-          nextDevelopment: operation.nextDevelopment,
-          visibility: operation.visibility,
-          updatedAtStep: atStep,
-          type: "simulator" as const,
-          initialPlan: null,
-          causalEntryIds: [],
-          turnsActive: 0,
-          sourceDirector: "world_director" as const,
-        }],
-      };
-    }
-  }
-  return { world: current, summary: `Temporary workflow patch applied: ${patch.title}.` };
-}

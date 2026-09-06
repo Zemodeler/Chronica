@@ -19,7 +19,6 @@ import type {
   SelectedCharacter,
   WorkflowAuditBlob,
   CandidateAction,
-  IntentClaim,
   CharacterIntent,
   WorldState,
 } from "@chronica/shared";
@@ -33,12 +32,8 @@ import {
   deriveDiplomaticEscalations,
   createPressure,
   dueCommitments,
-  fulfillCommitment,
-  deferCommitment,
-  breakCommitment,
   generateCandidateActions,
   rankCandidates,
-  resolveIntentConflicts,
   resolveDueProcedures,
   netSupportWeight,
   dueLifeReviews,
@@ -111,11 +106,13 @@ import {
   buildChronicleFromFacts,
   rewriteClaimsUnsupportedWar,
 } from "./chronicle-from-facts";
-import { buildIntentInvocation, buildIntentSocialEvent, hasActiveAgencyState, isEligibleForNpcAgency, resolveFormedNpcIntentOutcome } from "./character-agency";
+import { buildIntentInvocation, hasActiveAgencyState, isEligibleForNpcAgency, resolveFormedNpcIntentOutcome } from "./character-agency";
 import type { FormedNpcProposal } from "./character-agency";
 import { materializeCanvasProvince } from "../canvas-world";
 import { advanceWorldDynamics } from "./world-dynamics";
+import { selectDevelopmentActors } from "./world-development-scheduler";
 import { applyMilitaryEmergencyFallback } from "./military-emergency-fallback";
+import { applyCommitmentSafetyNet } from "./commitment-safety-net";
 
 export type ProgressCallback = (progress: ResolutionProgress) => void;
 
@@ -436,6 +433,17 @@ export async function resolveTurn(
         })),
       ...scoredCharacters,
     ];
+    // Background reviews have their own small allocation; player activity cannot displace them.
+    const developmentActors = selectDevelopmentActors(resolutionWorld, atStep, actorCharacterId);
+    for (const selected of developmentActors) {
+      const index = selectedCharacters.findIndex(c => c.characterId === selected.characterId);
+      if (index < 0) selectedCharacters.unshift(selected);
+      else {
+        const existing = selectedCharacters[index]!;
+        selectedCharacters.splice(index, 1);
+        selectedCharacters.unshift({ ...existing, actionAllowance: Math.max(existing.actionAllowance, selected.actionAllowance), reasons: [...selected.reasons, ...existing.reasons] });
+      }
+    }
     console.log(`${tag()} [game_master] IN: atStep=${atStep} directives=${gameMasterDirectives.length} relevantCharacters=${selectedCharacters.length}`);
 
     // ── Step 2: Life review — aging, health, incapacity, death (character-sim phase 5) ──
@@ -608,7 +616,6 @@ export async function resolveTurn(
 
     const dueThisTurn = dueCommitments(agencyWorld.commitments ?? [], atStep);
     const intents: CharacterIntent[] = [];
-    const claims: IntentClaim[] = [];
     const candidateByIntentId = new Map<string, CandidateAction>();
 
     // Brennos, freshly named for an invaded or addressed power, has no
@@ -646,11 +653,6 @@ export async function resolveTurn(
         status: "proposed", createdAtStep: atStep, reviewedAtStep: null, expiresAtStep: null,
         visibility: "private", sourceEventIds: [], resolutionReason: null,
       });
-      claims.push({
-        intentId, actorCharacterId: character.id, actionType: top.candidate.actionType,
-        requiredResource: top.candidate.requiredResource, requiredOfficeId: top.candidate.requiredOfficeId,
-        targetIds: top.candidate.targetIds, score: top.score.total, createdAtStep: atStep,
-      });
     }
 
     // "remembered" characters advance their existing coarse plan by one step
@@ -667,36 +669,21 @@ export async function resolveTurn(
     }
     agencyWorld = { ...agencyWorld, continuity: continuityAfterCoarseAdvance };
 
-    const conflictOutcomes = resolveIntentConflicts(agencyWorld, claims);
+    // docs/30: nothing below mutates `agencyWorld` any more, and there is no
+    // separate deterministic conflict-resolution pass. Every intent -- a due
+    // commitment, a pressure-driven social action, or a plot/office/economic
+    // move -- is offered to the Game Master as a formed intention through a
+    // real registered workflow (`fulfill_commitment`, `defer_commitment`,
+    // `break_commitment`, and `record_character_social_action` joined the
+    // registry alongside the workflows already offered this way). A second
+    // NPC's genuinely conflicting claim on the same resource or office is
+    // refused by that workflow's own precondition check when the Game Master
+    // actually attempts it, the same way any other command conflict is --
+    // not pre-empted by a separate priority pass before anyone gets to try.
     const resolvedIntents: CharacterIntent[] = [];
 
     for (const intent of intents) {
       const candidate = candidateByIntentId.get(intent.id)!;
-      const conflict = conflictOutcomes.get(intent.id);
-      if (conflict && !conflict.accepted) {
-        resolvedIntents.push({ ...intent, status: "blocked", resolutionReason: conflict.reason });
-        continue;
-      }
-
-      const commitment = intent.sourceCommitmentId !== null
-        ? dueThisTurn.find((c) => c.id === intent.sourceCommitmentId)
-        : undefined;
-      if (commitment && (intent.actionType === "fulfill_commitment" || intent.actionType === "defer_commitment" || intent.actionType === "break_commitment")) {
-        const result = intent.actionType === "fulfill_commitment"
-          ? fulfillCommitment(agencyWorld, commitment.id, atStep)
-          : intent.actionType === "break_commitment"
-            ? breakCommitment(agencyWorld, commitment.id, atStep, intent.rationale)
-            : deferCommitment(agencyWorld, commitment.id, atStep, intent.rationale);
-        agencyWorld = {
-          ...agencyWorld,
-          characters: [...result.characters],
-          commitments: [...result.commitments],
-          characterPressures: [...result.characterPressures],
-          material: result.material,
-        };
-        resolvedIntents.push({ ...intent, status: "executed", resolutionReason: `Commitment ${intent.actionType.replace("_commitment", "")}ed.` });
-        continue;
-      }
 
       // A formed intention that maps to a legal workflow is offered to the
       // Game Master rather than executed here. The agent is the one authority
@@ -720,22 +707,9 @@ export async function resolveTurn(
         continue;
       }
 
-      const socialEvent = buildIntentSocialEvent(candidate, atStep, gameId);
-      if (socialEvent) {
-        const applied = applySocialEvents(agencyWorld, [socialEvent], atStep, "in-progress-turn");
-        agencyWorld = applied.world;
-        const failed = applied.rejectedIds[0];
-        resolvedIntents.push({
-          ...intent,
-          status: failed ? "failed" : "executed",
-          resolutionReason: failed?.reason ?? "Applied as a direct social consequence.",
-        });
-        continue;
-      }
-
       resolvedIntents.push({ ...intent, status: "executed", resolutionReason: "No mechanical effect modeled for this action; recorded for continuity only." });
     }
-    console.log(`${tag()} [character_agency] OUT: formedIntentions=${npcFormedIntentions.length} intents=${intents.length} blocked=${resolvedIntents.filter((i) => i.status === "blocked").length}`);
+    console.log(`${tag()} [character_agency] OUT: formedIntentions=${npcFormedIntentions.length} intents=${intents.length}`);
     emit(onProgress, "character_agency", true);
 
     // ── Step 4: Game Master ────────────────────────────────────────────────
@@ -767,10 +741,15 @@ export async function resolveTurn(
       directives: gameMasterDirectives,
       selectedCharacters,
       npcProposals: npcFormedIntentions,
+      persistentPlans: true,
       playerContext: resolutionContext,
       scenarioGovernment: input.scenarioGovernment,
       scenarioChronicle: input.scenarioChronicle,
       definedActions,
+      // Off by default (docs/27): `request_capability` is the supported path
+      // for an unanticipated player intent. This is a developer-controlled
+      // rollout/testing exception, not a normal-play setting.
+      allowInventedActions: process.env.CHRONICA_ALLOW_INVENTED_ACTIONS === "true",
     });
     let newWorld: WorldState = gameMasterOutcome.world;
     let factualEvents = [
@@ -955,6 +934,42 @@ export async function resolveTurn(
       }
     }
 
+    // ── Step 6c: Deterministic commitment safety net ──────────────────────
+    //
+    // Resolving a due commitment is now the Game Master's own choice
+    // (`fulfill_commitment`/`defer_commitment`/`break_commitment`, docs/30),
+    // so a commitment it never gets to -- or chooses not to act on -- needs a
+    // backstop against sitting unresolved forever. Auto-defers only, and only
+    // once a commitment has gone unaddressed for `GRACE_WINDOW_STEPS` past its
+    // own review step; see commitment-safety-net.ts for the full rationale.
+    const commitmentSafetyNet = applyCommitmentSafetyNet(newWorld, atStep);
+    newWorld = commitmentSafetyNet.world;
+    if (commitmentSafetyNet.events.length > 0) {
+      factualEvents = [
+        ...factualEvents,
+        ...commitmentSafetyNet.events.map((event, index) => ({ ...event, id: `fact-${atStep}-commitment-safety-net-${index + 1}` })),
+      ];
+      finalWorkflowAudit = {
+        ...finalWorkflowAudit,
+        candidates: [
+          ...finalWorkflowAudit.candidates,
+          ...commitmentSafetyNet.events.map((event) => ({
+            correlationId: `commitment-safety-net-${atStep}-${event.actorId}-${event.parameters["commitmentId"]}`,
+            source: "simulator" as const,
+            sourceRef: "commitment_safety_net",
+            requestedActionId: event.actionId,
+            requestedInvocation: { actionId: event.actionId, actorId: event.actorId, parameters: event.parameters },
+            finalInvocation: { actionId: event.actionId, actorId: event.actorId, parameters: event.parameters },
+            dryRunOk: true,
+            executionOk: true,
+          })),
+        ],
+      };
+      for (const event of commitmentSafetyNet.events) {
+        console.log(`${tag()} [commitment_safety_net] actorId=${event.actorId} ${event.summary}`);
+      }
+    }
+
     newWorld = autoResolveDecidedStorylines(world, newWorld, atStep);
 
     // Background material society (docs/14 Phase 2): coarse war damage for
@@ -991,7 +1006,8 @@ export async function resolveTurn(
     // applied deterministically here, before this turn's own new actions are
     // projected, so a cancelled operation stops without touching what
     // already happened to it.
-    const cancelActionIds = batch.directives.filter((directive) => directive.kind === "cancel").map((directive) => directive.actionId);
+    const cancelledIds = batch.directives.filter((directive) => directive.kind === "cancel").map((directive) => directive.actionId);
+    const cancelActionIds = [...cancelledIds, ...resolutionWorld.actions.filter(a => cancelledIds.includes(a.sourceIntentId)).map(a => a.id)];
     const cancellation = applyCancellationDirectives(resolutionWorld.actions ?? [], resolutionWorld.operations ?? [], cancelActionIds, atStep);
 
     // Explicit revision (docs/14 Phase 6 follow-on): a "revise" directive
@@ -1323,7 +1339,7 @@ export async function resolveTurn(
     // Narrator pass
     let narratorOk = false;
     try {
-      // Player directives, rule refusals, and unsupported attempts are
+        // Rule refusals and incomplete attempts are
       // already exact, executor-derived records. Keeping them out of the
       // free-form narrator prevents a rejected action from acquiring an
       // invented institutional explanation, a completed action from being
@@ -1566,6 +1582,7 @@ export async function resolveTurn(
         })),
         capabilityRequestIds: capabilityRequests.map((request) => request.id),
       },
+      gameMasterAudit: gameMasterOutcome.auditEntries,
     });
 
     // Written only after the turn itself committed, so a capability the world

@@ -2,9 +2,7 @@ import "server-only";
 
 import type {
   CandidateAction,
-  CharacterIntentActionType,
   CharacterSelectionTier,
-  CharacterSocialEvent,
   ContinuityTier,
   ProposedInvocation,
   WorkflowAuditEntry,
@@ -13,18 +11,10 @@ import type {
 
 // Character agency execution helpers (character-sim phase 3).
 //
-// Two kinds of state a chosen action can produce, both already validated
-// before either function below is called:
-//
-//  - A material/bookkeeping change goes through a real, registered workflow
-//    Since the Game Master refactor the invocation it builds is offered to
-//    the agent as a formed intention rather than executed for it, so this
-//    still only ever builds; it never mutates anything.
-//  - A pure social consequence (a threat, an attempt at reconciliation) has
-//    no material effect and instead becomes a `CharacterSocialEvent`,
-//    applied through the exact same `applySocialEvents` ledger dialogue
-//    already uses -- one boundary for every relation-cause change in the
-//    game, chat-originated or agency-originated.
+// A chosen candidate never mutates anything directly: it becomes a
+// `ProposedInvocation` for a real, registered workflow, offered to the Game
+// Master as a formed intention (docs/30). This module only ever builds that
+// proposal; it never executes it.
 //
 // Neither path invents a target, an office, a resource, or a workflow that
 // candidate generation (`character-agency/candidates.ts`) did not already
@@ -176,67 +166,41 @@ export function buildIntentInvocation(candidate: CandidateAction, world: WorldSt
         },
       };
     }
+    // docs/30: these three used to be executed directly by the pipeline
+    // (character-agency/commitments.ts's plain functions); they are now
+    // registered workflows (packages/shared/.../npc-agency.ts) the Game
+    // Master must actually invoke, like every other formed intention.
+    case "fulfill_commitment":
+    case "defer_commitment":
+    case "break_commitment": {
+      if (candidate.sourceCommitmentId === null) return null;
+      return {
+        actionId: candidate.actionType,
+        actorId: candidate.actorCharacterId,
+        parameters: candidate.actionType === "fulfill_commitment"
+          ? { commitmentId: candidate.sourceCommitmentId }
+          : { commitmentId: candidate.sourceCommitmentId, reason: candidate.rationale.slice(0, 240) },
+      };
+    }
+    // docs/30: these used to be applied immediately via buildIntentSocialEvent
+    // the instant a candidate scored highest; they are now offered as a
+    // formed intention through the registered record_character_social_action
+    // workflow instead, so the target, kind, and reason are the Game
+    // Master's call, not a pre-computed effect.
+    case "threaten":
+    case "reconcile":
+    case "offer_favour":
+    case "negotiate":
+    case "publicly_oppose": {
+      const targetCharacterId = candidate.targetIds[0];
+      if (targetCharacterId === undefined) return null;
+      return {
+        actionId: "record_character_social_action",
+        actorId: candidate.actorCharacterId,
+        parameters: { targetCharacterId, kind: candidate.actionType, reasonLabel: candidate.rationale.slice(0, 200) },
+      };
+    }
     default:
       return null;
   }
-}
-
-/** Dimension + direction a pure social action moves, and the social-event kind it is recorded as. */
-const SOCIAL_ACTION_EFFECT: Partial<Record<CharacterIntentActionType, {
-  kind: CharacterSocialEvent["kind"];
-  dimension: "affection" | "trust" | "fear" | "respect" | "obligation";
-  delta: number;
-}>> = {
-  threaten: { kind: "insult", dimension: "fear", delta: 15 },
-  reconcile: { kind: "favour", dimension: "affection", delta: 12 },
-  offer_favour: { kind: "favour", dimension: "affection", delta: 10 },
-  negotiate: { kind: "conversation", dimension: "trust", delta: 6 },
-  publicly_oppose: { kind: "insult", dimension: "respect", delta: -12 },
-};
-
-/**
- * A pure social candidate becomes a `CharacterSocialEvent` applied through
- * the same ledger dialogue uses -- never a bespoke mutation path. Returns
- * null for an action with no target or no modeled social effect (e.g. wait,
- * prepare, travel): those are legitimate, deliberate no-ops this phase.
- */
-export function buildIntentSocialEvent(
-  candidate: CandidateAction,
-  atStep: number,
-  gameId: string,
-): CharacterSocialEvent | null {
-  const effect = SOCIAL_ACTION_EFFECT[candidate.actionType];
-  if (effect === undefined || candidate.targetIds.length === 0) return null;
-  const targetId = candidate.targetIds[0]!;
-  const eventId = `intent-social-${candidate.actorCharacterId}-${atStep}`;
-  return {
-    id: eventId,
-    gameId,
-    sourceTurnId: null,
-    sourceSessionId: null,
-    sourceMessageId: null,
-    participantCharacterIds: [candidate.actorCharacterId, targetId],
-    kind: effect.kind,
-    visibility: "polity",
-    knownByCharacterIds: [candidate.actorCharacterId, targetId],
-    relationCauses: [{
-      subjectCharacterId: targetId,
-      targetCharacterId: candidate.actorCharacterId,
-      label: candidate.expectedEffectSummary,
-      score: effect.delta,
-      decayPerYearBps: 3_000,
-      dimensions: { [effect.dimension]: effect.delta },
-    }],
-    knowledgeClaims: [],
-    proposedBeliefs: [],
-    pressureChanges: [],
-    commitmentProposal: null,
-    introducedCharacter: null,
-    introducedProfile: null,
-    createdAtStep: atStep,
-    appliedAtStep: null,
-    appliedInTurnId: null,
-    status: "proposed",
-    rejectionReason: null,
-  };
 }

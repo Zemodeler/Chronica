@@ -158,6 +158,16 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
       if (!force) return null;
       const province = world.map.provinces.find((p) => p.id === params.destinationProvinceId);
       if (!province) return null;
+      if (force.locationId === params.destinationProvinceId) {
+        return {
+          world,
+          result: {
+            summary: `${force.name} is already at ${province.name}.`,
+            applied: true,
+            noOp: true,
+          },
+        };
+      }
       return {
         world: {
           ...world,

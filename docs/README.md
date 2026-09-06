@@ -22,6 +22,13 @@ Chronica is a single-player, AI-driven grand strategy game seen through one char
 18. [Interrupt and the Chronicles button](22-interrupt-and-chronicles-ui.md)
 19. [Scenarios, diagnostics, and the test matrix](23-scenarios-diagnostics-and-tests.md)
 20. [The Game Master](24-game-master.md)
+21. [Living world and expressive narration](25-living-world-and-narration.md)
+22. [Continuing plans and personal time](26-player-plans-and-personal-time.md)
+23. [The command contract and taxonomy](27-command-contract-and-taxonomy.md)
+24. [Diplomacy and map/control: a command-contract audit](28-diplomacy-and-map-control-audit.md)
+25. [Military reaction and political choice](29-military-reaction-and-political-choice.md)
+26. [NPC action selection: from deterministic execution to AI choice](30-npc-action-selection.md)
+27. [Legacy retirement: closing out the migration's final step](31-legacy-retirement.md)
 
 Confirmed decisions are stated directly. Future possibilities and unresolved choices are kept in the roadmap or open-decisions document.
 

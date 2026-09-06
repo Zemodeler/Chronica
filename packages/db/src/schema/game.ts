@@ -163,6 +163,14 @@ export const turns = pgTable("turns", {
   workflowAudit: jsonb("workflow_audit").$type<import("@chronica/shared").WorkflowAuditBlob>(),
   /** Structured Game Master turn report plus the factual event log it was built from. */
   gameMasterReport: jsonb("game_master_report").$type<import("@chronica/shared").CommittedGameMasterReport>(),
+  /**
+   * Per-call audit trail from the current GM tool loop (docs/27) -- policy
+   * violation, dry-run/execution outcome, and final invocation for every
+   * attempted call this turn. Distinct from `workflowAudit`, which is the
+   * older Workflow-Manager blob shape the GM refactor superseded; nothing
+   * writes that field for turns resolved by the current pipeline.
+   */
+  gameMasterAudit: jsonb("game_master_audit").$type<readonly import("@chronica/shared").WorkflowAuditEntry[]>(),
 }, (table) => [
   uniqueIndex("turns_game_index_unique").on(table.gameId, table.index),
   index("turns_claimable_idx").on(table.status, table.claimExpiresAt),
