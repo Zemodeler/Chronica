@@ -11,8 +11,8 @@ import { ElapsedStepSchema, EntityIdSchema } from "../material-state";
 // and, if the capability is warranted, writes a real typed workflow.
 //
 // The attempted action is recorded as unresolved/unsupported so the turn stays
-// honest about it: the Chronicle may report the factual limitation, and the
-// audit shows exactly what was asked for and why nothing happened.
+// honest about it. It remains in the developer audit, which shows exactly what
+// was asked for and why nothing happened; it is never player-facing history.
 
 /**
  * Shapes that would make a request executable rather than descriptive. A
@@ -107,7 +107,7 @@ export function recordCapabilityRequest(
   return { id, atStep, request, resolution: RECORDED_CAPABILITY_RESOLUTION };
 }
 
-/** The exact, factual sentence a Chronicle entry may carry for an unsupported attempt. */
+/** The exact, factual sentence kept in the developer audit for an unsupported attempt. */
 export function capabilityLimitationFact(request: CapabilityRequest, actorName: string): string {
   return `${actorName} attempted something the simulation does not model: ${request.requestedIntent} No world change followed, and the attempt is recorded as unresolved.`;
 }

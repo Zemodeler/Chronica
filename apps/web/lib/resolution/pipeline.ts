@@ -55,6 +55,7 @@ import {
   chronicleHeadline,
   humanizeRefusalReason,
   orderNounPhrase,
+  describePoliticalQuestion,
   stripEngineJargon,
   buildCurrentDispatch,
   foldTurnIntoCampaignMemory,
@@ -114,6 +115,7 @@ import { buildIntentInvocation, buildIntentSocialEvent, hasActiveAgencyState, is
 import type { FormedNpcProposal } from "./character-agency";
 import { materializeCanvasProvince } from "../canvas-world";
 import { advanceWorldDynamics } from "./world-dynamics";
+import { applyMilitaryEmergencyFallback } from "./military-emergency-fallback";
 
 export type ProgressCallback = (progress: ResolutionProgress) => void;
 
@@ -148,29 +150,25 @@ function stripToJson(text: string): string {
   return s;
 }
 
-const BACKGROUND_FLAVOR_QUOTA = 3;
-
 function capChronicleVisibility(entries: readonly ChronicleEntryInput[], maxVisible: number): ChronicleEntryInput[] {
   const relevancyWeight = (tier: ChronicleEntryInput["playerRelevance"]): number =>
     tier === "high" ? 3 : tier === "medium" ? 2 : tier === "low" ? 1 : 0;
   const isPlayerAction = (entry: ChronicleEntryInput) => entry.scope === "directive" && entry.sourceDirector === "player";
-  const rankByRelevance = (list: readonly ChronicleEntryInput[]) =>
-    [...list].sort((a, b) => {
-      const weightDiff = relevancyWeight(b.playerRelevance) - relevancyWeight(a.playerRelevance);
-      if (weightDiff !== 0) return weightDiff;
-      return (a.simulatedDurationDays ?? 1) - (b.simulatedDurationDays ?? 1);
-    });
-
-  const alwaysShown = entries.filter(isPlayerAction);
-  const rest = entries.filter((entry) => !isPlayerAction(entry));
-  // Every entry that actually changed world state earns its place on its own
-  // merit -- it is never traded away for background flavor. Only
-  // consequence-free color competes for the small remaining quota.
-  const material = rankByRelevance(rest.filter((entry) => entry.materialConsequence));
-  const flavor = rankByRelevance(rest.filter((entry) => !entry.materialConsequence));
-  const flavorBudget = Math.min(BACKGROUND_FLAVOR_QUOTA, Math.max(0, maxVisible - material.length));
-
-  return [...alwaysShown, ...material, ...flavor.slice(0, flavorBudget)];
+  // The reader sees one deliberately edited page of history, not every event
+  // the simulation produced. Player and world entries compete for the same
+  // twelve slots; a player entry wins a tie, but a low-stakes player action
+  // can still yield to a more relevant war, death, or political upheaval.
+  return [...entries]
+    .sort((a, b) => {
+      const relevanceDiff = relevancyWeight(b.playerRelevance) - relevancyWeight(a.playerRelevance);
+      if (relevanceDiff !== 0) return relevanceDiff;
+      const playerDiff = Number(isPlayerAction(b)) - Number(isPlayerAction(a));
+      if (playerDiff !== 0) return playerDiff;
+      const materialDiff = Number(b.materialConsequence) - Number(a.materialConsequence);
+      if (materialDiff !== 0) return materialDiff;
+      return (a.simulatedDurationDays ?? 1) - (b.simulatedDurationDays ?? 1) || a.sequence - b.sequence;
+    })
+    .slice(0, maxVisible);
 }
 
 function estimateWorkflowDurationDays(workflows: readonly Pick<ProposedInvocation, "actionId">[]): number {
@@ -262,7 +260,7 @@ function autoResolveDecidedStorylines(before: WorldState, after: WorldState, atS
     return {
       ...storyline,
       phase: "resolved",
-      nextDevelopment: "",
+      nextDevelopment: `Settled: control passed to ${polityName(newController)}.`,
       history: [...storyline.history, `Control of ${provinceName(storyline.provinceId)} passed to ${polityName(newController)}, settling this storyline.`].slice(-24),
       updatedAtStep: atStep,
     };
@@ -426,6 +424,8 @@ export async function resolveTurn(
         .map((leader) => ({
           characterId: leader.characterId,
           tier: "important" as const,
+          relevanceScore: 700,
+          actionAllowance: 5,
           reasons: [
             leader.trigger === "invaded"
               ? `${leader.polityName} has a foreign army on its ground and has just found a voice to answer with`
@@ -773,7 +773,7 @@ export async function resolveTurn(
       definedActions,
     });
     let newWorld: WorldState = gameMasterOutcome.world;
-    const factualEvents = [
+    let factualEvents = [
       ...gameMasterOutcome.events,
       ...worldDynamics.events.map((event, index) => ({ ...event, id: `fact-${atStep}-${gameMasterOutcome.events.length + index + 1}` })),
     ];
@@ -907,6 +907,54 @@ export async function resolveTurn(
       }
     }
 
+    // ── Step 6b: Deterministic military-emergency fallback ────────────────
+    //
+    // The Game Master is prompted to answer an invasion, but a prompt is not
+    // a guarantee: it can spend its budget elsewhere, rank a lower-value
+    // action higher, or fail outright (model_stopped / a budget limit /
+    // a provider error). An invaded polity with a leader and no response of
+    // its own by this point in the turn gets one here, deterministically --
+    // never in place of a real response the Game Master or a political
+    // procedure already gave it this turn, only in the absence of one.
+    const respondedThisTurn: ProposedInvocation[] = [
+      ...gameMasterOutcome.executedInvocations,
+      ...politicalInvocations,
+      ...immediatePoliticalInvocations,
+    ];
+    const militaryFallback = applyMilitaryEmergencyFallback(newWorld, atStep, respondedThisTurn);
+    newWorld = militaryFallback.world;
+    if (militaryFallback.events.length > 0) {
+      factualEvents = [
+        ...factualEvents,
+        ...militaryFallback.events.map((event, index) => ({ ...event, id: `fact-${atStep}-fallback-${index + 1}` })),
+      ];
+    }
+    for (const entry of militaryFallback.invocations) {
+      allWorkflowLog = [...allWorkflowLog, { invocation: entry.invocation, outcome: entry.ok ? { ok: true, result: { summary: entry.summary } } : { ok: false, message: entry.summary } }];
+      finalWorkflowAudit = {
+        ...finalWorkflowAudit,
+        candidates: [
+          ...finalWorkflowAudit.candidates,
+          {
+            correlationId: `military-fallback-${atStep}-${entry.invocation.actorId}`,
+            source: "simulator" as const,
+            sourceRef: "military_emergency_fallback",
+            requestedActionId: entry.invocation.actionId,
+            requestedInvocation: entry.invocation,
+            finalInvocation: entry.invocation,
+            dryRunOk: entry.ok,
+            executionOk: entry.ok,
+            ...(entry.ok ? {} : { executionReason: entry.summary }),
+          },
+        ],
+      };
+      if (entry.ok) {
+        console.log(`${tag()} [military_emergency_fallback] actorId=${entry.invocation.actorId} actionId=${entry.invocation.actionId} summary="${entry.summary}"`);
+      } else {
+        console.log(`${tag()} [military_emergency_fallback] no legal response available for actorId=${entry.invocation.actorId}: ${entry.summary}`);
+      }
+    }
+
     newWorld = autoResolveDecidedStorylines(world, newWorld, atStep);
 
     // Background material society (docs/14 Phase 2): coarse war damage for
@@ -1010,7 +1058,16 @@ export async function resolveTurn(
       atStep,
       isLongRunningAction: (actionId) => estimateWorkflowDurationDays([{ actionId }]) >= 14,
     });
-    const orderRefusalChronicle: ChronicleEntryInput[] = orderProjection.refusals.map((refusal: OrderRefusalFact) => {
+    // A named refusal aftermath is the richer record of the same failed
+    // request. Do not also print the generic engine-only refusal beside it.
+    const refusalsWithNamedAftermath = new Set(
+      factualEvents
+        .filter((event) => event.actionId === "record_refusal_aftermath")
+        .map((event) => [String(event.parameters["requesterCharacterId"]), String(event.parameters["rejectedActionId"])].join("::")),
+    );
+    const orderRefusalChronicle: ChronicleEntryInput[] = orderProjection.refusals
+      .filter((refusal: OrderRefusalFact) => !refusalsWithNamedAftermath.has([refusal.actorId, refusal.actionId].join("::")))
+      .map((refusal: OrderRefusalFact) => {
       const actor = newWorld.characters.find((character) => character.id === refusal.actorId);
       const actorName = actor?.name ?? refusal.actorId;
       // A refusal is history too, and is written as history: about the deed
@@ -1018,13 +1075,13 @@ export async function resolveTurn(
       // fact that nothing followed is exact; the reason is the engine's own,
       // restated in plain words rather than in the executor's.
       const noun = orderNounPhrase(refusal.actionId);
-      const verb = refusal.kind === "authority" ? "was refused him" : "came to nothing";
+      const verb = refusal.kind === "authority" ? "was refused him" : "found no ears";
       return {
         sequence: 0,
         scope: "order_refusal",
         scopeRef: `${refusal.actorId}:${refusal.actionId}:${atStep}`,
         audience: "all_players",
-        body: `${actorName} pressed for ${noun}, and it ${verb}: ${humanizeRefusalReason(refusal.reason)}. Nothing in the world moved on account of it.`,
+        body: `${actorName} pressed for ${noun}, but it ${verb}: ${humanizeRefusalReason(refusal.reason)}. The matter went no further.`,
         atStep,
         materialConsequence: false,
         simulatedDurationDays: 1,
@@ -1078,18 +1135,18 @@ export async function resolveTurn(
         : undefined;
       const outcome = procedure.outcome ?? "failed";
       const weights = netSupportWeight({ characters: newWorld.characters, material: newWorld.material }, procedure);
-      const readableType = procedure.type.replace(/_/g, " ");
-      const outcomeVerb = outcome === "passed" ? "succeeds" : outcome === "blocked" ? "is blocked" : outcome === "withdrawn" ? "is withdrawn" : "fails";
+      const question = describePoliticalQuestion(newWorld, procedure);
+      const outcomeVerb = outcome === "passed" ? "approves" : outcome === "blocked" ? "sets aside" : outcome === "withdrawn" ? "withdraws" : "rejects";
       politicalChronicle.push({
         sequence: 0,
         scope: "political_procedure",
         scopeRef: procedure.id,
         audience: procedure.visibility === "private" ? "knowledge_scoped" : "all_players",
-        body: stripEngineJargon(`${sponsor?.name ?? "A sponsor"}'s ${readableType} ${outcomeVerb}${institution ? ` before the ${institution.name}` : ""}. ${procedure.outcomeReason ?? ""}`.trim()),
+        body: stripEngineJargon(`${institution?.name ?? "The authority"} ${outcomeVerb} the question of ${question}, brought forward by ${sponsor?.name ?? "a sponsor"}. ${procedure.outcomeReason ?? ""}`.trim()),
         atStep,
         materialConsequence: outcome === "passed",
         simulatedDurationDays: 1,
-        title: chronicleHeadline(`The ${readableType} of ${sponsor?.name ?? "a sponsor"} ${outcomeVerb}`),
+        title: chronicleHeadline(`${institution?.name ?? "The authority"} ${outcomeVerb} the question of ${question}`),
         knowledgeStatus: "confirmed",
         participants: sponsor ? [{ name: sponsor.name, role: "sponsor" }] : [],
         institutions: institution ? [{ name: institution.name }] : [],
@@ -1133,7 +1190,7 @@ export async function resolveTurn(
       const polity = procedure.subjectKind === "polity" && procedure.subjectId
         ? newWorld.map.polities.find((p) => p.id === procedure.subjectId)
         : undefined;
-      const readableType = procedure.type.replace(/_/g, " ");
+      const question = describePoliticalQuestion(newWorld, procedure);
       const against = polity?.name ?? institution?.name ?? "the ruling authority";
       politicalChronicle.push({
         sequence: 0,
@@ -1141,12 +1198,12 @@ export async function resolveTurn(
         scopeRef: procedure.id,
         audience: procedure.visibility === "private" ? "knowledge_scoped" : "all_players",
         body: procedure.sponsorCharacterId === "system"
-          ? `Opposition rises against ${against}: a ${readableType} opens${institution ? ` before the ${institution.name}` : ""}.`
-          : `${newWorld.characters.find((c) => c.id === procedure.sponsorCharacterId)?.name ?? "A sponsor"} opens a ${readableType} against ${against}.`,
+          ? `Opposition rises against ${against}: ${question}${institution ? ` is put before the ${institution.name}` : " is now under consideration"}.`
+          : `${newWorld.characters.find((c) => c.id === procedure.sponsorCharacterId)?.name ?? "A sponsor"} brings ${question}${institution ? ` before the ${institution.name}` : ""}.`,
         atStep,
         materialConsequence: false,
         simulatedDurationDays: 1,
-        title: procedure.sponsorCharacterId === "system" ? `Opposition Rises Against ${against}` : chronicleHeadline(`A New ${readableType} Opens`),
+        title: procedure.sponsorCharacterId === "system" ? `Opposition Rises Against ${against}` : chronicleHeadline(`A Decision on ${question}`),
         knowledgeStatus: "confirmed",
         institutions: institution ? [{ name: institution.name }] : [],
         playerRelevance: procedure.eligibleParticipantIds.includes(actorCharacterId) ? "high" : "medium",
@@ -1251,7 +1308,10 @@ export async function resolveTurn(
       ...orderRefusalChronicle,
       ...cancellationChronicle,
       ...revisionChronicle,
-    ], DEFAULT_MAX_CHRONICLE_ENTRIES_PER_TURN));
+    // Reserve one of the twelve visible Chronicle slots for the dispatch
+    // header appended below. Player and world events therefore share the
+    // remaining eleven slots rather than quietly producing a thirteenth row.
+    ], Math.max(0, DEFAULT_MAX_CHRONICLE_ENTRIES_PER_TURN - 1)));
 
     if (displayPatch && chronicleInputs.length > 0) {
       const lastIdx = chronicleInputs.length - 1;
@@ -1271,7 +1331,12 @@ export async function resolveTurn(
       // being narrated as though it had an effect.
       const narratorTargets = chronicleInputs
         .map((entry, index) => ({ entry, index }))
-        .filter(({ entry }) => !NARRATOR_EXEMPT_SCOPES.has(entry.scope));
+        // Naming a pre-existing leader is an identity update, not an event in
+        // which that person comes into being. Its deterministic wording is
+        // already reader-facing, so keep it out of free-form narration where
+        // it could turn into a fictional "emergence" or new actor.
+        .filter(({ entry }) => !NARRATOR_EXEMPT_SCOPES.has(entry.scope)
+          && !(entry.factActionIds?.length === 1 && entry.factActionIds[0] === "rename_character"));
       const narratorEntries: NarratorEntry[] = narratorTargets.map(({ entry: e }) => ({
         body: e.body,
         isPlayerAction: e.scope === "directive",

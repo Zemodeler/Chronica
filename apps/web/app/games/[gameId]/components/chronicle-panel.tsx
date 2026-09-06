@@ -330,6 +330,27 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
               </p>
             )}
 
+            {/* A resolved turn can legitimately have no player-facing news --
+                for example, when it contained only internal audit records.
+                It must still be possible to acknowledge the turn and move on. */}
+            {!hasEntries && !loading && !notYetAvailable && !error && phase === "news" && (
+              <article style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <p style={{ color: "var(--text-muted)", fontSize: "0.9375rem", margin: 0 }}>
+                  No reportable events occurred this turn.
+                </p>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    className="chat-message-send"
+                    onClick={() => { void handleDone(); }}
+                    disabled={marking}
+                  >
+                    {marking ? "Closing…" : "Done reading"}
+                  </button>
+                </div>
+              </article>
+            )}
+
             {currentEntry && (
               <article style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
                 <EntryHeader entry={currentEntry} />

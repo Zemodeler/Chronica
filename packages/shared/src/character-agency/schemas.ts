@@ -278,5 +278,9 @@ export type CharacterSelectionTier = z.infer<typeof CharacterSelectionTierSchema
 export interface SelectedCharacter {
   readonly characterId: string;
   readonly tier: CharacterSelectionTier;
+  /** Deterministic relevance score used to allocate this turn's agency. */
+  readonly relevanceScore: number;
+  /** Number of state-backed actions this NPC may take during this turn. */
+  readonly actionAllowance: number;
   readonly reasons: readonly string[];
 }

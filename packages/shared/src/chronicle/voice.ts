@@ -43,6 +43,10 @@ const ENGINE_PHRASES: readonly (readonly [RegExp, string])[] = [
 export function humanizeIdentifiers(text: string): string {
   return text
     .replace(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g, (token) => token.replace(/_/g, " "))
+    // Long, lower-case hyphenated tokens are generated ids, not historical
+    // prose (e.g. `senate-war-account-step6`). Do not make them look merely
+    // less technical; remove the leaked identifier from reader-facing text.
+    .replace(/\b[a-z][a-z0-9]*(?:-[a-z0-9]+){2,}\b/g, "the proposed measure")
     .replace(/\b[a-z]+(?:[A-Z][a-z0-9]*)+\b/g, (token) => token.replace(/([A-Z])/g, (letter) => ` ${letter.toLowerCase()}`));
 }
 
@@ -70,6 +74,12 @@ export function titleCase(text: string): string {
  */
 export function humanizeRefusalReason(reason: string): string {
   const text = humanizeIdentifiers(reason.trim());
+  // A guessed character id is an engine-level lookup failure, but it reads
+  // terribly when repeated verbatim in the Chronicle.  Preserve the actual
+  // fact -- the named person was absent -- without exposing an internal id.
+  if (/^no character exists with the id /i.test(text)) {
+    return "the name found no match in the rolls";
+  }
   if (/cannot be applied to the current world state/i.test(text)) {
     return "circumstances as they stood did not admit it";
   }
@@ -138,6 +148,7 @@ const ORDER_NOUNS: Readonly<Record<string, string>> = {
   add_gold: "the payment",
   remove_gold: "the levy of money",
   arrange_marriage_alliance: "the marriage",
+  rename_character: "the renaming",
 };
 
 export function orderNounPhrase(actionId: string): string {

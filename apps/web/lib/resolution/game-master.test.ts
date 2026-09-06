@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createMockAdapter, type MockToolStep } from "@chronica/ai";
 import { firstPunicWarScenario } from "@chronica/db";
-import { WorldStateSchema, type WorldState } from "@chronica/shared";
+import { WorldStateSchema, projectOrdersAndOperations, type WorldState } from "@chronica/shared";
 import { runGameMaster } from "./game-master";
+import { buildChronicleFromFacts } from "./chronicle-from-facts";
 
 // The loop's job is to be boring and safe: forward tool calls, hand back exact
 // engine results, and stop. These tests drive it with a scripted model so the
@@ -220,6 +221,57 @@ describe("the game master loop", () => {
     expect(outcome.report).toBeNull();
     // The levy really happened; it is not rolled back because the report never came.
     expect(outcome.world.material.forces.some((force) => force.name === "Legio IX")).toBe(true);
+  });
+
+  it("repairs a placeholder force id end to end without creating a false Chronicle refusal", async () => {
+    // This is the full path behind the player-facing card: a model first
+    // emits the bad `force-?` placeholder, receives the deterministic lookup
+    // failure, then uses the real id it was given. The audit keeps the error
+    // for diagnosis, while the persistent-order and Chronicle layers receive
+    // only the actual march.
+    const outcome = await run([
+      { toolCalls: [{ name: "move_force", arguments: { actorId: PLAYER, forceId: "force-?", destinationProvinceId: SICILY_NORTHWEST } }] },
+      { toolCalls: [{ name: "move_force", arguments: { actorId: PLAYER, forceId: "legio-i", destinationProvinceId: SICILY_NORTHWEST } }] },
+      finish({
+        directiveOutcomes: [{ directiveId: "directive-0", outcome: "carried_out", reason: "Legio I marched west.", factRefs: ["fact-1-1"] }],
+        events: [],
+        openThreads: [],
+        turnSummary: "Legio I marched west.",
+      }),
+      finish({
+        directiveOutcomes: [{ directiveId: "directive-0", outcome: "carried_out", reason: "Legio I marched west.", factRefs: ["fact-1-1"] }],
+        events: [],
+        openThreads: [],
+        turnSummary: "Legio I marched west.",
+      }),
+    ]);
+
+    expect(outcome.report).not.toBeNull();
+    expect(outcome.executedInvocations).toEqual([
+      { actionId: "move_force", actorId: PLAYER, parameters: { forceId: "legio-i", destinationProvinceId: SICILY_NORTHWEST } },
+    ]);
+
+    const projection = projectOrdersAndOperations({
+      previousActions: [],
+      previousOperations: [],
+      candidates: outcome.auditEntries,
+      turnIndex: 1,
+      atStep: 1,
+      isLongRunningAction: (actionId) => actionId === "move_force",
+    });
+    expect(projection.refusals).toEqual([]);
+
+    const entries = buildChronicleFromFacts({
+      world: outcome.world,
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      events: outcome.events,
+      report: outcome.report,
+      directiveIds: ["directive-0"],
+    });
+    expect(entries).toHaveLength(1);
+    expect(`${entries[0]?.title} ${entries[0]?.body}`).not.toContain("force-?");
+    expect(`${entries[0]?.title} ${entries[0]?.body}`).not.toMatch(/refused|nothing in the world answers/i);
   });
 
   it("survives a provider failure with the stage it had reached", async () => {

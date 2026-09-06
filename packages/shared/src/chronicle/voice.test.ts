@@ -6,6 +6,10 @@ describe("humanizeIdentifiers", () => {
     expect(humanizeIdentifiers("sponsors a council_deliberation procedure")).toBe("sponsors a council deliberation procedure");
   });
 
+  it("removes a leaked hyphenated internal identifier rather than presenting it as a decision", () => {
+    expect(humanizeIdentifiers("senate-war-account-step6")).toBe("the proposed measure");
+  });
+
   it("leaves proper names and ordinary prose alone", () => {
     expect(humanizeIdentifiers("Lucius Aemilius Barbula opened a debate")).toBe("Lucius Aemilius Barbula opened a debate");
   });
@@ -29,6 +33,11 @@ describe("humanizeRefusalReason", () => {
     expect(humanizeRefusalReason("Refused: a consul may not appoint a dictator alone."))
       .toBe("a consul may not appoint a dictator alone");
   });
+
+  it("does not leak a guessed character id into the Chronicle", () => {
+    expect(humanizeRefusalReason('No character exists with the id "roman-field-army".'))
+      .toBe("the name found no match in the rolls");
+  });
 });
 
 describe("chronicleHeadline", () => {
@@ -47,6 +56,10 @@ describe("chronicleHeadline", () => {
 
   it("carries no identifier into a title", () => {
     expect(chronicleHeadline("Lucius sponsors a council_deliberation procedure")).not.toContain("_");
+  });
+
+  it("does not turn a leaked hyphenated id into a headline", () => {
+    expect(chronicleHeadline("The senate-war-account-step6 refused")).not.toMatch(/senate-war-account-step6|step6/i);
   });
 });
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario, punicWarsScenario } from "@chronica/db";
 import { WorldStateSchema, type WorldState } from "../world/world-state";
 import { createGameMasterSession } from "./session";
-import { FINISH_TURN_TOOL, REQUEST_CAPABILITY_TOOL, buildGameMasterTools } from "./tools";
+import { FINISH_TURN_TOOL, RECORD_REFUSAL_AFTERMATH_TOOL, REQUEST_CAPABILITY_TOOL, buildGameMasterTools } from "./tools";
 
 // The staged tool loop is the whole safety story of the Game Master
 // architecture, so these tests are written from the outside: give the session
@@ -53,6 +53,7 @@ describe("game master tool surface", () => {
     expect(names.has("create_force")).toBe(true);
     expect(names.has(REQUEST_CAPABILITY_TOOL)).toBe(true);
     expect(names.has(FINISH_TURN_TOOL)).toBe(true);
+    expect(names.has(RECORD_REFUSAL_AFTERMATH_TOOL)).toBe(true);
 
     // No generic mutation surface exists for the model to reach for.
     for (const forbidden of ["apply_patch", "set_state", "invent_workflow", "create_workflow", "write_world"]) {
@@ -60,6 +61,60 @@ describe("game master tool surface", () => {
     }
     // The deterministic engine's own entry point is not offered at all.
     expect(names.has("resolve_battle")).toBe(false);
+  });
+});
+
+describe("a named refusal aftermath", () => {
+  it("gives a real refusal a named voice and records the relationship damage", () => {
+    const gm = session();
+    const refusal = gm.invoke(call("remove_gold", {
+      actorId: PLAYER,
+      accountId: "hanno-purse",
+      amount: 100,
+      reason: "A confiscation ordered without Carthaginian consent.",
+    }));
+
+    expect(refusal.ok).toBe(false);
+    expect(refusal.refusalId).toBeDefined();
+    expect(refusal.factual).toContain(RECORD_REFUSAL_AFTERMATH_TOOL);
+
+    const aftermath = gm.invoke(call(RECORD_REFUSAL_AFTERMATH_TOOL, {
+      refusalId: refusal.refusalId,
+      refuserCharacterId: "quintus-fabius",
+      reason: "The Senate will not fund a commander's private quarrel.",
+      quote: "ROME NON REGEM HABET.",
+    }));
+
+    expect(aftermath.ok).toBe(true);
+    expect(aftermath.factId).toBeDefined();
+    expect(aftermath.factual).toContain("ROME NON REGEM HABET");
+    const marcus = gm.stagedWorld.characters.find((character) => character.id === PLAYER)!;
+    const cause = marcus.relations.find((relation) => relation.subjectCharacterId === "quintus-fabius")?.causes[0];
+    expect(cause?.label).toContain("private quarrel");
+    expect(cause?.dimensions).toMatchObject({ trust: -8, respect: -12 });
+    expect(gm.result().events.find((event) => event.id === aftermath.factId)?.materialConsequence).toBe(false);
+  });
+
+  it("never allows a bad id to acquire a fictional speaker", () => {
+    const gm = session();
+    const mistaken = gm.invoke(call("create_force", {
+      actorId: PLAYER,
+      polityId: "atlantis",
+      locationProvinceId: LATIUM,
+      name: "Phantom Legion",
+      size: 4_000,
+      kind: "infantry",
+    }));
+
+    expect(mistaken.refusalId).toBeUndefined();
+    const fabricated = gm.invoke(call(RECORD_REFUSAL_AFTERMATH_TOOL, {
+      refusalId: "refusal-1-1",
+      refuserCharacterId: "quintus-fabius",
+      reason: "Because no one trusted the maps.",
+      quote: "Not even Neptune keeps accounts in Atlantis.",
+    }));
+    expect(fabricated.ok).toBe(false);
+    expect(JSON.stringify(gm.stagedWorld)).toContain("marcus-atilius");
   });
 });
 
@@ -245,10 +300,46 @@ describe("the capability-gap safeguard", () => {
     // It is on the factual record as an attempt with no material consequence.
     const gap = result.events.find((event) => event.kind === "capability_gap");
     expect(gap?.materialConsequence).toBe(false);
-    // Recorded as history: the attempt was made and went nowhere. The reader
-    // is never told about the machine that failed to model it.
-    expect(gap?.summary).toContain("It went no further");
-    expect(gap?.summary).not.toMatch(/simulation|model|workflow|world change/i);
+    // An internal audit record: it never becomes player-facing history.
+    expect(gap?.summary).toContain("requested an unsupported capability");
+    expect(gap?.summary).toContain("No world change was applied");
+  });
+
+  it("requires one validated repair attempt before the turn can finish", () => {
+    const gm = session();
+    const capability = gm.invoke(call(REQUEST_CAPABILITY_TOOL, {
+      requestedIntent: "Gaius wants to establish a veteran colony on Roman land.",
+      whyNoRegisteredToolFits: "The requested colony mechanics are not yet modelled.",
+      actorId: PLAYER,
+      targetEntityIds: [LATIUM],
+      proposedToolName: "found_veteran_colony",
+      proposedParameters: [],
+      expectedStateEffect: "A permanent colony is established.",
+      safetyConstraints: [],
+      scenarioContext: "Rome is rewarding veterans.",
+    }));
+    expect(capability.ok).toBe(true);
+
+    const blocked = gm.invoke(call(FINISH_TURN_TOOL, {
+      report: { directiveOutcomes: [], events: [], openThreads: [], turnSummary: "The turn ends." },
+    }));
+    expect(blocked.ok).toBe(false);
+    expect(blocked.factual).toContain("repair these unsupported attempts");
+
+    const repair = gm.invoke(call("create_force", {
+      actorId: PLAYER,
+      polityId: ROME,
+      locationProvinceId: LATIUM,
+      name: "Veteran Levy",
+      size: 4_000,
+      kind: "infantry",
+    }));
+    expect(repair.ok).toBe(true);
+
+    const afterRepair = gm.invoke(call(FINISH_TURN_TOOL, {
+      report: { directiveOutcomes: [], events: [], openThreads: [], turnSummary: "The turn ends." },
+    }));
+    expect(afterRepair.factual).not.toContain("repair these unsupported attempts");
   });
 });
 

@@ -29,7 +29,7 @@ import { GAME_MASTER_READ_TOOLS, type AnyReadToolDefinition } from "./read-tools
 // player who does something the designers never anticipated deserves a world
 // that answers rather than a note saying the attempt was unsupported.
 
-export type GameMasterToolKind = "read" | "action" | "capability" | "finish" | "define";
+export type GameMasterToolKind = "read" | "action" | "capability" | "finish" | "define" | "aftermath";
 
 export interface GameMasterToolDefinition {
   readonly name: string;
@@ -43,6 +43,7 @@ export const REQUEST_CAPABILITY_TOOL = "request_capability";
 export const FINISH_TURN_TOOL = "finish_turn";
 export const DEFINE_ACTION_TOOL = "define_action";
 export const INVOKE_DEFINED_ACTION_TOOL = "invoke_defined_action";
+export const RECORD_REFUSAL_AFTERMATH_TOOL = "record_refusal_aftermath";
 
 /**
  * Workflows the deterministic engine invokes for itself. They are excluded
@@ -136,13 +137,23 @@ export function buildReadTools(readTools: readonly AnyReadToolDefinition[] = GAM
 
 const CapabilityToolArgsSchema = CapabilityRequestSchema;
 const FinishToolArgsSchema = z.object({ report: GameMasterTurnReportSchema }).strict();
+const RefusalAftermathToolArgsSchema = z.object({
+  /** Returned only for a genuine, non-recoverable refusal earlier this turn. */
+  refusalId: z.string().trim().min(1).max(120),
+  /** A living office-holder, commander, or political-group leader in the requester's polity. */
+  refuserCharacterId: EntityIdSchema,
+  /** The public, in-world rationale; it explains the refusal but cannot alter it. */
+  reason: z.string().trim().min(3).max(240),
+  /** A short quotation attributed to the refuser. */
+  quote: z.string().trim().min(3).max(280),
+}).strict();
 
 export function buildCapabilityTool(): GameMasterToolDefinition {
   return {
     name: REQUEST_CAPABILITY_TOOL,
     kind: "capability",
     description:
-      "Record that an actor attempted something no registered action tool can perform. This changes NOTHING in the world: the attempt is filed as unresolved and unsupported, a developer reviews it later, and the Chronicle may report only that the attempt had no effect. Never use it to describe a change you want applied, and never put state paths or values in it.",
+      "Record that an actor attempted something no registered action tool can perform. This changes NOTHING in the world: the attempt is filed as an unsupported internal audit record for developer review. It is never player-facing Chronicle history. Never use it to describe a change you want applied, and never put state paths or values in it.",
     parameters: toJsonSchema(CapabilityToolArgsSchema),
   };
 }
@@ -154,6 +165,22 @@ export function buildFinishTool(): GameMasterToolDefinition {
     description:
       "End the turn. Supply the structured report of what the tools you called actually did. Every event you report must reference a factRef returned by an earlier tool result; the report cannot create anything.",
     parameters: toJsonSchema(FinishToolArgsSchema),
+  };
+}
+
+/**
+ * Turns an already-real refusal into an accountable social scene.  This is
+ * deliberately not a generic narration tool: the session accepts it only
+ * after a non-recoverable engine refusal, names a plausible authority, and
+ * records a directed relationship consequence for both people.
+ */
+export function buildRefusalAftermathTool(): GameMasterToolDefinition {
+  return {
+    name: RECORD_REFUSAL_AFTERMATH_TOOL,
+    kind: "aftermath",
+    description:
+      "After a tool returns a refusal id for a genuine world refusal, record who publicly refused it, why, and one short quote. This never changes the rejected action or invents resources, authority, or an outcome. The refuser must be a living office-holder, force commander, or active political-group leader in the requester's polity, and the exchange leaves a lasting relationship consequence. Never use it for a bad id, malformed arguments, or an unsupported action.",
+    parameters: toJsonSchema(RefusalAftermathToolArgsSchema),
   };
 }
 
@@ -222,6 +249,7 @@ export function buildGameMasterTools(): GameMasterToolDefinition[] {
     buildDefineActionTool(),
     buildInvokeDefinedActionTool(),
     buildCapabilityTool(),
+    buildRefusalAftermathTool(),
     buildFinishTool(),
   ];
   // A copy, so a caller that sorts or filters in place cannot corrupt the cache.
@@ -230,6 +258,7 @@ export function buildGameMasterTools(): GameMasterToolDefinition[] {
 
 export const CapabilityToolArguments = CapabilityToolArgsSchema;
 export const FinishToolArguments = FinishToolArgsSchema;
+export const RefusalAftermathToolArguments = RefusalAftermathToolArgsSchema;
 
 /** Shape every action tool's arguments share before the workflow schema sees them. */
 export const ActionToolEnvelopeSchema = z.object({ actorId: EntityIdSchema }).loose();

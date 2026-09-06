@@ -56,6 +56,19 @@ describe("a power with a foreign army on its ground", () => {
     expect(result.world.material.accounts.some((account) => account.id === leader.personalAccountId)).toBe(true);
   });
 
+  it("creates a named person with a temperament and a concrete reason to act", () => {
+    const { world: w, polityId } = invaded();
+    const result = ensurePolityLeadership(w, 3);
+    const seeded = result.seeded.find((leader) => leader.polityId === polityId)!;
+    const leader = result.world.characters.find((character) => character.id === seeded.characterId)!;
+    const goal = result.world.characterGoals.find((candidate) => candidate.characterId === leader.id);
+
+    expect(leader.name).not.toBe(`${seeded.polityName} leader`);
+    expect(leader.traits.length).toBeGreaterThan(0);
+    expect(leader.ambitions).toHaveLength(1);
+    expect(goal).toMatchObject({ category: "preserve_power", priority: 5, status: "active", targetEntityIds: [polityId] });
+  });
+
   it("produces a world the engine still accepts", () => {
     const { world: w } = invaded();
     expect(WorldStateSchema.safeParse(ensurePolityLeadership(w, 3).world).success).toBe(true);

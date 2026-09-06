@@ -570,6 +570,11 @@ export async function getChronicleForLatestTurn(
       dispatch = { headline: row.body, items: f?.dispatch?.items ?? [], uncertaintyNote: f?.dispatch?.uncertaintyNote ?? null };
       continue;
     }
+    // Older turns can contain capability-gap rows created before those
+    // internal audit records were excluded at Chronicle construction time.
+    // Keep them available to the developer inspector, but never show them to
+    // a player or let them block reading the current turn.
+    if (row.scope === "unsupported_action") continue;
 
     const view = projectChronicleEntry(
       {

@@ -223,12 +223,19 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
       }
       const taken = world.characters.some((c) => c.alive && c.id !== character.id && c.name === params.newName);
       if (taken) return refuse(`Another living character is already called ${params.newName}. Two people of one name in one record cannot be told apart.`);
+      // A polity leader seeded by ensurePolityLeadership is bookkeeping for a
+      // person who was already there, not their arrival in the world. Naming
+      // that existing leader must therefore be recorded as an identification,
+      // so the Chronicle cannot plausibly recast it as their sudden emergence.
+      const summary = character.createdByDirector === true
+        ? `The existing leader of ${world.map.polities.find((polity) => polity.id === character.polityId)?.name ?? "their people"} is identified in the record as ${params.newName}.`
+        : `${character.name} is known thereafter as ${params.newName}.`;
       return {
         world: {
           ...world,
           characters: world.characters.map((c) => (c.id === character.id ? { ...c, name: params.newName } : c)),
         },
-        result: { summary: `${character.name} is known thereafter as ${params.newName}.`, applied: true },
+        result: { summary, applied: true },
       };
     },
   }),

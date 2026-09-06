@@ -17,8 +17,9 @@ import {
 export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
   defineWorkflow({
     id: "create_character_goal",
-    description: "Give a character a new persistent goal. Use when the Character Director forms a new goal after a meaningful trigger (encounter, political event, plot resolution).",
+    description: "Give a character a new persistent goal. Use when the Character Director forms a new goal after a meaningful trigger (encounter, political event, plot resolution). System-only: internal agency bookkeeping, never a Game Master tool call or public event.",
     category: "character" as const,
+    invokerAuthority: ["system"],
     parametersSchema: z.object({
       characterId: EntityIdSchema,
       objective: z.string().trim().min(1).max(240),
@@ -67,8 +68,9 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
 
   defineWorkflow({
     id: "update_character_goal",
-    description: "Update the status or priority of an existing character goal.",
+    description: "Update the status or priority of an existing character goal. System-only: internal agency bookkeeping, never a Game Master tool call or public event.",
     category: "character" as const,
+    invokerAuthority: ["system"],
     parametersSchema: z.object({
       goalId: EntityIdSchema,
       status: CharacterGoalStatusSchema.optional(),
@@ -107,8 +109,9 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
 
   defineWorkflow({
     id: "create_character_plot",
-    description: "Create a new plot for a character pursuing a goal. A plot is a concrete attempt: participants, objective, stakes, and a starting stage.",
+    description: "Create a new plot for a character pursuing a goal. A plot is a concrete attempt: participants, objective, stakes, and a starting stage. System-only: internal agency bookkeeping, never a Game Master tool call or public event.",
     category: "character" as const,
+    invokerAuthority: ["system"],
     parametersSchema: z.object({
       characterId: EntityIdSchema,
       goalId: EntityIdSchema,
@@ -167,8 +170,9 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
 
   defineWorkflow({
     id: "advance_character_plot",
-    description: "Advance a plot to a new stage, updating momentum, obstacle, and next intended move.",
+    description: "Advance a plot to a new stage, updating momentum, obstacle, and next intended move. System-only: internal agency bookkeeping, never a Game Master tool call or public event.",
     category: "character" as const,
+    invokerAuthority: ["system"],
     parametersSchema: z.object({
       plotId: EntityIdSchema,
       newStage: CharacterPlotStageSchema,
@@ -213,8 +217,9 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
 
   defineWorkflow({
     id: "resolve_character_plot",
-    description: "Mark a plot as resolved (succeeded, failed, abandoned, exposed, or stalled).",
+    description: "Mark a plot as resolved (succeeded, failed, abandoned, exposed, or stalled). System-only: internal agency bookkeeping, never a Game Master tool call or public event.",
     category: "character" as const,
+    invokerAuthority: ["system"],
     parametersSchema: z.object({
       plotId: EntityIdSchema,
       status: z.enum(["succeeded", "failed", "abandoned", "exposed", "stalled"]),

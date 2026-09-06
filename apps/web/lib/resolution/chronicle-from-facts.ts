@@ -8,8 +8,8 @@ import { chronicleHeadline, deriveChronicleDepth, humanizeRefusalReason, stripEn
 //
 // The Chronicle is downstream of the engine, always. An entry's body is built
 // from the factual event log -- the executor's own summaries of mutations that
-// actually applied, and the exact limitation text of an attempt that was not
-// supported. The Game Master's report contributes framing only: which events
+// actually applied. Unsupported capability requests remain in the developer
+// audit trail, not the player-facing Chronicle. The Game Master's report contributes framing only: which events
 // belong together, who was involved, where it happened, how prominent it is,
 // and which player directive it answers.
 //
@@ -20,8 +20,17 @@ import { chronicleHeadline, deriveChronicleDepth, humanizeRefusalReason, stripEn
 
 const PLAYER_SCOPE = "directive";
 const REFUSAL_SCOPE = "order_refusal";
-const UNSUPPORTED_SCOPE = "unsupported_action";
 const WORLD_SCOPE = "world_event";
+/**
+ * The Game Master never reached an accepted `finish_turn` this turn (a step
+ * or tool budget was hit, or the model stopped without reporting). This is
+ * not a refusal -- nothing in the world said no -- so it must never be
+ * worded like one ("found no ears"). Any real, validated work the session
+ * did complete is still recorded separately, in the "facts the report
+ * forgot" pass below; this scope only covers directives left with no report
+ * to answer them.
+ */
+const INCOMPLETE_SCOPE = "resolution_incomplete";
 
 /** Reasons a directive produced no world change. These stay executor-worded. */
 const NON_SUCCESS_OUTCOMES = new Set(["refused", "failed", "unsupported"]);
@@ -30,7 +39,7 @@ function factBody(events: readonly FactualEvent[], refs: readonly string[]): str
   const byId = new Map(events.map((event) => [event.id, event]));
   const summaries = refs
     .map((ref) => byId.get(ref))
-    .filter((event): event is FactualEvent => event !== undefined && event.noOp !== true)
+    .filter((event): event is FactualEvent => event !== undefined && event.kind === "action" && event.noOp !== true)
     .map((event) => stripEngineJargon(event.summary))
     .filter((summary) => summary.trim().length > 0);
   // The same executor sentence cited twice is one fact, not two.
@@ -108,7 +117,7 @@ function directConsequencesOf(events: readonly FactualEvent[]): NonNullable<Chro
   const seen = new Set<string>();
   const consequences: NonNullable<ChronicleEntryInput["directConsequences"]> = [];
   for (const event of events) {
-    if (event.kind !== "action" || event.noOp === true) continue;
+    if (event.kind !== "action" || event.noOp === true || !event.materialConsequence) continue;
     if (event.actionId === "add_gold" || event.actionId === "remove_gold") {
       const amount = event.parameters["amount"];
       const sign = event.actionId === "add_gold" ? "+" : "-";
@@ -145,6 +154,17 @@ function playerTitle(events: readonly FactualEvent[], world: WorldState, actorCh
   return actorName ? `The Order of ${actorName}` : "The Recorded Order";
 }
 
+/** A seeded polity leader pre-dates the turn; only their identity was added to the record. */
+function worldEventTitle(events: readonly FactualEvent[], world: WorldState, fallback: string): string {
+  const identityEvent = events.find((event) => event.actionId === "rename_character");
+  const characterId = identityEvent?.parameters["characterId"];
+  if (typeof characterId === "string") {
+    const character = world.characters.find((candidate) => candidate.id === characterId);
+    if (character?.createdByDirector === true) return `${character.name} of ${world.map.polities.find((polity) => polity.id === character.polityId)?.name ?? "their people"}`;
+  }
+  return chronicleHeadline(fallback);
+}
+
 export interface ChronicleFromFactsInput {
   readonly world: WorldState;
   readonly atStep: number;
@@ -173,9 +193,12 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
     for (const ref of allRefs) consumed.add(ref);
     const refEvents = refs.map((ref) => byId.get(ref)).filter((event): event is FactualEvent => event !== undefined);
     const applied = refEvents.filter((event) => event.kind === "action" && event.noOp !== true);
-    const unsupported = refEvents.filter((event) => event.kind === "capability_gap");
+    const namedRefusal = refEvents.find((event) => event.actionId === "record_refusal_aftermath");
 
     const succeeded = outcome !== undefined && !NON_SUCCESS_OUTCOMES.has(outcome.outcome) && applied.length > 0;
+    // Capability requests are internal audit records, never history.  Do not
+    // turn a failed attempt into a player-blocking "unresolved" Chronicle item.
+    if (refEvents.some((event) => event.kind === "capability_gap") && applied.length === 0) continue;
     // A successful directive whose every fact was already recorded under an
     // earlier one would be the same paragraph told twice.
     if (!succeeded && refs.length === 0 && allRefs.length > 0 && outcome !== undefined && !NON_SUCCESS_OUTCOMES.has(outcome.outcome)) continue;
@@ -185,14 +208,16 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
     const actorName = world.characters.find((character) => character.id === input.actorCharacterId)?.name ?? "The order's author";
     const body = succeeded
       ? factBody(events, refs)
-      : unsupported.length > 0
-        ? unsupported.map((event) => stripEngineJargon(event.summary)).join(" ")
+      : namedRefusal !== undefined
+          ? factBody(events, refs)
+        : report === null
+          ? `${actorName}'s order was still being carried through when this turn's resolution stopped short. What became of it is not yet known.`
         : outcome?.reason !== undefined
-          ? `${actorName} gave the order, and it came to nothing: ${humanizeRefusalReason(outcome.reason)}. No change followed in the world.`
-          : "The order was given, and no change followed in the world.";
+          ? `${actorName} gave the order, but it found no ears: ${humanizeRefusalReason(outcome.reason)}. The matter went no further.`
+          : "The order was given, but it found no ears. The matter went no further.";
 
     entries.push({
-      scope: succeeded ? PLAYER_SCOPE : unsupported.length > 0 ? UNSUPPORTED_SCOPE : REFUSAL_SCOPE,
+      scope: succeeded ? PLAYER_SCOPE : report === null ? INCOMPLETE_SCOPE : REFUSAL_SCOPE,
       scopeRef: directiveId,
       audience: "all_players",
       body,
@@ -200,7 +225,7 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
       materialConsequence: succeeded,
       simulatedDurationDays: durationDaysFor(applied.map((event) => event.actionId)),
       factActionIds: [...new Set(applied.map((event) => event.actionId))],
-      title: succeeded ? playerTitle(applied, world, input.actorCharacterId) : `The Order That Came to Nothing`,
+      title: succeeded ? playerTitle(applied, world, input.actorCharacterId) : namedRefusal !== undefined ? "The Refusal Answered" : report === null ? "Resolution Incomplete" : "The Unheard Order",
       knowledgeStatus: "confirmed",
       sourceDirector: "player",
       chainPosition: "root",
@@ -217,12 +242,11 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
     for (const ref of refs) consumed.add(ref);
     const refEvents = refs
       .map((ref) => byId.get(ref))
-      .filter((candidate): candidate is FactualEvent => candidate !== undefined && candidate.noOp !== true);
+      .filter((candidate): candidate is FactualEvent => candidate !== undefined && candidate.kind === "action" && candidate.noOp !== true);
     if (refEvents.length === 0) continue;
     const material = refEvents.some((candidate) => candidate.materialConsequence);
-    const unsupportedOnly = refEvents.length > 0 && refEvents.every((candidate) => candidate.kind === "capability_gap");
     entries.push({
-      scope: unsupportedOnly ? UNSUPPORTED_SCOPE : WORLD_SCOPE,
+      scope: WORLD_SCOPE,
       scopeRef: refs[0] ?? `${atStep}`,
       audience: event.visibility === "private" ? "knowledge_scoped" : "all_players",
       body: factBody(events, refs),
@@ -239,7 +263,7 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
       // is why the title is a headline drawn from it and the body comes from
       // the engine. A headline is cut on a word, never mid-word, and never
       // carries an engine identifier into the record.
-      title: chronicleHeadline(event.summary),
+      title: worldEventTitle(refEvents, world, event.summary),
       knowledgeStatus: "confirmed",
       sourceDirector: "game_master",
       chainPosition: event.chainPosition,
@@ -260,18 +284,19 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
   // omission in a Chronicle that claims to be the record.
   for (const event of events) {
     if (consumed.has(event.id)) continue;
-    // ...except a call that changed nothing. There is no omission in staying
-    // silent about a world that did not move.
-    if (event.noOp === true) continue;
+    // ...except a call that changed nothing, including an internal capability
+    // request. There is no omission in staying silent about a world that did
+    // not move.
+    if (event.kind !== "action" || event.noOp === true) continue;
     entries.push({
-      scope: event.kind === "capability_gap" ? UNSUPPORTED_SCOPE : WORLD_SCOPE,
+      scope: WORLD_SCOPE,
       scopeRef: event.id,
       audience: "all_players",
       body: stripEngineJargon(event.summary),
       atStep,
       materialConsequence: event.materialConsequence,
       simulatedDurationDays: durationDaysFor([event.actionId]),
-      factActionIds: event.kind === "action" ? [event.actionId] : [],
+      factActionIds: [event.actionId],
       title: chronicleHeadline(event.summary),
       knowledgeStatus: "confirmed",
       sourceDirector: "game_master",
@@ -287,11 +312,10 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
 
 /**
  * Scopes whose wording is executor-derived and must never reach the narrator.
- * A refusal and an unsupported attempt say exactly why nothing happened; a
- * free-form rewrite could only add an institutional cause the engine never
- * gave, so they are already worded as history here and left alone.
+ * A refusal says exactly why nothing happened; a free-form rewrite could only
+ * add an institutional cause the engine never gave, so it is left alone.
  */
-export const NARRATOR_EXEMPT_SCOPES: ReadonlySet<string> = new Set([REFUSAL_SCOPE, UNSUPPORTED_SCOPE]);
+export const NARRATOR_EXEMPT_SCOPES: ReadonlySet<string> = new Set([REFUSAL_SCOPE, INCOMPLETE_SCOPE]);
 
 /**
  * Scopes the narrator may write, but only under a hard outcome lock: the

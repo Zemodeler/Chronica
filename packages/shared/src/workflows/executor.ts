@@ -82,6 +82,21 @@ export function executeWorkflow(
     };
   }
 
+  // A political procedure is an authorization for one real, registered
+  // action. Letting it name an arbitrary string creates a fake motion that
+  // can appear to pass, only to fail later when its supposed action is
+  // invoked. Reject that at the moment the motion is proposed instead.
+  if (invocation.actionId === "sponsor_procedure") {
+    const linkedWorkflowId = (parsed.data as { linkedWorkflowId?: unknown }).linkedWorkflowId;
+    if (typeof linkedWorkflowId === "string" && !WORKFLOW_REGISTRY.has(linkedWorkflowId)) {
+      return {
+        ok: false,
+        reason: "not_applicable",
+        message: "The proposed motion did not name a recognized action, so there was no question the institution could lawfully decide.",
+      };
+    }
+  }
+
   const applied = definition.apply(world, parsed.data, { actorId: invocation.actorId, atStep });
   if (applied === null) {
     // A bare null says only "no". Before giving up on it, check the one thing
