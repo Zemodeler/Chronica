@@ -17,6 +17,13 @@ import { executeWorkflows } from "@chronica/shared";
  * only when nothing this turn already answered for it. It never overrides,
  * second-guesses, or duplicates a response the Game Master or a political
  * procedure already made.
+ *
+ * This is a deliberate, temporary exception to the command contract
+ * (docs/27, docs/28): a deterministic fallback still picks a strategic
+ * response instead of the AI. Remove it once shadow-turn or production
+ * evidence shows the Game Master reliably answers every `military_emergency`
+ * pressure without this backstop ever firing -- not on the strength of a
+ * code-reading audit alone, since that cannot verify GM behavior in practice.
  */
 export interface MilitaryEmergencyFallbackResult {
   readonly world: WorldState;

@@ -43,7 +43,10 @@ export interface RunGameMasterInput {
   readonly scenarioChronicle: ScenarioChronicleRules | undefined;
   /** Actions this campaign defined in earlier turns, usable without redefining. */
   readonly definedActions?: readonly InventedWorkflowDefinition[];
+  /** Off by default (docs/27) -- see `GameMasterSessionOptions.allowInventedActions`. */
+  readonly allowInventedActions?: boolean;
   readonly maxSteps?: number;
+  readonly persistentPlans?: boolean;
 }
 
 export interface RunGameMasterResult extends GameMasterSessionResult {
@@ -75,12 +78,15 @@ export async function runGameMaster(
   adapter: AiAdapter,
   input: RunGameMasterInput,
 ): Promise<RunGameMasterResult> {
+  const planningAllowance = input.persistentPlans ? Math.min(32, (input.world.playerPlans ?? []).filter(p => p.ownerId === input.actorCharacterId && p.status === "active").length + input.directives.filter(d => d.directive.kind === "new").length) : 0;
   const session = createGameMasterSession({
     world: input.world,
     atStep: input.atStep,
     actorCharacterId: input.actorCharacterId,
     directiveIds: input.directives.map((entry) => entry.id),
+    ...(input.persistentPlans ? { directives: input.directives } : {}),
     definedActions: input.definedActions ?? [],
+    allowInventedActions: input.allowInventedActions ?? false,
     actionAllowances: input.selectedCharacters.map((character) => ({
       characterId: character.characterId,
       allowance: character.actionAllowance,
@@ -88,11 +94,11 @@ export async function runGameMaster(
     // Reads, reports, and the player’s own orders are not NPC actions. Keep
     // room for them while scaling the tool loop with the relevance-derived
     // agency available this turn.
-    maxToolCalls: Math.max(60, input.selectedCharacters.reduce((sum, character) => sum + character.actionAllowance, 0) + 24),
+    maxToolCalls: Math.max(60, input.selectedCharacters.reduce((sum, character) => sum + character.actionAllowance, 0) + 24) + planningAllowance * 2,
   });
 
   const systemPrompt = buildGameMasterSystemPrompt({
-    world: input.world,
+    world: session.stagedWorld,
     actorCharacterId: input.actorCharacterId,
     atStep: input.atStep,
     directives: input.directives,
@@ -101,6 +107,7 @@ export async function runGameMaster(
     playerContext: input.playerContext,
     scenarioGovernment: input.scenarioGovernment,
     scenarioChronicle: input.scenarioChronicle,
+    allowInventedActions: input.allowInventedActions ?? false,
   });
   const tools: AiToolDefinition[] = session.listTools().map((tool) => ({
     name: tool.name,
@@ -113,8 +120,8 @@ export async function runGameMaster(
   ];
 
   const maxSteps = input.maxSteps ?? Math.max(
-    DEFAULT_MAX_STEPS,
-    input.selectedCharacters.reduce((sum, character) => sum + character.actionAllowance, 0) + 2,
+    DEFAULT_MAX_STEPS + planningAllowance,
+    input.selectedCharacters.reduce((sum, character) => sum + character.actionAllowance, 0) + 2 + planningAllowance,
   );
   let termination: RunGameMasterResult["termination"] = "step_budget";
   let providerError: string | null = null;

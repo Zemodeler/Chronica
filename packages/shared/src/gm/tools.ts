@@ -1,11 +1,12 @@
 import { z } from "zod";
 import { EntityIdSchema } from "../material-state";
 import { WORKFLOW_REGISTRY } from "../workflows/registry";
-import type { AnyWorkflowDefinition } from "../workflows/types";
+import { commandKindOf, type AnyWorkflowDefinition } from "../workflows/types";
 import { CapabilityRequestSchema } from "./capability-request";
 import { InventedWorkflowDefinitionSchema } from "../workflows/invented-workflow";
 import { GameMasterTurnReportSchema } from "./turn-report";
 import { GAME_MASTER_READ_TOOLS, type AnyReadToolDefinition } from "./read-tools";
+import { InterpretPlanSchema, ExecutePlanStageSchema, RespondToAssignmentSchema, DeferPlanStageSchema } from "../actions/plans";
 
 // The Game Master's tool surface (GM refactor, requirements 1, 4, 5, 7).
 //
@@ -22,14 +23,16 @@ import { GAME_MASTER_READ_TOOLS, type AnyReadToolDefinition } from "./read-tools
 // `apply` the rest of the engine uses.
 //
 // There is still no free-form "apply patch" or "set state" tool: prose has no
-// path to world state. `define_action` is the one narrow exception, and it is
-// not that -- an action must be *defined* first, as a named, parameterised,
-// reviewable thing, and every use of it is re-validated against the whole
-// world document exactly like a built-in. The reason it exists is that a
-// player who does something the designers never anticipated deserves a world
-// that answers rather than a note saying the attempt was unsupported.
+// path to world state. `define_action`/`invoke_defined_action` are a narrower
+// exception than that -- an action must be *defined* first, as a named,
+// parameterised, reviewable thing, and every use of it is re-validated against
+// the whole world document exactly like a built-in -- but they are also off
+// by default (see `buildGameMasterTools`'s `allowInventedActions`, docs/27).
+// The supported path for a player doing something the designers never
+// anticipated is `request_capability`: it changes nothing and waits for a
+// developer to decide whether the capability is warranted.
 
-export type GameMasterToolKind = "read" | "action" | "capability" | "finish" | "define" | "aftermath";
+export type GameMasterToolKind = "read" | "action" | "capability" | "finish" | "define" | "aftermath" | "plan";
 
 export interface GameMasterToolDefinition {
   readonly name: string;
@@ -44,16 +47,6 @@ export const FINISH_TURN_TOOL = "finish_turn";
 export const DEFINE_ACTION_TOOL = "define_action";
 export const INVOKE_DEFINED_ACTION_TOOL = "invoke_defined_action";
 export const RECORD_REFUSAL_AFTERMATH_TOOL = "record_refusal_aftermath";
-
-/**
- * Workflows the deterministic engine invokes for itself. They are excluded
- * from the tool surface entirely rather than merely refused at validation, so
- * the Game Master is never tempted to hand-resolve a battle or a death.
- */
-function isSystemOnly(definition: AnyWorkflowDefinition): boolean {
-  const authority = definition.invokerAuthority;
-  return authority !== undefined && authority.length > 0 && authority.every((kind) => kind === "system");
-}
 
 /**
  * JSON Schema keywords a provider's function-calling validator has no use for
@@ -115,7 +108,7 @@ function actionToolSchema(definition: AnyWorkflowDefinition): Record<string, unk
 export function buildActionTools(): GameMasterToolDefinition[] {
   const tools: GameMasterToolDefinition[] = [];
   for (const definition of WORKFLOW_REGISTRY.values()) {
-    if (isSystemOnly(definition)) continue;
+    if (commandKindOf(definition) === "system_effect") continue;
     tools.push({
       name: definition.id,
       kind: "action",
@@ -240,20 +233,38 @@ export function buildInvokeDefinedActionTool(): GameMasterToolDefinition {
   };
 }
 
-let cachedTools: GameMasterToolDefinition[] | undefined;
+const cachedTools = new Map<boolean, GameMasterToolDefinition[]>();
 
-export function buildGameMasterTools(): GameMasterToolDefinition[] {
-  cachedTools ??= [
-    ...buildReadTools(),
-    ...buildActionTools(),
-    buildDefineActionTool(),
-    buildInvokeDefinedActionTool(),
-    buildCapabilityTool(),
-    buildRefusalAftermathTool(),
-    buildFinishTool(),
-  ];
+/**
+ * The complete tool surface for a Game Master turn.
+ *
+ * `allowInventedActions` (default `false`, docs/27) gates `define_action`/
+ * `invoke_defined_action` out of normal play: the reviewed, supported escape
+ * valve for an unanticipated player intent is `request_capability`, which
+ * changes nothing and waits for a developer. The invented-action tools stay
+ * in code as a developer-controlled rollout/testing exception, not a fourth
+ * always-available class of command.
+ */
+export function buildGameMasterTools(options: { readonly allowInventedActions?: boolean } = {}): GameMasterToolDefinition[] {
+  const allowInventedActions = options.allowInventedActions ?? false;
+  let built = cachedTools.get(allowInventedActions);
+  if (built === undefined) {
+    built = [
+      ...buildReadTools(),
+      ...buildActionTools(),
+      ...(allowInventedActions ? [buildDefineActionTool(), buildInvokeDefinedActionTool()] : []),
+      buildCapabilityTool(),
+      buildRefusalAftermathTool(),
+      buildFinishTool(),
+      { name: "interpret_plan", kind: "plan", description: "Interpret a saved player plan as up to twelve concrete stages. Preserve original intent, constraints, completed stages and player-named delegates. One stage corresponds to one action; use dependencies and time/location conditions. This records a plan, not an outcome.", parameters: toJsonSchema(InterpretPlanSchema) },
+      { name: "execute_plan_stage", kind: "plan", description: "Attempt one ready plan stage through a registered or defined action. Dependencies, delegate acceptance, personal time, authority and actual spending are checked. Completed stages are never repeated; blocked stages persist for retry.", parameters: toJsonSchema(ExecutePlanStageSchema) },
+      { name: "respond_to_plan_assignment", kind: "plan", description: "A player-named NPC accepts or declines an assignment based on their own interests, relationship, risk and knowledge. State their reason. Acceptance grants no resources or authority. Never automatically accept just because the player asked.", parameters: toJsonSchema(RespondToAssignmentSchema) },
+      { name: "defer_plan_stage", kind: "plan", description: "Keep an uncompleted stage pending with a specific obstacle or an unmet player condition. Use when circumstances cannot yet be established, not to invent a refusal. This changes no material state and preserves the plan for next turn.", parameters: toJsonSchema(DeferPlanStageSchema) },
+    ];
+    cachedTools.set(allowInventedActions, built);
+  }
   // A copy, so a caller that sorts or filters in place cannot corrupt the cache.
-  return [...cachedTools];
+  return [...built];
 }
 
 export const CapabilityToolArguments = CapabilityToolArgsSchema;

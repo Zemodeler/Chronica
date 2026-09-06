@@ -3,7 +3,6 @@ import { firstPunicWarScenario } from "@chronica/db";
 import type { CandidateAction, ProposedInvocation, WorkflowAuditEntry } from "@chronica/shared";
 import {
   buildIntentInvocation,
-  buildIntentSocialEvent,
   hasActiveAgencyState,
   isEligibleForNpcAgency,
   resolveFormedNpcIntentOutcome,
@@ -49,23 +48,6 @@ describe("buildIntentInvocation", () => {
 
   it("returns null for an action type with no legal workflow mapping", () => {
     expect(buildIntentInvocation(candidate({ actionType: "wait" }), world())).toBeNull();
-  });
-});
-
-describe("buildIntentSocialEvent", () => {
-  it("builds a social event whose relation cause targets the actor from the target's own perspective", () => {
-    const event = buildIntentSocialEvent(candidate({ actionType: "threaten", targetIds: ["hanno"] }), 5, "game-1");
-    expect(event?.relationCauses[0]?.subjectCharacterId).toBe("hanno");
-    expect(event?.relationCauses[0]?.targetCharacterId).toBe("marcus-atilius");
-    expect(event?.relationCauses[0]?.dimensions?.fear).toBeGreaterThan(0);
-  });
-
-  it("returns null for an action with no target", () => {
-    expect(buildIntentSocialEvent(candidate({ actionType: "threaten", targetIds: [] }), 5, "game-1")).toBeNull();
-  });
-
-  it("returns null for an action with no modeled social effect", () => {
-    expect(buildIntentSocialEvent(candidate({ actionType: "wait", targetIds: ["hanno"] }), 5, "game-1")).toBeNull();
   });
 });
 

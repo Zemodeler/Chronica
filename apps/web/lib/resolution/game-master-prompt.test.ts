@@ -74,6 +74,24 @@ describe("world activity requirements", () => {
   });
 });
 
+describe("capability escape hatch", () => {
+  it("points to request_capability and omits define_action when invented actions are off (the default)", () => {
+    const prompt = buildGameMasterSystemPrompt(baseInput());
+
+    expect(prompt).toContain("request_capability");
+    expect(prompt).not.toContain("define_action");
+    expect(prompt).not.toContain("invoke_defined_action");
+  });
+
+  it("describes define_action/invoke_defined_action when allowInventedActions is on", () => {
+    const prompt = buildGameMasterSystemPrompt(baseInput({ allowInventedActions: true }));
+
+    expect(prompt).toContain("define_action");
+    expect(prompt).toContain("invoke_defined_action");
+    expect(prompt).toContain("request_capability");
+  });
+});
+
 describe("open political procedures", () => {
   it("gives the Game Master the actual question under consideration, not an internal action id", () => {
     const prompt = buildGameMasterSystemPrompt(baseInput());

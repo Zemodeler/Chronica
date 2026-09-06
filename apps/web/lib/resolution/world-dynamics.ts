@@ -6,6 +6,7 @@ import {
   type FactualEvent,
   type WorldState,
 } from "@chronica/shared";
+import { advanceWorldDevelopments } from "./world-development-scheduler";
 
 /**
  * Deterministic, state-backed pressures which make the political and military
@@ -144,5 +145,6 @@ export function advanceWorldDynamics(world: WorldState, atStep: number): WorldDy
     }
   }
 
-  return { world: next, events };
+  const developments = advanceWorldDevelopments(next, atStep);
+  return { world: developments.world, events: [...events, ...developments.events] };
 }

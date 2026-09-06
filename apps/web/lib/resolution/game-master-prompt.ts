@@ -7,7 +7,7 @@ import type {
   SelectedCharacter,
   WorldState,
 } from "@chronica/shared";
-import { describePoliticalQuestion, deriveOpenThreads, renderOpenThreads } from "@chronica/shared";
+import { describePoliticalQuestion, deriveOpenThreads, renderOpenThreads, generateCandidateActions, rankCandidates, dueCommitments } from "@chronica/shared";
 import { buildPlayerResolutionContext, type ResolutionPlayerContext } from "./prompts";
 import type { FormedNpcProposal } from "./character-agency";
 
@@ -35,10 +35,12 @@ export interface GameMasterPromptInput {
   readonly playerContext: ResolutionPlayerContext | undefined;
   readonly scenarioGovernment: ScenarioGovernmentRules | undefined;
   readonly scenarioChronicle: ScenarioChronicleRules | undefined;
+  /** Off by default (docs/27) -- mirrors `GameMasterSessionOptions.allowInventedActions`, which gates whether `define_action`/`invoke_defined_action` are actually in the tool list this turn. */
+  readonly allowInventedActions?: boolean;
 }
 
 const MAX_PROVINCES_LISTED = 60;
-const MAX_NPCS_DETAILED = 8;
+const MAX_NPCS_DETAILED = 11;
 
 function constitution(input: GameMasterPromptInput): string {
   const lines: string[] = ["SCENARIO CONSTITUTION AND RULES"];
@@ -64,7 +66,9 @@ function constitution(input: GameMasterPromptInput): string {
     "3. When a tool refuses, its reason is the real mechanical reason. Never replace it. If the tool also returns a refusal id, you MAY call record_refusal_aftermath once: name a real living office-holder, commander, or active political-group leader from the requester's own polity, give their short public rationale and quote, and let the resulting relationship consequence stand. This is how a Senate vote, commander, or minister says no in the Chronicle. It cannot be used for a bad id, malformed arguments, an unsupported action, or to make the rejected action happen.",
     "4. When an action tool succeeds, its effect is already complete and immediate. A raised force is named, commanded, located, and able to receive orders the moment create_force returns. Never describe a completed action as pending, provisional, or awaiting anything.",
     "5. Battles, deaths, inheritance, and procedure outcomes are decided by the deterministic engine, not by you. Start a battle and the engine fights it and tells you what happened; react to that result.",
-    "6. If nothing in your tool list can do what an actor is attempting, and it is a real act with a real effect on the world, define it with define_action and then carry it out with invoke_defined_action. Describe only the change to world state; the engine validates it exactly as strictly as a built-in action and refuses anything that would leave the world inconsistent. What you define stays part of this campaign. Reserve request_capability for an attempt you genuinely cannot express as a change to the world at all. It is an internal escalation, never an outcome: before finishing, inspect the relevant state and make one real, validated repair attempt for that actor with an existing or newly defined action.",
+    input.allowInventedActions
+      ? "6. If nothing in your tool list can do what an actor is attempting, and it is a real act with a real effect on the world, define it with define_action and then carry it out with invoke_defined_action. Describe only the change to world state; the engine validates it exactly as strictly as a built-in action and refuses anything that would leave the world inconsistent. What you define stays part of this campaign. Reserve request_capability for an attempt you genuinely cannot express as a change to the world at all. It is an internal escalation, never an outcome: before finishing, inspect the relevant state and make one real, validated repair attempt for that actor with an existing or newly defined action."
+      : "6. If nothing in your tool list can do what an actor is attempting, call request_capability: it records the unmet need for developer review and changes nothing in the world. It is an internal escalation, never an outcome: before finishing, inspect the relevant state and make one real, validated repair attempt for that actor with an existing action.",
     "6a. Diplomacy is a first-class act, not a capability gap. A letter, an offer of alliance, a demand for tribute, a protest, an ultimatum — all of these go through send_diplomatic_message, which obliges the other power to answer and decides nothing on their behalf. Their reply is answer_diplomatic_message, taken in their own interest, and it may well be no. An accepted offer is carried out afterwards with the workflow that models it: sign_treaty, end_war, impose_tribute, arrange_marriage_alliance.",
     "6b. A message addressed to the player is never yours to answer. answer_diplomatic_message is refused outright if you name the player's own character as the answerer -- the engine enforces this, it is not a matter of judgment. Report an unanswered message to or from the player as an open thread awaiting the player's own reply; you may answer only on behalf of an AI-controlled power, and only after weighing that power's own interest.",
     "7. Never invent an id. Every id you pass to a tool must have come from this prompt or from a tool result you received: a settlement id from inspect_province, a procedure id from the list of open procedures, a force id from the forces listed. A guessed id is the single most common reason a player's order is refused as inapplicable — inspect first, then act.",
@@ -73,6 +77,7 @@ function constitution(input: GameMasterPromptInput): string {
     "8b. ACTIVITY ALLOWANCES: each named actor below is given a relevance-derived allowance. They may take up to that many state-backed actions this turn; there is no shared world-action pool. Use their allowance where the world gives them real opportunities, never to pad the Chronicle with generic morale, weather, or 'the matter remains unresolved' notices. A high-relevance ruler, nemesis, or commander may pursue a sequence; a background actor normally makes one meaningful move. If conditions truly block an actor, inspect the relevant forces, treasury, and open threads and record the concrete obstacle.",
     "8c. REGIONAL REACTION: a foreign force on another power's controlled ground is an emergency. The defending power must react in the same turn with a valid, state-backed response appropriate to its means: raise or move a force, seek an ally, send an ultimatum, raid, fortify, open a siege, submit, or declare war. Do not merely narrate that the balance has changed.",
     "8d. ROMAN REPUBLIC: Rome has domestic politics as well as armies. When the Senate is listed, include a concrete Roman political, economic, social, religious, or military-command development at least every second season. Tie it to current state — an army abroad, a war, casualties, supply, treasury, legitimacy, an office, or an open procedure — and use political tools where a decision is being made. The Senate's scrutiny is not flavour; it must create a procedure, pressure, vote, appointment, factional consequence, or player-facing choice.",
+    "8e. POLITICAL AGENCY: a character or group whose stance on an open procedure matters this turn should have one recorded with pledge_support, stating your own reason. inspect_political_procedure shows each participant's relationship and legitimacy context as a suggested lean -- read it, but the position and the stated reason are your call, not a computed one. Silence is a choice too: a procedure you never weigh in on resolves on whatever positions exist, which may not be the ones you would have chosen.",
     "9. A power does not ignore an army on its own ground. Every foreign force listed under UNRESOLVED THREADS is being answered by someone this turn: a levy raised, a border watched, an envoy sent, a war declared, or a deliberate decision to submit. If the power in question has no living named leader, create one with create_world_character and let them answer — a polity with no character cannot act, and its silence is your omission, not its policy.",
     "10. An army that meets no opposition fights no battle. start_battle requires at least one force on each side; if the ground you are taking is undefended, do not call it. Besiege the settlement (start_siege takes an empty defender list) or take the province with change_province_control, and say plainly that it was taken unopposed.",
     "10a. change_province_control is not a narrative shortcut: the engine itself now verifies the claim of 'unopposed.' It refuses the transfer unless a living force of the new controller already stands in that exact province AND no living force of any other power stands there too -- so it succeeds precisely when a battle or siege has actually cleared the ground, or when the province genuinely had no defender and your own force already walked in. It never succeeds by your saying so. A province still held by a real defending force can change hands only by winning a siege (start_siege, then end_siege with successfulCapture), by a decisive battle that breaks or removes the defender first, or by a diplomatic cession -- give_territory requires an authorization naming an accepted diplomatic message ceding exactly that ground between exactly those two powers; it has no other path.",
@@ -208,7 +213,7 @@ function campaignMemory(world: WorldState): string {
   return lines.join("\n");
 }
 
-function npcContext(world: WorldState, selected: readonly SelectedCharacter[], actorCharacterId: string): string {
+function npcContext(world: WorldState, selected: readonly SelectedCharacter[], actorCharacterId: string, atStep: number): string {
   const lines: string[] = [
     "ACTORS WHO MATTER THIS TURN",
     "These are the named characters the selection system judges relevant. They have their own motives and are not obliged to help the player. Use inspect_actor_memory for any of them before deciding what they do.",
@@ -219,6 +224,12 @@ function npcContext(world: WorldState, selected: readonly SelectedCharacter[], a
   for (const entry of selected.slice(0, MAX_NPCS_DETAILED)) {
     const character = world.characters.find((candidate) => candidate.id === entry.characterId);
     if (!character || !character.alive || character.id === actorCharacterId) continue;
+    // docs/30: this is advisory context, not a pre-selected action -- the
+    // same candidates character agency generates and scores, shown here
+    // instead of pre-executed. The Game Master may act on one, act
+    // differently, or ignore all of them; nothing here has happened yet.
+    const owed = dueCommitments(world.commitments ?? [], atStep).filter((c) => c.promisorCharacterId === character.id);
+    const ranked = rankCandidates(world, character, generateCandidateActions({ world, character, atStep, commitments: owed }), atStep).slice(0, 4);
     const goals = (world.characterGoals ?? []).filter((goal) => goal.characterId === character.id && goal.status === "active").slice(0, 3);
     const plots = (world.characterPlots ?? []).filter((plot) => plot.characterId === character.id && plot.status === "active").slice(0, 2);
     const pressures = (world.characterPressures ?? []).filter((pressure) => pressure.characterId === character.id && pressure.status === "active").slice(0, 3);
@@ -238,6 +249,7 @@ function npcContext(world: WorldState, selected: readonly SelectedCharacter[], a
     if (beliefs.length > 0) lines.push(`    believes: ${beliefs.map((belief) => belief.claim).join("; ")}`);
     if (commitments.length > 0) lines.push(`    owes: ${commitments.map((commitment) => commitment.description).join("; ")}`);
     if (recentIntents.length > 0) lines.push(`    last acted: ${recentIntents.map((intent) => `${intent.actionType} -> ${intent.status}`).join("; ")}`);
+    if (ranked.length > 0) lines.push(`    candidate actions (suggested, not decided): ${ranked.map((r) => `${r.candidate.actionType} (score ${r.score.total}) -- ${r.candidate.rationale}`).join("; ")}`);
   }
   if (lines.length === 2) lines.push("  No named character other than the player is currently in the relevant set.");
   return lines.join("\n");
@@ -300,6 +312,7 @@ function orders(input: GameMasterPromptInput): string {
 
 export function buildGameMasterSystemPrompt(input: GameMasterPromptInput): string {
   const threads = deriveOpenThreads(input.world);
+  const reviewedDevelopments = (input.world.worldDevelopments ?? []).filter(d => d.status === "active" && d.lastReviewedStep === input.atStep && d.kind !== "household");
   return [
     "You are the Game Master of a historical simulation. You simulate one turn.",
     "",
@@ -312,13 +325,23 @@ export function buildGameMasterSystemPrompt(input: GameMasterPromptInput): strin
     "UNRESOLVED THREADS",
     renderOpenThreads(threads),
     "",
-    npcContext(input.world, input.selectedCharacters, input.actorCharacterId),
+    npcContext(input.world, input.selectedCharacters, input.actorCharacterId, input.atStep),
     "",
     npcFormedIntentions(input.world, input.npcProposals),
+    "SCHEDULED WORLD DEVELOPMENTS",
+    ...reviewedDevelopments.slice(0, 12).map(d => `  ${d.id}: ${d.summary} Actor ${d.actorId}; pressure ${d.intensity}/100; reviewed ${d.reviews} times; next review ${d.nextReviewStep}.`),
+    "These concerns were advanced independently of the player. Before spending the turn on a long player plan, give selected background actors an opportunity to address them through tools. Inspect available resources; relief, reconstruction, negotiation, and institutional business need real actions. A pressure is a need, not proof that relief, a vote, a battle, or a payment occurred. Reconsider older unresolved concerns, and let a quiet or resource-constrained region remain quiet when appropriate. Never choose an action for the player's character.",
     "",
     buildPlayerResolutionContext(input.world, input.playerContext).trim(),
     "",
     orders(input),
+    "",
+    "PERSISTENT PLAYER PLANS (authoritative; continue unfinished work without a new order)",
+    ...(input.world.playerPlans ?? []).filter(p => p.ownerId === input.actorCharacterId && p.status === "active").slice(0, 32).map(p => JSON.stringify(p)),
+    "Use interpret_plan for a plan with no interpretation, then execute_plan_stage for each ready stage. Never directly execute a player's action outside its plan. One stage is one concrete action; for a long operation, distinguish issuing the order from its eventual completion and require the destination/time conditions before the next stage. Preserve completed stages exactly when reinterpreting. Account for every clause of the player's original text, conditions, priorities, method, secrecy, and spending limit. Do not truncate a complex objective into one convenient action. Do not treat a recorded plan as an accomplished objective. If a conditional outcome cannot yet be established, leave its stage blocked and explain why; never assume a favorable answer. A refusal invites a plausible alternative, but never change the player's objective or exceed their constraints. Named delegates must answer through respond_to_plan_assignment before execution; their acceptance does not create authority or resources. No delegate named means personal work: suggest a delegate rather than selecting one for the player. Consider older plans before new work that competes for the same person or funds.",
+    "PERSONAL TIME: each person has one turn of capacity. Personal travel consumes the turn, military/material tasks one quarter, ordinary administration one eighth. Read tools and narrative bookkeeping do not consume personal time. Actual action refusals leave stages available next turn. Independent accepted delegates use their own capacity; all resource and authority rules still apply. Freeform staging and conversation never manufacture material results.",
+    "Standing instructions may use repeatEverySteps only when the player actually asked for recurring work. Repeating stages reopen on their scheduled turn; their spending limit is cumulative over the plan's lifetime. Leave repeatEverySteps null for ordinary one-time objectives. Completed means the named action occurred, never that a larger campaign succeeded merely because its opening order was issued.",
+    "Only a plan created on this step answers its sourceDirectiveId among this turn's NEW orders. Source directive ids from earlier steps are historical and must not be attributed to a new order just because the labels match. Continuing old work is a separate event. A plan with unfinished stages must be reported with its actual partial progress or obstacle, never as entirely carried out.",
     "",
     "HOW TO WORK",
     "Read what you need with the inspect tools. Attempt each player order with the action tool that matches it. Then let the world answer: characters with their own goals, pressures, and commitments act on what just happened, and open threads move. Every effect must go through a tool. When you are done, call finish_turn with a report whose every event cites a factRef you were given.",

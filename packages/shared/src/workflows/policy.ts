@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { WorldState } from "../world/world-state";
 import { WORKFLOW_REGISTRY } from "./registry";
 import type { WorkflowCandidate, WorkflowCandidateSource } from "./manager-types";
+import { commandKindOf, type AnyWorkflowDefinition } from "./types";
 
 // Deterministic workflow policy (Issue #6; extended by the GM refactor).
 //
@@ -47,6 +48,27 @@ export function workflowInvocationKey(invocation: WorkflowCandidate["requestedIn
   return `${invocation.actionId}:${invocation.actorId}:${stableParameterEncoding(invocation.parameters)}`;
 }
 
+/**
+ * Idempotency (docs/27): a command must be idempotent or explicitly reject a
+ * duplicate invocation. Exact-duplicate rejection is enforced here, once,
+ * rather than each command re-implementing its own duplicate check — any
+ * caller that processes a sequence of invocations against one staged world
+ * should hold one of these and check every invocation through it, regardless
+ * of source.
+ */
+export interface InvocationDuplicateGuard {
+  readonly isDuplicate: (invocation: WorkflowCandidate["requestedInvocation"]) => boolean;
+  readonly record: (invocation: WorkflowCandidate["requestedInvocation"]) => void;
+}
+
+export function createInvocationDuplicateGuard(): InvocationDuplicateGuard {
+  const seen = new Set<string>();
+  return {
+    isDuplicate: (invocation) => seen.has(workflowInvocationKey(invocation)),
+    record: (invocation) => { seen.add(workflowInvocationKey(invocation)); },
+  };
+}
+
 /** Map from WorkflowCandidateSource to the invokerAuthority kind it represents. */
 const SOURCE_TO_INVOKER: Record<WorkflowCandidateSource, string> = {
   game_master: "game_master",
@@ -76,13 +98,17 @@ const SOURCE_TO_SCOPE: Partial<Record<WorkflowCandidateSource, string>> = {
 /**
  * Whether an invoker may propose a workflow declaring `authority`.
  *
- * The Game Master satisfies every declared authority except a workflow that
- * only `system` may invoke: those are the deterministic engine's own entry
- * points (battle resolution, life events, procedure resolution), spliced in by
- * the pipeline, and no model may call them directly.
+ * The Game Master satisfies every declared authority except a `system_effect`
+ * command (docs/27): those are the deterministic engine's own entry points
+ * (battle resolution, life events, procedure resolution), spliced in by the
+ * pipeline, and no model may call them directly. This is the same
+ * classification `commandKindOf` gives `tools.ts` when it builds the Game
+ * Master's tool surface -- expressed once there, reused here, so the two
+ * checks cannot silently drift apart.
  */
-function invokerSatisfiesAuthority(invoker: string, authority: readonly string[]): boolean {
-  if (invoker === "game_master") return authority.some((kind) => kind !== "system");
+function invokerSatisfiesAuthority(invoker: string, definition: AnyWorkflowDefinition): boolean {
+  if (invoker === "game_master") return commandKindOf(definition) === "agent_action";
+  const authority: readonly string[] = definition.invokerAuthority ?? [];
   return authority.includes(invoker);
 }
 
@@ -140,7 +166,7 @@ export function validateCandidate(
   const authority = definition.invokerAuthority;
   if (authority && authority.length > 0) {
     const invoker = SOURCE_TO_INVOKER[source];
-    if (!invokerSatisfiesAuthority(invoker, authority)) {
+    if (!invokerSatisfiesAuthority(invoker, definition)) {
       return {
         kind: "authority_mismatch",
         message: `Skill "${inv.actionId}" may only be invoked by [${authority.join(", ")}]; source "${source}" maps to "${invoker}".`,

@@ -19,6 +19,9 @@ import { FamilyLinkSchema, HouseholdSchema, LifeContractSchema } from "../charac
 import { LegacyCauseSchema } from "../continuity/continuity";
 import { CampaignMemorySchema, EMPTY_CAMPAIGN_MEMORY } from "../gm/campaign-memory";
 import { DiplomaticMessageSchema } from "./diplomacy";
+import { WorldDevelopmentSchema } from "./developments";
+import { PlayerPlanSchema } from "../actions/plans";
+import { ActorActivitySchema } from "../actions/activity";
 
 /**
  * Bumped when an old snapshot needs upgrading on load.
@@ -51,6 +54,10 @@ export const WorldStateSchema = z
      * reads one value and a replay stops at one step.
      */
     elapsedStep: ElapsedStepSchema,
+    /** Optional for existing snapshots; the scheduler materializes it on first use. */
+    worldDevelopments: z.array(WorldDevelopmentSchema).optional(),
+    playerPlans: z.array(PlayerPlanSchema).optional(),
+    actorActivities: z.array(ActorActivitySchema).optional(),
     /**
      * The province graph is the map (ADR-0015). Detail tiers live on the
      * provinces because they are state the simulation mutates deterministically,

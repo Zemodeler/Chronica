@@ -66,8 +66,12 @@ the world the agent reads and can answer within the same turn.
 - **`request_capability`**: the capability-gap safeguard, below.
 - **`finish_turn`**: the structured turn report that ends the turn.
 
-There is deliberately no generic patch, set-state, or invent-workflow tool. An
-unregistered action id has no execution path anywhere in the engine.
+There is deliberately no generic patch or set-state tool, and an unregistered
+action id has no execution path anywhere in the engine. `define_action`/
+`invoke_defined_action` exist in code as a narrower, reviewed exception, but
+are off by default and not part of the normal-play tool surface —
+[docs/27](27-command-contract-and-taxonomy.md) has the full rationale, the
+feature flag, and the removal criterion.
 
 ## Why the tool loop uses the Responses API
 
@@ -114,11 +118,15 @@ committed with a deterministic account.
 
 ## The capability-gap safeguard
 
-The invented-workflow escape hatch is gone. `executeWorkflow` has no
-runtime-template path, and migration 0029 disables every persisted invented
-workflow. Existing rows stay readable for review.
+`executeWorkflow` has no runtime-template path, and migration 0029 disables
+every persisted invented workflow — existing rows stay readable for review,
+never executable. The narrower, code-level invented-action escape hatch
+(`define_action`/`invoke_defined_action`) is off by default for the same
+reason; see [docs/27](27-command-contract-and-taxonomy.md) for why it still
+exists in code and what would need to be true to remove it outright.
 
-In its place, when nothing in the tool list can do what an actor is attempting,
+The supported path is `request_capability`: when nothing in the tool list can
+do what an actor is attempting,
 the agent calls `request_capability` with the intent, why no tool fits, the
 actor and targets, a proposed tool name and typed parameters, the expected
 state effect, safety constraints, and scenario context. Nothing is mutated. The

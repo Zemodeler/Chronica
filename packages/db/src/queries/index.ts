@@ -15,5 +15,7 @@ export * from "./turns";
 export * from "./ui-state";
 export * from "./workflow-proposals";
 export * from "./invented-workflows";
+export * from "./military-fallback-metrics";
+export * from "./commitment-safety-net-metrics";
 export * from "./capability-requests";
 export * from "../built-in-scenarios";

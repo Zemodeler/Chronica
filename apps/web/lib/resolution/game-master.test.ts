@@ -150,6 +150,55 @@ describe("the game master loop", () => {
     expect(carthaginian?.locationId).toBe(SICILY_NORTHWEST);
   });
 
+  // docs/30: the Game Master can originate an NPC's commitment resolution or
+  // social action itself, with no pre-formed proposal at all -- the same
+  // unrestricted way it can already originate `create_force` for an NPC.
+  it("resolves an NPC's due commitment and records a social action with no pre-formed proposal", async () => {
+    const withCommitment: WorldState = {
+      ...world(),
+      commitments: [{
+        id: "hanno-pays-marcus",
+        promisorCharacterId: "hanno",
+        beneficiaryCharacterId: PLAYER,
+        actionKind: "payment",
+        description: "Pay tribute for safe passage through Roman waters.",
+        conditions: "",
+        requiredOfficeId: null,
+        requiredResource: { accountId: "hanno-purse", minAmount: 100 },
+        visibility: "polity",
+        sourceEventId: null,
+        breachPressureKind: "humiliation",
+        status: "pending",
+        createdAtStep: 0,
+        reviewAtStep: 1,
+        resolvedAtStep: null,
+        resolutionReason: null,
+      }],
+    };
+    const outcome = await run(
+      [
+        { toolCalls: [{ name: "fulfill_commitment", arguments: { actorId: "hanno", commitmentId: "hanno-pays-marcus" } }] },
+        { toolCalls: [{ name: "record_character_social_action", arguments: { actorId: "hanno", targetCharacterId: PLAYER, kind: "reconcile", reasonLabel: "Hanno offers a gesture of goodwill after paying the tribute." } }] },
+        finish({
+          directiveOutcomes: [{ directiveId: "directive-0", outcome: "unsupported", reason: "Not attempted this turn.", factRefs: [] }],
+          events: [
+            { factRefs: ["fact-1-1"], summary: "Hanno pays tribute.", participantCharacterIds: ["hanno"], provinceId: null, visibility: "public", salience: 4, directiveRef: null, chainPosition: "reaction" },
+            { factRefs: ["fact-1-2"], summary: "Hanno reconciles with Marcus.", participantCharacterIds: ["hanno", PLAYER], provinceId: null, visibility: "public", salience: 3, directiveRef: null, chainPosition: "reaction" },
+          ],
+          openThreads: [],
+          turnSummary: "Hanno pays his debt and mends the relationship.",
+        }),
+      ],
+      { world: withCommitment },
+    );
+
+    expect(outcome.termination).toBe("reported");
+    expect(outcome.world.commitments.find((c) => c.id === "hanno-pays-marcus")?.status).toBe("fulfilled");
+    expect(outcome.world.material.accounts.find((a) => a.id === "hanno-purse")?.balance).toBe(800);
+    const marcus = outcome.world.characters.find((c) => c.id === PLAYER);
+    expect(marcus?.relations.find((r) => r.subjectCharacterId === "hanno")?.causes.some((c) => c.label.includes("goodwill"))).toBe(true);
+  });
+
   it("fights a started battle deterministically and hands the result back before the next decision", async () => {
     const base = world();
     const attacker = base.material.forces[0];

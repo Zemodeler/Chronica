@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { InventedPatchOperation, RuntimeInventedWorkflow } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
 import { inventedWorkflowUses, inventedWorkflows } from "../schema/game";
@@ -111,4 +111,24 @@ export async function listInventedWorkflowUses(db: ChronicaDatabase, workflowId:
   return db.select().from(inventedWorkflowUses)
     .where(eq(inventedWorkflowUses.workflowId, workflowId))
     .orderBy(desc(inventedWorkflowUses.createdAt)).limit(limit);
+}
+
+/**
+ * How many defined actions (docs/27's `define_action`/`allowInventedActions`
+ * escape hatch) still await a developer's review: `status = "active"` is the
+ * table's only durable proxy for "not yet reviewed" -- a developer's
+ * decision is recorded here only as `setInventedWorkflowStatus` disabling a
+ * row, never as a separate "reviewed" flag, so a still-active row is exactly
+ * one nobody has acted on yet. `gameId` scopes to one campaign, or omit it
+ * for a cross-game count. This is the evidence docs/27's removal criterion
+ * for the escape hatch itself asks for ("no active campaign has unreviewed
+ * defined actions"); it does not by itself decide whether that criterion is
+ * met.
+ */
+export async function getUnreviewedDefinedActionCount(db: ChronicaDatabase, gameId?: string): Promise<number> {
+  const condition = gameId === undefined
+    ? eq(inventedWorkflows.status, "active")
+    : and(eq(inventedWorkflows.status, "active"), eq(inventedWorkflows.gameId, gameId));
+  const rows = await db.select({ id: inventedWorkflows.id }).from(inventedWorkflows).where(condition);
+  return rows.length;
 }

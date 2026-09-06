@@ -105,6 +105,22 @@ export interface WorkflowDefinition<TParams extends z.ZodTypeAny = z.ZodTypeAny>
 export type AnyWorkflowDefinition = WorkflowDefinition<any>;
 
 /**
+ * The command taxonomy (docs/27): `agent_action` is AI-callable, `system_effect`
+ * runs only from deterministic pipeline/executor code and is never offered as
+ * a tool. A workflow is a `system_effect` exactly when every declared
+ * `invokerAuthority` is `"system"` -- the same test `tools.ts`'s
+ * `buildActionTools` and `policy.ts`'s `invokerSatisfiesAuthority` both need,
+ * now expressed once instead of twice.
+ */
+export type CommandKind = "agent_action" | "system_effect";
+
+export function commandKindOf(definition: AnyWorkflowDefinition): CommandKind {
+  const authority = definition.invokerAuthority;
+  const isSystemOnly = authority !== undefined && authority.length > 0 && authority.every((kind) => kind === "system");
+  return isSystemOnly ? "system_effect" : "agent_action";
+}
+
+/**
  * Helper that preserves the concrete TParams type for the apply() callback
  * while widening to AnyWorkflowDefinition for registry storage.
  */

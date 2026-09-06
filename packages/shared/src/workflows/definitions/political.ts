@@ -13,14 +13,15 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params) {
       const a = world.map.polities.find((p) => p.id === params.polityAId);
+      if (!a) return refuse(`No polity exists with the id "${params.polityAId}".`);
       const b = world.map.polities.find((p) => p.id === params.polityBId);
-      if (!a || !b) return null;
+      if (!b) return refuse(`No polity exists with the id "${params.polityBId}".`);
       const alreadyAtWar = world.conflicts.wars.some(
         (w) =>
           (w.polityAId === params.polityAId && w.polityBId === params.polityBId) ||
           (w.polityAId === params.polityBId && w.polityBId === params.polityAId),
       );
-      if (alreadyAtWar) return null;
+      if (alreadyAtWar) return refuse(`${a.name} and ${b.name} are already at war.`);
       const [orderedA, orderedB]: [string, string] = params.polityAId < params.polityBId
         ? [params.polityAId, params.polityBId]
         : [params.polityBId, params.polityAId];

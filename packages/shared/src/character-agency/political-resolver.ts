@@ -4,13 +4,19 @@ import type { MaterialWorldState, Motion, PoliticalProcedure, SupportPosition, V
 import { stableHash } from "../determinism";
 import type { Commitment } from "./commitments";
 
-// Political support resolution (character-sim phase 4).
+// Political support resolution (character-sim phase 4; vote agency, docs/29).
 //
-// AI may propose persuasion attempts and likely positions; this module is
-// what actually computes and validates a canonical SupportPosition and, when
-// a procedure comes due, its outcome. Nothing here calls an AI and nothing
-// here is randomised -- two identical world states at the same step always
-// resolve the same way, per docs/03's replay guarantee.
+// This module validates and tallies whatever canonical SupportPosition
+// records already exist, and decides a procedure's outcome when it comes due.
+// Nothing here calls an AI and nothing here is randomised -- two identical
+// world states at the same step always resolve the same way, per docs/03's
+// replay guarantee.
+//
+// `evaluateSupport` no longer decides a position: the Game Master's own
+// stated choice, recorded by the `pledge_support` workflow, is the position.
+// `evaluateSupport` stays as advisory context only -- surfaced through the
+// `inspect_political_procedure` read tool as a suggestion, never applied
+// automatically.
 
 export interface PoliticalResolverWorldView {
   readonly characters: readonly Character[];
@@ -19,11 +25,11 @@ export interface PoliticalResolverWorldView {
 
 /**
  * Folds relationship, belief-adjacent, group-loyalty, and legitimacy signals
- * into one canonical support score for `supporterId` toward `procedure`'s
- * sponsor. This is the single function every support-changing workflow calls
- * to compute the number it then validates and records -- AI-proposed
- * persuasion changes the *inputs* (a new relationship cause, a new pressure),
- * never this output directly.
+ * into one advisory support score for `supporterId` toward `procedure`'s
+ * sponsor -- a suggestion the Game Master may read before recording its own
+ * chosen position, never the position itself. AI-proposed persuasion changes
+ * the *inputs* (a new relationship cause, a new pressure), which this
+ * function will reflect the next time it's read.
  */
 export function evaluateSupport(
   world: PoliticalResolverWorldView,

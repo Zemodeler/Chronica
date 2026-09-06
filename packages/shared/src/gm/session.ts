@@ -1,9 +1,12 @@
 import { z } from "zod";
+import { InterpretPlanSchema, ExecutePlanStageSchema, RespondToAssignmentSchema, DeferPlanStageSchema, preparePlayerPlans, interpretPlan, planSpending, type PlayerPlan } from "../actions/plans";
+import { actionTimeCost, chargeActivity } from "../actions/activity";
+import type { OrderDirective } from "../actions/orders";
 import type { WorldState } from "../world/world-state";
 import type { ProposedInvocation } from "../actions/orders";
 import { WORKFLOW_REGISTRY } from "../workflows/registry";
 import { executeWorkflow } from "../workflows/executor";
-import { validateCandidate, workflowInvocationKey, type PolicyViolation } from "../workflows/policy";
+import { validateCandidate, createInvocationDuplicateGuard, type PolicyViolation } from "../workflows/policy";
 import { InventedWorkflowDefinitionSchema, applyInventedWorkflow, type InventedWorkflowDefinition } from "../workflows/invented-workflow";
 import type { WorkflowAuditEntry, WorkflowCandidate } from "../workflows/manager-types";
 import { READ_TOOL_BY_NAME, type PrivateInformationPolicy, type ReadToolContext } from "./read-tools";
@@ -226,6 +229,7 @@ export interface GameMasterSessionOptions {
   readonly actorCharacterId: string;
   /** Directive ids submitted this turn; the report must account for each. */
   readonly directiveIds: readonly string[];
+  readonly directives?: readonly { id: string; directive: OrderDirective }[];
   readonly privateInformation?: PrivateInformationPolicy;
   /** Optional test/operations override. Normal play uses actor allowances. */
   readonly maxActions?: number;
@@ -233,11 +237,19 @@ export interface GameMasterSessionOptions {
   readonly actionAllowances?: readonly { readonly characterId: string; readonly allowance: number }[];
   readonly maxToolCalls?: number;
   /**
-   * Actions this campaign defined in earlier turns. They are usable
-   * immediately, without being defined again: a capability the world once
-   * gained does not have to be re-invented every time it is needed.
+   * Actions this campaign defined in earlier turns. Always kept and reported
+   * for audit even while `allowInventedActions` is off -- see there.
    */
   readonly definedActions?: readonly InventedWorkflowDefinition[];
+  /**
+   * Off by default (docs/27). `define_action`/`invoke_defined_action` are a
+   * developer-controlled rollout/testing exception, not a live escape hatch:
+   * while this is false, neither tool is offered by `listTools()`, and a call
+   * to either by name is refused without touching the stage. Earlier-turn
+   * `definedActions` remain readable in `result()` either way -- they are
+   * historical record, not something this flag makes executable again.
+   */
+  readonly allowInventedActions?: boolean;
 }
 
 export interface GameMasterSessionResult {
@@ -280,13 +292,15 @@ export class GameMasterSession {
   private readonly maxToolCalls: number;
   private readonly actionAllowances: ReadonlyMap<string, number>;
   private readonly actionsByActor = new Map<string, number>();
+  private executingPlanId: string | null = null;
+  private readonly managedPlans: boolean;
 
   private readonly events: FactualEvent[] = [];
   private readonly auditEntries: WorkflowAuditEntry[] = [];
   private readonly capabilityRequests: RecordedCapabilityRequest[] = [];
   private readonly pendingCapabilityRepairs = new Map<string, PendingCapabilityRepair>();
   private readonly executedInvocations: ProposedInvocation[] = [];
-  private readonly seenInvocationKeys = new Set<string>();
+  private readonly invocationDuplicates = createInvocationDuplicateGuard();
   private readonly eligibleRefusals = new Map<string, EligibleRefusal>();
 
   private report: GameMasterTurnReport | null = null;
@@ -310,11 +324,13 @@ export class GameMasterSession {
   private readCallCount = 0;
   private factCounter = 0;
   private finished = false;
+  private readonly allowInventedActions: boolean;
 
   readonly directiveIds: readonly string[];
 
   constructor(options: GameMasterSessionOptions) {
-    this.staged = options.world;
+    this.managedPlans = options.directives !== undefined;
+    this.staged = options.directives ? preparePlayerPlans(options.world, options.actorCharacterId, options.atStep, options.directives) : options.world;
     this.atStep = options.atStep;
     this.actorCharacterId = options.actorCharacterId;
     this.directiveIds = [...options.directiveIds];
@@ -325,11 +341,17 @@ export class GameMasterSession {
       (options.actionAllowances ?? []).map((entry) => [entry.characterId, Math.max(0, entry.allowance)]),
     );
     this.definedActions = new Map((options.definedActions ?? []).map((definition) => [definition.actionId, definition]));
+    this.allowInventedActions = options.allowInventedActions ?? false;
+    for (const { directive } of options.directives ?? []) {
+      if (directive.kind === "new") continue;
+      const plan = options.world.playerPlans?.find(p => p.id === directive.actionId && p.ownerId === options.actorCharacterId && p.status === "active");
+      if (plan) this.planFact(`The player ${directive.kind === "cancel" ? "cancelled" : "revised"} a continuing plan. Completed work remains in its history.`);
+    }
   }
 
   /** The tool surface this session accepts. Anything else is refused by name. */
   listTools(): GameMasterToolDefinition[] {
-    return buildGameMasterTools();
+    return buildGameMasterTools({ allowInventedActions: this.allowInventedActions });
   }
 
   get stagedWorld(): WorldState {
@@ -370,9 +392,29 @@ export class GameMasterSession {
     }
 
     const args = call.arguments ?? {};
+    if (call.name === "interpret_plan") return this.planInterpretation(args);
+    if (call.name === "execute_plan_stage") return this.executePlanStage(args);
+    if (call.name === "respond_to_plan_assignment") return this.respondToAssignment(args);
+    if (call.name === "defer_plan_stage") {
+      const parsed = DeferPlanStageSchema.safeParse(args);
+      if (!parsed.success) return { ok: false, finished: false, factual: parsed.error.message };
+      const { planId, stageId, reason } = parsed.data;
+      const plan = this.staged.playerPlans?.find(p => p.id === planId && p.ownerId === this.actorCharacterId && p.status === "active");
+      if (!plan?.stages.some(s => s.id === stageId && s.status !== "completed")) return { ok: false, finished: false, factual: "Only an unfinished stage can be deferred." };
+      this.staged = { ...this.staged, playerPlans: this.staged.playerPlans!.map(p => p.id !== planId ? p : { ...p, updatedAtStep: this.atStep, stages: p.stages.map(s => s.id !== stageId ? s : { ...s, status: "blocked", reason }) }) };
+      return { ok: true, finished: false, factual: `The stage remains unfinished: ${reason}` };
+    }
     if (call.name === FINISH_TURN_TOOL) return this.finish(args);
-    if (call.name === DEFINE_ACTION_TOOL) return this.defineAction(args);
-    if (call.name === INVOKE_DEFINED_ACTION_TOOL) return this.invokeDefinedAction(args);
+    if (call.name === DEFINE_ACTION_TOOL || call.name === INVOKE_DEFINED_ACTION_TOOL) {
+      if (!this.allowInventedActions) {
+        return {
+          ok: false,
+          finished: false,
+          factual: `${call.name} is not available. If no registered action fits, call ${REQUEST_CAPABILITY_TOOL} to record the unmet need for developer review; nothing you attempt this way changes the world.`,
+        };
+      }
+      return call.name === DEFINE_ACTION_TOOL ? this.defineAction(args) : this.invokeDefinedAction(args);
+    }
     if (call.name === REQUEST_CAPABILITY_TOOL) return this.requestCapability(args);
     if (call.name === RECORD_REFUSAL_AFTERMATH_TOOL) return this.recordRefusalAftermath(args);
     if (READ_TOOL_BY_NAME.has(call.name)) return this.read(call.name, args);
@@ -410,22 +452,32 @@ export class GameMasterSession {
 
   // -- actions ---------------------------------------------------------------
 
-  private actionLimitRefusal(actorId: string): string | null {
+  private actionLimitRefusal(actorId: string, actionId?: string): string | null {
     // An explicit `maxActions` is retained only for tests and an emergency
     // operational override. Normal simulation has no shared global pool.
     if (this.maxActions !== undefined && this.actionCount >= this.maxActions) {
       return `This turn's emergency action budget (${this.maxActions}) is spent. Call ${FINISH_TURN_TOOL} and report what happened.`;
     }
+    if (actionId) {
+      if (this.managedPlans && actorId === this.actorCharacterId && this.executingPlanId === null) return "Use execute_plan_stage for player orders so progress and limits stay attached to their plan.";
+      const used = this.staged.actorActivities?.find(a => a.actorId === actorId && a.atStep === this.atStep)?.usedBps ?? 0;
+      if (used + actionTimeCost(actionId, WORKFLOW_REGISTRY.get(actionId)?.category) > 10_000) return "This character has no time left for that activity this turn. Keep it pending for next turn or use an accepted delegate.";
+    }
     // The player is never an NPC allowance entry. Every other listed actor
     // draws only against their own relevance, never another polity's budget.
     if (actorId === this.actorCharacterId || this.actionAllowances.size === 0) return null;
     const allowance = this.actionAllowances.get(actorId);
-    if (allowance === undefined) {
+    const isDelegate = this.staged.playerPlans?.some(p => p.status === "active" && p.assignments.some(a => a.actorId === actorId && a.accepted));
+    if (allowance === undefined && !isDelegate) {
       return "This character is not in the active cast for this turn. Let a relevant actor take the action, or bring this character into relevance first.";
     }
-    const used = this.actionsByActor.get(actorId) ?? 0;
-    if (used >= allowance) {
-      return `${this.staged.characters.find((character) => character.id === actorId)?.name ?? actorId} has used their ${allowance}-action relevance allowance for this turn. Let another actor carry the next development.`;
+    // docs/30: the relevance-derived allowance is a real per-character budget,
+    // not just membership in this turn's cast -- "AI choice constrained by
+    // their state" needs an actual constraint. A delegate with no allowance
+    // entry of their own (isDelegate but allowance === undefined) has no
+    // count to exceed, so only a defined allowance is checked here.
+    if (allowance !== undefined && (this.actionsByActor.get(actorId) ?? 0) >= allowance) {
+      return `This character has already taken its allowance of ${allowance} action${allowance === 1 ? "" : "s"} this turn.`;
     }
     return null;
   }
@@ -455,6 +507,74 @@ export class GameMasterSession {
     if (pending !== undefined) this.pendingCapabilityRepairs.delete(pending.id);
   }
 
+  private planFact(summary: string): GameMasterToolOutcome {
+    const id = `fact-${this.atStep}-${++this.factCounter}`;
+    this.events.push({ id, atStep: this.atStep, kind: "action", actionId: "plan_update", actorId: this.actorCharacterId, parameters: {}, summary, materialConsequence: false });
+    return { ok: true, finished: false, factId: id, factual: `[${id}] ${summary}` };
+  }
+
+  private planInterpretation(args: Record<string, unknown>): GameMasterToolOutcome {
+    const parsed = InterpretPlanSchema.safeParse(args);
+    if (!parsed.success) return { ok: false, finished: false, factual: parsed.error.message };
+    const result = interpretPlan(this.staged, this.actorCharacterId, parsed.data, this.atStep);
+    if (typeof result === "string") return { ok: false, finished: false, factual: result };
+    this.staged = result;
+    return this.planFact(`A continuing plan was prepared: ${parsed.data.interpretation}. Its stages are attempts, not completed outcomes.`);
+  }
+
+  private respondToAssignment(args: Record<string, unknown>): GameMasterToolOutcome {
+    const parsed = RespondToAssignmentSchema.safeParse(args);
+    if (!parsed.success) return { ok: false, finished: false, factual: parsed.error.message };
+    const input = parsed.data;
+    const plan = this.staged.playerPlans?.find(p => p.id === input.planId && p.ownerId === this.actorCharacterId && p.status === "active");
+    const actor = this.staged.characters.find(c => c.id === input.actorId && c.alive);
+    if (!plan || !actor || input.actorId === this.actorCharacterId || !plan.options.delegateIds.includes(input.actorId)) return { ok: false, finished: false, factual: "Only a living NPC named as a delegate may answer this assignment." };
+    this.staged = { ...this.staged, playerPlans: this.staged.playerPlans!.map(p => p.id !== plan.id ? p : { ...p, updatedAtStep: this.atStep,
+      assignments: [...p.assignments.filter(a => a.actorId !== input.actorId), { actorId: input.actorId, accepted: input.accepted, reason: input.reason }] }) };
+    return this.planFact(`${actor.name} ${input.accepted ? "accepted" : "declined"} an assignment: ${input.reason}`);
+  }
+
+  private checkPlanBudget(after: WorldState): string | null {
+    const plan = this.staged.playerPlans?.find(p => p.id === this.executingPlanId);
+    if (!plan) return null;
+    const debit = planSpending(this.staged, after, plan);
+    return typeof debit === "string" ? debit : null;
+  }
+
+  private executePlanStage(args: Record<string, unknown>): GameMasterToolOutcome {
+    const parsed = ExecutePlanStageSchema.safeParse(args);
+    if (!parsed.success) return { ok: false, finished: false, factual: parsed.error.message };
+    const input = parsed.data;
+    const plan = this.staged.playerPlans?.find(p => p.id === input.planId && p.ownerId === this.actorCharacterId && p.status === "active");
+    const stage = plan?.stages.find(s => s.id === input.stageId);
+    if (!plan || !stage || !plan.interpretation) return { ok: false, finished: false, factual: "Interpret an active plan before attempting its stages." };
+    if (stage.status === "completed") return { ok: false, finished: false, factual: "This stage already completed; its effects must not be repeated." };
+    const actor = this.staged.characters.find(c => c.id === stage.actorId && c.alive);
+    const obstacle = !actor ? "The assigned character is no longer available. Revise the plan."
+      : stage.dependsOn.some(id => plan.stages.find(s => s.id === id)?.status !== "completed") ? "An earlier stage has not completed."
+      : stage.notBeforeStep !== null && stage.notBeforeStep > this.atStep ? "The scheduled time has not arrived."
+      : stage.provinceId !== null && actor.locationProvinceId !== stage.provinceId ? "The executor has not reached the required location."
+      : stage.actorId !== plan.ownerId && !plan.assignments.some(a => a.actorId === stage.actorId && a.accepted) ? "The delegate has not accepted this assignment." : null;
+    let result: GameMasterToolOutcome;
+    const before = this.staged;
+    if (obstacle) result = { ok: false, finished: false, factual: obstacle };
+    else {
+      this.executingPlanId = plan.id;
+      try {
+        result = WORKFLOW_REGISTRY.has(input.actionId) ? this.act(input.actionId, { ...input.parameters, actorId: stage.actorId })
+          : this.allowInventedActions && this.definedActions.has(input.actionId) ? this.invokeDefinedAction({ actionId: input.actionId, actorId: stage.actorId, parameters: input.parameters })
+          : { ok: false, finished: false, factual: "Use a registered action for this stage." };
+      } finally { this.executingPlanId = null; }
+    }
+    const debit = planSpending(before, this.staged, plan);
+    this.staged = { ...this.staged, playerPlans: this.staged.playerPlans!.map(p => {
+      if (p.id !== plan.id) return p;
+      const stages: PlayerPlan["stages"] = p.stages.map(s => s.id !== stage.id ? s : { ...s, status: result.ok ? "completed" : "blocked", reason: result.ok ? null : result.factual.slice(0, 600), factRefs: result.factId ? [result.factId] : [], lastCompletedStep: result.ok ? this.atStep : s.lastCompletedStep });
+      return { ...p, stages, spent: p.spent + (typeof debit === "number" ? debit : 0), updatedAtStep: this.atStep, status: stages.every(s => s.status === "completed" && s.repeatEverySteps === null) ? "completed" : "active" };
+    }) };
+    return result;
+  }
+
   private act(actionId: string, args: Record<string, unknown>): GameMasterToolOutcome {
     const { actorId, ...parameters } = args as { actorId?: unknown } & Record<string, unknown>;
     if (typeof actorId !== "string" || actorId.trim().length === 0) {
@@ -463,6 +583,7 @@ export class GameMasterSession {
     // Check identity first. A guessed actor id is a recoverable lookup error,
     // not a claim that someone was outside this turn's active cast.
     const actor = this.staged.characters.find((character) => character.id === actorId);
+    if (actionId === "move_character" && parameters["characterId"] !== actorId) return { ok: false, finished: false, factual: "The traveler must execute their own movement; another actor cannot supply their personal travel time." };
     if (!actor || !actor.alive) {
       const outcome = this.applyInvocation({ actionId, actorId, parameters }, "game_master");
       if (outcome.recoverable) this.pendingRecoverableRetries.add(`${actionId}::${actorId}`);
@@ -473,7 +594,7 @@ export class GameMasterSession {
         ...(outcome.refusalId === undefined ? {} : { refusalId: outcome.refusalId }),
       };
     }
-    const limitRefusal = this.actionLimitRefusal(actorId);
+    const limitRefusal = this.actionLimitRefusal(actorId, actionId);
     if (limitRefusal !== null) return { ok: false, finished: false, factual: limitRefusal };
 
     // A diplomatic message answered in the player's own name is the
@@ -555,7 +676,7 @@ export class GameMasterSession {
     const auditBase: WorkflowAuditEntry = {
       correlationId: `gm-${this.atStep}-${this.auditEntries.length}`,
       source: "game_master",
-      sourceRef: source === "system" ? "engine" : "game_master",
+      sourceRef: source === "system" ? "engine" : this.executingPlanId ?? "game_master",
       requestedActionId: invocation.actionId,
       requestedInvocation: invocation,
     };
@@ -589,8 +710,7 @@ export class GameMasterSession {
       };
     }
 
-    const duplicateKey = workflowInvocationKey(invocation);
-    if (source === "game_master" && this.seenInvocationKeys.has(duplicateKey)) {
+    if (this.invocationDuplicates.isDuplicate(invocation)) {
       const message = `Refused: ${invocation.actionId} with these exact parameters has already been carried out this turn by ${invocation.actorId}.`;
       this.auditEntries.push({
         ...auditBase,
@@ -653,8 +773,12 @@ export class GameMasterSession {
 
     // Committed to the stage only now, after the executor has re-validated
     // the whole world document.
-    this.staged = executed.world;
-    this.seenInvocationKeys.add(duplicateKey);
+    const budgetRefusal = this.checkPlanBudget(executed.world);
+    if (budgetRefusal !== null) return { ok: false, factual: budgetRefusal, recoverable: false };
+    const timed = source === "game_master" ? chargeActivity(this.staged, executed.world, invocation.actorId, invocation.actionId, WORKFLOW_REGISTRY.get(invocation.actionId)?.category, this.atStep) : executed.world;
+    if (typeof timed === "string") return { ok: false, factual: timed, recoverable: false };
+    this.staged = timed;
+    this.invocationDuplicates.record(invocation);
     if (source === "game_master") this.recordAction(invocation.actorId);
     this.executedInvocations.push(invocation);
     this.auditEntries.push({ ...auditBase, finalInvocation: invocation, dryRunOk: true, executionOk: true });
@@ -818,12 +942,16 @@ export class GameMasterSession {
 
   // -- defining what the engine does not have --------------------------------
   //
-  // The escape hatch, and the reason it is safe enough to have: a definition
-  // is a named, parameterised list of patch operations, and every use of it
-  // goes through `applyInventedWorkflow`, which re-parses the entire world
-  // document, refuses any dangling reference it would introduce, and refuses
-  // the clock, the pins, and the schema version outright. What it cannot do
-  // is anything a built-in workflow could not also do.
+  // Reached only when `allowInventedActions` is true (docs/27); `invoke()`
+  // refuses both tool names by name otherwise. The reason it is safe enough to
+  // have at all: a definition is a named, parameterised list of patch
+  // operations, and every use of it goes through `applyInventedWorkflow`,
+  // which re-parses the entire world document, refuses any dangling reference
+  // it would introduce, and refuses the clock, the pins, and the schema
+  // version outright. What it cannot do is anything a built-in workflow could
+  // not also do. It stays off by default because `request_capability` is the
+  // supported path for the same situation, and a developer reviewing a typed
+  // workflow beats a campaign quietly accumulating ad hoc ones.
 
   private defineAction(args: Record<string, unknown>): GameMasterToolOutcome {
     if (this.definedThisTurn.length >= MAX_DEFINITIONS_PER_TURN) {
@@ -886,7 +1014,7 @@ export class GameMasterSession {
     if (!actor || !actor.alive) {
       return { ok: false, finished: false, factual: `No living character with the id "${actorId}" can take this action.` };
     }
-    const limitRefusal = this.actionLimitRefusal(actorId);
+    const limitRefusal = this.actionLimitRefusal(actorId, actionId);
     if (limitRefusal !== null) return { ok: false, finished: false, factual: limitRefusal };
 
     const executed = applyInventedWorkflow(definition, this.staged, parameters);
@@ -898,7 +1026,11 @@ export class GameMasterSession {
       };
     }
 
-    this.staged = executed.world;
+    const budgetRefusal = this.checkPlanBudget(executed.world);
+    if (budgetRefusal !== null) return { ok: false, factual: budgetRefusal, finished: false };
+    const timed = chargeActivity(this.staged, executed.world, actorId, actionId, undefined, this.atStep);
+    if (typeof timed === "string") return { ok: false, factual: timed, finished: false };
+    this.staged = timed;
     this.recordAction(actorId);
     this.definedActionUses.push({ actionId, actorId, parameters });
 
@@ -1028,6 +1160,11 @@ export class GameMasterSession {
     const missingDirectives = this.directiveIds.filter(
       (id) => !parsed.data.directiveOutcomes.some((outcome) => outcome.directiveId === id),
     );
+    const prematurelyCompleted = parsed.data.directiveOutcomes.find(outcome => {
+      const plan = this.staged.playerPlans?.find(p => p.ownerId === this.actorCharacterId && p.createdAtStep === this.atStep && p.sourceDirectiveId === outcome.directiveId);
+      return plan && outcome.outcome === "carried_out" && (plan.stages.length === 0 || plan.stages.some(s => s.status !== "completed"));
+    });
+    if (prematurelyCompleted) return { ok: false, finished: false, factual: `Directive ${prematurelyCompleted.directiveId} still has unfinished plan stages. Report its actual partial progress or obstacle; do not declare the whole plan completed.` };
     if (missingDirectives.length > 0) {
       return {
         ok: false,

@@ -65,7 +65,7 @@ export function generateCandidateActions(context: CandidateGenerationContext): r
         requiredOfficeId: commitment.requiredOfficeId, requiredResource: commitment.requiredResource,
         expectedRisk: 5,
         expectedEffectSummary: `Keeps the promise: ${commitment.description}`,
-        legalWorkflowIds: [],
+        legalWorkflowIds: ["fulfill_commitment"],
         rationale: `A commitment to ${commitment.beneficiaryCharacterId} is due and can genuinely be kept.`,
       });
     }
@@ -77,7 +77,7 @@ export function generateCandidateActions(context: CandidateGenerationContext): r
       requiredOfficeId: null, requiredResource: null,
       expectedRisk: 15,
       expectedEffectSummary: "Buys time without breaking the promise outright.",
-      legalWorkflowIds: [],
+      legalWorkflowIds: ["defer_commitment"],
       rationale: "The commitment cannot yet be kept, but is not worth breaking either.",
     });
     candidates.push({
@@ -88,7 +88,7 @@ export function generateCandidateActions(context: CandidateGenerationContext): r
       requiredOfficeId: null, requiredResource: null,
       expectedRisk: 60,
       expectedEffectSummary: "Abandons the promise outright, at a reputational cost.",
-      legalWorkflowIds: [],
+      legalWorkflowIds: ["break_commitment"],
       rationale: "Keeping this commitment now conflicts with a higher priority.",
     });
   }
@@ -173,7 +173,7 @@ function socialPressureCandidates(actorId: string, rivalId: string, pressure: Ch
       requiredOfficeId: null, requiredResource: null,
       expectedRisk: 50,
       expectedEffectSummary: "Raises fear, damages trust and respect toward the rival.",
-      legalWorkflowIds: [],
+      legalWorkflowIds: ["record_character_social_action"],
       rationale: `Responds to pressure "${pressure.label}" by confronting the rival directly.`,
     },
     {
@@ -184,7 +184,7 @@ function socialPressureCandidates(actorId: string, rivalId: string, pressure: Ch
       requiredOfficeId: null, requiredResource: null,
       expectedRisk: 20,
       expectedEffectSummary: "Seeks to repair trust and affection with the rival.",
-      legalWorkflowIds: [],
+      legalWorkflowIds: ["record_character_social_action"],
       rationale: `Responds to pressure "${pressure.label}" by seeking to defuse it instead.`,
     },
   ];

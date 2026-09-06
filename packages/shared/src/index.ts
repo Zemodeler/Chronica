@@ -4,7 +4,6 @@ export * from "./character-agency/schemas";
 export * from "./character-agency/selector";
 export * from "./character-agency/candidates";
 export * from "./character-agency/commitments";
-export * from "./character-agency/conflicts";
 export * from "./character-agency/intents";
 export * from "./character-agency/scoring";
 export * from "./character-agency/political-resolver";

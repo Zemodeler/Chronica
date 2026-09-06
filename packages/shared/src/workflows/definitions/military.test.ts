@@ -4,6 +4,39 @@ import { executeWorkflow } from "../executor";
 
 const world = () => structuredClone(firstPunicWarScenario.initialWorld);
 
+describe("move_force", () => {
+  // docs/27: moving a force to where it already stands must not silently
+  // "succeed" as if it moved -- it is a no-op, not a real relocation.
+  it("is a no-op when the destination is the force's current province", () => {
+    const w = world();
+    const force = w.material.forces.find((f) => f.id === "carthaginian-army")!;
+    const outcome = executeWorkflow(
+      { actionId: "move_force", actorId: "test-actor", parameters: { forceId: force.id, destinationProvinceId: force.locationId } },
+      w,
+      0,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.noOp).toBe(true);
+    expect(outcome.world.material.forces.find((f) => f.id === force.id)?.locationId).toBe(force.locationId);
+  });
+
+  it("moves a force to a genuinely different province", () => {
+    const w = world();
+    const force = w.material.forces.find((f) => f.id === "legio-i")!;
+    const destination = w.map.provinces.find((p) => p.id !== force.locationId)!.id;
+    const outcome = executeWorkflow(
+      { actionId: "move_force", actorId: "test-actor", parameters: { forceId: force.id, destinationProvinceId: destination } },
+      w,
+      0,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.noOp).toBeUndefined();
+    expect(outcome.world.material.forces.find((f) => f.id === force.id)?.locationId).toBe(destination);
+  });
+});
+
 describe("start_siege", () => {
   // Regression: a siege named a besieging force with no check that the force
   // was anywhere near the target -- "route and target are valid" (item 2)

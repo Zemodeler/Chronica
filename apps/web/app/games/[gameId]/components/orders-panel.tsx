@@ -2,6 +2,7 @@
 
 import { useRef, useState, useEffect, useCallback, type FormEvent, type KeyboardEvent } from "react";
 import { RESOLUTION_PROGRESS_STAGES, STEP_LABELS, type ResolutionStep as PipelineResolutionStep } from "../../../../lib/resolution/types";
+import type { OrderDirective, PlayerPlan } from "@chronica/shared";
 
 interface ResolutionStep {
   readonly step: string;
@@ -30,7 +31,17 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [open, setOpen] = useState(false);
   const [orderInput, setOrderInput] = useState("");
-  const [orders, setOrders] = useState<string[]>([]);
+  const [orders, setOrders] = useState<OrderDirective[]>([]);
+  const [plans, setPlans] = useState<PlayerPlan[]>([]);
+  const [delegates, setDelegates] = useState<{ id: string; name: string }[]>([]);
+  const [accounts, setAccounts] = useState<{ id: string; label: string }[]>([]);
+  const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
+  const [method, setMethod] = useState("");
+  const [constraints, setConstraints] = useState("");
+  const [secrecy, setSecrecy] = useState<"public" | "discreet" | "secret">("public");
+  const [delegateIds, setDelegateIds] = useState<string[]>([]);
+  const [accountId, setAccountId] = useState("");
+  const [budgetAmount, setBudgetAmount] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [steps, setSteps] = useState<ResolutionStep[]>([]);
@@ -51,9 +62,12 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
     try {
       const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/orders`, { cache: "no-store" });
       if (!res.ok) return;
-      const data = await res.json() as { order: { rawText: string } | null; turnStatus: string | null };
+      const data = await res.json() as { order: { rawText: string } | null; turnStatus: string | null; plans?: PlayerPlan[]; delegates?: { id: string; name: string }[]; accounts?: { id: string; label: string }[] };
       setCurrentOrder(data.order);
       setTurnStatus(data.turnStatus);
+      setPlans(data.plans ?? []);
+      setDelegates(data.delegates ?? []);
+      setAccounts(data.accounts ?? []);
     } catch {
       // Silently ignore
     }
@@ -122,15 +136,22 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
     };
   }, [gameId, onResolutionComplete]);
 
+  const makeDirective = useCallback((text: string): OrderDirective => editingPlanId
+    ? { kind: "revise", actionId: editingPlanId, text }
+    : { kind: "new", text, planOptions: { method, constraints, secrecy, delegateIds, budget: accountId && budgetAmount !== "" ? { accountId, amount: Number(budgetAmount) } : null } },
+  [editingPlanId, method, constraints, secrecy, delegateIds, accountId, budgetAmount]);
+
   const addOrder = useCallback(() => {
     const trimmed = orderInput.trim();
     if (!trimmed) return;
-    setOrders((prev) => [...prev, trimmed]);
+    if (!editingPlanId && accountId && (budgetAmount === "" || !Number.isSafeInteger(Number(budgetAmount)) || Number(budgetAmount) < 0)) { setError("Enter a whole-number spending limit of zero or more."); return; }
+    setOrders((prev) => [...prev, makeDirective(trimmed)]);
     setOrderInput("");
-  }, [orderInput]);
+    setEditingPlanId(null);
+  }, [orderInput, makeDirective, editingPlanId, accountId, budgetAmount]);
 
-  const handleInputKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
+  const handleInputKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       addOrder();
     }
@@ -143,14 +164,13 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
   const handleSubmit = useCallback(async (event: FormEvent) => {
     event.preventDefault();
     const pending = orderInput.trim();
-    const allOrders = pending ? [...orders, pending] : orders;
-    if (allOrders.length === 0) return;
+    const allOrders = pending ? [...orders, makeDirective(pending)] : orders;
 
     setSubmitting(true);
     setError(null);
 
     try {
-      const directives = allOrders.map((text) => ({ kind: "new" as const, text }));
+      const directives = allOrders;
       const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/orders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -164,19 +184,20 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
       }
       setOrderInput("");
       setOrders([]);
+      setEditingPlanId(null);
       setSubmitting(false);
       setOpen(false);
       if (data.enqueued) {
         startSseStream();
       } else {
-        setCurrentOrder({ rawText: allOrders.join("\n") });
+        setCurrentOrder({ rawText: allOrders.map(d => "text" in d ? d.text : "Cancel ongoing plan").join("\n") });
         setTurnStatus("queued");
       }
     } catch {
       setError("Failed to submit orders.");
       setSubmitting(false);
     }
-  }, [gameId, orderInput, orders, startSseStream]);
+  }, [gameId, orderInput, orders, startSseStream, makeDirective]);
 
   // If the turn becomes queued (polled from another tab), auto-start resolution
   useEffect(() => {
@@ -189,7 +210,7 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
     return () => { sseRef.current?.close(); };
   }, []);
 
-  const canSubmit = (orders.length > 0 || orderInput.trim().length > 0) && !submitting && !resolving;
+  const canSubmit = !submitting && !resolving;
   const isCollecting = turnStatus === "collecting" || turnStatus === null;
 
   const resolutionDone = !resolving && steps.length > 0;
@@ -239,6 +260,23 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
         <div className="chat-panel-body" style={{ flexDirection: "column", gap: "1rem", overflowY: "auto" }}>
 
           {/* Already-submitted order display */}
+          {plans.length > 0 && <section aria-label="Continuing plans">
+            <h3>Continuing plans</h3>
+            <p>Unfinished work continues each turn. People have their own time; delegates must agree and have the means to act.</p>
+            {plans.slice().sort((a, b) => Number(b.status === "active") - Number(a.status === "active") || b.updatedAtStep - a.updatedAtStep).slice(0, 40).map(plan => <details key={plan.id} open={plan.status === "active"} style={{ marginBottom: "0.75rem" }}>
+              <summary>{plan.rawText.slice(0, 100)} — {plan.status}</summary>
+              <p>{plan.interpretation || "Awaiting interpretation"}</p>
+              {plan.options.method && <p>Method: {plan.options.method}</p>}
+              {plan.options.constraints && <p>Conditions: {plan.options.constraints}</p>}
+              {plan.options.budget && <p>Spent {plan.spent} of {plan.options.budget.amount}</p>}
+              <ol>{plan.stages.map(stage => <li key={stage.id}>{stage.objective} — {stage.status}{stage.repeatEverySteps ? ` (repeats every ${stage.repeatEverySteps} turns)` : ""}{stage.reason ? `: ${stage.reason}` : ""}</li>)}</ol>
+              {plan.assignments.map(a => <p key={a.actorId}>{delegates.find(d => d.id === a.actorId)?.name ?? "Delegate"}: {a.accepted ? "accepted" : "declined"} — {a.reason}</p>)}
+              {plan.status === "active" && isCollecting && !resolving && <div>
+                <button type="button" disabled={submitting} onClick={() => { setEditingPlanId(plan.id); setOrderInput(plan.rawText); }}>Revise plan</button>{" "}
+                <button type="button" disabled={submitting || orders.some(d => d.kind === "cancel" && d.actionId === plan.id)} onClick={() => setOrders(prev => [...prev.filter(d => d.kind === "new" || d.actionId !== plan.id), { kind: "cancel", actionId: plan.id }])}>Cancel plan next turn</button>
+              </div>}
+            </details>)}
+          </section>}
           {currentOrder && (
             <section style={{ padding: "0.75rem", background: "var(--surface-raised)", borderRadius: "0.375rem" }}>
               <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.5rem" }}>
@@ -275,7 +313,7 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
                       <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: "1.25rem" }}>
                         {idx + 1}.
                       </span>
-                      <span style={{ fontSize: "0.875rem", flex: 1 }}>{order}</span>
+                      <span style={{ fontSize: "0.875rem", flex: 1 }}>{order.kind === "cancel" ? "Cancel ongoing plan" : `${order.kind === "revise" ? "Revise: " : ""}${order.text}`}</span>
                       <button
                         type="button"
                         onClick={() => removeOrder(idx)}
@@ -299,12 +337,14 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
 
               {/* New order input */}
               <div style={{ display: "flex", gap: "0.5rem" }}>
-                <input
-                  type="text"
+                <textarea
+                  rows={4}
+                  maxLength={4_000}
+                  aria-label={editingPlanId ? "Revised plan" : "New plan"}
                   value={orderInput}
                   onChange={(e) => setOrderInput(e.target.value)}
                   onKeyDown={handleInputKeyDown}
-                  placeholder="Type an order and press Enter…"
+                  placeholder="Describe your plan, priorities, and conditions. Ctrl+Enter adds it."
                   disabled={submitting}
                   style={{
                     flex: 1,
@@ -336,12 +376,23 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
                 </button>
               </div>
 
+              {editingPlanId ? <p>Completed stages and existing limits are preserved. <button type="button" onClick={() => { setEditingPlanId(null); setOrderInput(""); }}>Discard revision</button></p> : <details>
+                <summary>Method, delegates, and limits for each new plan</summary>
+                <label>Method <input value={method} maxLength={400} onChange={e => setMethod(e.target.value)} /></label>
+                <label>Conditions and limits <textarea value={constraints} maxLength={800} onChange={e => setConstraints(e.target.value)} /></label>
+                <label>Visibility <select value={secrecy} onChange={e => setSecrecy(e.target.value as typeof secrecy)}><option value="public">Public</option><option value="discreet">Discreet</option><option value="secret">Secret</option></select></label>
+                <label>Invite delegates <select multiple value={delegateIds} onChange={e => setDelegateIds(Array.from(e.target.selectedOptions, option => option.value).slice(0, 8))}>{delegates.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
+                <p>Delegates can decline. Selecting someone gives them no additional authority or funds.</p>
+                <label>Budget account <select value={accountId} onChange={e => setAccountId(e.target.value)}><option value="">No additional spending cap</option>{accounts.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}</select></label>
+                {accountId && <label>Total spending limit <input type="number" min={0} step={1} required value={budgetAmount} onChange={e => setBudgetAmount(e.target.value)} /></label>}
+              </details>}
+
               <button
                 type="submit"
                 className="chat-message-send"
                 disabled={!canSubmit}
               >
-                {submitting ? "Submitting…" : "Submit Orders"}
+                {submitting ? "Submitting…" : orders.length || orderInput.trim() ? "Submit plans and advance" : "Continue plans and let time pass"}
               </button>
             </form>
           )}
