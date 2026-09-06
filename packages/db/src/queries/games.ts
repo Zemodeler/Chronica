@@ -91,7 +91,11 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     // character agency to act on, so it never proposed anything the Game
     // Master could invoke.
     await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 9, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "Fixes the Mamertine spokesman's ambition to name this scenario's own settlement id, and gives Carthage/Hanno an authored goal, plot, and pressure over the Messana crisis so Carthage has real agency from the opening turn." }).onConflictDoNothing();
-    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 9, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
+    // Version 10 makes the playable world agree with the rendered map. A
+    // settlement shown inside a simulated province is now present in that
+    // province's authoritative state, so it can be inspected and besieged.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 10, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "Adds every rendered settlement in a playable province to the authoritative starting world, preventing map-visible settlements from being impossible to inspect or besiege." }).onConflictDoNothing();
+    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 10, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
   });
 }
 

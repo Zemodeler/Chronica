@@ -14,6 +14,21 @@ import { CharacterSelectionTierSchema } from "./schemas";
 
 export const MAX_CHARACTERS_PER_TURN = 8;
 
+/**
+ * Relevance is not merely a sorting hint: it determines how much agency an
+ * NPC receives this turn. A distant background actor gets one meaningful
+ * move; a nemesis, head of state, or person at the centre of a crisis may
+ * pursue a whole sequence. There is deliberately no shared action pool.
+ */
+function actionAllowanceFor(score: number): number {
+  if (score >= 1_000) return 6;
+  if (score >= 600) return 5;
+  if (score >= 400) return 4;
+  if (score >= 250) return 3;
+  if (score >= 100) return 2;
+  return 1;
+}
+
 interface ScoredCharacter {
   characterId: string;
   score: number;
@@ -219,6 +234,8 @@ export function selectRelevantCharacters(
     return {
       characterId: s.characterId,
       tier: finalTier,
+      relevanceScore: s.score,
+      actionAllowance: actionAllowanceFor(s.score),
       reasons: s.reasons,
     };
   });

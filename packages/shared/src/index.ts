@@ -12,6 +12,7 @@ export * from "./chronicle/causal-chain";
 export * from "./chronicle/depth";
 export * from "./chronicle/dispatch";
 export * from "./chronicle/knowledge";
+export * from "./chronicle/political-procedure-description";
 export * from "./chronicle/voice";
 export * from "./workflows/diagnose";
 export * from "./world/diplomacy";

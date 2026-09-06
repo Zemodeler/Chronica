@@ -115,6 +115,48 @@ interface ClassifiedOutcome {
   readonly terminalReason: string | null;
 }
 
+/** Stable enough for the JSON-shaped workflow parameter object. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
+}
+
+function refusalKey(invocation: ProposedInvocation, kind: OrderRefusalFact["kind"], reason: string): string {
+  return `${invocation.actorId}\u0000${invocation.actionId}\u0000${kind}\u0000${reason}\u0000${canonicalJson(invocation.parameters)}`;
+}
+
+/**
+ * True when an audit entry describes the Game Master's malformed call rather
+ * than a decision made by the world.  These entries remain in the audit trail
+ * so they can guide a retry, but must never become an OngoingAction, an
+ * operation, or a Chronicle refusal.  Otherwise an invented placeholder such
+ * as `force-?` is shown to the player as if a commander had rejected a real
+ * march.
+ *
+ * Keep this deliberately aligned with the session's recoverable-failure
+ * classification.  A real refusal (authority, resources, an existing siege,
+ * and so on) is still projected and narrated; only a bad tool name, malformed
+ * parameters, or an entity lookup that can be corrected is hidden.
+ */
+function isRecoverableToolCallMistake(entry: WorkflowAuditEntry): boolean {
+  const violation = entry.policyViolation;
+  if (violation) {
+    return violation.kind === "unknown_action"
+      || violation.kind === "invalid_params"
+      || violation.kind === "unknown_actor";
+  }
+
+  const reason = entry.executionReason ?? "";
+  return /^invalid param/i.test(reason)
+    || /\bwith the id\b/i.test(reason)
+    || /\banswers to\b/i.test(reason)
+    || /\bdoes not exist in world state\b/i.test(reason);
+}
+
 function classifyOutcome(entry: WorkflowAuditEntry, isLongRunning: boolean): ClassifiedOutcome {
   if (entry.policyViolation) {
     return { status: "impossible", terminalReason: entry.policyViolation.message };
@@ -315,29 +357,31 @@ export function projectOrdersAndOperations(input: OrderProjectionInput): OrderPr
   const newActions: OngoingAction[] = [];
   const newOperations: PersistentOperation[] = [];
   const refusals: OrderRefusalFact[] = [];
+  const refusalKeys = new Set<string>();
+
+  const recordRefusal = (invocation: ProposedInvocation, kind: OrderRefusalFact["kind"], reason: string, source: WorkflowCandidateSource) => {
+    const key = refusalKey(invocation, kind, reason);
+    if (refusalKeys.has(key)) return;
+    refusalKeys.add(key);
+    refusals.push({ actionId: invocation.actionId, actorId: invocation.actorId, source, reason, kind });
+  };
 
   for (const entry of candidates) {
+    // The GM session requires the model to correct these calls before it can
+    // finish.  If it nevertheless runs out of steps or provider time, retain
+    // the diagnostic only in the private audit -- do not manufacture a false
+    // in-world refusal from it.
+    if (isRecoverableToolCallMistake(entry)) continue;
+
     const invocation = entry.finalInvocation ?? entry.requestedInvocation;
     const longRunning = isLongRunningAction(invocation.actionId);
     const { status, terminalReason } = classifyOutcome(entry, longRunning);
     const authorityBasis = deriveAuthorityBasis(entry);
 
     if (status === "impossible") {
-      refusals.push({
-        actionId: invocation.actionId,
-        actorId: invocation.actorId,
-        source: entry.source,
-        reason: terminalReason ?? "Refused.",
-        kind: "authority",
-      });
+      recordRefusal(invocation, "authority", terminalReason ?? "Refused.", entry.source);
     } else if (status === "failed") {
-      refusals.push({
-        actionId: invocation.actionId,
-        actorId: invocation.actorId,
-        source: entry.source,
-        reason: terminalReason ?? "Failed.",
-        kind: "failed",
-      });
+      recordRefusal(invocation, "failed", terminalReason ?? "Failed.", entry.source);
     }
 
     let operationId: string | undefined;

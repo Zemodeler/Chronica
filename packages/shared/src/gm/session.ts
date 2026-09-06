@@ -14,11 +14,15 @@ import {
   type RecordedCapabilityRequest,
 } from "./capability-request";
 import { GameMasterTurnReportSchema, type GameMasterTurnReport } from "./turn-report";
+import { applySocialEvents } from "../characters/apply-social-events";
+import type { CharacterSocialEvent } from "../characters/social-events";
 import {
   FINISH_TURN_TOOL,
   REQUEST_CAPABILITY_TOOL,
   DEFINE_ACTION_TOOL,
   INVOKE_DEFINED_ACTION_TOOL,
+  RECORD_REFUSAL_AFTERMATH_TOOL,
+  RefusalAftermathToolArguments,
   buildGameMasterTools,
   type GameMasterToolDefinition,
 } from "./tools";
@@ -155,6 +159,29 @@ function isRecoverableLookupOrArgumentFailure(message: string): boolean {
     || /^invalid param/i.test(message);
 }
 
+/**
+ * Only failures that reached a real actor can become a social scene. Unknown
+ * actors, malformed arguments, and duplicate calls are facts about the call,
+ * not a person in the world saying no.
+ */
+function canHaveNamedRefusalAftermath(
+  invocation: ProposedInvocation,
+  message: string,
+  kind?: PolicyViolation["kind"],
+): boolean {
+  if (isRecoverableLookupOrArgumentFailure(message)) return false;
+  if (kind === "unknown_action" || kind === "invalid_params" || kind === "unknown_actor" || kind === "dead_actor" || kind === "duplicate") return false;
+  return invocation.actorId.trim().length > 0;
+}
+
+function actionPhrase(actionId: string): string {
+  return actionId.replace(/[_-]+/g, " ").trim();
+}
+
+function relationLabel(text: string): string {
+  return text.length <= 200 ? text : `${text.slice(0, 197).trimEnd()}...`;
+}
+
 /** A tool call the Game Master asked for. Ids come from the provider. */
 export interface GameMasterToolCall {
   readonly id: string;
@@ -170,6 +197,27 @@ export interface GameMasterToolOutcome {
   /** True once `finish_turn` has been accepted; no further calls are executed. */
   readonly finished: boolean;
   readonly factId?: string;
+  /** Present only for a genuine engine refusal that may receive social aftermath. */
+  readonly refusalId?: string;
+}
+
+interface EligibleRefusal {
+  readonly id: string;
+  readonly requesterCharacterId: string;
+  readonly rejectedActionId: string;
+  readonly engineReason: string;
+  used: boolean;
+}
+
+/**
+ * A capability request is not allowed to be the Game Master's last word on
+ * an actor's situation. Before the turn can finish, that actor must make one
+ * real, engine-validated attempt using an existing or newly defined action.
+ */
+interface PendingCapabilityRepair {
+  readonly id: string;
+  readonly actorId: string;
+  readonly intent: string;
 }
 
 export interface GameMasterSessionOptions {
@@ -179,8 +227,10 @@ export interface GameMasterSessionOptions {
   /** Directive ids submitted this turn; the report must account for each. */
   readonly directiveIds: readonly string[];
   readonly privateInformation?: PrivateInformationPolicy;
-  /** Hard ceiling on world-changing calls, so a loop cannot run away. */
+  /** Optional test/operations override. Normal play uses actor allowances. */
   readonly maxActions?: number;
+  /** Relevance-derived NPC action allowances for this turn. */
+  readonly actionAllowances?: readonly { readonly characterId: string; readonly allowance: number }[];
   readonly maxToolCalls?: number;
   /**
    * Actions this campaign defined in earlier turns. They are usable
@@ -205,7 +255,6 @@ export interface GameMasterSessionResult {
   readonly definedActionUses: readonly { readonly actionId: string; readonly actorId: string; readonly parameters: Record<string, unknown> }[];
 }
 
-const DEFAULT_MAX_ACTIONS = 24;
 const DEFAULT_MAX_TOOL_CALLS = 60;
 /**
  * How many actions one turn may bring into being. A turn that needs four new
@@ -227,14 +276,18 @@ export class GameMasterSession {
   private readonly atStep: number;
   private readonly actorCharacterId: string;
   private readonly privateInformation: PrivateInformationPolicy;
-  private readonly maxActions: number;
+  private readonly maxActions: number | undefined;
   private readonly maxToolCalls: number;
+  private readonly actionAllowances: ReadonlyMap<string, number>;
+  private readonly actionsByActor = new Map<string, number>();
 
   private readonly events: FactualEvent[] = [];
   private readonly auditEntries: WorkflowAuditEntry[] = [];
   private readonly capabilityRequests: RecordedCapabilityRequest[] = [];
+  private readonly pendingCapabilityRepairs = new Map<string, PendingCapabilityRepair>();
   private readonly executedInvocations: ProposedInvocation[] = [];
   private readonly seenInvocationKeys = new Set<string>();
+  private readonly eligibleRefusals = new Map<string, EligibleRefusal>();
 
   private report: GameMasterTurnReport | null = null;
   private actionCount = 0;
@@ -266,8 +319,11 @@ export class GameMasterSession {
     this.actorCharacterId = options.actorCharacterId;
     this.directiveIds = [...options.directiveIds];
     this.privateInformation = options.privateInformation ?? "omit";
-    this.maxActions = options.maxActions ?? DEFAULT_MAX_ACTIONS;
+    this.maxActions = options.maxActions;
     this.maxToolCalls = options.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
+    this.actionAllowances = new Map(
+      (options.actionAllowances ?? []).map((entry) => [entry.characterId, Math.max(0, entry.allowance)]),
+    );
     this.definedActions = new Map((options.definedActions ?? []).map((definition) => [definition.actionId, definition]));
   }
 
@@ -318,6 +374,7 @@ export class GameMasterSession {
     if (call.name === DEFINE_ACTION_TOOL) return this.defineAction(args);
     if (call.name === INVOKE_DEFINED_ACTION_TOOL) return this.invokeDefinedAction(args);
     if (call.name === REQUEST_CAPABILITY_TOOL) return this.requestCapability(args);
+    if (call.name === RECORD_REFUSAL_AFTERMATH_TOOL) return this.recordRefusalAftermath(args);
     if (READ_TOOL_BY_NAME.has(call.name)) return this.read(call.name, args);
     if (WORKFLOW_REGISTRY.has(call.name)) return this.act(call.name, args);
 
@@ -353,19 +410,71 @@ export class GameMasterSession {
 
   // -- actions ---------------------------------------------------------------
 
-  private act(actionId: string, args: Record<string, unknown>): GameMasterToolOutcome {
-    if (this.actionCount >= this.maxActions) {
-      return {
-        ok: false,
-        finished: false,
-        factual: `This turn's action budget (${this.maxActions}) is spent. Call ${FINISH_TURN_TOOL} and report what happened.`,
-      };
+  private actionLimitRefusal(actorId: string): string | null {
+    // An explicit `maxActions` is retained only for tests and an emergency
+    // operational override. Normal simulation has no shared global pool.
+    if (this.maxActions !== undefined && this.actionCount >= this.maxActions) {
+      return `This turn's emergency action budget (${this.maxActions}) is spent. Call ${FINISH_TURN_TOOL} and report what happened.`;
     }
+    // The player is never an NPC allowance entry. Every other listed actor
+    // draws only against their own relevance, never another polity's budget.
+    if (actorId === this.actorCharacterId || this.actionAllowances.size === 0) return null;
+    const allowance = this.actionAllowances.get(actorId);
+    if (allowance === undefined) {
+      return "This character is not in the active cast for this turn. Let a relevant actor take the action, or bring this character into relevance first.";
+    }
+    const used = this.actionsByActor.get(actorId) ?? 0;
+    if (used >= allowance) {
+      return `${this.staged.characters.find((character) => character.id === actorId)?.name ?? actorId} has used their ${allowance}-action relevance allowance for this turn. Let another actor carry the next development.`;
+    }
+    return null;
+  }
 
+  private recordAction(actorId: string): void {
+    this.actionCount += 1;
+    if (actorId !== this.actorCharacterId) {
+      this.actionsByActor.set(actorId, (this.actionsByActor.get(actorId) ?? 0) + 1);
+    }
+  }
+
+  /**
+   * A successful state change, or a genuine rules refusal, closes one repair
+   * debt for the same actor. Lookup and argument mistakes do not: they still
+   * need correction before they can be called a repair attempt.
+   */
+  private recordCapabilityRepairAttempt(
+    actorId: string,
+    outcome: { ok: boolean; factId?: string; recoverable?: boolean },
+  ): void {
+    if (!outcome.ok && outcome.recoverable) return;
+    if (outcome.ok) {
+      const event = outcome.factId === undefined ? undefined : this.events.find((candidate) => candidate.id === outcome.factId);
+      if (event?.materialConsequence !== true) return;
+    }
+    const pending = [...this.pendingCapabilityRepairs.values()].find((entry) => entry.actorId === actorId);
+    if (pending !== undefined) this.pendingCapabilityRepairs.delete(pending.id);
+  }
+
+  private act(actionId: string, args: Record<string, unknown>): GameMasterToolOutcome {
     const { actorId, ...parameters } = args as { actorId?: unknown } & Record<string, unknown>;
     if (typeof actorId !== "string" || actorId.trim().length === 0) {
       return { ok: false, finished: false, factual: `${actionId} requires "actorId": the living character who takes this action.` };
     }
+    // Check identity first. A guessed actor id is a recoverable lookup error,
+    // not a claim that someone was outside this turn's active cast.
+    const actor = this.staged.characters.find((character) => character.id === actorId);
+    if (!actor || !actor.alive) {
+      const outcome = this.applyInvocation({ actionId, actorId, parameters }, "game_master");
+      if (outcome.recoverable) this.pendingRecoverableRetries.add(`${actionId}::${actorId}`);
+      return {
+        ok: outcome.ok,
+        finished: false,
+        factual: outcome.factual,
+        ...(outcome.refusalId === undefined ? {} : { refusalId: outcome.refusalId }),
+      };
+    }
+    const limitRefusal = this.actionLimitRefusal(actorId);
+    if (limitRefusal !== null) return { ok: false, finished: false, factual: limitRefusal };
 
     // A diplomatic message answered in the player's own name is the
     // player's own decision, not the agent's to make. Nothing about the
@@ -393,8 +502,16 @@ export class GameMasterSession {
     const outcome = this.applyInvocation(invocation, "game_master");
     if (!outcome.ok) {
       if (outcome.recoverable) this.pendingRecoverableRetries.add(retryKey);
-      return { ok: false, finished: false, factual: outcome.factual };
+      this.recordCapabilityRepairAttempt(actorId, outcome);
+      return {
+        ok: false,
+        finished: false,
+        factual: outcome.factual,
+        ...(outcome.refusalId === undefined ? {} : { refusalId: outcome.refusalId }),
+      };
     }
+
+    this.recordCapabilityRepairAttempt(actorId, outcome);
 
     // Deterministic follow-ups the engine owns. A started battle is fought by
     // the resolver immediately, in the same call, so the Game Master's next
@@ -434,7 +551,7 @@ export class GameMasterSession {
   private applyInvocation(
     invocation: ProposedInvocation,
     source: "game_master" | "system",
-  ): { ok: boolean; factual: string; factId?: string; recoverable?: boolean } {
+  ): { ok: boolean; factual: string; factId?: string; refusalId?: string; recoverable?: boolean } {
     const auditBase: WorkflowAuditEntry = {
       correlationId: `gm-${this.atStep}-${this.auditEntries.length}`,
       source: "game_master",
@@ -460,7 +577,16 @@ export class GameMasterSession {
     }
     if (violation !== null) {
       this.auditEntries.push({ ...auditBase, policyViolation: violation, dryRunOk: false, executionOk: false, executionReason: violation.message });
-      return { ok: false, factual: `Refused: ${violation.message}`, recoverable: isRecoverableLookupOrArgumentFailure(violation.message) };
+      const refusalId = canHaveNamedRefusalAftermath(invocation, violation.message, violation.kind)
+        ? this.registerEligibleRefusal(invocation, violation.message)
+        : undefined;
+      const factual = `Refused: ${violation.message}`;
+      return {
+        ok: false,
+        factual: refusalId === undefined ? factual : `${factual} A named aftermath may be recorded with ${RECORD_REFUSAL_AFTERMATH_TOOL} using ${refusalId}.`,
+        recoverable: isRecoverableLookupOrArgumentFailure(violation.message),
+        ...(refusalId === undefined ? {} : { refusalId }),
+      };
     }
 
     const duplicateKey = workflowInvocationKey(invocation);
@@ -513,14 +639,23 @@ export class GameMasterSession {
       // registry's id-lookup phrasings -- never for a genuine refusal (no
       // authority, ineligible sponsor, insufficient resource, already done).
       const recoverable = executed.reason === "invalid_params" || isRecoverableLookupOrArgumentFailure(executed.message);
-      return { ok: false, factual: `Failed: ${executed.message}${hint}`, recoverable };
+      const refusalId = !recoverable && executed.reason !== "invalid_params" && canHaveNamedRefusalAftermath(invocation, executed.message)
+        ? this.registerEligibleRefusal(invocation, executed.message)
+        : undefined;
+      const factual = `Failed: ${executed.message}${hint}`;
+      return {
+        ok: false,
+        factual: refusalId === undefined ? factual : `${factual} A named aftermath may be recorded with ${RECORD_REFUSAL_AFTERMATH_TOOL} using ${refusalId}.`,
+        recoverable,
+        ...(refusalId === undefined ? {} : { refusalId }),
+      };
     }
 
     // Committed to the stage only now, after the executor has re-validated
     // the whole world document.
     this.staged = executed.world;
     this.seenInvocationKeys.add(duplicateKey);
-    if (source === "game_master") this.actionCount += 1;
+    if (source === "game_master") this.recordAction(invocation.actorId);
     this.executedInvocations.push(invocation);
     this.auditEntries.push({ ...auditBase, finalInvocation: invocation, dryRunOk: true, executionOk: true });
 
@@ -544,6 +679,141 @@ export class GameMasterSession {
       ...(battleBrief === null ? {} : { battleBrief }),
     });
     return { ok: true, factual: `Done [${factId}]: ${executed.result.summary}`, factId };
+  }
+
+  // -- named refusal aftermath ---------------------------------------------
+
+  private registerEligibleRefusal(invocation: ProposedInvocation, engineReason: string): string {
+    const id = `refusal-${this.atStep}-${this.eligibleRefusals.size + 1}`;
+    this.eligibleRefusals.set(id, {
+      id,
+      requesterCharacterId: invocation.actorId,
+      rejectedActionId: invocation.actionId,
+      engineReason,
+      used: false,
+    });
+    return id;
+  }
+
+  /** A speaker must plausibly be able to say no for the requester's own power. */
+  private isEligibleRefuser(requesterId: string, refuserId: string): boolean {
+    const requester = this.staged.characters.find((character) => character.id === requesterId);
+    const refuser = this.staged.characters.find((character) => character.id === refuserId);
+    if (!requester || !refuser || !requester.alive || !refuser.alive || requester.id === refuser.id) return false;
+    if (requester.polityId === null || refuser.polityId !== requester.polityId) return false;
+    return refuser.officeId !== null
+      || this.staged.material.forces.some(
+        (force) => force.polityId === refuser.polityId
+          && (force.commanderCharacterId === refuser.id || force.controllerCharacterId === refuser.id),
+      )
+      || this.staged.material.politicalGroups.some(
+        (group) => group.polityId === refuser.polityId && group.leaderCharacterId === refuser.id && group.active,
+      );
+  }
+
+  private recordRefusalAftermath(args: Record<string, unknown>): GameMasterToolOutcome {
+    const parsed = RefusalAftermathToolArguments.safeParse(args);
+    if (!parsed.success) {
+      return {
+        ok: false,
+        finished: false,
+        factual: `The refusal aftermath was rejected: ${parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}.`,
+      };
+    }
+    const input = parsed.data;
+    const refusal = this.eligibleRefusals.get(input.refusalId);
+    if (!refusal) {
+      return { ok: false, finished: false, factual: `No eligible refusal exists with id "${input.refusalId}". Only a refusal id returned by this turn's tool call may receive an aftermath.` };
+    }
+    if (refusal.used) {
+      return { ok: false, finished: false, factual: `The refusal "${input.refusalId}" already has a recorded aftermath.` };
+    }
+    if (!this.isEligibleRefuser(refusal.requesterCharacterId, input.refuserCharacterId)) {
+      return {
+        ok: false,
+        finished: false,
+        factual: "The named refuser is not an eligible authority for this request. Choose a different living office-holder, force commander, or political-group leader from the requester's own polity.",
+      };
+    }
+
+    const requester = this.staged.characters.find((character) => character.id === refusal.requesterCharacterId)!;
+    const refuser = this.staged.characters.find((character) => character.id === input.refuserCharacterId)!;
+    const action = actionPhrase(refusal.rejectedActionId);
+    const socialEvent: CharacterSocialEvent = {
+      id: `refusal-social-${refusal.id}`,
+      gameId: `gm-turn-${this.atStep}`,
+      sourceTurnId: null,
+      sourceSessionId: null,
+      sourceMessageId: null,
+      participantCharacterIds: [requester.id, refuser.id],
+      kind: "conversation",
+      visibility: "public",
+      knownByCharacterIds: [],
+      relationCauses: [
+        {
+          subjectCharacterId: requester.id,
+          targetCharacterId: refuser.id,
+          label: relationLabel(`${refuser.name} refused ${requester.name}'s ${action}: ${input.reason}`),
+          score: -12,
+          decayPerYearBps: 1_000,
+          dimensions: { trust: -8, respect: -12 },
+        },
+        {
+          subjectCharacterId: refuser.id,
+          targetCharacterId: requester.id,
+          label: relationLabel(`${refuser.name} refused ${requester.name}'s ${action}: ${input.reason}`),
+          score: -6,
+          decayPerYearBps: 1_000,
+          dimensions: { trust: -6, respect: -4 },
+        },
+      ],
+      knowledgeClaims: [],
+      proposedBeliefs: [],
+      pressureChanges: [],
+      commitmentProposal: null,
+      introducedCharacter: null,
+      introducedProfile: null,
+      createdAtStep: this.atStep,
+      appliedAtStep: null,
+      appliedInTurnId: null,
+      status: "proposed",
+      rejectionReason: null,
+    };
+    const socialOutcome = applySocialEvents(this.staged, [socialEvent], this.atStep, `gm-turn-${this.atStep}`);
+    if (!socialOutcome.appliedIds.includes(socialEvent.id)) {
+      return {
+        ok: false,
+        finished: false,
+        factual: `The refusal aftermath could not be applied: ${socialOutcome.rejectedIds.find((entry) => entry.id === socialEvent.id)?.reason ?? "unknown reason"}`,
+      };
+    }
+
+    this.staged = socialOutcome.world;
+    refusal.used = true;
+    this.factCounter += 1;
+    const factId = `fact-${this.atStep}-${this.factCounter}`;
+    const summary = `${refuser.name} refused ${requester.name}'s attempt to ${action}. “${input.quote}” ${input.reason}`;
+    this.events.push({
+      id: factId,
+      atStep: this.atStep,
+      kind: "action",
+      actionId: RECORD_REFUSAL_AFTERMATH_TOOL,
+      actorId: refuser.id,
+      parameters: {
+        refusalId: refusal.id,
+        requesterCharacterId: requester.id,
+        refuserCharacterId: refuser.id,
+        rejectedActionId: refusal.rejectedActionId,
+        engineReason: refusal.engineReason,
+        reason: input.reason,
+        quote: input.quote,
+      },
+      summary,
+      // The social result is real and persistent, but it does not turn the
+      // rejected material action into a success.
+      materialConsequence: false,
+    });
+    return { ok: true, finished: false, factId, factual: `Recorded [${factId}]: ${summary}` };
   }
 
   // -- defining what the engine does not have --------------------------------
@@ -598,9 +868,6 @@ export class GameMasterSession {
   }
 
   private invokeDefinedAction(args: Record<string, unknown>): GameMasterToolOutcome {
-    if (this.actionCount >= this.maxActions) {
-      return { ok: false, finished: false, factual: `This turn's action budget (${this.maxActions}) is spent. Call ${FINISH_TURN_TOOL} and report what happened.` };
-    }
     const actionId = typeof args["actionId"] === "string" ? args["actionId"] : "";
     const actorId = typeof args["actorId"] === "string" ? args["actorId"] : "";
     const parameters = (args["parameters"] ?? {}) as Record<string, unknown>;
@@ -619,6 +886,8 @@ export class GameMasterSession {
     if (!actor || !actor.alive) {
       return { ok: false, finished: false, factual: `No living character with the id "${actorId}" can take this action.` };
     }
+    const limitRefusal = this.actionLimitRefusal(actorId);
+    if (limitRefusal !== null) return { ok: false, finished: false, factual: limitRefusal };
 
     const executed = applyInventedWorkflow(definition, this.staged, parameters);
     if ("error" in executed) {
@@ -630,7 +899,7 @@ export class GameMasterSession {
     }
 
     this.staged = executed.world;
-    this.actionCount += 1;
+    this.recordAction(actorId);
     this.definedActionUses.push({ actionId, actorId, parameters });
 
     this.factCounter += 1;
@@ -647,6 +916,7 @@ export class GameMasterSession {
       summary: `${actor.name}: ${definition.intent}`,
       materialConsequence: true,
     });
+    this.recordCapabilityRepairAttempt(actorId, { ok: true, factId });
     return { ok: true, factId, finished: false, factual: `Done [${factId}]: ${actor.name} — ${definition.intent}` };
   }
 
@@ -666,9 +936,30 @@ export class GameMasterSession {
     if (!actor) {
       return { ok: false, finished: false, factual: `Refused: actor "${request.actorId}" does not exist, so no attempt can be recorded for them.` };
     }
+    const limitRefusal = this.actionLimitRefusal(request.actorId);
+    if (limitRefusal !== null) {
+      return {
+        ok: false,
+        finished: false,
+        factual: `A capability request cannot be used after the actor's action allowance is exhausted. ${limitRefusal}`,
+      };
+    }
+    const existingRepair = [...this.pendingCapabilityRepairs.values()].find((entry) => entry.actorId === request.actorId);
+    if (existingRepair !== undefined) {
+      return {
+        ok: false,
+        finished: false,
+        factual: `${actor.name} already has an unsupported attempt awaiting repair: ${existingRepair.intent}. Inspect the world and make that repair attempt before raising another capability request.`,
+      };
+    }
 
     const id = `capability-${this.atStep}-${this.capabilityRequests.length + 1}`;
     this.capabilityRequests.push(recordCapabilityRequest(request, this.atStep, id));
+    this.pendingCapabilityRepairs.set(id, {
+      id,
+      actorId: request.actorId,
+      intent: request.requestedIntent,
+    });
 
     this.factCounter += 1;
     const factId = `fact-${this.atStep}-${this.factCounter}`;
@@ -679,11 +970,9 @@ export class GameMasterSession {
       actionId: request.proposedToolName,
       actorId: request.actorId,
       parameters: {},
-      // Written as history, not as an engine notice. The reader is told the
-      // attempt was made and that nothing came of it -- which is true and is
-      // the whole of what is known -- without being told about the machine
-      // that failed to model it.
-      summary: `${actor.name} set the matter in motion: ${request.requestedIntent.replace(/\s*$/, "").replace(/\.$/, "")}. It went no further, and the matter stood unresolved.`,
+      // Capability gaps are internal audit records, not player-facing
+      // history. The Chronicle conversion deliberately excludes them.
+      summary: `${actor.name} requested an unsupported capability: ${request.requestedIntent.replace(/\s*$/, "").replace(/\.$/, "")}. No world change was applied.`,
       materialConsequence: false,
     });
 
@@ -691,7 +980,7 @@ export class GameMasterSession {
       ok: true,
       factId,
       finished: false,
-      factual: `Recorded [${factId}] as an unsupported capability request. Nothing changed in the world. Continue with the tools that do exist, or finish the turn reporting that this attempt had no effect.`,
+      factual: `Recorded [${factId}] as an unsupported capability request. Nothing changed in the world. Before finishing, inspect the world and make one engine-validated repair attempt for ${actor.name}: use an existing action when one fits, or define and invoke a state-backed action when it truly does not.`,
     };
   }
 
@@ -718,6 +1007,21 @@ export class GameMasterSession {
         ok: false,
         finished: false,
         factual: `The report references facts that never happened: ${[...new Set(unknownRefs)].join(", ")}. Only ids returned by your own tool results exist. Correct the report and call ${FINISH_TURN_TOOL} again.`,
+      };
+    }
+
+    if (this.pendingCapabilityRepairs.size > 0) {
+      const repairs = [...this.pendingCapabilityRepairs.values()]
+        .map((entry) => {
+          const actorName = this.staged.characters.find((character) => character.id === entry.actorId)?.name ?? entry.actorId;
+          return `${actorName}: ${entry.intent}`;
+        })
+        .join("; ");
+      return {
+        ok: false,
+        finished: false,
+        factual:
+          `Before finishing, repair these unsupported attempts with one state-backed action attempt by the named actor: ${repairs}. Inspect the relevant world state and use an existing action when possible; otherwise define and invoke a validated action. A genuine rules refusal may stand, but a bad id or invalid arguments must be corrected and retried.`,
       };
     }
 

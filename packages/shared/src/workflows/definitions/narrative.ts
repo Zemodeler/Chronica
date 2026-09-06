@@ -108,7 +108,7 @@ export const narrativeWorkflows: AnyWorkflowDefinition[] = [
                   ...s,
                   phase: "resolved",
                   history: [...s.history, params.resolution],
-                  nextDevelopment: "",
+                  nextDevelopment: `Resolved: ${params.resolution}`.slice(0, 320),
                   updatedAtStep: context.atStep,
                 },
           ),

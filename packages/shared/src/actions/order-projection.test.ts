@@ -69,6 +69,60 @@ describe("projectOrdersAndOperations", () => {
     expect(result.refusals[0]).toMatchObject({ actorId: "player-character", actionId: "move_force", kind: "authority" });
   });
 
+  it("emits one refusal when the same failed invocation is retried in a turn", () => {
+    const refusedVote = {
+      source: "game_master" as const,
+      sourceRef: "game_master",
+      requestedActionId: "call_vote",
+      requestedInvocation: { actionId: "call_vote", actorId: "gaius-genucius", parameters: { procedureId: "senate-motion", callerCharacterId: "gaius-genucius" } },
+      finalInvocation: { actionId: "call_vote", actorId: "gaius-genucius", parameters: { procedureId: "senate-motion", callerCharacterId: "gaius-genucius" } },
+      dryRunOk: false,
+      executionOk: false,
+      executionReason: "The Senate cannot hear this vote.",
+    };
+    const result = projectOrdersAndOperations({
+      previousActions: [], previousOperations: [], turnIndex: 1, atStep: 1, isLongRunningAction,
+      candidates: [
+        auditEntry({ correlationId: "22222222-2222-2222-2222-222222222224", ...refusedVote }),
+        auditEntry({ correlationId: "22222222-2222-2222-2222-222222222225", ...refusedVote }),
+      ],
+    });
+
+    expect(result.refusals).toEqual([expect.objectContaining({ actionId: "call_vote", actorId: "gaius-genucius", reason: "The Senate cannot hear this vote." })]);
+  });
+
+  it("keeps a guessed force id in the audit only, never turning it into a false world refusal", () => {
+    const result = projectOrdersAndOperations({
+      previousActions: [],
+      previousOperations: [],
+      turnIndex: 1,
+      atStep: 1,
+      isLongRunningAction,
+      candidates: [auditEntry({
+        correlationId: "22222222-2222-2222-2222-222222222223",
+        source: "game_master",
+        sourceRef: "game_master",
+        requestedActionId: "move_force",
+        requestedInvocation: {
+          actionId: "move_force",
+          actorId: "gaius-genucius",
+          parameters: { forceId: "force-?", destinationProvinceId: "sicily" },
+        },
+        finalInvocation: {
+          actionId: "move_force",
+          actorId: "gaius-genucius",
+          parameters: { forceId: "force-?", destinationProvinceId: "sicily" },
+        },
+        executionOk: false,
+        executionReason: 'Nothing in the world answers to forceId "force-?". Inspect the entity to get its real id, then call move_force again.',
+      })],
+    });
+
+    expect(result.actions).toEqual([]);
+    expect(result.operations).toEqual([]);
+    expect(result.refusals).toEqual([]);
+  });
+
   it("projects an NPC-originated candidate through the same schema and path as a player order", () => {
     const result = projectOrdersAndOperations({
       previousActions: [],

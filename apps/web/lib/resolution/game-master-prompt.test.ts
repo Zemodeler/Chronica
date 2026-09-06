@@ -64,12 +64,21 @@ describe("FORMED NPC INTENTIONS", () => {
 });
 
 describe("world activity requirements", () => {
-  it("requires multiple state-backed world developments and recurring Roman politics", () => {
+  it("uses relevance-derived activity allowances and recurring Roman politics", () => {
     const prompt = buildGameMasterSystemPrompt(baseInput());
-    expect(prompt).toContain("ACTIVITY BUDGET");
-    expect(prompt).toContain("3–8 distinct, state-backed developments");
+    expect(prompt).toContain("ACTIVITY ALLOWANCES");
+    expect(prompt).toContain("no shared world-action pool");
     expect(prompt).toContain("REGIONAL REACTION");
     expect(prompt).toContain("ROMAN REPUBLIC");
     expect(prompt).toMatch(/at least every second season/i);
+  });
+});
+
+describe("open political procedures", () => {
+  it("gives the Game Master the actual question under consideration, not an internal action id", () => {
+    const prompt = buildGameMasterSystemPrompt(baseInput());
+
+    expect(prompt).toContain("whether Hamilcar should command Carthaginian Army");
+    expect(prompt).not.toContain("linkedWorkflowId");
   });
 });

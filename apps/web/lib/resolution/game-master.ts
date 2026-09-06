@@ -81,6 +81,14 @@ export async function runGameMaster(
     actorCharacterId: input.actorCharacterId,
     directiveIds: input.directives.map((entry) => entry.id),
     definedActions: input.definedActions ?? [],
+    actionAllowances: input.selectedCharacters.map((character) => ({
+      characterId: character.characterId,
+      allowance: character.actionAllowance,
+    })),
+    // Reads, reports, and the player’s own orders are not NPC actions. Keep
+    // room for them while scaling the tool loop with the relevance-derived
+    // agency available this turn.
+    maxToolCalls: Math.max(60, input.selectedCharacters.reduce((sum, character) => sum + character.actionAllowance, 0) + 24),
   });
 
   const systemPrompt = buildGameMasterSystemPrompt({
@@ -104,7 +112,10 @@ export async function runGameMaster(
     { role: "user", content: buildGameMasterOpeningMessage(input.atStep) },
   ];
 
-  const maxSteps = input.maxSteps ?? DEFAULT_MAX_STEPS;
+  const maxSteps = input.maxSteps ?? Math.max(
+    DEFAULT_MAX_STEPS,
+    input.selectedCharacters.reduce((sum, character) => sum + character.actionAllowance, 0) + 2,
+  );
   let termination: RunGameMasterResult["termination"] = "step_budget";
   let providerError: string | null = null;
   let silentSteps = 0;

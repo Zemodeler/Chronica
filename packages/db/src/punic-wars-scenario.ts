@@ -1,4 +1,4 @@
-import { ScenarioDefinitionSchema, WorldStateSchema, type ScenarioDefinition, type WorldState } from "@chronica/shared";
+import { ScenarioDefinitionSchema, WorldStateSchema, type ScenarioDefinition, type Settlement, type WorldState } from "@chronica/shared";
 
 export const PUNIC_WARS_SCENARIO_ID = "00000000-0000-4000-8000-000000000102";
 export const PUNIC_WARS_SLUG = "punic-wars";
@@ -32,6 +32,59 @@ const italy = [
   ["punic-italy-bruttian-highlands", "Bruttium", "rome"],
 ] as const;
 
+// The campaign state, not the rendered GeoJSON, is authoritative for a
+// siege. Keep every settlement that appears on the delivered map *within a
+// playable province* here as well. Otherwise a place can be visible and
+// clickable to a player but impossible for start_siege to resolve.
+const visibleSettlementsByProvince: Readonly<Record<string, readonly Settlement[]>> = {
+  "punic-italy-ligurian-coast": [
+    { id: "settlement-genua", name: "Genua", kind: "port", provinceId: "punic-italy-ligurian-coast", controllerPolityId: "ligurians", size: 45, fortificationLevel: 3 },
+  ],
+  "punic-italy-insubrian-plain": [
+    { id: "settlement-mediolanum", name: "Mediolanum", kind: "city", provinceId: "punic-italy-insubrian-plain", controllerPolityId: "insubres", size: 55, fortificationLevel: 3 },
+  ],
+  "punic-italy-middle-padus": [
+    { id: "settlement-bononia", name: "Felsina", kind: "town", provinceId: "punic-italy-middle-padus", controllerPolityId: "boii", size: 35, fortificationLevel: 2 },
+  ],
+  "punic-italy-venetian-lagoon": [
+    { id: "settlement-patavium", name: "Patavium", kind: "city", provinceId: "punic-italy-venetian-lagoon", controllerPolityId: "veneti", size: 50, fortificationLevel: 2 },
+  ],
+  "punic-italy-etrurian-uplands": [
+    { id: "settlement-volsinii", name: "Volsinii", kind: "fortress", provinceId: "punic-italy-etrurian-uplands", controllerPolityId: "etruscan-cities", size: 35, fortificationLevel: 4 },
+  ],
+  "punic-italy-latium": [
+    { id: "settlement-rome", name: "Rome", kind: "city", provinceId: "punic-italy-latium", controllerPolityId: "rome", size: 100, fortificationLevel: 6 },
+  ],
+  "punic-italy-samnium": [
+    { id: "settlement-bovianum", name: "Bovianum", kind: "fortress", provinceId: "punic-italy-samnium", controllerPolityId: "rome", size: 25, fortificationLevel: 3 },
+  ],
+  "punic-italy-campanian-plain": [
+    { id: "settlement-naples", name: "Naples", kind: "city", provinceId: "punic-italy-campanian-plain", controllerPolityId: "rome", size: 60, fortificationLevel: 3 },
+    { id: "settlement-capua", name: "Capua", kind: "city", provinceId: "punic-italy-campanian-plain", controllerPolityId: "rome", size: 65, fortificationLevel: 4 },
+  ],
+  "punic-italy-apulian-coast": [
+    { id: "settlement-tarentum", name: "Tarentum", kind: "port", provinceId: "punic-italy-apulian-coast", controllerPolityId: "rome", size: 60, fortificationLevel: 4 },
+  ],
+  "tun-13205935b88806172084765": [
+    { id: "settlement-carthage", name: "Carthage", kind: "city", provinceId: "tun-13205935b88806172084765", controllerPolityId: "carthage", size: 100, fortificationLevel: 6 },
+  ],
+  "ita-72843720b81376294924159-sicily-west": [
+    { id: "settlement-lilybaeum", name: "Lilybaeum", kind: "port", provinceId: "ita-72843720b81376294924159-sicily-west", controllerPolityId: "carthage", size: 45, fortificationLevel: 4 },
+  ],
+  "ita-72843720b81376294924159-sicily-northwest": [
+    { id: "settlement-panormus", name: "Panormus", kind: "city", provinceId: "ita-72843720b81376294924159-sicily-northwest", controllerPolityId: "carthage", size: 55, fortificationLevel: 3 },
+  ],
+  "ita-72843720b81376294924159-sicily-central": [
+    { id: "settlement-agrigentum-fort", name: "Fort Agrigentum", kind: "fortress", provinceId: "ita-72843720b81376294924159-sicily-central", controllerPolityId: "carthage", size: 30, fortificationLevel: 4 },
+  ],
+  "ita-72843720b81376294924159-sicily-southeast": [
+    { id: "settlement-syracuse", name: "Syracuse", kind: "port", provinceId: "ita-72843720b81376294924159-sicily-southeast", controllerPolityId: "syracuse", size: 90, fortificationLevel: 5 },
+  ],
+  "ita-72843720b81376294924159-sicily-northeast": [
+    { id: "settlement-messana", name: "Messana", kind: "port", provinceId: "ita-72843720b81376294924159-sicily-northeast", controllerPolityId: "mamertines", size: 50, fortificationLevel: 3 },
+  ],
+};
+
 const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
   clock: { stepLabel: "season", stepLabelPlural: "seasons", stepsPerYear: 4, minSpan: 1, maxSpan: 4, epoch: { year: 270, month: 3, day: 1, era: "BCE" } },
   map: {
@@ -63,7 +116,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
 
 const initialWorld: WorldState = WorldStateSchema.parse({
   schemaVersion: 1,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 4, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 10, libraryVersion: 1 },
   elapsedStep: 0,
   map: {
     polities: [
@@ -75,13 +128,13 @@ const initialWorld: WorldState = WorldStateSchema.parse({
     ],
     politicalRelations: [],
     provinces: [
-      ...italy.map(([id, name, controllerPolityId]) => ({ id, name, formerNames: [], terrainId: id === "punic-italy-latium" || id === "punic-italy-campanian-plain" ? "coastal-plain" : "hills", settlements: id === "punic-italy-latium" ? [{ id: "settlement-rome", name: "Rome", kind: "city", provinceId: id, controllerPolityId: "rome", size: 100, fortificationLevel: 6 }] : [], controllerPolityId, controlFirmnessBps: controllerPolityId === "rome" ? 9_000 : 7_000, tier: "far" as const })),
-      { id: "tun-13205935b88806172084765", name: "Carthaginian heartland", formerNames: [], terrainId: "coastal-plain", settlements: [{ id: "settlement-carthage", name: "Carthage", kind: "city", provinceId: "tun-13205935b88806172084765", controllerPolityId: "carthage", size: 100, fortificationLevel: 6 }], controllerPolityId: "carthage", controlFirmnessBps: 9_000, tier: "far" },
-      { id: "ita-72843720b81376294924159-sicily-west", name: "Lilybaeum and western Sicily", formerNames: [], terrainId: "coastal-plain", settlements: [], controllerPolityId: "carthage", controlFirmnessBps: 8_500, tier: "focus" },
-      { id: "ita-72843720b81376294924159-sicily-northwest", name: "Panormus and the north-west", formerNames: [], terrainId: "hills", settlements: [], controllerPolityId: "carthage", controlFirmnessBps: 8_000, tier: "focus" },
-      { id: "ita-72843720b81376294924159-sicily-central", name: "Agrigentum and the south-west", formerNames: [], terrainId: "hills", settlements: [], controllerPolityId: "carthage", controlFirmnessBps: 8_000, tier: "focus" },
-      { id: "ita-72843720b81376294924159-sicily-southeast", name: "Syracuse and the south-east", formerNames: [], terrainId: "coastal-plain", settlements: [{ id: "settlement-syracuse", name: "Syracuse", kind: "city", provinceId: "ita-72843720b81376294924159-sicily-southeast", controllerPolityId: "syracuse", size: 90, fortificationLevel: 5 }], controllerPolityId: "syracuse", controlFirmnessBps: 8_500, tier: "focus" },
-      { id: "ita-72843720b81376294924159-sicily-northeast", name: "Messana and the strait", formerNames: [], terrainId: "coastal-plain", settlements: [{ id: "settlement-messana", name: "Messana", kind: "port", provinceId: "ita-72843720b81376294924159-sicily-northeast", controllerPolityId: "mamertines", size: 50, fortificationLevel: 3 }], controllerPolityId: "mamertines", controlFirmnessBps: 7_500, tier: "focus" },
+      ...italy.map(([id, name, controllerPolityId]) => ({ id, name, formerNames: [], terrainId: id === "punic-italy-latium" || id === "punic-italy-campanian-plain" ? "coastal-plain" : "hills", settlements: visibleSettlementsByProvince[id] ?? [], controllerPolityId, controlFirmnessBps: controllerPolityId === "rome" ? 9_000 : 7_000, tier: "far" as const })),
+      { id: "tun-13205935b88806172084765", name: "Carthaginian heartland", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["tun-13205935b88806172084765"]!, controllerPolityId: "carthage", controlFirmnessBps: 9_000, tier: "far" },
+      { id: "ita-72843720b81376294924159-sicily-west", name: "Lilybaeum and western Sicily", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-west"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_500, tier: "focus" },
+      { id: "ita-72843720b81376294924159-sicily-northwest", name: "Panormus and the north-west", formerNames: [], terrainId: "hills", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-northwest"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_000, tier: "focus" },
+      { id: "ita-72843720b81376294924159-sicily-central", name: "Agrigentum and the south-west", formerNames: [], terrainId: "hills", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-central"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_000, tier: "focus" },
+      { id: "ita-72843720b81376294924159-sicily-southeast", name: "Syracuse and the south-east", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-southeast"]!, controllerPolityId: "syracuse", controlFirmnessBps: 8_500, tier: "focus" },
+      { id: "ita-72843720b81376294924159-sicily-northeast", name: "Messana and the strait", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-northeast"]!, controllerPolityId: "mamertines", controlFirmnessBps: 7_500, tier: "focus" },
     ],
     // Real Italian geography, chained north-to-south with a Messana-strait and
     // a Carthage-Sicily crossing closing the loop to Africa. "land" is used

@@ -4,6 +4,7 @@ export * from "./backfill-character-minds";
 export * from "./backfill-legacy-commitments";
 export * from "./backfill-npc-characters";
 export * from "./backfill-office-seats";
+export * from "./repair-empty-storyline-next-development";
 export * from "./character";
 export * from "./character-social";
 export * from "./dialogue";

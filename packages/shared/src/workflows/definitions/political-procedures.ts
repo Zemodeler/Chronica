@@ -7,11 +7,13 @@ import {
   PoliticalResolutionMechanismSchema,
   SupportPositionKindSchema,
   VisibilitySchema,
+  type MaterialWorldState,
   type PoliticalProcedure,
   type SupportPosition,
 } from "../../material-state";
 import { canParticipate, canSponsorProcedure, resolveEligibility } from "../../characters/political-authority";
 import { evaluateSupport, positionFromScore } from "../../character-agency/political-resolver";
+import { describePoliticalQuestion } from "../../chronicle/political-procedure-description";
 import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
 
 // Political procedure workflows (character-sim phase 4).
@@ -23,6 +25,61 @@ import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
 // `resolveDueProcedures` (packages/shared/src/character-agency/political-resolver.ts)
 // resolves a procedure `passed`, which queues exactly one further,
 // authorization-carrying invocation for the executor to run in the same batch.
+
+/**
+ * Older/generated worlds can supply an institution's voting blocs without the
+ * matching political-group records and memberships. Create the minimum
+ * representation at the point it is needed so a valid sponsor does not leave
+ * behind an uncallable vote procedure.
+ */
+function ensureVotingBlocMembership(
+  material: MaterialWorldState,
+  institutionId: string,
+  characterId: string,
+  atStep: number,
+): MaterialWorldState {
+  const institution = material.institutions.find((candidate) => candidate.id === institutionId);
+  if (institution === undefined) return material;
+  const existingMembership = material.groupMemberships.some(
+    (membership) => membership.characterId === characterId
+      && membership.leftAtStep === null
+      && institution.votingBlocs.some((bloc) => bloc.id === membership.groupId),
+  );
+  if (existingMembership) return material;
+
+  // An institution always has at least one bloc. The first is the stable
+  // fallback when the scenario supplied no affiliation for this office-holder.
+  const bloc = institution.votingBlocs[0]!;
+  const groupExists = material.politicalGroups.some((group) => group.id === bloc.id);
+  return {
+    ...material,
+    politicalGroups: groupExists
+      ? material.politicalGroups
+      : [...material.politicalGroups, {
+        id: bloc.id,
+        name: bloc.name,
+        polityId: institution.polityId,
+        type: "faction",
+        leaderCharacterId: null,
+        platform: [bloc.representedInterest],
+        resourceAccountId: null,
+        publicReputationBps: 5_000,
+        active: true,
+      }],
+    groupMemberships: [...material.groupMemberships, {
+      characterId,
+      groupId: bloc.id,
+      role: "member",
+      influenceBps: 5_000,
+      loyaltyBps: 50,
+      visibility: "polity",
+      joinedAtStep: atStep,
+      leftAtStep: null,
+      joinProvenanceEventId: null,
+      leaveProvenanceEventId: null,
+    }],
+  };
+}
 
 /** True only for a resolved procedure that authorizes exactly this workflow and target. */
 function isAuthorizedByResolvedProcedure(
@@ -114,9 +171,13 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
         resultingEventIds: [],
       };
       const sponsor = world.characters.find((c) => c.id === params.sponsorCharacterId);
+      const institution = params.institutionId === null ? null : world.material.institutions.find((i) => i.id === params.institutionId) ?? null;
       return {
         world: { ...world, material: { ...world.material, politicalProcedures: [...world.material.politicalProcedures, procedure] } },
-        result: { summary: `${sponsor?.name ?? params.sponsorCharacterId} sponsors a ${params.type} procedure.`, applied: true },
+        result: {
+          summary: `${sponsor?.name ?? "A sponsor"} brings ${describePoliticalQuestion(world, procedure)}${institution ? ` before the ${institution.name}` : ""}.`,
+          applied: true,
+        },
       };
     },
   }),
@@ -132,7 +193,7 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
         nominatorCharacterId: EntityIdSchema,
       })
       .strict(),
-    apply(world, params) {
+    apply(world, params, context) {
       const procedure = world.material.politicalProcedures.find((p) => p.id === params.procedureId);
       if (!procedure) return null;
       if (procedure.type !== "nomination" && procedure.type !== "appointment") return null;
@@ -252,7 +313,7 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
     description: "The sponsor calls the eligible vote or decision, advancing a procedure to voting_or_deciding.",
     category: "political",
     parametersSchema: z.object({ procedureId: EntityIdSchema, callerCharacterId: EntityIdSchema }).strict(),
-    apply(world, params) {
+    apply(world, params, context) {
       const procedure = world.material.politicalProcedures.find((p) => p.id === params.procedureId);
       if (!procedure) {
         const open = world.material.politicalProcedures.filter((p) => p.resolvedAtStep === null);
@@ -269,14 +330,25 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
         const sponsor = world.characters.find((c) => c.id === procedure.sponsorCharacterId);
         return refuse(`Only its sponsor may call that procedure to a decision, and its sponsor is ${sponsor?.name ?? procedure.sponsorCharacterId}.`);
       }
-      const actions = canParticipate(world, params.callerCharacterId, procedure);
-      const canCall = actions.length > 0 || procedure.resolutionMechanism !== "vote";
-      if (!canCall) return refuse("The caller is not among those eligible to take part in this vote, so it cannot be put to a decision by them.");
+      // Supply missing scenario scaffolding before enforcing the actual voting
+      // rule. The sponsor still needs a bloc membership; this creates the
+      // missing bloc and assignment rather than making the procedure dead-end.
+      const material = procedure.resolutionMechanism === "vote" && procedure.institutionId !== null
+        ? ensureVotingBlocMembership(world.material, procedure.institutionId, params.callerCharacterId, context.atStep)
+        : world.material;
+      const actions = canParticipate({ ...world, material }, params.callerCharacterId, procedure);
+      if (procedure.resolutionMechanism === "vote" && !actions.includes("vote")) {
+        return refuse("The caller could not be seated in one of this institution's voting blocs.");
+      }
 
       const updated: PoliticalProcedure = { ...procedure, stage: "voting_or_deciding" };
+      const institution = procedure.institutionId === null ? null : material.institutions.find((candidate) => candidate.id === procedure.institutionId) ?? null;
       return {
-        world: { ...world, material: { ...world.material, politicalProcedures: world.material.politicalProcedures.map((p) => (p.id === procedure.id ? updated : p)) } },
-        result: { summary: `Procedure "${procedure.id}" moves to a decision.`, applied: true },
+        world: { ...world, material: { ...material, politicalProcedures: material.politicalProcedures.map((p) => (p.id === procedure.id ? updated : p)) } },
+        result: {
+          summary: `${world.characters.find((character) => character.id === params.callerCharacterId)?.name ?? "The sponsor"} calls${institution ? ` the ${institution.name}` : ""} to decide ${describePoliticalQuestion(world, procedure)}.`,
+          applied: true,
+        },
       };
     },
   }),

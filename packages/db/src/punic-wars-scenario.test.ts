@@ -20,6 +20,21 @@ describe("Punic Wars built-in scenario", () => {
     expect(controller.get("punic-italy-lucanian-uplands")).toBe("rome");
   });
 
+  it("keeps every rendered settlement in a playable province available to the simulation", () => {
+    const settlements = new Map(
+      punicWarsScenario.initialWorld.map.provinces.flatMap((province) =>
+        province.settlements.map((settlement) => [settlement.id, settlement] as const),
+      ),
+    );
+    expect(settlements.get("settlement-bononia")).toMatchObject({
+      name: "Felsina",
+      provinceId: "punic-italy-middle-padus",
+      controllerPolityId: "boii",
+    });
+    expect(settlements.get("settlement-lilybaeum")?.provinceId).toBe("ita-72843720b81376294924159-sicily-west");
+    expect(settlements.get("settlement-panormus")?.provinceId).toBe("ita-72843720b81376294924159-sicily-northwest");
+  });
+
   // Italy's gameplay provinces match the rendered map's own partition
   // (apps/web/lib/punic-wars-geojson.ts's ITALY_GROUNDED_TERRITORIES) exactly
   // -- a gameplay province id with no matching map polygon has nowhere to

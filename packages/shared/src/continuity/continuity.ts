@@ -120,10 +120,10 @@ export const ContinuityConfigSchema = z
     startingSeatCount: z.number().int().positive().max(32),
     extraPrincipalsPerPlayer: z.number().int().min(0).max(3),
     /**
-     * The total named characters a running game may ever hold (character-sim
-     * phase 5) -- the bound that stops runtime character creation (births,
-     * world-director introductions) from becoming an unbounded population
-     * simulator. Additive/defaulted so every pre-phase-5 scenario stays valid.
+     * Deprecated compatibility setting. Runtime character creation is no
+     * longer capped: a living world may keep adding named people whenever a
+     * real role, relationship, or Chronicle thread calls for one. The field
+     * remains readable so existing scenario definitions still parse.
      */
     maxTotalCharacters: z.number().int().positive().max(500).default(64),
     /**
@@ -142,25 +142,19 @@ export type ContinuityConfig = z.infer<typeof ContinuityConfigSchema>;
 /** The hard cap that stops continuity becoming a disguised whole-world simulation. */
 export const MAX_PRINCIPALS = 32;
 
-/**
- * Engine-level default population bound, used by any workflow that creates a
- * character (`create_world_character`, `create_child_character`) since a
- * workflow's pure `apply(world, params, context)` does not receive the
- * scenario's `ContinuityConfig` today -- only `WorldState`. A caller with the
- * scenario in hand (e.g. the resolution pipeline) may enforce the scenario's
- * own `maxTotalCharacters` instead; this is the floor every workflow applies
- * regardless.
- */
-export const DEFAULT_MAX_TOTAL_CHARACTERS = 64;
-
 /** Engine-level Chronicle output bounds, mirroring `ContinuityConfigSchema`'s defaults (character-sim phase 6). */
 export const DEFAULT_MAX_CHRONICLE_ENTRIES_PER_TURN = 12;
 export const DEFAULT_MAX_CHRONICLE_CHAIN_DEPTH = 5;
 export const DEFAULT_MAX_DISPATCH_LENGTH = 600;
 
-/** True if the world may still gain one more named character under the given bound. */
-export function canCreateCharacter(characterCount: number, maxTotalCharacters: number = DEFAULT_MAX_TOTAL_CHARACTERS): boolean {
-  return characterCount < maxTotalCharacters;
+/**
+ * Runtime casting deliberately has no arbitrary population ceiling. Creation
+ * workflows still require a valid role, place, unique identity, purse, and a
+ * schema-valid resulting world; this helper remains as a compatibility seam
+ * for those workflows and their callers.
+ */
+export function canCreateCharacter(_characterCount: number, _maxTotalCharacters?: number): boolean {
+  return true;
 }
 
 /**

@@ -104,13 +104,16 @@ describe("create_child_character", () => {
     expect(outcome.ok).toBe(false);
   });
 
-  it("enforces the population bound", () => {
+  it("has no arbitrary population ceiling: a large existing cast does not block a new birth", () => {
+    // Runtime casting (background leaders, births) must never be blocked by a
+    // fixed headcount -- an invaded polity that needs a leader must be able
+    // to get one no matter how large the world has already grown.
     const w = world();
     const padded = {
       ...w,
       characters: [
         ...w.characters,
-        ...Array.from({ length: 64 - w.characters.length }, (_, i) => ({
+        ...Array.from({ length: 200 }, (_, i) => ({
           ...w.characters[0]!,
           id: `filler-${i}`,
           name: `Filler ${i}`,
@@ -119,10 +122,10 @@ describe("create_child_character", () => {
       ],
     };
     const outcome = executeWorkflow(
-      { actionId: "create_child_character", parameters: { childCharacterId: "one-too-many", name: "Overflow", parentCharacterIds: ["marcus-atilius"] }, actorId: "system" },
+      { actionId: "create_child_character", parameters: { childCharacterId: "one-more", name: "Overflow", parentCharacterIds: ["marcus-atilius"] }, actorId: "system" },
       padded,
       4,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
   });
 });

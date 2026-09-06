@@ -426,9 +426,19 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
         .flatMap((province) => province.settlements.map((settlement) => ({ settlement, province })))
         .find(({ settlement }) => settlement.id === params.settlementId);
       if (!settlementWithProvince) {
-        const known = world.map.provinces
-          .flatMap((province) => province.settlements.map((settlement) => `${settlement.name} (${settlement.id})`))
+        // A guessed id is often the settlement's display name instead of its
+        // authoritative id (e.g. "messana" for "settlement-messana"): surface
+        // any settlement whose name or id matches what was guessed before an
+        // arbitrary cap on the rest of the list pushes the real answer out.
+        const guess = params.settlementId.toLowerCase();
+        const allSettlements = world.map.provinces.flatMap((province) => province.settlements);
+        const matches = allSettlements.filter(
+          (settlement) => settlement.name.toLowerCase().includes(guess) || settlement.id.toLowerCase().includes(guess),
+        );
+        const rest = allSettlements.filter((settlement) => !matches.includes(settlement));
+        const known = [...matches, ...rest]
           .slice(0, 12)
+          .map((settlement) => `${settlement.name} (${settlement.id})`)
           .join("; ");
         return refuse(`No settlement exists with the id "${params.settlementId}". Settlements that do exist include: ${known || "none"}. Use inspect_province to get the id of the one you mean.`);
       }

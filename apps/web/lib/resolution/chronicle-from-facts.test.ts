@@ -109,16 +109,100 @@ describe("a refused order", () => {
 
     expect(entry?.scope).toBe("order_refusal");
     // The refusal survives exactly; the executor's wording of it does not.
-    expect(entry?.body).toContain("came to nothing");
+    expect(entry?.body).toContain("found no ears");
     expect(entry?.body).toContain("circumstances as they stood did not admit it");
     expect(entry?.body).not.toMatch(/workflow|world state|create_force/i);
     expect(entry?.materialConsequence).toBe(false);
     expect(NARRATOR_EXEMPT_SCOPES.has(entry!.scope)).toBe(true);
   });
+
+  it("uses a validated named aftermath instead of bland engine prose", () => {
+    const aftermath: FactualEvent = {
+      id: "fact-1-2",
+      atStep: 1,
+      kind: "action",
+      actionId: "record_refusal_aftermath",
+      actorId: "quintus-fabius",
+      parameters: {
+        requesterCharacterId: PLAYER,
+        refuserCharacterId: "quintus-fabius",
+        rejectedActionId: "remove_gold",
+        reason: "The Senate will not fund a commander's private quarrel.",
+        quote: "ROME NON REGEM HABET.",
+      },
+      summary: "Quintus Fabius refused Marcus Atilius's attempt to remove gold. “ROME NON REGEM HABET.” The Senate will not fund a commander's private quarrel.",
+      materialConsequence: false,
+    };
+    const entries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      events: [aftermath],
+      report: report({
+        directiveOutcomes: [{
+          directiveId: "directive-0",
+          outcome: "refused",
+          reason: "Actor lacks treasury access.",
+          factRefs: ["fact-1-2"],
+        }],
+      }),
+      directiveIds: ["directive-0"],
+    });
+
+    expect(entries[0]?.title).toBe("The Refusal Answered");
+    expect(entries[0]?.body).toContain("ROME NON REGEM HABET");
+    expect(entries[0]?.body).toContain("private quarrel");
+    expect(entries[0]?.materialConsequence).toBe(false);
+  });
+});
+
+describe("a turn whose Game Master session never produced an accepted report", () => {
+  // Regression: `report` is null whenever the session hit a step/tool budget
+  // or the model stopped without calling finish_turn (game-master.ts's
+  // "step_budget" / "tool_budget" / "model_stopped" terminations). This must
+  // never be worded as a refusal -- nothing in the world said no, the
+  // resolution simply did not finish -- and any real, validated work the
+  // session did complete before that point must still reach the Chronicle.
+  it("reports the player's own directive as unresolved, not as a refusal", () => {
+    const entries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      events: [],
+      report: null,
+      directiveIds: ["directive-0"],
+    });
+    const entry = entries.find((candidate) => candidate.scopeRef === "directive-0");
+
+    expect(entry?.scope).toBe("resolution_incomplete");
+    expect(entry?.title).toBe("Resolution Incomplete");
+    expect(entry?.body).not.toMatch(/found no ears/i);
+    expect(entry?.materialConsequence).toBe(false);
+    // Executor-derived, deterministic wording: never handed to the free-form
+    // narrator, which could otherwise turn an incomplete turn into an
+    // invented refusal or a fictional outcome.
+    expect(NARRATOR_EXEMPT_SCOPES.has(entry!.scope)).toBe(true);
+  });
+
+  it("still records real, validated work the session completed before it stopped short", () => {
+    const entries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      events: [levyEvent],
+      report: null,
+      directiveIds: ["directive-0"],
+    });
+
+    const worldEntry = entries.find((candidate) => candidate.scopeRef === levyEvent.id);
+    expect(worldEntry).toBeDefined();
+    expect(worldEntry?.body).toBe(levyEvent.summary);
+    expect(worldEntry?.materialConsequence).toBe(true);
+  });
 });
 
 describe("an unsupported attempt", () => {
-  it("reports only the factual limitation, with no material consequence", () => {
+  it("stays in the internal audit and never reaches the Chronicle", () => {
     const gapEvent: FactualEvent = {
       id: "fact-1-1",
       atStep: 1,
@@ -129,7 +213,7 @@ describe("an unsupported attempt", () => {
       summary: "Marcus Atilius attempted something the simulation does not model: swear a binding dynastic oath. No world change followed; the attempt is recorded as unresolved.",
       materialConsequence: false,
     };
-    const entries = buildChronicleFromFacts({
+    const playerEntries = buildChronicleFromFacts({
       world: world(),
       atStep: 1,
       actorCharacterId: PLAYER,
@@ -139,12 +223,41 @@ describe("an unsupported attempt", () => {
       }),
       directiveIds: ["directive-0"],
     });
-    const entry = entries[0];
+    expect(playerEntries).toEqual([]);
 
-    expect(entry?.scope).toBe("unsupported_action");
-    expect(entry?.body).toBe(gapEvent.summary);
-    expect(entry?.materialConsequence).toBe(false);
-    expect(NARRATOR_EXEMPT_SCOPES.has(entry!.scope)).toBe(true);
+    // The screenshot's failure path: an AI world event cites only a
+    // capability gap. It must be hidden too, not merely player directives.
+    const worldEntries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      events: [gapEvent],
+      report: report({
+        events: [{
+          factRefs: ["fact-1-1"],
+          summary: "Hanno advances his plot.",
+          visibility: "public",
+          participantCharacterIds: ["hanno-carthage"],
+          provinceId: null,
+          directiveRef: null,
+          chainPosition: "pressure",
+          salience: 8,
+        }],
+      }),
+      directiveIds: [],
+    });
+    expect(worldEntries).toEqual([]);
+
+    // Nor can an unreported capability gap leak through the fallback pass.
+    const fallbackEntries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      events: [gapEvent],
+      report: report(),
+      directiveIds: [],
+    });
+    expect(fallbackEntries).toEqual([]);
   });
 });
 
@@ -328,18 +441,29 @@ describe("a world event naming a newly seeded leader", () => {
       actionId: "rename_character",
       actorId: "system",
       parameters: { characterId: "leader-boii", name: "Brennos" },
-      summary: "The Boii leader takes the name Brennos.",
+      summary: "The existing leader of Boii is identified in the record as Brennos.",
       materialConsequence: false,
     };
+    const knownBoiiLeader = {
+      ...world().characters[0]!,
+      id: "leader-boii",
+      name: "Brennos",
+      polityId: "boii",
+      createdByDirector: true,
+    };
     const entries = buildChronicleFromFacts({
-      world: world(),
+      world: {
+        ...world(),
+        map: { ...world().map, polities: [...world().map.polities, { id: "boii", name: "Boii", capitalSettlementId: null }] },
+        characters: [...world().characters, knownBoiiLeader],
+      },
       atStep: 2,
       actorCharacterId: PLAYER,
       events: [renameEvent],
       report: report({
         events: [{
           factRefs: ["fact-2-1"],
-          summary: "The Boii leader takes the name Brennos.",
+          summary: "The existing leader of Boii is identified in the record as Brennos.",
           participantCharacterIds: ["leader-boii"],
           provinceId: null,
           visibility: "public",
@@ -353,6 +477,8 @@ describe("a world event naming a newly seeded leader", () => {
 
     const entry = entries.find((candidate) => candidate.scopeRef?.includes("fact-2-1"));
     expect(entry?.factActionIds).toEqual(["rename_character"]);
+    expect(entry?.title).toBe("Brennos of Boii");
+    expect(entry?.body).toContain("existing leader");
     expect(rewriteClaimsUnsupportedWar("Brennos declares war on Rome in this moment of naming.", entry?.factActionIds)).toBe(true);
   });
 });

@@ -54,6 +54,89 @@ describe("sponsor_procedure", () => {
     );
     expect(outcome.ok).toBe(false);
   });
+
+  it("refuses a motion linked to an invented action before it can become a false Senate decision", () => {
+    const outcome = executeWorkflow(
+      {
+        actionId: "sponsor_procedure",
+        actorId: "quintus-fabius",
+        parameters: {
+          procedureId: "senate-war-account",
+          type: "council_deliberation",
+          institutionId: "roman-senate",
+          sponsorCharacterId: "quintus-fabius",
+          subjectKind: "polity",
+          subjectId: "rome",
+          linkedWorkflowId: "senate-war-account-step6",
+          resolutionMechanism: "vote",
+          visibility: "polity",
+        },
+      },
+      world(),
+      1,
+    );
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.message).toContain("recognized action");
+  });
+
+  it("records the concrete question, not a generic procedural label", () => {
+    const outcome = executeWorkflow(
+      {
+        actionId: "sponsor_procedure",
+        actorId: "quintus-fabius",
+        parameters: {
+          procedureId: "command-for-hamilcar",
+          type: "command_assignment",
+          institutionId: null,
+          sponsorCharacterId: "quintus-fabius",
+          subjectKind: "force",
+          subjectId: "carthaginian-army",
+          linkedWorkflowId: "assign_command",
+          linkedWorkflowParams: { forceId: "carthaginian-army", commanderCharacterId: "hamilcar" },
+          resolutionMechanism: "sponsor_discretion",
+          visibility: "polity",
+        },
+      },
+      world(),
+      1,
+    );
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.summary).toContain("whether Hamilcar should command Carthaginian Army");
+    expect(outcome.result.summary).not.toMatch(/procedure|assign_command/i);
+  });
+
+  it("states the substance and reason of a financial measure", () => {
+    const outcome = executeWorkflow(
+      {
+        actionId: "sponsor_procedure",
+        actorId: "quintus-fabius",
+        parameters: {
+          procedureId: "fund-sicilian-grain",
+          type: "council_deliberation",
+          institutionId: "roman-senate",
+          sponsorCharacterId: "quintus-fabius",
+          subjectKind: "polity",
+          subjectId: "rome",
+          linkedWorkflowId: "add_gold",
+          linkedWorkflowParams: { accountId: "marcus-purse", amount: 300, reason: "purchase grain for the Sicilian army" },
+          resolutionMechanism: "vote",
+          visibility: "polity",
+        },
+      },
+      world(),
+      1,
+    );
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.summary).toContain("300");
+    expect(outcome.result.summary).toContain("purchase grain for the Sicilian army");
+    expect(outcome.result.summary).not.toContain("proposed measure");
+  });
 });
 
 describe("pledge_support / withdraw_support", () => {
@@ -123,6 +206,22 @@ describe("call_vote", () => {
       1,
     );
     expect(outcome.ok).toBe(false);
+  });
+
+  it("creates a missing voting bloc and membership before the sponsor calls an institutional vote", () => {
+    const w = world();
+    w.material.groupMemberships = [];
+    w.material.politicalGroups = [];
+    const outcome = executeWorkflow(
+      { actionId: "call_vote", actorId: "quintus-fabius", parameters: { procedureId: "senate-censure-marcus", callerCharacterId: "quintus-fabius" } },
+      w,
+      1,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.material.politicalProcedures.find((procedure) => procedure.id === "senate-censure-marcus")?.stage).toBe("voting_or_deciding");
+    expect(outcome.world.material.politicalGroups).toContainEqual(expect.objectContaining({ id: "patrician-bloc", name: "Patrician bloc" }));
+    expect(outcome.world.material.groupMemberships).toContainEqual(expect.objectContaining({ characterId: "quintus-fabius", groupId: "patrician-bloc", joinedAtStep: 1 }));
   });
 });
 

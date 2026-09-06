@@ -18,4 +18,17 @@ describe("scenario map integrity", () => {
     expect(findWorldMapGeometryGaps(world, punicWarsGeoJson)).toEqual(["not-on-the-map"]);
     expect(() => assertWorldMapGeometryComplete(world, punicWarsGeoJson)).toThrow("not-on-the-map");
   });
+
+  it("does not render a siegeable settlement that is absent from its playable world", () => {
+    const playableProvinceIds = new Set(punicWarsScenario.initialWorld.map.provinces.map((province) => province.id));
+    const renderedSettlementIds = punicWarsGeoJson.features
+      .filter((feature) => feature.properties.kind === "settlement" && playableProvinceIds.has(feature.properties.provinceId))
+      .map((feature) => feature.id)
+      .sort();
+    const worldSettlementIds = punicWarsScenario.initialWorld.map.provinces
+      .flatMap((province) => province.settlements.map((settlement) => settlement.id))
+      .sort();
+
+    expect(worldSettlementIds).toEqual(renderedSettlementIds);
+  });
 });
