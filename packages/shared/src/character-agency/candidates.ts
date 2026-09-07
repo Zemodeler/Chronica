@@ -5,8 +5,13 @@ import type { Commitment } from "./commitments";
 import { checkCommitmentAuthority, dueCommitments } from "./commitments";
 import { getActivePressures, type CharacterPressure } from "../characters/pressures";
 import { queryBeliefs } from "../characters/beliefs";
-import { listSocialLinks } from "../characters/relationship-dimensions";
+import { listSocialLinks, type SocialLink } from "../characters/relationship-dimensions";
 import type { CharacterGoal, CharacterPlot } from "./schemas";
+import { canSponsorProcedure } from "../characters/political-authority";
+import { PoliticalProcedureSubjectKindSchema, type PoliticalProcedureType, type PoliticalResolutionMechanism } from "../material-state";
+import type { z } from "zod";
+
+type PoliticalProcedureSubjectKind = z.infer<typeof PoliticalProcedureSubjectKindSchema>;
 
 // Candidate action generation (character-sim phase 3).
 //
@@ -33,6 +38,24 @@ export interface CandidateAction {
   /** Workflow registry ids this candidate could execute through if chosen; empty means a direct social effect, not a material workflow. */
   readonly legalWorkflowIds: readonly string[];
   readonly rationale: string;
+  /** Present only for `investigate`/`spread_belief`: the exact belief this candidate is about, so invocation-building can read its canonical subject/kind rather than reconstructing them. */
+  readonly sourceBeliefId?: string;
+  /**
+   * Present only for `sponsor_procedure`: the shape of the procedure this
+   * candidate would open. `buildIntentInvocation`
+   * (apps/web/lib/resolution/character-agency.ts) reads this to assemble the
+   * `sponsor_procedure` command's parameters -- everything else about that
+   * command (institution, requirements, eligible participants) is left for
+   * the Game Master's own judgement, since only it can read live
+   * institution/office data through its read tools; this is advisory
+   * context, never auto-invoked.
+   */
+  readonly proposedProcedure?: {
+    readonly type: PoliticalProcedureType;
+    readonly subjectKind: PoliticalProcedureSubjectKind;
+    readonly linkedWorkflowId: string;
+    readonly resolutionMechanism: PoliticalResolutionMechanism;
+  };
 }
 
 export interface CandidateGenerationContext {
@@ -67,6 +90,20 @@ export function generateCandidateActions(context: CandidateGenerationContext): r
         expectedEffectSummary: `Keeps the promise: ${commitment.description}`,
         legalWorkflowIds: ["fulfill_commitment"],
         rationale: `A commitment to ${commitment.beneficiaryCharacterId} is due and can genuinely be kept.`,
+      });
+    } else if (commitment.requiredResource !== null) {
+      // The promisor no longer controls what was promised outright -- offer
+      // proposing new terms as an alternative to deferring or breaking it.
+      candidates.push({
+        actorCharacterId: character.id, actionType: "renegotiate_commitment",
+        sourceGoalId: null, sourcePlotId: null, sourceCommitmentId: commitment.id,
+        targetIds: [commitment.beneficiaryCharacterId],
+        requiredBeliefClaim: null, minBeliefConfidence: 0,
+        requiredOfficeId: null, requiredResource: null,
+        expectedRisk: 30,
+        expectedEffectSummary: "Proposes new terms rather than keeping the promise as originally made.",
+        legalWorkflowIds: ["renegotiate_commitment"],
+        rationale: `The original terms of the commitment to ${commitment.beneficiaryCharacterId} are no longer within reach.`,
       });
     }
     candidates.push({
@@ -109,6 +146,24 @@ export function generateCandidateActions(context: CandidateGenerationContext): r
       legalWorkflowIds: ["advance_character_plot"],
       rationale: `Continues an active plot: ${plot.objective.slice(0, 120)}`,
     });
+    // A plot naming a province the character is not currently in also
+    // legally admits actually going there, alongside advancing the plot itself.
+    const destinationProvinceId = plot.targetIds.find(
+      (id) => id !== character.locationProvinceId && world.map.provinces.some((p) => p.id === id),
+    );
+    if (destinationProvinceId !== undefined) {
+      candidates.push({
+        actorCharacterId: character.id, actionType: "travel",
+        sourceGoalId: plot.goalId, sourcePlotId: plot.id, sourceCommitmentId: null,
+        targetIds: [destinationProvinceId],
+        requiredBeliefClaim: null, minBeliefConfidence: 0,
+        requiredOfficeId: null, requiredResource: null,
+        expectedRisk: 10,
+        expectedEffectSummary: `Travels toward where the plot's business is: ${plot.objective.slice(0, 100)}`,
+        legalWorkflowIds: ["move_character"],
+        rationale: `An active plot names a province other than where ${character.id} currently is.`,
+      });
+    }
   }
 
   // 3. Pressures translate into social or material candidates.
@@ -116,23 +171,42 @@ export function generateCandidateActions(context: CandidateGenerationContext): r
   const rivalLinks = listSocialLinks(world, character.id).filter(
     (l) => (l.kind === "rival" || l.kind === "enemy") && (l.subjectCharacterId === character.id || l.targetCharacterId === character.id),
   );
+  const allyLinks = listSocialLinks(world, character.id).filter(
+    (l) => (l.kind === "ally" || l.kind === "friend" || l.kind === "patron" || l.kind === "client" || l.kind === "kin")
+      && (l.subjectCharacterId === character.id || l.targetCharacterId === character.id),
+  );
 
   for (const pressure of pressures) {
     if ((pressure.kind === "humiliation" || pressure.kind === "political_danger") && rivalLinks.length > 0) {
-      const rivalId = rivalLinks[0]!.subjectCharacterId === character.id ? rivalLinks[0]!.targetCharacterId : rivalLinks[0]!.subjectCharacterId;
-      candidates.push(...socialPressureCandidates(character.id, rivalId, pressure));
+      const rivalId = otherParty(rivalLinks[0]!, character.id);
+      candidates.push(...socialPressureCandidates(world, character, rivalId, pressure));
+      candidates.push(...spreadBeliefCandidates(world, character, rivalId, allyLinks));
     }
     if (pressure.kind === "debt") {
-      candidates.push(...debtCandidates(world, character, pressure));
+      candidates.push(...debtCandidates(world, character, pressure, allyLinks));
     }
     if (pressure.kind === "opportunity") {
-      candidates.push(...opportunityCandidates(character, pressure));
+      candidates.push(...opportunityCandidates(world, character, pressure));
     }
   }
 
   // 4. Goals with no active plot yet still deserve a "seek_support"/"prepare" placeholder.
   for (const goal of (world.characterGoals ?? []).filter((g): g is CharacterGoal => g.characterId === character.id && g.status === "active")) {
     const hasPlot = (world.characterPlots ?? []).some((p) => p.goalId === goal.id && p.status === "active");
+    if (allyLinks.length > 0) {
+      const allyId = otherParty(allyLinks[0]!, character.id);
+      candidates.push({
+        actorCharacterId: character.id, actionType: "seek_support",
+        sourceGoalId: goal.id, sourcePlotId: null, sourceCommitmentId: null,
+        targetIds: [allyId],
+        requiredBeliefClaim: null, minBeliefConfidence: 0,
+        requiredOfficeId: null, requiredResource: null,
+        expectedRisk: 15,
+        expectedEffectSummary: "Asks a trusted ally to back this goal.",
+        legalWorkflowIds: ["record_character_social_action"],
+        rationale: `Goal "${goal.objective.slice(0, 80)}" is easier with real backing.`,
+      });
+    }
     if (hasPlot) continue;
     candidates.push({
       actorCharacterId: character.id, actionType: "prepare",
@@ -145,6 +219,56 @@ export function generateCandidateActions(context: CandidateGenerationContext): r
       legalWorkflowIds: [],
       rationale: `Goal "${goal.objective.slice(0, 80)}" has no active plot yet.`,
     });
+  }
+
+  // 5. A belief already held, but genuinely uncertain -- worth investigating
+  // further. Deliberately a low bar (not merely "not yet 100% confident",
+  // which would sweep in routine background suspicion practically every
+  // character starts with) -- only a suspicion this weakly held competes
+  // with whatever else the character has real reason to be doing.
+  const ownSuspicions = queryBeliefs(world, character.id).filter((b) => b.kind === "suspicion" && b.confidence < 40);
+  for (const belief of ownSuspicions) {
+    candidates.push({
+      actorCharacterId: character.id, actionType: "investigate",
+      sourceGoalId: null, sourcePlotId: null, sourceCommitmentId: null,
+      targetIds: belief.subjectEntityId !== null ? [belief.subjectEntityId] : [],
+      requiredBeliefClaim: belief.claim, minBeliefConfidence: belief.confidence,
+      requiredOfficeId: null, requiredResource: null,
+      expectedRisk: 15,
+      expectedEffectSummary: `Looks further into: ${belief.claim.slice(0, 100)}`,
+      legalWorkflowIds: ["investigate"],
+      rationale: `Holds a suspicion (confidence ${belief.confidence}) not yet confirmed.`,
+      sourceBeliefId: belief.id,
+    });
+  }
+
+  // 6. Commands a force, and an enemy force shares its ground -- battle is a real option.
+  const ownForce = world.material.forces.find((f) => f.commanderCharacterId === character.id);
+  if (ownForce !== undefined && character.polityId !== null) {
+    const atWar = world.conflicts.wars.some((w) => w.polityAId === character.polityId || w.polityBId === character.polityId);
+    if (atWar) {
+      const enemyForce = world.material.forces.find(
+        (f) => f.locationId === ownForce.locationId
+          && f.polityId !== character.polityId
+          && world.conflicts.wars.some(
+            (w) => (w.polityAId === character.polityId && w.polityBId === f.polityId)
+              || (w.polityBId === character.polityId && w.polityAId === f.polityId),
+          ),
+      );
+      if (enemyForce !== undefined) {
+        candidates.push({
+          actorCharacterId: character.id, actionType: "military_action",
+          sourceGoalId: null, sourcePlotId: null, sourceCommitmentId: null,
+          targetIds: [enemyForce.id],
+          requiredBeliefClaim: null, minBeliefConfidence: 0,
+          requiredOfficeId: null, requiredResource: null,
+          expectedRisk: 70,
+          expectedEffectSummary: `Gives battle to ${enemyForce.name}, sharing the same ground.`,
+          legalWorkflowIds: ["start_battle"],
+          rationale: `Commands ${ownForce.name}; an enemy force stands on the same ground while the two polities are at war.`,
+        });
+      }
+    }
   }
 
   // Baseline fallback -- always legal, never invents a target.
@@ -163,10 +287,15 @@ export function generateCandidateActions(context: CandidateGenerationContext): r
   return candidates;
 }
 
-function socialPressureCandidates(actorId: string, rivalId: string, pressure: CharacterPressure): CandidateAction[] {
-  return [
+/** The party on the opposite side of a link from `characterId`. */
+function otherParty(link: SocialLink, characterId: string): string {
+  return link.subjectCharacterId === characterId ? link.targetCharacterId : link.subjectCharacterId;
+}
+
+function socialPressureCandidates(world: WorldState, character: Character, rivalId: string, pressure: CharacterPressure): CandidateAction[] {
+  const candidates: CandidateAction[] = [
     {
-      actorCharacterId: actorId, actionType: "threaten",
+      actorCharacterId: character.id, actionType: "threaten",
       sourceGoalId: null, sourcePlotId: null, sourceCommitmentId: null,
       targetIds: [rivalId],
       requiredBeliefClaim: null, minBeliefConfidence: 0,
@@ -177,7 +306,7 @@ function socialPressureCandidates(actorId: string, rivalId: string, pressure: Ch
       rationale: `Responds to pressure "${pressure.label}" by confronting the rival directly.`,
     },
     {
-      actorCharacterId: actorId, actionType: "reconcile",
+      actorCharacterId: character.id, actionType: "reconcile",
       sourceGoalId: null, sourcePlotId: null, sourceCommitmentId: null,
       targetIds: [rivalId],
       requiredBeliefClaim: null, minBeliefConfidence: 0,
@@ -188,20 +317,69 @@ function socialPressureCandidates(actorId: string, rivalId: string, pressure: Ch
       rationale: `Responds to pressure "${pressure.label}" by seeking to defuse it instead.`,
     },
   ];
+  // A rival who currently holds an office is also, alternatively, someone a
+  // procedure could be sponsored against -- an option alongside a direct
+  // social response, not instead of it.
+  const rival = world.characters.find((c) => c.id === rivalId);
+  if (rival?.officeId !== null && rival?.officeId !== undefined) {
+    const sponsorship = canSponsorProcedure(world, character.id, "removal");
+    if (sponsorship.eligible) {
+      candidates.push({
+        actorCharacterId: character.id, actionType: "sponsor_procedure",
+        sourceGoalId: null, sourcePlotId: null, sourceCommitmentId: null,
+        targetIds: [rival.officeId],
+        requiredBeliefClaim: null, minBeliefConfidence: 0,
+        requiredOfficeId: rival.officeId, requiredResource: null,
+        expectedRisk: 55,
+        expectedEffectSummary: `Opens a procedure to remove the rival from office "${rival.officeId}".`,
+        legalWorkflowIds: ["sponsor_procedure"],
+        rationale: `Responds to pressure "${pressure.label}": the rival holds an office that could be contested.`,
+        proposedProcedure: {
+          type: "removal", subjectKind: "office_seat",
+          linkedWorkflowId: "remove_from_office", resolutionMechanism: "decree_authority",
+        },
+      });
+    }
+  }
+  return candidates;
 }
 
-function debtCandidates(world: WorldState, character: Character, pressure: CharacterPressure): CandidateAction[] {
+function spreadBeliefCandidates(world: WorldState, character: Character, rivalId: string, allyLinks: readonly SocialLink[]): CandidateAction[] {
+  if (allyLinks.length === 0) return [];
+  const damaging = queryBeliefs(world, character.id, rivalId).filter(
+    (b) => b.kind === "secret" || b.kind === "suspicion" || b.kind === "rumour",
+  );
+  if (damaging.length === 0) return [];
+  const belief = damaging[0]!;
+  const allyId = otherParty(allyLinks[0]!, character.id);
+  if (queryBeliefs(world, allyId, rivalId).some((b) => b.claim === belief.claim)) return [];
+  return [{
+    actorCharacterId: character.id, actionType: "spread_belief",
+    sourceGoalId: null, sourcePlotId: null, sourceCommitmentId: null,
+    targetIds: [allyId],
+    requiredBeliefClaim: belief.claim, minBeliefConfidence: belief.confidence,
+    requiredOfficeId: null, requiredResource: null,
+    expectedRisk: 35,
+    expectedEffectSummary: `Shares with a trusted ally: ${belief.claim.slice(0, 100)}`,
+    legalWorkflowIds: ["spread_belief"],
+    rationale: `Holds something about the rival worth a trusted ally knowing too.`,
+    sourceBeliefId: belief.id,
+  }];
+}
+
+function debtCandidates(world: WorldState, character: Character, pressure: CharacterPressure, allyLinks: readonly SocialLink[]): CandidateAction[] {
   const balance = accountBalance(world, character.personalAccountId);
+  const trustedContactId = allyLinks.length > 0 ? otherParty(allyLinks[0]!, character.id) : null;
   const candidates: CandidateAction[] = [
     {
       actorCharacterId: character.id, actionType: "request_assistance",
       sourceGoalId: null, sourcePlotId: null, sourceCommitmentId: null,
-      targetIds: [],
+      targetIds: trustedContactId !== null ? [trustedContactId] : [],
       requiredBeliefClaim: null, minBeliefConfidence: 0,
       requiredOfficeId: null, requiredResource: null,
       expectedRisk: 25,
       expectedEffectSummary: "Asks a trusted contact for help with the debt.",
-      legalWorkflowIds: [],
+      legalWorkflowIds: trustedContactId !== null ? ["record_character_social_action"] : [],
       rationale: `Responds to pressure "${pressure.label}".`,
     },
   ];
@@ -221,17 +399,40 @@ function debtCandidates(world: WorldState, character: Character, pressure: Chara
   return candidates;
 }
 
-function opportunityCandidates(character: Character, pressure: CharacterPressure): CandidateAction[] {
+function opportunityCandidates(world: WorldState, character: Character, pressure: CharacterPressure): CandidateAction[] {
   const ambition = character.ambitions.find((a) => a.status === "active" && a.targetId !== null);
   if (ambition === undefined || ambition.targetId === null) return [];
+  const officeId = ambition.targetId;
+  const openProcedureExists = world.material.politicalProcedures.some(
+    (p) => p.subjectKind === "office_seat" && p.subjectId === officeId
+      && p.stage !== "resolved" && p.stage !== "withdrawn" && p.stage !== "blocked",
+  );
+  if (!openProcedureExists && canSponsorProcedure(world, character.id, "appointment").eligible) {
+    return [{
+      actorCharacterId: character.id, actionType: "sponsor_procedure",
+      sourceGoalId: null, sourcePlotId: null, sourceCommitmentId: null,
+      targetIds: [officeId],
+      requiredBeliefClaim: null, minBeliefConfidence: 0,
+      requiredOfficeId: officeId, requiredResource: null,
+      expectedRisk: 35,
+      expectedEffectSummary: `Opens an appointment procedure for office "${officeId}" -- the step `
+        + `"appoint_to_office" itself requires before it can succeed.`,
+      legalWorkflowIds: ["sponsor_procedure"],
+      rationale: `Responds to pressure "${pressure.label}": a sought office has fallen vacant, but no procedure for it is open yet.`,
+      proposedProcedure: {
+        type: "appointment", subjectKind: "office_seat",
+        linkedWorkflowId: "appoint_to_office", resolutionMechanism: "appointment_authority",
+      },
+    }];
+  }
   return [{
     actorCharacterId: character.id, actionType: "seek_office",
     sourceGoalId: null, sourcePlotId: null, sourceCommitmentId: null,
-    targetIds: [ambition.targetId],
+    targetIds: [officeId],
     requiredBeliefClaim: null, minBeliefConfidence: 0,
-    requiredOfficeId: ambition.targetId, requiredResource: null,
+    requiredOfficeId: officeId, requiredResource: null,
     expectedRisk: 40,
-    expectedEffectSummary: `Seeks appointment to ${ambition.targetId}.`,
+    expectedEffectSummary: `Seeks appointment to ${officeId}.`,
     legalWorkflowIds: ["appoint_to_office"],
     rationale: `Responds to pressure "${pressure.label}": a sought office has fallen vacant.`,
   }];

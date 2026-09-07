@@ -177,4 +177,137 @@ describe("record_character_social_action", () => {
     const outcomeB = executeWorkflow(invocation, world(), 1);
     expect(outcomeA).toEqual(outcomeB);
   });
+
+  // docs/32: seek_support/request_assistance reuse the same fixed-effect table.
+  it("also accepts the two docs/32 kinds, seek_support and request_assistance", () => {
+    const seekSupport = executeWorkflow(
+      { actionId: "record_character_social_action", actorId: "marcus-atilius", parameters: { targetCharacterId: "hanno", kind: "seek_support", reasonLabel: "Asks Hanno to back him." } },
+      world(),
+      1,
+    );
+    expect(seekSupport.ok).toBe(true);
+    const requestAssistance = executeWorkflow(
+      { actionId: "record_character_social_action", actorId: "marcus-atilius", parameters: { targetCharacterId: "hanno", kind: "request_assistance", reasonLabel: "Asks Hanno for help." } },
+      world(),
+      1,
+    );
+    expect(requestAssistance.ok).toBe(true);
+  });
+});
+
+describe("renegotiate_commitment", () => {
+  it("proposes new terms the promisor can actually keep, staying pending", () => {
+    const outcome = executeWorkflow(
+      { actionId: "renegotiate_commitment", actorId: "marcus-atilius", parameters: { commitmentId: "marcus-pays-hanno", description: "Pay Hanno a smaller ransom instead.", requiredResource: { accountId: "marcus-purse", minAmount: 50 } } },
+      world(),
+      1,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const commitment = outcome.world.commitments.find((c) => c.id === "marcus-pays-hanno");
+    expect(commitment?.status).toBe("pending");
+    expect(commitment?.description).toBe("Pay Hanno a smaller ransom instead.");
+    expect(commitment?.requiredResource).toEqual({ accountId: "marcus-purse", minAmount: 50 });
+  });
+
+  it("refuses terms the promisor still cannot actually keep", () => {
+    const outcome = executeWorkflow(
+      { actionId: "renegotiate_commitment", actorId: "marcus-atilius", parameters: { commitmentId: "marcus-pays-hanno", description: "Pay an impossible sum.", requiredResource: { accountId: "marcus-purse", minAmount: 999_999_999 } } },
+      world(),
+      1,
+    );
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("refuses anyone but the promisor", () => {
+    const outcome = executeWorkflow(
+      { actionId: "renegotiate_commitment", actorId: "hanno", parameters: { commitmentId: "marcus-pays-hanno", description: "n/a" } },
+      world(),
+      1,
+    );
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("produces byte-identical resulting state given the same snapshot and parameters", () => {
+    const invocation = { actionId: "renegotiate_commitment" as const, actorId: "marcus-atilius", parameters: { commitmentId: "marcus-pays-hanno", description: "New terms.", requiredResource: { accountId: "marcus-purse", minAmount: 50 } } };
+    const outcomeA = executeWorkflow(invocation, world(), 1);
+    const outcomeB = executeWorkflow(invocation, world(), 1);
+    expect(outcomeA).toEqual(outcomeB);
+  });
+});
+
+describe("investigate", () => {
+  const withBelief = (): WorldState => ({
+    ...world(),
+    characterBeliefs: [{
+      id: "b1", holderCharacterId: "marcus-atilius", subjectEntityId: "hanno",
+      claim: "Hanno may be moving against Messana.", kind: "suspicion",
+      sourceCharacterId: null, sourceEventId: null, confidence: 25, visibility: "private",
+      learnedAtStep: 0, expiresAtStep: null, supersedesBeliefIds: [], status: "active",
+    }],
+  });
+
+  it("raises confidence on a belief the holder actually holds", () => {
+    const outcome = executeWorkflow({ actionId: "investigate", actorId: "marcus-atilius", parameters: { beliefId: "b1" } }, withBelief(), 1);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.characterBeliefs.find((b) => b.id === "b1")?.confidence).toBe(45);
+  });
+
+  it("refuses anyone but the belief's own holder", () => {
+    const outcome = executeWorkflow({ actionId: "investigate", actorId: "hanno", parameters: { beliefId: "b1" } }, withBelief(), 1);
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("refuses an unknown belief", () => {
+    const outcome = executeWorkflow({ actionId: "investigate", actorId: "marcus-atilius", parameters: { beliefId: "nowhere" } }, withBelief(), 1);
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("produces byte-identical resulting state given the same snapshot and parameters", () => {
+    const invocation = { actionId: "investigate" as const, actorId: "marcus-atilius", parameters: { beliefId: "b1" } };
+    const outcomeA = executeWorkflow(invocation, withBelief(), 1);
+    const outcomeB = executeWorkflow(invocation, withBelief(), 1);
+    expect(outcomeA).toEqual(outcomeB);
+  });
+});
+
+describe("spread_belief", () => {
+  it("grants the target a belief through the private_disclosure channel", () => {
+    const outcome = executeWorkflow(
+      { actionId: "spread_belief", actorId: "marcus-atilius", parameters: { targetCharacterId: "hanno", subjectEntityId: "rome", claim: "Rome is mustering another legion.", kind: "rumour" } },
+      world(),
+      1,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const belief = outcome.world.characterBeliefs.find((b) => b.holderCharacterId === "hanno" && b.claim === "Rome is mustering another legion.");
+    expect(belief).toBeDefined();
+    expect(belief?.kind).toBe("rumour");
+  });
+
+  it("refuses a character sharing a belief with themselves", () => {
+    const outcome = executeWorkflow(
+      { actionId: "spread_belief", actorId: "marcus-atilius", parameters: { targetCharacterId: "marcus-atilius", subjectEntityId: null, claim: "n/a", kind: "rumour" } },
+      world(),
+      1,
+    );
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("refuses an unknown target", () => {
+    const outcome = executeWorkflow(
+      { actionId: "spread_belief", actorId: "marcus-atilius", parameters: { targetCharacterId: "nobody", subjectEntityId: null, claim: "n/a", kind: "rumour" } },
+      world(),
+      1,
+    );
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("produces byte-identical resulting state given the same snapshot and parameters", () => {
+    const invocation = { actionId: "spread_belief" as const, actorId: "marcus-atilius", parameters: { targetCharacterId: "hanno", subjectEntityId: "rome", claim: "Rome is mustering another legion.", kind: "rumour" as const } };
+    const outcomeA = executeWorkflow(invocation, world(), 1);
+    const outcomeB = executeWorkflow(invocation, world(), 1);
+    expect(outcomeA).toEqual(outcomeB);
+  });
 });

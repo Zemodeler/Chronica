@@ -4,6 +4,7 @@ import {
   addOrReinforceBelief,
   expireBeliefs,
   queryBeliefs,
+  investigateBelief,
   reduceConfidence,
   resolveRecipients,
   supersedeBelief,
@@ -84,6 +85,20 @@ describe("reduceConfidence", () => {
     });
     const reduced = reduceConfidence(withBelief, "b1", 20);
     expect(reduced.characterBeliefs[0]!.confidence).toBe(withBelief.characterBeliefs[0]!.confidence - 20);
+  });
+});
+
+describe("investigateBelief", () => {
+  it("raises confidence by a fixed amount, capped at 100", () => {
+    const withBelief = addOrReinforceBelief({ characterBeliefs: [] }, {
+      id: "b1", holderCharacterId: "h", subjectEntityId: null, claim: "X", kind: "suspicion",
+      sourceCharacterId: null, sourceEventId: null, channel: "ordinary_rumour", atStep: 1, expiresInSteps: null,
+    });
+    const investigated = investigateBelief(withBelief, "b1");
+    expect(investigated.characterBeliefs[0]!.confidence).toBe(withBelief.characterBeliefs[0]!.confidence + 20);
+
+    const nearCeiling = investigateBelief({ characterBeliefs: [{ ...withBelief.characterBeliefs[0]!, confidence: 90 }] }, "b1");
+    expect(nearCeiling.characterBeliefs[0]!.confidence).toBe(100);
   });
 });
 

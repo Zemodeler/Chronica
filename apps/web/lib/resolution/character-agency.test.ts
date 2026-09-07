@@ -49,6 +49,103 @@ describe("buildIntentInvocation", () => {
   it("returns null for an action type with no legal workflow mapping", () => {
     expect(buildIntentInvocation(candidate({ actionType: "wait" }), world())).toBeNull();
   });
+
+  it("builds renegotiate_commitment carrying the candidate's own proposed terms", () => {
+    const invocation = buildIntentInvocation(
+      candidate({ actionType: "renegotiate_commitment", sourceCommitmentId: "c1", rationale: "New terms.", requiredResource: { accountId: "a1", minAmount: 5 } }),
+      world(),
+    );
+    expect(invocation?.actionId).toBe("renegotiate_commitment");
+    expect(invocation?.parameters["commitmentId"]).toBe("c1");
+    expect(invocation?.parameters["requiredResource"]).toEqual({ accountId: "a1", minAmount: 5 });
+  });
+
+  it("returns null for renegotiate_commitment with no source commitment", () => {
+    expect(buildIntentInvocation(candidate({ actionType: "renegotiate_commitment", sourceCommitmentId: null }), world())).toBeNull();
+  });
+
+  it("builds record_character_social_action for seek_support and request_assistance, the docs/32 additions", () => {
+    const seekSupport = buildIntentInvocation(candidate({ actionType: "seek_support", targetIds: ["hanno"] }), world());
+    expect(seekSupport?.actionId).toBe("record_character_social_action");
+    expect(seekSupport?.parameters["kind"]).toBe("seek_support");
+
+    const requestAssistance = buildIntentInvocation(candidate({ actionType: "request_assistance", targetIds: ["hanno"] }), world());
+    expect(requestAssistance?.actionId).toBe("record_character_social_action");
+    expect(requestAssistance?.parameters["kind"]).toBe("request_assistance");
+  });
+
+  it("builds move_character for travel", () => {
+    const invocation = buildIntentInvocation(candidate({ actionType: "travel", targetIds: ["prov-1"] }), world());
+    expect(invocation?.actionId).toBe("move_character");
+    expect(invocation?.parameters["destinationProvinceId"]).toBe("prov-1");
+  });
+
+  it("returns null for travel with no destination", () => {
+    expect(buildIntentInvocation(candidate({ actionType: "travel", targetIds: [] }), world())).toBeNull();
+  });
+
+  it("builds sponsor_procedure from the candidate's proposedProcedure, leaving institution/requirements for the Game Master", () => {
+    const invocation = buildIntentInvocation(
+      candidate({
+        actionType: "sponsor_procedure", targetIds: ["consul-office"],
+        proposedProcedure: { type: "appointment", subjectKind: "office_seat", linkedWorkflowId: "appoint_to_office", resolutionMechanism: "appointment_authority" },
+      }),
+      world(),
+    );
+    expect(invocation?.actionId).toBe("sponsor_procedure");
+    expect(invocation?.parameters["subjectId"]).toBe("consul-office");
+    expect(invocation?.parameters["type"]).toBe("appointment");
+    expect(invocation?.parameters["institutionId"]).toBeNull();
+  });
+
+  it("returns null for sponsor_procedure with no proposedProcedure", () => {
+    expect(buildIntentInvocation(candidate({ actionType: "sponsor_procedure", targetIds: ["consul-office"] }), world())).toBeNull();
+  });
+
+  it("builds investigate from the candidate's sourceBeliefId", () => {
+    const invocation = buildIntentInvocation(candidate({ actionType: "investigate", sourceBeliefId: "b1" }), world());
+    expect(invocation?.actionId).toBe("investigate");
+    expect(invocation?.parameters["beliefId"]).toBe("b1");
+  });
+
+  it("returns null for investigate with no sourceBeliefId", () => {
+    expect(buildIntentInvocation(candidate({ actionType: "investigate" }), world())).toBeNull();
+  });
+
+  it("builds spread_belief by reading the belief's own subject and kind from world state", () => {
+    const w = world();
+    const w2 = {
+      ...w,
+      characterBeliefs: [{
+        id: "b1", holderCharacterId: "marcus-atilius", subjectEntityId: "rome", claim: "Something worth sharing.",
+        kind: "rumour" as const, sourceCharacterId: null, sourceEventId: null, confidence: 60, visibility: "private" as const,
+        learnedAtStep: 0, expiresAtStep: null, supersedesBeliefIds: [], status: "active" as const,
+      }],
+    };
+    const invocation = buildIntentInvocation(candidate({ actionType: "spread_belief", targetIds: ["hanno"], sourceBeliefId: "b1" }), w2);
+    expect(invocation?.actionId).toBe("spread_belief");
+    expect(invocation?.parameters["claim"]).toBe("Something worth sharing.");
+    expect(invocation?.parameters["kind"]).toBe("rumour");
+  });
+
+  it("returns null for spread_belief when the referenced belief no longer exists", () => {
+    expect(buildIntentInvocation(candidate({ actionType: "spread_belief", targetIds: ["hanno"], sourceBeliefId: "missing" }), world())).toBeNull();
+  });
+
+  it("builds start_battle for military_action using the actor's own commanded force", () => {
+    const w = world();
+    const ownForce = w.material.forces.find((f) => f.commanderCharacterId === "marcus-atilius")!;
+    const invocation = buildIntentInvocation(candidate({ actionType: "military_action", targetIds: ["enemy-force-1"] }), w);
+    expect(invocation?.actionId).toBe("start_battle");
+    expect(invocation?.parameters["attackingForceIds"]).toEqual([ownForce.id]);
+    expect(invocation?.parameters["defendingForceIds"]).toEqual(["enemy-force-1"]);
+  });
+
+  it("returns null for military_action when the actor commands no force", () => {
+    const w = world();
+    const noForceWorld = { ...w, material: { ...w.material, forces: w.material.forces.filter((f) => f.commanderCharacterId !== "marcus-atilius") } };
+    expect(buildIntentInvocation(candidate({ actionType: "military_action", targetIds: ["enemy-force-1"] }), noForceWorld)).toBeNull();
+  });
 });
 
 describe("hasActiveAgencyState", () => {
