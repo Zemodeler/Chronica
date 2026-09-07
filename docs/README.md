@@ -29,6 +29,7 @@ Chronica is a single-player, AI-driven grand strategy game seen through one char
 25. [Military reaction and political choice](29-military-reaction-and-political-choice.md)
 26. [NPC action selection: from deterministic execution to AI choice](30-npc-action-selection.md)
 27. [Legacy retirement: closing out the migration's final step](31-legacy-retirement.md)
+28. [The remaining NPC intent types: from schema-only to AI choice](32-remaining-npc-intent-types.md)
 
 Confirmed decisions are stated directly. Future possibilities and unresolved choices are kept in the roadmap or open-decisions document.
 

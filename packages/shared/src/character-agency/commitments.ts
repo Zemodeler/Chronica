@@ -269,6 +269,42 @@ export function deferCommitment(
   };
 }
 
+/**
+ * Proposes new terms for a commitment the promisor can no longer keep as
+ * originally made -- unilateral, the same way `deferCommitment` is: the
+ * beneficiary is not asked to agree, only informed. Re-validated through
+ * `checkCommitmentAuthority` against the *new* terms, so this cannot become
+ * a way to promise something the promisor still does not actually control.
+ * Stays `pending`, with a fresh `reviewAtStep`.
+ */
+export function renegotiateCommitment(
+  world: CommitmentWorldView,
+  commitmentId: string,
+  atStep: number,
+  newTerms: { readonly description: string; readonly requiredResource?: { accountId: string; minAmount: number } | null | undefined; readonly requiredOfficeId?: string | null | undefined },
+  reviewInSteps = 4,
+): CommitmentResolutionResult | { rejectionReason: string } {
+  const commitment = world.commitments.find((c) => c.id === commitmentId);
+  if (commitment === undefined) return world;
+  const requiredOfficeId = newTerms.requiredOfficeId ?? null;
+  const requiredResource = newTerms.requiredResource ?? null;
+  const authority = checkCommitmentAuthority(world, commitment.promisorCharacterId, requiredOfficeId, requiredResource);
+  if (!authority.ok) return { rejectionReason: authority.reason };
+  return {
+    characters: world.characters,
+    commitments: patchCommitment(world.commitments, commitmentId, {
+      status: "pending",
+      description: newTerms.description,
+      requiredOfficeId,
+      requiredResource,
+      reviewAtStep: atStep + reviewInSteps,
+      resolutionReason: null,
+    }),
+    characterPressures: world.characterPressures,
+    material: world.material,
+  };
+}
+
 /** Marks the commitment broken, and creates the pressure that follows a broken promise. */
 export function breakCommitment(
   world: CommitmentWorldView,

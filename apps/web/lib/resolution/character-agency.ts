@@ -182,22 +182,124 @@ export function buildIntentInvocation(candidate: CandidateAction, world: WorldSt
           : { commitmentId: candidate.sourceCommitmentId, reason: candidate.rationale.slice(0, 240) },
       };
     }
+    // docs/32: the promisor no longer controls what was originally promised;
+    // proposes new terms instead of only fulfilling, deferring, or breaking.
+    case "renegotiate_commitment": {
+      if (candidate.sourceCommitmentId === null) return null;
+      return {
+        actionId: "renegotiate_commitment",
+        actorId: candidate.actorCharacterId,
+        parameters: {
+          commitmentId: candidate.sourceCommitmentId,
+          description: candidate.rationale.slice(0, 400),
+          requiredResource: candidate.requiredResource,
+          requiredOfficeId: candidate.requiredOfficeId,
+        },
+      };
+    }
     // docs/30: these used to be applied immediately via buildIntentSocialEvent
     // the instant a candidate scored highest; they are now offered as a
     // formed intention through the registered record_character_social_action
     // workflow instead, so the target, kind, and reason are the Game
-    // Master's call, not a pre-computed effect.
+    // Master's call, not a pre-computed effect. docs/32 adds two more kinds
+    // to the same fixed-magnitude table (npc-agency.ts's SOCIAL_ACTION_EFFECT).
     case "threaten":
     case "reconcile":
     case "offer_favour":
     case "negotiate":
-    case "publicly_oppose": {
+    case "publicly_oppose":
+    case "seek_support":
+    case "request_assistance": {
       const targetCharacterId = candidate.targetIds[0];
       if (targetCharacterId === undefined) return null;
       return {
         actionId: "record_character_social_action",
         actorId: candidate.actorCharacterId,
         parameters: { targetCharacterId, kind: candidate.actionType, reasonLabel: candidate.rationale.slice(0, 200) },
+      };
+    }
+    // docs/32: relocates to a province an active plot already names.
+    case "travel": {
+      const destinationProvinceId = candidate.targetIds[0];
+      if (destinationProvinceId === undefined) return null;
+      return {
+        actionId: "move_character",
+        actorId: candidate.actorCharacterId,
+        parameters: { characterId: candidate.actorCharacterId, destinationProvinceId },
+      };
+    }
+    // docs/32: opens the political procedure `candidates.ts` identified as
+    // missing (an appointment prerequisite, or a removal against a rival)
+    // -- everything the candidate itself could not know (institution,
+    // eligibility requirements, participants) is left null/empty for the
+    // Game Master's own live read-tool judgement, not invented here.
+    case "sponsor_procedure": {
+      const subjectId = candidate.targetIds[0];
+      if (subjectId === undefined || candidate.proposedProcedure === undefined) return null;
+      return {
+        actionId: "sponsor_procedure",
+        actorId: candidate.actorCharacterId,
+        parameters: {
+          procedureId: `procedure-${candidate.actorCharacterId}-${subjectId}`,
+          type: candidate.proposedProcedure.type,
+          institutionId: null,
+          sponsorCharacterId: candidate.actorCharacterId,
+          subjectKind: candidate.proposedProcedure.subjectKind,
+          subjectId,
+          linkedWorkflowId: candidate.proposedProcedure.linkedWorkflowId,
+          linkedWorkflowParams: {},
+          eligibilityRequirementIds: [],
+          eligibleParticipantIds: [],
+          resolutionMechanism: candidate.proposedProcedure.resolutionMechanism,
+          visibility: "polity",
+          deadlineStep: null,
+          sourceEventIds: [],
+        },
+      };
+    }
+    // docs/32: raises confidence on a suspicion the actor already holds --
+    // self-targeted, no recipient.
+    case "investigate": {
+      if (candidate.sourceBeliefId === undefined) return null;
+      return {
+        actionId: "investigate",
+        actorId: candidate.actorCharacterId,
+        parameters: { beliefId: candidate.sourceBeliefId },
+      };
+    }
+    // docs/32: shares a claim the actor already holds with another character,
+    // reading the belief's own canonical subject/kind rather than
+    // reconstructing them, the same way `advance_plot` reads its plot.
+    case "spread_belief": {
+      const targetCharacterId = candidate.targetIds[0];
+      const belief = candidate.sourceBeliefId === undefined
+        ? undefined
+        : world.characterBeliefs.find((b) => b.id === candidate.sourceBeliefId);
+      if (targetCharacterId === undefined || belief === undefined) return null;
+      return {
+        actionId: "spread_belief",
+        actorId: candidate.actorCharacterId,
+        parameters: {
+          targetCharacterId,
+          subjectEntityId: belief.subjectEntityId,
+          claim: belief.claim,
+          kind: belief.kind,
+        },
+      };
+    }
+    // docs/32: gives battle to an enemy force sharing the same ground.
+    case "military_action": {
+      const enemyForceId = candidate.targetIds[0];
+      const ownForce = world.material.forces.find((f) => f.commanderCharacterId === candidate.actorCharacterId);
+      if (enemyForceId === undefined || ownForce === undefined) return null;
+      return {
+        actionId: "start_battle",
+        actorId: candidate.actorCharacterId,
+        parameters: {
+          battleId: `battle-${candidate.actorCharacterId}-${ownForce.locationId}`,
+          attackingForceIds: [ownForce.id],
+          defendingForceIds: [enemyForceId],
+        },
       };
     }
     default:

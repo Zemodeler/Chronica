@@ -199,6 +199,56 @@ describe("the game master loop", () => {
     expect(marcus?.relations.find((r) => r.subjectCharacterId === "hanno")?.causes.some((c) => c.label.includes("goodwill"))).toBe(true);
   });
 
+  // docs/32: the Game Master can likewise originate the newer NPC commands
+  // (renegotiate_commitment, spread_belief) with no pre-formed proposal.
+  it("renegotiates an NPC's commitment and lets it share a belief, with no pre-formed proposal", async () => {
+    const withCommitment: WorldState = {
+      ...world(),
+      commitments: [{
+        id: "hanno-pays-marcus",
+        promisorCharacterId: "hanno",
+        beneficiaryCharacterId: PLAYER,
+        actionKind: "payment",
+        description: "Pay tribute for safe passage through Roman waters.",
+        conditions: "",
+        requiredOfficeId: null,
+        requiredResource: { accountId: "hanno-purse", minAmount: 900_000 },
+        visibility: "polity",
+        sourceEventId: null,
+        breachPressureKind: "humiliation",
+        status: "pending",
+        createdAtStep: 0,
+        reviewAtStep: 1,
+        resolvedAtStep: null,
+        resolutionReason: null,
+      }],
+    };
+    const outcome = await run(
+      [
+        { toolCalls: [{ name: "renegotiate_commitment", arguments: { actorId: "hanno", commitmentId: "hanno-pays-marcus", description: "Pay a smaller tribute instead.", requiredResource: { accountId: "hanno-purse", minAmount: 100 } } }] },
+        { toolCalls: [{ name: "spread_belief", arguments: { actorId: "hanno", targetCharacterId: PLAYER, subjectEntityId: "rome", claim: "Carthage is reinforcing its Sicilian garrisons.", kind: "rumour" } }] },
+        finish({
+          directiveOutcomes: [{ directiveId: "directive-0", outcome: "unsupported", reason: "Not attempted this turn.", factRefs: [] }],
+          events: [
+            { factRefs: ["fact-1-1"], summary: "Hanno proposes smaller tribute.", participantCharacterIds: ["hanno"], provinceId: null, visibility: "public", salience: 4, directiveRef: null, chainPosition: "reaction" },
+            { factRefs: ["fact-1-2"], summary: "Hanno tells Marcus what he knows.", participantCharacterIds: ["hanno", PLAYER], provinceId: null, visibility: "public", salience: 3, directiveRef: null, chainPosition: "reaction" },
+          ],
+          openThreads: [],
+          turnSummary: "Hanno renegotiates and shares what he knows.",
+        }),
+      ],
+      { world: withCommitment },
+    );
+
+    expect(outcome.termination).toBe("reported");
+    const commitment = outcome.world.commitments.find((c) => c.id === "hanno-pays-marcus");
+    expect(commitment?.status).toBe("pending");
+    expect(commitment?.requiredResource).toEqual({ accountId: "hanno-purse", minAmount: 100 });
+    const marcusBelief = outcome.world.characterBeliefs.find((b) => b.holderCharacterId === PLAYER && b.claim === "Carthage is reinforcing its Sicilian garrisons.");
+    expect(marcusBelief).toBeDefined();
+    expect(marcusBelief?.kind).toBe("rumour");
+  });
+
   it("fights a started battle deterministically and hands the result back before the next decision", async () => {
     const base = world();
     const attacker = base.material.forces[0];

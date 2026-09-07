@@ -180,6 +180,24 @@ export function reduceConfidence(world: BeliefWorldView, beliefId: string, amoun
   };
 }
 
+const INVESTIGATE_CONFIDENCE_GAIN = 20;
+
+/**
+ * Raises confidence on a belief the holder already has, by deliberate
+ * effort rather than a new event -- the mirror of `reduceConfidence`. A
+ * fixed magnitude, the same fixed-effect pattern
+ * `SOCIAL_ACTION_EFFECT` (workflows/definitions/npc-agency.ts) uses for
+ * social actions: the holder's choice is *whether* to investigate, not how
+ * much ground it covers.
+ */
+export function investigateBelief(world: BeliefWorldView, beliefId: string): Pick<BeliefWorldView, "characterBeliefs"> {
+  return {
+    characterBeliefs: world.characterBeliefs.map((belief) =>
+      belief.id === beliefId ? { ...belief, confidence: Math.min(100, belief.confidence + INVESTIGATE_CONFIDENCE_GAIN) } : belief,
+    ),
+  };
+}
+
 /** Marks an old belief superseded by a new one, preserving the old record rather than deleting it. */
 export function supersedeBelief(
   world: BeliefWorldView,
