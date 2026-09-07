@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($env:DATABASE_URL = \"postgres://chronica:chronica@localhost:5432/chronica\"; cd E:\\\\Chronica\\\\packages\\\\db; npx drizzle-kit migrate 2>&1)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}
