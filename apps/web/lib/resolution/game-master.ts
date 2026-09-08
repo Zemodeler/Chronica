@@ -7,7 +7,9 @@ import type {
   GameMasterToolOutcome,
   OrderDirective,
   ScenarioChronicleRules,
+  ScenarioClock,
   ScenarioGovernmentRules,
+  ScenarioLifeRules,
   SelectedCharacter,
   WorldState,
 } from "@chronica/shared";
@@ -15,7 +17,6 @@ import { FINISH_TURN_TOOL, createGameMasterSession } from "@chronica/shared";
 import type { InventedWorkflowDefinition } from "@chronica/shared";
 import { buildGameMasterOpeningMessage, buildGameMasterSystemPrompt } from "./game-master-prompt";
 import type { ResolutionPlayerContext } from "./prompts";
-import type { FormedNpcProposal } from "./character-agency";
 
 // The Game Master loop (GM refactor, requirement 3).
 //
@@ -37,11 +38,12 @@ export interface RunGameMasterInput {
   readonly actorCharacterId: string;
   readonly directives: readonly { readonly id: string; readonly directive: OrderDirective }[];
   readonly selectedCharacters: readonly SelectedCharacter[];
-  /** Concrete NPC workflow proposals already formed by character agency this turn, offered as context -- never executed here. */
-  readonly npcProposals?: readonly FormedNpcProposal[];
   readonly playerContext: ResolutionPlayerContext | undefined;
   readonly scenarioGovernment: ScenarioGovernmentRules | undefined;
   readonly scenarioChronicle: ScenarioChronicleRules | undefined;
+  /** Scenario life/clock rules, so the Game Master's own life-review read tool can report age/rate facts. */
+  readonly scenarioLife?: ScenarioLifeRules | undefined;
+  readonly scenarioClock?: ScenarioClock | undefined;
   /** Actions this campaign defined in earlier turns, usable without redefining. */
   readonly definedActions?: readonly InventedWorkflowDefinition[];
   /** Off by default (docs/27) -- see `GameMasterSessionOptions.allowInventedActions`. */
@@ -95,6 +97,8 @@ export async function runGameMaster(
     ...(input.persistentPlans ? { directives: input.directives } : {}),
     definedActions: input.definedActions ?? [],
     allowInventedActions: input.allowInventedActions ?? false,
+    scenarioLife: input.scenarioLife,
+    scenarioClock: input.scenarioClock,
     // Reads, reports, and the player’s own orders are not NPC actions. Keep
     // room for them while scaling the tool loop with the relevance-derived
     // agency available this turn.
@@ -107,7 +111,6 @@ export async function runGameMaster(
     atStep: input.atStep,
     directives: input.directives,
     selectedCharacters: input.selectedCharacters,
-    npcProposals: input.npcProposals ?? [],
     playerContext: input.playerContext,
     scenarioGovernment: input.scenarioGovernment,
     scenarioChronicle: input.scenarioChronicle,

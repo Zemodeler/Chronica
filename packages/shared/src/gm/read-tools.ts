@@ -2,8 +2,13 @@ import { z } from "zod";
 import { EntityIdSchema } from "../material-state";
 import type { WorldState } from "../world/world-state";
 import { currentAgeYears } from "../characters/age";
+import { classifyLifeStage } from "../characters/age";
+import { dueLifeReviews } from "../characters/life-events";
+import { findPlayerSuccessors } from "../characters/inheritance";
+import type { ScenarioLifeRules } from "../characters/family";
+import type { ScenarioClock } from "../world/clock";
 import { buildPoliticalInspectorView } from "../characters/political-inspector";
-import { evaluateSupport, positionFromScore } from "../character-agency/political-resolver";
+import { evaluateSupport, positionFromScore, dueProcedures, netSupportWeight } from "../character-agency/political-resolver";
 
 // Bounded read tools (GM refactor, requirement 5).
 //
@@ -27,7 +32,13 @@ export interface ReadToolContext {
   /** The character whose turn this is; used only to label perspective, never to widen access. */
   readonly actorCharacterId: string;
   readonly privateInformation: PrivateInformationPolicy;
+  /** Scenario life rules (life stages, review interval), when the scenario authored any. Absent -- no life-review facts to report. */
+  readonly scenarioLife?: ScenarioLifeRules | undefined;
+  readonly scenarioClock?: ScenarioClock | undefined;
 }
+
+/** Default years-per-step used when a scenario carries no clock of its own. */
+const DEFAULT_STEPS_PER_YEAR = 4;
 
 export interface ReadToolResult {
   readonly ok: boolean;
@@ -590,6 +601,98 @@ const inspectPoliticalProcedure: AnyReadToolDefinition = {
   },
 };
 
+// -- list_due_life_reviews ----------------------------------------------------
+
+const listDueLifeReviews: AnyReadToolDefinition = {
+  name: "list_due_life_reviews",
+  description:
+    "Every living character whose scheduled life review has arrived this step, with age, life stage, and the scenario's own authored mortality/incapacity/recovery rates for that stage. This is information only -- no death, incapacity, or recovery has been decided. Whether and how any of them dies, weakens, or recovers this turn is your own judgment call: use kill_character, incapacitate_character, or recover_from_incapacity yourself when the story and these rates warrant it, then settle_estate for anyone who dies. A character not listed here has no life review due; do not age or kill them regardless.",
+  parametersSchema: z.object({}).strict(),
+  read(context) {
+    const { world, scenarioLife, scenarioClock } = context;
+    if (scenarioLife === undefined || scenarioLife.lifeStages.length === 0) {
+      return {
+        ok: true,
+        data: { dueLifeReviews: [] },
+        factual: "This scenario authors no life stages, so no character ever comes due for an automatic life review.",
+      };
+    }
+    const stepsPerYear = scenarioClock?.stepsPerYear ?? DEFAULT_STEPS_PER_YEAR;
+    const due = dueLifeReviews(world.characters, context.atStep).map((character) => {
+      const ageYears = currentAgeYears(character, stepsPerYear, context.atStep);
+      const stage = ageYears === null ? undefined : classifyLifeStage(ageYears, scenarioLife.lifeStages);
+      const incapacitated = character.disqualifyingStatuses.includes("incapacitated");
+      return {
+        characterId: character.id,
+        name: character.name,
+        ageYears,
+        lifeStageLabel: stage?.label ?? null,
+        incapacitated,
+        mortalityRatePerYearBps: stage?.mortalityRatePerYearBps ?? 0,
+        incapacityRatePerYearBps: stage?.incapacityRatePerYearBps ?? 0,
+        recoveryRatePerYearBps: stage?.recoveryRatePerYearBps ?? 0,
+        successorCandidatesIfDeceasedToday: findPlayerSuccessors(world, character.id, stepsPerYear, context.atStep),
+      };
+    });
+    return {
+      ok: true,
+      data: { dueLifeReviews: due },
+      factual:
+        due.length === 0
+          ? "No character is due for a life review this step."
+          : due
+              .map((entry) =>
+                `${entry.name} (${entry.characterId}), ${entry.ageYears ?? "unknown"} years old, ${entry.lifeStageLabel ?? "unclassified life stage"}. `
+                + (entry.incapacitated
+                  ? `Currently incapacitated; scenario recovery rate ${entry.recoveryRatePerYearBps}bps/year.`
+                  : `Scenario mortality rate ${entry.mortalityRatePerYearBps}bps/year, incapacity rate ${entry.incapacityRatePerYearBps}bps/year.`)
+                + (entry.successorCandidatesIfDeceasedToday.length > 0
+                  ? ` Successor candidates if they died today: ${entry.successorCandidatesIfDeceasedToday.join(", ")}.`
+                  : ""),
+              )
+              .join("\n"),
+    };
+  },
+};
+
+// -- list_due_political_procedures --------------------------------------------
+
+const listDuePoliticalProcedures: AnyReadToolDefinition = {
+  name: "list_due_political_procedures",
+  description:
+    "Every open political procedure ready to be decided this step: at voting_or_deciding, or past its deadline. Shows the recorded net support/opposition only -- it does not decide the outcome. Use inspect_political_procedure for the full detail on one, then resolve_procedure when you judge the moment right to actually decide it. A procedure not listed here is not yet ready: call_vote first, or wait for its deadline.",
+  parametersSchema: z.object({}).strict(),
+  read(context) {
+    const { world } = context;
+    const due = dueProcedures(world.material.politicalProcedures, context.atStep).map((procedure) => {
+      const weights = netSupportWeight({ characters: world.characters, material: world.material }, procedure);
+      return {
+        procedureId: procedure.id,
+        type: procedure.type,
+        stage: procedure.stage,
+        resolutionMechanism: procedure.resolutionMechanism,
+        sponsorCharacterId: procedure.sponsorCharacterId,
+        sponsorName: characterName(world, procedure.sponsorCharacterId),
+        deadlineStep: procedure.deadlineStep,
+        netSupportWeight: weights.support,
+        netOppositionWeight: weights.oppose,
+      };
+    });
+    return {
+      ok: true,
+      data: { dueProcedures: due },
+      factual:
+        due.length === 0
+          ? "No political procedure is ready to resolve this step."
+          : due
+              .map((entry) =>
+                `${entry.procedureId} (${entry.type}, ${entry.resolutionMechanism}), sponsored by ${entry.sponsorName}, stage ${entry.stage}${entry.deadlineStep !== null ? `, deadline step ${entry.deadlineStep}` : ""}. Net support ${entry.netSupportWeight} vs opposition ${entry.netOppositionWeight}.`,
+              )
+              .join("\n"),
+    };
+  },
+};
+
 export const GAME_MASTER_READ_TOOLS: readonly AnyReadToolDefinition[] = [
   inspectWorld,
   inspectForce,
@@ -601,6 +704,8 @@ export const GAME_MASTER_READ_TOOLS: readonly AnyReadToolDefinition[] = [
   inspectChronicleChain,
   inspectActorMemory,
   inspectPoliticalProcedure,
+  listDueLifeReviews,
+  listDuePoliticalProcedures,
 ];
 
 export const READ_TOOL_BY_NAME: ReadonlyMap<string, AnyReadToolDefinition> = new Map(

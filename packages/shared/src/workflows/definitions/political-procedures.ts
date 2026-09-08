@@ -15,6 +15,7 @@ import {
 } from "../../material-state";
 import { describePoliticalQuestion } from "../../chronicle/political-procedure-description";
 import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
+import { resolveProcedure } from "../../character-agency/political-resolver";
 
 // Political procedure workflows (character-sim phase 4).
 //
@@ -303,6 +304,44 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
         world: { ...world, material: { ...material, politicalProcedures: material.politicalProcedures.map((p) => (p.id === procedure.id ? updated : p)) } },
         result: {
           summary: `${world.characters.find((character) => character.id === params.callerCharacterId)?.name ?? "The sponsor"} calls${institution ? ` the ${institution.name}` : ""} to decide ${describePoliticalQuestion(world, procedure)}.`,
+          applied: true,
+        },
+      };
+    },
+  }),
+
+  defineWorkflow({
+    id: "resolve_procedure",
+    description: "Decide an open political procedure that is ready: at voting_or_deciding, or past its deadline. Tallies the support positions already recorded (by the institution's own quorum/threshold rules, or the sponsor's authority) into a pass/fail outcome -- it invents no one's position, it only computes what the recorded positions already decide. If it passes, call the procedure's own linkedWorkflowId yourself (see inspect_political_procedure or list_due_political_procedures) with { authorization: { procedureId } } to carry out its effect: this tool only decides the vote, it does not itself grant an office, remove a rival, or otherwise act.",
+    category: "political",
+    parametersSchema: z.object({ procedureId: EntityIdSchema }).strict(),
+    apply(world, params, context) {
+      const procedure = world.material.politicalProcedures.find((p) => p.id === params.procedureId);
+      if (!procedure) return null;
+      if (procedure.stage === "resolved" || procedure.stage === "withdrawn" || procedure.stage === "blocked") {
+        return refuse(`Procedure "${procedure.id}" is already ${procedure.stage} and cannot be resolved again.`);
+      }
+      const isDue = procedure.stage === "voting_or_deciding" || (procedure.deadlineStep !== null && procedure.deadlineStep <= context.atStep);
+      if (!isDue) {
+        return refuse(
+          `Procedure "${procedure.id}" is not yet ready to resolve: call call_vote first, or wait for its deadline${procedure.deadlineStep !== null ? ` (step ${procedure.deadlineStep})` : ""}.`,
+        );
+      }
+
+      const { resolution } = resolveProcedure({ characters: world.characters, material: world.material }, procedure, context.atStep);
+      const material = {
+        ...world.material,
+        politicalProcedures: world.material.politicalProcedures.map((p) => (p.id === resolution.procedure.id ? resolution.procedure : p)),
+        motions: resolution.motion ? [...world.material.motions.filter((m) => m.id !== resolution.motion!.id), resolution.motion] : world.material.motions,
+        voteRecords: resolution.voteRecord ? [...world.material.voteRecords, resolution.voteRecord] : world.material.voteRecords,
+      };
+      const passed = resolution.procedure.outcome === "passed";
+      return {
+        world: { ...world, material },
+        result: {
+          summary:
+            `${describePoliticalQuestion(world, procedure)} ${passed ? "passes" : "fails"}: ${resolution.procedure.outcomeReason ?? ""}`
+            + (passed ? ` Carry out its effect by calling ${resolution.procedure.linkedWorkflowId} with authorization: { procedureId: "${resolution.procedure.id}" }.` : ""),
           applied: true,
         },
       };

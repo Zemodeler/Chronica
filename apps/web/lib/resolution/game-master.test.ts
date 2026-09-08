@@ -447,37 +447,24 @@ describe("the game master loop", () => {
     expect(outcome.world.material.forces.some((force) => force.name === "Legio X")).toBe(true);
   });
 
-  it("executes a formed NPC proposal when the model calls the exact workflow it named", async () => {
-    // Regression: a formed NPC intention used to be summarized as loose prose
-    // the Game Master could act on only by independently reinventing the
-    // same workflow. Handed the exact invocation instead, a model that simply
-    // calls it should see the real workflow execute -- proving the proposal
-    // reached the session, not just the prompt.
-    const outcome = await run(
-      [
-        { toolCalls: [{ name: "create_force", arguments: { actorId: PLAYER, polityId: ROME, locationProvinceId: LATIUM, name: "Legio I", size: 4_000, kind: "infantry" } }] },
-        { toolCalls: [{ name: "remove_gold", arguments: { actorId: "hanno", accountId: "hanno-purse", amount: 50, reason: "Bribes an informant." } }] },
-        finish({
-          directiveOutcomes: [{ directiveId: "directive-0", outcome: "carried_out", reason: "The levy went through.", factRefs: ["fact-1-1"] }],
-          // A directiveRef-less event with real facts satisfies the session's
-          // own "the world must act too" check in one pass, since the world
-          // (Hanno) already acted on its own here.
-          events: [{ factRefs: ["fact-1-2"], summary: "Hanno spends gold on an informant.", participantCharacterIds: ["hanno"], provinceId: null, visibility: "private", salience: 4, directiveRef: null, chainPosition: "spread" }],
-          openThreads: [],
-          turnSummary: "Rome raised Legio I; Hanno bribed an informant.",
-        }),
-      ],
-      {
-        npcProposals: [{
-          intentId: "intent-hanno-1",
-          actorCharacterId: "hanno",
-          actionType: "economic_action",
-          rationale: "Hanno manages remaining funds to reduce exposure.",
-          workflowIds: ["remove_gold"],
-          invocation: { actionId: "remove_gold", actorId: "hanno", parameters: { accountId: "hanno-purse", amount: 50, reason: "Bribes an informant." } },
-        }],
-      },
-    );
+  it("executes an NPC action the model chooses on its own, as any other actor", async () => {
+    // The Game Master decides NPC actions itself now (no pre-ranked
+    // candidate or pre-built proposal offered to it): calling a registered
+    // workflow with an NPC's own id as actorId executes exactly like any
+    // other actor.
+    const outcome = await run([
+      { toolCalls: [{ name: "create_force", arguments: { actorId: PLAYER, polityId: ROME, locationProvinceId: LATIUM, name: "Legio I", size: 4_000, kind: "infantry" } }] },
+      { toolCalls: [{ name: "remove_gold", arguments: { actorId: "hanno", accountId: "hanno-purse", amount: 50, reason: "Bribes an informant." } }] },
+      finish({
+        directiveOutcomes: [{ directiveId: "directive-0", outcome: "carried_out", reason: "The levy went through.", factRefs: ["fact-1-1"] }],
+        // A directiveRef-less event with real facts satisfies the session's
+        // own "the world must act too" check in one pass, since the world
+        // (Hanno) already acted on its own here.
+        events: [{ factRefs: ["fact-1-2"], summary: "Hanno spends gold on an informant.", participantCharacterIds: ["hanno"], provinceId: null, visibility: "private", salience: 4, directiveRef: null, chainPosition: "spread" }],
+        openThreads: [],
+        turnSummary: "Rome raised Legio I; Hanno bribed an informant.",
+      }),
+    ]);
 
     expect(outcome.executedInvocations.some((invocation) => invocation.actionId === "remove_gold" && invocation.actorId === "hanno")).toBe(true);
     const hannoAccount = outcome.world.material.accounts.find((account) => account.id === "hanno-purse");
