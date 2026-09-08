@@ -2,10 +2,16 @@ import "server-only";
 
 // Turn resolution (Game Master architecture).
 //
-// The AI part of a turn is one agent with tools, not a committee. Everything
-// around it is deterministic and unchanged: dialogue social events and
-// pressure lifecycle before, life review and character agency before, political
-// procedures and background material society after, then Chronicle and commit.
+// The AI part of a turn is one agent with tools, not a committee, and it is
+// the sole authority on every outcome that used to be decided for it: life,
+// death, incapacity, what an NPC does, and how a political procedure
+// resolves are all its own judgment calls now, informed by read tools that
+// report facts (a scenario's authored life-review rates, a procedure's
+// recorded support) rather than a pre-computed decision. What stays
+// deterministic around it is bookkeeping and physics, not judgment: dialogue
+// social events and pressure lifecycle before; battle/war-damage math,
+// storyline auto-resolution, and background material society after; then
+// Chronicle and commit.
 //
 // The agent's only route to state is `runGameMaster`, which stages every
 // mutation in memory through the registered workflow executor. Prose changes
@@ -18,34 +24,18 @@ import type {
   ProposedInvocation,
   SelectedCharacter,
   WorkflowAuditBlob,
-  CandidateAction,
   CharacterIntent,
   WorldState,
 } from "@chronica/shared";
 import {
   executeWorkflow,
-  executeWorkflows,
   selectRelevantCharacters,
   applySocialEvents,
   advancePressureLifecycle,
   derivePressureTriggers,
   deriveDiplomaticEscalations,
   createPressure,
-  dueCommitments,
-  generateCandidateActions,
-  rankCandidates,
-  resolveDueProcedures,
   netSupportWeight,
-  dueLifeReviews,
-  rollLifeEvent,
-  classifyLifeStage,
-  nextReviewStep,
-  settleEstate,
-  deriveLegacyCauses,
-  findPlayerSuccessors,
-  currentAgeYears,
-  canSponsorProcedure,
-  resolveEligibility,
   deriveAuthoritySummary,
   chronicleHeadline,
   humanizeRefusalReason,
@@ -106,8 +96,6 @@ import {
   buildChronicleFromFacts,
   rewriteClaimsUnsupportedWar,
 } from "./chronicle-from-facts";
-import { buildIntentInvocation, hasActiveAgencyState, isEligibleForNpcAgency, resolveFormedNpcIntentOutcome } from "./character-agency";
-import type { FormedNpcProposal } from "./character-agency";
 import { materializeCanvasProvince } from "../canvas-world";
 import { advanceWorldDynamics } from "./world-dynamics";
 import { selectDevelopmentActors } from "./world-development-scheduler";
@@ -435,265 +423,28 @@ export async function resolveTurn(
     }
     console.log(`${tag()} [game_master] IN: atStep=${atStep} directives=${gameMasterDirectives.length} relevantCharacters=${selectedCharacters.length}`);
 
-    // ── Step 2: Life review — aging, health, incapacity, death (character-sim phase 5) ──
+    // ── Step 2: Life review — aging, health, incapacity, death ────────────
     //
-    // Deterministic and rules-backed, never AI-proposed: a due character's
-    // life stage and the scenario's own authored rates (default 0 — no rates
-    // authored means no automatic life events) decide the roll
-    // (`rollLifeEvent`), and the roll commits through the exact same
-    // `kill_character`/`incapacitate_character`/`recover_from_incapacity`
-    // workflows any other death/incapacity goes through — office vacancy is
-    // therefore always recorded truthfully, in one place. A death then
-    // settles its estate and, if a natural claimant exists, opens (not
-    // grants) their bid for any vacated office through a real Phase 4
-    // procedure — `heirCharacterId`/family seniority only ever nominates a
-    // sponsor, never a holder.
+    // No longer a deterministic roll: the Game Master itself decides, via
+    // the list_due_life_reviews read tool (which reports the scenario's own
+    // authored rates as information, not a rolled outcome) and the
+    // kill_character/incapacitate_character/recover_from_incapacity/
+    // settle_estate action tools. This step now only carries the world
+    // forward unchanged into the agent's turn.
     emit(onProgress, "life_review");
-    // Seeded from `resolutionWorld`: with a single Game Master, life review
-    // and character agency run BEFORE the agent acts rather than after the
-    // player's actions were previewed, so a death, an incapacity, or an
-    // NPC's own formed intent is part of the world the agent reads and can
-    // react to within the same turn.
-    let lifeReviewedWorld: WorldState = resolutionWorld;
+    const lifeReviewedWorld: WorldState = resolutionWorld;
     const lifeEventChronicle: ChronicleEntryInput[] = [];
-    const lifeStages = input.scenarioLife?.lifeStages ?? [];
-    const stepsPerYear = input.scenarioClock?.stepsPerYear ?? 4;
-    const reviewIntervalSteps = input.scenarioLife?.reviewIntervalSteps ?? 4;
-    let playerSuccessorCandidates: readonly string[] = [];
-    let playerCharacterDied = false;
-
-    if (lifeStages.length > 0) {
-      for (const character of dueLifeReviews(lifeReviewedWorld.characters, atStep)) {
-        const ageYears = currentAgeYears(character, stepsPerYear, atStep);
-        const stage = classifyLifeStage(ageYears, lifeStages);
-        const roll = rollLifeEvent(character, stage, atStep);
-
-        if (roll !== null) {
-          const actionId = roll.kind === "death" ? "kill_character" : roll.kind === "incapacitation" ? "incapacitate_character" : "recover_from_incapacity";
-          const parameters = roll.kind === "recovery" ? { characterId: character.id } : { characterId: character.id, cause: roll.cause };
-          const rolled = executeWorkflows([{ actionId, actorId: "system", parameters }], lifeReviewedWorld, atStep);
-          lifeReviewedWorld = rolled.world;
-          console.log(`${tag()} [life_review] ${character.name} (${character.id}): ${roll.kind} — ${roll.cause}`);
-          let estateOutcome: string | null = null;
-          let vacatedOfficeIds: string[] = [];
-
-          if (roll.kind === "death") {
-            const settlement = settleEstate(lifeReviewedWorld, character.id, stepsPerYear, atStep);
-            lifeReviewedWorld = { ...lifeReviewedWorld, material: settlement.material };
-            const successorId = settlement.beneficiaryIds[0];
-            if (settlement.transfers.length > 0) {
-              estateOutcome = successorId !== undefined
-                ? `${lifeReviewedWorld.characters.find((c) => c.id === successorId)?.name ?? successorId} inherits the estate.`
-                : "The estate is escheated for lack of a valid heir.";
-            }
-            vacatedOfficeIds = lifeReviewedWorld.material.officeSeats
-              .filter((seat) => seat.status === "vacant" && seat.vacancyCause === "death" && seat.termExpiresAtStep === atStep)
-              .map((seat) => seat.officeId);
-
-            if (successorId !== undefined) {
-              const legacy = deriveLegacyCauses(lifeReviewedWorld, character.id, successorId, atStep);
-              if (legacy.length > 0) {
-                lifeReviewedWorld = {
-                  ...lifeReviewedWorld,
-                  legacyCauses: [...lifeReviewedWorld.legacyCauses, ...legacy],
-                  characters: lifeReviewedWorld.characters.map((c) => {
-                    const entry = legacy.find((l) => l.holderCharacterId === c.id);
-                    if (!entry) return c;
-                    const existing = c.relations.find((r) => r.subjectCharacterId === successorId);
-                    return existing
-                      ? { ...c, relations: c.relations.map((r) => (r.subjectCharacterId === successorId ? { ...r, causes: [...r.causes, entry.cause] } : r)) }
-                      : { ...c, relations: [...c.relations, { subjectCharacterId: successorId, causes: [entry.cause] }] };
-                  }),
-                };
-              }
-
-              // Open (never grant) the natural claimant's bid for any office this death vacated.
-              const vacatedSeats = lifeReviewedWorld.material.officeSeats.filter(
-                (seat) => seat.status === "vacant" && seat.vacancyCause === "death" && seat.termExpiresAtStep === atStep,
-              );
-              for (const seat of vacatedSeats) {
-                const office = input.scenarioGovernment?.offices.find((o) => o.id === seat.officeId);
-                const rule = office ? input.scenarioGovernment?.successionRules.find((r) => r.id === office.successionRuleId) : undefined;
-                if (office === undefined || rule === undefined) continue;
-                const eligibility = resolveEligibility(lifeReviewedWorld, successorId, office.eligibilityRequirementIds);
-                const sponsorship = canSponsorProcedure(lifeReviewedWorld, successorId, "appointment", rule.institutionId);
-                if (!eligibility.eligible || !sponsorship.eligible) continue;
-                const resolutionMechanism = rule.kind === "elective" ? "vote" : rule.kind === "appointment" ? "appointment_authority" : "seniority";
-                if (resolutionMechanism === "vote" && rule.institutionId === null) continue;
-                const sponsorProcedureResult = executeWorkflows(
-                  [{
-                    actionId: "sponsor_procedure",
-                    actorId: successorId,
-                    parameters: {
-                      procedureId: `succession:${seat.officeId}:${successorId}:${atStep}`,
-                      type: "appointment",
-                      institutionId: rule.institutionId,
-                      sponsorCharacterId: successorId,
-                      subjectKind: "office_seat",
-                      subjectId: seat.officeId,
-                      linkedWorkflowId: "appoint_to_office",
-                      linkedWorkflowParams: { characterId: successorId, officeId: seat.officeId },
-                      eligibilityRequirementIds: office.eligibilityRequirementIds,
-                      eligibleParticipantIds: [successorId],
-                      resolutionMechanism,
-                      visibility: "polity",
-                    },
-                  }],
-                  lifeReviewedWorld,
-                  atStep,
-                );
-                lifeReviewedWorld = sponsorProcedureResult.world;
-              }
-            }
-
-            if (character.id === actorCharacterId) {
-              playerCharacterDied = true;
-              playerSuccessorCandidates = findPlayerSuccessors(lifeReviewedWorld, character.id, stepsPerYear, atStep);
-            }
-          }
-
-          lifeEventChronicle.push({
-            sequence: 0,
-            scope: "life_event",
-            scopeRef: character.id,
-            audience: "all_players",
-            body: `${character.name} ${roll.kind === "death" ? "dies" : roll.kind === "incapacitation" ? "is incapacitated" : "recovers"}. ${roll.cause}`,
-            atStep,
-            materialConsequence: roll.kind === "death",
-            simulatedDurationDays: 1,
-            title: `${character.name}: ${roll.kind === "death" ? "Death" : roll.kind === "incapacitation" ? "Incapacitated" : "Recovery"}`,
-            knowledgeStatus: "confirmed",
-            participants: [{ name: character.name, role: "subject" }],
-            playerRelevance: character.id === actorCharacterId ? "high" : "medium",
-            lifeEvent: {
-              characterId: character.id,
-              characterName: character.name,
-              kind: roll.kind,
-              cause: roll.cause,
-              estateOutcome,
-              vacatedOfficeIds,
-            },
-          });
-        }
-
-        lifeReviewedWorld = {
-          ...lifeReviewedWorld,
-          characters: lifeReviewedWorld.characters.map((c) =>
-            c.id === character.id ? { ...c, nextLifeReviewAtStep: nextReviewStep(atStep, reviewIntervalSteps) } : c,
-          ),
-        };
-      }
-    }
-    if (playerCharacterDied) {
-      console.log(`${tag()} [life_review] player character died; ${playerSuccessorCandidates.length} successor candidate(s) found`);
-    }
     emit(onProgress, "life_review", true);
 
-    // ── Step 3: Character agency — goals/plots, commitments, intents ─────
-    // Deterministic and unchanged in substance: candidates are generated and
-    // scored, conflicts resolved, and a due commitment is kept, deferred, or
-    // broken by the rules-backed helpers, not by any model (character-sim
-    // phase 3). What changed is where the result goes. An intent that maps to
-    // a legal workflow is no longer executed behind the Game Master's back;
-    // it is offered to it as a formed intention the agent may act on, ignore,
-    // or be overtaken by events. `agencyWorld` is the world the agent stages
-    // its turn against.
+    // ── Step 3: Character agency ───────────────────────────────────────────
+    // No longer a deterministic candidate-generation/ranking pass: the Game
+    // Master reads each relevant NPC's goals, plots, pressures, and
+    // commitments directly via inspect_actor_memory and decides and executes
+    // any NPC action itself through the normal action tools -- no pre-ranked
+    // candidate or pre-built proposal is offered on its behalf.
     emit(onProgress, "character_agency");
-    /** Formed NPC intentions offered to the Game Master as concrete, executable proposals -- never executed here. */
-    const npcFormedIntentions: FormedNpcProposal[] = [];
-    let agencyWorld: WorldState = lifeReviewedWorld;
-
-    const dueThisTurn = dueCommitments(agencyWorld.commitments ?? [], atStep);
-    const intents: CharacterIntent[] = [];
-    const candidateByIntentId = new Map<string, CandidateAction>();
-
-    // Bounded to this turn's already-selected, already-capped working set
-    // (`selectRelevantCharacters`, max 8) -- only characters eligible for
-    // agency (continuity "principal" or top-tier "persistent"
-    // selection) get full candidate generation and up to one primary action;
-    // "remembered" characters only advance their existing coarse plan;
-    // everyone else (or unselected characters) gets none.
-    for (const selected of selectedCharacters) {
-      const character = agencyWorld.characters.find((c) => c.id === selected.characterId);
-      if (!character || !character.alive) continue;
-      const continuityEntry = agencyWorld.continuity.find((c) => c.characterId === character.id);
-      if (!isEligibleForNpcAgency(continuityEntry?.tier, selected.tier, hasActiveAgencyState(agencyWorld, character.id))) continue;
-
-      const owed = dueThisTurn.filter((c) => c.promisorCharacterId === character.id);
-      const candidates = generateCandidateActions({ world: agencyWorld, character, atStep, commitments: owed });
-      const top = rankCandidates(agencyWorld, character, candidates, atStep)[0];
-      if (!top) continue;
-
-      const intentId = `intent-${character.id}-${atStep}`;
-      candidateByIntentId.set(intentId, top.candidate);
-      intents.push({
-        id: intentId, actorCharacterId: character.id,
-        sourceGoalId: top.candidate.sourceGoalId, sourcePlotId: top.candidate.sourcePlotId,
-        sourceCommitmentId: top.candidate.sourceCommitmentId,
-        actionType: top.candidate.actionType, targetIds: [...top.candidate.targetIds],
-        rationale: top.candidate.rationale, prerequisites: [],
-        intendedWorkflowIds: [...top.candidate.legalWorkflowIds],
-        priority: Math.max(0, Math.min(100, Math.round(top.score.total + 50))),
-        status: "proposed", createdAtStep: atStep, reviewedAtStep: null, expiresAtStep: null,
-        visibility: "private", sourceEventIds: [], resolutionReason: null,
-      });
-    }
-
-    // "remembered" characters advance their existing coarse plan by one step
-    // -- no candidate generation, no scoring, never a rewritten history.
-    let continuityAfterCoarseAdvance = agencyWorld.continuity;
-    for (const selected of selectedCharacters) {
-      const continuityEntry = continuityAfterCoarseAdvance.find((c) => c.characterId === selected.characterId);
-      if (continuityEntry?.tier !== "remembered" || continuityEntry.plan === null) continue;
-      continuityAfterCoarseAdvance = continuityAfterCoarseAdvance.map((c) =>
-        c.characterId === selected.characterId && c.plan !== null
-          ? { ...c, plan: { ...c.plan, progressSteps: c.plan.progressSteps + 1 } }
-          : c,
-      );
-    }
-    agencyWorld = { ...agencyWorld, continuity: continuityAfterCoarseAdvance };
-
-    // docs/30: nothing below mutates `agencyWorld` any more, and there is no
-    // separate deterministic conflict-resolution pass. Every intent -- a due
-    // commitment, a pressure-driven social action, or a plot/office/economic
-    // move -- is offered to the Game Master as a formed intention through a
-    // real registered workflow (`fulfill_commitment`, `defer_commitment`,
-    // `break_commitment`, and `record_character_social_action` joined the
-    // registry alongside the workflows already offered this way). A second
-    // NPC's genuinely conflicting claim on the same resource or office is
-    // refused by that workflow's own precondition check when the Game Master
-    // actually attempts it, the same way any other command conflict is --
-    // not pre-empted by a separate priority pass before anyone gets to try.
+    const agencyWorld: WorldState = lifeReviewedWorld;
     const resolvedIntents: CharacterIntent[] = [];
-
-    for (const intent of intents) {
-      const candidate = candidateByIntentId.get(intent.id)!;
-
-      // A formed intention that maps to a legal workflow is offered to the
-      // Game Master rather than executed here. The agent is the one authority
-      // on what the world does this turn, so an NPC acts when the agent has
-      // it act -- and the intent is resolved below against what actually
-      // happened, not against what was proposed. The exact invocation
-      // `buildIntentInvocation` produced is carried verbatim: the Game
-      // Master is handed a concrete, executable proposal, not a paraphrase of
-      // one it must reconstruct.
-      const invocation = candidate.legalWorkflowIds.length > 0 ? buildIntentInvocation(candidate, agencyWorld) : null;
-      if (invocation !== null) {
-        npcFormedIntentions.push({
-          intentId: intent.id,
-          actorCharacterId: intent.actorCharacterId,
-          actionType: intent.actionType,
-          rationale: intent.rationale,
-          workflowIds: candidate.legalWorkflowIds,
-          invocation,
-        });
-        resolvedIntents.push({ ...intent, status: "prepared" });
-        continue;
-      }
-
-      resolvedIntents.push({ ...intent, status: "executed", resolutionReason: "No mechanical effect modeled for this action; recorded for continuity only." });
-    }
-    console.log(`${tag()} [character_agency] OUT: formedIntentions=${npcFormedIntentions.length} intents=${intents.length}`);
     emit(onProgress, "character_agency", true);
 
     // ── Step 4: Game Master ────────────────────────────────────────────────
@@ -724,11 +475,12 @@ export async function resolveTurn(
       actorCharacterId,
       directives: gameMasterDirectives,
       selectedCharacters,
-      npcProposals: npcFormedIntentions,
       persistentPlans: true,
       playerContext: resolutionContext,
       scenarioGovernment: input.scenarioGovernment,
       scenarioChronicle: input.scenarioChronicle,
+      scenarioLife: input.scenarioLife,
+      scenarioClock: input.scenarioClock,
       definedActions,
       // Off by default (docs/27): `request_capability` is the supported path
       // for an unanticipated player intent. This is a developer-controlled
@@ -755,7 +507,7 @@ export async function resolveTurn(
     );
     const contactDialogueOutcome = applySocialEvents(newWorld, readyContactDialogueEvents, atStep, turnId);
     newWorld = contactDialogueOutcome.world;
-    let factualEvents = [
+    const factualEvents = [
       ...gameMasterOutcome.events,
       ...worldDynamics.events.map((event, index) => ({ ...event, id: `fact-${atStep}-${gameMasterOutcome.events.length + index + 1}` })),
     ];
@@ -792,13 +544,13 @@ export async function resolveTurn(
 
     // Audit is the session's, verbatim: every refusal carries the exact
     // deterministic reason the policy or the executor produced.
-    let finalWorkflowAudit: WorkflowAuditBlob = {
+    const finalWorkflowAudit: WorkflowAuditBlob = {
       candidates: [...gameMasterOutcome.auditEntries],
       novelActionProposals: [],
       managerFailed: gameMasterOutcome.termination === "provider_error",
       atStep,
     };
-    let allWorkflowLog: { invocation: ProposedInvocation; outcome: { ok: boolean; reason?: string; message?: string; result?: { summary: string } } }[] =
+    const allWorkflowLog: { invocation: ProposedInvocation; outcome: { ok: boolean; reason?: string; message?: string; result?: { summary: string } } }[] =
       gameMasterOutcome.auditEntries.map((entry) => ({
         invocation: entry.finalInvocation ?? entry.requestedInvocation,
         outcome: entry.executionOk === true
@@ -806,88 +558,16 @@ export async function resolveTurn(
           : { ok: false, message: entry.executionReason ?? "Refused." },
       }));
 
-    // A formed NPC intention is resolved against what the Game Master actually
-    // did, never against what was proposed for it.
-    const npcProposalByIntentId = new Map(npcFormedIntentions.map((proposal) => [proposal.intentId, proposal]));
-    for (let i = 0; i < resolvedIntents.length; i++) {
-      const intent = resolvedIntents[i]!;
-      if (intent.status !== "prepared") continue;
-      const proposal = npcProposalByIntentId.get(intent.id);
-      if (proposal === undefined) {
-        resolvedIntents[i] = { ...intent, status: "deferred", resolutionReason: "Formed but its proposal was lost before the Game Master ran." };
-        continue;
-      }
-      const outcome = resolveFormedNpcIntentOutcome(proposal, gameMasterOutcome.executedInvocations, gameMasterOutcome.auditEntries);
-      resolvedIntents[i] = { ...intent, status: outcome.status, resolutionReason: outcome.reason };
-    }
-
-    // ── Step 5: Resolve due political procedures ──────────────────────────
-    // Deterministic, no AI involved: any procedure at voting_or_deciding (or
-    // past its deadline) resolves here by its declared resolutionMechanism,
-    // producing at most one authorized workflow invocation per procedure
-    // (character-sim phase 4, packages/shared/src/character-agency/political-resolver.ts).
-    // It runs after the Game Master so a procedure the agent opened or voted
-    // in this turn is included in the same sitting.
+    // ── Step 5/6: Political procedures ─────────────────────────────────────
+    // No longer auto-resolved by the pipeline: the Game Master decides when
+    // and how a due procedure resolves, via the list_due_political_procedures
+    // read tool and the resolve_procedure action tool -- both already
+    // captured in gameMasterOutcome.auditEntries/events like any other tool
+    // call, so there is nothing further to execute or audit here.
     emit(onProgress, "resolve_politics");
-    const politicsResolution = resolveDueProcedures({ characters: newWorld.characters, material: newWorld.material }, atStep);
-    newWorld = { ...newWorld, material: politicsResolution.material };
-    const politicalInvocations: ProposedInvocation[] = politicsResolution.invocations.map((inv) => ({
-      actionId: inv.actionId,
-      actorId: inv.actorId,
-      parameters: inv.parameters,
-    }));
-    console.log(`${tag()} [resolve_politics] OUT: ${politicalInvocations.length} procedure(s) resolved to an authorized invocation`);
     emit(onProgress, "resolve_politics", true);
 
     emit(onProgress, "execute_world");
-    /** Deterministic procedure resolutions executed after the agent, for the audit. */
-    const procedureLog: { invocation: ProposedInvocation; outcome: { ok: boolean; message?: string } }[] = [];
-    if (politicalInvocations.length > 0) {
-      const politicalExecuted = executeWorkflows(politicalInvocations, newWorld, atStep);
-      newWorld = politicalExecuted.world;
-      allWorkflowLog = [...allWorkflowLog, ...politicalExecuted.log];
-      procedureLog.push(...politicalExecuted.log.map((entry) => ({ invocation: entry.invocation, outcome: entry.outcome.ok ? { ok: true } : { ok: false, message: entry.outcome.message } })));
-      for (const entry of politicalExecuted.log) {
-        if (entry.outcome.ok) {
-          console.log(`${tag()} [execute:ok] actionId=${entry.invocation.actionId} actorId=${entry.invocation.actorId} summary="${entry.outcome.result.summary}"`);
-        } else {
-          console.error(`${tag()} [execute:fail] actionId=${entry.invocation.actionId} actorId=${entry.invocation.actorId} reason=${entry.outcome.reason}`);
-        }
-      }
-    }
-
-    // ── Step 6: Resolve procedures that became due this same turn ─────────
-    // resolve_politics (Step 5, above) only sees procedures that already
-    // existed at the START of this turn -- a procedure sponsored just now
-    // (e.g. a compound "ask the Senate for X and act on it" order given an
-    // immediate deadlineStep) isn't in world state until the execute_world
-    // batch above applies it, so it would otherwise sit unresolved until a
-    // future turn's resolve_politics pass, forcing the player to wait several
-    // real turns for what the fiction treats as one sitting. Re-running the
-    // same deterministic resolver against the post-execution world catches
-    // exactly that case; it's a no-op for anything already resolved, since
-    // dueProcedures excludes "resolved"/"withdrawn"/"blocked" procedures.
-    const immediatePoliticsResolution = resolveDueProcedures({ characters: newWorld.characters, material: newWorld.material }, atStep);
-    newWorld = { ...newWorld, material: immediatePoliticsResolution.material };
-    const immediatePoliticalInvocations: ProposedInvocation[] = immediatePoliticsResolution.invocations.map((inv) => ({
-      actionId: inv.actionId,
-      actorId: inv.actorId,
-      parameters: inv.parameters,
-    }));
-    if (immediatePoliticalInvocations.length > 0) {
-      console.log(`${tag()} [resolve_politics_immediate] OUT: ${immediatePoliticalInvocations.length} same-turn procedure(s) resolved`);
-      const immediateExecuted = executeWorkflows(immediatePoliticalInvocations, newWorld, atStep);
-      newWorld = immediateExecuted.world;
-      allWorkflowLog = [...allWorkflowLog, ...immediateExecuted.log];
-      procedureLog.push(...immediateExecuted.log.map((entry) => ({ invocation: entry.invocation, outcome: entry.outcome.ok ? { ok: true } : { ok: false, message: entry.outcome.message } })));
-      for (const entry of immediateExecuted.log) {
-        if (entry.outcome.ok) {
-          console.log(`${tag()} [execute:ok] actionId=${entry.invocation.actionId} actorId=${entry.invocation.actorId} summary="${entry.outcome.result.summary}"`);
-        } else {
-          console.error(`${tag()} [execute:fail] actionId=${entry.invocation.actionId} actorId=${entry.invocation.actorId} reason=${entry.outcome.reason}`);
-        }
-      }
-    }
 
     newWorld = autoResolveDecidedStorylines(world, newWorld, atStep);
 
@@ -898,27 +578,6 @@ export async function resolveTurn(
     const successfulInvocations = allWorkflowLog.filter((entry) => entry.outcome.ok).map((entry) => entry.invocation);
     const warDamageResult = applyWarDamageForExecutedWorkflows(newWorld, successfulInvocations, atStep);
     newWorld = advanceProvinceMaterial(warDamageResult.world, atStep, warDamageResult.affectedProvinceIds);
-    // The Game Master session already recorded every one of its own calls with
-    // its exact outcome. Only the deterministic procedure resolutions executed
-    // after it need appending, so the audit covers the whole turn.
-    finalWorkflowAudit = {
-      ...finalWorkflowAudit,
-      candidates: [
-        ...finalWorkflowAudit.candidates,
-        ...procedureLog
-          .map((entry, index) => ({
-            correlationId: `procedure-${atStep}-${index}`,
-            source: "game_master" as const,
-            sourceRef: "political_procedure",
-            requestedActionId: entry.invocation.actionId,
-            requestedInvocation: entry.invocation,
-            finalInvocation: entry.invocation,
-            dryRunOk: entry.outcome.ok,
-            executionOk: entry.outcome.ok,
-            ...(entry.outcome.ok ? {} : { executionReason: entry.outcome.message ?? "Procedure invocation failed." }),
-          })),
-      ],
-    };
 
     // Explicit cancellation (docs/14 Phase 6): a "cancel" directive names an
     // existing OngoingAction id directly, so it needs no AI interpretation --
@@ -1061,9 +720,19 @@ export async function resolveTurn(
     // outcome and public reason only. Never the per-supporter reasons or
     // undisclosed positions the admin political inspector shows
     // (packages/shared/src/characters/political-inspector.ts).
+    // A procedure the Game Master resolved by calling resolve_procedure is
+    // already in this turn's factual event log, and buildChronicleFromFacts
+    // writes it -- the same dedup this file already applies to a procedure's
+    // opening, just for its resolution.
+    const proceduresResolvedByFact = new Set(
+      factualEvents
+        .filter((event) => event.actionId === "resolve_procedure" && typeof event.parameters["procedureId"] === "string")
+        .map((event) => event.parameters["procedureId"] as string),
+    );
     const politicalChronicle: ChronicleEntryInput[] = [];
-    for (const procedure of politicsResolution.material.politicalProcedures) {
+    for (const procedure of newWorld.material.politicalProcedures) {
       if (procedure.resolvedAtStep !== atStep) continue;
+      if (proceduresResolvedByFact.has(procedure.id)) continue;
       const sponsor = newWorld.characters.find((c) => c.id === procedure.sponsorCharacterId);
       const institution = procedure.institutionId
         ? newWorld.material.institutions.find((i) => i.id === procedure.institutionId)
@@ -1102,11 +771,6 @@ export async function resolveTurn(
     // A procedure's *opening* otherwise has no Chronicle entry at all --
     // only its resolution does, above (docs/18 Phase 2 follow-on: "taxation
     // ... never opens a real political procedure", now that one can).
-    // Read from `newWorld` rather than `politicsResolution`: a procedure a
-    // workflow opens during this turn's own execution (e.g.
-    // `collect_emergency_taxation`'s automatic opposition motion) is not
-    // yet in `politicsResolution`, which only reflects the *pre*-execution
-    // political-resolver pass the "resolved" loop above reads from.
     // A procedure the Game Master opened by tool call is already in this
     // turn's factual event log, and buildChronicleFromFacts writes it. Writing
     // it a second time here from the world diff is the same opening told
@@ -1419,10 +1083,9 @@ export async function resolveTurn(
     // the same thread must not just repeat itself: this reads what the
     // message record already says -- never invents a repeat -- and presses
     // the offended sender's own leader toward a real reaction, the same
-    // deterministic path every other pressure trigger already takes. It is
-    // what makes the sender's leader agency-eligible next turn even at
-    // continuity tier "ordinary" (`isEligibleForNpcAgency`'s explicit-
-    // relevance path), not merely a flavor note the Game Master might notice.
+    // deterministic path every other pressure trigger already takes. It is a
+    // real pressure record the sender's leader carries into next turn's
+    // inspect_actor_memory, not merely a flavor note the Game Master might notice.
     const diplomaticEscalations = deriveDiplomaticEscalations(newWorld.diplomacy, atStep);
     const diplomaticEscalationTriggers = diplomaticEscalations
       .filter((escalation) => newWorld.characters.some((character) => character.id === escalation.senderCharacterId && character.alive))

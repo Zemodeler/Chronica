@@ -9,6 +9,8 @@ import { validateCandidate, createInvocationDuplicateGuard, type PolicyViolation
 import { InventedWorkflowDefinitionSchema, applyInventedWorkflow, type InventedWorkflowDefinition } from "../workflows/invented-workflow";
 import type { WorkflowAuditEntry, WorkflowCandidate } from "../workflows/manager-types";
 import { READ_TOOL_BY_NAME, type PrivateInformationPolicy, type ReadToolContext } from "./read-tools";
+import type { ScenarioLifeRules } from "../characters/family";
+import type { ScenarioClock } from "../world/clock";
 import {
   CapabilityRequestSchema,
   recordCapabilityRequest,
@@ -230,6 +232,8 @@ export interface GameMasterSessionOptions {
   readonly directiveIds: readonly string[];
   readonly directives?: readonly { id: string; directive: OrderDirective }[];
   readonly privateInformation?: PrivateInformationPolicy;
+  readonly scenarioLife?: ScenarioLifeRules | undefined;
+  readonly scenarioClock?: ScenarioClock | undefined;
   readonly maxToolCalls?: number;
   /**
    * Actions this campaign defined in earlier turns. Always kept and reported
@@ -283,6 +287,8 @@ export class GameMasterSession {
   private readonly atStep: number;
   private readonly actorCharacterId: string;
   private readonly privateInformation: PrivateInformationPolicy;
+  private readonly scenarioLife: ScenarioLifeRules | undefined;
+  private readonly scenarioClock: ScenarioClock | undefined;
   private readonly maxToolCalls: number;
   private executingPlanId: string | null = null;
   private readonly managedPlans: boolean;
@@ -326,6 +332,8 @@ export class GameMasterSession {
     this.actorCharacterId = options.actorCharacterId;
     this.directiveIds = [...options.directiveIds];
     this.privateInformation = options.privateInformation ?? "omit";
+    this.scenarioLife = options.scenarioLife;
+    this.scenarioClock = options.scenarioClock;
     this.maxToolCalls = options.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
     this.definedActions = new Map((options.definedActions ?? []).map((definition) => [definition.actionId, definition]));
     this.allowInventedActions = options.allowInventedActions ?? false;
@@ -432,6 +440,8 @@ export class GameMasterSession {
       atStep: this.atStep,
       actorCharacterId: this.actorCharacterId,
       privateInformation: this.privateInformation,
+      scenarioLife: this.scenarioLife,
+      scenarioClock: this.scenarioClock,
     };
     const result = tool.read(context, parsed.data);
     return { ok: result.ok, factual: result.factual, finished: false };

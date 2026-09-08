@@ -7,9 +7,8 @@ import type {
   SelectedCharacter,
   WorldState,
 } from "@chronica/shared";
-import { describePoliticalQuestion, deriveOpenThreads, renderOpenThreads, generateCandidateActions, rankCandidates, dueCommitments } from "@chronica/shared";
+import { describePoliticalQuestion, deriveOpenThreads, renderOpenThreads } from "@chronica/shared";
 import { buildPlayerResolutionContext, type ResolutionPlayerContext } from "./prompts";
-import type { FormedNpcProposal } from "./character-agency";
 
 // The Game Master's single coherent prompt (GM refactor, requirement 1).
 //
@@ -30,8 +29,6 @@ export interface GameMasterPromptInput {
   readonly atStep: number;
   readonly directives: readonly { readonly id: string; readonly directive: OrderDirective }[];
   readonly selectedCharacters: readonly SelectedCharacter[];
-  /** Concrete NPC workflow proposals already formed by character agency this turn (never executed here). */
-  readonly npcProposals: readonly FormedNpcProposal[];
   readonly playerContext: ResolutionPlayerContext | undefined;
   readonly scenarioGovernment: ScenarioGovernmentRules | undefined;
   readonly scenarioChronicle: ScenarioChronicleRules | undefined;
@@ -65,7 +62,7 @@ function constitution(input: GameMasterPromptInput): string {
     "2. A player order is an ATTEMPT, never a guaranteed outcome. Attempt it with the right tool and report exactly what the tool returned, success or refusal.",
     "3. When a tool refuses, its reason is the real mechanical reason. Never replace it. If the tool also returns a refusal id, you MAY call record_refusal_aftermath once: name a real living office-holder, commander, or active political-group leader from the requester's own polity, give their short public rationale and quote, and let the resulting relationship consequence stand. This is how a Senate vote, commander, or minister says no in the Chronicle. It cannot be used for a bad id, malformed arguments, an unsupported action, or to make the rejected action happen.",
     "4. When an action tool succeeds, its effect is already complete and immediate. A raised force is named, commanded, located, and able to receive orders the moment create_force returns. Never describe a completed action as pending, provisional, or awaiting anything.",
-    "5. Battles, deaths, inheritance, and procedure outcomes are decided by the deterministic engine, not by you. Start a battle and the engine fights it and tells you what happened; react to that result.",
+    "5. A battle's casualties, retreats, and outcome are computed by the deterministic engine once you start it -- react to that result, never invent one. Life, death, incapacity, and a political procedure's actual vote or authority decision are your own judgment calls, not the engine's: call list_due_life_reviews and list_due_political_procedures before finishing, and decide them yourself with kill_character/incapacitate_character/recover_from_incapacity (then settle_estate for a death) and resolve_procedure. Neither tool invents a rate, a position, or a vote count for you -- they report the scenario's own authored rates and the positions already recorded, and you decide what follows from them.",
     input.allowInventedActions
       ? "6. If nothing in your tool list can do what an actor is attempting, and it is a real act with a real effect on the world, define it with define_action and then carry it out with invoke_defined_action. Describe only the change to world state; the engine validates it exactly as strictly as a built-in action and refuses anything that would leave the world inconsistent. What you define stays part of this campaign. Reserve request_capability for an attempt you genuinely cannot express as a change to the world at all. It is an internal escalation, never an outcome: before finishing, inspect the relevant state and make one real, validated repair attempt for that actor with an existing or newly defined action."
       : "6. If nothing in your tool list can do what an actor is attempting, call request_capability: it records the unmet need for developer review and changes nothing in the world. It is an internal escalation, never an outcome: before finishing, inspect the relevant state and make one real, validated repair attempt for that actor with an existing action.",
@@ -214,7 +211,7 @@ function campaignMemory(world: WorldState): string {
   return lines.join("\n");
 }
 
-function npcContext(world: WorldState, selected: readonly SelectedCharacter[], actorCharacterId: string, atStep: number): string {
+function npcContext(world: WorldState, selected: readonly SelectedCharacter[], actorCharacterId: string): string {
   const lines: string[] = [
     "ACTORS WHO MATTER THIS TURN",
     "These are the named characters the selection system judges relevant. They have their own motives and are not obliged to help the player. Use inspect_actor_memory for any of them before deciding what they do.",
@@ -225,12 +222,6 @@ function npcContext(world: WorldState, selected: readonly SelectedCharacter[], a
   for (const entry of selected.slice(0, MAX_NPCS_DETAILED)) {
     const character = world.characters.find((candidate) => candidate.id === entry.characterId);
     if (!character || !character.alive || character.id === actorCharacterId) continue;
-    // docs/30: this is advisory context, not a pre-selected action -- the
-    // same candidates character agency generates and scores, shown here
-    // instead of pre-executed. The Game Master may act on one, act
-    // differently, or ignore all of them; nothing here has happened yet.
-    const owed = dueCommitments(world.commitments ?? [], atStep).filter((c) => c.promisorCharacterId === character.id);
-    const ranked = rankCandidates(world, character, generateCandidateActions({ world, character, atStep, commitments: owed }), atStep).slice(0, 4);
     const goals = (world.characterGoals ?? []).filter((goal) => goal.characterId === character.id && goal.status === "active").slice(0, 3);
     const plots = (world.characterPlots ?? []).filter((plot) => plot.characterId === character.id && plot.status === "active").slice(0, 2);
     const pressures = (world.characterPressures ?? []).filter((pressure) => pressure.characterId === character.id && pressure.status === "active").slice(0, 3);
@@ -250,38 +241,8 @@ function npcContext(world: WorldState, selected: readonly SelectedCharacter[], a
     if (beliefs.length > 0) lines.push(`    believes: ${beliefs.map((belief) => belief.claim).join("; ")}`);
     if (commitments.length > 0) lines.push(`    owes: ${commitments.map((commitment) => commitment.description).join("; ")}`);
     if (recentIntents.length > 0) lines.push(`    last acted: ${recentIntents.map((intent) => `${intent.actionType} -> ${intent.status}`).join("; ")}`);
-    if (ranked.length > 0) lines.push(`    candidate actions (suggested, not decided): ${ranked.map((r) => `${r.candidate.actionType} (score ${r.score.total}) -- ${r.candidate.rationale}`).join("; ")}`);
   }
   if (lines.length === 2) lines.push("  No named character other than the player is currently in the relevant set.");
-  return lines.join("\n");
-}
-
-/**
- * Concrete NPC actions character agency already selected this turn, each
- * carrying the exact workflow and parameters `buildIntentInvocation` produced
- * -- not a description the Game Master must reconstruct into a tool call. The
- * bug this closes: an NPC's formed intention used to be summarized as loose
- * prose the agent could act on only by independently reinventing the same
- * workflow, which it rarely did, so a leader's own chosen action sat
- * "prepared" and then silently "deferred" turn after turn.
- */
-function npcFormedIntentions(world: WorldState, proposals: readonly FormedNpcProposal[]): string {
-  const lines: string[] = ["FORMED NPC INTENTIONS"];
-  if (proposals.length === 0) {
-    lines.push("  None this turn.");
-    return lines.join("\n");
-  }
-  lines.push(
-    "These are concrete actions already selected by character agency, not suggestions: each names the actor, what they intend, why, and the exact workflow and parameters to invoke. You must either call the named tool with these (or corrected) parameters, or leave it unexecuted -- and only when a conflicting validated event this turn, a deterministic tool refusal, or a clearly recorded deferral you report justifies that. Writing prose about the actor's intention is not executing it and satisfies nothing here.",
-  );
-  for (const proposal of proposals) {
-    const actor = world.characters.find((character) => character.id === proposal.actorCharacterId);
-    const actorName = actor?.name ?? proposal.actorCharacterId;
-    lines.push(
-      `  ${actorName} [id: ${proposal.actorCharacterId}] intends: ${proposal.actionType} -- ${proposal.rationale}`,
-      `    invoke: ${proposal.invocation.actionId}(${JSON.stringify(proposal.invocation.parameters)}) [workflows considered: ${proposal.workflowIds.join(", ")}]`,
-    );
-  }
   return lines.join("\n");
 }
 
@@ -326,9 +287,7 @@ export function buildGameMasterSystemPrompt(input: GameMasterPromptInput): strin
     "UNRESOLVED THREADS",
     renderOpenThreads(threads),
     "",
-    npcContext(input.world, input.selectedCharacters, input.actorCharacterId, input.atStep),
-    "",
-    npcFormedIntentions(input.world, input.npcProposals),
+    npcContext(input.world, input.selectedCharacters, input.actorCharacterId),
     "SCHEDULED WORLD DEVELOPMENTS",
     ...reviewedDevelopments.slice(0, 12).map(d => `  ${d.id}: ${d.summary} Actor ${d.actorId}; pressure ${d.intensity}/100; reviewed ${d.reviews} times; next review ${d.nextReviewStep}.`),
     "These concerns were advanced independently of the player. Before spending the turn on a long player plan, give selected background actors an opportunity to address them through tools. Inspect available resources; relief, reconstruction, negotiation, and institutional business need real actions. A pressure is a need, not proof that relief, a vote, a battle, or a payment occurred. Reconsider older unresolved concerns, and let a quiet or resource-constrained region remain quiet when appropriate. Never choose an action for the player's character.",
@@ -346,7 +305,7 @@ export function buildGameMasterSystemPrompt(input: GameMasterPromptInput): strin
     "A plan whose objective is to seek a body's authorization (e.g. a Senate vote) has two distinct stages: sponsor_procedure opens the question, and call_vote is a separate, later stage that actually decides it -- opening it is not the objective achieved. Before adding a sponsor_procedure stage, check the open political procedures listed above for one this actor already sponsors on the same question; if one exists, the next stage is call_vote on that procedure's id, never a second sponsor_procedure re-raising the same question.",
     "",
     "HOW TO WORK",
-    "Read what you need with the inspect tools. Attempt each player order with the action tool that matches it. Then let the world answer: characters with their own goals, pressures, and commitments act on what just happened, and open threads move. Every effect must go through a tool. When you are done, call finish_turn with a report whose every event cites a factRef you were given.",
+    "Read what you need with the inspect tools. Attempt each player order with the action tool that matches it. Then let the world answer: characters with their own goals, pressures, and commitments act on what just happened, and open threads move. Before finishing, call list_due_life_reviews and list_due_political_procedures -- if either lists anything, decide it (or explicitly note why not) rather than leaving it untouched. Every effect must go through a tool. When you are done, call finish_turn with a report whose every event cites a factRef you were given.",
   ]
     .filter((section) => section.length > 0)
     .join("\n");

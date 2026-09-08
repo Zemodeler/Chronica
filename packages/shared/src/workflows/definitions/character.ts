@@ -2,6 +2,10 @@ import { z } from "zod";
 import { EntityIdSchema } from "../../material-state";
 import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
 import { vacateOfficeSeatsFor } from "../../characters/succession";
+import { settleEstate } from "../../characters/inheritance";
+
+/** Default years-per-step used when no scenario clock is available to a workflow. */
+const DEFAULT_STEPS_PER_YEAR = 4;
 
 export const characterWorkflows: AnyWorkflowDefinition[] = [
   defineWorkflow({
@@ -83,6 +87,38 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
         },
         result: {
           summary: `${character.name} recovers from incapacity.`,
+          applied: true,
+        },
+      };
+    },
+  }),
+
+  defineWorkflow({
+    id: "settle_estate",
+    description: "Settle a deceased character's estate: transfer assets to beneficiaries per their inheritance rule, or escheat it if none applies. Call this once, promptly after a death.",
+    category: "character",
+    parametersSchema: z.object({
+      ownerCharacterId: EntityIdSchema,
+    }).strict(),
+    apply(world, params, context) {
+      const owner = world.characters.find((c) => c.id === params.ownerCharacterId);
+      if (!owner) return null;
+      if (owner.alive) return refuse(`${owner.name} is still alive; an estate is only settled after death.`);
+
+      const settlement = settleEstate(world, params.ownerCharacterId, DEFAULT_STEPS_PER_YEAR, context.atStep);
+      if (settlement.transfers.length === 0) {
+        return refuse(`${owner.name} has no unsettled estate to transfer -- it may already be settled, escheated, or never existed.`);
+      }
+      const primaryBeneficiaryId = settlement.beneficiaryIds[0];
+      const beneficiaryName = primaryBeneficiaryId !== undefined
+        ? world.characters.find((c) => c.id === primaryBeneficiaryId)?.name ?? primaryBeneficiaryId
+        : null;
+      return {
+        world: { ...world, material: settlement.material },
+        result: {
+          summary: beneficiaryName !== null
+            ? `${owner.name}'s estate is settled; ${beneficiaryName} inherits.`
+            : `${owner.name}'s estate is escheated for lack of a valid heir.`,
           applied: true,
         },
       };
