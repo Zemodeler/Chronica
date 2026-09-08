@@ -2,6 +2,7 @@ import { z } from "zod";
 import { EntityIdSchema } from "../../material-state";
 import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
 import { BattlePostureSchema } from "../../warfare/battle-resolver";
+import { appendEntityNote, type EntityNote } from "../../gm/campaign-memory";
 
 const FORCE_KIND_SCHEMA = z.enum(["infantry", "cavalry", "siege", "naval", "militia", "mercenary", "other"]);
 
@@ -70,6 +71,14 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
       size: z.number().int().min(100).max(50_000),
       kind: FORCE_KIND_SCHEMA,
       payerAccountId: EntityIdSchema.optional(),
+      /**
+       * Exactly what the player or Game Master said this force is for, kept
+       * verbatim as a freeform memory note -- never a mechanical field. A
+       * later turn's Game Master sees the same words again and decides, at
+       * its own discretion, what they are worth each time they become
+       * relevant (docs: generic entity-note memory, not a specialization tag).
+       */
+      intent: z.string().trim().min(1).max(400).optional(),
     }).strict(),
     apply(world, params, context) {
       const polity = world.map.polities.find((p) => p.id === params.polityId);
@@ -84,6 +93,15 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
       const forceId = randomUUID();
       const categoryId = `cat-${params.kind}-${forceId.slice(0, 8)}`;
       const summary = `${params.name} (${params.size} ${params.kind}) raised in ${province.name} for ${polity.name}.`;
+      const campaignMemory = params.intent
+        ? appendEntityNote(world.campaignMemory, {
+            id: `note-${context.atStep}-${forceId.slice(0, 8)}`,
+            entityId: forceId,
+            entityType: "force",
+            text: params.intent,
+            createdAtStep: context.atStep,
+          } satisfies EntityNote)
+        : world.campaignMemory;
 
       const baseForce = {
         id: forceId,
@@ -122,6 +140,7 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
         return {
           world: {
             ...world,
+            campaignMemory,
             material: {
               ...world.material,
               obligations: [...world.material.obligations, obligation],
@@ -135,6 +154,7 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
       return {
         world: {
           ...world,
+          campaignMemory,
           material: {
             ...world.material,
             forces: [...world.material.forces, { ...baseForce, payObligationId: null }],
@@ -492,7 +512,20 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
             ...nextWorld.map,
             provinces: nextWorld.map.provinces.map((p) =>
               p.settlements.some((settlement) => settlement.id === siege.settlementId)
-                ? { ...p, controllerPolityId: params.newControllerPolityId!, controlFirmnessBps: 3_000 }
+                ? {
+                    ...p,
+                    controllerPolityId: params.newControllerPolityId!,
+                    controlFirmnessBps: 3_000,
+                    // A successful siege takes the settlement that was
+                    // actually besieged. Keep its local controller in sync
+                    // with the province so the map marker changes to the
+                    // conqueror's colour with the territory.
+                    settlements: p.settlements.map((settlement) =>
+                      settlement.id === siege.settlementId
+                        ? { ...settlement, controllerPolityId: params.newControllerPolityId! }
+                        : settlement,
+                    ),
+                  }
                 : p,
             ),
           },

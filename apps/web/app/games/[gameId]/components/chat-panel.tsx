@@ -23,9 +23,12 @@ interface MessageView {
 interface ChatPanelProps {
   readonly gameId: string;
   readonly playerCharacterId: string;
+  /** Set to open this panel directly on a specific session -- e.g. a conversation a character initiated. */
+  readonly openSessionId?: string | null;
+  readonly onOpenSessionConsumed?: () => void;
 }
 
-export function ChatPanel({ gameId, playerCharacterId }: ChatPanelProps) {
+export function ChatPanel({ gameId, playerCharacterId, openSessionId, onOpenSessionConsumed }: ChatPanelProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const discoverDialogRef = useRef<HTMLDialogElement>(null);
   const groupDialogRef = useRef<HTMLDialogElement>(null);
@@ -73,6 +76,17 @@ export function ChatPanel({ gameId, playerCharacterId }: ChatPanelProps) {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    if (!openSessionId) return;
+    setOpen(true);
+    dialogRef.current?.showModal();
+    void fetchContacts();
+    void selectContact(openSessionId);
+    onOpenSessionConsumed?.();
+    // openSessionId is a one-shot signal from the parent; deliberately not
+    // re-running when fetchContacts/selectContact identity changes.
+  }, [openSessionId]);
 
   function openPanel() {
     setOpen(true);

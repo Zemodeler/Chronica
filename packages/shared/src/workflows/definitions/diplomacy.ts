@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema, VisibilitySchema } from "../../material-state";
-import { DiplomaticAnswerSchema, DiplomaticMessageKindSchema, type DiplomaticMessage } from "../../world/diplomacy";
+import { DiplomaticAnswerSchema, DiplomaticMessageKindSchema, applyDiplomaticAnswerToStance, type DiplomaticMessage } from "../../world/diplomacy";
 import type { WorldState } from "../../world/world-state";
 import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
 
@@ -148,7 +148,11 @@ export const diplomacyWorkflows: AnyWorkflowDefinition[] = [
             : "lets stand without reply";
 
       return {
-        world: { ...world, diplomacy: world.diplomacy.map((candidate) => (candidate.id === message.id ? answered : candidate)) },
+        world: {
+          ...world,
+          diplomacy: world.diplomacy.map((candidate) => (candidate.id === message.id ? answered : candidate)),
+          polityStances: [...applyDiplomaticAnswerToStance(world.polityStances, answered, context.atStep)],
+        },
         result: {
           summary: `${answerer.name} of ${polityName(world, message.toPolityId)} ${verb}: ${polityName(world, message.fromPolityId)}'s ${readable(message.kind)} concerning ${message.subject}.`,
           applied: true,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveDiplomaticEscalations, type DiplomaticMessage } from "./diplomacy";
+import { applyDiplomaticAnswerToStance, deriveDiplomaticEscalations, type DiplomaticMessage, type PolityStance } from "./diplomacy";
 
 // Regression: a rejected ultimatum used to have nothing tracking it -- the
 // offended power's only reaction was whatever the Game Master happened to
@@ -99,5 +99,59 @@ describe("deriveDiplomaticEscalations", () => {
   it("ignores a message still awaiting a reply", () => {
     const messages = [message({ id: "m1", status: "awaiting_reply" })];
     expect(deriveDiplomaticEscalations(messages, 1)).toEqual([]);
+  });
+});
+
+// Regression: a thread that went quiet used to leave no trace once it
+// stopped being "the most recent reply" -- a Game Master reading turn thirty
+// had no way to see the accumulated weight of thirty turns of behaviour, only
+// whatever the last message happened to say. PolityStance is the accumulator.
+
+describe("applyDiplomaticAnswerToStance", () => {
+  it("does nothing for a message with no answer yet", () => {
+    const msg = message({ id: "m1", status: "awaiting_reply" });
+    expect(applyDiplomaticAnswerToStance([], msg, 1)).toEqual([]);
+  });
+
+  it("raises the sender's trust in the recipient on acceptance", () => {
+    const msg = message({ id: "m1", status: "answered", answer: "accepted", answeredAtStep: 1 });
+    const stances = applyDiplomaticAnswerToStance([], msg, 1);
+    expect(stances).toHaveLength(1);
+    expect(stances[0]).toMatchObject({ polityId: "carthage", towardPolityId: "rome" });
+    expect(stances[0]?.trustScore).toBeGreaterThan(0);
+  });
+
+  it("lowers the sender's trust in the recipient on refusal, and further on being ignored", () => {
+    const refused = applyDiplomaticAnswerToStance([], message({ id: "m1", status: "answered", answer: "refused", answeredAtStep: 1 }), 1);
+    expect(refused[0]?.trustScore).toBeLessThan(0);
+
+    const ignored = applyDiplomaticAnswerToStance([], message({ id: "m1", status: "answered", answer: "ignored", answeredAtStep: 1 }), 1);
+    expect(ignored[0]?.trustScore).toBeLessThan(refused[0]!.trustScore);
+  });
+
+  it("accumulates across repeated answers rather than resetting each time", () => {
+    let stances: readonly PolityStance[] = [];
+    for (let step = 1; step <= 3; step++) {
+      stances = applyDiplomaticAnswerToStance(stances, message({ id: `m${step}`, status: "answered", answer: "refused", answeredAtStep: step }), step);
+    }
+    expect(stances).toHaveLength(1);
+    // Three refusals in a row should be more negative than one.
+    const single = applyDiplomaticAnswerToStance([], message({ id: "m1", status: "answered", answer: "refused", answeredAtStep: 1 }), 1)[0]!.trustScore;
+    expect(stances[0]?.trustScore).toBeLessThan(single);
+    expect(stances[0]?.lastShiftAtStep).toBe(3);
+  });
+
+  it("is directed: the recipient's trust in the sender is untouched by the recipient's own answer", () => {
+    const msg = message({ id: "m1", status: "answered", answer: "accepted", answeredAtStep: 1 });
+    const stances = applyDiplomaticAnswerToStance([], msg, 1);
+    expect(stances.find((s) => s.polityId === "rome" && s.towardPolityId === "carthage")).toBeUndefined();
+  });
+
+  it("clamps to the -100..100 range rather than drifting unbounded", () => {
+    let stances: readonly PolityStance[] = [];
+    for (let step = 1; step <= 20; step++) {
+      stances = applyDiplomaticAnswerToStance(stances, message({ id: `m${step}`, status: "answered", answer: "accepted", answeredAtStep: step }), step);
+    }
+    expect(stances[0]?.trustScore).toBeLessThanOrEqual(100);
   });
 });

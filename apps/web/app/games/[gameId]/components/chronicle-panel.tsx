@@ -3,11 +3,35 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 
+interface DirectConsequenceFieldChange {
+  readonly field: string;
+  readonly from: unknown;
+  readonly to: unknown;
+}
+
 interface DirectConsequence {
   readonly kind: string;
   readonly label: string;
   readonly entityId: string | null;
   readonly quantified: boolean;
+  /** Present only when derived from the generic entity-state diff -- the changed entity's resolved name. */
+  readonly entityName?: string;
+  /** "created" | "deleted" | "updated" -- present alongside entityName. */
+  readonly changeKind?: string;
+  /** Present only for "updated": every tracked field that actually changed. */
+  readonly fields?: readonly DirectConsequenceFieldChange[];
+}
+
+/** "controllerPolityId" -> "controller polity". Generic across every tracked field on every entity type. */
+function humanizeFieldName(field: string): string {
+  return field.replace(/Id$/, "").replace(/Bps$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+}
+
+function formatFieldValue(value: unknown): string {
+  if (value === null || value === undefined) return "none";
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  return JSON.stringify(value);
 }
 
 interface ChronicleEntry {
@@ -31,6 +55,13 @@ interface ChronicleEntry {
   // Chronicle-first legibility fields (character-sim phase 6)
   readonly title?: string;
   readonly knowledgeStatus?: "confirmed" | "report" | "rumour" | "suspicion";
+  /** Present when a named character flagged this turn that they want to talk. */
+  readonly initiatedDialogue?: {
+    readonly characterId: string;
+    readonly characterName: string;
+    readonly topic: string;
+    readonly openingLine: string;
+  };
 }
 
 interface ChronicleDispatch {
@@ -69,6 +100,56 @@ interface ChroniclePanelProps {
   readonly forceOpen?: boolean;
   readonly onForceOpenConsumed?: () => void;
   readonly onDisplayPatch?: (patch: unknown) => void;
+  /** Called with the opened session id once the player starts a character-initiated conversation. */
+  readonly onDialogueOpened?: (sessionId: string) => void;
+}
+
+function InitiatedChatSection({ gameId, entryId, dialogue, onDialogueOpened }: {
+  readonly gameId: string;
+  readonly entryId: string;
+  readonly dialogue: NonNullable<ChronicleEntry["initiatedDialogue"]>;
+  readonly onDialogueOpened?: (sessionId: string) => void;
+}) {
+  const [opening, setOpening] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function open() {
+    if (opening) return;
+    setOpening(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/conversations/initiate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entryId }),
+      });
+      const data = await res.json() as { sessionId?: string; error?: string };
+      if (!res.ok || !data.sessionId) { setError(data.error ?? "Could not open the conversation."); return; }
+      onDialogueOpened?.(data.sessionId);
+    } catch {
+      setError("Could not open the conversation.");
+    } finally {
+      setOpening(false);
+    }
+  }
+
+  return (
+    <section
+      aria-label="Initiated conversation"
+      style={{ borderTop: "1px solid var(--border, rgba(255,255,255,0.08))", paddingTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}
+    >
+      <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", letterSpacing: "0.08em", textTransform: "uppercase", margin: 0 }}>Initiated chat</p>
+      <p style={{ fontSize: "0.875rem", margin: 0, color: "var(--text)" }}>
+        <strong>{dialogue.characterName}</strong> wants to talk: {dialogue.topic}
+      </p>
+      <div>
+        <button type="button" className="chat-message-send" onClick={() => { void open(); }} disabled={opening}>
+          {opening ? "Opening…" : `Talk to ${dialogue.characterName}`}
+        </button>
+      </div>
+      {error && <p style={{ color: "var(--text-error, #e53e3e)", fontSize: "0.8125rem", margin: 0 }}>{error}</p>}
+    </section>
+  );
 }
 
 function EntryHeader({ entry }: { entry: ChronicleEntry }) {
@@ -93,6 +174,8 @@ function EntryHeader({ entry }: { entry: ChronicleEntry }) {
 function DirectConsequencesSection({ consequences }: { consequences: readonly DirectConsequence[] }) {
   const [open, setOpen] = useState(false);
   if (consequences.length === 0) return null;
+  const structuredCount = consequences.filter((c) => c.entityName !== undefined).length;
+  const heading = structuredCount > 0 ? `Map changes (${structuredCount})` : "Direct consequences";
   return (
     <details
       open={open}
@@ -114,28 +197,47 @@ function DirectConsequencesSection({ consequences }: { consequences: readonly Di
         }}
       >
         <span style={{ transition: "transform 0.15s", display: "inline-block", transform: open ? "rotate(90deg)" : "rotate(0deg)" }}>›</span>
-        Direct consequences
+        {heading}
       </summary>
       {open && (
         <ul
           style={{
             marginTop: "0.6rem",
-            paddingLeft: "1rem",
+            paddingLeft: 0,
+            listStyle: "none",
             display: "flex",
             flexDirection: "column",
-            gap: "0.3rem",
+            gap: "0.4rem",
           }}
         >
           {consequences.map((c, i) => (
             <li
               key={i}
-              style={{
-                fontSize: "0.8125rem",
-                color: "var(--text-secondary, var(--text-muted))",
-                lineHeight: 1.5,
-              }}
+              style={
+                c.entityName === undefined
+                  ? { fontSize: "0.8125rem", color: "var(--text-secondary, var(--text-muted))", lineHeight: 1.5 }
+                  : {
+                      fontSize: "0.8125rem",
+                      color: "var(--text-secondary, var(--text-muted))",
+                      lineHeight: 1.5,
+                      border: "1px solid var(--border, rgba(255,255,255,0.08))",
+                      borderRadius: "0.5rem",
+                      padding: "0.5rem 0.65rem",
+                    }
+              }
             >
-              {c.label}
+              {c.entityName !== undefined ? (
+                <>
+                  <span style={{ fontWeight: 600, color: "var(--text)" }}>{c.entityName}</span>
+                  {c.changeKind === "created" && <span> — created</span>}
+                  {c.changeKind === "deleted" && <span> — removed</span>}
+                  {c.changeKind === "updated" && c.fields && c.fields.length > 0 && (
+                    <span> — {c.fields.map((f) => `${humanizeFieldName(f.field)} ${formatFieldValue(f.from)} → ${formatFieldValue(f.to)}`).join("; ")}</span>
+                  )}
+                </>
+              ) : (
+                c.label
+              )}
             </li>
           ))}
         </ul>
@@ -144,7 +246,7 @@ function DirectConsequencesSection({ consequences }: { consequences: readonly Di
   );
 }
 
-export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, onDisplayPatch }: ChroniclePanelProps) {
+export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, onDisplayPatch, onDialogueOpened }: ChroniclePanelProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [chronicle, setChronicle] = useState<ChronicleData | null>(null);
@@ -407,6 +509,15 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
 
                 {hasConsequences && (
                   <DirectConsequencesSection consequences={currentEntry.directConsequences!} />
+                )}
+
+                {currentEntry.initiatedDialogue && (
+                  <InitiatedChatSection
+                    gameId={gameId}
+                    entryId={currentEntry.id}
+                    dialogue={currentEntry.initiatedDialogue}
+                    {...(onDialogueOpened ? { onDialogueOpened } : {})}
+                  />
                 )}
 
                 {showDispatch && dispatch && (

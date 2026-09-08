@@ -54,7 +54,10 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
       return {
         world: { ...world, characterGoals: [...(world.characterGoals ?? []), newGoal] },
         result: {
-          summary: `${character.name} forms a new goal: ${params.objective}.`,
+          // Subsequent agency actions refer to this id. Return it in the
+          // factual workflow summary so the Game Master can continue the
+          // same chain without guessing or re-inspecting.
+          summary: `${character.name} forms a new goal (id ${goalId}): ${params.objective}.`,
           applied: true,
         },
       };
@@ -151,7 +154,7 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
       return {
         world: { ...world, characterPlots: [...(world.characterPlots ?? []), newPlot] },
         result: {
-          summary: `${character.name} begins plotting: ${params.objective.slice(0, 80)}.`,
+          summary: `${character.name} begins plotting (id ${plotId}): ${params.objective.slice(0, 80)}.`,
           applied: true,
         },
       };

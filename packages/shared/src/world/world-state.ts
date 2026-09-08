@@ -18,7 +18,7 @@ import { CharacterIntentSchema } from "../character-agency/intents";
 import { FamilyLinkSchema, HouseholdSchema, LifeContractSchema } from "../characters/family";
 import { LegacyCauseSchema } from "../continuity/continuity";
 import { CampaignMemorySchema, EMPTY_CAMPAIGN_MEMORY } from "../gm/campaign-memory";
-import { DiplomaticMessageSchema } from "./diplomacy";
+import { DiplomaticMessageSchema, PolityStanceSchema } from "./diplomacy";
 import { WorldDevelopmentSchema } from "./developments";
 import { PlayerPlanSchema } from "../actions/plans";
 import { ActorActivitySchema } from "../actions/activity";
@@ -141,6 +141,15 @@ export const WorldStateSchema = z
      * existed still parses.
      */
     diplomacy: z.array(DiplomaticMessageSchema).default([]),
+    /**
+     * One power's accumulated trust toward another, nudged each time a
+     * diplomatic message between them is answered. Distinct from a message
+     * thread's own escalation count: this is the thing that persists once a
+     * thread goes quiet, so a Game Master reading it turns later still sees
+     * the weight of how the two powers have actually treated each other.
+     * Defaulted so every snapshot written before this existed still parses.
+     */
+    polityStances: z.array(PolityStanceSchema).default([]),
   })
   .strict()
   .superRefine((world, context) => {

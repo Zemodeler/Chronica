@@ -120,6 +120,29 @@ describe("answering one", () => {
     expect(outcome.world.diplomacy.find((candidate) => candidate.id === "msg-1")?.status).toBe("answered");
   });
 
+  it("nudges the sender's accumulated trust in the recipient", () => {
+    const outcome = executeWorkflow(
+      {
+        actionId: "answer_diplomatic_message",
+        actorId: HANNO,
+        parameters: {
+          messageId: "msg-1",
+          answer: "refused",
+          answeredByCharacterId: HANNO,
+          answerText: "Carthage has no interest in Roman arrangements over Sicilian ground.",
+        },
+      },
+      sent(),
+      2,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const stance = outcome.world.polityStances.find((candidate) => candidate.polityId === ROME && candidate.towardPolityId === CARTHAGE);
+    expect(stance).toBeDefined();
+    expect(stance?.trustScore).toBeLessThan(0);
+    expect(stance?.lastShiftAtStep).toBe(2);
+  });
+
   it("lists what is actually awaiting a reply when the id is wrong", () => {
     const outcome = executeWorkflow(
       {

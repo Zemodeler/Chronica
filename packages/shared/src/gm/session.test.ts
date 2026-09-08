@@ -98,6 +98,46 @@ describe("director-created characters", () => {
   });
 });
 
+describe("character-agency identifiers", () => {
+  it("exposes existing agency ids and returns ids for newly created agency records", () => {
+    const gm = punicSession();
+
+    const inspected = gm.invoke(call("inspect_actor_memory", { characterId: "hanno-carthage" }));
+    expect(inspected.ok).toBe(true);
+    expect(inspected.factual).toContain("id hanno-goal-messana-watch");
+    expect(inspected.factual).toContain("id hanno-plot-messana-watch");
+
+    const goal = gm.invoke(call("create_character_goal", {
+      actorId: "hanno-carthage",
+      characterId: "hanno-carthage",
+      objective: "Secure Carthaginian supply lines near Sicily.",
+      category: "resource",
+      targetEntityIds: [],
+      priority: 3,
+      visibility: "polity",
+    }));
+    expect(goal.ok).toBe(true);
+    const goalId = goal.factual.match(/id (goal-[\w-]+)/)?.[1];
+    expect(goalId).toBeDefined();
+    if (!goalId) return;
+
+    const plot = gm.invoke(call("create_character_plot", {
+      actorId: "hanno-carthage",
+      characterId: "hanno-carthage",
+      goalId,
+      objective: "Survey the route to Messana.",
+      participantIds: [],
+      targetIds: [],
+      visibility: "polity",
+      stakes: "Rome may consolidate its position first.",
+      currentObstacle: null,
+      worldStorylineId: null,
+    }));
+    expect(plot.ok).toBe(true);
+    expect(plot.factual).toMatch(/id plot-hanno-ca-1-\d+/);
+  });
+});
+
 describe("a named refusal aftermath", () => {
   it("gives a real refusal a named voice and records the relationship damage", () => {
     const gm = session();
@@ -180,6 +220,145 @@ describe("a valid levy", () => {
     expect(moved.ok).toBe(true);
     expect(gm.stagedWorld.material.forces.find((candidate) => candidate.id === force!.id)?.locationId)
       .toBe("ita-72843720b81376294924159-sicily-west");
+  });
+});
+
+describe("a force raised with a stated purpose", () => {
+  it("keeps the player's own words as a freeform note, not a mechanical field", () => {
+    const gm = session();
+    const outcome = gm.invoke(call("create_force", {
+      actorId: PLAYER,
+      polityId: ROME,
+      locationProvinceId: LATIUM,
+      name: "Legio Klan",
+      size: 4_000,
+      kind: "infantry",
+      intent: "Specifically trained in fighting the Carthaginians.",
+    }));
+    expect(outcome.ok).toBe(true);
+    const force = gm.stagedWorld.material.forces.find((candidate) => candidate.name === "Legio Klan");
+    expect(force).toBeDefined();
+    const notes = gm.stagedWorld.campaignMemory.entityNotes.filter((note) => note.entityId === force!.id);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.text).toBe("Specifically trained in fighting the Carthaginians.");
+    expect(notes[0]?.entityType).toBe("force");
+  });
+
+  it("carries a typed state delta on the factual event, for the Chronicle's map-changes card", () => {
+    const gm = session();
+    gm.invoke(call("create_force", {
+      actorId: PLAYER,
+      polityId: ROME,
+      locationProvinceId: LATIUM,
+      name: "Legio III",
+      size: 2_000,
+      kind: "infantry",
+    }));
+    const created = gm.result().events.find((event) => event.actionId === "create_force");
+    const forceDelta = created?.stateDeltas?.find((delta) => delta.entityType === "force");
+    expect(forceDelta?.change).toBe("created");
+    expect(forceDelta?.entityName).toBe("Legio III");
+  });
+});
+
+describe("record_entity_note", () => {
+  it("appends a note the Game Master can add later, without touching any other world state", () => {
+    const gm = session();
+    const created = gm.invoke(call("create_force", {
+      actorId: PLAYER,
+      polityId: ROME,
+      locationProvinceId: LATIUM,
+      name: "Legio IV",
+      size: 3_000,
+      kind: "infantry",
+    }));
+    expect(created.ok).toBe(true);
+    const force = gm.stagedWorld.material.forces.find((candidate) => candidate.name === "Legio IV")!;
+
+    const noted = gm.invoke(call("record_entity_note", {
+      entityId: force.id,
+      entityType: "force",
+      text: "Its first cohort proved itself against Numidian cavalry this spring.",
+    }));
+    expect(noted.ok).toBe(true);
+    const notes = gm.stagedWorld.campaignMemory.entityNotes.filter((note) => note.entityId === force.id);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.text).toContain("Numidian cavalry");
+    // No other world state moved.
+    expect(gm.stagedWorld.material.forces.find((candidate) => candidate.id === force.id)?.name).toBe("Legio IV");
+  });
+});
+
+describe("flag_npc_initiated_dialogue", () => {
+  it("records a flag against a living, named character other than the player", () => {
+    const gm = session();
+    const outcome = gm.invoke(call("flag_npc_initiated_dialogue", {
+      characterId: "hanno",
+      topic: "Carthage's fleet near Messana",
+      openingLine: "We need to speak about the strait, before this goes further.",
+    }));
+    expect(outcome.ok).toBe(true);
+    const flagged = gm.result().events.find((event) => event.actionId === "flag_npc_initiated_dialogue");
+    expect(flagged?.actorId).toBe("hanno");
+    expect(flagged?.parameters["openingLine"]).toBe("We need to speak about the strait, before this goes further.");
+    expect(flagged?.materialConsequence).toBe(false);
+    // No world state moved -- this only surfaces an affordance.
+    expect(gm.stagedWorld.characters).toEqual(world().characters);
+  });
+
+  it("refuses the player's own character", () => {
+    const gm = session();
+    const outcome = gm.invoke(call("flag_npc_initiated_dialogue", {
+      characterId: PLAYER,
+      topic: "Talking to myself",
+      openingLine: "...",
+    }));
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("refuses a character id that does not exist", () => {
+    const gm = session();
+    const outcome = gm.invoke(call("flag_npc_initiated_dialogue", {
+      characterId: "nobody-here",
+      topic: "A ghost speaks",
+      openingLine: "...",
+    }));
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("refuses a dead character", () => {
+    const dead = world();
+    dead.characters = dead.characters.map((character) => (character.id === "hanno" ? { ...character, alive: false, diedAtStep: 0 } : character));
+    const gm = createGameMasterSession({ world: dead, atStep: 1, actorCharacterId: PLAYER, directiveIds: [] });
+    const outcome = gm.invoke(call("flag_npc_initiated_dialogue", {
+      characterId: "hanno",
+      topic: "A ghost speaks",
+      openingLine: "...",
+    }));
+    expect(outcome.ok).toBe(false);
+  });
+});
+
+describe("flag_ambient_event", () => {
+  it("records one paragraph of pure flavor, with no material consequence", () => {
+    const gm = session();
+    const outcome = gm.invoke(call("flag_ambient_event", {
+      narrative: "Far across the world, the Kingdom of Qin presses its advantage against its rivals.",
+    }));
+    expect(outcome.ok).toBe(true);
+    const flagged = gm.result().events.find((event) => event.actionId === "flag_ambient_event");
+    expect(flagged?.materialConsequence).toBe(false);
+    expect(gm.stagedWorld.characters).toEqual(world().characters);
+    expect(gm.stagedWorld.map).toEqual(world().map);
+  });
+
+  it("refuses a second ambient event in the same turn", () => {
+    const gm = session();
+    const first = gm.invoke(call("flag_ambient_event", { narrative: "A distant famine spreads." }));
+    expect(first.ok).toBe(true);
+    const second = gm.invoke(call("flag_ambient_event", { narrative: "A second, unrelated event." }));
+    expect(second.ok).toBe(false);
+    expect(gm.result().events.filter((event) => event.actionId === "flag_ambient_event")).toHaveLength(1);
   });
 });
 

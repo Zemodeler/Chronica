@@ -37,7 +37,18 @@ export interface ChronicleEntryInput {
   readonly location?: string | null;
   readonly chainId?: string | null;
   readonly chainPosition?: "root" | "reaction" | "spread" | "distant" | "pressure" | null;
-  readonly directConsequences?: Array<{ kind: string; label: string; entityId: string | null; quantified: boolean }>;
+  readonly directConsequences?: Array<{
+    kind: string;
+    label: string;
+    entityId: string | null;
+    quantified: boolean;
+    /** Present only when derived from the generic entity-state diff -- the entity's resolved name. */
+    entityName?: string;
+    /** "created" | "deleted" | "updated" -- present alongside entityName. */
+    changeKind?: string;
+    /** Present only for "updated": every tracked field that actually changed. */
+    fields?: Array<{ field: string; from: unknown; to: unknown }>;
+  }>;
   /** Ephemeral cast supplied to the narrator and relevance system before the prose is persisted. */
   readonly characterMentions?: readonly { characterId: string; role: string }[];
   /** Ephemeral Chronicle ordering aid. It is deliberately not persisted as world state. */
@@ -126,6 +137,18 @@ export interface ChronicleEntryInput {
     readonly attackerCasualties: number;
     readonly defenderCasualties: number;
     readonly retreated: readonly string[];
+  };
+  /**
+   * Present when a named character flagged this turn that they want to open
+   * a conversation with the player (flag_npc_initiated_dialogue). Surfaces an
+   * "Initiated Chat" affordance on this entry; opening it seeds the
+   * character's own opening line as the first message.
+   */
+  readonly initiatedDialogue?: {
+    readonly characterId: string;
+    readonly characterName: string;
+    readonly topic: string;
+    readonly openingLine: string;
   };
 }
 
@@ -237,6 +260,7 @@ export async function commitResolution(
             ...(entry.dispatch !== undefined ? { dispatch: entry.dispatch } : {}),
             ...(entry.depth !== undefined ? { depth: entry.depth } : {}),
             ...(entry.battleBrief !== undefined ? { battleBrief: entry.battleBrief } : {}),
+            ...(entry.initiatedDialogue !== undefined ? { initiatedDialogue: entry.initiatedDialogue } : {}),
           },
         })),
       );
