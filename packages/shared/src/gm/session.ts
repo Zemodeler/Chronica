@@ -304,6 +304,12 @@ export class GameMasterSession {
   private report: GameMasterTurnReport | null = null;
   /** A turn is pushed back for world agency at most once; see `finish`. */
   private pushedForWorldAgency = false;
+  /** A turn is pushed back for ignoring due life reviews/political procedures at most once; see `finish`. */
+  private pushedForDueOutcomes = false;
+  /** Character ids `list_due_life_reviews` reported this turn, cleared once addressed by a life-event action. */
+  private readonly unaddressedDueLifeReviews = new Set<string>();
+  /** Procedure ids `list_due_political_procedures` reported this turn, cleared once addressed by resolve_procedure. */
+  private readonly unaddressedDueProcedures = new Set<string>();
   /**
    * Keyed `${actionId}::${actorId}`. Set when a game-master-sourced call fails
    * only because of a bad/missing id or invalid arguments; cleared the moment
@@ -444,6 +450,14 @@ export class GameMasterSession {
       scenarioClock: this.scenarioClock,
     };
     const result = tool.read(context, parsed.data);
+    if (result.ok && name === "list_due_life_reviews") {
+      const due = (result.data as { dueLifeReviews?: readonly { characterId: string }[] }).dueLifeReviews ?? [];
+      for (const entry of due) this.unaddressedDueLifeReviews.add(entry.characterId);
+    }
+    if (result.ok && name === "list_due_political_procedures") {
+      const due = (result.data as { dueProcedures?: readonly { procedureId: string }[] }).dueProcedures ?? [];
+      for (const entry of due) this.unaddressedDueProcedures.add(entry.procedureId);
+    }
     return { ok: result.ok, factual: result.factual, finished: false };
   }
 
@@ -598,6 +612,18 @@ export class GameMasterSession {
     }
 
     this.recordCapabilityRepairAttempt(actorId, outcome);
+
+    // A due life review or political procedure is addressed the instant the
+    // matching action succeeds for the same character/procedure it was
+    // reported for -- never merely by being read.
+    if (actionId === "kill_character" || actionId === "incapacitate_character" || actionId === "recover_from_incapacity") {
+      const characterId = parameters["characterId"];
+      if (typeof characterId === "string") this.unaddressedDueLifeReviews.delete(characterId);
+    }
+    if (actionId === "resolve_procedure") {
+      const procedureId = parameters["procedureId"];
+      if (typeof procedureId === "string") this.unaddressedDueProcedures.delete(procedureId);
+    }
 
     // Deterministic follow-ups the engine owns. A started battle is fought by
     // the resolver immediately, in the same call, so the Game Master's next
@@ -1162,6 +1188,25 @@ export class GameMasterSession {
         factual:
           "This report contains nothing but the player's own orders. The other named characters have goals, pressures, and commitments of their own, and the open threads are still open — none of them were waiting on the player. Let at least one of them act now through the tools, then call "
           + `${FINISH_TURN_TOOL} again. If you look and there is genuinely nothing for anyone to do, say so in the report and call ${FINISH_TURN_TOOL} again as it stands.`,
+      };
+    }
+
+    // A due life review or political procedure read this turn but never
+    // acted on is not a decision -- it is silence. Pushed back exactly once,
+    // the same as the world-agency reminder above: if the Game Master looks
+    // again and still judges no action warranted, it says so in the report
+    // and the second call is accepted.
+    if ((this.unaddressedDueLifeReviews.size > 0 || this.unaddressedDueProcedures.size > 0) && !this.pushedForDueOutcomes) {
+      this.pushedForDueOutcomes = true;
+      const owed = [
+        ...[...this.unaddressedDueLifeReviews].map((characterId) => `life review for ${this.staged.characters.find((c) => c.id === characterId)?.name ?? characterId}`),
+        ...[...this.unaddressedDueProcedures].map((procedureId) => `political procedure ${procedureId}`),
+      ].join("; ");
+      return {
+        ok: false,
+        finished: false,
+        factual:
+          `You read that these are due but the report does not act on them: ${owed}. Decide each one now -- kill_character/incapacitate_character/recover_from_incapacity (then settle_estate for a death), or resolve_procedure -- or, if you judge none of them warrant a decision yet, say so explicitly in the report and call ${FINISH_TURN_TOOL} again as it stands.`,
       };
     }
 
