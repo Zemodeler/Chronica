@@ -12,6 +12,7 @@ import { materialWorkflows } from "./definitions/material";
 import { battleResolutionWorkflows } from "./definitions/battle-resolution";
 import { diplomacyWorkflows } from "./definitions/diplomacy";
 import { npcAgencyWorkflows } from "./definitions/npc-agency";
+import { playerMaterializationWorkflows } from "./definitions/player-materialization";
 import { z } from "zod";
 import type { AnyWorkflowDefinition } from "./types";
 
@@ -37,6 +38,7 @@ const allWorkflows: AnyWorkflowDefinition[] = [
   ...battleResolutionWorkflows,
   ...diplomacyWorkflows,
   ...npcAgencyWorkflows,
+  ...playerMaterializationWorkflows,
 ];
 
 /** Immutable registry map: actionId → WorkflowDefinition. */

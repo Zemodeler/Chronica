@@ -171,21 +171,12 @@ describe("hasActiveAgencyState", () => {
 });
 
 describe("isEligibleForNpcAgency", () => {
-  // Regression: a leader ensurePolityLeadership seeds this very turn (e.g.
-  // Brennos, freshly named for an invaded or addressed power) has no
-  // continuity history yet, so gating agency on continuity tier "principal"
-  // alone silently excluded exactly the character a turn most needs to hear
-  // from.
-  it("admits a character seeded this turn even with no continuity history", () => {
-    expect(isEligibleForNpcAgency(undefined, true, "background", false)).toBe(true);
-  });
-
   it("admits a character the selector itself ranked as this turn's most relevant", () => {
-    expect(isEligibleForNpcAgency("ordinary", false, "persistent", false)).toBe(true);
+    expect(isEligibleForNpcAgency("ordinary", "persistent", false)).toBe(true);
   });
 
   it("still admits an established principal-tier character", () => {
-    expect(isEligibleForNpcAgency("principal", false, "background", false)).toBe(true);
+    expect(isEligibleForNpcAgency("principal", "background", false)).toBe(true);
   });
 
   // Regression: Carthage/Hanno commands a force and scores "important" in
@@ -194,12 +185,12 @@ describe("isEligibleForNpcAgency", () => {
   // relevance (a real goal/plot/pressure) admits him without admitting every
   // other force commander who has none.
   it("admits an ordinary, unseeded, non-persistent character with explicit scenario relevance", () => {
-    expect(isEligibleForNpcAgency("ordinary", false, "important", true)).toBe(true);
+    expect(isEligibleForNpcAgency("ordinary", "important", true)).toBe(true);
   });
 
   it("excludes an ordinary, unseeded, non-persistent character with no active agency state", () => {
-    expect(isEligibleForNpcAgency("ordinary", false, "background", false)).toBe(false);
-    expect(isEligibleForNpcAgency("remembered", false, "important", false)).toBe(false);
+    expect(isEligibleForNpcAgency("ordinary", "background", false)).toBe(false);
+    expect(isEligibleForNpcAgency("remembered", "important", false)).toBe(false);
   });
 });
 

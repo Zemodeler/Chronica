@@ -39,24 +39,10 @@ export const worldCreationWorkflows: AnyWorkflowDefinition[] = [
       })
       .strict(),
     apply(world, params, context) {
-      // Uniqueness check: Levenshtein-approximate name collision.
-      const nameLower = params.name.toLowerCase();
-      const collision = world.characters.find((c) => {
-        if (!c.alive) return false;
-        const cLower = c.name.toLowerCase();
-        if (cLower === nameLower) return true;
-        // Simple prefix check as lightweight collision guard
-        const minLen = Math.min(nameLower.length, cLower.length);
-        if (minLen >= 4 && cLower.slice(0, 4) === nameLower.slice(0, 4)) return true;
-        return false;
-      });
-      if (collision) return null;
-
       const locationProv = world.map.provinces.find((p) => p.id === params.locationProvinceId);
       if (!locationProv) return null;
 
       const characterId = params.characterId ?? `char-wd-${randomUUID().slice(0, 12)}`;
-      if (world.characters.some((character) => character.id === characterId)) return null;
       if (!canCreateCharacter(world.characters.length)) return null;
 
       // A character without a purse is invisible to candidate scoring,
@@ -107,9 +93,16 @@ export const worldCreationWorkflows: AnyWorkflowDefinition[] = [
       };
 
       return {
-        world: { ...world, characters: [...world.characters, newCharacter], material: purse.material },
+        world: {
+          ...world,
+          characters: [...world.characters.filter((c) => c.id !== characterId), newCharacter],
+          material: purse.material,
+        },
         result: {
-          summary: `${params.name} enters the world as a new character.`,
+          // The returned id is part of the tool result, so the model can use
+          // this person in later calls in the same turn without guessing an
+          // identifier or relying on prose to make a person exist.
+          summary: `${params.name} enters the world as a new character [id: ${characterId}].`,
           applied: true,
         },
       };

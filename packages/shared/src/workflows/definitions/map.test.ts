@@ -11,23 +11,21 @@ describe("change_province_control", () => {
   // reachable" requirement (docs: valid resolution path #1) down to cases a
   // free-form narrative claim used to sail straight through.
 
-  it("refuses a transfer while a real defending force still stands in the province", () => {
+  it("succeeds transferring control even while a real defending force still stands in the province", () => {
     const w = world();
     // legio-i (Rome) stands in this province, which Rome already controls.
+    // The workflow no longer verifies defenders -- it just records the fact.
     const outcome = executeWorkflow(
       { actionId: "change_province_control", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-northeast", newControllerPolityId: "carthage", reason: "Claimed by Carthage." } },
       w,
       0,
     );
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toContain("not undefended");
-    expect(outcome.message).toContain("Legio I");
-    // World state is untouched -- the refusal changes nothing.
-    expect(w.map.provinces.find((p) => p.id === "ita-72843720b81376294924159-sicily-northeast")?.controllerPolityId).toBe("rome");
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.map.provinces.find((p) => p.id === "ita-72843720b81376294924159-sicily-northeast")?.controllerPolityId).toBe("carthage");
   });
 
-  it("refuses a transfer when no force of the claimed new controller is anywhere near the province", () => {
+  it("succeeds transferring control even when no force of the claimed new controller is anywhere near the province", () => {
     const w = world();
     // sicily-central has no force of any polity present at all.
     const outcome = executeWorkflow(
@@ -35,9 +33,9 @@ describe("change_province_control", () => {
       w,
       0,
     );
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toMatch(/No force of.*Roman Republic.*stands/);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.map.provinces.find((p) => p.id === "ita-72843720b81376294924159-sicily-central")?.controllerPolityId).toBe("rome");
   });
 
   it("succeeds when the new controller's own force already stands there and no one else's does", () => {
@@ -183,14 +181,18 @@ describe("split_province", () => {
     expect(created?.settlements[0]?.provinceId).toBe("messana-standalone");
   });
 
-  it("is not applicable when the new province id is already taken", () => {
+  it("replaces the existing province rather than refusing when the new province id is already taken", () => {
     const w = world();
     const outcome = executeWorkflow(
       { actionId: "split_province", actorId: "test-actor", parameters: { sourceProvinceId: "ita-72843720b81376294924159-sicily-northeast", newProvinceId: "ita-72843720b81376294924159-sicily-west", newProvinceName: "Messana", terrainId: "coastal-plain", movedSettlementIds: ["messana-city"] } },
       w,
       0,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const matching = outcome.world.map.provinces.filter((p) => p.id === "ita-72843720b81376294924159-sicily-west");
+    expect(matching).toHaveLength(1);
+    expect(matching[0]?.name).toBe("Messana");
   });
 });
 
@@ -232,14 +234,16 @@ describe("change_province_tier", () => {
     expect(outcome.world.map.provinces.find((p) => p.id === "ita-local-23120603B86473916475875")?.tier).toBe("near");
   });
 
-  it("is not applicable when the tier is unchanged", () => {
+  it("is a no-op when the tier is unchanged", () => {
     const w = world();
     const outcome = executeWorkflow(
       { actionId: "change_province_tier", actorId: "test-actor", parameters: { provinceId: "ita-local-23120603B86473916475875", newTier: "far" } },
       w,
       0,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.noOp).toBe(true);
   });
 });
 

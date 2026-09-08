@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { InterpretPlanSchema, ExecutePlanStageSchema, RespondToAssignmentSchema, DeferPlanStageSchema, preparePlayerPlans, interpretPlan, planSpending, type PlayerPlan } from "../actions/plans";
-import { actionTimeCost, chargeActivity } from "../actions/activity";
 import type { OrderDirective } from "../actions/orders";
 import type { WorldState } from "../world/world-state";
 import type { ProposedInvocation } from "../actions/orders";
@@ -231,10 +230,6 @@ export interface GameMasterSessionOptions {
   readonly directiveIds: readonly string[];
   readonly directives?: readonly { id: string; directive: OrderDirective }[];
   readonly privateInformation?: PrivateInformationPolicy;
-  /** Optional test/operations override. Normal play uses actor allowances. */
-  readonly maxActions?: number;
-  /** Relevance-derived NPC action allowances for this turn. */
-  readonly actionAllowances?: readonly { readonly characterId: string; readonly allowance: number }[];
   readonly maxToolCalls?: number;
   /**
    * Actions this campaign defined in earlier turns. Always kept and reported
@@ -288,10 +283,7 @@ export class GameMasterSession {
   private readonly atStep: number;
   private readonly actorCharacterId: string;
   private readonly privateInformation: PrivateInformationPolicy;
-  private readonly maxActions: number | undefined;
   private readonly maxToolCalls: number;
-  private readonly actionAllowances: ReadonlyMap<string, number>;
-  private readonly actionsByActor = new Map<string, number>();
   private executingPlanId: string | null = null;
   private readonly managedPlans: boolean;
 
@@ -304,7 +296,6 @@ export class GameMasterSession {
   private readonly eligibleRefusals = new Map<string, EligibleRefusal>();
 
   private report: GameMasterTurnReport | null = null;
-  private actionCount = 0;
   /** A turn is pushed back for world agency at most once; see `finish`. */
   private pushedForWorldAgency = false;
   /**
@@ -335,11 +326,7 @@ export class GameMasterSession {
     this.actorCharacterId = options.actorCharacterId;
     this.directiveIds = [...options.directiveIds];
     this.privateInformation = options.privateInformation ?? "omit";
-    this.maxActions = options.maxActions;
     this.maxToolCalls = options.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
-    this.actionAllowances = new Map(
-      (options.actionAllowances ?? []).map((entry) => [entry.characterId, Math.max(0, entry.allowance)]),
-    );
     this.definedActions = new Map((options.definedActions ?? []).map((definition) => [definition.actionId, definition]));
     this.allowInventedActions = options.allowInventedActions ?? false;
     for (const { directive } of options.directives ?? []) {
@@ -452,41 +439,17 @@ export class GameMasterSession {
 
   // -- actions ---------------------------------------------------------------
 
+  /**
+   * The only remaining deterministic gate on an action: player orders must
+   * flow through their own plan so progress and revisions stay attached to
+   * it. Whether an actor has the time, standing, or relevance to act at all
+   * is judgement now, left entirely to the Game Master.
+   */
   private actionLimitRefusal(actorId: string, actionId?: string): string | null {
-    // An explicit `maxActions` is retained only for tests and an emergency
-    // operational override. Normal simulation has no shared global pool.
-    if (this.maxActions !== undefined && this.actionCount >= this.maxActions) {
-      return `This turn's emergency action budget (${this.maxActions}) is spent. Call ${FINISH_TURN_TOOL} and report what happened.`;
-    }
-    if (actionId) {
-      if (this.managedPlans && actorId === this.actorCharacterId && this.executingPlanId === null) return "Use execute_plan_stage for player orders so progress and limits stay attached to their plan.";
-      const used = this.staged.actorActivities?.find(a => a.actorId === actorId && a.atStep === this.atStep)?.usedBps ?? 0;
-      if (used + actionTimeCost(actionId, WORKFLOW_REGISTRY.get(actionId)?.category) > 10_000) return "This character has no time left for that activity this turn. Keep it pending for next turn or use an accepted delegate.";
-    }
-    // The player is never an NPC allowance entry. Every other listed actor
-    // draws only against their own relevance, never another polity's budget.
-    if (actorId === this.actorCharacterId || this.actionAllowances.size === 0) return null;
-    const allowance = this.actionAllowances.get(actorId);
-    const isDelegate = this.staged.playerPlans?.some(p => p.status === "active" && p.assignments.some(a => a.actorId === actorId && a.accepted));
-    if (allowance === undefined && !isDelegate) {
-      return "This character is not in the active cast for this turn. Let a relevant actor take the action, or bring this character into relevance first.";
-    }
-    // docs/30: the relevance-derived allowance is a real per-character budget,
-    // not just membership in this turn's cast -- "AI choice constrained by
-    // their state" needs an actual constraint. A delegate with no allowance
-    // entry of their own (isDelegate but allowance === undefined) has no
-    // count to exceed, so only a defined allowance is checked here.
-    if (allowance !== undefined && (this.actionsByActor.get(actorId) ?? 0) >= allowance) {
-      return `This character has already taken its allowance of ${allowance} action${allowance === 1 ? "" : "s"} this turn.`;
+    if (actionId && this.managedPlans && actorId === this.actorCharacterId && this.executingPlanId === null) {
+      return "Use execute_plan_stage for player orders so progress and limits stay attached to their plan.";
     }
     return null;
-  }
-
-  private recordAction(actorId: string): void {
-    this.actionCount += 1;
-    if (actorId !== this.actorCharacterId) {
-      this.actionsByActor.set(actorId, (this.actionsByActor.get(actorId) ?? 0) + 1);
-    }
   }
 
   /**
@@ -534,13 +497,6 @@ export class GameMasterSession {
     return this.planFact(`${actor.name} ${input.accepted ? "accepted" : "declined"} an assignment: ${input.reason}`);
   }
 
-  private checkPlanBudget(after: WorldState): string | null {
-    const plan = this.staged.playerPlans?.find(p => p.id === this.executingPlanId);
-    if (!plan) return null;
-    const debit = planSpending(this.staged, after, plan);
-    return typeof debit === "string" ? debit : null;
-  }
-
   private executePlanStage(args: Record<string, unknown>): GameMasterToolOutcome {
     const parsed = ExecutePlanStageSchema.safeParse(args);
     if (!parsed.success) return { ok: false, finished: false, factual: parsed.error.message };
@@ -553,7 +509,6 @@ export class GameMasterSession {
     const obstacle = !actor ? "The assigned character is no longer available. Revise the plan."
       : stage.dependsOn.some(id => plan.stages.find(s => s.id === id)?.status !== "completed") ? "An earlier stage has not completed."
       : stage.notBeforeStep !== null && stage.notBeforeStep > this.atStep ? "The scheduled time has not arrived."
-      : stage.provinceId !== null && actor.locationProvinceId !== stage.provinceId ? "The executor has not reached the required location."
       : stage.actorId !== plan.ownerId && !plan.assignments.some(a => a.actorId === stage.actorId && a.accepted) ? "The delegate has not accepted this assignment." : null;
     let result: GameMasterToolOutcome;
     const before = this.staged;
@@ -773,13 +728,8 @@ export class GameMasterSession {
 
     // Committed to the stage only now, after the executor has re-validated
     // the whole world document.
-    const budgetRefusal = this.checkPlanBudget(executed.world);
-    if (budgetRefusal !== null) return { ok: false, factual: budgetRefusal, recoverable: false };
-    const timed = source === "game_master" ? chargeActivity(this.staged, executed.world, invocation.actorId, invocation.actionId, WORKFLOW_REGISTRY.get(invocation.actionId)?.category, this.atStep) : executed.world;
-    if (typeof timed === "string") return { ok: false, factual: timed, recoverable: false };
-    this.staged = timed;
+    this.staged = executed.world;
     this.invocationDuplicates.record(invocation);
-    if (source === "game_master") this.recordAction(invocation.actorId);
     this.executedInvocations.push(invocation);
     this.auditEntries.push({ ...auditBase, finalInvocation: invocation, dryRunOk: true, executionOk: true });
 
@@ -1026,12 +976,7 @@ export class GameMasterSession {
       };
     }
 
-    const budgetRefusal = this.checkPlanBudget(executed.world);
-    if (budgetRefusal !== null) return { ok: false, factual: budgetRefusal, finished: false };
-    const timed = chargeActivity(this.staged, executed.world, actorId, actionId, undefined, this.atStep);
-    if (typeof timed === "string") return { ok: false, factual: timed, finished: false };
-    this.staged = timed;
-    this.recordAction(actorId);
+    this.staged = executed.world;
     this.definedActionUses.push({ actionId, actorId, parameters });
 
     this.factCounter += 1;

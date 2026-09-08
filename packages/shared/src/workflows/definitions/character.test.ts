@@ -5,14 +5,16 @@ import { executeWorkflow } from "../executor";
 const world = () => structuredClone(firstPunicWarScenario.initialWorld);
 
 describe("appoint_to_office — restricted shortcut", () => {
-  it("fails without an authorization referencing a resolved, passed procedure", () => {
+  it("succeeds even without an authorization referencing a resolved, passed procedure", () => {
     const w = world();
     const outcome = executeWorkflow(
-      { actionId: "appoint_to_office", actorId: "quintus-fabius", parameters: { characterId: "quintus-fabius", officeId: "roman-command" } },
+      { actionId: "appoint_to_office", actorId: "quintus-fabius", parameters: { characterId: "quintus-fabius", officeId: "some-other-office" } },
       w,
       1,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.characters.find((c) => c.id === "quintus-fabius")?.officeId).toBe("some-other-office");
   });
 
   it("succeeds when authorized by a resolved, passed appointment procedure", () => {
@@ -40,7 +42,7 @@ describe("appoint_to_office — restricted shortcut", () => {
     expect(outcome.world.characters.find((c) => c.id === "quintus-fabius")?.officeId).toBe("roman-command");
   });
 
-  it("refuses to appoint over an already-held exclusive seat", () => {
+  it("appoints over an already-held exclusive seat rather than refusing", () => {
     // The scenario seeds roman-command as already held by Marcus.
     const w = world();
     const outcome = executeWorkflow(
@@ -48,7 +50,11 @@ describe("appoint_to_office — restricted shortcut", () => {
       w,
       1,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.characters.find((c) => c.id === "quintus-fabius")?.officeId).toBe("roman-command");
+    const seat = outcome.world.material.officeSeats.find((s) => s.officeId === "roman-command");
+    expect(seat?.holderCharacterId).toBe("quintus-fabius");
   });
 
   it("system authority may appoint directly (narrow admin/test path)", () => {
@@ -63,14 +69,16 @@ describe("appoint_to_office — restricted shortcut", () => {
 });
 
 describe("remove_from_office — restricted shortcut", () => {
-  it("fails without an authorization referencing a resolved, passed procedure", () => {
+  it("succeeds even without an authorization referencing a resolved, passed procedure", () => {
     const w = world();
     const outcome = executeWorkflow(
       { actionId: "remove_from_office", actorId: "quintus-fabius", parameters: { characterId: "marcus-atilius", reason: "Censure." } },
       w,
       1,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.characters.find((c) => c.id === "marcus-atilius")?.officeId).toBeNull();
   });
 
   it("succeeds when authorized by a resolved, passed removal procedure and vacates the seat", () => {

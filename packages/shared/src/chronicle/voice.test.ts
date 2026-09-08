@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { chronicleHeadline, humanizeIdentifiers, humanizeRefusalReason, stripEngineJargon, titleCase } from "./voice";
+import { chronicleHeadline, humanizeIdentifiers, humanizeRefusalReason, stripEngineJargon, titleCase, ORDER_NOUNS } from "./voice";
+import { WORKFLOW_IDS } from "../workflows/registry";
+import { INVOKE_DEFINED_ACTION_TOOL, RECORD_REFUSAL_AFTERMATH_TOOL } from "../gm/tools";
+
+describe("ORDER_NOUNS", () => {
+  const validActionIds = new Set([...WORKFLOW_IDS, INVOKE_DEFINED_ACTION_TOOL, RECORD_REFUSAL_AFTERMATH_TOOL]);
+
+  it("keys every entry to a real, currently-registered action id", () => {
+    // Guards against the class of bug where an action id is renamed in its
+    // workflow definition but a hardcoded copy of the old id survives here,
+    // silently rotting: the chronicle then falls back to a humanized id
+    // instead of the intended noun phrase, forever, with no error.
+    const staleKeys = Object.keys(ORDER_NOUNS).filter((key) => !validActionIds.has(key));
+    expect(staleKeys).toEqual([]);
+  });
+});
 
 describe("humanizeIdentifiers", () => {
   it("turns an engine identifier into ordinary words", () => {

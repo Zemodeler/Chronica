@@ -14,6 +14,14 @@ export interface ResolutionPlayerContext {
     conditions: string;
     rationale: string;
   }[];
+  /** AI-discovered people waiting for the Game Master to materialize with create_world_character. */
+  readonly pendingContactDiscoveries: readonly {
+    characterId: string;
+    name: string;
+    polityId: string | null;
+    locationProvinceId: string;
+    roleLabel: string;
+  }[];
 }
 
 /**
@@ -37,6 +45,7 @@ export function buildPlayerResolutionContext(
     // second copy of a long backstory to every call costs more than it helps.
     lines.push(`  Background: ${kb.biography.slice(0, 500)}`);
     lines.push(`  Key relations: ${kb.relations.slice(0, 8).map((r) => `${r.name} (${r.relationship}: ${r.notes.slice(0, 160)})`).join("; ")}`);
+    lines.push("  A key relation is background until a create_world_character tool call makes that person part of the world. If one needs to speak, act, hold a relationship, or affect the turn, create them through that tool first; never merely narrate them into existence.");
   }
 
   if (context.pendingCommitments.length > 0) {
@@ -44,6 +53,13 @@ export function buildPlayerResolutionContext(
     for (const commitment of context.pendingCommitments.slice(0, 4)) {
       const npcName = world.characters.find((c) => c.id === commitment.npcCharacterId)?.name ?? commitment.npcCharacterId;
       lines.push(`  ${npcName} [id: ${commitment.npcCharacterId}] promised ${commitment.promiseType}: ${commitment.promisedResult.slice(0, 200)}. Conditions: ${commitment.conditions.slice(0, 160)}. Basis: ${commitment.rationale.slice(0, 160)}`);
+    }
+  }
+
+  if (context.pendingContactDiscoveries.length > 0) {
+    lines.push("\nPENDING CONTACT DISCOVERIES (must be materialized through tools):");
+    for (const contact of context.pendingContactDiscoveries.slice(0, 8)) {
+      lines.push(`  ${contact.name} [reserve id: ${contact.characterId}] — ${contact.roleLabel}; location ${contact.locationProvinceId}; polity ${contact.polityId ?? "none"}. Call create_world_character with this exact characterId, name, polityId, and locationProvinceId before treating this person as real. Use provenance createdByDirector: true and explain that the player discovered this contact.`);
     }
   }
 

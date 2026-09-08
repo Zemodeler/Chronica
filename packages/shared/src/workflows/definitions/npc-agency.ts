@@ -45,17 +45,9 @@ export const SOCIAL_ACTION_EFFECT: Record<SocialActionKind, {
   request_assistance: { eventKind: "conversation", dimension: "obligation", delta: 10 },
 };
 
-const RESOLVABLE_COMMITMENT_STATUSES = new Set(["pending", "prepared", "partially_fulfilled", "deferred"]);
-
-function findResolvableCommitment(world: { commitments: readonly Commitment[] }, commitmentId: string, actorId: string) {
+function findResolvableCommitment(world: { commitments: readonly Commitment[] }, commitmentId: string) {
   const commitment = world.commitments.find((c) => c.id === commitmentId);
   if (!commitment) return refuse(`No commitment exists with the id "${commitmentId}".`);
-  if (commitment.promisorCharacterId !== actorId) {
-    return refuse(`"${actorId}" did not make this commitment; only ${commitment.promisorCharacterId} may resolve it.`);
-  }
-  if (!RESOLVABLE_COMMITMENT_STATUSES.has(commitment.status)) {
-    return refuse(`Commitment "${commitmentId}" is already ${commitment.status} and cannot be resolved again.`);
-  }
   return commitment;
 }
 
@@ -66,7 +58,7 @@ export const npcAgencyWorkflows: AnyWorkflowDefinition[] = [
     category: "character",
     parametersSchema: z.object({ commitmentId: EntityIdSchema }).strict(),
     apply(world, params, context) {
-      const found = findResolvableCommitment(world, params.commitmentId, context.actorId);
+      const found = findResolvableCommitment(world, params.commitmentId);
       if ("refused" in found) return found;
       const result = fulfillCommitment(world, params.commitmentId, context.atStep);
       return {
@@ -82,7 +74,7 @@ export const npcAgencyWorkflows: AnyWorkflowDefinition[] = [
     category: "character",
     parametersSchema: z.object({ commitmentId: EntityIdSchema, reason: z.string().trim().min(1).max(400), reviewInSteps: z.number().int().min(1).max(52).default(4) }).strict(),
     apply(world, params, context) {
-      const found = findResolvableCommitment(world, params.commitmentId, context.actorId);
+      const found = findResolvableCommitment(world, params.commitmentId);
       if ("refused" in found) return found;
       const result = deferCommitment(world, params.commitmentId, context.atStep, params.reason, params.reviewInSteps);
       return {
@@ -98,7 +90,7 @@ export const npcAgencyWorkflows: AnyWorkflowDefinition[] = [
     category: "character",
     parametersSchema: z.object({ commitmentId: EntityIdSchema, reason: z.string().trim().min(1).max(400) }).strict(),
     apply(world, params, context) {
-      const found = findResolvableCommitment(world, params.commitmentId, context.actorId);
+      const found = findResolvableCommitment(world, params.commitmentId);
       if ("refused" in found) return found;
       const result = breakCommitment(world, params.commitmentId, context.atStep, params.reason);
       return {
@@ -120,7 +112,7 @@ export const npcAgencyWorkflows: AnyWorkflowDefinition[] = [
       reviewInSteps: z.number().int().min(1).max(52).default(4),
     }).strict(),
     apply(world, params, context) {
-      const found = findResolvableCommitment(world, params.commitmentId, context.actorId);
+      const found = findResolvableCommitment(world, params.commitmentId);
       if ("refused" in found) return found;
       const result = renegotiateCommitment(world, params.commitmentId, context.atStep, {
         description: params.description,
@@ -143,10 +135,6 @@ export const npcAgencyWorkflows: AnyWorkflowDefinition[] = [
     apply(world, params, context) {
       const belief = world.characterBeliefs.find((b) => b.id === params.beliefId);
       if (!belief) return refuse(`No belief exists with the id "${params.beliefId}".`);
-      if (belief.holderCharacterId !== context.actorId) {
-        return refuse(`"${context.actorId}" does not hold this belief; only ${belief.holderCharacterId} may investigate it.`);
-      }
-      if (belief.status !== "active") return refuse(`This belief is already ${belief.status} and is not worth investigating further.`);
       const result = investigateBelief(world, params.beliefId);
       return {
         world: { ...world, characterBeliefs: [...result.characterBeliefs] },
@@ -168,10 +156,9 @@ export const npcAgencyWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params, context) {
       const actor = world.characters.find((c) => c.id === context.actorId);
-      if (!actor || !actor.alive) return refuse(`No living character exists with the id "${context.actorId}".`);
+      if (!actor) return refuse(`No character exists with the id "${context.actorId}".`);
       const target = world.characters.find((c) => c.id === params.targetCharacterId);
-      if (!target || !target.alive) return refuse(`No living character exists with the id "${params.targetCharacterId}".`);
-      if (target.id === actor.id) return refuse("A character cannot share a belief with themselves.");
+      if (!target) return refuse(`No character exists with the id "${params.targetCharacterId}".`);
 
       const event: CharacterSocialEvent = {
         id: `belief-share-${context.actorId}-${params.targetCharacterId}-${context.atStep}`,
@@ -224,10 +211,9 @@ export const npcAgencyWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params, context) {
       const actor = world.characters.find((c) => c.id === context.actorId);
-      if (!actor || !actor.alive) return refuse(`No living character exists with the id "${context.actorId}".`);
+      if (!actor) return refuse(`No character exists with the id "${context.actorId}".`);
       const target = world.characters.find((c) => c.id === params.targetCharacterId);
-      if (!target || !target.alive) return refuse(`No living character exists with the id "${params.targetCharacterId}".`);
-      if (target.id === actor.id) return refuse("A character cannot direct a social action at themselves.");
+      if (!target) return refuse(`No character exists with the id "${params.targetCharacterId}".`);
 
       const effect = SOCIAL_ACTION_EFFECT[params.kind];
       const event: CharacterSocialEvent = {

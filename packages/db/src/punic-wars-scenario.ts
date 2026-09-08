@@ -20,7 +20,7 @@ const italy = [
   ["punic-italy-insubrian-plain", "Insubria", "insubres"],
   ["punic-italy-middle-padus", "Boii", "boii"],
   ["punic-italy-venetian-lagoon", "Veneti", "veneti"],
-  ["punic-italy-etrurian-uplands", "Etruria", "etruscan-cities"],
+  ["punic-italy-etrurian-uplands", "Etruria", "rome"],
   ["punic-italy-umbrian-valleys", "Umbria", "rome"],
   ["punic-italy-picenum-coast", "Picenum", "rome"],
   ["punic-italy-latium", "Latium", "rome"],
@@ -50,7 +50,7 @@ const visibleSettlementsByProvince: Readonly<Record<string, readonly Settlement[
     { id: "settlement-patavium", name: "Patavium", kind: "city", provinceId: "punic-italy-venetian-lagoon", controllerPolityId: "veneti", size: 50, fortificationLevel: 2 },
   ],
   "punic-italy-etrurian-uplands": [
-    { id: "settlement-volsinii", name: "Volsinii", kind: "fortress", provinceId: "punic-italy-etrurian-uplands", controllerPolityId: "etruscan-cities", size: 35, fortificationLevel: 4 },
+    { id: "settlement-volsinii", name: "Volsinii", kind: "fortress", provinceId: "punic-italy-etrurian-uplands", controllerPolityId: "rome", size: 35, fortificationLevel: 4 },
   ],
   "punic-italy-latium": [
     { id: "settlement-rome", name: "Rome", kind: "city", provinceId: "punic-italy-latium", controllerPolityId: "rome", size: 100, fortificationLevel: 6 },
@@ -116,7 +116,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
 
 const initialWorld: WorldState = WorldStateSchema.parse({
   schemaVersion: 1,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 10, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 11, libraryVersion: 1 },
   elapsedStep: 0,
   map: {
     polities: [

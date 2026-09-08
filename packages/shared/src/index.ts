@@ -15,7 +15,6 @@ export * from "./chronicle/political-procedure-description";
 export * from "./chronicle/voice";
 export * from "./workflows/diagnose";
 export * from "./world/diplomacy";
-export * from "./world/polity-leadership";
 export * from "./coins";
 export * from "./continuity/index";
 export * from "./determinism";

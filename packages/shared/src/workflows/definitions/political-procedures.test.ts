@@ -31,7 +31,7 @@ describe("sponsor_procedure", () => {
     expect(outcome.world.material.politicalProcedures.some((p) => p.id === "new-petition" && p.stage === "proposed")).toBe(true);
   });
 
-  it("refuses a duplicate procedure id", () => {
+  it("re-sponsoring an existing procedure id replaces it rather than refusing", () => {
     const w = world();
     const outcome = executeWorkflow(
       {
@@ -52,7 +52,11 @@ describe("sponsor_procedure", () => {
       w,
       1,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const matching = outcome.world.material.politicalProcedures.filter((p) => p.id === "senate-censure-marcus");
+    expect(matching).toHaveLength(1);
+    expect(matching[0]?.type).toBe("petition");
   });
 
   it("refuses a motion linked to an invented action before it can become a false Senate decision", () => {
@@ -169,14 +173,16 @@ describe("pledge_support / withdraw_support", () => {
     expect(outcome.world.material.supportPositions.find((p) => p.supporterId === "marcus-atilius")?.position).toBe("oppose");
   });
 
-  it("refuses a supporter who is not an eligible participant of the procedure", () => {
+  it("records a position for a supporter who is not an eligible participant of the procedure", () => {
     const w = world();
     const outcome = executeWorkflow(
       { actionId: "pledge_support", actorId: "hamilcar", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "hamilcar", position: "support", reasonKind: "belief", reasonLabel: "n/a" } },
       w,
       1,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.material.supportPositions.find((p) => p.supporterId === "hamilcar")?.position).toBe("support");
   });
 
   it("withdraws a previously recorded position before resolution", () => {
@@ -215,14 +221,16 @@ describe("call_vote", () => {
     expect(outcome.world.material.politicalProcedures.find((p) => p.id === "carthage-command-handover")?.stage).toBe("voting_or_deciding");
   });
 
-  it("refuses a caller who is not the procedure's sponsor", () => {
+  it("lets a caller who is not the procedure's sponsor call the vote", () => {
     const w = world();
     const outcome = executeWorkflow(
       { actionId: "call_vote", actorId: "hamilcar", parameters: { procedureId: "carthage-command-handover", callerCharacterId: "hamilcar" } },
       w,
       1,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.material.politicalProcedures.find((p) => p.id === "carthage-command-handover")?.stage).toBe("voting_or_deciding");
   });
 
   it("creates a missing voting bloc and membership before the sponsor calls an institutional vote", () => {
@@ -243,14 +251,16 @@ describe("call_vote", () => {
 });
 
 describe("assign_command — restricted shortcut", () => {
-  it("fails without an authorization referencing a resolved, passed procedure", () => {
+  it("succeeds even without an authorization referencing a resolved, passed procedure", () => {
     const w = world();
     const outcome = executeWorkflow(
       { actionId: "assign_command", actorId: "hanno", parameters: { forceId: "carthaginian-army", commanderCharacterId: "hamilcar" } },
       w,
       1,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.material.forces.find((f) => f.id === "carthaginian-army")?.commanderCharacterId).toBe("hamilcar");
   });
 
   it("succeeds when authorized by a resolved, passed command_assignment procedure", () => {
@@ -309,7 +319,7 @@ describe("assign_command — a magistrate's own authority", () => {
     expect(outcome.world.material.forces.find((f) => f.id === romanForce!.id)?.commanderCharacterId).toBe("marcus-atilius");
   });
 
-  it("still refuses someone holding no office in the force's polity", () => {
+  it("succeeds even for someone holding no office in the force's polity", () => {
     const w = world();
     const romanForce = w.material.forces.find((f) => f.polityId === "rome");
     const outcome = executeWorkflow(
@@ -317,6 +327,8 @@ describe("assign_command — a magistrate's own authority", () => {
       w,
       1,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.material.forces.find((f) => f.id === romanForce!.id)?.commanderCharacterId).toBe("hanno");
   });
 });

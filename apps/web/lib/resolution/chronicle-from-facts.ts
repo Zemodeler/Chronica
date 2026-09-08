@@ -2,7 +2,7 @@ import "server-only";
 
 import type { ChronicleEntryInput } from "@chronica/db";
 import type { FactualEvent, GameMasterTurnReport, WorldState } from "@chronica/shared";
-import { chronicleHeadline, deriveChronicleDepth, humanizeRefusalReason, stripEngineJargon } from "@chronica/shared";
+import { chronicleHeadline, deriveChronicleDepth, humanizeRefusalReason, stripEngineJargon, RECORD_REFUSAL_AFTERMATH_TOOL } from "@chronica/shared";
 
 // Chronicle from facts (GM refactor, requirement 8).
 //
@@ -193,7 +193,7 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
     for (const ref of allRefs) consumed.add(ref);
     const refEvents = refs.map((ref) => byId.get(ref)).filter((event): event is FactualEvent => event !== undefined);
     const applied = refEvents.filter((event) => event.kind === "action" && event.noOp !== true);
-    const namedRefusal = refEvents.find((event) => event.actionId === "record_refusal_aftermath");
+    const namedRefusal = refEvents.find((event) => event.actionId === RECORD_REFUSAL_AFTERMATH_TOOL);
 
     const succeeded = outcome !== undefined && !NON_SUCCESS_OUTCOMES.has(outcome.outcome) && applied.length > 0;
     // Capability requests are internal audit records, never history.  Do not

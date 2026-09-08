@@ -249,7 +249,7 @@ export const economicWorkflows: AnyWorkflowDefinition[] = [
     apply(world, params) {
       if (world.material.holdings.some((h) => h.id === params.holdingId)) return null;
       const holder = world.characters.find((c) => c.id === params.legalHolderCharacterId);
-      if (!holder || !holder.alive) return null;
+      if (!holder) return null;
       const incomeSource = world.material.incomeSources.find((s) => s.id === params.incomeSourceId);
       if (!incomeSource) return null;
       return {

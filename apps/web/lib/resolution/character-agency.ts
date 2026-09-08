@@ -56,10 +56,9 @@ export function hasActiveAgencyState(world: WorldState, characterId: string): bo
  * plan or being skipped entirely.
  *
  * Continuity tier "principal" is earned over several turns of sustained
- * relevance, so gating agency on it alone left a leader seeded THIS turn
- * (`ensurePolityLeadership`) -- with no continuity history yet -- a
- * character the deterministic selector itself just ranked as this turn's
- * most relevant ("persistent") -- and an ordinary "important"-tier NPC the
+ * relevance, so gating agency on it alone would exclude a character the
+ * deterministic selector itself ranked as this turn's most relevant
+ * ("persistent") -- and an ordinary "important"-tier NPC the
  * scenario itself gave a real stake in something (a goal, a plot, a pressure)
  * -- silent for no reason but bookkeeping lag. All three are treated as
  * eligible here, alongside the existing continuity-earned "principal" path.
@@ -69,11 +68,10 @@ export function hasActiveAgencyState(world: WorldState, characterId: string): bo
  */
 export function isEligibleForNpcAgency(
   continuityTier: ContinuityTier | undefined,
-  isSeededThisTurn: boolean,
   selectionTier: CharacterSelectionTier,
   hasActiveAgencyStateFlag: boolean,
 ): boolean {
-  return continuityTier === "principal" || isSeededThisTurn || selectionTier === "persistent" || hasActiveAgencyStateFlag;
+  return continuityTier === "principal" || selectionTier === "persistent" || hasActiveAgencyStateFlag;
 }
 
 /** A subset match: every key the proposal named must agree; the executed call may carry additional fields the proposal did not constrain. */

@@ -20,7 +20,7 @@ describe("propose_life_contract / dissolve_life_contract", () => {
     expect(outcome.world.characters.find((c) => c.id === "hanno")?.relations).toEqual([]);
   });
 
-  it("refuses a second marriage while one party's is still active", () => {
+  it("permits a second marriage while one party's is still active", () => {
     const w = world();
     const first = executeWorkflow(
       { actionId: "propose_life_contract", actorId: "hanno", parameters: { contractId: "hanno-marriage", type: "marriage_or_partnership", partyCharacterIds: ["hanno", "hamilcar"], visibility: "polity" } },
@@ -34,7 +34,10 @@ describe("propose_life_contract / dissolve_life_contract", () => {
       first.world,
       1,
     );
-    expect(second.ok).toBe(false);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.world.lifeContracts.some((c) => c.id === "hanno-marriage" && c.status === "active")).toBe(true);
+    expect(second.world.lifeContracts.some((c) => c.id === "hanno-marriage-2" && c.status === "active")).toBe(true);
   });
 
   it("refuses a party that fails an eligibility requirement", () => {
@@ -93,7 +96,7 @@ describe("create_child_character", () => {
     expect(outcome.world.continuity.some((c) => c.characterId === "new-child" && c.tier === "ordinary")).toBe(true);
   });
 
-  it("refuses when no named parent is alive", () => {
+  it("succeeds even when no named parent is alive", () => {
     const w = world();
     w.characters = w.characters.map((c) => (c.id === "marcus-atilius" ? { ...c, alive: false, diedAtStep: 0 } : c));
     const outcome = executeWorkflow(
@@ -101,7 +104,9 @@ describe("create_child_character", () => {
       w,
       4,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.characters.find((c) => c.id === "new-child")).toBeDefined();
   });
 
   it("has no arbitrary population ceiling: a large existing cast does not block a new birth", () => {

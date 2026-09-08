@@ -1,21 +1,13 @@
 import { z } from "zod";
-import { EntityIdSchema, type Force } from "../../material-state";
+import { EntityIdSchema } from "../../material-state";
 import { DetailTierSchema, SettlementKindSchema } from "../../world/map";
 import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
-
-const allSettlements = (world: Parameters<AnyWorkflowDefinition["apply"]>[0]) =>
-  world.map.provinces.flatMap((province) => province.settlements.map((settlement) => ({ settlement, province })));
-
-/** A force with at least one living soldier still fit to fight -- a record reduced to zero fit everywhere is not a defender any more. */
-function forceIsLive(force: Force): boolean {
-  return force.personnel.some((category) => category.fit > 0);
-}
 
 export const mapWorkflows: AnyWorkflowDefinition[] = [
   defineWorkflow({
     id: "change_province_control",
     description:
-      "Transfer control of a province to a different polity, adjusting firmness. Refused unless the province is verifiably undefended and reachable: a living force of the new controller must already stand there, and no living force of any other power may. A province with a real defending force still present must be taken by a decisive siege or battle first, or ceded diplomatically with give_territory.",
+      "Transfer control of a province to a different polity, adjusting firmness. Does no verification of defenders or reachability -- it simply sets the new controller. A siege, battle, or diplomatic cession (give_territory) is how such a change would normally be earned; use this to record the resulting fact.",
     category: "map",
     parametersSchema: z.object({
       provinceId: EntityIdSchema,
@@ -33,31 +25,6 @@ export const mapWorkflows: AnyWorkflowDefinition[] = [
         if (!polity) {
           const known = world.map.polities.map((p) => `${p.name} (${p.id})`).join("; ");
           return refuse(`No power exists with the id "${params.newControllerPolityId}" to take control. The powers that exist are: ${known}.`);
-        }
-      }
-
-      // A conquest, not merely a firmness adjustment: control is actually
-      // changing to a real new power. This is the one path this workflow
-      // offers for "the ground was undefended and my army already stands on
-      // it" (docs/14 Phase 1 rule 10) -- so it is the one place that claim
-      // is verified, not narrated. A cession where the old power still has
-      // troops present belongs to give_territory's diplomatic-authorization
-      // path instead; this workflow never bypasses a real defender.
-      if (params.newControllerPolityId !== null && params.newControllerPolityId !== province.controllerPolityId) {
-        const forcesPresent = world.material.forces.filter((f) => f.locationId === province.id && forceIsLive(f));
-        const opposing = forcesPresent.filter((f) => f.polityId !== params.newControllerPolityId);
-        if (opposing.length > 0) {
-          return refuse(
-            `${province.name} is not undefended: ${opposing.map((f) => `${f.name} (${f.polityId})`).join(", ")} still stands there. `
-            + "It cannot be handed to a new power by fiat. Win a siege (start_siege, end_siege) or a decisive battle first, or cede it diplomatically with give_territory and an accepted message.",
-          );
-        }
-        const attackerPresent = forcesPresent.some((f) => f.polityId === params.newControllerPolityId);
-        if (!attackerPresent) {
-          const newControllerName = world.map.polities.find((p) => p.id === params.newControllerPolityId)?.name ?? params.newControllerPolityId;
-          return refuse(
-            `No force of ${newControllerName} stands in ${province.name}, so there is nothing to confirm as having taken it unopposed. Move a force there first, or resolve a siege, battle, or diplomatic cession (give_territory).`,
-          );
         }
       }
 
@@ -213,7 +180,6 @@ export const mapWorkflows: AnyWorkflowDefinition[] = [
     apply(world, params) {
       const province = world.map.provinces.find((p) => p.id === params.provinceId);
       if (!province) return null;
-      if (allSettlements(world).some(({ settlement }) => settlement.id === params.settlementId)) return null;
       if (params.controllerPolityId !== null && !world.map.polities.some((p) => p.id === params.controllerPolityId)) return null;
       const newSettlement = {
         id: params.settlementId,
@@ -230,7 +196,9 @@ export const mapWorkflows: AnyWorkflowDefinition[] = [
           map: {
             ...world.map,
             provinces: world.map.provinces.map((p) =>
-              p.id === params.provinceId ? { ...p, settlements: [...p.settlements, newSettlement] } : p,
+              p.id === params.provinceId
+                ? { ...p, settlements: [...p.settlements.filter((s) => s.id !== params.settlementId), newSettlement] }
+                : p,
             ),
           },
         },
@@ -333,7 +301,6 @@ export const mapWorkflows: AnyWorkflowDefinition[] = [
     apply(world, params) {
       const source = world.map.provinces.find((p) => p.id === params.sourceProvinceId);
       if (!source) return null;
-      if (world.map.provinces.some((p) => p.id === params.newProvinceId)) return null;
       const movedSet = new Set(params.movedSettlementIds);
       if (!params.movedSettlementIds.every((id) => source.settlements.some((s) => s.id === id))) return null;
       const movedSettlements = source.settlements
@@ -355,11 +322,13 @@ export const mapWorkflows: AnyWorkflowDefinition[] = [
           map: {
             ...world.map,
             provinces: [
-              ...world.map.provinces.map((p) =>
-                p.id === params.sourceProvinceId
-                  ? { ...p, settlements: p.settlements.filter((s) => !movedSet.has(s.id)) }
-                  : p,
-              ),
+              ...world.map.provinces
+                .filter((p) => p.id !== params.newProvinceId)
+                .map((p) =>
+                  p.id === params.sourceProvinceId
+                    ? { ...p, settlements: p.settlements.filter((s) => !movedSet.has(s.id)) }
+                    : p,
+                ),
               newProvince,
             ],
           },
@@ -426,7 +395,12 @@ export const mapWorkflows: AnyWorkflowDefinition[] = [
     apply(world, params) {
       const province = world.map.provinces.find((p) => p.id === params.provinceId);
       if (!province) return null;
-      if (province.tier === params.newTier) return null;
+      if (province.tier === params.newTier) {
+        return {
+          world,
+          result: { summary: `${province.name} is already at ${params.newTier} detail.`, applied: true, noOp: true },
+        };
+      }
       return {
         world: {
           ...world,

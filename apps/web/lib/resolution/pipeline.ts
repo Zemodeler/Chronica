@@ -23,9 +23,9 @@ import type {
   WorldState,
 } from "@chronica/shared";
 import {
+  executeWorkflow,
   executeWorkflows,
   selectRelevantCharacters,
-  materializePlayerCharacter,
   applySocialEvents,
   advancePressureLifecycle,
   derivePressureTriggers,
@@ -61,10 +61,10 @@ import {
   applyRevisionDirectives,
   ensureProvinceMaterial,
   ensureCharacterAccounts,
-  ensurePolityLeadership,
   advanceProvinceMaterial,
   applyWarDamageForExecutedWorkflows,
   deriveChronicleDepth,
+  RECORD_REFUSAL_AFTERMATH_TOOL,
   type OrderRefusalFact,
   type ScenarioChronicleRules,
   type ScenarioClock,
@@ -111,8 +111,6 @@ import type { FormedNpcProposal } from "./character-agency";
 import { materializeCanvasProvince } from "../canvas-world";
 import { advanceWorldDynamics } from "./world-dynamics";
 import { selectDevelopmentActors } from "./world-development-scheduler";
-import { applyMilitaryEmergencyFallback } from "./military-emergency-fallback";
-import { applyCommitmentSafetyNet } from "./commitment-safety-net";
 
 export type ProgressCallback = (progress: ResolutionProgress) => void;
 
@@ -331,9 +329,15 @@ export async function resolveTurn(
     const gameMasterAdapter = coinGatedAdapter;
     const playerKnowledgebase = await getCharacterKnowledgebase(db, gameId, playerId).catch(() => null);
     const pendingCommitments = await listPendingNpcCommitments(db, gameId);
-    const resolutionContext: ResolutionPlayerContext = { knowledgebase: playerKnowledgebase, pendingCommitments };
     const canvasWorld = materializeCanvasProvince(world, input.mapAssetId ?? null, playerKnowledgebase?.locationProvinceId ?? null);
-    const materializedWorld = materializePlayerCharacter(canvasWorld, actorCharacterId, playerKnowledgebase, input.scenarioGovernment);
+    if (playerKnowledgebase === null) throw new Error("The submitted player has no confirmed character knowledgebase.");
+    const playerMaterialization = executeWorkflow({
+      actionId: "materialize_declared_player",
+      actorId: "system",
+      parameters: { characterId: actorCharacterId, knowledgebase: playerKnowledgebase, ...(input.scenarioGovernment === undefined ? {} : { scenarioGovernment: input.scenarioGovernment }) },
+    }, canvasWorld, canvasWorld.elapsedStep + 1);
+    if (!playerMaterialization.ok) throw new Error(`The submitted player could not enter the world: ${playerMaterialization.message}`);
+    const materializedWorld = playerMaterialization.world;
 
     // ── Step 0: Apply pending dialogue social events ────────────────────────
     //
@@ -344,9 +348,25 @@ export async function resolveTurn(
     // dialogue insult, a promise, or a discovered NPC only ever becomes real
     // through the same committed-turn path every other world mutation uses.
     const pendingSocialEvents = await listUnappliedCharacterSocialEvents(db, gameId);
+    // Discovery is a request for the Game Master to use create_world_character,
+    // not an implicit character mutation. Keep it pending until that tool has
+    // created the reserved id on the staged world.
+    const pendingContactEvents = pendingSocialEvents.filter((event) => event.kind === "discovery" && event.introducedCharacter !== null);
+    const pendingContactDiscoveries = pendingContactEvents.map((event) => ({
+      characterId: event.introducedCharacter!.id,
+      name: event.introducedCharacter!.name,
+      polityId: event.introducedCharacter!.polityId,
+      locationProvinceId: event.introducedCharacter!.locationProvinceId,
+      roleLabel: event.introducedProfile?.roleLabel ?? "contact",
+    }));
+    const pendingContactIds = new Set(pendingContactDiscoveries.map((contact) => contact.characterId));
+    const resolutionContext: ResolutionPlayerContext = { knowledgebase: playerKnowledgebase, pendingCommitments, pendingContactDiscoveries };
     const socialEventOutcome = applySocialEvents(
       materializedWorld,
-      pendingSocialEvents,
+      pendingSocialEvents.filter((event) =>
+        (event.kind !== "discovery" || event.introducedCharacter === null)
+        && !event.participantCharacterIds.some((characterId) => pendingContactIds.has(characterId)),
+      ),
       materializedWorld.elapsedStep + 1,
       turnId,
     );
@@ -363,22 +383,12 @@ export async function resolveTurn(
       characters: [...pressureAdvanced.characters],
       characterPressures: [...pressureAdvanced.characterPressures],
     }, materializedWorld.elapsedStep + 1));
-    // A power the player has walked into, written to, or gone to war with
-    // needs somebody to be. Scenarios name people only for the powers their
-    // author cared about, and every tool in the engine needs an actor -- so
-    // without this a march into the Boii met a polity that was mechanically
-    // incapable of noticing. Seeded before the Game Master reads the world,
-    // so the leader is in its working set the same turn the player provokes
-    // them. Idempotent: a power that already has anyone living is untouched.
-    const leadership = ensurePolityLeadership(backfilled, materializedWorld.elapsedStep + 1);
-    for (const leader of leadership.seeded) {
-      console.log(`${tag()} [leadership] seeded "${leader.characterName}" for ${leader.polityName} (${leader.trigger})`);
-    }
     // Turn foreign occupations and Roman public business into durable,
-    // state-backed pressures before character selection.  The Game Master
-    // therefore receives leaders who have something concrete to answer this
-    // turn, rather than merely a map that it may choose to ignore.
-    const worldDynamics = advanceWorldDynamics(leadership.world, materializedWorld.elapsedStep + 1);
+    // state-backed pressures before character selection.  A power without a
+    // living representative stays visible as a real problem for the Game
+    // Master to solve with create_world_character; the pipeline never casts
+    // one on the model's behalf.
+    const worldDynamics = advanceWorldDynamics(backfilled, materializedWorld.elapsedStep + 1);
     const resolutionWorld: WorldState = worldDynamics.world;
     const actor = resolutionWorld.characters.find((character) => character.id === actorCharacterId)!;
     console.log(
@@ -411,28 +421,7 @@ export async function resolveTurn(
       undefined,
       pendingCommitments.map((commitment) => commitment.npcCharacterId),
     );
-    // A leader seeded this turn has no history for the scorer to weigh, so it
-    // would rank them nowhere -- and the power the player just provoked would
-    // be silent again, for a new reason. They are the most relevant figures on
-    // the board this turn by construction, so they are added outright.
-    const selectedCharacters: SelectedCharacter[] = [
-      ...leadership.seeded
-        .filter((leader) => !scoredCharacters.some((selected) => selected.characterId === leader.characterId))
-        .map((leader) => ({
-          characterId: leader.characterId,
-          tier: "important" as const,
-          relevanceScore: 700,
-          actionAllowance: 5,
-          reasons: [
-            leader.trigger === "invaded"
-              ? `${leader.polityName} has a foreign army on its ground and has just found a voice to answer with`
-              : leader.trigger === "addressed"
-                ? `${leader.polityName} has been addressed directly and owes an answer`
-                : `${leader.polityName} is at war and must conduct it`,
-          ],
-        })),
-      ...scoredCharacters,
-    ];
+    const selectedCharacters: SelectedCharacter[] = [...scoredCharacters];
     // Background reviews have their own small allocation; player activity cannot displace them.
     const developmentActors = selectDevelopmentActors(resolutionWorld, atStep, actorCharacterId);
     for (const selected of developmentActors) {
@@ -618,14 +607,9 @@ export async function resolveTurn(
     const intents: CharacterIntent[] = [];
     const candidateByIntentId = new Map<string, CandidateAction>();
 
-    // Brennos, freshly named for an invaded or addressed power, has no
-    // continuity history yet but is the most relevant actor on the board
-    // this turn by construction -- see `isEligibleForNpcAgency`.
-    const seededCharacterIds = new Set(leadership.seeded.map((leader) => leader.characterId));
-
     // Bounded to this turn's already-selected, already-capped working set
     // (`selectRelevantCharacters`, max 8) -- only characters eligible for
-    // agency (continuity "principal", newly seeded, or top-tier "persistent"
+    // agency (continuity "principal" or top-tier "persistent"
     // selection) get full candidate generation and up to one primary action;
     // "remembered" characters only advance their existing coarse plan;
     // everyone else (or unselected characters) gets none.
@@ -633,7 +617,7 @@ export async function resolveTurn(
       const character = agencyWorld.characters.find((c) => c.id === selected.characterId);
       if (!character || !character.alive) continue;
       const continuityEntry = agencyWorld.continuity.find((c) => c.characterId === character.id);
-      if (!isEligibleForNpcAgency(continuityEntry?.tier, seededCharacterIds.has(character.id), selected.tier, hasActiveAgencyState(agencyWorld, character.id))) continue;
+      if (!isEligibleForNpcAgency(continuityEntry?.tier, selected.tier, hasActiveAgencyState(agencyWorld, character.id))) continue;
 
       const owed = dueThisTurn.filter((c) => c.promisorCharacterId === character.id);
       const candidates = generateCandidateActions({ world: agencyWorld, character, atStep, commitments: owed });
@@ -752,6 +736,25 @@ export async function resolveTurn(
       allowInventedActions: process.env.CHRONICA_ALLOW_INVENTED_ACTIONS === "true",
     });
     let newWorld: WorldState = gameMasterOutcome.world;
+    // Now that the Game Master has had the pending discovery requests, fold
+    // only those whose reserved id it created into the social-event ledger.
+    // Uncalled requests remain proposed for the next turn; they cannot add a
+    // character merely because a prior AI response mentioned one.
+    const materializedContactEvents = pendingContactEvents.filter((event) =>
+      newWorld.characters.some((character) => character.id === event.introducedCharacter!.id),
+    );
+    const contactSocialOutcome = applySocialEvents(newWorld, materializedContactEvents, atStep, turnId);
+    newWorld = contactSocialOutcome.world;
+    // Dialogue with a just-discovered person may already be queued. Apply it
+    // only after the Game Master actually created that person; otherwise it
+    // remains pending instead of being rejected for an absent participant.
+    const readyContactDialogueEvents = pendingSocialEvents.filter((event) =>
+      event.kind !== "discovery"
+      && event.participantCharacterIds.some((characterId) => pendingContactIds.has(characterId))
+      && event.participantCharacterIds.every((characterId) => newWorld.characters.some((character) => character.id === characterId)),
+    );
+    const contactDialogueOutcome = applySocialEvents(newWorld, readyContactDialogueEvents, atStep, turnId);
+    newWorld = contactDialogueOutcome.world;
     let factualEvents = [
       ...gameMasterOutcome.events,
       ...worldDynamics.events.map((event, index) => ({ ...event, id: `fact-${atStep}-${gameMasterOutcome.events.length + index + 1}` })),
@@ -886,90 +889,6 @@ export async function resolveTurn(
       }
     }
 
-    // ── Step 6b: Deterministic military-emergency fallback ────────────────
-    //
-    // The Game Master is prompted to answer an invasion, but a prompt is not
-    // a guarantee: it can spend its budget elsewhere, rank a lower-value
-    // action higher, or fail outright (model_stopped / a budget limit /
-    // a provider error). An invaded polity with a leader and no response of
-    // its own by this point in the turn gets one here, deterministically --
-    // never in place of a real response the Game Master or a political
-    // procedure already gave it this turn, only in the absence of one.
-    const respondedThisTurn: ProposedInvocation[] = [
-      ...gameMasterOutcome.executedInvocations,
-      ...politicalInvocations,
-      ...immediatePoliticalInvocations,
-    ];
-    const militaryFallback = applyMilitaryEmergencyFallback(newWorld, atStep, respondedThisTurn);
-    newWorld = militaryFallback.world;
-    if (militaryFallback.events.length > 0) {
-      factualEvents = [
-        ...factualEvents,
-        ...militaryFallback.events.map((event, index) => ({ ...event, id: `fact-${atStep}-fallback-${index + 1}` })),
-      ];
-    }
-    for (const entry of militaryFallback.invocations) {
-      allWorkflowLog = [...allWorkflowLog, { invocation: entry.invocation, outcome: entry.ok ? { ok: true, result: { summary: entry.summary } } : { ok: false, message: entry.summary } }];
-      finalWorkflowAudit = {
-        ...finalWorkflowAudit,
-        candidates: [
-          ...finalWorkflowAudit.candidates,
-          {
-            correlationId: `military-fallback-${atStep}-${entry.invocation.actorId}`,
-            source: "simulator" as const,
-            sourceRef: "military_emergency_fallback",
-            requestedActionId: entry.invocation.actionId,
-            requestedInvocation: entry.invocation,
-            finalInvocation: entry.invocation,
-            dryRunOk: entry.ok,
-            executionOk: entry.ok,
-            ...(entry.ok ? {} : { executionReason: entry.summary }),
-          },
-        ],
-      };
-      if (entry.ok) {
-        console.log(`${tag()} [military_emergency_fallback] actorId=${entry.invocation.actorId} actionId=${entry.invocation.actionId} summary="${entry.summary}"`);
-      } else {
-        console.log(`${tag()} [military_emergency_fallback] no legal response available for actorId=${entry.invocation.actorId}: ${entry.summary}`);
-      }
-    }
-
-    // ── Step 6c: Deterministic commitment safety net ──────────────────────
-    //
-    // Resolving a due commitment is now the Game Master's own choice
-    // (`fulfill_commitment`/`defer_commitment`/`break_commitment`, docs/30),
-    // so a commitment it never gets to -- or chooses not to act on -- needs a
-    // backstop against sitting unresolved forever. Auto-defers only, and only
-    // once a commitment has gone unaddressed for `GRACE_WINDOW_STEPS` past its
-    // own review step; see commitment-safety-net.ts for the full rationale.
-    const commitmentSafetyNet = applyCommitmentSafetyNet(newWorld, atStep);
-    newWorld = commitmentSafetyNet.world;
-    if (commitmentSafetyNet.events.length > 0) {
-      factualEvents = [
-        ...factualEvents,
-        ...commitmentSafetyNet.events.map((event, index) => ({ ...event, id: `fact-${atStep}-commitment-safety-net-${index + 1}` })),
-      ];
-      finalWorkflowAudit = {
-        ...finalWorkflowAudit,
-        candidates: [
-          ...finalWorkflowAudit.candidates,
-          ...commitmentSafetyNet.events.map((event) => ({
-            correlationId: `commitment-safety-net-${atStep}-${event.actorId}-${event.parameters["commitmentId"]}`,
-            source: "simulator" as const,
-            sourceRef: "commitment_safety_net",
-            requestedActionId: event.actionId,
-            requestedInvocation: { actionId: event.actionId, actorId: event.actorId, parameters: event.parameters },
-            finalInvocation: { actionId: event.actionId, actorId: event.actorId, parameters: event.parameters },
-            dryRunOk: true,
-            executionOk: true,
-          })),
-        ],
-      };
-      for (const event of commitmentSafetyNet.events) {
-        console.log(`${tag()} [commitment_safety_net] actorId=${event.actorId} ${event.summary}`);
-      }
-    }
-
     newWorld = autoResolveDecidedStorylines(world, newWorld, atStep);
 
     // Background material society (docs/14 Phase 2): coarse war damage for
@@ -1078,7 +997,7 @@ export async function resolveTurn(
     // request. Do not also print the generic engine-only refusal beside it.
     const refusalsWithNamedAftermath = new Set(
       factualEvents
-        .filter((event) => event.actionId === "record_refusal_aftermath")
+        .filter((event) => event.actionId === RECORD_REFUSAL_AFTERMATH_TOOL)
         .map((event) => [String(event.parameters["requesterCharacterId"]), String(event.parameters["rejectedActionId"])].join("::")),
     );
     const orderRefusalChronicle: ChronicleEntryInput[] = orderProjection.refusals
@@ -1194,7 +1113,7 @@ export async function resolveTurn(
     // twice, under two different headlines.
     const proceduresOpenedByFact = new Set(
       factualEvents
-        .filter((event) => event.actionId === "open_political_procedure" && typeof event.parameters["procedureId"] === "string")
+        .filter((event) => event.actionId === "sponsor_procedure" && typeof event.parameters["procedureId"] === "string")
         .map((event) => event.parameters["procedureId"] as string),
     );
     for (const procedure of newWorld.material.politicalProcedures) {
@@ -1481,8 +1400,9 @@ export async function resolveTurn(
       }
       return map;
     };
+    const appliedSocialEventIds = [...socialEventOutcome.appliedIds, ...contactSocialOutcome.appliedIds, ...contactDialogueOutcome.appliedIds];
     const appliedSocialEventSummaries = pendingSocialEvents
-      .filter((event) => socialEventOutcome.appliedIds.includes(event.id))
+      .filter((event) => appliedSocialEventIds.includes(event.id))
       .map((event) => ({ id: event.id, kind: event.kind, participantCharacterIds: event.participantCharacterIds }));
     const warringPolityIds = new Set(newWorld.conflicts.wars.flatMap((w) => [w.polityAId, w.polityBId]));
     const pressureTriggers = derivePressureTriggers({
@@ -1609,11 +1529,11 @@ export async function resolveTurn(
 
     // Guarded by `WHERE status = 'proposed'` inside the query itself, so this
     // can never re-apply an event a concurrent resolution already committed.
-    for (const profile of socialEventOutcome.introducedProfiles) {
+    for (const profile of [...socialEventOutcome.introducedProfiles, ...contactSocialOutcome.introducedProfiles, ...contactDialogueOutcome.introducedProfiles]) {
       await upsertCharacterProfile(db, profile);
     }
-    await markCharacterSocialEventsApplied(db, socialEventOutcome.appliedIds, atStep, turnId);
-    await markCharacterSocialEventsRejected(db, socialEventOutcome.rejectedIds);
+    await markCharacterSocialEventsApplied(db, appliedSocialEventIds, atStep, turnId);
+    await markCharacterSocialEventsRejected(db, [...socialEventOutcome.rejectedIds, ...contactSocialOutcome.rejectedIds, ...contactDialogueOutcome.rejectedIds]);
 
     const playerProvinceId = resolutionWorld.characters.find((c) => c.id === actorCharacterId)?.locationProvinceId;
     const playerPolityId = resolutionWorld.characters.find((c) => c.id === actorCharacterId)?.polityId;

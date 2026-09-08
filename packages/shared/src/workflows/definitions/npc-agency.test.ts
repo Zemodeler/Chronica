@@ -42,15 +42,15 @@ describe("fulfill_commitment", () => {
     expect(outcome.world.commitments.find((c) => c.id === "marcus-pays-hanno")?.status).toBe("fulfilled");
   });
 
-  it("refuses anyone but the promisor", () => {
+  it("permits anyone, not only the promisor, to fulfill it", () => {
     const outcome = executeWorkflow(
       { actionId: "fulfill_commitment", actorId: "hanno", parameters: { commitmentId: "marcus-pays-hanno" } },
       world(),
       1,
     );
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toContain("only marcus-atilius may resolve it");
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.commitments.find((c) => c.id === "marcus-pays-hanno")?.status).toBe("fulfilled");
   });
 
   it("refuses an unknown commitment", () => {
@@ -62,7 +62,7 @@ describe("fulfill_commitment", () => {
     expect(outcome.ok).toBe(false);
   });
 
-  it("refuses a commitment already resolved", () => {
+  it("permits fulfilling a commitment already resolved, rather than refusing", () => {
     const already = executeWorkflow(
       { actionId: "fulfill_commitment", actorId: "marcus-atilius", parameters: { commitmentId: "marcus-pays-hanno" } },
       world(),
@@ -75,9 +75,9 @@ describe("fulfill_commitment", () => {
       already.world,
       2,
     );
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toContain("already fulfilled");
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.commitments.find((c) => c.id === "marcus-pays-hanno")?.status).toBe("fulfilled");
   });
 
   // docs/30: a replay fixture -- the same command against the same snapshot
@@ -105,13 +105,13 @@ describe("defer_commitment", () => {
     expect(outcome.world.material.accounts.find((a) => a.id === "marcus-purse")?.balance).toBe(1_200);
   });
 
-  it("refuses anyone but the promisor", () => {
+  it("permits anyone, not only the promisor, to defer it", () => {
     const outcome = executeWorkflow(
       { actionId: "defer_commitment", actorId: "hanno", parameters: { commitmentId: "marcus-pays-hanno", reason: "n/a" } },
       world(),
       1,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
   });
 });
 
@@ -128,13 +128,13 @@ describe("break_commitment", () => {
     expect(outcome.world.characterPressures.some((p) => p.characterId === "marcus-atilius" && p.kind === "humiliation")).toBe(true);
   });
 
-  it("refuses anyone but the promisor", () => {
+  it("permits anyone, not only the promisor, to break it", () => {
     const outcome = executeWorkflow(
       { actionId: "break_commitment", actorId: "hanno", parameters: { commitmentId: "marcus-pays-hanno", reason: "n/a" } },
       world(),
       1,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
   });
 });
 
@@ -153,13 +153,13 @@ describe("record_character_social_action", () => {
     expect(cause?.dimensions?.fear).toBe(15);
   });
 
-  it("refuses a character directing a social action at themselves", () => {
+  it("permits a character directing a social action at themselves", () => {
     const outcome = executeWorkflow(
       { actionId: "record_character_social_action", actorId: "marcus-atilius", parameters: { targetCharacterId: "marcus-atilius", kind: "reconcile", reasonLabel: "n/a" } },
       world(),
       1,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
   });
 
   it("refuses an unknown target", () => {
@@ -219,13 +219,13 @@ describe("renegotiate_commitment", () => {
     expect(outcome.ok).toBe(false);
   });
 
-  it("refuses anyone but the promisor", () => {
+  it("permits anyone, not only the promisor, to renegotiate it", () => {
     const outcome = executeWorkflow(
       { actionId: "renegotiate_commitment", actorId: "hanno", parameters: { commitmentId: "marcus-pays-hanno", description: "n/a" } },
       world(),
       1,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
   });
 
   it("produces byte-identical resulting state given the same snapshot and parameters", () => {
@@ -254,9 +254,9 @@ describe("investigate", () => {
     expect(outcome.world.characterBeliefs.find((b) => b.id === "b1")?.confidence).toBe(45);
   });
 
-  it("refuses anyone but the belief's own holder", () => {
+  it("permits anyone, not only the belief's own holder, to investigate it", () => {
     const outcome = executeWorkflow({ actionId: "investigate", actorId: "hanno", parameters: { beliefId: "b1" } }, withBelief(), 1);
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
   });
 
   it("refuses an unknown belief", () => {
@@ -286,13 +286,13 @@ describe("spread_belief", () => {
     expect(belief?.kind).toBe("rumour");
   });
 
-  it("refuses a character sharing a belief with themselves", () => {
+  it("permits a character sharing a belief with themselves", () => {
     const outcome = executeWorkflow(
       { actionId: "spread_belief", actorId: "marcus-atilius", parameters: { targetCharacterId: "marcus-atilius", subjectEntityId: null, claim: "n/a", kind: "rumour" } },
       world(),
       1,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
   });
 
   it("refuses an unknown target", () => {

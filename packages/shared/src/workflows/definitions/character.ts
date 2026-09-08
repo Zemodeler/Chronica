@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { EntityIdSchema } from "../../material-state";
 import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
-import { requireProcedureAuthorization } from "./political-procedures";
 import { vacateOfficeSeatsFor } from "../../characters/succession";
 
 export const characterWorkflows: AnyWorkflowDefinition[] = [
@@ -15,7 +14,7 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params, context) {
       const character = world.characters.find((c) => c.id === params.characterId);
-      if (!character || !character.alive) return null;
+      if (!character) return null;
       return {
         world: {
           ...world,
@@ -44,8 +43,7 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params, context) {
       const character = world.characters.find((c) => c.id === params.characterId);
-      if (!character || !character.alive) return null;
-      if (character.disqualifyingStatuses.includes("incapacitated")) return null;
+      if (!character) return null;
       return {
         world: {
           ...world,
@@ -73,7 +71,7 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params) {
       const character = world.characters.find((c) => c.id === params.characterId);
-      if (!character || !character.disqualifyingStatuses.includes("incapacitated")) return null;
+      if (!character) return null;
       return {
         world: {
           ...world,
@@ -101,8 +99,7 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params, context) {
       const character = world.characters.find((c) => c.id === params.characterId);
-      if (!character || !character.alive) return null;
-      if (character.disqualifyingStatuses.includes("retired")) return null;
+      if (!character) return null;
       return {
         world: {
           ...world,
@@ -132,7 +129,7 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params) {
       const character = world.characters.find((c) => c.id === params.characterId);
-      if (!character || !character.alive) return null;
+      if (!character) return null;
       const next = Math.max(0, character.healthBps - params.healthLossBps);
       return {
         world: {
@@ -159,7 +156,7 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params) {
       const character = world.characters.find((c) => c.id === params.characterId);
-      if (!character || !character.alive) return null;
+      if (!character) return null;
       const next = Math.min(10_000, character.healthBps + params.healthGainBps);
       return {
         world: {
@@ -217,19 +214,10 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
     apply(world, params) {
       const character = world.characters.find((c) => c.id === params.characterId);
       if (!character) return refuse(`No character exists with the id "${params.characterId}".`);
-      if (!character.alive) return refuse(`${character.name} is dead; the record of a dead figure is not rewritten.`);
       if (character.name === params.newName) {
         return { world, result: { summary: `${character.name} keeps the name they already bear.`, applied: true, noOp: true } };
       }
-      const taken = world.characters.some((c) => c.alive && c.id !== character.id && c.name === params.newName);
-      if (taken) return refuse(`Another living character is already called ${params.newName}. Two people of one name in one record cannot be told apart.`);
-      // A polity leader seeded by ensurePolityLeadership is bookkeeping for a
-      // person who was already there, not their arrival in the world. Naming
-      // that existing leader must therefore be recorded as an identification,
-      // so the Chronicle cannot plausibly recast it as their sudden emergence.
-      const summary = character.createdByDirector === true
-        ? `The existing leader of ${world.map.polities.find((polity) => polity.id === character.polityId)?.name ?? "their people"} is identified in the record as ${params.newName}.`
-        : `${character.name} is known thereafter as ${params.newName}.`;
+      const summary = `${character.name} is known thereafter as ${params.newName}.`;
       return {
         world: {
           ...world,
@@ -250,7 +238,7 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params) {
       const character = world.characters.find((c) => c.id === params.characterId);
-      if (!character || !character.alive) return null;
+      if (!character) return null;
       const province = world.map.provinces.find((p) => p.id === params.destinationProvinceId);
       if (!province) return null;
       return {
@@ -280,15 +268,10 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
       authorization: z.object({ procedureId: EntityIdSchema }).optional(),
     }).strict(),
     apply(world, params, context) {
-      const authorized = requireProcedureAuthorization(world.material.politicalProcedures, context.actorId, "appoint_to_office", params.authorization);
-      if (authorized === null) return null;
       const character = world.characters.find((c) => c.id === params.characterId);
-      if (!character || !character.alive) return null;
-      // Two actors cannot occupy one exclusive office seat: a seat already
-      // held by someone else must be vacated (removal/expiry) before this can succeed.
+      if (!character) return null;
       const seat = world.material.officeSeats.find((s) => s.officeId === params.officeId && s.seatIndex === 0);
-      if (seat !== undefined && seat.status === "held" && seat.holderCharacterId !== params.characterId) return null;
-      const procedureId = authorized !== "system" ? authorized.id : null;
+      const procedureId = params.authorization?.procedureId ?? null;
       return {
         world: {
           ...world,
@@ -346,13 +329,11 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
       reason: z.string().min(1).max(240),
       authorization: z.object({ procedureId: EntityIdSchema }).optional(),
     }).strict(),
-    apply(world, params, context) {
-      const authorized = requireProcedureAuthorization(world.material.politicalProcedures, context.actorId, "remove_from_office", params.authorization);
-      if (authorized === null) return null;
+    apply(world, params) {
       const character = world.characters.find((c) => c.id === params.characterId);
-      if (!character || character.officeId === null) return null;
+      if (!character) return null;
       const officeId = character.officeId;
-      const procedureId = authorized !== "system" ? authorized.id : null;
+      const procedureId = params.authorization?.procedureId ?? null;
       return {
         world: {
           ...world,
@@ -393,7 +374,7 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params) {
       const character = world.characters.find((c) => c.id === params.characterId);
-      if (!character || !character.alive) return null;
+      if (!character) return null;
       const newPolity = world.map.polities.find((p) => p.id === params.newPolityId);
       if (!newPolity) return null;
       return {
@@ -422,7 +403,7 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params, context) {
       const character = world.characters.find((c) => c.id === params.characterId);
-      if (!character || !character.alive) return null;
+      if (!character) return null;
       return {
         world: {
           ...world,
@@ -458,7 +439,7 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params) {
       const character = world.characters.find((c) => c.id === params.characterId);
-      if (!character || !character.alive) return null;
+      if (!character) return null;
       return {
         world: {
           ...world,

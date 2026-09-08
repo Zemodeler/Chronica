@@ -95,7 +95,13 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     // settlement shown inside a simulated province is now present in that
     // province's authoritative state, so it can be inspected and besieged.
     await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 10, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "Adds every rendered settlement in a playable province to the authoritative starting world, preventing map-visible settlements from being impossible to inspect or besiege." }).onConflictDoNothing();
-    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 10, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
+    // Version 11 aligns Etruria and Volsinii's authoritative controllers
+    // with the opening map. Before this version the opening overlay displayed
+    // Rome, but the seeded world assigned the territory to the Etruscan
+    // cities; after the first turn the persisted state replaced the overlay
+    // and made the territory appear to switch sides.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 11, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 1, origin: "built-in", validatedAt: new Date(), notes: "Aligns Etruria and Volsinii's authoritative Roman control with the opening map, preventing their controller from changing after the first turn." }).onConflictDoNothing();
+    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 11, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
   });
 }
 

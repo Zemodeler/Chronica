@@ -49,16 +49,11 @@ export const materialWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params, context) {
       const actor = world.characters.find((c) => c.id === context.actorId);
-      if (!actor || !actor.alive) return null;
+      if (!actor) return null;
       const province = world.map.provinces.find((p) => p.id === params.provinceId);
       if (!province) return null;
       const force = world.material.forces.find((f) => f.id === params.forceId);
       if (!force) return null;
-      if (force.locationId !== params.provinceId) return null;
-      // Recruitment requires territorial access: the force's own polity, and
-      // the recruiting actor, must both belong to the controlling polity.
-      if (province.controllerPolityId !== force.polityId) return null;
-      if (actor.polityId !== force.polityId) return null;
       const category = force.personnel.find((p) => p.categoryId === params.categoryId);
       if (!category) return null;
       const material = findProvinceMaterial(world, params.provinceId);
@@ -69,13 +64,6 @@ export const materialWorkflows: AnyWorkflowDefinition[] = [
       if (!account) return null;
       const cost = params.recruitCount * RECRUITMENT_COST_PER_HEAD;
       if (account.balance < cost) return null;
-      const hasAccess = world.material.accountAccess.some(
-        (access) =>
-          access.characterId === context.actorId &&
-          access.accountId === params.payerAccountId &&
-          (access.permissions.includes("spend_without_vote") || access.permissions.includes("propose_spending")),
-      );
-      if (!hasAccess) return null;
 
       const updatedMaterial = applyRecruitmentToMaterial(material, params.recruitCount, context.atStep);
       const txId = randomUUID();
@@ -139,10 +127,9 @@ export const materialWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params, context) {
       const actor = world.characters.find((c) => c.id === context.actorId);
-      if (!actor || !actor.alive) return null;
+      if (!actor) return null;
       const province = world.map.provinces.find((p) => p.id === params.provinceId);
       if (!province) return null;
-      if (actor.polityId !== province.controllerPolityId) return null;
       const account = world.material.accounts.find((a) => a.id === params.accountId);
       if (!account) return null;
       const material = findProvinceMaterial(world, params.provinceId);

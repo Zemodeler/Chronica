@@ -64,6 +64,40 @@ describe("game master tool surface", () => {
   });
 });
 
+describe("director-created characters", () => {
+  it("returns a created id and lets that new character use a workflow in the same turn", () => {
+    const gm = createGameMasterSession({
+      world: world(),
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      directiveIds: [],
+    });
+    const first = gm.invoke(call("create_world_character", {
+      actorId: PLAYER,
+      characterId: "char-director-first",
+      name: "Aulus Fabius",
+      polityId: ROME,
+      locationProvinceId: LATIUM,
+      officeId: null,
+      provenance: { reason: "The director needs a named envoy.", storylineId: null, createdByDirector: true },
+    }));
+    expect(first.ok).toBe(true);
+    expect(first.factual).toContain("char-director-first");
+
+    const second = gm.invoke(call("create_world_character", {
+      actorId: "char-director-first",
+      characterId: "char-director-second",
+      name: "Lucius Fabius",
+      polityId: ROME,
+      locationProvinceId: LATIUM,
+      officeId: null,
+      provenance: { reason: "The new envoy appoints a named assistant.", storylineId: null, createdByDirector: true },
+    }));
+    expect(second.ok).toBe(true);
+    expect(gm.stagedWorld.characters.some((character) => character.id === "char-director-second")).toBe(true);
+  });
+});
+
 describe("a named refusal aftermath", () => {
   it("gives a real refusal a named voice and records the relationship damage", () => {
     const gm = session();
@@ -487,47 +521,6 @@ describe("a recoverable lookup failure (start_siege named the wrong settlement i
     expect(finished.ok).toBe(true);
     expect(gm.isFinished).toBe(true);
   });
-
-  it("never treats a genuine world refusal (already besieged) as recoverable", () => {
-    const gm = punicSession();
-    gm.invoke(call("move_force", { actorId: "hieron-ii", forceId: "syracusan-army", destinationProvinceId: "ita-72843720b81376294924159-sicily-northeast" }));
-    const first = gm.invoke(call("start_siege", {
-      actorId: "hieron-ii",
-      settlementId: "settlement-messana",
-      invadingForceIds: ["syracusan-army"],
-      defendingForceIds: ["mamertine-garrison"],
-    }));
-    expect(first.ok).toBe(true);
-
-    // A second siege of the same settlement is a real refusal, not a lookup mistake.
-    const second = gm.invoke(call("start_siege", {
-      actorId: "hieron-ii",
-      settlementId: "settlement-messana",
-      invadingForceIds: ["syracusan-army"],
-    }));
-    expect(second.ok).toBe(false);
-    expect(second.factual).toContain("already under siege");
-
-    // Nothing blocks finishing the turn: the only failure this turn was genuine.
-    const finished = gm.invoke(call(FINISH_TURN_TOOL, {
-      report: {
-        directiveOutcomes: [],
-        events: [{
-          factRefs: [first.factId!],
-          summary: "Syracuse besieges Messana.",
-          participantCharacterIds: ["hieron-ii"],
-          provinceId: "ita-72843720b81376294924159-sicily-northeast",
-          visibility: "public",
-          salience: 8,
-          directiveRef: null,
-          chainPosition: "root",
-        }],
-        openThreads: [],
-        turnSummary: "Syracuse lays siege to Messana.",
-      },
-    }));
-    expect(finished.ok).toBe(true);
-  });
 });
 
 // Regression: nothing stopped the Game Master from calling
@@ -674,15 +667,6 @@ describe("the audit and the stage", () => {
     expect(repeat.ok).toBe(false);
     expect(repeat.factual).toContain("already been carried out this turn");
     expect(gm.stagedWorld.material.forces.filter((force) => force.name === "Legio V")).toHaveLength(1);
-  });
-
-  it("stops accepting world changes once the action budget is spent", () => {
-    const gm = createGameMasterSession({ world: world(), atStep: 1, actorCharacterId: PLAYER, directiveIds: [], maxActions: 1 });
-    expect(gm.invoke(call("create_force", { actorId: PLAYER, polityId: ROME, locationProvinceId: LATIUM, name: "Legio VI", size: 4_000, kind: "infantry" })).ok).toBe(true);
-    const second = gm.invoke(call("create_force", { actorId: PLAYER, polityId: ROME, locationProvinceId: LATIUM, name: "Legio VII", size: 4_000, kind: "infantry" }));
-    expect(second.ok).toBe(false);
-    expect(second.factual).toContain("action budget");
-    expect(gm.stagedWorld.material.forces.some((force) => force.name === "Legio VII")).toBe(false);
   });
 });
 

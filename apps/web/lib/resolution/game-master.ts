@@ -4,6 +4,7 @@ import type { AiAdapter, AiConversationMessage, AiToolDefinition } from "@chroni
 import type {
   GameMasterSessionResult,
   GameMasterToolCall,
+  GameMasterToolOutcome,
   OrderDirective,
   ScenarioChronicleRules,
   ScenarioGovernmentRules,
@@ -65,6 +66,13 @@ function tag(atStep: number): string {
   return `[game-master:step-${atStep}]`;
 }
 
+/** Keep each tool outcome on one log line while preserving the engine's reason. */
+function logToolOutcome(atStep: number, toolName: string, outcome: GameMasterToolOutcome): void {
+  const reason = outcome.factual.replace(/\s+/g, " ").trim()
+    || (outcome.ok ? "The session accepted the call." : "The session did not provide a refusal reason.");
+  console.log(`${tag(atStep)} ${toolName} -> ${outcome.ok ? "accepted" : "refused"} reason=${JSON.stringify(reason)}`);
+}
+
 /**
  * A step where the model produced no tool call at all. Prose is not an action,
  * so the loop tells it so and gives it one chance to act; a second silent step
@@ -87,10 +95,6 @@ export async function runGameMaster(
     ...(input.persistentPlans ? { directives: input.directives } : {}),
     definedActions: input.definedActions ?? [],
     allowInventedActions: input.allowInventedActions ?? false,
-    actionAllowances: input.selectedCharacters.map((character) => ({
-      characterId: character.characterId,
-      allowance: character.actionAllowance,
-    })),
     // Reads, reports, and the player’s own orders are not NPC actions. Keep
     // room for them while scaling the tool loop with the relevance-derived
     // agency available this turn.
@@ -164,7 +168,7 @@ export async function runGameMaster(
     const results = response.toolCalls.map((toolCall) => {
       const call: GameMasterToolCall = { id: toolCall.id, name: toolCall.name, arguments: toolCall.arguments };
       const outcome = session.invoke(call);
-      console.log(`${tag(input.atStep)} ${toolCall.name} -> ${outcome.ok ? "ok" : "refused"}`);
+      logToolOutcome(input.atStep, toolCall.name, outcome);
       return { callId: toolCall.id, name: toolCall.name, content: outcome.factual };
     });
     messages.push({ role: "tool_results", results });
