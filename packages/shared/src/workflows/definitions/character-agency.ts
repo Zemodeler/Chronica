@@ -17,9 +17,9 @@ import {
 export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
   defineWorkflow({
     id: "create_character_goal",
-    description: "Give a character a new persistent goal. Use when the Character Director forms a new goal after a meaningful trigger (encounter, political event, plot resolution). System-only: internal agency bookkeeping, never a Game Master tool call or public event.",
+    description: "Give a character a new persistent goal. Use when current world facts give them a concrete reason to pursue one.",
     category: "character" as const,
-    invokerAuthority: ["system"],
+    invokerAuthority: ["world_director"],
     parametersSchema: z.object({
       characterId: EntityIdSchema,
       objective: z.string().trim().min(1).max(240),
@@ -30,12 +30,7 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params, context) {
       const character = world.characters.find((c) => c.id === params.characterId);
-      if (!character || !character.alive) return null;
-
-      const activeGoals = (world.characterGoals ?? []).filter(
-        (g) => g.characterId === params.characterId && g.status === "active",
-      );
-      if (activeGoals.length >= 4) return null;
+      if (!character) return null;
 
       // Derived from data already fixed by the deterministic replay inputs
       // (world, params, atStep) rather than a random UUID, so replaying the
@@ -68,9 +63,9 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
 
   defineWorkflow({
     id: "update_character_goal",
-    description: "Update the status or priority of an existing character goal. System-only: internal agency bookkeeping, never a Game Master tool call or public event.",
+    description: "Update the status or priority of an existing character goal after a real development.",
     category: "character" as const,
-    invokerAuthority: ["system"],
+    invokerAuthority: ["world_director"],
     parametersSchema: z.object({
       goalId: EntityIdSchema,
       status: CharacterGoalStatusSchema.optional(),
@@ -81,7 +76,7 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
       const goal = (world.characterGoals ?? []).find((g) => g.id === params.goalId);
       if (!goal) return null;
       const character = world.characters.find((c) => c.id === goal.characterId);
-      if (!character || !character.alive) return null;
+      if (!character) return null;
 
       const historyEntry = params.note
         ? [{ atStep: context.atStep, note: params.note }]
@@ -109,9 +104,9 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
 
   defineWorkflow({
     id: "create_character_plot",
-    description: "Create a new plot for a character pursuing a goal. A plot is a concrete attempt: participants, objective, stakes, and a starting stage. System-only: internal agency bookkeeping, never a Game Master tool call or public event.",
+    description: "Create a new plot for a character pursuing a goal. A plot is a concrete attempt with participants, objective, stakes, and a starting stage.",
     category: "character" as const,
-    invokerAuthority: ["system"],
+    invokerAuthority: ["world_director"],
     parametersSchema: z.object({
       characterId: EntityIdSchema,
       goalId: EntityIdSchema,
@@ -125,14 +120,9 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params, context) {
       const character = world.characters.find((c) => c.id === params.characterId);
-      if (!character || !character.alive) return null;
+      if (!character) return null;
       const goal = (world.characterGoals ?? []).find((g) => g.id === params.goalId && g.characterId === params.characterId);
-      if (!goal || goal.status !== "active") return null;
-
-      const activePlots = (world.characterPlots ?? []).filter(
-        (p) => p.characterId === params.characterId && p.status === "active",
-      );
-      if (activePlots.length >= 3) return null;
+      if (!goal) return null;
 
       // See create_character_goal: derived from deterministic replay inputs,
       // never a random UUID.
@@ -170,9 +160,9 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
 
   defineWorkflow({
     id: "advance_character_plot",
-    description: "Advance a plot to a new stage, updating momentum, obstacle, and next intended move. System-only: internal agency bookkeeping, never a Game Master tool call or public event.",
+    description: "Advance a plot to a new stage after a real development, updating momentum, obstacle, and next intended move.",
     category: "character" as const,
-    invokerAuthority: ["system"],
+    invokerAuthority: ["world_director"],
     parametersSchema: z.object({
       plotId: EntityIdSchema,
       newStage: CharacterPlotStageSchema,
@@ -183,9 +173,9 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params, context) {
       const plot = (world.characterPlots ?? []).find((p) => p.id === params.plotId);
-      if (!plot || plot.status !== "active") return null;
+      if (!plot) return null;
       const character = world.characters.find((c) => c.id === plot.characterId);
-      if (!character || !character.alive) return null;
+      if (!character) return null;
 
       const historyEntry = {
         atStep: context.atStep,
@@ -217,9 +207,9 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
 
   defineWorkflow({
     id: "resolve_character_plot",
-    description: "Mark a plot as resolved (succeeded, failed, abandoned, exposed, or stalled). System-only: internal agency bookkeeping, never a Game Master tool call or public event.",
+    description: "Mark a plot as succeeded, failed, abandoned, exposed, or stalled after its real outcome is known.",
     category: "character" as const,
-    invokerAuthority: ["system"],
+    invokerAuthority: ["world_director"],
     parametersSchema: z.object({
       plotId: EntityIdSchema,
       status: z.enum(["succeeded", "failed", "abandoned", "exposed", "stalled"]),
@@ -263,14 +253,7 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params, context) {
       const character = world.characters.find((c) => c.id === params.characterId);
-      if (!character || !character.alive) return null;
-
-      // Guard: max 2 active nemeses simultaneously.
-      const activeNemeses = (world.nemeses ?? []).filter((n) => n.active);
-      if (activeNemeses.length >= 2) return null;
-
-      // Guard: character must not already be an active nemesis.
-      if (activeNemeses.some((n) => n.characterId === params.characterId)) return null;
+      if (!character) return null;
 
       const newEntry = {
         characterId: params.characterId,
@@ -315,9 +298,6 @@ export const characterAgencyWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params, context) {
       const nemeses = world.nemeses ?? [];
-      const target = nemeses.find((n) => n.characterId === params.characterId && n.active);
-      if (!target) return null;
-
       const updatedNemeses = nemeses.map((n) =>
         n.characterId === params.characterId && n.active
           ? { ...n, active: false, deactivatedAtStep: context.atStep, deactivationReason: params.reason }

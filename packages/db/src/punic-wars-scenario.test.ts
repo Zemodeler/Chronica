@@ -16,6 +16,7 @@ describe("Punic Wars built-in scenario", () => {
 
   it("uses direct Roman control for its Italian client territories", () => {
     const controller = new Map(punicWarsScenario.initialWorld.map.provinces.map((province) => [province.id, province.controllerPolityId]));
+    expect(controller.get("punic-italy-etrurian-uplands")).toBe("rome");
     expect(controller.get("punic-italy-samnium")).toBe("rome");
     expect(controller.get("punic-italy-lucanian-uplands")).toBe("rome");
   });
@@ -30,6 +31,10 @@ describe("Punic Wars built-in scenario", () => {
       name: "Felsina",
       provinceId: "punic-italy-middle-padus",
       controllerPolityId: "boii",
+    });
+    expect(settlements.get("settlement-volsinii")).toMatchObject({
+      provinceId: "punic-italy-etrurian-uplands",
+      controllerPolityId: "rome",
     });
     expect(settlements.get("settlement-lilybaeum")?.provinceId).toBe("ita-72843720b81376294924159-sicily-west");
     expect(settlements.get("settlement-panormus")?.provinceId).toBe("ita-72843720b81376294924159-sicily-northwest");

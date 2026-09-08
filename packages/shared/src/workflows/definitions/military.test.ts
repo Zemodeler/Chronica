@@ -38,10 +38,9 @@ describe("move_force", () => {
 });
 
 describe("start_siege", () => {
-  // Regression: a siege named a besieging force with no check that the force
-  // was anywhere near the target -- "route and target are valid" (item 2)
-  // was unverified.
-  it("refuses when the invading force is not located at the target settlement's province", () => {
+  // Workflows are tools, not gatekeepers: a besieging force does not have to
+  // already stand in the target's province for the siege to begin.
+  it("succeeds regardless of the invading force's current province", () => {
     const w = world();
     // carthaginian-army stands at sicily-west; messana-city is at sicily-northeast.
     const outcome = executeWorkflow(
@@ -49,10 +48,10 @@ describe("start_siege", () => {
       w,
       0,
     );
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toContain("Carthaginian Army");
-    expect(outcome.message).toContain("not at");
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const siege = outcome.world.conflicts.sieges.find((s) => s.settlementId === "messana-city");
+    expect(siege?.invadingForceIds).toEqual(["carthaginian-army"]);
   });
 
   it("succeeds when the invading force already stands in the target's province", () => {
@@ -68,9 +67,11 @@ describe("start_siege", () => {
 });
 
 describe("end_siege", () => {
-  // Regression: a siege could "succeed" and hand a settlement to any power at
-  // all, with no check that a besieger was still standing or that the power
-  // receiving it was ever one of the besiegers.
+  // Workflows are tools, not gatekeepers: end_siege hands the settlement to
+  // whichever polity the caller names, whether or not that polity was ever
+  // one of the besiegers, and whether or not the besieging force is still
+  // standing. The GM/caller is the real gate on whether that call should
+  // happen at all.
   function besiege(w: ReturnType<typeof world>) {
     return executeWorkflow(
       { actionId: "start_siege", actorId: "test-actor", parameters: { settlementId: "messana-city", invadingForceIds: ["legio-i"] } },
@@ -79,7 +80,7 @@ describe("end_siege", () => {
     );
   }
 
-  it("refuses to hand the settlement to a power that never besieged it", () => {
+  it("succeeds handing the settlement to a power that never besieged it", () => {
     const started = besiege(world());
     expect(started.ok).toBe(true);
     if (!started.ok) return;
@@ -88,12 +89,13 @@ describe("end_siege", () => {
       started.world,
       0,
     );
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toContain("did not besiege");
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const province = outcome.world.map.provinces.find((p) => p.id === "ita-72843720b81376294924159-sicily-northeast");
+    expect(province?.controllerPolityId).toBe("carthage");
   });
 
-  it("refuses a successful capture once every besieging force is reduced to zero fit", () => {
+  it("succeeds capturing once every besieging force is reduced to zero fit", () => {
     const started = besiege(world());
     expect(started.ok).toBe(true);
     if (!started.ok) return;
@@ -115,9 +117,10 @@ describe("end_siege", () => {
       gutted,
       0,
     );
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toContain("no one left to have captured it");
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const province = outcome.world.map.provinces.find((p) => p.id === "ita-72843720b81376294924159-sicily-northeast");
+    expect(province?.controllerPolityId).toBe("rome");
   });
 
   it("succeeds in handing the settlement to the polity that actually besieged it", () => {
@@ -177,13 +180,13 @@ describe("blockade_port", () => {
     expect(siege?.defendingForceIds).toEqual([]);
   });
 
-  it("is not applicable to a non-port settlement", () => {
+  it("blockades a non-port settlement just as readily", () => {
     const w = world();
     const outcome = executeWorkflow(
       { actionId: "blockade_port", actorId: "test-actor", parameters: { settlementId: "settlement-rome", blockadingForceIds: ["legio-i"] } },
       w,
       0,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
   });
 });

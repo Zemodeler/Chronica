@@ -32,12 +32,6 @@ export async function GET(
       .where(and(eq(schema.players.gameId, gameId), eq(schema.players.userId, userId), eq(schema.players.status, "active")))
       .limit(1);
     if (!player) return Response.json({ error: "Unauthorized." }, { status: 401 });
-    const view = await getWorldView(db, gameId);
-    const actor = view?.world.characters.find(c => c.id === player.characterId);
-    const plans = view?.world.playerPlans?.filter(p => p.ownerId === player.characterId) ?? [];
-    const delegates = view?.world.characters.filter(c => c.alive && c.id !== player.characterId && (c.locationProvinceId === actor?.locationProvinceId || (actor?.polityId != null && c.polityId === actor.polityId))).map(c => ({ id: c.id, name: c.name })) ?? [];
-    const accounts = view?.world.material.accounts.filter(a => a.owner.kind === "character" && a.owner.id === player.characterId).map(a => ({ id: a.id, label: `${a.currencyId}: ${a.balance}`, balance: a.balance })) ?? [];
-
     const [openTurn] = await db
       .select({ id: schema.turns.id, status: schema.turns.status })
       .from(schema.turns)
@@ -45,7 +39,7 @@ export async function GET(
       .orderBy(desc(schema.turns.index))
       .limit(1);
 
-    if (!openTurn) return Response.json({ order: null, turnStatus: null, plans, delegates, accounts });
+    if (!openTurn) return Response.json({ order: null, turnStatus: null });
 
     const [order] = await db
       .select({ rawText: schema.orders.rawText, directives: schema.orders.directives })
@@ -54,7 +48,7 @@ export async function GET(
       .limit(1);
 
     return Response.json(
-      { turnId: openTurn.id, turnStatus: openTurn.status, order: order ?? null, plans, delegates, accounts },
+      { turnId: openTurn.id, turnStatus: openTurn.status, order: order ?? null },
       { headers: { "Cache-Control": "private, no-store" } },
     );
   } finally {
@@ -99,14 +93,8 @@ export async function POST(
     const owned = view.world.playerPlans?.filter(p => p.ownerId === player.characterId && p.status === "active") ?? [];
     const cancellations = new Set(batch.directives.filter(d => d.kind === "cancel").map(d => d.actionId));
     if (owned.filter(p => !cancellations.has(p.id)).length + batch.directives.filter(d => d.kind === "new").length > 32) return Response.json({ error: "You have 32 active plans. Complete or cancel a plan before adding another." }, { status: 422 });
-    const owner = view.world.characters.find(c => c.id === player.characterId);
     for (const d of batch.directives) {
       if (d.kind !== "new" && !owned.some(p => p.id === d.actionId) && !view.world.actions.some(a => a.id === d.actionId && a.actorId === player.characterId)) return Response.json({ error: "You can revise or cancel only your own ongoing work." }, { status: 422 });
-      if (d.kind === "new" && d.planOptions?.budget) {
-        const account = view.world.material.accounts.find(a => a.id === d.planOptions!.budget!.accountId);
-        if (!account || account.owner.kind !== "character" || account.owner.id !== player.characterId) return Response.json({ error: "Choose one of your own accounts for the plan budget." }, { status: 422 });
-      }
-      if (d.kind === "new" && d.planOptions?.delegateIds.some(id => !view.world.characters.some(c => c.id === id && c.alive && c.id !== player.characterId && (c.locationProvinceId === owner?.locationProvinceId || (owner?.polityId != null && c.polityId === owner.polityId))))) return Response.json({ error: "Choose an available delegate from your contacts." }, { status: 422 });
     }
     const result = await submitPlayerOrder(db, { gameId, playerId: player.id, rawText: rawText || "Continue ongoing plans and let time pass.", batch });
     if (!result.accepted) return Response.json({ error: result.reason ?? "Order rejected." }, { status: 409 });

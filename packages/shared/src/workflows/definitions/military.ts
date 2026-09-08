@@ -343,10 +343,8 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
       battleId: EntityIdSchema,
       attackingForceIds: z.array(EntityIdSchema).min(1),
       // Deliberately not `.min(1)`. An empty defender list is a real thing an
-      // army can meet, and rejecting it at the schema turned "there was no one
-      // there to fight" into an argument error the caller could not act on and
-      // reported to the player as though the world had refused. It is refused
-      // below instead, in words, naming the tool that does answer the case.
+      // army can meet -- an unopposed advance is recorded the same way as any
+      // other battle rather than being rejected at the schema.
       defendingForceIds: z.array(EntityIdSchema),
       attackerPosture: BattlePostureSchema.optional(),
       defenderPosture: BattlePostureSchema.optional(),
@@ -354,24 +352,12 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
     apply(world, params) {
       const attackers = params.attackingForceIds.map((id) => world.material.forces.find((f) => f.id === id));
       const defenders = params.defendingForceIds.map((id) => world.material.forces.find((f) => f.id === id));
-      if (params.defendingForceIds.length === 0) {
-        // The commonest reason there is no defender: the ground being taken
-        // belongs to a power that has no army at all.
-        return refuse(
-          "No force is named on the defending side, so there is no battle to fight. An unopposed advance is not a battle: besiege the settlement with start_siege (which accepts an empty defender list) or take the ground with change_province_control, and say that it was taken unopposed.",
-        );
-      }
       if (attackers.some((f) => !f) || defenders.some((f) => !f)) {
         const missing = [...params.attackingForceIds, ...params.defendingForceIds].filter((id) => !world.material.forces.some((f) => f.id === id));
         return refuse(`No force exists with the id ${missing.map((id) => `"${id}"`).join(", ")}. Inspect the province to see which forces actually stand there.`);
       }
-      const alreadyExists = world.conflicts.battles.some(
-        (b) => params.attackingForceIds.some((id) => b.participantForceIds.includes(id))
-          && params.defendingForceIds.some((id) => b.participantForceIds.includes(id)),
-      );
-      if (alreadyExists) return null;
       const attackerNames = attackers.map((f) => f!.name).join(" and ");
-      const defenderNames = defenders.map((f) => f!.name).join(" and ");
+      const defenderNames = defenders.length > 0 ? defenders.map((f) => f!.name).join(" and ") : "no one";
       return {
         world: {
           ...world,
@@ -452,20 +438,10 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
           .join("; ");
         return refuse(`No settlement exists with the id "${params.settlementId}". Settlements that do exist include: ${known || "none"}. Use inspect_province to get the id of the one you mean.`);
       }
-      const alreadyBesieged = world.conflicts.sieges.some((s) => s.settlementId === params.settlementId);
-      if (alreadyBesieged) return refuse(`${settlementWithProvince.settlement.name} is already under siege; it cannot be besieged twice.`);
       const invadingForces = params.invadingForceIds.map((id) => world.material.forces.find((f) => f.id === id));
       const missingBesiegers = params.invadingForceIds.filter((id, index) => !invadingForces[index]);
       if (missingBesiegers.length > 0) {
         return refuse(`No force exists with the id ${missingBesiegers.map((id) => `"${id}"`).join(", ")}, so nothing can lay the siege.`);
-      }
-      // A siege is a real army sitting outside a real wall: naming a force
-      // that is somewhere else entirely is not a siege, it is a claim.
-      const outOfRange = invadingForces.filter((force) => force!.locationId !== settlementWithProvince.province.id).map((force) => force!.name);
-      if (outOfRange.length > 0) {
-        return refuse(
-          `${outOfRange.join(", ")} ${outOfRange.length === 1 ? "is" : "are"} not at ${settlementWithProvince.province.name}, so ${outOfRange.length === 1 ? "it" : "they"} cannot besiege ${settlementWithProvince.settlement.name} from where ${outOfRange.length === 1 ? "it stands" : "they stand"}. Move the force to ${settlementWithProvince.province.name} first.`,
-        );
       }
       return {
         world: {
@@ -502,23 +478,6 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
     apply(world, params) {
       const siege = world.conflicts.sieges.find((s) => s.settlementId === params.settlementId);
       if (!siege) return null;
-      if (params.successfulCapture && params.newControllerPolityId) {
-        // A siege that "succeeds" without anyone left besieging it, or that
-        // hands the prize to a power that was never party to it, is not a
-        // capture -- it is control changing hands by nothing more than the
-        // claim. At least one besieger must still be a real, living force,
-        // and the power receiving the settlement must be one of them.
-        const livingBesiegers = siege.invadingForceIds
-          .map((id) => world.material.forces.find((f) => f.id === id))
-          .filter((force): force is NonNullable<typeof force> => force !== undefined && force.personnel.some((category) => category.fit > 0));
-        if (livingBesiegers.length === 0) {
-          return refuse(`No besieging force at "${params.settlementId}" is still standing; there is no one left to have captured it.`);
-        }
-        if (!livingBesiegers.some((force) => force.polityId === params.newControllerPolityId)) {
-          const besiegerPolities = [...new Set(livingBesiegers.map((force) => force.polityId))].join(", ");
-          return refuse(`${params.newControllerPolityId} did not besiege "${params.settlementId}" -- the besieging power(s) were: ${besiegerPolities}. Capture can only pass it to one of them.`);
-        }
-      }
       let nextWorld = {
         ...world,
         conflicts: {
@@ -695,9 +654,6 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
         .flatMap((province) => province.settlements.map((settlement) => ({ settlement, province })))
         .find(({ settlement }) => settlement.id === params.settlementId);
       if (!settlementWithProvince) return null;
-      if (settlementWithProvince.settlement.kind !== "port") return null;
-      const alreadyBesieged = world.conflicts.sieges.some((s) => s.settlementId === params.settlementId);
-      if (alreadyBesieged) return null;
       return {
         world: {
           ...world,

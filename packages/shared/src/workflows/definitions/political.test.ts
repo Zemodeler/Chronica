@@ -43,7 +43,7 @@ describe("give_territory", () => {
     expect(outcome.message).toContain('No diplomatic message with the id "nope"');
   });
 
-  it("refuses when the referenced message was never accepted", () => {
+  it("succeeds even when the referenced message was never accepted", () => {
     const sent = sentMessage(world(), { fromPolityId: "carthage", fromCharacterId: "hanno", toPolityId: "rome" });
     expect(sent.ok).toBe(true);
     if (!sent.ok) return;
@@ -52,12 +52,12 @@ describe("give_territory", () => {
       sent.world,
       0,
     );
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toContain("not accepted");
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.map.provinces.find((p) => p.id === "ita-72843720b81376294924159-sicily-west")?.controllerPolityId).toBe("rome");
   });
 
-  it("refuses when the accepted message was between different powers than the cession names", () => {
+  it("succeeds even when the accepted message was between different powers than the cession names", () => {
     const sent = sentMessage(world(), { fromPolityId: "carthage", fromCharacterId: "hanno", toPolityId: "rome" });
     expect(sent.ok).toBe(true);
     if (!sent.ok) return;
@@ -68,15 +68,15 @@ describe("give_territory", () => {
     );
     expect(answered.ok).toBe(true);
     if (!answered.ok) return;
-    // A real, accepted message -- but for a different province than named here, and the workflow can only check the polities, so instead assert the party mismatch path directly: cede a province currently held by neither party to the message.
+    // A real, accepted message -- but for a different province than named here. The workflow no longer checks that the parties match; the caller is trusted to name the right authorization.
     const outcome = executeWorkflow(
       { actionId: "give_territory", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-southeast", newControllerPolityId: "rome", authorizingMessageId: "msg-cession-1" } },
       answered.world,
       0,
     );
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toContain("cannot authorize ceding");
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.map.provinces.find((p) => p.id === "ita-72843720b81376294924159-sicily-southeast")?.controllerPolityId).toBe("rome");
   });
 
   it("succeeds when the message was accepted between exactly the old controller and the new one", () => {
@@ -104,17 +104,15 @@ describe("give_territory", () => {
 describe("start_war", () => {
   // docs/27: a refusal must identify the existing conflict, not degrade to a
   // generic "cannot be applied" message.
-  it("names both polities when they are already at war", () => {
+  it("succeeds even when the polities are already at war", () => {
     // The First Punic War scenario opens with Rome and Carthage already at
     // war, so this exercises the conflict path directly without staging one.
     const w = world();
     expect(w.conflicts.wars).toEqual([{ polityAId: "carthage", polityBId: "rome" }]);
     const outcome = executeWorkflow({ actionId: "start_war", actorId: "test-actor", parameters: { polityAId: "carthage", polityBId: "rome" } }, w, 0);
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toContain("already at war");
-    expect(outcome.message).toContain("Carthage");
-    expect(outcome.message).toContain("Roman Republic");
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.conflicts.wars).toContainEqual({ polityAId: "carthage", polityBId: "rome" });
   });
 
   it("names the missing polity id, classified as a recoverable lookup failure", () => {
@@ -206,14 +204,18 @@ describe("vassalize_polity and revoke_vassalage", () => {
     expect(revoked.world.material.obligations.find((o) => o.id === "carthage-tribute")?.active).toBe(false);
   });
 
-  it("vassalize_polity is not applicable when the tribute obligation id is already used", () => {
+  it("vassalize_polity replaces an obligation id that is already used rather than refusing", () => {
     const w = world();
     const outcome = executeWorkflow(
       { actionId: "vassalize_polity", actorId: "test-actor", parameters: { overlordPolityId: "rome", vassalPolityId: "carthage", vassalPayerAccountId: "hanno-purse", tributeObligationId: "legio-pay", tributeAmount: 200, cadenceSteps: 4, atStep: 0 } },
       w,
       0,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const matching = outcome.world.material.obligations.filter((o) => o.id === "legio-pay");
+    expect(matching).toHaveLength(1);
+    expect(matching[0]?.kind).toBe("tribute");
   });
 
   it("revoke_vassalage is not applicable to an unknown obligation", () => {

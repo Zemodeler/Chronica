@@ -56,21 +56,22 @@ describe("sending a diplomatic message", () => {
     expect(outcome.world.conflicts).toEqual(before.conflicts);
   });
 
-  it("refuses a sender who does not belong to the power they write for, and says so", () => {
+  it("succeeds even for a sender who does not belong to the power they write for", () => {
     const outcome = send(world(), { fromPolityId: CARTHAGE, toPolityId: "syracuse", toCharacterId: null });
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toMatch(/does not belong to/i);
-    expect(outcome.message).not.toMatch(/cannot be applied/i);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.diplomacy.find((candidate) => candidate.id === "msg-1")?.fromPolityId).toBe(CARTHAGE);
   });
 
-  it("names the alternative when the recipient has no living leader to receive it", () => {
+  it("succeeds sending to a recipient who is no longer alive", () => {
     const w = world();
-    w.characters = w.characters.map((character) => (character.id === HANNO ? { ...character, alive: false } : character));
+    w.characters = w.characters.map((character) =>
+      character.id === HANNO ? { ...character, alive: false, diedAtStep: 0 } : character,
+    );
     const outcome = send(w);
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toMatch(/create_world_character|passing null/i);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.diplomacy.find((candidate) => candidate.id === "msg-1")?.toCharacterId).toBe(HANNO);
   });
 });
 
@@ -104,7 +105,7 @@ describe("answering one", () => {
     expect(message?.answeredAtStep).toBe(2);
   });
 
-  it("refuses an answer from someone speaking for the wrong power", () => {
+  it("succeeds even for someone speaking for the wrong power", () => {
     const outcome = executeWorkflow(
       {
         actionId: "answer_diplomatic_message",
@@ -114,9 +115,9 @@ describe("answering one", () => {
       sent(),
       2,
     );
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toMatch(/cannot answer in its name/i);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.diplomacy.find((candidate) => candidate.id === "msg-1")?.status).toBe("answered");
   });
 
   it("lists what is actually awaiting a reply when the id is wrong", () => {

@@ -34,6 +34,7 @@ describe("create_world_character", () => {
     if (!outcome.ok) return;
     const created = outcome.world.characters.find((character) => character.id === "char-cast-publius");
     expect(created?.name).toBe("Publius Cornelius");
+    expect(outcome.result.summary).toContain("char-cast-publius");
     expect(created?.alive).toBe(true);
     // A created character is immediately whole: named, located, funded, valid.
     expect(created?.locationProvinceId).toBe("ita-local-23120603B86473916475875");

@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema } from "../material-state";
-import { PlanOptionsSchema } from "./plans";
 
 // What a player submits, and what the simulation makes of it (docs/14, ADR-0032).
 //
@@ -18,7 +17,7 @@ export const MAX_BATCH_CODE_POINTS = 4_000;
  * resource -- it never moves their work ahead of another player's.
  */
 export const OrderDirectiveSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("new"), text: z.string().trim().min(1), planOptions: PlanOptionsSchema.optional() }).strict(),
+  z.object({ kind: z.literal("new"), text: z.string().trim().min(1) }).strict(),
   z.object({ kind: z.literal("revise"), actionId: EntityIdSchema, text: z.string().trim().min(1) }).strict(),
   z.object({ kind: z.literal("cancel"), actionId: EntityIdSchema }).strict(),
 ]);

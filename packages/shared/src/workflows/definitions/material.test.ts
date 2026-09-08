@@ -39,15 +39,16 @@ describe("recruit_from_province", () => {
     expect(outcome.ok).toBe(false);
   });
 
-  it("refuses recruitment for a force outside the actor's own polity", () => {
+  it("succeeds recruiting for a force outside the actor's own polity", () => {
     const world = worldWithMaterial({ availableManpower: 5_000 });
     const outcome = executeWorkflow(
-      // Hanno (Carthaginian) has no standing to recruit for Rome's Legio I.
+      // Hanno (Carthaginian) recruiting for Rome's Legio I: no territorial or
+      // polity-membership gate blocks the workflow itself any longer.
       { actionId: "recruit_from_province", actorId: "hanno", parameters: { provinceId: ROMAN_PROVINCE_ID, forceId: "legio-i", categoryId: "infantry", recruitCount: 100, payerAccountId: "hanno-purse" } },
       world,
       0,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
   });
 
   it("refuses recruitment the treasury cannot afford, without touching manpower", () => {
@@ -61,15 +62,16 @@ describe("recruit_from_province", () => {
     expect(outcome.ok).toBe(false);
   });
 
-  it("refuses recruitment paid from an account the actor has no spending access to", () => {
+  it("succeeds recruiting paid from an account the actor has no spending access to", () => {
     const world = worldWithMaterial({ availableManpower: 5_000 });
     const outcome = executeWorkflow(
-      // Marcus has no access to Hanno's purse.
+      // Marcus has no recorded access to Hanno's purse, but the workflow no
+      // longer gates on the accountAccess record -- it just pays.
       { actionId: "recruit_from_province", actorId: "marcus-atilius", parameters: { provinceId: ROMAN_PROVINCE_ID, forceId: "legio-i", categoryId: "infantry", recruitCount: 10, payerAccountId: "hanno-purse" } },
       world,
       0,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
   });
 });
 
@@ -118,14 +120,14 @@ describe("collect_emergency_taxation", () => {
     expect(romeAfter).toBe(romeBefore);
   });
 
-  it("refuses taxation by an actor whose polity does not control the province", () => {
+  it("succeeds taxation by an actor whose polity does not control the province", () => {
     const world = worldWithMaterial({ taxCapacity: 1_000 });
     const outcome = executeWorkflow(
       { actionId: "collect_emergency_taxation", actorId: "hanno", parameters: { provinceId: ROMAN_PROVINCE_ID, accountId: "hanno-purse", requestedAmount: 500, reason: "Opportunistic levy." } },
       world,
       0,
     );
-    expect(outcome.ok).toBe(false);
+    expect(outcome.ok).toBe(true);
   });
 
   it("refuses taxation with no tax capacity to draw on", () => {

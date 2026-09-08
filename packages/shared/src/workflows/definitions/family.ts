@@ -2,7 +2,6 @@ import { z } from "zod";
 import { EntityIdSchema, VisibilitySchema } from "../../material-state";
 import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
 import { canCreateCharacter } from "../../continuity/continuity";
-import { resolveEligibility } from "../../characters/political-authority";
 import { deriveDefaultMind } from "../../characters/mind";
 import { openCharacterAccount } from "../../material/character-accounts";
 import { FamilyLinkKindSchema, LifeContractTypeSchema } from "../../characters/family";
@@ -35,22 +34,8 @@ export const familyWorkflows: AnyWorkflowDefinition[] = [
       })
       .strict(),
     apply(world, params, context) {
-      if (world.lifeContracts.some((c) => c.id === params.contractId)) return null;
       const parties = params.partyCharacterIds.map((id) => world.characters.find((c) => c.id === id));
-      if (parties.some((p) => p === undefined || !p.alive)) return null;
-
-      for (const partyId of params.partyCharacterIds) {
-        const eligibility = resolveEligibility(world, partyId, params.eligibilityRequirementIds);
-        if (!eligibility.eligible) return null;
-      }
-
-      const exclusiveTypes = new Set(["marriage_or_partnership"]);
-      if (exclusiveTypes.has(params.type)) {
-        const alreadyBound = world.lifeContracts.some(
-          (c) => c.type === params.type && c.status === "active" && c.partyCharacterIds.some((id) => params.partyCharacterIds.includes(id)),
-        );
-        if (alreadyBound) return null;
-      }
+      if (parties.some((p) => p === undefined)) return null;
 
       const contract = {
         id: params.contractId,
@@ -85,7 +70,7 @@ export const familyWorkflows: AnyWorkflowDefinition[] = [
       return {
         world: {
           ...world,
-          lifeContracts: [...world.lifeContracts, contract],
+          lifeContracts: [...world.lifeContracts.filter((c) => c.id !== params.contractId), contract],
           familyLinks: [...world.familyLinks, ...newLinks],
         },
         result: {
@@ -109,7 +94,7 @@ export const familyWorkflows: AnyWorkflowDefinition[] = [
       .strict(),
     apply(world, params, context) {
       const contract = world.lifeContracts.find((c) => c.id === params.contractId);
-      if (!contract || contract.status !== "active") return null;
+      if (!contract) return null;
 
       return {
         world: {
@@ -144,11 +129,9 @@ export const familyWorkflows: AnyWorkflowDefinition[] = [
       })
       .strict(),
     apply(world, params, context) {
-      if (world.characters.some((c) => c.id === params.childCharacterId)) return null;
       if (!canCreateCharacter(world.characters.length)) return null;
       const parents = params.parentCharacterIds.map((id) => world.characters.find((c) => c.id === id));
-      if (parents.every((p) => p === undefined)) return null;
-      const livingParent = parents.find((p) => p !== undefined && p.alive);
+      const livingParent = parents.find((p) => p !== undefined);
       if (livingParent === undefined) return null;
 
       // A newborn owns an empty purse from birth. Without it, their
@@ -201,11 +184,11 @@ export const familyWorkflows: AnyWorkflowDefinition[] = [
       return {
         world: {
           ...world,
-          characters: [...world.characters, child],
+          characters: [...world.characters.filter((c) => c.id !== params.childCharacterId), child],
           material: purse.material,
           familyLinks: [...world.familyLinks, ...parentLinks],
           continuity: [
-            ...world.continuity,
+            ...world.continuity.filter((c) => c.characterId !== params.childCharacterId),
             { characterId: params.childCharacterId, tier: "ordinary" as const, notability: 0, encounterIds: [], lastingChanges: [], plan: null },
           ],
         },

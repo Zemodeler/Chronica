@@ -39,8 +39,8 @@ describe("Carthage's opening-turn agency", () => {
     // "important" selection tier from commanding a force is not, on its own,
     // enough to be eligible for full candidate generation -- only explicit,
     // scenario-authored relevance is.
-    expect(isEligibleForNpcAgency("ordinary", false, "important", false)).toBe(false);
-    expect(isEligibleForNpcAgency("ordinary", false, "important", hasActiveAgencyState(world(), HANNO))).toBe(true);
+    expect(isEligibleForNpcAgency("ordinary", "important", false)).toBe(false);
+    expect(isEligibleForNpcAgency("ordinary", "important", hasActiveAgencyState(world(), HANNO))).toBe(true);
   });
 
   it("generates a real, non-wait top candidate for Hanno from his authored plot", () => {

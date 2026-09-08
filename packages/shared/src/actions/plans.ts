@@ -46,6 +46,8 @@ export const InterpretPlanSchema = z.object({
   planId: EntityIdSchema,
   interpretation: z.string().trim().min(1).max(800),
   stages: z.array(PlanStageInputSchema).min(1).max(12),
+  /** Method, conditions, secrecy, delegates and any spending cap, inferred from the plan's own text -- never invented beyond what it actually says. */
+  options: PlanOptionsSchema,
 }).strict();
 export const ExecutePlanStageSchema = z.object({ planId: EntityIdSchema, stageId: EntityIdSchema, actionId: EntityIdSchema, parameters: z.record(z.string(), z.unknown()).default({}) }).strict();
 export const RespondToAssignmentSchema = z.object({ planId: EntityIdSchema, actorId: EntityIdSchema, accepted: z.boolean(), reason: z.string().trim().min(1).max(400) }).strict();
@@ -61,7 +63,7 @@ export function preparePlayerPlans(world: WorldState, ownerId: string, atStep: n
       const planId = `plan-${atStep}-${id}`;
       if (plans.some(p => p.id === planId)) continue;
       plans.push({ id: planId, ownerId, sourceDirectiveId: id, rawText: directive.text, revisions: [{ atStep, text: directive.text }],
-        options: PlanOptionsSchema.parse(directive.planOptions ?? {}), interpretation: "", status: "active", stages: [], assignments: [], spent: 0, createdAtStep: atStep, updatedAtStep: atStep });
+        options: PlanOptionsSchema.parse({}), interpretation: "", status: "active", stages: [], assignments: [], spent: 0, createdAtStep: atStep, updatedAtStep: atStep });
     } else {
       plans = plans.map(p => {
         if (p.id !== directive.actionId || p.ownerId !== ownerId || p.status !== "active") return p;
@@ -82,12 +84,25 @@ export function preparePlayerPlans(world: WorldState, ownerId: string, atStep: n
 export function interpretPlan(world: WorldState, ownerId: string, input: z.infer<typeof InterpretPlanSchema>, atStep: number): WorldState | string {
   const plan = world.playerPlans?.find(p => p.id === input.planId && p.ownerId === ownerId && p.status === "active");
   if (!plan) return "No active plan of yours has that identity.";
+  const owner = world.characters.find(c => c.id === ownerId);
+  const budget = input.options.budget;
+  if (budget) {
+    const account = world.material.accounts.find(a => a.id === budget.accountId);
+    if (!account || account.owner.kind !== "character" || account.owner.id !== ownerId) return "A plan may only draw on the player's own account.";
+  }
+  if (plan.spent > 0) {
+    if (!budget || budget.amount < plan.spent) return "A plan's spending limit cannot drop below what it has already spent.";
+    if (plan.options.budget && budget.accountId !== plan.options.budget.accountId) return "Already-committed spending must keep its original account.";
+  }
+  for (const delegateId of input.options.delegateIds) {
+    if (!world.characters.some(c => c.id === delegateId && c.alive && c.id !== ownerId && (c.locationProvinceId === owner?.locationProvinceId || (owner?.polityId != null && c.polityId === owner.polityId)))) return "A named delegate must be a living contact of the player.";
+  }
   const ids = new Set<string>();
   const completed = plan.stages.filter(s => s.status === "completed");
   for (const stage of input.stages) {
     if (ids.has(stage.id)) return "Each stage needs a unique identity.";
     if (stage.dependsOn.some(id => !ids.has(id))) return "Dependencies must name an earlier stage; circular plans cannot proceed.";
-    if (stage.actorId !== ownerId && !plan.options.delegateIds.includes(stage.actorId)) return "This person was not named as a delegate by the player.";
+    if (stage.actorId !== ownerId && !input.options.delegateIds.includes(stage.actorId)) return "This person was not named as a delegate in the plan's own text.";
     if (!world.characters.some(c => c.id === stage.actorId && c.alive)) return "Every executor must be a living character.";
     if (stage.provinceId !== null && !world.map.provinces.some(p => p.id === stage.provinceId)) return "A stage condition names an unknown province.";
     const old = completed.find(s => s.id === stage.id);
@@ -95,20 +110,22 @@ export function interpretPlan(world: WorldState, ownerId: string, input: z.infer
     ids.add(stage.id);
   }
   if (completed.some(s => !ids.has(s.id))) return "Keep completed stages as the plan's history.";
-  return { ...world, playerPlans: world.playerPlans!.map(p => p.id !== plan.id ? p : { ...p, interpretation: input.interpretation, updatedAtStep: atStep,
+  return { ...world, playerPlans: world.playerPlans!.map(p => p.id !== plan.id ? p : { ...p, interpretation: input.interpretation, options: input.options, updatedAtStep: atStep,
     stages: input.stages.map(s => completed.find(c => c.id === s.id) ?? { ...s, status: "pending", reason: null, factRefs: [], lastCompletedStep: null }) }) };
 }
 
-/** A plan budget limits actual debits, never a model's estimate. */
-export function planSpending(before: WorldState, after: WorldState, plan: PlayerPlan): number | string {
-  const budget = plan.options.budget;
-  if (!budget) return 0;
+/**
+ * How much a stage actually debited from the accounts it touched. A stated
+ * plan budget is guidance for the Game Master's own judgement, not a
+ * deterministic spending cap -- so this only measures the debit, it never
+ * refuses one.
+ */
+export function planSpending(before: WorldState, after: WorldState, plan: PlayerPlan): number {
+  if (!plan.options.budget) return 0;
   let debit = 0;
   for (const account of before.material.accounts) {
     const remaining = after.material.accounts.find(a => a.id === account.id)?.balance ?? 0;
-    const amount = Math.max(0, account.balance - remaining);
-    if (amount > 0 && account.id !== budget.accountId) return "This plan may spend only from its selected account.";
-    debit += amount;
+    debit += Math.max(0, account.balance - remaining);
   }
-  return plan.spent + debit > budget.amount ? "This stage would exceed the player's remaining plan budget." : debit;
+  return debit;
 }

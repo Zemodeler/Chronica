@@ -122,7 +122,7 @@ export function stripEngineJargon(text: string): string {
  * written about the deed that did not happen -- "the siege", "the vote" --
  * because "attempt to start siege" is an identifier wearing a verb.
  */
-const ORDER_NOUNS: Readonly<Record<string, string>> = {
+export const ORDER_NOUNS: Readonly<Record<string, string>> = {
   start_siege: "the siege",
   end_siege: "the lifting of the siege",
   start_battle: "the battle",
@@ -135,8 +135,7 @@ const ORDER_NOUNS: Readonly<Record<string, string>> = {
   move_force: "the march",
   assign_command: "the command",
   call_vote: "the vote",
-  open_political_procedure: "the motion",
-  cast_vote: "the vote",
+  sponsor_procedure: "the motion",
   nominate_candidate: "the nomination",
   appoint_to_office: "the appointment",
   remove_from_office: "the removal from office",

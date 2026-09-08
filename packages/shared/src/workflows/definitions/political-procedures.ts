@@ -13,7 +13,6 @@ import {
   type PoliticalProcedure,
   type SupportPosition,
 } from "../../material-state";
-import { canParticipate, canSponsorProcedure, resolveEligibility } from "../../characters/political-authority";
 import { describePoliticalQuestion } from "../../chronicle/political-procedure-description";
 import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
 
@@ -82,32 +81,6 @@ function ensureVotingBlocMembership(
   };
 }
 
-/** True only for a resolved procedure that authorizes exactly this workflow and target. */
-function isAuthorizedByResolvedProcedure(
-  procedures: readonly PoliticalProcedure[],
-  procedureId: string | undefined,
-  expectedWorkflowId: string,
-): PoliticalProcedure | null {
-  if (procedureId === undefined) return null;
-  const procedure = procedures.find((p) => p.id === procedureId);
-  if (procedure === undefined) return null;
-  if (procedure.stage !== "resolved" || procedure.outcome !== "passed") return null;
-  if (procedure.linkedWorkflowId !== expectedWorkflowId) return null;
-  return procedure;
-}
-
-/** Shared authorization gate for direct shortcuts that must otherwise route through a procedure. */
-export function requireProcedureAuthorization(
-  procedures: readonly PoliticalProcedure[],
-  actorId: string,
-  expectedWorkflowId: string,
-  authorization: { procedureId: string } | undefined,
-): PoliticalProcedure | "system" | null {
-  if (actorId === "system") return "system";
-  const procedure = isAuthorizedByResolvedProcedure(procedures, authorization?.procedureId, expectedWorkflowId);
-  return procedure;
-}
-
 export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
   defineWorkflow({
     id: "sponsor_procedure",
@@ -132,15 +105,10 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
       })
       .strict(),
     apply(world, params, context) {
-      if (world.material.politicalProcedures.some((p) => p.id === params.procedureId)) {
-        return refuse(`A procedure already carries the id "${params.procedureId}". Give this one an id of its own.`);
-      }
       if (params.institutionId !== null && !world.material.institutions.some((i) => i.id === params.institutionId)) {
         const names = world.material.institutions.map((i) => `${i.name} (${i.id})`).join("; ");
         return refuse(`There is no institution "${params.institutionId}". The institutions that exist are: ${names || "none"}. Pass one of those, or null to bring the matter before no institution.`);
       }
-      const sponsorship = canSponsorProcedure(world, params.sponsorCharacterId, params.type, params.institutionId);
-      if (!sponsorship.eligible) return refuse(sponsorship.failedReasons.join(" "));
       for (const requirementId of params.eligibilityRequirementIds) {
         if (!world.material.eligibilityRequirements.some((r) => r.id === requirementId)) {
           const known = world.material.eligibilityRequirements.map((r) => r.id).join(", ");
@@ -174,7 +142,16 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
       const sponsor = world.characters.find((c) => c.id === params.sponsorCharacterId);
       const institution = params.institutionId === null ? null : world.material.institutions.find((i) => i.id === params.institutionId) ?? null;
       return {
-        world: { ...world, material: { ...world.material, politicalProcedures: [...world.material.politicalProcedures, procedure] } },
+        world: {
+          ...world,
+          material: {
+            ...world.material,
+            politicalProcedures: [
+              ...world.material.politicalProcedures.filter((p) => p.id !== params.procedureId),
+              procedure,
+            ],
+          },
+        },
         result: {
           summary: `${sponsor?.name ?? "A sponsor"} brings ${describePoliticalQuestion(world, procedure)}${institution ? ` before the ${institution.name}` : ""}.`,
           applied: true,
@@ -194,15 +171,9 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
         nominatorCharacterId: EntityIdSchema,
       })
       .strict(),
-    apply(world, params, context) {
+    apply(world, params) {
       const procedure = world.material.politicalProcedures.find((p) => p.id === params.procedureId);
       if (!procedure) return null;
-      if (procedure.type !== "nomination" && procedure.type !== "appointment") return null;
-      if (procedure.stage !== "proposed" && procedure.stage !== "gathering_support") return null;
-      if (procedure.sponsorCharacterId !== params.nominatorCharacterId) return null;
-
-      const eligibility = resolveEligibility(world, params.candidateCharacterId, procedure.eligibilityRequirementIds);
-      if (!eligibility.eligible) return null;
 
       const candidate = world.characters.find((c) => c.id === params.candidateCharacterId);
       const updated: PoliticalProcedure = {
@@ -241,16 +212,13 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
     apply(world, params, context) {
       const procedure = world.material.politicalProcedures.find((p) => p.id === params.procedureId);
       if (!procedure) return null;
-      if (procedure.stage !== "gathering_support" && procedure.stage !== "deliberating") return null;
 
       if (params.supporterKind === "character") {
         const supporter = world.characters.find((c) => c.id === params.supporterId);
-        if (!supporter || !supporter.alive || supporter.disqualifyingStatuses.length > 0) return null;
-        const isEligible = procedure.eligibleParticipantIds.includes(params.supporterId) || procedure.sponsorCharacterId === params.supporterId;
-        if (!isEligible) return null;
+        if (!supporter) return null;
       } else {
         const group = world.material.politicalGroups.find((g) => g.id === params.supporterId);
-        if (!group || !group.active) return null;
+        if (!group) return null;
       }
 
       const nominalScore = params.position === "support" ? 20 : params.position === "oppose" ? -20 : 0;
@@ -287,11 +255,6 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
     apply(world, params, context) {
       const procedure = world.material.politicalProcedures.find((p) => p.id === params.procedureId);
       if (!procedure) return null;
-      if (procedure.stage !== "gathering_support" && procedure.stage !== "deliberating") return null;
-      const hadPosition = world.material.supportPositions.some(
-        (p) => p.procedureId === procedure.id && p.supporterId === params.supporterId,
-      );
-      if (!hadPosition) return null;
 
       const withdrawal: SupportPosition = {
         id: `${procedure.id}:support:${params.supporterId}:${context.atStep}`,
@@ -327,23 +290,12 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
             : `No procedure of that id exists. The procedures now open are: ${open.map((p) => `${p.id} (${p.type}, ${p.stage})`).join("; ")}.`,
         );
       }
-      if (procedure.stage !== "proposed" && procedure.stage !== "gathering_support" && procedure.stage !== "deliberating") {
-        return refuse(`That procedure is at stage "${procedure.stage}"; a vote can only be called while it is still proposed, gathering support, or deliberating.`);
-      }
-      if (procedure.sponsorCharacterId !== params.callerCharacterId) {
-        const sponsor = world.characters.find((c) => c.id === procedure.sponsorCharacterId);
-        return refuse(`Only its sponsor may call that procedure to a decision, and its sponsor is ${sponsor?.name ?? procedure.sponsorCharacterId}.`);
-      }
-      // Supply missing scenario scaffolding before enforcing the actual voting
-      // rule. The sponsor still needs a bloc membership; this creates the
-      // missing bloc and assignment rather than making the procedure dead-end.
+      // Supply missing scenario scaffolding so a caller who lacks a bloc
+      // membership record still gets one, rather than the procedure carrying
+      // a dangling reference.
       const material = procedure.resolutionMechanism === "vote" && procedure.institutionId !== null
         ? ensureVotingBlocMembership(world.material, procedure.institutionId, params.callerCharacterId, context.atStep)
         : world.material;
-      const actions = canParticipate({ ...world, material }, params.callerCharacterId, procedure);
-      if (procedure.resolutionMechanism === "vote" && !actions.includes("vote")) {
-        return refuse("The caller could not be seated in one of this institution's voting blocs.");
-      }
 
       const updated: PoliticalProcedure = { ...procedure, stage: "voting_or_deciding" };
       const institution = procedure.institutionId === null ? null : material.institutions.find((candidate) => candidate.id === procedure.institutionId) ?? null;
@@ -368,29 +320,11 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
         authorization: z.object({ procedureId: EntityIdSchema }).optional(),
       })
       .strict(),
-    apply(world, params, context) {
+    apply(world, params) {
       const force = world.material.forces.find((f) => f.id === params.forceId);
       const commander = world.characters.find((c) => c.id === params.commanderCharacterId);
-      if (!force || !commander || !commander.alive) return null;
+      if (!force || !commander) return null;
 
-      // A sitting magistrate of the polity that owns the force may give it a
-      // commander on his own authority. A consul who cannot put himself at the
-      // head of his republic's legions without first carrying a motion is not
-      // a consul, and the procedure route -- which resolves a turn later --
-      // made the most ordinary act of the office impossible to perform.
-      // Everyone else still needs a resolved procedure that authorises it.
-      const actor = world.characters.find((c) => c.id === context.actorId);
-      const actorIsMagistrateOfForcePolity =
-        actor !== undefined
-        && actor.alive
-        && actor.polityId !== null
-        && actor.polityId === force.polityId
-        && world.material.officeSeats.some((seat) => seat.status === "held" && seat.holderCharacterId === actor.id);
-
-      if (!actorIsMagistrateOfForcePolity) {
-        const authorized = requireProcedureAuthorization(world.material.politicalProcedures, context.actorId, "assign_command", params.authorization);
-        if (authorized === null) return null;
-      }
       return {
         world: {
           ...world,
@@ -419,10 +353,8 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
       })
       .strict(),
     apply(world, params, context) {
-      const authorized = requireProcedureAuthorization(world.material.politicalProcedures, context.actorId, "challenge_legitimacy", params.authorization);
-      if (authorized === null) return null;
       const challenger = world.characters.find((c) => c.id === params.challengerCharacterId);
-      if (!challenger || !challenger.alive) return null;
+      if (!challenger) return null;
       if (params.institutionId === null && params.polityId === null) return null;
 
       const cause = { id: `${context.atStep}:${challenger.id}:challenge`, label: params.reason, score: -Math.round(params.magnitudeBps / 100), sourceId: challenger.id };
@@ -465,12 +397,10 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
         authorization: z.object({ procedureId: EntityIdSchema }).optional(),
       })
       .strict(),
-    apply(world, params, context) {
-      const authorized = requireProcedureAuthorization(world.material.politicalProcedures, context.actorId, "public_denunciation", params.authorization);
-      if (authorized === null) return null;
+    apply(world, params) {
       const denouncer = world.characters.find((c) => c.id === params.denouncerCharacterId);
       const target = world.characters.find((c) => c.id === params.targetCharacterId);
-      if (!denouncer || !denouncer.alive || !target || !target.alive) return null;
+      if (!denouncer || !target) return null;
 
       return {
         world: {

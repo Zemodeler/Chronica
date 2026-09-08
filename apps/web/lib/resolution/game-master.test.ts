@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createMockAdapter, type MockToolStep } from "@chronica/ai";
 import { firstPunicWarScenario } from "@chronica/db";
 import { WorldStateSchema, projectOrdersAndOperations, type WorldState } from "@chronica/shared";
@@ -44,6 +44,28 @@ const playerOnlyReport = {
 };
 
 describe("the game master loop", () => {
+  it("logs the engine's reason for both accepted and refused tool calls", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      await run([
+        {
+          toolCalls: [
+            { name: "inspect_character", arguments: { characterId: PLAYER } },
+            { name: "create_force", arguments: { polityId: ROME } },
+          ],
+        },
+        { content: "No more actions." },
+        { content: "Still no more actions." },
+      ]);
+
+      const calls = log.mock.calls.map(([message]) => String(message));
+      expect(calls).toContainEqual(expect.stringContaining('[game-master:step-1] inspect_character -> accepted reason='));
+      expect(calls).toContainEqual(expect.stringContaining('create_force -> refused reason="create_force requires'));
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it("carries out a player order and reports it against the fact the engine produced", async () => {
     const outcome = await run([
       { toolCalls: [{ name: "inspect_character", arguments: { characterId: PLAYER } }] },

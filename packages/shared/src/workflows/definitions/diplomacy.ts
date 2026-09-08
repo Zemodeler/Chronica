@@ -48,29 +48,20 @@ export const diplomacyWorkflows: AnyWorkflowDefinition[] = [
       })
       .strict(),
     apply(world, params, context) {
-      if (world.diplomacy.some((message) => message.id === params.messageId)) {
-        return refuse(`A message already carries the id "${params.messageId}". Give this one an id of its own.`);
-      }
-      if (params.fromPolityId === params.toPolityId) {
-        return refuse("A power cannot send a diplomatic message to itself. A matter internal to one polity is a political procedure, not diplomacy.");
-      }
       for (const [label, polityId] of [["sender", params.fromPolityId], ["recipient", params.toPolityId]] as const) {
         if (!world.map.polities.some((polity) => polity.id === polityId)) {
           return refuse(`There is no power with the id "${polityId}" to be the ${label}. Use one of the polity ids the world state lists.`);
         }
       }
       const sender = world.characters.find((character) => character.id === params.fromCharacterId);
-      if (!sender || !sender.alive) {
-        return refuse(`No living character with the id "${params.fromCharacterId}" can put their name to this message.`);
-      }
-      if (sender.polityId !== params.fromPolityId) {
-        return refuse(`${sender.name} does not belong to ${polityName(world, params.fromPolityId)} and cannot write in its name.`);
+      if (!sender) {
+        return refuse(`No character with the id "${params.fromCharacterId}" can put their name to this message.`);
       }
       if (params.toCharacterId !== null) {
         const recipient = world.characters.find((character) => character.id === params.toCharacterId);
-        if (!recipient || !recipient.alive) {
+        if (!recipient) {
           return refuse(
-            `No living character with the id "${params.toCharacterId}" can receive this message. Address it to the power itself by passing null for toCharacterId, or give that power a leader first with create_world_character.`,
+            `No character with the id "${params.toCharacterId}" can receive this message. Address it to the power itself by passing null for toCharacterId, or give that power a leader first with create_world_character.`,
           );
         }
       }
@@ -101,7 +92,10 @@ export const diplomacyWorkflows: AnyWorkflowDefinition[] = [
         : world.characters.find((character) => character.id === params.toCharacterId)?.name ?? polityName(world, params.toPolityId);
 
       return {
-        world: { ...world, diplomacy: [...world.diplomacy, message] },
+        world: {
+          ...world,
+          diplomacy: [...world.diplomacy.filter((candidate) => candidate.id !== params.messageId), message],
+        },
         result: {
           summary: `${sender.name} sends ${recipientName} a ${readable(params.kind)}: ${params.subject}`,
           applied: true,
@@ -133,15 +127,9 @@ export const diplomacyWorkflows: AnyWorkflowDefinition[] = [
             : `No message with the id "${params.messageId}" exists. Still awaiting a reply: ${open.map((candidate) => `${candidate.id} (${candidate.subject})`).join("; ")}.`,
         );
       }
-      if (message.status === "answered") {
-        return refuse(`That message was already answered — it was ${message.answer}. Send a new message rather than answering the same one twice.`);
-      }
       const answerer = world.characters.find((character) => character.id === params.answeredByCharacterId);
-      if (!answerer || !answerer.alive) {
-        return refuse(`No living character with the id "${params.answeredByCharacterId}" can answer for ${polityName(world, message.toPolityId)}.`);
-      }
-      if (answerer.polityId !== message.toPolityId) {
-        return refuse(`${answerer.name} does not belong to ${polityName(world, message.toPolityId)} and cannot answer in its name.`);
+      if (!answerer) {
+        return refuse(`No character with the id "${params.answeredByCharacterId}" can answer for ${polityName(world, message.toPolityId)}.`);
       }
 
       const answered: DiplomaticMessage = {
@@ -179,12 +167,8 @@ export const diplomacyWorkflows: AnyWorkflowDefinition[] = [
     apply(world, params, context) {
       const message = world.diplomacy.find((candidate) => candidate.id === params.messageId);
       if (!message) return refuse(`No message with the id "${params.messageId}" exists.`);
-      if (message.status === "answered") return refuse("That message has already been answered; it cannot be withdrawn after the fact.");
       const actor = world.characters.find((character) => character.id === params.withdrawnByCharacterId);
-      if (!actor || !actor.alive) return refuse(`No living character with the id "${params.withdrawnByCharacterId}" can withdraw it.`);
-      if (actor.polityId !== message.fromPolityId) {
-        return refuse(`Only ${polityName(world, message.fromPolityId)}, which sent it, may withdraw this message.`);
-      }
+      if (!actor) return refuse(`No character with the id "${params.withdrawnByCharacterId}" can withdraw it.`);
 
       const withdrawn: DiplomaticMessage = {
         ...message,

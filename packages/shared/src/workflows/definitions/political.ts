@@ -16,12 +16,6 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
       if (!a) return refuse(`No polity exists with the id "${params.polityAId}".`);
       const b = world.map.polities.find((p) => p.id === params.polityBId);
       if (!b) return refuse(`No polity exists with the id "${params.polityBId}".`);
-      const alreadyAtWar = world.conflicts.wars.some(
-        (w) =>
-          (w.polityAId === params.polityAId && w.polityBId === params.polityBId) ||
-          (w.polityAId === params.polityBId && w.polityBId === params.polityAId),
-      );
-      if (alreadyAtWar) return refuse(`${a.name} and ${b.name} are already at war.`);
       const [orderedA, orderedB]: [string, string] = params.polityAId < params.polityBId
         ? [params.polityAId, params.polityBId]
         : [params.polityBId, params.polityAId];
@@ -55,12 +49,6 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
       const a = world.map.polities.find((p) => p.id === params.polityAId);
       const b = world.map.polities.find((p) => p.id === params.polityBId);
       if (!a || !b) return null;
-      const hadWar = world.conflicts.wars.some(
-        (w) =>
-          (w.polityAId === params.polityAId && w.polityBId === params.polityBId) ||
-          (w.polityAId === params.polityBId && w.polityBId === params.polityAId),
-      );
-      if (!hadWar) return null;
       return {
         world: {
           ...world,
@@ -106,15 +94,6 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
       const message = world.diplomacy.find((candidate) => candidate.id === params.authorizingMessageId);
       if (!message) {
         return refuse(`No diplomatic message with the id "${params.authorizingMessageId}" exists. give_territory requires an accepted message ceding this exact ground as its authorization.`);
-      }
-      if (message.status !== "answered" || message.answer !== "accepted") {
-        return refuse(`Message "${params.authorizingMessageId}" was not accepted (it is ${message.status === "awaiting_reply" ? "still awaiting a reply" : `answered: ${message.answer}`}). A cession requires an accepted message, not merely a sent one.`);
-      }
-      const parties = new Set([message.fromPolityId, message.toPolityId]);
-      if (oldPolityId !== null && (!parties.has(oldPolityId) || !parties.has(params.newControllerPolityId))) {
-        return refuse(
-          `Message "${params.authorizingMessageId}" was exchanged between ${world.map.polities.find((p) => p.id === message.fromPolityId)?.name ?? message.fromPolityId} and ${world.map.polities.find((p) => p.id === message.toPolityId)?.name ?? message.toPolityId}, not between ${oldPolity?.name ?? "the current controller"} and ${newPolity.name}. It cannot authorize ceding ${province.name} between different powers.`,
-        );
       }
 
       return {
@@ -183,15 +162,13 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
       claimedProvinceIds: z.array(EntityIdSchema).min(1).max(8),
     }).strict(),
     apply(world, params) {
-      const alreadyExists = world.map.polities.some((p) => p.id === params.newPolityId);
-      if (alreadyExists) return null;
       return {
         world: {
           ...world,
           map: {
             ...world.map,
             polities: [
-              ...world.map.polities,
+              ...world.map.polities.filter((p) => p.id !== params.newPolityId),
               { id: params.newPolityId, name: params.newPolityName, capitalSettlementId: params.capitalSettlementId },
             ],
             provinces: world.map.provinces.map((p) =>
@@ -324,20 +301,18 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
       atStep: z.number().int().nonnegative(),
     }).strict(),
     apply(world, params, context) {
-      if (params.overlordPolityId === params.vassalPolityId) return null;
       const overlord = world.map.polities.find((p) => p.id === params.overlordPolityId);
       const vassal = world.map.polities.find((p) => p.id === params.vassalPolityId);
       if (!overlord || !vassal) return null;
       const payerAccount = world.material.accounts.find((a) => a.id === params.vassalPayerAccountId);
       if (!payerAccount) return null;
-      if (world.material.obligations.some((o) => o.id === params.tributeObligationId)) return null;
       return {
         world: {
           ...world,
           material: {
             ...world.material,
             obligations: [
-              ...world.material.obligations,
+              ...world.material.obligations.filter((o) => o.id !== params.tributeObligationId),
               {
                 id: params.tributeObligationId,
                 kind: "tribute" as const,
@@ -372,7 +347,7 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
     }).strict(),
     apply(world, params) {
       const obligation = world.material.obligations.find((o) => o.id === params.tributeObligationId);
-      if (!obligation || obligation.kind !== "tribute") return null;
+      if (!obligation) return null;
       return {
         world: {
           ...world,
@@ -404,23 +379,17 @@ export const politicalWorkflows: AnyWorkflowDefinition[] = [
     apply(world, params) {
       const a = world.characters.find((c) => c.id === params.characterAId);
       const b = world.characters.find((c) => c.id === params.characterBId);
-      if (!a || !b || !a.alive || !b.alive) return null;
-      if (!a.polityId || !b.polityId || a.polityId === b.polityId) return null;
-      if (world.map.politicalRelations.some((r) => r.id === params.relationId)) return null;
-      const alreadyAllied = world.map.politicalRelations.some(
-        (r) =>
-          r.kind === "alliance" &&
-          ((r.leaderPolityId === a.polityId && r.memberPolityId === b.polityId) ||
-            (r.leaderPolityId === b.polityId && r.memberPolityId === a.polityId)),
-      );
-      if (alreadyAllied) return null;
+      if (!a || !b) return null;
+      // A political relation always names two polities: this is a shape
+      // requirement of the record, not a narrative eligibility gate.
+      if (!a.polityId || !b.polityId) return null;
       return {
         world: {
           ...world,
           map: {
             ...world.map,
             politicalRelations: [
-              ...world.map.politicalRelations,
+              ...world.map.politicalRelations.filter((r) => r.id !== params.relationId),
               {
                 id: params.relationId,
                 kind: "alliance" as const,

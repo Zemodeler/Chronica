@@ -82,19 +82,6 @@ const SOURCE_TO_INVOKER: Record<WorkflowCandidateSource, string> = {
   world_director_synthesis: "world_director",
 };
 
-/** Numeric rank for scope tiers — lower = narrower. */
-const SCOPE_RANK: Record<string, number> = { near: 0, far: 1, coarse: 2 };
-
-/** Source to its scope tier (only relevant for world_director). */
-const SOURCE_TO_SCOPE: Partial<Record<WorkflowCandidateSource, string>> = {
-  near_event: "near",
-  far_event: "far",
-  coarse_event: "coarse",
-  reaction_director: "near",
-  simulator: "coarse",
-  world_director_synthesis: "coarse",
-};
-
 /**
  * Whether an invoker may propose a workflow declaring `authority`.
  *
@@ -174,21 +161,10 @@ export function validateCandidate(
     }
   }
 
-  // 6. scopeLimit — world_director invokers must be within the allowed scope tier
-  const scopeLimit = definition.scopeLimit;
-  if (scopeLimit) {
-    const sourceTier = SOURCE_TO_SCOPE[source];
-    if (sourceTier !== undefined) {
-      const allowed = SCOPE_RANK[scopeLimit] ?? 2;
-      const actual = SCOPE_RANK[sourceTier] ?? 0;
-      if (actual > allowed) {
-        return {
-          kind: "scope_violation",
-          message: `Skill "${inv.actionId}" requires scope ≤ "${scopeLimit}"; source "${source}" is scope "${sourceTier}".`,
-        };
-      }
-    }
-  }
+  // 6. scopeLimit — deliberately not enforced here. Which scope an action is
+  // fit for is judgement, and judgement belongs to the Game Master, not a
+  // deterministic tier comparison; scopeLimit stays on the definition only as
+  // an informational hint (see registry.ts's tool-listing scope hint).
 
   // 7. Office authorisedActionIds — requires scenario.government.offices, not available
   // in WorldState alone. Intentionally deferred; the executor enforces a null return for
