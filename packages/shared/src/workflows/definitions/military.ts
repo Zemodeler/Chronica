@@ -64,6 +64,7 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
     id: "create_force",
     description: "Raise a new military force for a polity at a specified province. Use when a player orders raising an army, recruiting troops, or mustering soldiers. Requires a polity account to fund the obligation.",
     category: "military",
+    duration: { minimumDays: 3, likelyDays: 7, maximumDays: 21 },
     parametersSchema: z.object({
       polityId: EntityIdSchema,
       locationProvinceId: EntityIdSchema,
@@ -169,6 +170,7 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
     id: "move_force",
     description: "Move a military force to a different province. The force's locationId changes immediately.",
     category: "military",
+    duration: { minimumDays: 3, likelyDays: 14, maximumDays: 45 },
     parametersSchema: z.object({
       forceId: EntityIdSchema,
       destinationProvinceId: EntityIdSchema,
@@ -266,6 +268,7 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
     id: "raise_morale",
     description: "Increase a force's morale by a given basis-points amount (capped at 10 000).",
     category: "military",
+    duration: { minimumDays: 1, likelyDays: 2, maximumDays: 7 },
     parametersSchema: z.object({
       forceId: EntityIdSchema,
       deltaBps: z.number().int().min(1).max(5_000),
@@ -296,6 +299,7 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
     id: "lower_morale",
     description: "Decrease a force's morale by a given basis-points amount (floor at 0).",
     category: "military",
+    duration: { minimumDays: 1, likelyDays: 2, maximumDays: 7 },
     parametersSchema: z.object({
       forceId: EntityIdSchema,
       deltaBps: z.number().int().min(1).max(5_000),
@@ -359,6 +363,7 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
     id: "start_battle",
     description: "Start a battle between two sides, each one or more forces. A multi-force side is merged into the resolver as one combined contribution (docs/19 Phase 3); no new phase-arrival model is needed. An optional posture per side (offer_battle, avoid_battle, defend, hold) is carried through to the battle's deterministic resolution.",
     category: "military",
+    duration: { minimumDays: 1, likelyDays: 14, maximumDays: 30 },
     parametersSchema: z.object({
       battleId: EntityIdSchema,
       attackingForceIds: z.array(EntityIdSchema).min(1),
@@ -405,6 +410,7 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
     id: "end_battle",
     description: "Remove a battle from the active conflicts list.",
     category: "military",
+    duration: { minimumDays: 1, likelyDays: 1, maximumDays: 1 },
     parametersSchema: z.object({
       battleId: EntityIdSchema,
       outcomeLabel: z.string().min(1).max(240),
@@ -432,6 +438,7 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
     id: "start_siege",
     description: "Begin a siege of a settlement by besieging forces.",
     category: "military",
+    duration: { minimumDays: 7, likelyDays: 30, maximumDays: 120 },
     parametersSchema: z.object({
       settlementId: EntityIdSchema,
       invadingForceIds: z.array(EntityIdSchema).min(1),
@@ -490,6 +497,7 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
     id: "end_siege",
     description: "End an active siege, optionally transferring province control.",
     category: "military",
+    duration: { minimumDays: 1, likelyDays: 1, maximumDays: 1 },
     parametersSchema: z.object({
       settlementId: EntityIdSchema,
       successfulCapture: z.boolean(),

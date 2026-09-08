@@ -70,15 +70,53 @@ export const WorldPinsSchema = z
   .strict();
 export type WorldPins = z.infer<typeof WorldPinsSchema>;
 
-/** Why the elastic clock stopped. Part of the determinism contract, not just flavour. */
+/**
+ * Why the elastic clock stopped. Part of the determinism contract, not just
+ * flavour. `salient_event`, `clarification_required`, `plan_interrupted`,
+ * and `incoming_message` are declared here in docs/32 Phase 6, but the live
+ * pipeline does not yet produce them -- every turn still commits
+ * `stopReason: "player_decision"` unconditionally. Phase 7's elastic
+ * scheduler is what actually starts choosing among these; see docs/32's
+ * stop-condition priority order.
+ */
 export const StopReasonSchema = z.enum([
   "player_decision",
-  "action_completed",
+  "clarification_required",
+  "salient_event",
   "watch_condition",
+  "plan_interrupted",
   "threshold_crossed",
+  "action_completed",
   "scheduled_life_event",
+  "incoming_message",
   "max_span",
 ]);
 export type StopReason = z.infer<typeof StopReasonSchema>;
+
+/**
+ * Day-level authoritative time (docs/32, Phase 6), read alongside the
+ * existing `elapsedStep`. `elapsedStep` -- renamed `coarseStep` here --
+ * remains what the live pipeline actually advances by exactly 1 per turn
+ * until Phase 7's elastic scheduler starts writing `elapsedDay` directly;
+ * until then this is a read-only projection, not a second authoritative
+ * clock in the snapshot.
+ */
+export interface WorldTime {
+  readonly elapsedDay: number;
+  readonly coarseStep: number;
+}
+
+/** Matches `gm/read-tools.ts`'s own default: used only when a scenario declares no clock at all. */
+const DEFAULT_STEPS_PER_YEAR = 4;
+
+/** How many days one step represents under a scenario's own clock, or the engine default absent one. */
+export function daysPerStep(scenarioClock?: ScenarioClock): number {
+  return 365 / (scenarioClock?.stepsPerYear ?? DEFAULT_STEPS_PER_YEAR);
+}
+
+/** Derives day-level time from the authoritative `elapsedStep`. Pure and read-only -- see the module comment above. */
+export function deriveWorldTime(elapsedStep: number, scenarioClock?: ScenarioClock): WorldTime {
+  return { elapsedDay: Math.round(elapsedStep * daysPerStep(scenarioClock)), coarseStep: elapsedStep };
+}
 
 export { ElapsedStepSchema };

@@ -32,6 +32,7 @@ export const diplomacyWorkflows: AnyWorkflowDefinition[] = [
     description:
       "Send a letter, offer, request, demand, protest, or ultimatum from one power to another. Records the approach and obliges the receiving power to answer; it decides nothing on their behalf.",
     category: "political",
+    duration: { minimumDays: 1, likelyDays: 3, maximumDays: 14 },
     parametersSchema: z
       .object({
         messageId: EntityIdSchema,
@@ -109,6 +110,7 @@ export const diplomacyWorkflows: AnyWorkflowDefinition[] = [
     description:
       "The receiving power answers a standing diplomatic message: accepted, refused, countered, or deliberately left unanswered, in its own words. Acceptance records agreement only — carry out what was agreed with the workflow that models it (sign_treaty, end_war, impose_tribute, arrange_marriage_alliance).",
     category: "political",
+    duration: { minimumDays: 1, likelyDays: 3, maximumDays: 14 },
     parametersSchema: z
       .object({
         messageId: EntityIdSchema,
@@ -165,6 +167,7 @@ export const diplomacyWorkflows: AnyWorkflowDefinition[] = [
     id: "withdraw_diplomatic_message",
     description: "The sender withdraws a message that has not yet been answered, so it no longer stands between the two powers.",
     category: "political",
+    duration: { minimumDays: 1, likelyDays: 1, maximumDays: 3 },
     parametersSchema: z
       .object({ messageId: EntityIdSchema, withdrawnByCharacterId: EntityIdSchema, reason: z.string().trim().min(1).max(400) })
       .strict(),

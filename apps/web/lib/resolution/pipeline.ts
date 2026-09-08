@@ -54,6 +54,7 @@ import {
   advanceProvinceMaterial,
   applyWarDamageForExecutedWorkflows,
   deriveChronicleDepth,
+  estimateWorkflowDurationDays,
   RECORD_REFUSAL_AFTERMATH_TOOL,
   type OrderRefusalFact,
   type ScenarioChronicleRules,
@@ -99,6 +100,7 @@ import {
 import { materializeCanvasProvince } from "../canvas-world";
 import { advanceWorldDynamics } from "./world-dynamics";
 import { selectDevelopmentActors } from "./world-development-scheduler";
+import { decideElasticStop } from "./elastic-scheduler";
 
 export type ProgressCallback = (progress: ResolutionProgress) => void;
 
@@ -152,31 +154,6 @@ function capChronicleVisibility(entries: readonly ChronicleEntryInput[], maxVisi
       return (a.simulatedDurationDays ?? 1) - (b.simulatedDurationDays ?? 1) || a.sequence - b.sequence;
     })
     .slice(0, maxVisible);
-}
-
-function estimateWorkflowDurationDays(workflows: readonly Pick<ProposedInvocation, "actionId">[]): number {
-  const actionDays: Record<string, number> = {
-    add_gold: 1,
-    remove_gold: 1,
-    transfer_gold: 1,
-    appoint_to_office: 2,
-    remove_from_office: 2,
-    raise_morale: 2,
-    lower_morale: 2,
-    move_character: 4,
-    create_force: 7,
-    move_force: 14,
-    start_battle: 14,
-    end_battle: 14,
-    sign_treaty: 21,
-    start_siege: 30,
-    end_siege: 30,
-    start_war: 45,
-    end_war: 45,
-    give_territory: 45,
-    change_province_control: 45,
-  };
-  return Math.max(1, ...workflows.map((workflow) => actionDays[workflow.actionId] ?? 7));
 }
 
 function scheduleChronicleEntries(entries: readonly ChronicleEntryInput[]): ChronicleEntryInput[] {
@@ -672,7 +649,7 @@ export async function resolveTurn(
       candidates: finalWorkflowAudit.candidates,
       turnIndex: atStep,
       atStep,
-      isLongRunningAction: (actionId) => estimateWorkflowDurationDays([{ actionId }]) >= 14,
+      isLongRunningAction: (actionId) => estimateWorkflowDurationDays([actionId]) >= 14,
     });
     // A named refusal aftermath is the richer record of the same failed
     // request. Do not also print the generic engine-only refusal beside it.
@@ -918,6 +895,7 @@ export async function resolveTurn(
       events: factualEvents,
       report: gameMasterCompleted ? gameMasterOutcome.report : null,
       directiveIds: gameMasterDirectives.map((entry) => entry.id),
+      scenarioClock: input.scenarioClock,
     });
     if (gameMasterOutcome.report === null) {
       const incompleteEntries = chronicleInputs.filter((entry) => entry.scope === "resolution_incomplete");
@@ -1173,6 +1151,18 @@ export async function resolveTurn(
       ),
     };
 
+    // Shadow-mode only (docs/32, Phase 7): computes what an elastic scheduler
+    // would have decided, purely for later comparison. `elapsedStepEnd`/
+    // `stopReason` below remain exactly what they were before this phase --
+    // the live pipeline still resolves one turn per call and always returns
+    // control to the player, regardless of this decision.
+    const elasticShadowDecision = decideElasticStop({
+      elapsedStepStart: resolutionWorld.elapsedStep,
+      scenarioClock: input.scenarioClock,
+      factualEvents,
+      plans: finalWorld.playerPlans ?? [],
+    });
+
     await commitResolution(db, {
       gameId,
       turnId,
@@ -1180,6 +1170,9 @@ export async function resolveTurn(
       elapsedStepEnd: atStep,
       chronicleEntries: chronicleInputs,
       stopReason: "player_decision",
+      elapsedDayEnd: elasticShadowDecision.elapsedDayEnd,
+      stoppingFactIds: elasticShadowDecision.stoppingFactIds,
+      requestedPlayerDecision: elasticShadowDecision.requestedPlayerDecision,
       workflowAudit: finalWorkflowAudit,
       capabilityRequests,
       gameMasterReport: {

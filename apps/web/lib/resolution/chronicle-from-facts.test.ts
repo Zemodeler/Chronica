@@ -88,6 +88,41 @@ describe("a completed levy", () => {
   });
 });
 
+describe("occurredAtDay / finalizedAtDay (docs/32, Phase 11)", () => {
+  it("populates identical occurredAtDay/finalizedAtDay from atStep, since every fact is still atomic", () => {
+    const entries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 4,
+      actorCharacterId: PLAYER,
+      events: [levyEvent],
+      report: report({
+        directiveOutcomes: [{ directiveId: "directive-0", outcome: "carried_out", reason: "Raised.", factRefs: ["fact-1-1"] }],
+      }),
+      directiveIds: ["directive-0"],
+      scenarioClock: { stepLabel: "season", stepLabelPlural: "seasons", stepsPerYear: 4, minSpan: 1, maxSpan: 10 },
+    });
+    const entry = entries.find((candidate) => candidate.scopeRef === "directive-0");
+    expect(entry?.occurredAtDay).toBe(365);
+    expect(entry?.finalizedAtDay).toBe(365);
+  });
+
+  it("falls back to the engine default when no scenario clock is supplied", () => {
+    const entries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      events: [levyEvent],
+      report: report({
+        directiveOutcomes: [{ directiveId: "directive-0", outcome: "carried_out", reason: "Raised.", factRefs: ["fact-1-1"] }],
+      }),
+      directiveIds: ["directive-0"],
+    });
+    const entry = entries.find((candidate) => candidate.scopeRef === "directive-0");
+    expect(entry?.occurredAtDay).toBeDefined();
+    expect(entry?.occurredAtDay).toBe(entry?.finalizedAtDay);
+  });
+});
+
 describe("a generic entity-state delta", () => {
   it("gives a force-created consequence its entity name, not just a text label", () => {
     const withDelta: FactualEvent = {

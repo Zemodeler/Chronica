@@ -154,7 +154,19 @@ export const turns = pgTable("turns", {
   claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
   elapsedStepStart: integer("elapsed_step_start").notNull(),
   elapsedStepEnd: integer("elapsed_step_end"),
+  /**
+   * Day-level authoritative time (docs/32, Phase 6), alongside the existing
+   * step columns above -- `elapsedStep` remains what the live pipeline
+   * actually advances by exactly 1 per turn until Phase 7's scheduler wires
+   * these in. Nullable so every turn resolved before this phase still parses.
+   */
+  elapsedDayStart: integer("elapsed_day_start"),
+  elapsedDayEnd: integer("elapsed_day_end"),
   stopReason: text("stop_reason"),
+  /** Fact ids the elastic scheduler (docs/32, Phase 7) cites as why this turn stopped. Absent until that phase writes it. */
+  stoppingFactIds: text("stopping_fact_ids").array(),
+  /** A short description of the decision, if any, this turn is waiting on the player for. Absent until Phase 7. */
+  requestedPlayerDecision: text("requested_player_decision"),
   /** Provinces whose controllerPolityId changed while resolving this turn. */
   changedRegionIds: text("changed_region_ids").array().notNull().default(sql`'{}'::text[]`),
   /** Current pipeline step written by the resolution worker for live polling. */
