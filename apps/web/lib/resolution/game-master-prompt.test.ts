@@ -60,3 +60,62 @@ describe("open political procedures", () => {
     expect(prompt).not.toContain("linkedWorkflowId");
   });
 });
+
+describe("causal chaining and inter-actor relations", () => {
+  it("instructs the Game Master to chain reactions and set chainPosition deliberately", () => {
+    const prompt = buildGameMasterSystemPrompt(baseInput());
+    expect(prompt).toContain("CAUSAL CHAINS");
+    expect(prompt).toContain("chainPosition");
+    expect(prompt).toMatch(/root.*reaction.*spread.*pressure/is);
+  });
+
+  it("gives the Game Master how the relevant polities stand toward each other, not just each character's own goals", () => {
+    const w = world();
+    w.conflicts = { ...w.conflicts, wars: [...w.conflicts.wars, { polityAId: "rome", polityBId: "carthage" }] };
+    w.diplomacy = [
+      ...w.diplomacy,
+      {
+        id: "msg-1",
+        kind: "ultimatum",
+        fromPolityId: "rome",
+        fromCharacterId: PLAYER,
+        toPolityId: "carthage",
+        toCharacterId: null,
+        subject: "Withdraw from Messana",
+        terms: "Leave the city or face war.",
+        sentAtStep: 1,
+        replyDueByStep: null,
+        status: "awaiting_reply",
+        answer: null,
+        answerText: null,
+        answeredAtStep: null,
+        inReplyToMessageId: null,
+        visibility: "polity",
+      },
+    ];
+    const prompt = buildGameMasterSystemPrompt(
+      baseInput({
+        world: w,
+        selectedCharacters: [{ characterId: "hanno", tier: "important", relevanceScore: 10, actionAllowance: 2, reasons: ["threatened"] }],
+      }),
+    );
+    expect(prompt).toContain("How these powers stand toward each other");
+    expect(prompt).toContain("Roman Republic ↔ Carthage");
+    expect(prompt).toContain("at war");
+    expect(prompt).toContain("1 unanswered message");
+  });
+
+  it("shows accumulated trust between polities, not just the latest message", () => {
+    const w = world();
+    w.polityStances = [
+      { polityId: "rome", towardPolityId: "carthage", trustScore: -34, lastShiftReason: "carthage refused \"Withdraw from Messana\"", lastShiftAtStep: 4 },
+    ];
+    const prompt = buildGameMasterSystemPrompt(
+      baseInput({
+        world: w,
+        selectedCharacters: [{ characterId: "hanno", tier: "important", relevanceScore: 10, actionAllowance: 2, reasons: ["threatened"] }],
+      }),
+    );
+    expect(prompt).toContain("Roman Republic's trust in Carthage: -34");
+  });
+});

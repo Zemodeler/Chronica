@@ -27,9 +27,17 @@ import {
   INVOKE_DEFINED_ACTION_TOOL,
   RECORD_REFUSAL_AFTERMATH_TOOL,
   RefusalAftermathToolArguments,
+  RECORD_ENTITY_NOTE_TOOL,
+  RecordEntityNoteToolArguments,
+  FLAG_NPC_INITIATED_DIALOGUE_TOOL,
+  FlagNpcInitiatedDialogueArguments,
+  FLAG_AMBIENT_EVENT_TOOL,
+  FlagAmbientEventArguments,
   buildGameMasterTools,
   type GameMasterToolDefinition,
 } from "./tools";
+import { appendEntityNote, type EntityNote } from "./campaign-memory";
+import { diffWorldState, type EntityStateDelta } from "./world-diff";
 
 // The staged tool loop (GM refactor, requirements 3, 4, 9).
 //
@@ -69,6 +77,14 @@ export interface FactualEvent {
    * this is the only point at which both are in hand.
    */
   readonly battleBrief?: BattleBrief;
+  /**
+   * Every tracked entity's change from this one call, found generically by
+   * `diffWorldState` comparing the staged world immediately before and after
+   * -- never by inspecting which action ran. A call that touches nothing the
+   * registry tracks yields an empty array, not an error; those still narrate
+   * from `summary` alone.
+   */
+  readonly stateDeltas?: readonly EntityStateDelta[];
 }
 
 /** Structured, deterministic facts about one resolved battle, for the Chronicle. */
@@ -326,6 +342,7 @@ export class GameMasterSession {
   private toolCallCount = 0;
   private readCallCount = 0;
   private factCounter = 0;
+  private ambientEventUsed = false;
   private finished = false;
   private readonly allowInventedActions: boolean;
 
@@ -418,6 +435,9 @@ export class GameMasterSession {
     }
     if (call.name === REQUEST_CAPABILITY_TOOL) return this.requestCapability(args);
     if (call.name === RECORD_REFUSAL_AFTERMATH_TOOL) return this.recordRefusalAftermath(args);
+    if (call.name === RECORD_ENTITY_NOTE_TOOL) return this.recordEntityNote(args);
+    if (call.name === FLAG_NPC_INITIATED_DIALOGUE_TOOL) return this.flagNpcInitiatedDialogue(args);
+    if (call.name === FLAG_AMBIENT_EVENT_TOOL) return this.flagAmbientEvent(args);
     if (READ_TOOL_BY_NAME.has(call.name)) return this.read(call.name, args);
     if (WORKFLOW_REGISTRY.has(call.name)) return this.act(call.name, args);
 
@@ -773,6 +793,11 @@ export class GameMasterSession {
     const factId = `fact-${this.atStep}-${this.factCounter}`;
     const battleId = invocation.actionId === "resolve_battle" ? invocation.parameters["battleId"] : undefined;
     const battleBrief = typeof battleId === "string" ? deriveBattleBrief(before, executed.world, battleId) : null;
+    // Generic and action-agnostic: whatever this call actually changed on any
+    // tracked entity, found by structural diff -- never by knowing which
+    // workflow ran. Covers every built-in workflow and every invented one
+    // the same way, with nothing to update here when a new one is added.
+    const stateDeltas = executed.result.noOp === true ? [] : diffWorldState(before, executed.world);
     this.events.push({
       id: factId,
       atStep: this.atStep,
@@ -787,6 +812,7 @@ export class GameMasterSession {
       materialConsequence: executed.result.noOp !== true,
       ...(executed.result.noOp === true ? { noOp: true } : {}),
       ...(battleBrief === null ? {} : { battleBrief }),
+      ...(stateDeltas.length === 0 ? {} : { stateDeltas }),
     });
     return { ok: true, factual: `Done [${factId}]: ${executed.result.summary}`, factId };
   }
@@ -819,6 +845,90 @@ export class GameMasterSession {
       || this.staged.material.politicalGroups.some(
         (group) => group.polityId === refuser.polityId && group.leaderCharacterId === refuser.id && group.active,
       );
+  }
+
+  private recordEntityNote(args: Record<string, unknown>): GameMasterToolOutcome {
+    const parsed = RecordEntityNoteToolArguments.safeParse(args);
+    if (!parsed.success) {
+      return { ok: false, finished: false, factual: `The note was rejected: ${parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}.` };
+    }
+    const { entityId, entityType, text } = parsed.data;
+    this.factCounter += 1;
+    const note: EntityNote = { id: `note-${this.atStep}-${this.factCounter}`, entityId, entityType, text, createdAtStep: this.atStep };
+    this.staged = { ...this.staged, campaignMemory: appendEntityNote(this.staged.campaignMemory, note) };
+    const factId = `fact-${this.atStep}-${this.factCounter}`;
+    // Memory-only: this is deliberately not narrated as a world event on its
+    // own (materialConsequence: false) -- nothing in the world changed, only
+    // what will be remembered about it next time.
+    this.events.push({
+      id: factId,
+      atStep: this.atStep,
+      kind: "action",
+      actionId: RECORD_ENTITY_NOTE_TOOL,
+      actorId: this.actorCharacterId,
+      parameters: { entityId, entityType, text },
+      summary: `Noted of ${entityId}: ${text}`,
+      materialConsequence: false,
+    });
+    return { ok: true, finished: false, factual: `Noted [${factId}].`, factId };
+  }
+
+  private flagNpcInitiatedDialogue(args: Record<string, unknown>): GameMasterToolOutcome {
+    const parsed = FlagNpcInitiatedDialogueArguments.safeParse(args);
+    if (!parsed.success) {
+      return { ok: false, finished: false, factual: `The flag was rejected: ${parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}.` };
+    }
+    const { characterId, topic, openingLine } = parsed.data;
+    if (characterId === this.actorCharacterId) {
+      return { ok: false, finished: false, factual: "The player's own character cannot initiate a conversation with themselves." };
+    }
+    const character = this.staged.characters.find((candidate) => candidate.id === characterId);
+    if (!character) return { ok: false, finished: false, factual: `No character with the id "${characterId}" exists.` };
+    if (!character.alive) return { ok: false, finished: false, factual: `${character.name} is dead and cannot open a conversation.` };
+
+    this.factCounter += 1;
+    const factId = `fact-${this.atStep}-${this.factCounter}`;
+    // Deliberately not a world mutation: this only surfaces an affordance.
+    // The Chronicle layer reads this action id specifically and attaches the
+    // topic/opening line to the event it belongs to.
+    this.events.push({
+      id: factId,
+      atStep: this.atStep,
+      kind: "action",
+      actionId: FLAG_NPC_INITIATED_DIALOGUE_TOOL,
+      actorId: characterId,
+      parameters: { characterId, topic, openingLine },
+      summary: `${character.name} wants to speak with you: ${topic}`,
+      materialConsequence: false,
+    });
+    return { ok: true, finished: false, factual: `Flagged [${factId}]: ${character.name} will show as wanting to talk.`, factId };
+  }
+
+  private flagAmbientEvent(args: Record<string, unknown>): GameMasterToolOutcome {
+    if (this.ambientEventUsed) {
+      return { ok: false, finished: false, factual: "An ambient event was already recorded this turn. At most one per turn." };
+    }
+    const parsed = FlagAmbientEventArguments.safeParse(args);
+    if (!parsed.success) {
+      return { ok: false, finished: false, factual: `The ambient event was rejected: ${parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}.` };
+    }
+    this.ambientEventUsed = true;
+    this.factCounter += 1;
+    const factId = `fact-${this.atStep}-${this.factCounter}`;
+    // Not a world mutation of any kind: pure flavor, cited by the report like
+    // any other fact so the Chronicle can narrate it, but with nothing behind
+    // it for a directConsequences card to ever show.
+    this.events.push({
+      id: factId,
+      atStep: this.atStep,
+      kind: "action",
+      actionId: FLAG_AMBIENT_EVENT_TOOL,
+      actorId: this.actorCharacterId,
+      parameters: { narrative: parsed.data.narrative },
+      summary: parsed.data.narrative,
+      materialConsequence: false,
+    });
+    return { ok: true, finished: false, factual: `Recorded [${factId}].`, factId };
   }
 
   private recordRefusalAftermath(args: Record<string, unknown>): GameMasterToolOutcome {

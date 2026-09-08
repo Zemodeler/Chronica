@@ -47,6 +47,9 @@ export const FINISH_TURN_TOOL = "finish_turn";
 export const DEFINE_ACTION_TOOL = "define_action";
 export const INVOKE_DEFINED_ACTION_TOOL = "invoke_defined_action";
 export const RECORD_REFUSAL_AFTERMATH_TOOL = "record_refusal_aftermath";
+export const RECORD_ENTITY_NOTE_TOOL = "record_entity_note";
+export const FLAG_NPC_INITIATED_DIALOGUE_TOOL = "flag_npc_initiated_dialogue";
+export const FLAG_AMBIENT_EVENT_TOOL = "flag_ambient_event";
 
 /**
  * JSON Schema keywords a provider's function-calling validator has no use for
@@ -130,6 +133,28 @@ export function buildReadTools(readTools: readonly AnyReadToolDefinition[] = GAM
 
 const CapabilityToolArgsSchema = CapabilityRequestSchema;
 const FinishToolArgsSchema = z.object({ report: GameMasterTurnReportSchema }).strict();
+const RecordEntityNoteToolArgsSchema = z.object({
+  /** Any world entity's id -- a force, a building, a settlement, a character. */
+  entityId: EntityIdSchema,
+  entityType: z.enum(["force", "building", "settlement", "character", "institution", "other"]),
+  /** What was said or decided about it. Kept close to the actual words -- no interpretation at write time. */
+  text: z.string().trim().min(1).max(400),
+}).strict();
+
+const FlagNpcInitiatedDialogueArgsSchema = z.object({
+  /** A living, named character -- never the player's own. */
+  characterId: EntityIdSchema,
+  /** One line on what they want to discuss; shown to the player before they open the conversation. */
+  topic: z.string().trim().min(1).max(160),
+  /** Exactly what this character says first, in their own voice, once the player opens the thread. */
+  openingLine: z.string().trim().min(1).max(600),
+}).strict();
+
+const FlagAmbientEventArgsSchema = z.object({
+  /** A short, self-contained paragraph of world-flavor narration, entirely outside the player's own tracked theater. */
+  narrative: z.string().trim().min(1).max(600),
+}).strict();
+
 const RefusalAftermathToolArgsSchema = z.object({
   /** Returned only for a genuine, non-recoverable refusal earlier this turn. */
   refusalId: z.string().trim().min(1).max(120),
@@ -158,6 +183,65 @@ export function buildFinishTool(): GameMasterToolDefinition {
     description:
       "End the turn. Supply the structured report of what the tools you called actually did. Every event you report must reference a factRef returned by an earlier tool result; the report cannot create anything.",
     parameters: toJsonSchema(FinishToolArgsSchema),
+  };
+}
+
+/**
+ * Records a freeform note against any entity -- what a player said when they
+ * created something ("a Legio trained specifically against Carthaginian war
+ * elephants"), or what the Game Master itself observed as it developed
+ * ("the academy graduated its first cohort of siege engineers"). This is
+ * memory, not a mechanical modifier: nothing reads it to compute a bonus.
+ * It exists so a later turn's Game Master sees the same words again and can
+ * decide, in its own judgment, what -- if anything -- they are worth this
+ * time, the same way it already reads a character's goals or beliefs rather
+ * than a formula.
+ */
+export function buildRecordEntityNoteTool(): GameMasterToolDefinition {
+  return {
+    name: RECORD_ENTITY_NOTE_TOOL,
+    kind: "aftermath",
+    description:
+      "Record a freeform note against any entity you can name an id for -- a force, a building, a settlement, a character, an institution. Use it to capture what a player stated when creating or ordering something (a unit's declared purpose, a building's stated function), or to add a later development worth remembering. This changes nothing else about the entity and grants no mechanical bonus by itself; the note is memory you (or a later turn's Game Master) may draw on at your own discretion when it becomes narratively relevant, never a guaranteed effect.",
+    parameters: toJsonSchema(RecordEntityNoteToolArgsSchema),
+  };
+}
+
+/**
+ * Lets a named character be the one who opens a conversation, instead of the
+ * player always being the one to start it. This changes nothing in the
+ * world by itself -- it only marks that this character wants to talk, and
+ * gives their opening line, so the player sees an affordance to open the
+ * thread on their own initiative. Use sparingly: reserve it for a character
+ * with a real, current reason to reach out (an unresolved demand, urgent
+ * news, a decision that affects the player directly), never as a routine
+ * check-in.
+ */
+export function buildFlagNpcInitiatedDialogueTool(): GameMasterToolDefinition {
+  return {
+    name: FLAG_NPC_INITIATED_DIALOGUE_TOOL,
+    kind: "aftermath",
+    description:
+      "Mark that a named, living character wants to open a conversation with the player, with a short topic and their exact opening line. This does not open the conversation itself or put words in the player's mouth -- it surfaces an affordance the player may choose to act on. Use only when the character has a real, current reason (an unresolved demand, urgent news, a choice bearing on the player) -- never as routine flavour, and never for the player's own character.",
+    parameters: toJsonSchema(FlagNpcInitiatedDialogueArgsSchema),
+  };
+}
+
+/**
+ * Records one line of world-flavor narration entirely outside the player's
+ * tracked theater -- a rival civilization's rise, a distant famine, a court
+ * intrigue nobody here will ever hear about. Purely immersion: no tool call
+ * of consequence backs it, and the session refuses a second call in the same
+ * turn (docs: at most one ambient event per turn), so it can never crowd out
+ * the turn's real work or read as though it mattered mechanically.
+ */
+export function buildFlagAmbientEventTool(): GameMasterToolDefinition {
+  return {
+    name: FLAG_AMBIENT_EVENT_TOOL,
+    kind: "aftermath",
+    description:
+      "Record one short paragraph of world-flavor narration entirely disconnected from the player's own tracked theater and forces -- a distant power's rise, a famine, a court intrigue elsewhere in the world. At most one per turn; the session refuses a second call. Never use this for anything involving a tracked polity, character, or force -- use the ordinary action tools for that.",
+    parameters: toJsonSchema(FlagAmbientEventArgsSchema),
   };
 }
 
@@ -255,6 +339,9 @@ export function buildGameMasterTools(options: { readonly allowInventedActions?: 
       ...(allowInventedActions ? [buildDefineActionTool(), buildInvokeDefinedActionTool()] : []),
       buildCapabilityTool(),
       buildRefusalAftermathTool(),
+      buildRecordEntityNoteTool(),
+      buildFlagNpcInitiatedDialogueTool(),
+      buildFlagAmbientEventTool(),
       buildFinishTool(),
       { name: "interpret_plan", kind: "plan", description: "Interpret a saved player plan as up to twelve concrete stages. Infer method, conditions, secrecy, named delegates and any spending cap from the plan's own words -- never invent a delegate or a sum the player did not name. Preserve original intent, completed stages and, once spending has occurred, the same budget account. One stage corresponds to one action; use dependencies and time/location conditions. This records a plan, not an outcome.", parameters: toJsonSchema(InterpretPlanSchema) },
       { name: "execute_plan_stage", kind: "plan", description: "Attempt one ready plan stage through a registered or defined action. Dependencies, delegate acceptance, personal time, authority and actual spending are checked. Completed stages are never repeated; blocked stages persist for retry.", parameters: toJsonSchema(ExecutePlanStageSchema) },
@@ -270,6 +357,9 @@ export function buildGameMasterTools(options: { readonly allowInventedActions?: 
 export const CapabilityToolArguments = CapabilityToolArgsSchema;
 export const FinishToolArguments = FinishToolArgsSchema;
 export const RefusalAftermathToolArguments = RefusalAftermathToolArgsSchema;
+export const RecordEntityNoteToolArguments = RecordEntityNoteToolArgsSchema;
+export const FlagNpcInitiatedDialogueArguments = FlagNpcInitiatedDialogueArgsSchema;
+export const FlagAmbientEventArguments = FlagAmbientEventArgsSchema;
 
 /** Shape every action tool's arguments share before the workflow schema sees them. */
 export const ActionToolEnvelopeSchema = z.object({ actorId: EntityIdSchema }).loose();

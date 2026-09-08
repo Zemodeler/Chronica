@@ -1,8 +1,8 @@
 import "server-only";
 
 import type { ChronicleEntryInput } from "@chronica/db";
-import type { FactualEvent, GameMasterTurnReport, WorldState } from "@chronica/shared";
-import { chronicleHeadline, deriveChronicleDepth, humanizeRefusalReason, stripEngineJargon, RECORD_REFUSAL_AFTERMATH_TOOL } from "@chronica/shared";
+import type { EntityStateDelta, FactualEvent, GameMasterTurnReport, WorldState } from "@chronica/shared";
+import { chronicleHeadline, deriveChronicleDepth, humanizeRefusalReason, stripEngineJargon, RECORD_REFUSAL_AFTERMATH_TOOL, FLAG_AMBIENT_EVENT_TOOL, FLAG_NPC_INITIATED_DIALOGUE_TOOL } from "@chronica/shared";
 
 // Chronicle from facts (GM refactor, requirement 8).
 //
@@ -35,11 +35,43 @@ const INCOMPLETE_SCOPE = "resolution_incomplete";
 /** Reasons a directive produced no world change. These stay executor-worded. */
 const NON_SUCCESS_OUTCOMES = new Set(["refused", "failed", "unsupported"]);
 
+// These facts drive the resolver but are not events in the world. They must
+// never become Chronicle prose just because the Game Master omitted them from
+// its report (or failed to finish a report at all). In particular, a pressure
+// tells an actor what needs attention; it is not evidence that they acted.
+const INTERNAL_FACT_ACTION_IDS = new Set([
+  "plan_update",
+  "record_entity_note",
+  "world_development",
+  "world_incursion_pressure",
+  "roman_senate_scrutiny",
+]);
+
+// A refusal scene and an ambient world beat are intentionally non-material,
+// but are authored player-facing records. All other non-material facts need a
+// real material action alongside them before the Chronicle may mention them.
+const EXPLICIT_NON_MATERIAL_CHRONICLE_FACT_IDS = new Set([
+  RECORD_REFUSAL_AFTERMATH_TOOL,
+  FLAG_AMBIENT_EVENT_TOOL,
+  // Naming an existing leader is a public identity update, even though it
+  // changes no material ledger or battlefield state.
+  "rename_character",
+  // This is a player-facing affordance (not an internal GM prompt). It may
+  // appear on a Chronicle entry so the client can offer the conversation.
+  FLAG_NPC_INITIATED_DIALOGUE_TOOL,
+]);
+
+function isChronicleEligibleFact(event: FactualEvent): boolean {
+  if (event.kind !== "action" || event.noOp === true) return false;
+  if (INTERNAL_FACT_ACTION_IDS.has(event.actionId)) return false;
+  return event.materialConsequence || EXPLICIT_NON_MATERIAL_CHRONICLE_FACT_IDS.has(event.actionId);
+}
+
 function factBody(events: readonly FactualEvent[], refs: readonly string[]): string {
   const byId = new Map(events.map((event) => [event.id, event]));
   const summaries = refs
     .map((ref) => byId.get(ref))
-    .filter((event): event is FactualEvent => event !== undefined && event.kind === "action" && event.noOp !== true)
+    .filter((event): event is FactualEvent => event !== undefined && isChronicleEligibleFact(event))
     .map((event) => stripEngineJargon(event.summary))
     .filter((summary) => summary.trim().length > 0);
   // The same executor sentence cited twice is one fact, not two.
@@ -93,46 +125,63 @@ function durationDaysFor(actionIds: readonly string[]): number {
 }
 
 /**
- * Actions whose effect is a countable, checkable change in the world -- the
- * kind of fact that belongs in the turn's brief strip as well as in its prose.
- * Everything else is narrated once and left there, so the Chronicle does not
- * print its own paragraph back to the reader as a bullet list.
+ * "controllerPolityId" reads as "controller polity"; "moraleBps" as "morale".
+ * Purely cosmetic, and generic across every tracked field on every tracked
+ * entity type -- never a lookup keyed on which workflow produced the change.
  */
-const QUANTIFIED_ACTIONS = new Set([
-  "add_gold",
-  "remove_gold",
-  "transfer_gold",
-  "create_force",
-  "disband_force",
-  "change_province_control",
-  "give_territory",
-  "start_war",
-  "end_war",
-  "sign_treaty",
-  "appoint_to_office",
-  "remove_from_office",
-]);
+function humanizeFieldName(field: string): string {
+  return field.replace(/Id$/, "").replace(/Bps$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+}
+
+/**
+ * One entity's change, in plain words, straight from the generic diff --
+ * never from knowing which workflow produced it. "Created"/"deleted" speak
+ * for themselves; "updated" lists exactly the fields that changed, which is
+ * everything from a province's controller to a force's location to a
+ * character's office, all through the same formatting.
+ */
+function labelForDelta(delta: EntityStateDelta): string {
+  if (delta.change === "created") return `${delta.entityName} created`;
+  if (delta.change === "deleted") return `${delta.entityName} removed`;
+  const parts = (delta.fields ?? []).map((change) => `${humanizeFieldName(change.field)} ${String(change.from)} → ${String(change.to)}`);
+  return `${delta.entityName}: ${parts.join("; ")}`;
+}
 
 function directConsequencesOf(events: readonly FactualEvent[]): NonNullable<ChronicleEntryInput["directConsequences"]> {
   const seen = new Set<string>();
   const consequences: NonNullable<ChronicleEntryInput["directConsequences"]> = [];
   for (const event of events) {
     if (event.kind !== "action" || event.noOp === true || !event.materialConsequence) continue;
-    if (event.actionId === "add_gold" || event.actionId === "remove_gold") {
-      const amount = event.parameters["amount"];
-      const sign = event.actionId === "add_gold" ? "+" : "-";
-      const label = `${sign}${String(amount)} gold`;
-      if (seen.has(label)) continue;
-      seen.add(label);
-      consequences.push({ kind: "material", label, entityId: null, quantified: true });
+    // The generic diff already found every tracked entity this call
+    // actually changed -- battle casualties, a captured settlement, a
+    // ratified treaty's war/alliance state, an office changing hands, the
+    // same as a force being raised or moved. Nothing here inspects which
+    // workflow ran.
+    const deltas = event.stateDeltas ?? [];
+    if (deltas.length > 0) {
+      for (const delta of deltas) {
+        const label = labelForDelta(delta);
+        if (seen.has(label)) continue;
+        seen.add(label);
+        consequences.push({
+          kind: "material",
+          label,
+          entityId: delta.entityId,
+          entityName: delta.entityName,
+          quantified: true,
+          changeKind: delta.change,
+          ...(delta.fields && delta.fields.length > 0 ? { fields: [...delta.fields] } : {}),
+        });
+      }
       continue;
     }
-    // One clause, in plain words: a ledger line, never a second copy of the
-    // narrated sentence.
+    // A call that touched nothing the registry tracks (a character's goal,
+    // a plot, a pledge of support) still belongs in the record -- just as
+    // plain text, never silently dropped.
     const label = stripEngineJargon(event.summary).split(/(?<=[.;])\s/)[0]?.trim().slice(0, 120) ?? "";
     if (label.length === 0 || seen.has(label)) continue;
     seen.add(label);
-    consequences.push({ kind: "material", label, entityId: event.actorId, quantified: QUANTIFIED_ACTIONS.has(event.actionId) });
+    consequences.push({ kind: "material", label, entityId: event.actorId, quantified: false });
   }
   return consequences;
 }
@@ -142,6 +191,24 @@ function directConsequencesOf(events: readonly FactualEvent[]): NonNullable<Chro
  * for. A raised force names itself, so the Chronicle headline and the body
  * agree that it exists.
  */
+/**
+ * A named character asked to open a conversation this turn carries the
+ * player-facing "Initiated Chat" affordance -- topic and opening line, both
+ * exactly as the Game Master gave them, resolved against a real living
+ * character so the entry can never point at someone who does not exist.
+ */
+function initiatedDialogueOf(events: readonly FactualEvent[], world: WorldState): NonNullable<ChronicleEntryInput["initiatedDialogue"]> | undefined {
+  const event = events.find((candidate) => candidate.kind === "action" && candidate.actionId === FLAG_NPC_INITIATED_DIALOGUE_TOOL);
+  if (event === undefined) return undefined;
+  const characterId = event.parameters["characterId"];
+  const topic = event.parameters["topic"];
+  const openingLine = event.parameters["openingLine"];
+  if (typeof characterId !== "string" || typeof topic !== "string" || typeof openingLine !== "string") return undefined;
+  const character = world.characters.find((candidate) => candidate.id === characterId && candidate.alive);
+  if (!character) return undefined;
+  return { characterId, characterName: character.name, topic, openingLine };
+}
+
 function playerTitle(events: readonly FactualEvent[], world: WorldState, actorCharacterId: string): string {
   const created = events.find((event) => event.actionId === "create_force" && event.kind === "action");
   const forceName = created?.parameters["name"];
@@ -192,7 +259,7 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
     const refs = allRefs.filter((ref) => !consumed.has(ref));
     for (const ref of allRefs) consumed.add(ref);
     const refEvents = refs.map((ref) => byId.get(ref)).filter((event): event is FactualEvent => event !== undefined);
-    const applied = refEvents.filter((event) => event.kind === "action" && event.noOp !== true);
+    const applied = refEvents.filter(isChronicleEligibleFact);
     const namedRefusal = refEvents.find((event) => event.actionId === RECORD_REFUSAL_AFTERMATH_TOOL);
 
     const succeeded = outcome !== undefined && !NON_SUCCESS_OUTCOMES.has(outcome.outcome) && applied.length > 0;
@@ -201,7 +268,8 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
     if (refEvents.some((event) => event.kind === "capability_gap") && applied.length === 0) continue;
     // A successful directive whose every fact was already recorded under an
     // earlier one would be the same paragraph told twice.
-    if (!succeeded && refs.length === 0 && allRefs.length > 0 && outcome !== undefined && !NON_SUCCESS_OUTCOMES.has(outcome.outcome)) continue;
+    if ((!succeeded && refs.length === 0 && allRefs.length > 0 && outcome !== undefined && !NON_SUCCESS_OUTCOMES.has(outcome.outcome))
+      || (outcome !== undefined && !NON_SUCCESS_OUTCOMES.has(outcome.outcome) && applied.length === 0)) continue;
     // A refusal or a failure is an executor-derived fact and stays worded that
     // way; it is deliberately kept out of the narrator pass downstream so no
     // invented institutional explanation can attach to it.
@@ -215,6 +283,8 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
         : outcome?.reason !== undefined
           ? `${actorName} gave the order, but it found no ears: ${humanizeRefusalReason(outcome.reason)}. The matter went no further.`
           : "The order was given, but it found no ears. The matter went no further.";
+    const directiveDialogue = initiatedDialogueOf(refEvents, world);
+    const directiveInitiatedDialogue = directiveDialogue === undefined ? {} : { initiatedDialogue: directiveDialogue };
 
     entries.push({
       scope: succeeded ? PLAYER_SCOPE : report === null ? INCOMPLETE_SCOPE : REFUSAL_SCOPE,
@@ -232,6 +302,7 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
       playerRelevance: "high",
       depth: "scene",
       directConsequences: directConsequencesOf(applied),
+      ...directiveInitiatedDialogue,
     });
   }
 
@@ -240,11 +311,14 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
     const refs = event.factRefs.filter((ref) => !consumed.has(ref));
     if (refs.length === 0) continue;
     for (const ref of refs) consumed.add(ref);
-    const refEvents = refs
+    const citedEvents = refs
       .map((ref) => byId.get(ref))
-      .filter((candidate): candidate is FactualEvent => candidate !== undefined && candidate.kind === "action" && candidate.noOp !== true);
+      .filter((candidate): candidate is FactualEvent => candidate !== undefined);
+    const refEvents = citedEvents.filter(isChronicleEligibleFact);
     if (refEvents.length === 0) continue;
     const material = refEvents.some((candidate) => candidate.materialConsequence);
+    const worldDialogue = initiatedDialogueOf(citedEvents, world);
+    const worldInitiatedDialogue = worldDialogue === undefined ? {} : { initiatedDialogue: worldDialogue };
     entries.push({
       scope: WORLD_SCOPE,
       scopeRef: refs[0] ?? `${atStep}`,
@@ -274,7 +348,9 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
         .map((id) => ({ characterId: id, role: "participant" })),
       playerRelevance: salienceTier(event.salience),
       depth: deriveChronicleDepth({ playerRelevance: salienceTier(event.salience), materialConsequence: material, isPlayerAction: false }),
+      directConsequences: directConsequencesOf(refEvents),
       ...battleBriefOf(refEvents),
+      ...worldInitiatedDialogue,
     });
   }
 
@@ -287,7 +363,9 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
     // ...except a call that changed nothing, including an internal capability
     // request. There is no omission in staying silent about a world that did
     // not move.
-    if (event.kind !== "action" || event.noOp === true) continue;
+    if (!isChronicleEligibleFact(event)) continue;
+    const forgottenDialogue = initiatedDialogueOf([event], world);
+    const forgottenInitiatedDialogue = forgottenDialogue === undefined ? {} : { initiatedDialogue: forgottenDialogue };
     entries.push({
       scope: WORLD_SCOPE,
       scopeRef: event.id,
@@ -303,7 +381,9 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
       chainPosition: "spread",
       playerRelevance: "low",
       depth: deriveChronicleDepth({ playerRelevance: "low", materialConsequence: event.materialConsequence, isPlayerAction: false }),
+      directConsequences: directConsequencesOf([event]),
       ...battleBriefOf([event]),
+      ...forgottenInitiatedDialogue,
     });
   }
 

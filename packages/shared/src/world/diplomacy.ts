@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ElapsedStepSchema, EntityIdSchema, VisibilitySchema } from "../material-state";
+import { ElapsedStepSchema, EntityIdSchema, SignedScoreSchema, VisibilitySchema } from "../material-state";
 
 // Diplomacy: what one power says to another.
 //
@@ -142,4 +142,74 @@ export function deriveDiplomaticEscalations(
   }
 
   return escalations;
+}
+
+// Persistent, evolving posture (GM refactor, requirement: causal chaining and
+// inter-actor relations, docs/34).
+//
+// `deriveDiplomaticEscalations` reads the message log fresh each time it is
+// asked and never remembers anything between turns; a thread that goes quiet
+// leaves no trace once it stops being "the most recent answer." PolityStance
+// is the accumulator that thread history was missing: one power's standing
+// trust toward another, nudged a little every time a message between them is
+// answered, so a Game Master reading it on turn thirty sees the accumulated
+// weight of thirty turns of behaviour, not just the last reply.
+
+/** One power's accumulated posture toward another. Directed: A's trust of B is not B's of A. */
+export const PolityStanceSchema = z
+  .object({
+    polityId: EntityIdSchema,
+    towardPolityId: EntityIdSchema,
+    /** -100 (open hostility) to 100 (firm trust); 0 is neutral/unknown. */
+    trustScore: SignedScoreSchema,
+    lastShiftReason: z.string().trim().min(1).max(240),
+    lastShiftAtStep: ElapsedStepSchema,
+  })
+  .strict()
+  .refine((stance) => stance.polityId !== stance.towardPolityId, {
+    message: "A polity's stance toward itself is not tracked.",
+    path: ["towardPolityId"],
+  });
+export type PolityStance = z.infer<typeof PolityStanceSchema>;
+
+/** How much one answered message shifts the recipient's trust in the sender. */
+const TRUST_SHIFT_BY_ANSWER: Record<DiplomaticAnswer, number> = {
+  accepted: 12,
+  countered: 2,
+  refused: -10,
+  ignored: -14,
+};
+
+function clampTrust(score: number): number {
+  return Math.max(-100, Math.min(100, score));
+}
+
+function findStance(stances: readonly PolityStance[], polityId: string, towardPolityId: string): PolityStance | undefined {
+  return stances.find((stance) => stance.polityId === polityId && stance.towardPolityId === towardPolityId);
+}
+
+/**
+ * Nudge the recipient's trust in the sender after one message is answered,
+ * returning the updated stance list. Directed and asymmetric on purpose: the
+ * recipient's opinion of the sender moves on how the sender's approach was
+ * received (nothing here, deliberately); the sender's opinion of the
+ * recipient moves on how it was answered, which is the information this
+ * function actually has.
+ */
+export function applyDiplomaticAnswerToStance(
+  stances: readonly PolityStance[],
+  message: Pick<DiplomaticMessage, "fromPolityId" | "toPolityId" | "answer" | "subject">,
+  atStep: number,
+): readonly PolityStance[] {
+  if (message.answer === null) return stances;
+  const shift = TRUST_SHIFT_BY_ANSWER[message.answer];
+  const existing = findStance(stances, message.fromPolityId, message.toPolityId);
+  const updated: PolityStance = {
+    polityId: message.fromPolityId,
+    towardPolityId: message.toPolityId,
+    trustScore: clampTrust((existing?.trustScore ?? 0) + shift),
+    lastShiftReason: `${message.toPolityId} ${message.answer} "${message.subject}"`,
+    lastShiftAtStep: atStep,
+  };
+  return [...stances.filter((stance) => !(stance.polityId === message.fromPolityId && stance.towardPolityId === message.toPolityId)), updated];
 }

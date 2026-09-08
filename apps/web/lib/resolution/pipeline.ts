@@ -469,7 +469,7 @@ export async function resolveTurn(
         console.error(`${tag()} [defined-actions] could not be loaded; this turn runs with built-ins only`, err);
         return [] as InventedWorkflowDefinition[];
       });
-    const gameMasterOutcome = await runGameMaster(gameMasterAdapter, {
+    const gameMasterInput = {
       world: agencyWorld,
       atStep,
       actorCharacterId,
@@ -486,8 +486,40 @@ export async function resolveTurn(
       // for an unanticipated player intent. This is a developer-controlled
       // rollout/testing exception, not a normal-play setting.
       allowInventedActions: process.env.CHRONICA_ALLOW_INVENTED_ACTIONS === "true",
-    });
-    let newWorld: WorldState = gameMasterOutcome.world;
+    };
+    let gameMasterOutcome = await runGameMaster(gameMasterAdapter, gameMasterInput);
+
+    // A session that did not submit an accepted finish_turn report is not a
+    // player-facing outcome. Its staged mutations have not been committed, so
+    // start one clean retry from the same pre-GM world rather than carrying
+    // partial work forward or writing an "incomplete" Chronicle entry.
+    //
+    // This is deliberately one retry: repeating a deterministic provider or
+    // budget failure forever would hold the turn lock indefinitely.
+    const initialGameMasterTermination = gameMasterOutcome.termination;
+    if (gameMasterOutcome.report === null) {
+      console.warn(
+        `${tag()} [game_master] retrying unreported session: termination=${initialGameMasterTermination}; `
+        + `discarding ${gameMasterOutcome.executedInvocations.length} staged action(s) and restarting from the pre-GM world`,
+      );
+      gameMasterOutcome = await runGameMaster(gameMasterAdapter, gameMasterInput);
+      console.warn(
+        `${tag()} [game_master] retry finished: initialTermination=${initialGameMasterTermination} `
+        + `retryTermination=${gameMasterOutcome.termination} reported=${gameMasterOutcome.report !== null}`,
+      );
+    }
+    const gameMasterCompleted = gameMasterOutcome.report !== null;
+    if (!gameMasterCompleted) {
+      console.warn(
+        `${tag()} [game_master] discarding retry output: termination=${gameMasterOutcome.termination}; `
+        + `${gameMasterOutcome.executedInvocations.length} staged action(s) will neither commit nor enter the Chronicle`,
+      );
+    }
+    // A second unreported session is no more authoritative than the first.
+    // Preserve only deterministic pre-GM work (social events, pressure
+    // maintenance, and world setup); otherwise partial actions would both
+    // alter the world and leak through the Chronicle's forgotten-facts pass.
+    let newWorld: WorldState = gameMasterCompleted ? gameMasterOutcome.world : agencyWorld;
     // Now that the Game Master has had the pending discovery requests, fold
     // only those whose reserved id it created into the social-event ledger.
     // Uncalled requests remain proposed for the next turn; they cannot add a
@@ -507,37 +539,27 @@ export async function resolveTurn(
     );
     const contactDialogueOutcome = applySocialEvents(newWorld, readyContactDialogueEvents, atStep, turnId);
     newWorld = contactDialogueOutcome.world;
+    const committedGameMasterEvents = gameMasterCompleted ? gameMasterOutcome.events : [];
     const factualEvents = [
-      ...gameMasterOutcome.events,
-      ...worldDynamics.events.map((event, index) => ({ ...event, id: `fact-${atStep}-${gameMasterOutcome.events.length + index + 1}` })),
+      ...committedGameMasterEvents,
+      ...worldDynamics.events.map((event, index) => ({ ...event, id: `fact-${atStep}-${committedGameMasterEvents.length + index + 1}` })),
     ];
-    const capabilityRequests = gameMasterOutcome.capabilityRequests;
+    const capabilityRequests = gameMasterCompleted ? gameMasterOutcome.capabilityRequests : [];
     console.log(
-      `${tag()} [game_master] OUT: termination=${gameMasterOutcome.termination} actions=${gameMasterOutcome.executedInvocations.length} facts=${factualEvents.length} capabilityGaps=${capabilityRequests.length}`,
+      `${tag()} [game_master] OUT: termination=${gameMasterOutcome.termination} committed=${gameMasterCompleted} `
+      + `actions=${gameMasterOutcome.executedInvocations.length} facts=${factualEvents.length} capabilityGaps=${capabilityRequests.length}`,
     );
     if (gameMasterOutcome.providerError !== null) {
       console.error(`${tag()} [game_master] provider error: ${gameMasterOutcome.providerError}`);
     }
-    // A turn the Game Master never got to run is not an uneventful turn.
-    // Committing it as one would advance the clock, consume the player's
-    // orders, and hand them a Chronicle saying nothing happened — a lie about
-    // an outage. Fail the turn instead, which surfaces the error to the player
-    // rather than burying it.
-    //
-    // Only when the agent achieved nothing at all: a provider that dies partway
-    // leaves real, validated work on the stage, and that is committed.
-    //
-    // NOTE: a failed turn is currently terminal — nothing re-dispatches it, so
-    // the game cannot proceed until the provider problem is fixed and the turn
-    // is retried by hand. That is deliberate for now: silently eating turns is
-    // worse than stopping. A retry path is a real gap.
-    if (
-      gameMasterOutcome.termination === "provider_error"
-      && gameMasterOutcome.executedInvocations.length === 0
-      && gameMasterOutcome.capabilityRequests.length === 0
-    ) {
-      throw new Error(
-        `The Game Master could not be reached, so nothing was resolved and the turn was not committed. Provider error: ${gameMasterOutcome.providerError ?? "unknown"}`,
+    // Once the clean retry also ends without a report, its work has already
+    // been discarded above. Keep the deterministic part of the turn instead
+    // of manufacturing an error card or committing partial GM state. The
+    // termination remains in the persisted diagnostic record and logs.
+    if (!gameMasterCompleted && gameMasterOutcome.termination === "provider_error") {
+      console.warn(
+        `${tag()} [game_master] provider remained unavailable after retry; committing no Game Master actions. `
+        + `reason=${gameMasterOutcome.providerError ?? "unknown"}`,
       );
     }
     emit(onProgress, "game_master", true);
@@ -545,13 +567,13 @@ export async function resolveTurn(
     // Audit is the session's, verbatim: every refusal carries the exact
     // deterministic reason the policy or the executor produced.
     const finalWorkflowAudit: WorkflowAuditBlob = {
-      candidates: [...gameMasterOutcome.auditEntries],
+      candidates: gameMasterCompleted ? [...gameMasterOutcome.auditEntries] : [],
       novelActionProposals: [],
       managerFailed: gameMasterOutcome.termination === "provider_error",
       atStep,
     };
     const allWorkflowLog: { invocation: ProposedInvocation; outcome: { ok: boolean; reason?: string; message?: string; result?: { summary: string } } }[] =
-      gameMasterOutcome.auditEntries.map((entry) => ({
+      (gameMasterCompleted ? gameMasterOutcome.auditEntries : []).map((entry) => ({
         invocation: entry.finalInvocation ?? entry.requestedInvocation,
         outcome: entry.executionOk === true
           ? { ok: true, result: { summary: factualEvents.find((event) => event.actionId === entry.requestedActionId)?.summary ?? entry.requestedActionId } }
@@ -894,9 +916,19 @@ export async function resolveTurn(
       atStep,
       actorCharacterId,
       events: factualEvents,
-      report: gameMasterOutcome.report,
+      report: gameMasterCompleted ? gameMasterOutcome.report : null,
       directiveIds: gameMasterDirectives.map((entry) => entry.id),
     });
+    if (gameMasterOutcome.report === null) {
+      const incompleteEntries = chronicleInputs.filter((entry) => entry.scope === "resolution_incomplete");
+      if (incompleteEntries.length > 0) {
+        chronicleInputs = chronicleInputs.filter((entry) => entry.scope !== "resolution_incomplete");
+        console.warn(
+          `${tag()} [chronicle] filtered ${incompleteEntries.length} resolution_incomplete placeholder(s): `
+          + `Game Master did not submit finish_turn after retry (initialTermination=${initialGameMasterTermination}, retryTermination=${gameMasterOutcome.termination})`,
+        );
+      }
+    }
     chronicleInputs = scheduleChronicleEntries(capChronicleVisibility([
       ...chronicleInputs,
       ...commitmentChronicle,
@@ -1165,13 +1197,13 @@ export async function resolveTurn(
         })),
         capabilityRequestIds: capabilityRequests.map((request) => request.id),
       },
-      gameMasterAudit: gameMasterOutcome.auditEntries,
+      gameMasterAudit: gameMasterCompleted ? gameMasterOutcome.auditEntries : [],
     });
 
     // Written only after the turn itself committed, so a capability the world
     // gained is never persisted for a turn that did not happen. From here on
     // it is part of this campaign: every later turn is handed it back.
-    if (gameMasterOutcome.definedActions.length > 0) {
+    if (gameMasterCompleted && gameMasterOutcome.definedActions.length > 0) {
       await insertInventedWorkflows(
         db,
         gameMasterOutcome.definedActions.map((definition) => ({

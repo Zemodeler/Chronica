@@ -144,6 +144,7 @@ export function GameShell({
   const [flagCatalogForce, setFlagCatalogForce] = useState<ForceMapDetails | null>(null);
   const [coins, setCoins] = useState<string | null>(null);
   const [chronicleOpen, setChronicleOpen] = useState(false);
+  const [openChatSessionId, setOpenChatSessionId] = useState<string | null>(null);
   const zoomBand = deriveZoomBand(viewport.scale);
 
   // --- Geometry shared between canvas terrain layer and lightweight SVG overlay ---
@@ -494,7 +495,14 @@ export function GameShell({
         </div>
       </div>
       {characterPanel && <CharacterPanel {...characterPanel} />}
-      {playerCharacterId && <ChatPanel gameId={gameId} playerCharacterId={playerCharacterId} />}
+      {playerCharacterId && (
+        <ChatPanel
+          gameId={gameId}
+          playerCharacterId={playerCharacterId}
+          openSessionId={openChatSessionId}
+          onOpenSessionConsumed={() => setOpenChatSessionId(null)}
+        />
+      )}
       {playerCharacterId && (
         <OrdersPanel
           gameId={gameId}
@@ -506,6 +514,7 @@ export function GameShell({
         phase={phase}
         forceOpen={chronicleOpen}
         onForceOpenConsumed={() => setChronicleOpen(false)}
+        onDialogueOpened={(sessionId) => setOpenChatSessionId(sessionId)}
         onDisplayPatch={(patch) => {
           // Apply chronicle display patches to the live overlay
           // Patches are arrays of { kind, ... } objects written by buildDisplayPatch()

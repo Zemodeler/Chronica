@@ -137,6 +137,7 @@ describe("end_siege", () => {
     const province = outcome.world.map.provinces.find((p) => p.id === "ita-72843720b81376294924159-sicily-northeast");
     expect(province?.controllerPolityId).toBe("rome");
     expect(province?.controlFirmnessBps).toBe(3_000);
+    expect(province?.settlements.find((settlement) => settlement.id === "messana-city")?.controllerPolityId).toBe("rome");
   });
 });
 

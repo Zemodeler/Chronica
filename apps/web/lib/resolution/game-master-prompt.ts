@@ -82,6 +82,12 @@ function constitution(input: GameMasterPromptInput): string {
     "10b. A rejected ultimatum is not the end of the story. A power that has been refused, ignored, or countered without result more than once must be shown reacting in proportion: mobilising a force, moving it toward the disputed ground, seeking an ally, raiding, opening a siege, or declaring war -- never a repeat of the same protest with nothing behind it. The engine tracks repeated refusals on a thread and raises pressure on the refused power's own leader for exactly this reason; read that pressure and act on it.",
     "11. A tool that rejects your arguments has not decided anything. Correct them and call it again. Never report a rejected call as the outcome of a player's order until you have tried to fix it, and never repeat the tool's complaint about its own arguments as if it were a reason the world refused — the player reads what you report.",
     "12. Finish with finish_turn. Every event you report must cite a factRef from a tool result you actually received.",
+    "13. CAUSAL CHAINS: a turn where every actor acts once, independently, in parallel, reads as a list of disconnected bulletins -- not history. When more than one high-relevance actor is in play, at least one of them must visibly react to what another one just did this same turn: the player intervenes, so the threatened power responds to that intervention specifically (not to the general situation), and a third power watches both and adjusts its own position in light of what it just saw. On finish_turn, set each event's chainPosition deliberately: 'root' for the event that starts a chain (usually the player's own action or the turn's inciting move), 'reaction' for an event that exists because of a specific root event this same turn, 'spread' for a further consequence of a reaction, 'pressure' for an event that only raises stakes without resolving anything, and 'distant' for something genuinely unconnected. Do not default every event to 'root' -- an unbroken column of 'root' events is the same disconnected-bulletins failure with different labels on it. For example: the player lands a force at a contested city (root) -> the city's occupier expels or resists it (reaction, citing the player's event) -> the occupier's home power declares war over the expulsion (spread, citing the reaction) -> a third power watching both sides weighs which one to back, without yet committing (pressure, citing the spread). Four events, one visible chain, not four unrelated paragraphs about the same week.",
+    "14. A polity that appears in this turn's events needs a person to answer for it. The moment a listed foreign power is directly affected by something that happened this turn -- attacked, threatened, offered an alliance, asked to answer a message -- and it has no living named character yet, call create_world_character for it before finishing, in the same turn, so its reaction in rule 13's chain has an actual actor behind it rather than staying silent by omission.",
+    "15. When a player names what something they are creating is for -- a unit raised with a stated purpose, a building given a stated function -- pass that statement into the creating tool's intent field verbatim, or, once created, record it with record_entity_note. This is memory, never a mechanical modifier: nothing computes a bonus from it. A later turn, when that same entity becomes relevant again, weigh the note in your own judgment for whatever it is actually worth in that moment -- it may matter a great deal, a little, or not at all; you decide each time, the same way you already decide what a goal or a belief is worth.",
+    "16. Trust between two powers (shown under 'how these powers stand toward each other') accumulates across many turns, not just the last exchange. A power whose trust in another has fallen sharply is not obliged to keep repeating polite protests: once it is low and the relationship is under real pressure, have that power escalate to a concrete demand, an ultimatum with real terms, or a decision to act without further asking -- the way a patience that has actually run out behaves. A power with rising trust may correspondingly offer something it would not have offered a stranger. Never let the number sit there unused.",
+    "17. flag_npc_initiated_dialogue lets a named character be the one who opens a conversation with the player, instead of the player always having to start it. Use it rarely -- at most once or twice a turn, only for a character with a real, current, personal reason to reach out right now (an unresolved demand, urgent news that affects the player directly, a decision only the player can answer). Never use it for routine flavour, and never for a character the player has no standing relationship or stake with. It changes nothing by itself; it only surfaces an affordance the player may choose to act on.",
+    "18. The wider world exists beyond the player's own theater. At most once per turn, you may call flag_ambient_event to record one short paragraph of something happening far away, with no connection to the player's tracked polities, characters, or forces -- a rival civilization's rise, a distant famine, an unrelated war. This is pure immersion, never a lever: it never earns a Map Changes card, never feeds a directive outcome, and the session refuses a second call the same turn. Skip it entirely on a turn where nothing distant is actually worth a line -- it is not owed every turn.",
   );
   return lines.join("\n");
 }
@@ -181,7 +187,12 @@ function orientation(world: WorldState, actorCharacterId: string): string {
       const province = world.map.provinces.find((candidate) => candidate.id === force.locationId);
       const polity = world.map.polities.find((candidate) => candidate.id === force.polityId);
       const fit = force.personnel.reduce((sum, category) => sum + category.fit, 0);
-      lines.push(`  ${force.name} [id: ${force.id}] of ${polity?.name ?? force.polityId}: ${fit} fit at ${province?.name ?? force.locationId} [id: ${force.locationId}]`);
+      // Freeform notes (what a player said this force was raised for, or what
+      // you yourself recorded about it since) are memory, not a mechanical
+      // stat -- weigh them at your own discretion when they become relevant.
+      const notes = world.campaignMemory.entityNotes.filter((note) => note.entityId === force.id).map((note) => note.text);
+      const noteText = notes.length > 0 ? ` — noted: ${notes.join(" | ")}` : "";
+      lines.push(`  ${force.name} [id: ${force.id}] of ${polity?.name ?? force.polityId}: ${fit} fit at ${province?.name ?? force.locationId} [id: ${force.locationId}]${noteText}`);
     }
   }
 
@@ -209,6 +220,57 @@ function campaignMemory(world: WorldState): string {
   }
   if (lines.length === 1) lines.push("This is the first resolved turn; there is no prior record.");
   return lines.join("\n");
+}
+
+function polityName(world: WorldState, polityId: string | null): string {
+  if (!polityId) return "no polity";
+  return world.map.polities.find((polity) => polity.id === polityId)?.name ?? polityId;
+}
+
+/**
+ * One line per pair of polities represented among this turn's relevant
+ * actors, covering war, alliance, and the most recent diplomatic thread
+ * between them. Without this, npcContext() gives the Game Master each NPC's
+ * own goals and pressures but nothing about how they stand toward each
+ * other, so a plausible three-way dynamic ("Carthage knows Syracuse is
+ * wavering") has no basis in the prompt to reason from -- it has to be
+ * invented or, more often, left out. Reads only committed state (rule 13
+ * asks for the causal reasoning; this supplies what that reasoning needs).
+ */
+function polityRelations(world: WorldState, polityIds: readonly string[]): string[] {
+  const ids = [...new Set(polityIds.filter((id): id is string => id !== null && id !== undefined))];
+  const lines: string[] = [];
+  for (let i = 0; i < ids.length; i++) {
+    for (let j = i + 1; j < ids.length; j++) {
+      const [a, b] = [ids[i]!, ids[j]!];
+      const atWar = world.conflicts.wars.some((war) => (war.polityAId === a && war.polityBId === b) || (war.polityAId === b && war.polityBId === a));
+      const allied = (world.map.politicalRelations ?? []).some(
+        (relation) => (relation.leaderPolityId === a && relation.memberPolityId === b) || (relation.leaderPolityId === b && relation.memberPolityId === a),
+      );
+      const messages = (world.diplomacy ?? []).filter((message) => (message.fromPolityId === a && message.toPolityId === b) || (message.fromPolityId === b && message.toPolityId === a));
+      const unanswered = messages.filter((message) => message.status === "awaiting_reply").length;
+      const latest = messages.slice().sort((x, y) => y.sentAtStep - x.sentAtStep)[0];
+      const stanceAB = (world.polityStances ?? []).find((stance) => stance.polityId === a && stance.towardPolityId === b);
+      const stanceBA = (world.polityStances ?? []).find((stance) => stance.polityId === b && stance.towardPolityId === a);
+      if (!atWar && !allied && messages.length === 0 && !stanceAB && !stanceBA) continue;
+      const parts: string[] = [];
+      if (atWar) parts.push("at war");
+      if (allied) parts.push("allied");
+      if (unanswered > 0) parts.push(`${unanswered} unanswered message${unanswered === 1 ? "" : "s"}`);
+      // Accumulated trust, not the last reply alone: a thread that has gone
+      // quiet still carries the weight of how the two powers have actually
+      // treated each other, which the message log alone stops showing once
+      // nothing has been sent lately.
+      if (stanceAB) parts.push(`${polityName(world, a)}'s trust in ${polityName(world, b)}: ${stanceAB.trustScore} (${stanceAB.lastShiftReason})`);
+      if (stanceBA) parts.push(`${polityName(world, b)}'s trust in ${polityName(world, a)}: ${stanceBA.trustScore} (${stanceBA.lastShiftReason})`);
+      if (latest) {
+        const direction = latest.fromPolityId === a ? `${polityName(world, a)} → ${polityName(world, b)}` : `${polityName(world, b)} → ${polityName(world, a)}`;
+        parts.push(`latest: ${direction} "${latest.subject}" (${latest.status}${latest.answer !== null ? `, ${latest.answer}` : ""})`);
+      }
+      lines.push(`  ${polityName(world, a)} ↔ ${polityName(world, b)}: ${parts.join("; ")}.`);
+    }
+  }
+  return lines;
 }
 
 function npcContext(world: WorldState, selected: readonly SelectedCharacter[], actorCharacterId: string): string {
@@ -243,6 +305,20 @@ function npcContext(world: WorldState, selected: readonly SelectedCharacter[], a
     if (recentIntents.length > 0) lines.push(`    last acted: ${recentIntents.map((intent) => `${intent.actionType} -> ${intent.status}`).join("; ")}`);
   }
   if (lines.length === 2) lines.push("  No named character other than the player is currently in the relevant set.");
+
+  const actorPolityId = world.characters.find((character) => character.id === actorCharacterId)?.polityId ?? null;
+  const relevantPolityIds = [
+    ...(actorPolityId ? [actorPolityId] : []),
+    ...selected
+      .slice(0, MAX_NPCS_DETAILED)
+      .map((entry) => world.characters.find((character) => character.id === entry.characterId)?.polityId)
+      .filter((id): id is string => id !== null && id !== undefined),
+  ];
+  const relations = polityRelations(world, relevantPolityIds);
+  if (relations.length > 0) {
+    lines.push("How these powers stand toward each other (read this before assuming any of them acts in isolation):");
+    lines.push(...relations);
+  }
   return lines.join("\n");
 }
 

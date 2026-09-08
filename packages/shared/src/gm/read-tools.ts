@@ -146,6 +146,7 @@ const inspectForce: AnyReadToolDefinition = {
     const force = world.material.forces.find((candidate) => candidate.id === params.forceId);
     if (!force) return notFound("force", params.forceId);
     const inBattle = world.conflicts.battles.find((battle) => battle.participantForceIds.includes(force.id));
+    const notes = world.campaignMemory.entityNotes.filter((note) => note.entityId === force.id);
     const data = {
       id: force.id,
       name: force.name,
@@ -165,6 +166,7 @@ const inspectForce: AnyReadToolDefinition = {
       provisionedThroughStep: force.provisionedThroughStep,
       payArrearsPeriods: force.payArrearsPeriods,
       inBattleId: inBattle?.battleId ?? null,
+      notes: notes.map((note) => note.text),
     };
     return {
       ok: true,
@@ -174,6 +176,10 @@ const inspectForce: AnyReadToolDefinition = {
         `At ${data.locationProvinceName} (${force.locationId}). Fit strength ${data.fitStrength} of authorised ${force.authorizedStrength}.`,
         `Morale ${force.moraleBps}bps, cohesion ${force.cohesionBps}bps, fatigue ${force.fatigueBps}bps. Supply: ${force.provisionStatus}, provisioned through step ${force.provisionedThroughStep}. Pay arrears: ${force.payArrearsPeriods} period(s).`,
         data.inBattleId === null ? "Not currently engaged in a battle." : `Currently engaged in battle ${data.inBattleId}.`,
+        // Memory, not a mechanical modifier -- these are exactly what was said
+        // about this force, for you to weigh at your own discretion, never a
+        // guaranteed effect.
+        ...(notes.length > 0 ? [`Noted: ${notes.map((note) => note.text).join(" | ")}`] : []),
       ]),
     };
   },
@@ -526,8 +532,12 @@ const inspectActorMemory: AnyReadToolDefinition = {
       factual: lines([
         `${character.name} (${character.id}). Risk tolerance ${character.mind.riskTolerance}. Drives: ${Object.entries(character.mind.drives).map(([key, value]) => `${key} ${String(value)}`).join(", ")}.`,
         `Ambitions: ${data.ambitions.map((ambition) => ambition.label).join("; ") || "none recorded"}.`,
-        `Active goals: ${data.goals.map((goal) => `${goal.objective} (priority ${goal.priority})`).join("; ") || "none"}.`,
-        `Active plots: ${data.plots.map((plot) => `${plot.objective} [${plot.stage}, momentum ${plot.momentum}]${plot.nextIntendedMove ? ` next: ${plot.nextIntendedMove}` : ""}`).join("; ") || "none"}.`,
+        // These ids are not merely diagnostic: the character-agency tools
+        // require them on their next call. Omitting them left a director that
+        // had correctly inspected a character with no valid way to advance
+        // that character's existing plot.
+        `Active goals: ${data.goals.map((goal) => `${goal.objective} (id ${goal.id}; priority ${goal.priority})`).join("; ") || "none"}.`,
+        `Active plots: ${data.plots.map((plot) => `${plot.objective} (id ${plot.id}) [${plot.stage}, momentum ${plot.momentum}]${plot.nextIntendedMove ? ` next: ${plot.nextIntendedMove}` : ""}`).join("; ") || "none"}.`,
         `Pressures: ${data.pressures.map((pressure) => `${pressure.kind} ${pressure.intensity} (${pressure.label})`).join("; ") || "none"}.`,
         `Beliefs: ${data.beliefs.map((belief) => `${belief.claim} (confidence ${belief.confidence})`).join("; ") || "none recorded"}.`,
         `Open commitments: ${data.commitments.map((commitment) => `${commitment.role}: ${commitment.description} (due step ${commitment.reviewAtStep})`).join("; ") || "none"}.`,

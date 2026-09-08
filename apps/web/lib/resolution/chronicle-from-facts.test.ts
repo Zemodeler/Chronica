@@ -88,6 +88,199 @@ describe("a completed levy", () => {
   });
 });
 
+describe("a generic entity-state delta", () => {
+  it("gives a force-created consequence its entity name, not just a text label", () => {
+    const withDelta: FactualEvent = {
+      ...levyEvent,
+      stateDeltas: [{ entityType: "force", entityId: "force-legio-ii", entityName: "Legio II", change: "created" }],
+    };
+    const entries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      events: [withDelta],
+      report: report({
+        directiveOutcomes: [{ directiveId: "directive-0", outcome: "carried_out", reason: "Raised.", factRefs: ["fact-1-1"] }],
+      }),
+      directiveIds: ["directive-0"],
+    });
+    const entry = entries.find((candidate) => candidate.scopeRef === "directive-0");
+    const consequence = entry?.directConsequences?.[0];
+    expect(consequence?.entityId).toBe("force-legio-ii");
+    expect(consequence?.entityName).toBe("Legio II");
+    expect(consequence?.changeKind).toBe("created");
+  });
+
+  it("gives a province-control consequence a real before/after, not a string it has to re-derive later -- and this is generic: any workflow that changes controllerPolityId produces the same shape, not just change_province_control", () => {
+    const controlChange: FactualEvent = {
+      id: "fact-1-2",
+      atStep: 1,
+      kind: "action",
+      actionId: "change_province_control",
+      actorId: PLAYER,
+      parameters: { provinceId: LATIUM, newControllerPolityId: "rome", firmnessBps: 5_000, reason: "Conquered." },
+      summary: "Latium passes from neutral to Roman Republic. Conquered.",
+      materialConsequence: true,
+      stateDeltas: [
+        {
+          entityType: "province",
+          entityId: LATIUM,
+          entityName: "Latium",
+          change: "updated",
+          fields: [{ field: "controllerPolityId", from: "unclaimed", to: "Roman Republic" }],
+        },
+      ],
+    };
+    const entries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      events: [controlChange],
+      report: report({
+        directiveOutcomes: [{ directiveId: "directive-0", outcome: "carried_out", reason: "Conquered.", factRefs: ["fact-1-2"] }],
+      }),
+      directiveIds: ["directive-0"],
+    });
+    const entry = entries.find((candidate) => candidate.scopeRef === "directive-0");
+    const consequence = entry?.directConsequences?.[0];
+    expect(consequence?.entityName).toBe("Latium");
+    expect(consequence?.changeKind).toBe("updated");
+    expect(consequence?.fields).toEqual([{ field: "controllerPolityId", from: "unclaimed", to: "Roman Republic" }]);
+  });
+
+  it("covers a battle's effect (casualties, a captured settlement) the same generic way, with no battle-specific code", () => {
+    const battleResolved: FactualEvent = {
+      id: "fact-1-5",
+      atStep: 1,
+      kind: "action",
+      actionId: "resolve_battle",
+      actorId: PLAYER,
+      parameters: { battleId: "battle-1" },
+      summary: "The battle is resolved.",
+      materialConsequence: true,
+      stateDeltas: [
+        { entityType: "force", entityId: "force-hanno", entityName: "Hanno's Army", change: "updated", fields: [{ field: "fitStrength", from: 8_000, to: 3_000 }] },
+        { entityType: "settlement", entityId: "settlement-messana", entityName: "Messana", change: "updated", fields: [{ field: "controllerPolityId", from: "carthage", to: "Roman Republic" }] },
+      ],
+    };
+    const entries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      events: [battleResolved],
+      report: report({
+        events: [{ factRefs: ["fact-1-5"], summary: "Battle resolved.", participantCharacterIds: [], provinceId: null, visibility: "public", salience: 8, directiveRef: null, chainPosition: "root" }],
+      }),
+      directiveIds: [],
+    });
+    const entry = entries.find((candidate) => candidate.scopeRef === "fact-1-5");
+    expect(entry?.directConsequences).toHaveLength(2);
+    expect(entry?.directConsequences?.map((c) => c.entityName).sort()).toEqual(["Hanno's Army", "Messana"]);
+  });
+});
+
+describe("an initiated conversation", () => {
+  it("attaches the character, topic, and opening line to the entry that carries the flag", () => {
+    const flagEvent: FactualEvent = {
+      id: "fact-1-3",
+      atStep: 1,
+      kind: "action",
+      actionId: "flag_npc_initiated_dialogue",
+      actorId: "hanno",
+      parameters: { characterId: "hanno", topic: "Carthage's fleet near Messana", openingLine: "We need to speak, before this goes further." },
+      summary: "Hanno wants to speak with you: Carthage's fleet near Messana",
+      materialConsequence: false,
+    };
+    const entries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      events: [flagEvent],
+      report: report({
+        events: [{ factRefs: ["fact-1-3"], summary: flagEvent.summary, participantCharacterIds: ["hanno"], provinceId: null, visibility: "public", salience: 6, directiveRef: null, chainPosition: "root" }],
+      }),
+      directiveIds: [],
+    });
+    const entry = entries.find((candidate) => candidate.scopeRef === "fact-1-3");
+    expect(entry?.initiatedDialogue).toEqual({
+      characterId: "hanno",
+      characterName: "Hanno",
+      topic: "Carthage's fleet near Messana",
+      openingLine: "We need to speak, before this goes further.",
+    });
+  });
+
+  it("never attaches a flag pointing at a dead or nonexistent character", () => {
+    const flagEvent: FactualEvent = {
+      id: "fact-1-4",
+      atStep: 1,
+      kind: "action",
+      actionId: "flag_npc_initiated_dialogue",
+      actorId: "nobody",
+      parameters: { characterId: "nobody", topic: "A ghost speaks", openingLine: "..." },
+      summary: "nobody wants to speak with you",
+      materialConsequence: false,
+    };
+    const entries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      events: [flagEvent],
+      report: report(),
+      directiveIds: [],
+    });
+    for (const entry of entries) expect(entry.initiatedDialogue).toBeUndefined();
+  });
+});
+
+describe("internal resolution records", () => {
+  it("never promotes plans, memory, or scheduler pressures into Chronicle events", () => {
+    const internalEvents: FactualEvent[] = [
+      { id: "fact-1-plan", atStep: 1, kind: "action", actionId: "plan_update", actorId: PLAYER, parameters: {}, summary: "A continuing plan was prepared.", materialConsequence: false },
+      { id: "fact-1-note", atStep: 1, kind: "action", actionId: "record_entity_note", actorId: PLAYER, parameters: {}, summary: "Noted of force-1: keep the supply route open.", materialConsequence: false },
+      { id: "fact-1-development", atStep: 1, kind: "action", actionId: "world_development", actorId: "hanno", parameters: {}, summary: "Messana needs reconstruction; Hanno has an opportunity to organize recovery.", materialConsequence: false },
+      { id: "fact-1-pressure", atStep: 1, kind: "action", actionId: "world_incursion_pressure", actorId: "hanno", parameters: {}, summary: "Hanno faces an immediate military emergency.", materialConsequence: true },
+      { id: "fact-1-scrutiny", atStep: 1, kind: "action", actionId: "roman_senate_scrutiny", actorId: PLAYER, parameters: {}, summary: "The Senate calls Marcus Atilius to account.", materialConsequence: true },
+    ];
+
+    const entries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      events: internalEvents,
+      report: report(),
+      directiveIds: [],
+    });
+
+    expect(entries).toEqual([]);
+  });
+
+  it("does not represent preparing a plan as a carried-out player order", () => {
+    const planFact: FactualEvent = {
+      id: "fact-1-plan",
+      atStep: 1,
+      kind: "action",
+      actionId: "plan_update",
+      actorId: PLAYER,
+      parameters: {},
+      summary: "A continuing plan was prepared.",
+      materialConsequence: false,
+    };
+    const entries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      events: [planFact],
+      report: report({
+        directiveOutcomes: [{ directiveId: "directive-0", outcome: "carried_out", reason: "Plan prepared.", factRefs: [planFact.id] }],
+      }),
+      directiveIds: ["directive-0"],
+    });
+
+    expect(entries).toEqual([]);
+  });
+});
+
 describe("a refused order", () => {
   it("carries the executor's own reason and nothing invented", () => {
     const entries = buildChronicleFromFacts({

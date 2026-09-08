@@ -31,6 +31,29 @@ export type CampaignTurnMemory = z.infer<typeof CampaignTurnMemorySchema>;
 
 export const MAX_CAMPAIGN_RECENT_TURNS = 6;
 
+/**
+ * A freeform note attached to any world entity -- a force, a building, a
+ * settlement, a character, anything with an id. This is deliberately not a
+ * typed mechanical field (no "specialization" enum, no combat-math tag): it
+ * is exactly what was said about the entity, verbatim or close to it, kept
+ * so the Game Master sees it again on a later turn and can decide, at its
+ * own discretion, what benefit or narrative relevance it carries each time
+ * it becomes relevant -- the same way it already interprets a goal, a plot,
+ * or a pressure rather than reading it off a formula.
+ */
+export const EntityNoteSchema = z
+  .object({
+    id: EntityIdSchema,
+    entityId: EntityIdSchema,
+    entityType: z.enum(["force", "building", "settlement", "character", "institution", "other"]),
+    text: z.string().trim().min(1).max(400),
+    createdAtStep: ElapsedStepSchema,
+  })
+  .strict();
+export type EntityNote = z.infer<typeof EntityNoteSchema>;
+
+export const MAX_ENTITY_NOTES = 64;
+
 export const CampaignMemorySchema = z
   .object({
     /**
@@ -55,6 +78,8 @@ export const CampaignMemorySchema = z
       )
       .max(16)
       .default([]),
+    /** Freeform notes on anything the player or the world has created, generalized beyond characters. */
+    entityNotes: z.array(EntityNoteSchema).max(MAX_ENTITY_NOTES).default([]),
     updatedAtStep: ElapsedStepSchema.default(0),
   })
   .strict();
@@ -64,8 +89,19 @@ export const EMPTY_CAMPAIGN_MEMORY: CampaignMemory = {
   durableSummary: "",
   recentTurns: [],
   characterNotes: [],
+  entityNotes: [],
   updatedAtStep: 0,
 };
+
+/**
+ * Append a note, oldest dropped first once the cap is reached -- the same
+ * "recent past kept, deep past dropped" shape as turn-memory compaction, so
+ * this cannot grow the prompt without bound over a long campaign.
+ */
+export function appendEntityNote(memory: CampaignMemory, note: EntityNote): CampaignMemory {
+  const kept = [...memory.entityNotes, note].slice(-MAX_ENTITY_NOTES);
+  return { ...memory, entityNotes: kept };
+}
 
 /**
  * Fold this turn's factual account into campaign memory.
@@ -96,6 +132,7 @@ export function foldTurnIntoCampaignMemory(
     durableSummary: durable,
     recentTurns: kept,
     characterNotes: memory.characterNotes,
+    entityNotes: memory.entityNotes,
     updatedAtStep: turn.atStep,
   };
 }

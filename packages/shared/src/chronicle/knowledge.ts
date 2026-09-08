@@ -56,6 +56,14 @@ export interface ChronicleFamilyEventFact {
   readonly outcome: string;
 }
 
+/** A named character has flagged that they want to open a conversation with the player this turn. */
+export interface ChronicleInitiatedDialogueFact {
+  readonly characterId: string;
+  readonly characterName: string;
+  readonly topic: string;
+  readonly openingLine: string;
+}
+
 /**
  * The narrow, already-projected shape a Chronicle row is read into before
  * `projectChronicleEntry` decides what a given viewer may see of it. Callers
@@ -89,6 +97,7 @@ export interface ChronicleFactRecord {
   readonly lifeEvent?: ChronicleLifeEventFact;
   readonly commandChange?: ChronicleCommandChangeFact;
   readonly familyEvent?: ChronicleFamilyEventFact;
+  readonly initiatedDialogue?: ChronicleInitiatedDialogueFact;
 }
 
 /**
@@ -130,6 +139,7 @@ export interface PlayerFacingChronicleFacts {
   readonly lifeEvent?: ChronicleLifeEventFact;
   readonly commandChange?: ChronicleCommandChangeFact;
   readonly familyEvent?: ChronicleFamilyEventFact;
+  readonly initiatedDialogue?: ChronicleInitiatedDialogueFact;
 }
 
 /**
@@ -159,6 +169,7 @@ export function redactChronicleFacts(entry: ChronicleFactRecord): PlayerFacingCh
     ...(entry.lifeEvent !== undefined ? { lifeEvent: entry.lifeEvent } : {}),
     ...(entry.commandChange !== undefined ? { commandChange: entry.commandChange } : {}),
     ...(entry.familyEvent !== undefined ? { familyEvent: entry.familyEvent } : {}),
+    ...(entry.initiatedDialogue !== undefined ? { initiatedDialogue: entry.initiatedDialogue } : {}),
   };
 }
 

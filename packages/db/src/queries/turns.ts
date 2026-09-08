@@ -420,7 +420,15 @@ export interface ChronicleView {
     readonly location?: string | null;
     readonly chainId?: string | null;
     readonly chainPosition?: "root" | "reaction" | "spread" | "distant" | "pressure" | null;
-    readonly directConsequences?: readonly { kind: string; label: string; entityId: string | null; quantified: boolean }[];
+    readonly directConsequences?: readonly {
+      kind: string;
+      label: string;
+      entityId: string | null;
+      quantified: boolean;
+      entityName?: string;
+      changeKind?: string;
+      fields?: readonly { field: string; from: unknown; to: unknown }[];
+    }[];
     readonly sourceDirector?: string;
     readonly openPressure?: boolean;
     // Chronicle-first legibility fields (character-sim phase 6, all optional — absent on legacy entries).
@@ -459,6 +467,12 @@ export interface ChronicleView {
       readonly type: string;
       readonly partyNames: readonly string[];
       readonly outcome: string;
+    };
+    readonly initiatedDialogue?: {
+      readonly characterId: string;
+      readonly characterName: string;
+      readonly topic: string;
+      readonly openingLine: string;
     };
   }[];
 }
@@ -537,7 +551,15 @@ export async function getChronicleForLatestTurn(
     location?: string | null;
     chainId?: string | null;
     chainPosition?: "root" | "reaction" | "spread" | "distant" | "pressure" | null;
-    directConsequences?: Array<{ kind: string; label: string; entityId: string | null; quantified: boolean }>;
+    directConsequences?: Array<{
+      kind: string;
+      label: string;
+      entityId: string | null;
+      quantified: boolean;
+      entityName?: string;
+      changeKind?: string;
+      fields?: Array<{ field: string; from: unknown; to: unknown }>;
+    }>;
     sourceDirector?: string;
     openPressure?: boolean;
     title?: string;
@@ -550,6 +572,7 @@ export async function getChronicleForLatestTurn(
     lifeEvent?: ChronicleView["entries"][number]["lifeEvent"];
     commandChange?: ChronicleView["entries"][number]["commandChange"];
     familyEvent?: ChronicleView["entries"][number]["familyEvent"];
+    initiatedDialogue?: ChronicleView["entries"][number]["initiatedDialogue"];
     dispatch?: { items?: readonly string[]; uncertaintyNote?: string | null };
   };
 
@@ -603,6 +626,7 @@ export async function getChronicleForLatestTurn(
         ...(f?.lifeEvent !== undefined ? { lifeEvent: f.lifeEvent } : {}),
         ...(f?.commandChange !== undefined ? { commandChange: f.commandChange } : {}),
         ...(f?.familyEvent !== undefined ? { familyEvent: f.familyEvent } : {}),
+        ...(f?.initiatedDialogue !== undefined ? { initiatedDialogue: f.initiatedDialogue } : {}),
       },
       viewerCharacterId ?? null,
       characterBeliefs,
@@ -619,6 +643,34 @@ export async function getChronicleForLatestTurn(
     ...(dispatch === undefined ? {} : { dispatch }),
     ...(scenarioClock === undefined ? {} : { scenarioClock }),
   };
+}
+
+/**
+ * The "Initiated Chat" affordance's authoritative source, scoped to the
+ * requesting game: reads the flag straight out of the committed Chronicle
+ * entry rather than trusting anything a client claims about who said what.
+ * `gameId` is enforced via the join to `turns`, so an entry id from a
+ * different game never resolves here.
+ */
+export async function getInitiatedDialogueFromChronicleEntry(
+  db: ChronicaDatabase,
+  gameId: string,
+  entryId: string,
+): Promise<{ characterId: string; characterName: string; topic: string; openingLine: string } | undefined> {
+  const [row] = await db
+    .select({ facts: chronicleEntries.facts })
+    .from(chronicleEntries)
+    .innerJoin(turns, eq(chronicleEntries.turnId, turns.id))
+    .where(and(eq(chronicleEntries.id, entryId), eq(turns.gameId, gameId)))
+    .limit(1);
+  if (row === undefined) return undefined;
+  const facts = row.facts;
+  if (facts === null || typeof facts !== "object" || Array.isArray(facts)) return undefined;
+  const initiatedDialogue = (facts as { initiatedDialogue?: unknown }).initiatedDialogue;
+  if (initiatedDialogue === null || typeof initiatedDialogue !== "object") return undefined;
+  const { characterId, characterName, topic, openingLine } = initiatedDialogue as Record<string, unknown>;
+  if (typeof characterId !== "string" || typeof characterName !== "string" || typeof topic !== "string" || typeof openingLine !== "string") return undefined;
+  return { characterId, characterName, topic, openingLine };
 }
 
 export interface ChronicleInspectorEntry {
