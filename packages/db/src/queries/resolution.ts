@@ -30,6 +30,14 @@ export interface ChronicleEntryInput {
   readonly body: string;
   readonly atStep: number;
   readonly materialConsequence: boolean;
+  /**
+   * Day-level Chronicle timing (docs/32, Phase 11). Identical for every
+   * entry today (nothing genuinely spans turns yet) -- `occurredAtDay` will
+   * diverge from `finalizedAtDay` once a stage that commences on one turn
+   * and completes on a later one exists (docs/32, Phase 8/9).
+   */
+  readonly occurredAtDay?: number;
+  readonly finalizedAtDay?: number;
   readonly displayPatch?: unknown;
   readonly playerInvolvement?: unknown;
   // Extended Chronicle fields (all optional for backward compat).
@@ -159,6 +167,16 @@ export interface CommitResolutionInput {
   readonly elapsedStepEnd: number;
   readonly chronicleEntries: readonly ChronicleEntryInput[];
   readonly stopReason: string;
+  /**
+   * Shadow-mode elastic-scheduler output (docs/32, Phase 7) -- diagnostic
+   * only. `elapsedStepEnd`/`stopReason` above remain the sole authoritative
+   * values the live pipeline actually committed to; these three are written
+   * purely so real shadow-mode comparison data (docs/32 Phase 16) exists
+   * before any cutover is considered.
+   */
+  readonly elapsedDayEnd?: number;
+  readonly stoppingFactIds?: readonly string[];
+  readonly requestedPlayerDecision?: string | null;
   /** Workflow Manager audit blob; stored as JSONB on the turn row for offline review. */
   readonly workflowAudit?: WorkflowAuditBlob;
   /** Novel action proposals emitted by the Workflow Manager; persisted for developer review. */
@@ -204,6 +222,9 @@ export async function commitResolution(
         elapsedStepEnd: input.elapsedStepEnd,
         stopReason: input.stopReason,
         resolutionCommittedAt: new Date(),
+        ...(input.elapsedDayEnd !== undefined ? { elapsedDayEnd: input.elapsedDayEnd } : {}),
+        ...(input.stoppingFactIds !== undefined ? { stoppingFactIds: [...input.stoppingFactIds] } : {}),
+        ...(input.requestedPlayerDecision !== undefined ? { requestedPlayerDecision: input.requestedPlayerDecision } : {}),
         ...(input.workflowAudit !== undefined ? { workflowAudit: input.workflowAudit } : {}),
         ...(input.gameMasterReport !== undefined ? { gameMasterReport: input.gameMasterReport } : {}),
         ...(input.gameMasterAudit !== undefined ? { gameMasterAudit: input.gameMasterAudit } : {}),
@@ -234,6 +255,8 @@ export async function commitResolution(
             ids: [],
             atStep: entry.atStep,
             materialConsequence: entry.materialConsequence,
+            ...(entry.occurredAtDay !== undefined ? { occurredAtDay: entry.occurredAtDay } : {}),
+            ...(entry.finalizedAtDay !== undefined ? { finalizedAtDay: entry.finalizedAtDay } : {}),
             ...(entry.displayPatch !== undefined ? { displayPatch: entry.displayPatch } : {}),
             ...(entry.eventDate != null ? { eventDate: entry.eventDate } : {}),
             ...(entry.location != null ? { location: entry.location } : {}),

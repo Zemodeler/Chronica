@@ -34,6 +34,20 @@ describe("world activity requirements", () => {
   });
 });
 
+describe("feasibility is advisory (docs/32, Phase 12)", () => {
+  it("tells the GM assess_feasibility never refuses anything and its own judgment still decides", () => {
+    const prompt = buildGameMasterSystemPrompt(baseInput());
+    expect(prompt).toContain("assess_feasibility");
+    expect(prompt).toContain("It is advisory only: it never refuses anything itself");
+  });
+
+  it("tells the GM a new order outranks a conflicting unfinished older plan without reversing completed stages", () => {
+    const prompt = buildGameMasterSystemPrompt(baseInput());
+    expect(prompt).toContain("outranks a conflicting unfinished older plan");
+    expect(prompt).toContain("never reverses a stage that already completed");
+  });
+});
+
 describe("capability escape hatch", () => {
   it("points to request_capability and omits define_action when invented actions are off (the default)", () => {
     const prompt = buildGameMasterSystemPrompt(baseInput());

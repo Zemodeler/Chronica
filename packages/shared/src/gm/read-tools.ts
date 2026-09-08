@@ -9,6 +9,8 @@ import type { ScenarioLifeRules } from "../characters/family";
 import type { ScenarioClock } from "../world/clock";
 import { buildPoliticalInspectorView } from "../characters/political-inspector";
 import { evaluateSupport, positionFromScore, dueProcedures, netSupportWeight } from "../character-agency/political-resolver";
+import { assessFeasibility } from "../actions/feasibility";
+import { InterpretedClaimSchema } from "../actions/plans";
 
 // Bounded read tools (GM refactor, requirement 5).
 //
@@ -703,6 +705,40 @@ const listDuePoliticalProcedures: AnyReadToolDefinition = {
   },
 };
 
+// -- assess_feasibility (docs/32, Phase 3) ------------------------------------
+
+const assessFeasibilityTool: AnyReadToolDefinition = {
+  name: "assess_feasibility",
+  description:
+    "Check one proposed attempt against the dimensions this engine can verify from world state alone -- does the actor exist and live, does the named province exist, does the actor actually control any named account or force, does a named action tool exist. This is advisory context, not a second decision-maker: it never refuses anything by itself, and it says nothing about political consent, physical realism, or whether an actor would actually agree -- those remain your own judgment. Pass any previously classified claims (from interpret_plan) to also check for a contradicted world premise.",
+  parametersSchema: z.object({
+    actorId: EntityIdSchema,
+    targetProvinceId: EntityIdSchema.nullable().optional(),
+    actionId: EntityIdSchema.nullable().optional(),
+    resourceRefs: z.array(z.object({ accountId: EntityIdSchema.optional(), forceId: EntityIdSchema.optional() }).strict()).max(10).optional(),
+    claims: z.array(InterpretedClaimSchema).max(20).optional(),
+  }).strict(),
+  read(context, params) {
+    const { world } = context;
+    const assessment = assessFeasibility({
+      world,
+      actorId: params.actorId,
+      targetProvinceId: params.targetProvinceId ?? null,
+      actionId: params.actionId ?? null,
+      resourceRefs: params.resourceRefs ?? [],
+      claims: params.claims ?? [],
+    });
+    return {
+      ok: true,
+      data: assessment,
+      factual: lines([
+        `Feasibility (advisory only): ${assessment.classification}.`,
+        ...assessment.findings.map((f) => `[${f.dimension}: ${f.result}] ${f.reason}`),
+      ]),
+    };
+  },
+};
+
 export const GAME_MASTER_READ_TOOLS: readonly AnyReadToolDefinition[] = [
   inspectWorld,
   inspectForce,
@@ -716,6 +752,7 @@ export const GAME_MASTER_READ_TOOLS: readonly AnyReadToolDefinition[] = [
   inspectPoliticalProcedure,
   listDueLifeReviews,
   listDuePoliticalProcedures,
+  assessFeasibilityTool,
 ];
 
 export const READ_TOOL_BY_NAME: ReadonlyMap<string, AnyReadToolDefinition> = new Map(

@@ -59,6 +59,22 @@ export function isWorkflowRefusal(value: unknown): value is WorkflowRefusal {
   return typeof value === "object" && value !== null && typeof (value as WorkflowRefusal).refused === "string";
 }
 
+/**
+ * A workflow's own duration estimate (docs/32, Phase 5), replacing the flat
+ * `actionId -> days` lookup tables `pipeline.ts` and `chronicle-from-facts.ts`
+ * used to keep independently. Always a range, never a false single-point
+ * promise: `likelyDays` is what schedules Chronicle ordering today;
+ * `minimumDays`/`maximumDays` exist for a later phase's scheduler. Optional
+ * -- a workflow that omits this still gets the same 7-day default the old
+ * flat tables used for anything unlisted, via `estimateWorkflowDurationDays`
+ * (`workflows/registry.ts`).
+ */
+export interface WorkflowDurationEstimate {
+  readonly minimumDays: number;
+  readonly likelyDays: number;
+  readonly maximumDays: number;
+}
+
 /** Which AI sources are permitted to invoke a workflow (skills framing, ADR-0032). */
 export type WorkflowInvokerAuthority = "player" | "world_director" | "character_director" | "system";
 
@@ -85,6 +101,8 @@ export interface WorkflowDefinition<TParams extends z.ZodTypeAny = z.ZodTypeAny>
   readonly scopeLimit?: WorkflowScopeLimit;
   /** Zod schema validating the raw `parameters` record. */
   readonly parametersSchema: TParams;
+  /** How long this action actually takes, in simulated days (docs/32, Phase 5). Omit to fall back to the registry's default. */
+  readonly duration?: WorkflowDurationEstimate;
   /**
    * Pure transformation: given valid params and current world, return the next
    * world. Must not throw on a valid world + valid params.

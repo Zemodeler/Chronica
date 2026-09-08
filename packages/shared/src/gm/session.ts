@@ -526,6 +526,9 @@ export class GameMasterSession {
     const result = interpretPlan(this.staged, this.actorCharacterId, parsed.data, this.atStep);
     if (typeof result === "string") return { ok: false, finished: false, factual: result };
     this.staged = result;
+    if (parsed.data.clarificationQuestions.length > 0) {
+      return this.planFact(`The plan needs the player's answer before any stage commits: ${parsed.data.clarificationQuestions.join(" ")}`);
+    }
     return this.planFact(`A continuing plan was prepared: ${parsed.data.interpretation}. Its stages are attempts, not completed outcomes.`);
   }
 

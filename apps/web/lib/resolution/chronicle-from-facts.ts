@@ -1,8 +1,8 @@
 import "server-only";
 
 import type { ChronicleEntryInput } from "@chronica/db";
-import type { EntityStateDelta, FactualEvent, GameMasterTurnReport, WorldState } from "@chronica/shared";
-import { chronicleHeadline, deriveChronicleDepth, humanizeRefusalReason, stripEngineJargon, RECORD_REFUSAL_AFTERMATH_TOOL, FLAG_AMBIENT_EVENT_TOOL, FLAG_NPC_INITIATED_DIALOGUE_TOOL } from "@chronica/shared";
+import type { EntityStateDelta, FactualEvent, GameMasterTurnReport, ScenarioClock, WorldState } from "@chronica/shared";
+import { chronicleHeadline, deriveChronicleDepth, deriveWorldTime, estimateWorkflowDurationDays, humanizeRefusalReason, stripEngineJargon, RECORD_REFUSAL_AFTERMATH_TOOL, FLAG_AMBIENT_EVENT_TOOL, FLAG_NPC_INITIATED_DIALOGUE_TOOL } from "@chronica/shared";
 
 // Chronicle from facts (GM refactor, requirement 8).
 //
@@ -96,32 +96,6 @@ function participantsOf(world: WorldState, characterIds: readonly string[]): { n
 
 function salienceTier(salience: number): "high" | "medium" | "low" {
   return salience >= 8 ? "high" : salience >= 5 ? "medium" : "low";
-}
-
-function durationDaysFor(actionIds: readonly string[]): number {
-  const actionDays: Record<string, number> = {
-    add_gold: 1,
-    remove_gold: 1,
-    transfer_gold: 1,
-    appoint_to_office: 2,
-    remove_from_office: 2,
-    raise_morale: 2,
-    lower_morale: 2,
-    move_character: 4,
-    create_force: 7,
-    move_force: 14,
-    start_battle: 14,
-    resolve_battle: 14,
-    end_battle: 14,
-    sign_treaty: 21,
-    start_siege: 30,
-    end_siege: 30,
-    start_war: 45,
-    end_war: 45,
-    give_territory: 45,
-    change_province_control: 45,
-  };
-  return Math.max(1, ...actionIds.map((actionId) => actionDays[actionId] ?? 7));
 }
 
 /**
@@ -240,6 +214,8 @@ export interface ChronicleFromFactsInput {
   readonly report: GameMasterTurnReport | null;
   /** Directive ids submitted this turn, so an unaccounted one is still recorded. */
   readonly directiveIds: readonly string[];
+  /** For day-level Chronicle timing (docs/32, Phase 11). Absent falls back to the engine default (`deriveWorldTime`'s own fallback). */
+  readonly scenarioClock?: ScenarioClock | undefined;
 }
 
 export function buildChronicleFromFacts(input: ChronicleFromFactsInput): ChronicleEntryInput[] {
@@ -247,6 +223,13 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
   const byId = new Map(events.map((event) => [event.id, event]));
   const entries: Omit<ChronicleEntryInput, "sequence">[] = [];
   const consumed = new Set<string>();
+  // Docs/32 Phase 11: every fact this turn is still atomic (no ActionPlan
+  // stage lifecycle is wired into the live GM tool loop yet, Phase 8/9), so
+  // occurredAtDay and finalizedAtDay are identical for every entry below.
+  // Once a stage can genuinely span turns, the entry that commences it and
+  // the one that finishes it will carry different values for each.
+  const { elapsedDay } = deriveWorldTime(atStep, input.scenarioClock);
+  const dayFields = { occurredAtDay: elapsedDay, finalizedAtDay: elapsedDay };
 
   // -- the player's own directives ------------------------------------------
   for (const directiveId of input.directiveIds) {
@@ -292,8 +275,9 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
       audience: "all_players",
       body,
       atStep,
+      ...dayFields,
       materialConsequence: succeeded,
-      simulatedDurationDays: durationDaysFor(applied.map((event) => event.actionId)),
+      simulatedDurationDays: estimateWorkflowDurationDays(applied.map((event) => event.actionId)),
       factActionIds: [...new Set(applied.map((event) => event.actionId))],
       title: succeeded ? playerTitle(applied, world, input.actorCharacterId) : namedRefusal !== undefined ? "The Refusal Answered" : report === null ? "Resolution Incomplete" : "The Unheard Order",
       knowledgeStatus: "confirmed",
@@ -325,8 +309,9 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
       audience: event.visibility === "private" ? "knowledge_scoped" : "all_players",
       body: factBody(events, refs),
       atStep,
+      ...dayFields,
       materialConsequence: material,
-      simulatedDurationDays: durationDaysFor(refEvents.map((candidate) => candidate.actionId)),
+      simulatedDurationDays: estimateWorkflowDurationDays(refEvents.map((candidate) => candidate.actionId)),
       // The narrator's own outcome lock (below): the exact set of successful
       // action ids this entry's facts are actually drawn from, so a rewrite
       // that claims a material outcome none of them recorded -- a war
@@ -372,8 +357,9 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
       audience: "all_players",
       body: stripEngineJargon(event.summary),
       atStep,
+      ...dayFields,
       materialConsequence: event.materialConsequence,
-      simulatedDurationDays: durationDaysFor([event.actionId]),
+      simulatedDurationDays: estimateWorkflowDurationDays([event.actionId]),
       factActionIds: [event.actionId],
       title: chronicleHeadline(event.summary),
       knowledgeStatus: "confirmed",
