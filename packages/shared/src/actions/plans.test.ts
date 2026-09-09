@@ -14,6 +14,7 @@ import {
   preparePlayerPlans,
   respondToActionPlanAssignment,
   startPlanStage,
+  upgradeActionPlanToScheduledEvents,
   upgradePlayerPlansToActionPlans,
   type ActionPlan,
   type PlayerPlan,
@@ -97,6 +98,36 @@ describe("upgradePlayerPlansToActionPlans", () => {
     const upgraded = upgradePlayerPlansToActionPlans([playerPlan(), playerPlan({ id: "plan-2", status: "cancelled" })]);
     expect(upgraded).toHaveLength(2);
     expect(upgraded[1]!.status).toBe("abandoned");
+  });
+});
+
+describe("upgradeActionPlanToScheduledEvents (docs/32, Phase 7)", () => {
+  it("schedules an action_phase event at an in-progress stage's expected completion", () => {
+    const started = startPlanStage(actionPlan(), "march", 2, {
+      durationEstimate: { minimumSteps: 1, likelySteps: 3, maximumSteps: 5, basis: ["distance"] },
+    }) as ActionPlan;
+    const drafts = upgradeActionPlanToScheduledEvents(started, 2);
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]).toMatchObject({ kind: "action_phase", actionId: "march", subjectRef: { kind: "character", id: "marcus-atilius" } });
+  });
+
+  it("schedules a pending stage with a notBeforeStep, but not one without one", () => {
+    const withNotBefore = actionPlan({
+      stages: [{ id: "march", objective: "March to Messana", actorId: "marcus-atilius", status: "pending", notBeforeStep: 5 }] as ActionPlan["stages"],
+    });
+    const drafts = upgradeActionPlanToScheduledEvents(withNotBefore, 1);
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]?.actionId).toBe("march");
+  });
+
+  it("leaves a stage with no completion or start estimate unscheduled", () => {
+    expect(upgradeActionPlanToScheduledEvents(actionPlan(), 1)).toEqual([]);
+  });
+
+  it("does not schedule a terminal stage", () => {
+    const started = startPlanStage(actionPlan(), "march", 2) as ActionPlan;
+    const completed = completePlanStage(started, "march", 4, { success: true, resultFactIds: ["fact-1"] }) as ActionPlan;
+    expect(upgradeActionPlanToScheduledEvents(completed, 4).some((d) => d.actionId === "march")).toBe(false);
   });
 });
 

@@ -72,6 +72,12 @@ export const games = pgTable("games", {
   turnTimeoutSeconds: integer("turn_timeout_seconds").notNull().default(86_400),
   newsTimeoutSeconds: integer("news_timeout_seconds").notNull().default(60),
   aiProfileVersion: integer("ai_profile_version").notNull(),
+  /**
+   * 1 = single centralized Game Master call (today's path, kept indefinitely for
+   * in-flight campaigns). 2 = the multi-agent dispatcher (docs/32, Part B). An
+   * active story's resolution model never changes mid-play.
+   */
+  agentArchitectureVersion: integer("agent_architecture_version").notNull().default(1),
   payerUserId: uuid("payer_user_id").notNull().references(() => users.id),
   creditRateCardVersion: integer("credit_rate_card_version").notNull(),
   creditBudgetMicrocredits: bigint("credit_budget_microcredits", { mode: "bigint" }).notNull(),
@@ -162,6 +168,16 @@ export const turns = pgTable("turns", {
    */
   elapsedDayStart: integer("elapsed_day_start"),
   elapsedDayEnd: integer("elapsed_day_end"),
+  /**
+   * Minute-precision authoritative time (docs/32, Phase 7), alongside the day
+   * columns above -- populated only once the event queue (world_events) is
+   * actually driving resolution for this turn. Nullable so every turn
+   * resolved before this phase still parses.
+   */
+  instantDayStart: integer("instant_day_start"),
+  instantMinuteStart: integer("instant_minute_start"),
+  instantDayEnd: integer("instant_day_end"),
+  instantMinuteEnd: integer("instant_minute_end"),
   stopReason: text("stop_reason"),
   /** Fact ids the elastic scheduler (docs/32, Phase 7) cites as why this turn stopped. Absent until that phase writes it. */
   stoppingFactIds: text("stopping_fact_ids").array(),
@@ -316,10 +332,9 @@ export const inventedWorkflowUses = pgTable("invented_workflow_uses", {
 /**
  * Capability-gap requests (Game Master refactor).
  *
- * A row here is the record of an action the Game Master needed and no
- * registered workflow covers. Writing one changed nothing: it exists so the
- * attempt is honest in the audit and the Chronicle, and so a developer can
- * decide offline whether to write a real typed workflow for it. There is
+ * A row here is the record of a need the Game Master cannot express as a safe
+ * world-data interaction. Writing one changes nothing: it keeps the attempt
+ * honest in the audit without treating prose as a mutation. There is
  * deliberately no status that makes a row executable.
  */
 export const capabilityRequests = pgTable("capability_requests", {

@@ -90,10 +90,53 @@ export const MoneyTransactionCauseSchema = z.object({
     "battle_result",
     "title_change",
     "succession",
+    // docs/32, Part C.3: a project's reserve/spend/release lifecycle
+    // (`world/project.ts`, `world/money-reservations.ts`).
+    "project_reservation",
+    "project_milestone",
+    "project_release",
   ]),
   id: EntityIdSchema,
   explanation: z.string().trim().min(1).max(240),
 });
+
+/**
+ * An earmark against an account's balance for one project (docs/32, Part C.3).
+ * A reservation does not move money -- no `MoneyTransaction` is created when
+ * one opens -- it only narrows what `availableBalance` (`world/money-
+ * reservations.ts`) reports as spendable, so an ordinary `transfer_gold` can
+ * never eat into funds a project has already committed. `remainingAmount`
+ * falls as each milestone spends from it; the reservation closes only when
+ * it reaches zero (`spent`) or the project is abandoned (`released`/
+ * `cancelled`).
+ */
+export const MoneyReservationSchema = z
+  .object({
+    id: EntityIdSchema,
+    accountId: EntityIdSchema,
+    currencyId: EntityIdSchema,
+    reservedAmount: MoneyAmountSchema.positive(),
+    remainingAmount: MoneyAmountSchema,
+    purposeKind: z.literal("project"),
+    purposeId: EntityIdSchema,
+    status: z.enum(["active", "released", "spent", "cancelled"]),
+    createdAtStep: ElapsedStepSchema,
+    closedAtStep: ElapsedStepSchema.nullable().default(null),
+  })
+  .strict()
+  .superRefine((reservation, context) => {
+    if (reservation.remainingAmount > reservation.reservedAmount) {
+      context.addIssue({ code: "custom", path: ["remainingAmount"], message: "A reservation cannot hold more remaining than it originally reserved." });
+    }
+    const isOpen = reservation.status === "active";
+    if (isOpen && reservation.closedAtStep !== null) {
+      context.addIssue({ code: "custom", path: ["closedAtStep"], message: "An active reservation has not closed yet." });
+    }
+    if (!isOpen && reservation.closedAtStep === null) {
+      context.addIssue({ code: "custom", path: ["closedAtStep"], message: "A reservation that is released, spent, or cancelled must record when it closed." });
+    }
+  });
+export type MoneyReservation = z.infer<typeof MoneyReservationSchema>;
 
 export const MoneyTransactionSchema = z
   .object({
@@ -776,6 +819,9 @@ export const MaterialWorldStateSchema = z
     // packages/shared/src/material/province-material.ts backfills any
     // missing entry the first time a snapshot is resolved.
     provinceMaterial: z.array(ProvinceMaterialSchema).default([]),
+    // docs/32, Part C.3: project fund earmarks. Defaulted so archived
+    // snapshots (none of which ever populated this) load cleanly.
+    reservations: z.array(MoneyReservationSchema).default([]),
   })
   .superRefine((state, context) => {
     const ids = <T extends { id: string }>(values: T[]) => new Set(values.map((value) => value.id));
@@ -818,6 +864,10 @@ export const MaterialWorldStateSchema = z
     });
     state.capturableValues.forEach((value, index) => {
       requireReference(value.currencyId === state.currency.id, ["capturableValues", index, "currencyId"], "Capturable value currency must match the scenario currency.");
+    });
+    state.reservations.forEach((reservation, index) => {
+      requireReference(accountIds.has(reservation.accountId), ["reservations", index, "accountId"], "A reservation must reference an existing account.");
+      requireReference(reservation.currencyId === state.currency.id, ["reservations", index, "currencyId"], "Reservation currency must match the scenario currency.");
     });
     state.reservedPowers.forEach((rule, index) => {
       requireReference(institutionIds.has(rule.institutionId), ["reservedPowers", index, "institutionId"], "Reserved power must reference an existing institution.");

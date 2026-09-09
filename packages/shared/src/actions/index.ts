@@ -6,6 +6,7 @@ export * from "./invented-actions-v2";
 export * from "./operations";
 export * from "./order-projection";
 export * from "./orders";
+export * from "./player-intent";
 export * from "./plans";
 export * from "./reservations";
 export * from "./solo-turn";

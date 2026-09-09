@@ -7,6 +7,7 @@ import {
   getCharacterKnowledgebase,
   getOrCreateNpcKnowledgebase,
   getWorldView,
+  persistOpeningWorld,
   findOrOpenSession,
   upsertCharacterKnowledgebase,
 } from "@chronica/db";
@@ -14,6 +15,8 @@ import {
   CharacterKnowledgebaseSchema,
   WorldStateSchema,
   deriveAuthoritySummary,
+  createCanonicalNpc,
+  linkCanonicalCharacters,
   materializePlayerCharacter,
   type CharacterKnowledgebase,
   type ScenarioGovernmentRules,
@@ -498,18 +501,43 @@ export async function confirmDeclaredCharacter(gameId: string): Promise<Characte
     }
     await db.update(schema.players).set({ characterId }).where(and(eq(schema.players.id, playerId), eq(schema.players.gameId, gameId)));
 
-    // Seed NPC knowledgebases for each person relation from the character declaration.
+    // Confirmation is the moment declared relations become real people.  Do
+    // not leave behind a chat profile for someone absent from WorldState.
     const scenarioCtx = await getScenarioContext(db, gameId);
     const period = scenarioCtx.period;
     const playerCulture = existing.culture ?? "local";
+    const view = await getWorldView(db, gameId);
+    if (view === undefined) return { status: "error", message: "This world's canonical state is unavailable." };
+    let canonicalWorld = materializePlayerCharacter(
+      materializeCanvasProvince(view.world, view.mapAssetId, existing.locationProvinceId),
+      characterId,
+      confirmed,
+      view.scenarioGovernment,
+    );
     for (const relation of existing.relations) {
       if (relation.kind !== "person") continue;
       const npcId = `declared-npc-${relation.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${playerId}`;
+      const relationScore = scoreForDeclaredConnection(relation.relationship, relation.notes);
+      const player = canonicalWorld.characters.find((candidate) => candidate.id === characterId);
+      if (player === undefined) return { status: "error", message: "The confirmed player could not enter canonical world state." };
+      const created = createCanonicalNpc(canonicalWorld, {
+        characterId: npcId,
+        name: relation.name,
+        polityId: player.polityId,
+        locationProvinceId: player.locationProvinceId,
+        startingMoney: 0,
+        createdAtStep: canonicalWorld.elapsedStep,
+        creationReason: `Declared ${relation.relationship} of ${existing.canonicalName}.`,
+      });
+      if (created === null) return { status: "error", message: `Could not materialise ${relation.name} in canonical world state.` };
+      canonicalWorld = linkCanonicalCharacters(created.world, characterId, npcId, relation.relationship, relationScore, canonicalWorld.elapsedStep);
+      canonicalWorld = linkCanonicalCharacters(canonicalWorld, npcId, characterId, relation.relationship, relationScore, canonicalWorld.elapsedStep);
       const kb = await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcId, {
         canonicalName: relation.name,
         personalitySummary: relation.notes ?? "",
-        relationshipLabel: relationshipLabelForScore(scoreForDeclaredConnection(relation.relationship, relation.notes)),
-        relationshipScore: scoreForDeclaredConnection(relation.relationship, relation.notes),
+        biography: relation.notes ?? `${relation.name} is ${existing.canonicalName}'s ${relation.relationship}.`,
+        relationshipLabel: relationshipLabelForScore(relationScore),
+        relationshipScore: relationScore,
         declaredConnection: relation.relationship,
         declaredConnectionNotes: `${relation.familyRole === null ? "" : `${relation.familyRole}. `}${relation.notes ?? ""}`.trim(),
       });
@@ -524,6 +552,10 @@ export async function confirmDeclaredCharacter(gameId: string): Promise<Characte
         });
       }
     }
+    // This is deliberately last: a contact/knowledgebase failure cannot leave
+    // a world-only NPC behind.  Once it succeeds all ordinary readers see the
+    // same persisted canonical player and relations before any order can run.
+    await persistOpeningWorld(db, gameId, canonicalWorld);
 
     return { status: "confirmed" };
   } finally {

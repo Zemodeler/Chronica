@@ -3,12 +3,11 @@ import { ElapsedStepSchema, EntityIdSchema } from "../material-state";
 
 // Capability-gap safeguard (GM refactor, requirement 7).
 //
-// This replaces the invented-workflow escape hatch. When the Game Master needs
-// an action no registered tool represents, it may say so -- and nothing else.
-// A capability request is a *record*, not an instruction: it never mutates the
-// staged or committed world, it carries no patch paths, and the executor has
-// no code path that turns one into a mutation. A developer reviews it offline
-// and, if the capability is warranted, writes a real typed workflow.
+// This records a need that cannot honestly be expressed as a world-data
+// interaction. When the Game Master can describe a safe data operation, it
+// should define and use a campaign workflow instead. A capability request is
+// a *record*, not an instruction: it never mutates the staged or committed
+// world and carries no patch paths.
 //
 // The attempted action is recorded as unresolved/unsupported so the turn stays
 // honest about it. It remains in the developer audit, which shows exactly what
@@ -84,9 +83,33 @@ export const CapabilityRequestSchema = z
     safetyConstraints: z.array(DescriptiveTextSchema(240)).max(10).default([]),
     /** Scenario context a reviewer needs to judge whether this belongs in the game. */
     scenarioContext: DescriptiveTextSchema(600),
+    /**
+     * docs/32, Part C.5: which existing generic primitives (`create_entity`,
+     * `create_project`, ...) were actually tried before concluding none fit --
+     * a reviewer reading "nothing was tried" versus "every primitive was tried
+     * and each was wrong for a stated reason" needs very different follow-up.
+     */
+    compositionAttempted: z.array(z.string().regex(/^[a-z][a-z0-9_]{2,79}$/)).max(10).default([]),
+    /**
+     * The closest tool actually invoked alongside this request, if one was --
+     * `record_entity_note` recording the same intent, a `create_entity` call
+     * with a best-inferable shape. Null only when nothing plausible existed
+     * even as a fallback.
+     */
+    bestAvailableFallbackToolName: z.string().regex(/^[a-z][a-z0-9_]{2,79}$/).nullable().default(null),
   })
   .strict();
 export type CapabilityRequest = z.infer<typeof CapabilityRequestSchema>;
+
+/** One turn's outcome for a capability request that has now been seen more than once. */
+export const CapabilityRequestObservedOutcomeSchema = z
+  .object({
+    atStep: ElapsedStepSchema,
+    /** What actually happened for the requester that turn -- the best-effort fallback's own summary, or "nothing" when there was none. */
+    summary: z.string().trim().min(1).max(400),
+  })
+  .strict();
+export type CapabilityRequestObservedOutcome = z.infer<typeof CapabilityRequestObservedOutcomeSchema>;
 
 /** A capability request as recorded against a turn. Stamped by the pipeline, never by a model. */
 export interface RecordedCapabilityRequest {
@@ -95,6 +118,10 @@ export interface RecordedCapabilityRequest {
   readonly request: CapabilityRequest;
   /** Always "unsupported": the attempt was recorded and nothing was applied. */
   readonly resolution: "unsupported";
+  /** How many times this same capability gap (by `proposedToolName`) has now been recorded for this game. */
+  readonly usageCount: number;
+  /** One entry per turn this gap recurred, oldest first -- append-only, never rewritten. */
+  readonly observedOutcomes: readonly CapabilityRequestObservedOutcome[];
 }
 
 export const RECORDED_CAPABILITY_RESOLUTION = "unsupported" as const;
@@ -104,7 +131,21 @@ export function recordCapabilityRequest(
   atStep: number,
   id: string,
 ): RecordedCapabilityRequest {
-  return { id, atStep, request, resolution: RECORDED_CAPABILITY_RESOLUTION };
+  return { id, atStep, request, resolution: RECORDED_CAPABILITY_RESOLUTION, usageCount: 1, observedOutcomes: [] };
+}
+
+/**
+ * A later turn hits the same named gap again: increments the dedupe count
+ * and appends this turn's outcome, rather than the caller inserting a
+ * duplicate row. The identity of "the same gap" is the caller's own
+ * decision (typically matching `proposedToolName`) -- this only merges once
+ * that match has already been made.
+ */
+export function mergeCapabilityRequestUsage(
+  existing: RecordedCapabilityRequest,
+  outcome: CapabilityRequestObservedOutcome,
+): RecordedCapabilityRequest {
+  return { ...existing, usageCount: existing.usageCount + 1, observedOutcomes: [...existing.observedOutcomes, outcome] };
 }
 
 /** The exact, factual sentence kept in the developer audit for an unsupported attempt. */

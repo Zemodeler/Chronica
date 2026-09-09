@@ -64,6 +64,8 @@ describe("summarizeTurnFacts", () => {
       id: "capability-2-1",
       atStep: 2,
       resolution: "unsupported",
+      usageCount: 1,
+      observedOutcomes: [],
       request: {
         requestedIntent: "Swear an oath.",
         whyNoRegisteredToolFits: "No tool for it.",
@@ -74,6 +76,8 @@ describe("summarizeTurnFacts", () => {
         expectedStateEffect: "A binding promise.",
         safetyConstraints: [],
         scenarioContext: "Roman oaths matter.",
+        compositionAttempted: [],
+        bestAvailableFallbackToolName: null,
       },
     }]);
 

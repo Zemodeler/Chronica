@@ -6,11 +6,11 @@ import type { ProposedInvocation } from "../actions/orders";
 import { WORKFLOW_REGISTRY } from "../workflows/registry";
 import { executeWorkflow } from "../workflows/executor";
 import { validateCandidate, createInvocationDuplicateGuard, type PolicyViolation } from "../workflows/policy";
-import { InventedWorkflowDefinitionSchema, applyInventedWorkflow, type InventedWorkflowDefinition } from "../workflows/invented-workflow";
+import { InventedWorkflowDefinitionSchema, applyInventedWorkflow, validateInventedWorkflowDefinition, type InventedWorkflowDefinition } from "../workflows/invented-workflow";
 import type { WorkflowAuditEntry, WorkflowCandidate } from "../workflows/manager-types";
 import { READ_TOOL_BY_NAME, type PrivateInformationPolicy, type ReadToolContext } from "./read-tools";
 import type { ScenarioLifeRules } from "../characters/family";
-import type { ScenarioClock } from "../world/clock";
+import { deriveWorldInstant, type ScenarioClock } from "../world/clock";
 import {
   CapabilityRequestSchema,
   recordCapabilityRequest,
@@ -38,6 +38,14 @@ import {
 } from "./tools";
 import { appendEntityNote, type EntityNote } from "./campaign-memory";
 import { diffWorldState, type EntityStateDelta } from "./world-diff";
+import { executeWorldTool, executeWorldReadTool } from "../world-tools/executor";
+import { ALL_WORLD_TOOLS, ALL_WORLD_READ_TOOLS, buildWorldToolCatalog } from "../world-tools/catalog";
+import type { AuthorityIndex } from "../authority/authority-grant";
+import { actorIdForPrincipal, canActAsPrincipal, type Principal } from "../authority/principal";
+import type { Fact } from "../world/facts";
+
+const WORLD_TOOL_BY_NAME = new Map(ALL_WORLD_TOOLS.map((tool) => [tool.id, tool]));
+const WORLD_READ_TOOL_BY_NAME = new Map(ALL_WORLD_READ_TOOLS.map((tool) => [tool.id, tool]));
 
 // The staged tool loop (GM refactor, requirements 3, 4, 9).
 //
@@ -252,19 +260,57 @@ export interface GameMasterSessionOptions {
   readonly scenarioClock?: ScenarioClock | undefined;
   readonly maxToolCalls?: number;
   /**
-   * Actions this campaign defined in earlier turns. Always kept and reported
-   * for audit even while `allowInventedActions` is off -- see there.
+   * Workflows this campaign defined in earlier turns.
    */
   readonly definedActions?: readonly InventedWorkflowDefinition[];
   /**
-   * Off by default (docs/27). `define_action`/`invoke_defined_action` are a
-   * developer-controlled rollout/testing exception, not a live escape hatch:
-   * while this is false, neither tool is offered by `listTools()`, and a call
-   * to either by name is refused without touching the stage. Earlier-turn
-   * `definedActions` remain readable in `result()` either way -- they are
-   * historical record, not something this flag makes executable again.
+   * Whether campaign-defined workflows are available. They are enabled by
+   * default; callers may turn them off for a deliberately constrained run.
    */
   readonly allowInventedActions?: boolean;
+  /**
+   * docs/32 Phase 7: the mechanical authority backstop. Undefined by
+   * default -- today's single-GM path is completely unaffected unless a
+   * caller explicitly wires one in. When present, every `act()` call is
+   * checked before it reaches `applyInvocation`, so an under-authorized
+   * caller (any of Part B's multiple agents, not just a misbehaving one)
+   * cannot make an unauthorized action take effect merely by calling the
+   * tool -- regardless of what a model attempts, the engine refuses it the
+   * same way it already refuses a bad id or a failed precondition. Kept as
+   * an injected interface (`authority/authority-grant.ts`'s
+   * `buildWorkflowAuthorityGate`) rather than an import of the `authority`
+   * module here, so this already-large file stays decoupled from it.
+   */
+  readonly authorityGate?: AuthorityGate;
+  /**
+   * docs/32, Part C.1/C.6 step 9. Off by default -- today's `WORKFLOW_REGISTRY`-
+   * only tool surface is completely unaffected unless a caller explicitly
+   * opts in. When true, `listTools()` also offers the typed world-tool
+   * catalog (`world-tools/catalog.ts`), and a call naming one of those tools
+   * is dispatched through `executeWorldTool`/`executeWorldReadTool` rather
+   * than `WORKFLOW_REGISTRY` -- a genuinely separate mutation path from
+   * `act()`, sharing only the staged world and actor/budget bookkeeping.
+   */
+  readonly enableWorldTools?: boolean;
+  /** The authority index world tools check their own `authorityRequirement` against. Undefined -- the default even when `enableWorldTools` is true -- means world-tool authority checks are unrestricted, mirroring `authorityGate`'s own opt-in default. */
+  readonly worldToolAuthorityIndex?: AuthorityIndex;
+  /**
+   * docs/32 corrective pass, requirement 3. Off by default -- every existing
+   * caller (v1's single GM, the per-turn multi-agent orchestrator) is
+   * completely unaffected. When true, a registered-workflow `act()` call
+   * that validates successfully is NOT applied to the staged world: it is
+   * rolled back and recorded in `scheduledActions` instead, for the caller
+   * to convert into a scheduled `action_phase` event. Only the event
+   * queue's per-event reaction runner sets this -- a reaction is decided
+   * now, but takes effect on the queue's own timeline, not instantly.
+   * World tools are unaffected (see `scheduledActions`'s own doc comment).
+   */
+  readonly deferMutations?: boolean;
+}
+
+/** See `GameMasterSessionOptions.authorityGate`. Returns null when `actionId` is not authority-sensitive (allow unconditionally, as before this existed); a refusal message otherwise. */
+export interface AuthorityGate {
+  check(actionId: string, actorId: string, parameters: Record<string, unknown>): string | null;
 }
 
 export interface GameMasterSessionResult {
@@ -278,15 +324,34 @@ export interface GameMasterSessionResult {
   readonly toolCallCount: number;
   /** Actions defined during this turn, for the caller to persist. */
   readonly definedActions: readonly InventedWorkflowDefinition[];
-  /** Every use of a defined action this turn, for the audit trail. */
-  readonly definedActionUses: readonly { readonly actionId: string; readonly actorId: string; readonly parameters: Record<string, unknown> }[];
+  /** Every use of a defined workflow this turn, for the audit trail. */
+  readonly definedActionUses: readonly {
+    readonly actionId: string;
+    readonly actorId: string;
+    readonly parameters: Record<string, unknown>;
+    readonly resolvedPatch: readonly import("../workflows/invented-workflow").InventedPatchOperation[];
+  }[];
+  /** docs/32, Part C.1: every world-tool call this turn made, for the audit trail -- empty unless `enableWorldTools` was set. */
+  readonly worldToolInvocations: readonly { readonly toolId: string; readonly actorId: string; readonly parameters: Record<string, unknown> }[];
+  /** Facts world tools (e.g. `record_fact`) produced this turn. The caller persists these to the fact ledger (Part A) -- they are never folded into `world` here. */
+  readonly worldToolFacts: readonly Fact[];
+  /**
+   * A registered-workflow action a reaction agent validated but did not
+   * apply, because `deferMutations` was on (docs/32 corrective pass,
+   * requirement 3) -- the caller (the event queue's reaction runner)
+   * converts each of these into a scheduled `action_phase` `WorldEvent`
+   * instead. World tools (`issue_order`/`record_response`/`record_fact`/
+   * `create_commitment`) are never deferred -- they are already their own
+   * scheduling primitive (an order attempt awaits its own later decision).
+   */
+  readonly scheduledActions: readonly { readonly actionId: string; readonly actorId: string; readonly parameters: Record<string, unknown> }[];
 }
 
 const DEFAULT_MAX_TOOL_CALLS = 60;
 /**
  * How many actions one turn may bring into being. A turn that needs four new
  * capabilities is a turn that has stopped playing the world it is in, and the
- * cap keeps the escape hatch an escape hatch.
+ * cap keeps a single turn focused on the world already in play.
  */
 const MAX_DEFINITIONS_PER_TURN = 3;
 
@@ -338,13 +403,37 @@ export class GameMasterSession {
   /** Actions this campaign has: the ones carried in from earlier turns, plus any defined now. */
   private readonly definedActions: Map<string, InventedWorkflowDefinition>;
   private readonly definedThisTurn: InventedWorkflowDefinition[] = [];
-  private readonly definedActionUses: { actionId: string; actorId: string; parameters: Record<string, unknown> }[] = [];
+  private readonly definedActionUses: {
+    actionId: string;
+    actorId: string;
+    parameters: Record<string, unknown>;
+    resolvedPatch: readonly import("../workflows/invented-workflow").InventedPatchOperation[];
+  }[] = [];
   private toolCallCount = 0;
   private readCallCount = 0;
   private factCounter = 0;
   private ambientEventUsed = false;
   private finished = false;
   private readonly allowInventedActions: boolean;
+  private readonly authorityGate: AuthorityGate | undefined;
+  private readonly enableWorldTools: boolean;
+  private readonly worldToolAuthorityIndex: AuthorityIndex | undefined;
+  private readonly worldToolInvocations: { toolId: string; actorId: string; parameters: Record<string, unknown> }[] = [];
+  private readonly worldToolFacts: Fact[] = [];
+  /** Monotonic, per-session counter for `record_fact`'s deterministic id (docs/32 corrective pass, requirement 4). */
+  private worldToolCallSequence = 0;
+  private readonly deferMutations: boolean;
+  private readonly scheduledActions: { actionId: string; actorId: string; parameters: Record<string, unknown> }[] = [];
+  /**
+   * Who is actually calling, for the duration of the current `invoke()`.
+   * Defaults to the player -- v1's single-agent path never supplies a
+   * `principal` argument, so it always resolves to exactly today's behavior
+   * (the one bound `actorCharacterId`, full surface). Safe as a single
+   * mutable field because every agent in the multi-agent path
+   * (`orchestrator.ts`) runs its own tool loop to completion, strictly
+   * sequentially, against this one shared session -- never concurrently.
+   */
+  private currentPrincipal: Principal;
 
   readonly directiveIds: readonly string[];
 
@@ -359,7 +448,16 @@ export class GameMasterSession {
     this.scenarioClock = options.scenarioClock;
     this.maxToolCalls = options.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
     this.definedActions = new Map((options.definedActions ?? []).map((definition) => [definition.actionId, definition]));
-    this.allowInventedActions = options.allowInventedActions ?? false;
+    this.allowInventedActions = options.allowInventedActions ?? true;
+    this.authorityGate = options.authorityGate;
+    this.enableWorldTools = options.enableWorldTools ?? false;
+    this.worldToolAuthorityIndex = options.worldToolAuthorityIndex;
+    this.deferMutations = options.deferMutations ?? false;
+    // v1's single Game Master is omniscient by design -- it decides and
+    // executes NPC actions itself (`pipeline.ts`), not only the player's own
+    // -- so its default, unbound principal is "system", not "player". Only
+    // the multi-agent path (`invoke(call, principal)`) ever narrows this.
+    this.currentPrincipal = { kind: "system" };
     for (const { directive } of options.directives ?? []) {
       if (directive.kind === "new") continue;
       const plan = options.world.playerPlans?.find(p => p.id === directive.actionId && p.ownerId === options.actorCharacterId && p.status === "active");
@@ -369,7 +467,9 @@ export class GameMasterSession {
 
   /** The tool surface this session accepts. Anything else is refused by name. */
   listTools(): GameMasterToolDefinition[] {
-    return buildGameMasterTools({ allowInventedActions: this.allowInventedActions });
+    const base = buildGameMasterTools({ allowInventedActions: this.allowInventedActions });
+    if (!this.enableWorldTools) return base;
+    return [...base, ...buildWorldToolCatalog()];
   }
 
   get stagedWorld(): WorldState {
@@ -396,11 +496,26 @@ export class GameMasterSession {
       toolCallCount: this.toolCallCount,
       definedActions: [...this.definedThisTurn],
       definedActionUses: [...this.definedActionUses],
+      worldToolInvocations: [...this.worldToolInvocations],
+      worldToolFacts: [...this.worldToolFacts],
+      scheduledActions: [...this.scheduledActions],
     };
   }
 
-  /** Execute one tool call against the staged world. Never throws. */
-  invoke(call: GameMasterToolCall): GameMasterToolOutcome {
+  /**
+   * Execute one tool call against the staged world. Never throws.
+   *
+   * `principal` is who is actually calling -- supplied by the orchestrator,
+   * never trusted from the model's own `arguments.actorId`. Omitted, it
+   * defaults to the unrestricted `system` principal, matching v1's single,
+   * omniscient Game Master (and any call site that predates the multi-agent
+   * split) exactly: that one agent already decides and executes actions for
+   * the player's character and every NPC alike, so it is never bound to a
+   * single claimable identity. Only the multi-agent orchestrator supplies a
+   * narrower principal (`player`/`npc`/`star_context`/`closing`).
+   */
+  invoke(call: GameMasterToolCall, principal?: Principal): GameMasterToolOutcome {
+    this.currentPrincipal = principal ?? { kind: "system" };
     if (this.finished) {
       return { ok: false, factual: "The turn is already finished; no further tool calls are accepted.", finished: true };
     }
@@ -440,6 +555,9 @@ export class GameMasterSession {
     if (call.name === FLAG_AMBIENT_EVENT_TOOL) return this.flagAmbientEvent(args);
     if (READ_TOOL_BY_NAME.has(call.name)) return this.read(call.name, args);
     if (WORKFLOW_REGISTRY.has(call.name)) return this.act(call.name, args);
+    if (this.enableWorldTools && (WORLD_TOOL_BY_NAME.has(call.name) || WORLD_READ_TOOL_BY_NAME.has(call.name))) {
+      return this.actWorldTool(call.name, args);
+    }
 
     return {
       ok: false,
@@ -521,6 +639,8 @@ export class GameMasterSession {
   }
 
   private planInterpretation(args: Record<string, unknown>): GameMasterToolOutcome {
+    const principalRefusal = this.principalRefusal(this.actorCharacterId);
+    if (principalRefusal !== null) return { ok: false, finished: false, factual: "Refused: only the player's own agent may interpret the player's plan." };
     const parsed = InterpretPlanSchema.safeParse(args);
     if (!parsed.success) return { ok: false, finished: false, factual: parsed.error.message };
     const result = interpretPlan(this.staged, this.actorCharacterId, parsed.data, this.atStep);
@@ -536,6 +656,8 @@ export class GameMasterSession {
     const parsed = RespondToAssignmentSchema.safeParse(args);
     if (!parsed.success) return { ok: false, finished: false, factual: parsed.error.message };
     const input = parsed.data;
+    const principalRefusal = this.principalRefusal(input.actorId);
+    if (principalRefusal !== null) return { ok: false, finished: false, factual: `Refused: only ${input.actorId} may answer an assignment addressed to them.` };
     const plan = this.staged.playerPlans?.find(p => p.id === input.planId && p.ownerId === this.actorCharacterId && p.status === "active");
     const actor = this.staged.characters.find(c => c.id === input.actorId && c.alive);
     if (!plan || !actor || input.actorId === this.actorCharacterId || !plan.options.delegateIds.includes(input.actorId)) return { ok: false, finished: false, factual: "Only a living NPC named as a delegate may answer this assignment." };
@@ -577,11 +699,34 @@ export class GameMasterSession {
     return result;
   }
 
+  /**
+   * The principal enforcement gate (docs/32 corrective pass): a claimed
+   * `actorId` is only ever a claim a model makes in tool arguments.
+   * `this.currentPrincipal` is the fact, bound by the orchestrator and set at
+   * the top of `invoke()` -- never something a tool call itself can alter.
+   * Checked before any lookup, authority, or liveness logic so an
+   * impersonation attempt is refused identically whether the claimed actor
+   * exists, is dead, or is a perfectly valid character who simply isn't the
+   * one actually calling.
+   */
+  private principalRefusal(actorId: string): string | null {
+    if (!canActAsPrincipal(this.currentPrincipal)) {
+      return "Refused: this pass may not take state-changing actions.";
+    }
+    const boundActorId = actorIdForPrincipal(this.currentPrincipal);
+    if (boundActorId !== null && actorId !== boundActorId) {
+      return `Refused: you may only act as "${boundActorId}", not "${actorId}".`;
+    }
+    return null;
+  }
+
   private act(actionId: string, args: Record<string, unknown>): GameMasterToolOutcome {
     const { actorId, ...parameters } = args as { actorId?: unknown } & Record<string, unknown>;
     if (typeof actorId !== "string" || actorId.trim().length === 0) {
       return { ok: false, finished: false, factual: `${actionId} requires "actorId": the living character who takes this action.` };
     }
+    const principalRefusal = this.principalRefusal(actorId);
+    if (principalRefusal !== null) return { ok: false, finished: false, factual: principalRefusal };
     // Check identity first. A guessed actor id is a recoverable lookup error,
     // not a claim that someone was outside this turn's active cast.
     const actor = this.staged.characters.find((character) => character.id === actorId);
@@ -598,6 +743,11 @@ export class GameMasterSession {
     }
     const limitRefusal = this.actionLimitRefusal(actorId, actionId);
     if (limitRefusal !== null) return { ok: false, finished: false, factual: limitRefusal };
+
+    if (this.authorityGate) {
+      const authorityRefusal = this.authorityGate.check(actionId, actorId, parameters);
+      if (authorityRefusal !== null) return { ok: false, finished: false, factual: authorityRefusal };
+    }
 
     // A diplomatic message answered in the player's own name is the
     // player's own decision, not the agent's to make. Nothing about the
@@ -622,6 +772,35 @@ export class GameMasterSession {
     this.pendingRecoverableRetries.delete(retryKey);
 
     const invocation: ProposedInvocation = { actionId, actorId, parameters };
+    // docs/32 corrective pass, requirement 3: a reaction agent's action is
+    // validated for real (the exact same policy/executor path any other
+    // caller goes through), but never committed here -- a successful,
+    // otherwise-final mutation is rolled back and recorded in
+    // `scheduledActions` instead, for the event queue's reaction runner to
+    // convert into a scheduled `action_phase` event on its own timeline.
+    if (this.deferMutations) {
+      const stagedBefore = this.staged;
+      const eventsBefore = this.events.length;
+      const executedBefore = this.executedInvocations.length;
+      const auditBefore = this.auditEntries.length;
+      const outcome = this.applyInvocation(invocation, "game_master");
+      if (!outcome.ok) {
+        if (outcome.recoverable) this.pendingRecoverableRetries.add(retryKey);
+        return {
+          ok: false,
+          finished: false,
+          factual: outcome.factual,
+          ...(outcome.refusalId === undefined ? {} : { refusalId: outcome.refusalId }),
+        };
+      }
+      this.staged = stagedBefore;
+      this.events.length = eventsBefore;
+      this.executedInvocations.length = executedBefore;
+      this.auditEntries.length = auditBefore;
+      this.pendingRecoverableRetries.delete(retryKey);
+      this.scheduledActions.push({ actionId, actorId, parameters });
+      return { ok: true, finished: false, factual: `Scheduled: "${actionId}" by ${actorId} will take effect on the world's own timeline, not instantly.` };
+    }
     const outcome = this.applyInvocation(invocation, "game_master");
     if (!outcome.ok) {
       if (outcome.recoverable) this.pendingRecoverableRetries.add(retryKey);
@@ -672,6 +851,63 @@ export class GameMasterSession {
     }
 
     return { ok: true, factual, finished: false, ...(outcome.factId === undefined ? {} : { factId: outcome.factId }) };
+  }
+
+  /**
+   * The world-tool dispatch path (docs/32, Part C.1/C.6 step 9) -- a
+   * genuinely separate mutation route from `act()`, sharing only the staged
+   * world and the actor/budget bookkeeping every tool call already goes
+   * through. A read tool (`inspect_entity`/`inspect_context`) needs no actor
+   * or authority check at all; an action tool gets the same living-actor
+   * check `act()` applies, then `executeWorldTool`'s own
+   * `authorityRequirement` (checked against `worldToolAuthorityIndex`, not
+   * `this.authorityGate` -- a world tool's requirement is keyed by tool id,
+   * not by the workflow action ids `authorityGate` was built from).
+   */
+  private actWorldTool(toolId: string, args: Record<string, unknown>): GameMasterToolOutcome {
+    const { actorId, ...parameters } = args as { actorId?: unknown } & Record<string, unknown>;
+    this.worldToolCallSequence += 1;
+    const ctxBase = {
+      atStep: this.atStep,
+      // Prefer the staged world's own precise instant (set by the event
+      // queue once it has run this turn) over the day-boundary derived from
+      // `atStep` alone -- the latter is only ever a fallback for a session
+      // that never went through the queue.
+      atInstant: this.staged.instant ?? deriveWorldInstant(this.atStep, this.scenarioClock),
+      factSequence: this.worldToolCallSequence,
+      ...(this.worldToolAuthorityIndex === undefined ? {} : { authorityIndex: this.worldToolAuthorityIndex }),
+    };
+
+    const readTool = WORLD_READ_TOOL_BY_NAME.get(toolId);
+    if (readTool !== undefined) {
+      const outcome = executeWorldReadTool(readTool, this.staged, parameters, { actorId: typeof actorId === "string" ? actorId : "", ...ctxBase });
+      return outcome.ok
+        ? { ok: true, finished: false, factual: JSON.stringify(outcome.data) }
+        : { ok: false, finished: false, factual: outcome.reason };
+    }
+
+    const tool = WORLD_TOOL_BY_NAME.get(toolId)!;
+    if (typeof actorId !== "string" || actorId.trim().length === 0) {
+      return { ok: false, finished: false, factual: `${toolId} requires "actorId": the living character who takes this action.` };
+    }
+    const principalRefusal = this.principalRefusal(actorId);
+    if (principalRefusal !== null) return { ok: false, finished: false, factual: principalRefusal };
+    const actor = this.staged.characters.find((character) => character.id === actorId);
+    if (!actor || !actor.alive) {
+      return { ok: false, finished: false, factual: `"${actorId}" is not a living character in this world.` };
+    }
+    const limitRefusal = this.actionLimitRefusal(actorId, toolId);
+    if (limitRefusal !== null) return { ok: false, finished: false, factual: limitRefusal };
+
+    const outcome = executeWorldTool(tool, this.staged, parameters, { actorId, ...ctxBase });
+    if (!outcome.ok) return { ok: false, finished: false, factual: outcome.reason };
+
+    this.staged = outcome.world;
+    this.worldToolInvocations.push({ toolId, actorId, parameters });
+    if (outcome.factsToPersist !== undefined && outcome.factsToPersist.length > 0) {
+      this.worldToolFacts.push(...outcome.factsToPersist);
+    }
+    return { ok: true, finished: false, factual: outcome.summary };
   }
 
   /**
@@ -1041,16 +1277,11 @@ export class GameMasterSession {
 
   // -- defining what the engine does not have --------------------------------
   //
-  // Reached only when `allowInventedActions` is true (docs/27); `invoke()`
-  // refuses both tool names by name otherwise. The reason it is safe enough to
-  // have at all: a definition is a named, parameterised list of patch
-  // operations, and every use of it goes through `applyInventedWorkflow`,
-  // which re-parses the entire world document, refuses any dangling reference
-  // it would introduce, and refuses the clock, the pins, and the schema
-  // version outright. What it cannot do is anything a built-in workflow could
-  // not also do. It stays off by default because `request_capability` is the
-  // supported path for the same situation, and a developer reviewing a typed
-  // workflow beats a campaign quietly accumulating ad hoc ones.
+  // Campaign-defined workflows are named, parameterised data interactions.
+  // Every use goes through `applyInventedWorkflow`, which re-parses the entire
+  // world document, refuses dangling references, and protects the clock,
+  // pins, and schema version. A caller can still disable this surface for a
+  // constrained run, but ordinary play keeps it available.
 
   private defineAction(args: Record<string, unknown>): GameMasterToolOutcome {
     if (this.definedThisTurn.length >= MAX_DEFINITIONS_PER_TURN) {
@@ -1069,6 +1300,10 @@ export class GameMasterSession {
       };
     }
     const definition = parsed.data;
+    const definitionError = validateInventedWorkflowDefinition(definition);
+    if (definitionError !== null) {
+      return { ok: false, finished: false, factual: `That workflow definition was rejected: ${definitionError}` };
+    }
     if (WORKFLOW_REGISTRY.has(definition.actionId)) {
       return {
         ok: false,
@@ -1126,7 +1361,7 @@ export class GameMasterSession {
     }
 
     this.staged = executed.world;
-    this.definedActionUses.push({ actionId, actorId, parameters });
+    this.definedActionUses.push({ actionId, actorId, parameters, resolvedPatch: executed.resolvedOperations });
 
     this.factCounter += 1;
     const factId = `fact-${this.atStep}-${this.factCounter}`;

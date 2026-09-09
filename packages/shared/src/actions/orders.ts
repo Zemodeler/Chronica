@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema } from "../material-state";
+import { WorldInstantSchema, type WorldInstant } from "../world/instant";
 
 // What a player submits, and what the simulation makes of it (docs/14, ADR-0032).
 //
@@ -175,6 +176,15 @@ export const ActionStatusSchema = z.enum([
   "impossible",
   "cancelled",
   "replaced",
+  // docs/32 Phase 7: additive states for the event-queue-driven lifecycle
+  // (proposed/scheduled/started/progressing/completed/interrupted/failed/
+  // cancelled). "progressing" reuses the existing "active" value rather
+  // than adding a synonym; "impossible"/"replaced" are kept, unchanged,
+  // with no spec equivalent.
+  "proposed",
+  "scheduled",
+  "started",
+  "interrupted",
 ]);
 export type ActionStatus = z.infer<typeof ActionStatusSchema>;
 
@@ -211,7 +221,14 @@ export const ActionProgressSchema = z
  */
 export const OrderPartyRefSchema = z
   .object({
-    kind: z.enum(["character", "faction", "polity", "institution", "force", "province", "settlement", "account", "office", "procedure"]),
+    kind: z.enum([
+      "character", "faction", "polity", "institution", "force", "province", "settlement", "account", "office", "procedure",
+      // docs/32 Phase 7: the star-context hierarchy's own three levels
+      // (person/unit/settlement/province already map onto kinds above);
+      // additive, non-breaking (a new discriminated-enum member, not a shape
+      // change) -- every existing consumer pattern-matches on known kinds.
+      "region", "theatre", "world",
+    ]),
     id: EntityIdSchema,
   })
   .strict();
@@ -298,6 +315,19 @@ export const OngoingActionSchema = z
     updatedAtStep: ElapsedStepSchema.optional(),
     /** Links this action's history into a Chronicle causal chain (`world/chronicle-chains.ts`). */
     chronicleChainId: EntityIdSchema.optional(),
+    /**
+     * docs/32 Phase 7: the `world_events` row (`world/event-queue.ts`) that
+     * will start or advance this action, once it has one. Set when status
+     * becomes "scheduled"; traces "scheduled" back to a concrete queue row
+     * rather than an implicit per-turn scan.
+     */
+    queuedEventId: EntityIdSchema.optional(),
+    /** Which phase of a multi-phase action is active, for event-queue-granularity resolution. */
+    currentPhaseIndex: z.number().int().nonnegative().optional(),
+    /** When this action's next queued event is due, mirrored here so it reads without a join. */
+    scheduledInstant: WorldInstantSchema.nullable().optional(),
+    /** Set when status becomes "interrupted", alongside `waitingReason`. */
+    interruptedAtStep: ElapsedStepSchema.optional(),
   })
   .strict()
   .superRefine((action, context) => {
@@ -308,11 +338,18 @@ export const OngoingActionSchema = z
         message: "An action's revision number must match the length of its immutable history.",
       });
     }
-    if (action.status === "waiting" && action.waitingReason === null) {
+    if ((action.status === "waiting" || action.status === "interrupted") && action.waitingReason === null) {
       context.addIssue({
         code: "custom",
         path: ["waitingReason"],
-        message: "Waiting work must name what it is waiting for.",
+        message: "Waiting or interrupted work must name what it is waiting for.",
+      });
+    }
+    if (action.status === "interrupted" && action.interruptedAtStep === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["interruptedAtStep"],
+        message: "An interrupted action must record when it was interrupted.",
       });
     }
     if (action.status === "replaced" && action.replacedByActionId === null) {
@@ -331,3 +368,43 @@ export const OngoingActionSchema = z
     }
   });
 export type OngoingAction = z.infer<typeof OngoingActionSchema>;
+
+/*
+ * docs/32 Phase 7: pure status-transition helpers for the event-queue-driven
+ * action lifecycle, in the same style as `actions/plans.ts`'s
+ * `startPlanStage`/`completePlanStage` -- no `WorldState` dependency, since
+ * these operate on a single `OngoingAction` value.
+ */
+
+/** `(no prior status)` -> "proposed": an order issued but not yet assessed/scheduled. */
+export function proposeAction(action: OngoingAction): OngoingAction {
+  return { ...action, status: "proposed" };
+}
+
+/** "proposed" -> "scheduled": accepted, has a queued `action_phase` event, not yet begun. */
+export function scheduleAction(
+  action: OngoingAction,
+  queuedEventId: string,
+  scheduledInstant: WorldInstant,
+  atStep: number,
+): OngoingAction {
+  return { ...action, status: "scheduled", queuedEventId, scheduledInstant, updatedAtStep: atStep };
+}
+
+/** "scheduled" -> "started": the first phase claimed/began this instant. */
+export function startAction(action: OngoingAction, atStep: number): OngoingAction {
+  return { ...action, status: "started", startedAtStep: atStep, updatedAtStep: atStep };
+}
+
+/** Any non-terminal status -> "interrupted": work paused by a higher-priority event, resumable. */
+export function interruptAction(action: OngoingAction, reason: string, atStep: number): OngoingAction {
+  return { ...action, status: "interrupted", waitingReason: reason, interruptedAtStep: atStep, updatedAtStep: atStep };
+}
+
+/** "interrupted" -> "active": resumes paused work, or "scheduled" if a fresh queue entry is supplied. */
+export function resumeAction(action: OngoingAction, atStep: number, queuedEventId?: string): OngoingAction {
+  if (queuedEventId !== undefined) {
+    return { ...action, status: "scheduled", queuedEventId, waitingReason: null, updatedAtStep: atStep };
+  }
+  return { ...action, status: "active", waitingReason: null, updatedAtStep: atStep };
+}

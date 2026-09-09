@@ -1,4 +1,5 @@
 ﻿import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { and, count, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import type { OrderBatch, ScenarioChronicleRules, ScenarioClock, ScenarioGovernmentRules, ScenarioLifeRules, WorkflowAuditBlob, WorldState } from "@chronica/shared";
 import { ScenarioDefinitionSchema, WorldStateSchema, projectChronicleEntry, resolveChronicleVisibility, type ChronicleEntryProjection } from "@chronica/shared";
@@ -42,6 +43,8 @@ export interface WorldViewSource {
   readonly scenarioGovernment?: ScenarioGovernmentRules;
   /** Opening context, tensions, and terminology — the scenario constitution the Game Master reads. */
   readonly scenarioChronicle?: ScenarioChronicleRules;
+  /** 1 = today's single-GM path, 2 = the multi-agent dispatcher (docs/32, Part B.7). */
+  readonly agentArchitectureVersion: number;
 }
 
 /** The scenario row a slug resolves to, so createGame can pin a game to it. */
@@ -284,9 +287,41 @@ export async function submitPlayerOrder(
 }
 
 /** The world a game's latest resolved turn left behind, for rendering. */
+/**
+ * Persist pre-turn canonical setup (character confirmation or a discovered
+ * person) on the currently open turn.  Unlike an authored scenario this is
+ * game-local state, so every normal reader sees the same world immediately.
+ * Resolution replaces this pre-turn snapshot with its resolved snapshot.
+ */
+export async function persistOpeningWorld(db: ChronicaDatabase, gameId: string, world: WorldState): Promise<void> {
+  const worldJson = JSON.stringify(WorldStateSchema.parse(world));
+  const stateHash = createHash("sha256").update(worldJson).digest("hex");
+  await db.transaction(async (tx) => {
+    const [turn] = await tx
+      .select({ id: turns.id })
+      .from(turns)
+      .where(and(eq(turns.gameId, gameId), inArray(turns.status, [...OPEN_TURN_STATUSES])))
+      .orderBy(desc(turns.index))
+      .limit(1);
+    if (turn === undefined) throw new Error("Cannot materialise a character without an open turn.");
+    await tx.insert(worldSnapshots).values({
+      turnId: turn.id,
+      state: JSON.parse(worldJson) as unknown,
+      schemaVersion: world.schemaVersion,
+      stateHash,
+    }).onConflictDoUpdate({
+      target: worldSnapshots.turnId,
+      set: { state: JSON.parse(worldJson) as unknown, schemaVersion: world.schemaVersion, stateHash },
+    });
+  });
+}
+
 export async function getWorldView(db: ChronicaDatabase, gameId: string): Promise<WorldViewSource | undefined> {
   const [game] = await db
-    .select({ id: games.id, title: games.title, status: games.status, scenarioId: games.scenarioId, scenarioVersion: games.scenarioVersion })
+    .select({
+      id: games.id, title: games.title, status: games.status, scenarioId: games.scenarioId, scenarioVersion: games.scenarioVersion,
+      agentArchitectureVersion: games.agentArchitectureVersion,
+    })
     .from(games)
     .where(eq(games.id, gameId))
     .limit(1);
@@ -368,6 +403,7 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
     totalPlayers,
     world: renderedWorld,
     mapAssetId: svRow?.mapAssetId ?? null,
+    agentArchitectureVersion: game.agentArchitectureVersion,
     ...(scenarioClock !== undefined ? { scenarioClock } : {}),
     ...(scenarioLife !== undefined ? { scenarioLife } : {}),
     ...(scenarioGovernment !== undefined ? { scenarioGovernment } : {}),

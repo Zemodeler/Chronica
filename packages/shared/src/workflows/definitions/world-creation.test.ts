@@ -42,6 +42,42 @@ describe("create_world_character", () => {
     expect(findWorldReferenceViolations(outcome.world)).toEqual([]);
   });
 
+  it("biases a new character's martial/learning skills and cites the academy in their provenance when one stands in their province (docs/32 corrective pass, requirement 5)", () => {
+    const provinceId = "ita-local-23120603B86473916475875";
+    const withAcademy = { ...world(), structures: [{
+      id: "academy-1", kind: "academy_building" as const, name: "Collegium of Latium", provinceId, settlementId: null,
+      ownerPolityId: "rome", garrisonCapacity: 0, defensiveEffectsBps: 0, supplyRadius: 0, builtAtStep: 0, provenanceProjectId: null,
+    }] };
+
+    const withoutAcademyOutcome = executeWorkflow({
+      actionId: "create_world_character",
+      actorId: "marcus-atilius",
+      parameters: {
+        characterId: "char-control", name: "Control Recruit", polityId: "rome", locationProvinceId: provinceId, officeId: null,
+        provenance: { reason: "A control case with no academy.", storylineId: null, createdByDirector: true },
+      },
+    }, world(), 1);
+    const withAcademyOutcome = executeWorkflow({
+      actionId: "create_world_character",
+      actorId: "marcus-atilius",
+      parameters: {
+        characterId: "char-trained", name: "Academy Recruit", polityId: "rome", locationProvinceId: provinceId, officeId: null,
+        provenance: { reason: "A veteran officer's protégé.", storylineId: null, createdByDirector: true },
+      },
+    }, withAcademy, 1);
+
+    expect(withoutAcademyOutcome.ok).toBe(true);
+    expect(withAcademyOutcome.ok).toBe(true);
+    if (!withoutAcademyOutcome.ok || !withAcademyOutcome.ok) return;
+
+    const control = withoutAcademyOutcome.world.characters.find((c) => c.id === "char-control")!;
+    const trained = withAcademyOutcome.world.characters.find((c) => c.id === "char-trained")!;
+
+    expect(trained.skills.martial).toBeGreaterThan(control.skills.martial);
+    expect(trained.skills.learning).toBeGreaterThan(control.skills.learning);
+    expect(trained.creationReason).toContain("Collegium of Latium");
+  });
+
   it("opens the purse it names, so the reference is not left dangling", () => {
     const outcome = executeWorkflow({
       actionId: "create_world_character",

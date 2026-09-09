@@ -1,6 +1,9 @@
 import type { WorldState } from "../world/world-state";
 import type { SelectedCharacter } from "./schemas";
 import { CharacterSelectionTierSchema } from "./schemas";
+import type { AuthorityIndex } from "../authority/authority-grant";
+import { scoreStarContext, selectStarContext, type StarContext } from "../star-context";
+import type { OrderPartyRef } from "../actions/orders";
 
 // Deterministic character relevance selector.
 //
@@ -239,4 +242,105 @@ export function selectRelevantCharacters(
       reasons: s.reasons,
     };
   });
+}
+
+/**
+ * docs/32 Phase 7: the combined NPC+star-context 8-agent-per-decision-point
+ * budget. Renamed from `MAX_CHARACTERS_PER_TURN` now that the cap covers
+ * both -- the old name stays as a deprecated alias below for callers not
+ * yet migrated.
+ */
+export const MAX_RICH_AGENTS_PER_DECISION_POINT = MAX_CHARACTERS_PER_TURN;
+/** At most two star contexts may be selected in one decision point (docs/32 default). */
+export const MAX_STAR_CONTEXTS_PER_DECISION_POINT = 2;
+
+export interface SelectedNpcActor extends SelectedCharacter {
+  readonly kind: "npc";
+}
+export interface SelectedStarContextActor {
+  readonly kind: "star_context";
+  readonly context: StarContext;
+  readonly relevanceScore: number;
+}
+export type SelectedActor = SelectedNpcActor | SelectedStarContextActor;
+
+/**
+ * Turn-level candidate star-context refs: every polity currently at war
+ * (both belligerents) and every settlement currently under active siege --
+ * the contexts a decision point most plausibly needs institutional coverage
+ * for, absent a specific triggering event to derive a native scope from
+ * (that finer, event-triggered selection is `AffectedAgentSelector`'s job,
+ * called per resolved event inside the event queue loop -- this function
+ * covers the coarser per-turn case `selectRelevantCharacters` already
+ * covers for NPCs).
+ */
+function starContextCandidateRefs(world: WorldState): OrderPartyRef[] {
+  const refs: OrderPartyRef[] = [];
+  const seen = new Set<string>();
+  const addPolity = (polityId: string) => {
+    const key = `polity:${polityId}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    refs.push({ kind: "polity", id: polityId });
+  };
+  for (const war of world.conflicts.wars) {
+    addPolity(war.polityAId);
+    addPolity(war.polityBId);
+  }
+  for (const siege of world.conflicts.sieges) {
+    const key = `settlement:${siege.settlementId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    refs.push({ kind: "settlement", id: siege.settlementId });
+  }
+  return refs;
+}
+
+/**
+ * The merged NPC+star-context selection for one decision point (docs/32,
+ * Phase 7, "Agent budget"). Runs the existing, untouched
+ * `selectRelevantCharacters` scoring internally (unbounded, so nothing is
+ * truncated before the merge), separately scores star-context candidates
+ * via `scoreStarContext`, merges both ranked lists by score, and truncates
+ * to `maxTotal` with a **post-truncation cap of `maxStarContexts`** on how
+ * many of the taken slots may be star contexts -- an excess star context's
+ * slot is skipped (not counted against the total) so the next-highest NPC
+ * backfills it instead of the budget going unused.
+ */
+export function selectRelevantActors(
+  world: WorldState,
+  playerCharacterId: string,
+  authorityIndex: AuthorityIndex,
+  atStep: number,
+  maxTotal = MAX_RICH_AGENTS_PER_DECISION_POINT,
+  maxStarContexts = MAX_STAR_CONTEXTS_PER_DECISION_POINT,
+  priorityCharacterIds: readonly string[] = [],
+): SelectedActor[] {
+  const npcCandidates: SelectedActor[] = selectRelevantCharacters(world, playerCharacterId, world.characters.length, priorityCharacterIds).map((c) => ({
+    kind: "npc",
+    ...c,
+  }));
+  const starCandidates: SelectedActor[] = starContextCandidateRefs(world).map((ref) => {
+    const context = selectStarContext(world, ref, authorityIndex, atStep);
+    return { kind: "star_context", context, relevanceScore: scoreStarContext(world, context, atStep) };
+  });
+
+  const merged = [...npcCandidates, ...starCandidates].sort((a, b) => {
+    if (b.relevanceScore !== a.relevanceScore) return b.relevanceScore - a.relevanceScore;
+    const aId = a.kind === "npc" ? a.characterId : a.context.id;
+    const bId = b.kind === "npc" ? b.characterId : b.context.id;
+    return aId.localeCompare(bId);
+  });
+
+  const result: SelectedActor[] = [];
+  let starContextsTaken = 0;
+  for (const candidate of merged) {
+    if (result.length >= maxTotal) break;
+    if (candidate.kind === "star_context") {
+      if (starContextsTaken >= maxStarContexts) continue;
+      starContextsTaken += 1;
+    }
+    result.push(candidate);
+  }
+  return result;
 }

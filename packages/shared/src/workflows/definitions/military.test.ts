@@ -35,6 +35,31 @@ describe("move_force", () => {
     expect(outcome.result.noOp).toBeUndefined();
     expect(outcome.world.material.forces.find((f) => f.id === force.id)?.locationId).toBe(destination);
   });
+
+  it("moves a force to a named position within its current province", () => {
+    const w = world();
+    const force = w.material.forces.find((f) => f.id === "legio-i")!;
+    const province = w.map.provinces.find((p) => p.id === force.locationId)!;
+    const positioned = {
+      ...w,
+      map: {
+        ...w.map,
+        provinces: w.map.provinces.map((p) => p.id !== province.id ? p : {
+          ...p,
+          positions: [{ id: "ridge", provinceId: p.id, label: "The ridge", type: "pass" as const, combatModifierBps: 500, capacity: 2 }],
+        }),
+      },
+    };
+    const outcome = executeWorkflow(
+      { actionId: "move_force", actorId: "test-actor", parameters: { forceId: force.id, destinationProvinceId: province.id, destinationPositionId: "ridge" } },
+      positioned,
+      0,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.noOp).toBeUndefined();
+    expect(outcome.world.material.forces.find((f) => f.id === force.id)?.positionId).toBe("ridge");
+  });
 });
 
 describe("start_siege", () => {

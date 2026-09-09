@@ -134,7 +134,22 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { id: "ita-72843720b81376294924159-sicily-northwest", name: "Panormus and the north-west", formerNames: [], terrainId: "hills", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-northwest"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_000, tier: "focus" },
       { id: "ita-72843720b81376294924159-sicily-central", name: "Agrigentum and the south-west", formerNames: [], terrainId: "hills", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-central"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_000, tier: "focus" },
       { id: "ita-72843720b81376294924159-sicily-southeast", name: "Syracuse and the south-east", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-southeast"]!, controllerPolityId: "syracuse", controlFirmnessBps: 8_500, tier: "focus" },
-      { id: "ita-72843720b81376294924159-sicily-northeast", name: "Messana and the strait", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-northeast"]!, controllerPolityId: "mamertines", controlFirmnessBps: 7_500, tier: "focus" },
+      {
+        id: "ita-72843720b81376294924159-sicily-northeast",
+        name: "Messana and the strait",
+        formerNames: [],
+        terrainId: "coastal-plain",
+        settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-northeast"]!,
+        // Mount Etna is an operational destination inside this coarse province;
+        // it is not a separate province that an army can be teleported to.
+        positions: [
+          { id: "position-mount-etna", provinceId: "ita-72843720b81376294924159-sicily-northeast", label: "Mount Etna", type: "pass", combatModifierBps: 700, capacity: 3 },
+          { id: "position-messana-strait", provinceId: "ita-72843720b81376294924159-sicily-northeast", label: "Messana strait", type: "coast", combatModifierBps: 0, capacity: null },
+        ],
+        controllerPolityId: "mamertines",
+        controlFirmnessBps: 7_500,
+        tier: "focus",
+      },
     ],
     // Real Italian geography, chained north-to-south with a Messana-strait and
     // a Carthage-Sicily crossing closing the loop to Africa. "land" is used

@@ -8,6 +8,7 @@ export * from "./repair-empty-storyline-next-development";
 export * from "./character";
 export * from "./character-social";
 export * from "./dialogue";
+export * from "./events";
 export * from "./games";
 export * from "./resolution";
 export * from "./shared-knowledgebase";

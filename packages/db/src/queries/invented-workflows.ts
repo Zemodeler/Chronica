@@ -114,18 +114,12 @@ export async function listInventedWorkflowUses(db: ChronicaDatabase, workflowId:
 }
 
 /**
- * How many defined actions (docs/27's `define_action`/`allowInventedActions`
- * escape hatch) still await a developer's review: `status = "active"` is the
- * table's only durable proxy for "not yet reviewed" -- a developer's
- * decision is recorded here only as `setInventedWorkflowStatus` disabling a
- * row, never as a separate "reviewed" flag, so a still-active row is exactly
- * one nobody has acted on yet. `gameId` scopes to one campaign, or omit it
- * for a cross-game count. This is the evidence docs/27's removal criterion
- * for the escape hatch itself asks for ("no active campaign has unreviewed
- * defined actions"); it does not by itself decide whether that criterion is
- * met.
+ * How many active campaign-defined workflows exist. `gameId` scopes to one
+ * campaign, or omission returns the cross-campaign count. This is useful for
+ * operational review, but active does not imply unsafe or unreviewed: a
+ * workflow is validated whenever it is invoked.
  */
-export async function getUnreviewedDefinedActionCount(db: ChronicaDatabase, gameId?: string): Promise<number> {
+export async function getActiveDefinedWorkflowCount(db: ChronicaDatabase, gameId?: string): Promise<number> {
   const condition = gameId === undefined
     ? eq(inventedWorkflows.status, "active")
     : and(eq(inventedWorkflows.status, "active"), eq(inventedWorkflows.gameId, gameId));

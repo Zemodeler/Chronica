@@ -46,7 +46,7 @@ export interface RunGameMasterInput {
   readonly scenarioClock?: ScenarioClock | undefined;
   /** Actions this campaign defined in earlier turns, usable without redefining. */
   readonly definedActions?: readonly InventedWorkflowDefinition[];
-  /** Off by default (docs/27) -- see `GameMasterSessionOptions.allowInventedActions`. */
+  /** Campaign-defined workflows are enabled by default. */
   readonly allowInventedActions?: boolean;
   readonly maxSteps?: number;
   readonly persistentPlans?: boolean;
@@ -96,7 +96,7 @@ export async function runGameMaster(
     directiveIds: input.directives.map((entry) => entry.id),
     ...(input.persistentPlans ? { directives: input.directives } : {}),
     definedActions: input.definedActions ?? [],
-    allowInventedActions: input.allowInventedActions ?? false,
+    allowInventedActions: input.allowInventedActions ?? true,
     scenarioLife: input.scenarioLife,
     scenarioClock: input.scenarioClock,
     // Reads, reports, and the player’s own orders are not NPC actions. Keep
@@ -114,7 +114,7 @@ export async function runGameMaster(
     playerContext: input.playerContext,
     scenarioGovernment: input.scenarioGovernment,
     scenarioChronicle: input.scenarioChronicle,
-    allowInventedActions: input.allowInventedActions ?? false,
+    allowInventedActions: input.allowInventedActions ?? true,
   });
   const tools: AiToolDefinition[] = session.listTools().map((tool) => ({
     name: tool.name,

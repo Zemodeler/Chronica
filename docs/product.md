@@ -16,7 +16,7 @@ Conversation can create knowledge and history, but material commitments become r
 
 ## Player experience and boundaries
 
-The game does not restrict a player to a fixed verb menu. A player may ask for a surrender, a march if it is refused, supplies to be taken, and survivors to be recruited if victory allows it. The engine preserves the hard boundaries: entities, territory, force control, resource ownership, workflow preconditions, and replay safety. Within those boundaries, the Game Master judges human and political outcomes.
+The game does not restrict a player to a fixed verb menu. A player may ask for a surrender, a march if it is refused, supplies to be taken, and survivors to be recruited if victory allows it. The AI uses workflows—MCP-style tools for interacting with world data—to make those attempts concrete. It can use built-in workflows or define a reusable campaign-local workflow when it needs a new data capability. The engine preserves the hard boundaries: valid entities and references, territory and resource records, and replay safety. Within those boundaries, the Game Master judges human and political outcomes.
 
 Version 1.0 is deliberately scoped to:
 

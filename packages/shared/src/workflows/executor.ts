@@ -15,14 +15,10 @@ import { diagnoseFailedInvocation } from "./diagnose";
 // world -- it returns null from apply() for logically impossible operations
 // (e.g. moving a force that does not exist). The caller records a failed result.
 //
-// GM refactor, requirement 7: the executor has no invented-workflow path any
-// more. A runtime-generated template or JSON patch can no longer reach world
-// state through ordinary play by any route -- an unregistered actionId is
-// simply `not_found`. Persisted invented workflows stay readable for
-// migration (see `invented-workflow.ts` and the db queries that list them),
-// but making one real now means a developer writing a registered, typed
-// workflow. See `gm/capability-request.ts` for the non-mutating safeguard
-// that replaced the escape hatch.
+// This executor resolves built-in workflows. Campaign-defined workflows use
+// the companion `applyInventedWorkflow` path because their definition lives
+// in campaign data rather than this process-wide registry. Both paths validate
+// their inputs and the resulting world before accepting a mutation.
 
 export interface ExecutionSuccess {
   readonly ok: true;

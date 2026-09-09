@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { EntityIdSchema } from "../../material-state";
+import { availableBalance } from "../../world/money-reservations";
 import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
@@ -115,7 +116,11 @@ export const economicWorkflows: AnyWorkflowDefinition[] = [
       const src = world.material.accounts.find((a) => a.id === params.sourceAccountId);
       const dst = world.material.accounts.find((a) => a.id === params.destinationAccountId);
       if (!src || !dst) return null;
-      const actual = Math.min(params.amount, src.balance);
+      // docs/32, Part C.3: never spend into what a project has already
+      // reserved -- `availableBalance` excludes every active reservation's
+      // remaining hold, so this can transfer less than the account's raw
+      // balance shows even when the account itself is never touched here.
+      const actual = Math.min(params.amount, availableBalance(world.material, params.sourceAccountId));
       if (actual === 0) return null;
       const txId = randomUUID();
       return {

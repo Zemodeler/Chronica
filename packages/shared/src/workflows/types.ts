@@ -3,9 +3,9 @@ import type { WorldState } from "../world/world-state";
 
 // Workflow registry types (docs/14, ADR-0032).
 //
-// Workflows are the concrete game operations the AI may propose and the
-// resolution pipeline may execute. They are the only channel through which
-// AI-generated intent becomes deterministic world-state change.
+// Workflows are MCP-style data tools the AI may use while resolving a world.
+// They expose an operation over WorldState and its input contract; the AI
+// still decides whether that capability fits the situation.
 //
 // A workflow:
 //  - Has a stable string ID the AI names and the registry resolves.

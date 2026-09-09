@@ -349,10 +349,6 @@ export async function listGameNpcRecords(db: ChronicaDatabase, gameId: string): 
     .from(gameNpcRecords).where(eq(gameNpcRecords.gameId, gameId)));
 }
 
-export async function insertGameNpcRecord(db: ChronicaDatabase, gameId: string, character: Character, roleLabel: string): Promise<void> {
-  await db.insert(gameNpcRecords).values({ gameId, characterId: character.id, character, roleLabel });
-}
-
 export interface NpcCommitmentRow { readonly id: string; readonly playerCharacterId: string; readonly npcCharacterId: string; readonly promiseType: string; readonly promisedResult: string; readonly conditions: string; readonly rationale: string; readonly status: string; }
 export async function createNpcCommitment(db: ChronicaDatabase, input: { gameId: string; sessionId: string; npcMessageId: string; playerCharacterId: string; npcCharacterId: string; promiseType: string; promisedResult: string; conditions: string; rationale: string; createdAtStep: number }): Promise<void> {
   await db.insert(npcCommitments).values(input).onConflictDoNothing();

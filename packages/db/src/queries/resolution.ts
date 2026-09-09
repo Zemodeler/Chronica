@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import type {
   CommittedGameMasterReport,
+  Fact,
   NovelActionProposal,
   RecordedCapabilityRequest,
   RuntimeInventedWorkflow,
@@ -15,6 +16,7 @@ import { chronicleEntries, games, turns, worldSnapshots } from "../schema/game";
 import { insertNovelActionProposals } from "./workflow-proposals";
 import { insertCapabilityRequests } from "./capability-requests";
 import { insertInventedWorkflows, recordInventedWorkflowUses, type InventedWorkflowUseInput } from "./invented-workflows";
+import { insertWorldEvents, insertWorldFacts, resolveWorldEvent, type NewWorldEvent } from "./events";
 
 // Persistence for the resolution pipeline.
 //
@@ -195,6 +197,20 @@ export interface CommitResolutionInput {
   readonly gameMasterReport?: CommittedGameMasterReport;
   /** Per-call audit trail from the current GM tool loop (docs/27) -- distinct from `workflowAudit`. */
   readonly gameMasterAudit?: readonly WorkflowAuditEntry[];
+  /**
+   * docs/32 corrective pass, requirement 4: every Fact this turn produced --
+   * the event queue's own handler-produced facts, world-tool facts
+   * (`record_fact`), and every successful state-changing workflow's fact
+   * (converted from `FactualEvent` at the call site) -- inserted into the
+   * canonical `worldFacts` ledger inside this SAME transaction. No fact may
+   * persist if the turn fails to commit; no state-changing success stays
+   * Chronicle-only where a later agent cannot inspect it.
+   */
+  readonly worldFacts?: readonly Fact[];
+  /** New/follow-up `WorldEvent`s the event queue staged this turn (never written by the loop itself -- see `EventLoopResult.pendingEventInserts`). */
+  readonly pendingWorldEvents?: readonly NewWorldEvent[];
+  /** Which claimed `WorldEvent`s this turn resolved, and with which fact ids -- see `EventLoopResult.pendingResolutions`. */
+  readonly pendingEventResolutions?: readonly { readonly id: string; readonly atStep: number; readonly factIds: readonly string[] }[];
 }
 
 export interface CommitResolutionResult {
@@ -301,6 +317,22 @@ export async function commitResolution(
     }
     if (input.inventedWorkflowUses && input.inventedWorkflowUses.length > 0) {
       await recordInventedWorkflowUses(tx as unknown as ChronicaDatabase, input.inventedWorkflowUses, input.turnId);
+    }
+
+    // docs/32 corrective pass, requirement 4: the event queue's staged
+    // events/resolutions and every canonical Fact this turn produced commit
+    // here, atomically with the snapshot above -- never before, never
+    // outside this transaction.
+    if (input.pendingWorldEvents && input.pendingWorldEvents.length > 0) {
+      await insertWorldEvents(tx as unknown as ChronicaDatabase, input.gameId, input.pendingWorldEvents);
+    }
+    if (input.pendingEventResolutions && input.pendingEventResolutions.length > 0) {
+      for (const resolution of input.pendingEventResolutions) {
+        await resolveWorldEvent(tx as unknown as ChronicaDatabase, resolution.id, resolution.atStep, resolution.factIds);
+      }
+    }
+    if (input.worldFacts && input.worldFacts.length > 0) {
+      await insertWorldFacts(tx as unknown as ChronicaDatabase, input.gameId, input.turnId, input.worldFacts);
     }
 
     // Look up active players to seed news-readiness rows
