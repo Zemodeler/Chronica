@@ -13,24 +13,18 @@ import { InterpretPlanSchema, ExecutePlanStageSchema, RespondToAssignmentSchema,
 // Everything the agent may do is here, and nothing else is possible:
 //
 //   read tools      -- bounded, factual queries against the staged world
-//   action tools    -- the registered workflows, one tool each, unchanged
-//   request_capability -- say that no tool fits; changes nothing
+//   data tools      -- built-in and campaign-defined MCP-style workflows
+//   request_capability -- record a genuinely inexpressible need; changes nothing
 //   finish_turn     -- terminate with the structured report
 //
-// Action tools are generated from the workflow registry rather than written
-// out here, so a workflow added to the registry is available to the Game
-// Master with the same parameter validation and the same deterministic
-// `apply` the rest of the engine uses.
+// Built-in data tools are generated from the workflow registry rather than
+// written out here. Campaign-defined data tools use the same validation and
+// whole-world integrity checks before their result is accepted.
 //
-// There is still no free-form "apply patch" or "set state" tool: prose has no
-// path to world state. `define_action`/`invoke_defined_action` are a narrower
-// exception than that -- an action must be *defined* first, as a named,
-// parameterised, reviewable thing, and every use of it is re-validated against
-// the whole world document exactly like a built-in -- but they are also off
-// by default (see `buildGameMasterTools`'s `allowInventedActions`, docs/27).
-// The supported path for a player doing something the designers never
-// anticipated is `request_capability`: it changes nothing and waits for a
-// developer to decide whether the capability is warranted.
+// There is no free-form "apply patch" or "set state" tool: prose has no path
+// to world state. `define_action` first creates a named, parameterised,
+// reviewable workflow; `invoke_defined_action` then uses it. Every use is
+// re-validated against the whole world document just like a built-in workflow.
 
 export type GameMasterToolKind = "read" | "action" | "capability" | "finish" | "define" | "aftermath" | "plan";
 
@@ -275,26 +269,25 @@ export function buildRefusalAftermathTool(): GameMasterToolDefinition {
 /**
  * Defining an action the engine does not have, and then using it.
  *
- * A registered workflow is a typed thing a developer wrote. These two tools
- * are the escape hatch for everything else: the Game Master describes the
- * state change an unanticipated act would make, the engine validates that
- * description as strictly as it validates any other mutation -- the same
+ * These two tools let the Game Master add a reusable MCP-style data capability
+ * when the existing catalogue does not describe the needed operation. The
+ * Game Master describes the world-data change and the engine validates it as
+ * strictly as any built-in mutation -- the same
  * whole-world re-parse, the same dangling-reference check, the same protected
  * roots -- and if it holds, the action becomes real and stays real for the
  * rest of the campaign.
  *
- * This is narrower than it looks. A definition is a list of patch operations
- * over world state; it cannot call code, cannot reach outside the document,
- * and cannot touch the clock, the pins, or the schema version. What it buys
- * is that a player who does something the designers never modelled gets a
- * world that answers, instead of a note that the attempt was unsupported.
+ * A definition is a list of patch operations over world state; it cannot call
+ * code, reach outside the document, or touch the clock, pins, or schema
+ * version. It lets the world gain a durable, auditable data tool without
+ * treating AI prose as a mutation.
  */
 export function buildDefineActionTool(): GameMasterToolDefinition {
   return {
     name: DEFINE_ACTION_TOOL,
     kind: "define",
     description:
-      "Define a new action the engine does not yet have, as a named set of changes to world state, then use it with invoke_defined_action. Use this when a player or character attempts something real that no existing tool covers — sending a gift, swearing an oath, founding a colony, proclaiming a law. Describe only the state change; the engine validates it exactly as strictly as a built-in action, and refuses anything that would leave the world inconsistent. Prefer an existing tool whenever one fits, and never use this to fake an outcome you could not otherwise obtain.",
+      "Define a reusable MCP-style workflow for a needed interaction with world data, then use it with invoke_defined_action. Use this when a player or character attempts something real that no existing tool covers — sending a gift, swearing an oath, founding a colony, proclaiming a law. Describe only the data change; the engine validates it as strictly as a built-in workflow and refuses anything that would leave the world inconsistent. Prefer an existing tool whenever one fits, and never use this to fake an outcome you could not otherwise obtain.",
     parameters: toJsonSchema(InventedWorkflowDefinitionSchema),
   };
 }
@@ -322,15 +315,11 @@ const cachedTools = new Map<boolean, GameMasterToolDefinition[]>();
 /**
  * The complete tool surface for a Game Master turn.
  *
- * `allowInventedActions` (default `false`, docs/27) gates `define_action`/
- * `invoke_defined_action` out of normal play: the reviewed, supported escape
- * valve for an unanticipated player intent is `request_capability`, which
- * changes nothing and waits for a developer. The invented-action tools stay
- * in code as a developer-controlled rollout/testing exception, not a fourth
- * always-available class of command.
+ * Campaign-defined workflows are part of the normal tool surface. Callers can
+ * explicitly disable them for a constrained simulation or test.
  */
 export function buildGameMasterTools(options: { readonly allowInventedActions?: boolean } = {}): GameMasterToolDefinition[] {
-  const allowInventedActions = options.allowInventedActions ?? false;
+  const allowInventedActions = options.allowInventedActions ?? true;
   let built = cachedTools.get(allowInventedActions);
   if (built === undefined) {
     built = [

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { EntityIdSchema } from "../../material-state";
 import { DetailTierSchema, SettlementKindSchema } from "../../world/map";
+import { transferAdministration, transferControl, transferOccupation } from "../../world/authority-records";
 import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
 
 export const mapWorkflows: AnyWorkflowDefinition[] = [
@@ -15,7 +16,7 @@ export const mapWorkflows: AnyWorkflowDefinition[] = [
       firmnessBps: z.number().int().min(0).max(10_000).default(5_000),
       reason: z.string().min(1).max(240),
     }).strict(),
-    apply(world, params) {
+    apply(world, params, context) {
       const province = world.map.provinces.find((p) => p.id === params.provinceId);
       if (!province) {
         return refuse(`No province exists with the id "${params.provinceId}". The world state lists every province id; use the one you mean.`);
@@ -34,6 +35,28 @@ export const mapWorkflows: AnyWorkflowDefinition[] = [
       const newControllerName = params.newControllerPolityId
         ? (world.map.polities.find((p) => p.id === params.newControllerPolityId)?.name ?? params.newControllerPolityId)
         : "neutral";
+      // docs/32, Part C.4: this is the only writer of `controlRecords`, and it
+      // never touches `claimRecords` -- a province changing hands leaves every
+      // existing claim on it exactly as it was. A transfer to "neutral"
+      // (newControllerPolityId: null) simply ends the active record without
+      // opening a new one, since a control record always names a controller.
+      const controlRecords = params.newControllerPolityId === null
+        ? world.map.controlRecords.map((r) =>
+          r.status === "active" && r.locationKind === "province" && r.locationId === params.provinceId
+            ? { ...r, status: "ended" as const, endedAtStep: context.atStep }
+            : r,
+        )
+        : transferControl(world.map.controlRecords, {
+          // Deterministic, not random: docs/28 requires the same command
+          // against the same snapshot to replay byte-identical, so this
+          // derives from state already in scope rather than `randomUUID()`.
+          id: `control:${params.provinceId}:${context.atStep}:${world.map.controlRecords.length}`,
+          locationKind: "province",
+          locationId: params.provinceId,
+          controllerPolityId: params.newControllerPolityId,
+          firmnessBps: params.firmnessBps,
+          atStep: context.atStep,
+        });
       return {
         world: {
           ...world,
@@ -44,12 +67,87 @@ export const mapWorkflows: AnyWorkflowDefinition[] = [
                 ? { ...p, controllerPolityId: params.newControllerPolityId, controlFirmnessBps: params.firmnessBps }
                 : p,
             ),
+            controlRecords,
           },
         },
         result: {
           summary: `${province.name} passes from ${oldControllerName} to ${newControllerName}. ${params.reason}`,
           applied: true,
         },
+      };
+    },
+  }),
+
+  defineWorkflow({
+    id: "change_occupation",
+    description:
+      "Record which polity's forces physically occupy a province, independent of who legally controls it. Ending occupation (occupyingPolityId: null) simply withdraws without transferring control or touching any claim.",
+    category: "map",
+    parametersSchema: z.object({
+      provinceId: EntityIdSchema,
+      occupyingPolityId: EntityIdSchema.nullable(),
+      forceId: EntityIdSchema.nullable().default(null),
+      reason: z.string().min(1).max(240),
+    }).strict(),
+    apply(world, params, context) {
+      const province = world.map.provinces.find((p) => p.id === params.provinceId);
+      if (!province) return refuse(`No province exists with the id "${params.provinceId}".`);
+      if (params.occupyingPolityId !== null && !world.map.polities.some((p) => p.id === params.occupyingPolityId)) {
+        return refuse(`No power exists with the id "${params.occupyingPolityId}" to occupy this province.`);
+      }
+      const occupationRecords = params.occupyingPolityId === null
+        ? world.map.occupationRecords.map((r) =>
+          r.status === "active" && r.locationKind === "province" && r.locationId === params.provinceId
+            ? { ...r, status: "ended" as const, endedAtStep: context.atStep }
+            : r,
+        )
+        : transferOccupation(world.map.occupationRecords, {
+          id: `occupation:${params.provinceId}:${context.atStep}:${world.map.occupationRecords.length}`,
+          locationKind: "province",
+          locationId: params.provinceId,
+          occupyingPolityId: params.occupyingPolityId,
+          forceId: params.forceId,
+          atStep: context.atStep,
+        });
+      const occupierName = params.occupyingPolityId
+        ? (world.map.polities.find((p) => p.id === params.occupyingPolityId)?.name ?? params.occupyingPolityId)
+        : "no one";
+      return {
+        world: { ...world, map: { ...world.map, occupationRecords } },
+        result: { summary: `${province.name} is now occupied by ${occupierName}. ${params.reason}`, applied: true },
+      };
+    },
+  }),
+
+  defineWorkflow({
+    id: "change_administration",
+    description:
+      "Record who actually administers a province day to day -- may lag behind its formal controller during a contested handover, and feeds tax-capacity calculations.",
+    category: "map",
+    parametersSchema: z.object({
+      provinceId: EntityIdSchema,
+      administeringPolityId: EntityIdSchema,
+      taxCapacityBps: z.number().int().min(0).max(10_000).default(5_000),
+      reason: z.string().min(1).max(240),
+    }).strict(),
+    apply(world, params, context) {
+      const province = world.map.provinces.find((p) => p.id === params.provinceId);
+      if (!province) return refuse(`No province exists with the id "${params.provinceId}".`);
+      if (!world.map.polities.some((p) => p.id === params.administeringPolityId)) {
+        return refuse(`No power exists with the id "${params.administeringPolityId}" to administer this province.`);
+      }
+      const administrationRecords = transferAdministration(world.map.administrationRecords, {
+        id: `administration:${params.provinceId}:${context.atStep}:${world.map.administrationRecords.length}`,
+        locationKind: "province",
+        locationId: params.provinceId,
+        administeringPolityId: params.administeringPolityId,
+        taxCapacityBps: params.taxCapacityBps,
+        atStep: context.atStep,
+      });
+      const administratorName = world.map.polities.find((p) => p.id === params.administeringPolityId)?.name ?? params.administeringPolityId;
+      return {
+        world: { ...world, map: { ...world.map, administrationRecords } },
+        result: { summary: `${province.name} is now administered by ${administratorName}. ${params.reason}`, applied: true },
       };
     },
   }),

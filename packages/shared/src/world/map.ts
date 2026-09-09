@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BasisPointsSchema, EntityIdSchema } from "../material-state";
+import { AdministrationRecordSchema, ClaimRecordSchema, ControlRecordSchema, OccupationRecordSchema } from "./authority-records";
 
 // The province graph is the map (ADR-0015).
 //
@@ -167,6 +168,15 @@ export const ProvinceGraphSchema = z
     edges: z.array(ProvinceEdgeSchema),
     polities: z.array(PolitySchema),
     politicalRelations: z.array(PolityRelationSchema).default([]),
+    // docs/32, Part C.4: control/claim/occupation/administration as four
+    // independent record kinds. Defaulted so archived snapshots (none of
+    // which ever populated these) load cleanly; `seedControlRecordsFromCache`
+    // backfills `controlRecords` from the cached `controllerPolityId` fields
+    // the first time such a snapshot is resolved.
+    controlRecords: z.array(ControlRecordSchema).default([]),
+    claimRecords: z.array(ClaimRecordSchema).default([]),
+    occupationRecords: z.array(OccupationRecordSchema).default([]),
+    administrationRecords: z.array(AdministrationRecordSchema).default([]),
   })
   .strict()
   .superRefine((graph, context) => {
@@ -202,6 +212,48 @@ export const ProvinceGraphSchema = z
         settlementIds.add(settlement.id);
       }
     }
+    // docs/32, Part C.4: control is a single fact at a time; a claim is not.
+    const activeControlKeys = new Set<string>();
+    graph.controlRecords.forEach((record, index) => {
+      if (record.status !== "active") return;
+      const key = `${record.locationKind}:${record.locationId}`;
+      if (activeControlKeys.has(key)) {
+        context.addIssue({ code: "custom", path: ["controlRecords", index], message: "At most one control record may be active at a location at a time." });
+      }
+      activeControlKeys.add(key);
+      if (!polityIds.has(record.controllerPolityId)) {
+        context.addIssue({ code: "custom", path: ["controlRecords", index, "controllerPolityId"], message: "A control record's controller must be a declared polity." });
+      }
+    });
+    graph.claimRecords.forEach((record, index) => {
+      if (!polityIds.has(record.claimantPolityId)) {
+        context.addIssue({ code: "custom", path: ["claimRecords", index, "claimantPolityId"], message: "A claim record's claimant must be a declared polity." });
+      }
+    });
+    const activeOccupationKeys = new Set<string>();
+    graph.occupationRecords.forEach((record, index) => {
+      if (record.status !== "active") return;
+      const key = `${record.locationKind}:${record.locationId}`;
+      if (activeOccupationKeys.has(key)) {
+        context.addIssue({ code: "custom", path: ["occupationRecords", index], message: "At most one occupation record may be active at a location at a time." });
+      }
+      activeOccupationKeys.add(key);
+      if (!polityIds.has(record.occupyingPolityId)) {
+        context.addIssue({ code: "custom", path: ["occupationRecords", index, "occupyingPolityId"], message: "An occupation record's occupier must be a declared polity." });
+      }
+    });
+    const activeAdministrationKeys = new Set<string>();
+    graph.administrationRecords.forEach((record, index) => {
+      if (record.status !== "active") return;
+      const key = `${record.locationKind}:${record.locationId}`;
+      if (activeAdministrationKeys.has(key)) {
+        context.addIssue({ code: "custom", path: ["administrationRecords", index], message: "At most one administration record may be active at a location at a time." });
+      }
+      activeAdministrationKeys.add(key);
+      if (!polityIds.has(record.administeringPolityId)) {
+        context.addIssue({ code: "custom", path: ["administrationRecords", index, "administeringPolityId"], message: "An administration record's administrator must be a declared polity." });
+      }
+    });
   });
 export type ProvinceGraph = z.infer<typeof ProvinceGraphSchema>;
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
-import { applyInventedWorkflow, type InventedWorkflowDefinition } from "./invented-workflow";
+import { applyInventedWorkflow, validateInventedWorkflowDefinition, type InventedWorkflowDefinition } from "./invented-workflow";
 
 const definition: InventedWorkflowDefinition = {
   actionId: "set_character_health",
@@ -15,6 +15,17 @@ const definition: InventedWorkflowDefinition = {
 };
 
 describe("invented workflow patches", () => {
+  it("rejects malformed definitions before a campaign can save them", () => {
+    expect(validateInventedWorkflowDefinition({
+      ...definition,
+      operations: [{ op: "replace", path: "/characters[id={{missingCharacterId}}]/healthBps", value: "{{healthBps}}" }],
+    })).toMatch(/unknown parameter/i);
+    expect(validateInventedWorkflowDefinition({
+      ...definition,
+      operations: [{ op: "replace", path: "/{{root}}/healthBps", value: "{{healthBps}}" }],
+    })).toMatch(/root/i);
+  });
+
   it("adds a schema-valid entity through a JSON parameter", () => {
     const world = structuredClone(firstPunicWarScenario.initialWorld);
     const addStoryline: InventedWorkflowDefinition = {

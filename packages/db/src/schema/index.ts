@@ -3,6 +3,7 @@ export * from "./billing";
 export * from "./character";
 export * from "./character-social";
 export * from "./dialogue";
+export * from "./events";
 export * from "./game";
 export * from "./shared-knowledgebase";
 export * from "./ui-state";

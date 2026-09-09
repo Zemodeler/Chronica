@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ElapsedStepSchema } from "../material-state";
+import { type WorldInstant, midnight } from "./instant";
 
 // The elastic clock's scale (ADR-0016, ADR-0032).
 //
@@ -119,4 +120,16 @@ export function deriveWorldTime(elapsedStep: number, scenarioClock?: ScenarioClo
   return { elapsedDay: Math.round(elapsedStep * daysPerStep(scenarioClock)), coarseStep: elapsedStep };
 }
 
+/**
+ * Derives a `WorldInstant` from the authoritative `elapsedStep`, at that
+ * step's day boundary (minute 0 -- a step boundary is always midnight-
+ * aligned until finer-grained intra-step scheduling exists). Used to upgrade
+ * pre-Phase-7 snapshots (which lack `WorldState.instant`) and to compute a
+ * turn's resolution window `[deriveWorldInstant(step), deriveWorldInstant(step+1))`.
+ */
+export function deriveWorldInstant(elapsedStep: number, scenarioClock?: ScenarioClock): WorldInstant {
+  return midnight(Math.floor(elapsedStep * daysPerStep(scenarioClock)));
+}
+
 export { ElapsedStepSchema };
+export type { WorldInstant };

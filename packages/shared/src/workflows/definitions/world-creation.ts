@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { EntityIdSchema } from "../../material-state";
 import { defineWorkflow, type AnyWorkflowDefinition } from "../types";
-import { deriveDefaultMind } from "../../characters/mind";
+import { createCanonicalNpc } from "../../characters/canonical-npc";
+import { academyInfluenceFor, applyAcademyInfluence } from "../../characters/academy-influence";
 import { canCreateCharacter } from "../../continuity/continuity";
-import { openCharacterAccount } from "../../material/character-accounts";
 
 // World Director entity-creation workflows.
 //
@@ -45,58 +45,33 @@ export const worldCreationWorkflows: AnyWorkflowDefinition[] = [
       const characterId = params.characterId ?? `char-wd-${randomUUID().slice(0, 12)}`;
       if (!canCreateCharacter(world.characters.length)) return null;
 
-      // A character without a purse is invisible to candidate scoring,
-      // commitments, inheritance, and every balance read. Open it here, in the
-      // same atomic mutation, rather than naming an account that does not exist.
-      const purse = openCharacterAccount(world.material, characterId);
-      if (purse === null) return null;
+      // docs/32 corrective pass, requirement 5: an academy standing in this
+      // province is durable provenance a newly generated character's own
+      // training actually reflects -- a bounded martial/learning bias, and a
+      // note folded into `creationReason` so a later turn's Game Master (or
+      // a character description) can see and cite it, not merely a record
+      // nobody reads back.
+      const academyInfluence = academyInfluenceFor(world, params.locationProvinceId);
+      const baseSkills = { martial: 35, intrigue: 45, learning: 45, piety: 35, stewardship: 45, diplomacy: 55, body: 45, subSkills: {} };
+      const skills = academyInfluence === null ? undefined : applyAcademyInfluence(baseSkills, academyInfluence);
+      const creationReason = academyInfluence === null ? params.provenance.reason : `${params.provenance.reason} ${academyInfluence.note}`;
 
-      const skills = {
-        martial: 35,
-        intrigue: 45,
-        learning: 45,
-        piety: 35,
-        stewardship: 45,
-        diplomacy: 55,
-        body: 45,
-        subSkills: {},
-      };
-      const newCharacter = {
-        id: characterId,
+      const created = createCanonicalNpc(world, {
+        characterId,
         name: params.name,
-        // World-created figures begin as ordinary adults; scenario-specific
-        // offices and skills can later be assigned through normal workflows.
-        cultureId: "culture-local",
-        faithId: null,
-        dynastyId: null,
         polityId: params.polityId,
         locationProvinceId: params.locationProvinceId,
-        ageYearsAtStart: 35,
-        birthStep: null,
-        nextLifeReviewAtStep: null,
         officeId: params.officeId,
-        personalAccountId: purse.accountId,
-        skills,
-        traits: [],
-        mind: deriveDefaultMind({ officeId: params.officeId, skills, ageYears: 35, cultureId: "culture-local" }),
-        alive: true,
-        healthBps: 10000,
-        prestigeBps: 3000,
-        relations: [],
-        ambitions: [],
-        heirCharacterId: null,
-        diedAtStep: null,
-        createdByDirector: true,
+        ...(skills === undefined ? {} : { skills }),
         createdAtStep: context.atStep,
-        creationReason: params.provenance.reason,
-        disqualifyingStatuses: [],
-      };
+        creationReason,
+      });
+      if (created === null) return null;
 
       return {
         world: {
           ...world,
-          characters: [...world.characters.filter((c) => c.id !== characterId), newCharacter],
-          material: purse.material,
+          ...created.world,
         },
         result: {
           // The returned id is part of the tool result, so the model can use

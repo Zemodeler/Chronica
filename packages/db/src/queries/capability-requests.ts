@@ -6,8 +6,8 @@ import { capabilityRequests } from "../schema/game";
 // Capability-gap requests (Game Master refactor, requirement 7).
 //
 // Write and read only. There is deliberately no query here that turns a
-// request into an executable workflow: the review path is a developer reading
-// these rows and writing a registered, typed workflow by hand.
+// request into an executable workflow: a request is reserved for needs that
+// cannot be expressed as a safe world-data interaction.
 
 export interface CapabilityRequestRow {
   readonly id: string;

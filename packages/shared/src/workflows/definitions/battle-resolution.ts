@@ -94,7 +94,14 @@ export const battleResolutionWorkflows: AnyWorkflowDefinition[] = [
       const provinceMaterial = world.material.provinceMaterial.find((m) => m.provinceId === province.id) ?? null;
 
       const result = resolveBattle(
-        { battle: { battleId: battle.battleId, provinceId: province.id, startedAtStep: context.atStep, participants: participants.map((p) => ({ forceId: p.forceId, side: p.side, arrivesAtPhase: "contact" as const })) }, participants, province, provinceMaterial, adjacentProvinceIds, tacticalProposals: params.tacticalProposals },
+        {
+          battle: { battleId: battle.battleId, provinceId: province.id, startedAtStep: context.atStep, participants: participants.map((p) => ({ forceId: p.forceId, side: p.side, arrivesAtPhase: "contact" as const })) },
+          participants, province, provinceMaterial, adjacentProvinceIds, tacticalProposals: params.tacticalProposals,
+          // docs/32 corrective pass, requirement 5: a fortress/wall standing
+          // in this province adds its defensive bonus for real, not merely
+          // as a note -- see `structureDefenseBps` in the resolver.
+          structures: world.structures,
+        },
         `${context.atStep}:combat:${battle.battleId}`,
       );
 

@@ -15,16 +15,15 @@ import { createGameMasterSession } from "./session";
 // it likes into the world. Every use is re-validated against the whole
 // document, exactly as a built-in action is.
 //
-// docs/27: the escape hatch is off by default. Every test below exercises it
-// with `allowInventedActions: true` on purpose; the "off by default" describe
-// block covers the normal-play behaviour instead.
+// Campaign-defined workflows are available by default. The final block checks
+// that a constrained caller can explicitly turn them off without staging data.
 
 const PLAYER = "marcus-atilius";
 
 const world = (): WorldState => structuredClone(firstPunicWarScenario.initialWorld);
 
 const session = (definedActions: Parameters<typeof createGameMasterSession>[0]["definedActions"] = []) =>
-  createGameMasterSession({ world: world(), atStep: 1, actorCharacterId: PLAYER, directiveIds: [], definedActions, allowInventedActions: true });
+  createGameMasterSession({ world: world(), atStep: 1, actorCharacterId: PLAYER, directiveIds: [], definedActions });
 
 const call = (name: string, args: Record<string, unknown>) => ({ id: `call-${name}`, name, arguments: args });
 
@@ -161,32 +160,32 @@ describe("the limits on what a defined action may do", () => {
   });
 });
 
-describe("off by default (docs/27)", () => {
-  const defaultSession = () =>
-    createGameMasterSession({ world: world(), atStep: 1, actorCharacterId: PLAYER, directiveIds: [] });
+describe("explicitly disabling campaign-defined workflows", () => {
+  const constrainedSession = () =>
+    createGameMasterSession({ world: world(), atStep: 1, actorCharacterId: PLAYER, directiveIds: [], allowInventedActions: false });
 
-  it("omits both tools from the default surface", () => {
+  it("includes both tools in the default surface", () => {
     const names = buildGameMasterTools().map((tool) => tool.name);
-    expect(names).not.toContain(DEFINE_ACTION_TOOL);
-    expect(names).not.toContain(INVOKE_DEFINED_ACTION_TOOL);
-  });
-
-  it("includes both tools only when explicitly enabled", () => {
-    const names = buildGameMasterTools({ allowInventedActions: true }).map((tool) => tool.name);
     expect(names).toContain(DEFINE_ACTION_TOOL);
     expect(names).toContain(INVOKE_DEFINED_ACTION_TOOL);
   });
 
-  it("refuses define_action without staging anything", () => {
-    const gm = defaultSession();
+  it("omits both tools when explicitly disabled", () => {
+    const names = buildGameMasterTools({ allowInventedActions: false }).map((tool) => tool.name);
+    expect(names).not.toContain(DEFINE_ACTION_TOOL);
+    expect(names).not.toContain(INVOKE_DEFINED_ACTION_TOOL);
+  });
+
+  it("refuses define_action without staging anything when disabled", () => {
+    const gm = constrainedSession();
     const outcome = gm.invoke(call(DEFINE_ACTION_TOOL, HONOUR_DEFINITION));
     expect(outcome.ok).toBe(false);
-    expect(outcome.factual).toMatch(new RegExp("request_capability"));
+    expect(outcome.factual).toMatch(/not available/i);
     expect(gm.stagedWorld).toEqual(world());
   });
 
-  it("refuses invoke_defined_action even for a campaign's own earlier definition", () => {
-    const gm = createGameMasterSession({ world: world(), atStep: 1, actorCharacterId: PLAYER, directiveIds: [], definedActions: [HONOUR_DEFINITION] });
+  it("refuses a campaign workflow when the caller explicitly disables it", () => {
+    const gm = createGameMasterSession({ world: world(), atStep: 1, actorCharacterId: PLAYER, directiveIds: [], definedActions: [HONOUR_DEFINITION], allowInventedActions: false });
     const outcome = gm.invoke(call(INVOKE_DEFINED_ACTION_TOOL, {
       actionId: "confer_public_honour",
       actorId: PLAYER,

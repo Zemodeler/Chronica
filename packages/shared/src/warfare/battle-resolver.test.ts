@@ -67,6 +67,97 @@ describe("resolveBattle", () => {
     expect(result.siegeAndControlChanges.length).toBeGreaterThan(0);
   });
 
+  it("gives the defender a real bonus from a standing fortress in the battle's province (docs/32 corrective pass, requirement 5)", () => {
+    const attacker = participant({
+      side: "attacker",
+      force: force({ id: "attacker-force", personnel: [{ categoryId: "infantry", label: "Legionaries", fit: 3_000, unavailable: [] }], moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 0 }),
+    });
+    const defender = participant({
+      side: "defender",
+      force: force({ id: "defender-force", personnel: [{ categoryId: "infantry", label: "Garrison", fit: 2_800, unavailable: [] }], moraleBps: 7_000, cohesionBps: 7_000, fatigueBps: 0 }),
+    });
+    const baseInput = { battle, participants: [attacker, defender], province: province(), provinceMaterial: null, adjacentProvinceIds: ["neighbor-a"] };
+
+    const withoutFortress = resolveBattle(baseInput, "fortress-seed");
+    const withFortress = resolveBattle({
+      ...baseInput,
+      structures: [{
+        id: "fortress-1", kind: "fortress", name: "Border Fortress", provinceId: province().id, settlementId: null,
+        ownerPolityId: defender.force.polityId, garrisonCapacity: 5_000, defensiveEffectsBps: 4_000, supplyRadius: 0, builtAtStep: 0, provenanceProjectId: null,
+      }],
+    }, "fortress-seed");
+
+    const defenderCasualties = (result: typeof withoutFortress) =>
+      result.casualties.filter((c) => c.forceId === "defender-force").reduce((sum, c) => sum + c.dead + c.deserted + c.wounded, 0);
+
+    // Same seed, same everything else -- the only difference is the
+    // fortress's defensive bonus, so the defender must fare no worse, and
+    // strictly better in at least one measurable way (fewer casualties, or a
+    // less severe outcome for them).
+    expect(defenderCasualties(withFortress)).toBeLessThanOrEqual(defenderCasualties(withoutFortress));
+    expect(withFortress).not.toEqual(withoutFortress);
+  });
+
+  it("gives no defensive bonus from a structure owned by the attacker's own polity", () => {
+    const attacker = participant({ side: "attacker", force: force({ id: "attacker-force", polityId: "rome" }) });
+    const defender = participant({ side: "defender", force: force({ id: "defender-force", polityId: "carthage" }) });
+    const baseInput = { battle, participants: [attacker, defender], province: province(), provinceMaterial: null, adjacentProvinceIds: ["neighbor-a"] };
+
+    const withoutStructures = resolveBattle(baseInput, "owner-seed");
+    const withAttackerOwnedStructure = resolveBattle({
+      ...baseInput,
+      structures: [{
+        id: "fortress-2", kind: "fortress", name: "Enemy-held Fort", provinceId: province().id, settlementId: null,
+        ownerPolityId: attacker.force.polityId, garrisonCapacity: 5_000, defensiveEffectsBps: 4_000, supplyRadius: 0, builtAtStep: 0, provenanceProjectId: null,
+      }],
+    }, "owner-seed");
+
+    expect(withAttackerOwnedStructure).toEqual(withoutStructures);
+  });
+
+  it("penalizes a defending garrison packed well past its structures' garrisonCapacity (docs/32 corrective pass, requirement 5)", () => {
+    const attacker = participant({ side: "attacker", force: force({ id: "attacker-force" }) });
+    const overcrowdedDefender = participant({
+      side: "defender",
+      force: force({ id: "defender-force", personnel: [{ categoryId: "infantry", label: "Garrison", fit: 10_000, unavailable: [] }] }),
+    });
+    const baseInput = { battle, participants: [attacker, overcrowdedDefender], province: province(), provinceMaterial: null, adjacentProvinceIds: ["neighbor-a"] };
+
+    const withoutCapacityLimit = resolveBattle(baseInput, "garrison-seed");
+    const withTightCapacity = resolveBattle({
+      ...baseInput,
+      structures: [{
+        id: "watchtower-1", kind: "watchtower", name: "Small Watchtower", provinceId: province().id, settlementId: null,
+        ownerPolityId: null, garrisonCapacity: 500, defensiveEffectsBps: 0, supplyRadius: 0, builtAtStep: 0, provenanceProjectId: null,
+      }],
+    }, "garrison-seed");
+
+    expect(withTightCapacity).not.toEqual(withoutCapacityLimit);
+    const defenderCasualties = (result: typeof withTightCapacity) =>
+      result.casualties.filter((c) => c.forceId === "defender-force").reduce((sum, c) => sum + c.dead + c.deserted + c.wounded, 0);
+    expect(defenderCasualties(withTightCapacity)).toBeGreaterThanOrEqual(defenderCasualties(withoutCapacityLimit));
+  });
+
+  it("relieves a force's supply shortage penalty when a depot in range reaches it (docs/32 corrective pass, requirement 5)", () => {
+    const attacker = participant({ side: "attacker", force: force({ id: "attacker-force" }) });
+    const shortageDefender = participant({ side: "defender", force: force({ id: "defender-force", provisionStatus: "critical" }) });
+    const baseInput = { battle, participants: [attacker, shortageDefender], province: province(), provinceMaterial: null, adjacentProvinceIds: ["neighbor-a"] };
+
+    const withoutDepot = resolveBattle(baseInput, "supply-seed");
+    const withDepotHere = resolveBattle({
+      ...baseInput,
+      structures: [{
+        id: "depot-1", kind: "depot", name: "Forward Depot", provinceId: province().id, settlementId: null,
+        ownerPolityId: shortageDefender.force.polityId, garrisonCapacity: 0, defensiveEffectsBps: 0, supplyRadius: 1, builtAtStep: 0, provenanceProjectId: null,
+      }],
+    }, "supply-seed");
+
+    expect(withDepotHere).not.toEqual(withoutDepot);
+    const defenderCasualties = (result: typeof withDepotHere) =>
+      result.casualties.filter((c) => c.forceId === "defender-force").reduce((sum, c) => sum + c.dead + c.deserted + c.wounded, 0);
+    expect(defenderCasualties(withDepotHere)).toBeLessThanOrEqual(defenderCasualties(withoutDepot));
+  });
+
   it("is fully deterministic for the same seed and inputs", () => {
     const input = {
       battle,

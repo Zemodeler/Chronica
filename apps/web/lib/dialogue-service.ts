@@ -10,6 +10,7 @@ import {
   getCharacterKnowledgebase,
   getOrCreateNpcKnowledgebase,
   getWorldView,
+  persistOpeningWorld,
   insertCharacterSocialEvent,
   insertSharedEntry,
   listNpcKnowledgebases,
@@ -22,7 +23,6 @@ import {
   schema,
   touchSession,
   updateNpcKnowledgebase,
-  upsertCharacterProfile,
   type KnowledgebaseRow,
   type MessageRow,
   type SharedEntryRow,
@@ -32,7 +32,6 @@ import type {
   CharacterBelief,
   CharacterKnowledgebase,
   CharacterPressure,
-  CharacterProfile,
   CharacterSocialEvent,
   ConversationMemoryEntry,
   DialogueChannel,
@@ -40,7 +39,8 @@ import type {
 } from "@chronica/shared";
 import {
   computeOpinion,
-  deriveDefaultMind,
+  createCanonicalNpc,
+  linkCanonicalCharacters,
   getActivePressures,
   isCharacterReachable,
   NEUTRAL_MIND,
@@ -662,7 +662,32 @@ export async function generateDialogueReply(input: DialogueCallInput & { readonl
     worldCharacters, characterPressures, characterBeliefs,
   } = input;
 
-  let kb = await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcCharacterId);
+  const npcRef = worldCharacters.find((character) => character.id === npcCharacterId);
+  // A session id is not identity.  Old sessions may survive a migration, but
+  // they must never be allowed to animate a person who is absent from the
+  // canonical world.
+  if (npcRef === undefined) {
+    return {
+      playerMessage: { id: "", sessionId, sequence: -1, speakerCharacterId: playerCharacterId, isPlayerMessage: true, body: playerMessageBody },
+      npcReply: null,
+      unavailableReason: "This contact is not present in the canonical world state.",
+    };
+  }
+  let kb = await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcCharacterId, {
+    canonicalName: npcRef.name,
+    role: npcRef.officeId ?? "contact",
+    skills: npcRef.skills,
+    locationProvinceId: npcRef.locationProvinceId,
+  });
+  // The knowledgebase is the rich dialogue record, but changing simulation
+  // facts are projected into it immediately before every reasoning call.
+  await updateNpcKnowledgebase(db, kb.id, {
+    locationProvinceId: npcRef.locationProvinceId,
+    skills: npcRef.skills,
+    role: npcRef.officeId ?? "contact",
+    isAvailable: npcRef.alive,
+  });
+  kb = { ...kb, locationProvinceId: npcRef.locationProvinceId, skills: npcRef.skills, role: npcRef.officeId ?? "contact", isAvailable: npcRef.alive };
 
   // Backfill pre-enrichment contacts that were created with a meaningful
   // relationship label but the old neutral score default.
@@ -685,10 +710,7 @@ export async function generateDialogueReply(input: DialogueCallInput & { readonl
   // status and location -- never from the legacy `isAvailable` flag alone.
   // `kb.isAvailable` remains a fallback only for a contact not yet found in
   // canonical state (e.g. mid-migration).
-  const npcRef = worldCharacters.find((c) => c.id === npcCharacterId);
-  const reachability = npcRef !== undefined
-    ? isCharacterReachable(npcRef, channel as DialogueChannel, worldCharacters.find((c) => c.id === playerCharacterId)?.locationProvinceId ?? null)
-    : { reachable: kb.isAvailable, reason: kb.isAvailable ? null : `${kb.canonicalName} is not reachable right now.` };
+  const reachability = isCharacterReachable(npcRef, channel as DialogueChannel, worldCharacters.find((c) => c.id === playerCharacterId)?.locationProvinceId ?? null);
 
   if (!reachability.reachable) {
     const playerMsg = input.appendPlayerMessage === false ? null : await appendMessage(db, sessionId, playerCharacterId, true, playerMessageBody);
@@ -703,7 +725,7 @@ export async function generateDialogueReply(input: DialogueCallInput & { readonl
   // Authoritative opinion, folded from the NPC's directed relation causes --
   // never the legacy stored `relationshipScore` (falls back to it only when
   // the NPC has no canonical relation ledger to read yet).
-  const opinionScore = npcRef !== undefined ? computeOpinion(npcRef, playerCharacterId) : kb.relationshipScore;
+  const opinionScore = computeOpinion(npcRef, playerCharacterId);
   const opinion = { score: opinionScore, label: opinionLabel(opinionScore) };
 
   // Resolve shared knowledge pools for this NPC and fetch existing entries
@@ -845,6 +867,11 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
   if (characterId) {
     const selected = unique.find((candidate) => candidate.character.id === characterId && candidate.character.alive);
     if (!selected) return { status: "unavailable", explanation: "That contact is no longer available." };
+    await getOrCreateNpcKnowledgebase(db, gameId, playerId, selected.character.id, {
+      canonicalName: selected.character.name,
+      role: selected.roleLabel,
+      locationProvinceId: selected.character.locationProvinceId,
+    });
     const session = await findOrOpenSession(db, gameId, playerId, selected.character.id);
     return { status: "found", sessionId: session.id, knownName: selected.character.name };
   }
@@ -925,35 +952,37 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
   if (parsed.characterId !== null) {
     const existing = unique.find((candidate) => candidate.character.id === parsed.characterId && candidate.character.alive);
     if (existing === undefined) return { status: "unavailable", explanation: "That person is not recorded in this world." };
+    await getOrCreateNpcKnowledgebase(db, gameId, playerId, existing.character.id, {
+      canonicalName: existing.character.name,
+      role: existing.roleLabel,
+      locationProvinceId: existing.character.locationProvinceId,
+    });
     const existingSession = await findOrOpenSession(db, gameId, playerId, existing.character.id);
     return { status: "found", sessionId: existingSession.id, knownName: existing.character.name };
   }
 
-  // New character — canonical Character + profile, proposed as a "discovery"
-  // social event rather than written directly to WorldState.characters. Turn
-  // resolution is the sole authority that folds it into the snapshot
-  // (apps/web/lib/resolution/pipeline.ts); until then it is only reachable
-  // through this same game's pending-discoveries list above.
+  // Discovery reveals a person who is already a complete canonical NPC.  The
+  // discovery event records what the player learned; it is never the thing
+  // that makes a profile-only person real.
   const npcCharacterId = `npc:discovered:${randomUUID().replace(/-/g, "").slice(0, 16)}`;
   const province = worldView.world.map.provinces.find((p) => p.id === parsed.locationProvinceId)
     ?? worldView.world.map.provinces.find((p) => p.id === playerLocationProvinceId)
     ?? worldView.world.map.provinces[0];
   if (!province) return { status: "unavailable", explanation: "No valid location is available for that contact." };
-  const npcSkills = { martial: 35, intrigue: 35, learning: 35, piety: 35, stewardship: 35, diplomacy: 35, body: 50, subSkills: {} };
-  const character: Character = {
-    id: npcCharacterId, name: parsed.name, cultureId: "local", faithId: null, dynastyId: null,
-    locationProvinceId: province.id, polityId: province.controllerPolityId, ageYearsAtStart: 35, officeId: null,
-    personalAccountId: `${npcCharacterId}:abstract`, skills: npcSkills,
-    traits: [], mind: deriveDefaultMind({ officeId: null, skills: npcSkills, ageYears: 35, cultureId: "local" }),
-    healthBps: 8_000, prestigeBps: 3_000, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null,
-    disqualifyingStatuses: [], birthStep: null, nextLifeReviewAtStep: null,
-  };
-  const profile: CharacterProfile = {
-    gameId, characterId: npcCharacterId, version: 1, roleLabel: parsed.roleLabel,
-    biography: null, voiceSummary: parsed.personalitySummary || null, presentationDetails: {},
-    updatedAtStep: worldView.world.elapsedStep,
-  };
-  await upsertCharacterProfile(db, profile);
+  const created = createCanonicalNpc(worldView.world, {
+    characterId: npcCharacterId,
+    name: parsed.name,
+    polityId: province.controllerPolityId,
+    locationProvinceId: province.id,
+    startingMoney: 0,
+    createdAtStep: worldView.world.elapsedStep,
+    creationReason: `Discovered by ${playerCharacterName}.`,
+  });
+  if (created === null) return { status: "unavailable", explanation: "That person cannot be placed consistently in this world." };
+  const relationshipScore = 0;
+  let canonicalWorld = linkCanonicalCharacters(created.world, playerCharacterId, npcCharacterId, "discovered contact", relationshipScore, created.world.elapsedStep);
+  canonicalWorld = linkCanonicalCharacters(canonicalWorld, npcCharacterId, playerCharacterId, "discovered contact", relationshipScore, canonicalWorld.elapsedStep);
+  await persistOpeningWorld(db, gameId, canonicalWorld);
   await insertCharacterSocialEvent(db, randomUUID(), gameId, {
     sourceSessionId: null,
     sourceMessageId: null,
@@ -966,8 +995,8 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
     proposedBeliefs: [],
     pressureChanges: [],
     commitmentProposal: null,
-    introducedCharacter: character,
-    introducedProfile: profile,
+    introducedCharacter: null,
+    introducedProfile: null,
     createdAtStep: worldView.world.elapsedStep,
   });
 
@@ -992,9 +1021,6 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
     });
     if (enrichedProfile !== null) {
       await updateNpcKnowledgebase(db, newKb.id, enrichedProfile);
-      if (enrichedProfile.biography !== null) {
-        await upsertCharacterProfile(db, { ...profile, biography: enrichedProfile.biography, version: 2 });
-      }
     }
   }
 
@@ -1114,6 +1140,7 @@ export async function resolveDialogueContext(gameId: string): Promise<DialogueCo
       mind: c.mind,
       traits: c.traits,
       personalAccountId: c.personalAccountId,
+      skills: c.skills,
     }));
 
     return {

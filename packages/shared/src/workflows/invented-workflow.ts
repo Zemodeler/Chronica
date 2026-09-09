@@ -3,14 +3,12 @@ import { WorldStateSchema, type WorldState } from "../world/world-state";
 import type { WorkflowInvokerAuthority, WorkflowScopeLimit } from "./types";
 import { findWorldReferenceViolations } from "../world/references";
 
-// RETIRED FOR ORDINARY PLAY (Game Master refactor, docs/24).
+// Campaign-defined workflows.
 //
-// Nothing here is reachable from turn resolution any more: the executor has
-// no invented-workflow path, and migration 0029 disables every persisted
-// template. It is kept so existing rows stay readable for migration review,
-// and so a developer converting one into a registered typed workflow can see
-// exactly what it did. The safeguard that replaced it is
-// `gm/capability-request.ts`, which records an unmet need and mutates nothing.
+// The Game Master can define a reusable world-data interaction when a
+// built-in workflow does not fit. Definitions are serialisable, bounded patch
+// templates rather than generated code. Every use is validated against the
+// full WorldState and its references before the staged world can change.
 
 /** A deliberately small, serialisable parameter language for runtime workflows. */
 export const InventedWorkflowParameterSchema = z.object({
@@ -67,6 +65,51 @@ export interface InventedWorkflowExecution {
 
 const PROTECTED_ROOTS = new Set(["schemaVersion", "pins", "elapsedStep", "lastTurnSummary", "playerPlans", "actorActivities"]);
 const PLACEHOLDER = /{{([a-z][a-zA-Z0-9_]*)}}/g;
+
+/**
+ * Reject definitions that could only fail because their template is malformed.
+ * World-specific checks still happen at invocation time, but a workflow is not
+ * admitted to a campaign if it refers to a parameter that does not exist, uses
+ * non-scalar data in a path, or tries to make its root target dynamic.
+ */
+export function validateInventedWorkflowDefinition(definition: InventedWorkflowDefinition): string | null {
+  const parameters = new Map(definition.parameters.map((parameter) => [parameter.name, parameter]));
+  const validateTemplate = (value: unknown, location: string, pathTemplate: boolean): string | null => {
+    if (typeof value === "string") {
+      for (const match of value.matchAll(PLACEHOLDER)) {
+        const parameter = parameters.get(match[1]!);
+        if (!parameter) return `${location} refers to unknown parameter "${match[1]}".`;
+        if (pathTemplate && (parameter.type === "json" || !parameter.required)) {
+          return `${location} may use only required scalar parameters.`;
+        }
+      }
+      return null;
+    }
+    if (Array.isArray(value)) {
+      for (const [index, item] of value.entries()) {
+        const error = validateTemplate(item, `${location}[${index}]`, false);
+        if (error) return error;
+      }
+    } else if (value && typeof value === "object") {
+      for (const [key, item] of Object.entries(value)) {
+        const error = validateTemplate(item, `${location}.${key}`, false);
+        if (error) return error;
+      }
+    }
+    return null;
+  };
+
+  for (const [index, operation] of definition.operations.entries()) {
+    const rootSegment = operation.path.split("/")[1] ?? "";
+    const root = rootSegment.split("[")[0]!;
+    if (root.includes("{{")) return `Operation ${index + 1} may not use a parameter for its world-data root.`;
+    const pathError = validateTemplate(operation.path, `Operation ${index + 1} path`, true);
+    if (pathError) return pathError;
+    const valueError = validateTemplate(operation.value, `Operation ${index + 1} value`, false);
+    if (valueError) return valueError;
+  }
+  return null;
+}
 
 export function validateInventedWorkflowParameters(
   definition: InventedWorkflowDefinition,

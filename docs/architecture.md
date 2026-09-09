@@ -2,7 +2,7 @@
 
 ## Source of truth and authority
 
-The committed `WorldState` is canonical. The Game Master is the sole AI authority for interpreting intent and choosing NPC or political responses, but it is never the authority on what the database says or on bypassing rules. A Game Master session works on a discardable copy of the world. Every material mutation goes through a typed workflow; its parameters, actor, authority, scope, references, and result are checked before the staged state is accepted. One transaction commits the final world, factual events, audit information, memory, capability requests, and Chronicle entries.
+The committed `WorldState` is canonical. The Game Master is the sole AI authority for interpreting intent and choosing NPC or political responses, but it is never the authority on what the database says or on bypassing world integrity. A Game Master session works on a discardable copy of the world. Workflows are MCP-style tools for interacting with world data: each exposes a capability and input contract, the AI chooses the appropriate tool and supplies its context, and the engine validates parameters, actor, authority, scope, references, and the resulting world before accepting a staged change. A workflow may be built in or defined during a campaign. One transaction commits the final world, factual events, audit information, memory, and Chronicle entries.
 
 This gives each question one owner:
 
@@ -18,7 +18,7 @@ No generic state-patch tool is exposed. Unsupported intent is recorded through `
 
 The resolver prepares the world, runs the Game Master tool loop, resolves due deterministic procedures, builds facts and Chronicle entries, then commits. Tool calls are bounded so an otherwise successful turn can commit useful work even when a budget is reached.
 
-Read tools expose compact, factual views of the world, characters, forces, provinces, polities, conflicts, history, and actor memory. Action tools are generated from the registered workflow catalogue. System-only workflows, such as deterministic battle or life-event resolution, are never offered to the Game Master as tools.
+Read tools expose compact, factual views of the world, characters, forces, provinces, polities, conflicts, history, and actor memory. Built-in workflows expose familiar data interactions; `define_action` lets the AI define a reusable, campaign-local interaction when the catalogue does not fit. System-only workflows, such as deterministic battle resolution, are never offered to the Game Master as tools.
 
 Each accepted action produces a factual event with its actor, parameters, material consequence, summary, and state deltas. A failed action leaves staged state unchanged and returns the exact rules-backed reason to the Game Master. Whole-world validation and delta reference checks prevent a workflow from introducing dangling identifiers while still allowing legacy snapshots to load and be repaired.
 
@@ -32,13 +32,15 @@ Conflict handling is deterministic where resource identity is clear. Its precede
 
 ## Workflows and command rules
 
-Every registered workflow declares its schema, authority, deterministic `apply` behaviour, and, when appropriate, an estimated duration. The catalogue distinguishes:
+In Chronica, a workflow is an MCP-style tool the AI uses to interact with the world's data. It is not a story script or a fixed player verb: it exposes a capability and input contract, while the AI decides whether calling that capability serves the current situation. Built-in workflows declare their schema, authority, data transformation, and, when appropriate, an estimated duration. When no built-in operation fits, the AI can define a campaign-local workflow as a named, parameterised data capability. Defined workflows persist for that campaign and are audited like built-in ones.
 
-- Agent actions, which the Game Master may invoke for a living actor.
+The catalogue distinguishes:
+
+- AI data interactions, which the Game Master may invoke for a living actor.
 - System effects, which only deterministic resolution may invoke.
 - Projections, which derive information and never mutate state.
 
-The same policy protects all invocations: valid parameters, living actor, permitted authority and scope, resource access, and duplicate protection. Commands should distinguish a meaningful refusal from an idempotent no-op and explain the specific blocking fact. New UI-visible effects should be based on small pure projections of committed state rather than copied state.
+The same validation protects all data interactions: valid parameters, living actor, permitted authority and scope, resource access, whole-world schema validity, reference integrity, and duplicate protection. Calls should distinguish a meaningful refusal from an idempotent no-op and explain the specific blocking fact. New UI-visible effects should be based on small pure projections of committed state rather than copied state.
 
 ## Clock and elastic simulation
 

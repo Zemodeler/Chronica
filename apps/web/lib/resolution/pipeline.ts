@@ -13,11 +13,10 @@ import "server-only";
 // storyline auto-resolution, and background material society after; then
 // Chronicle and commit.
 //
-// The agent's only route to state is `runGameMaster`, which stages every
-// mutation in memory through the registered workflow executor. Prose changes
-// nothing; there is no JSON-patch or invented-workflow path left in the
-// executor at all. The committed snapshot is written once, at the end, by
-// `commitResolution`.
+// The agent's route to state is `runGameMaster`, which stages every built-in
+// or campaign-defined workflow in memory. Prose changes nothing; a defined
+// workflow is a named, validated data operation rather than a free-form patch.
+// The committed snapshot is written once, at the end, by `commitResolution`.
 
 import type {
   OrderBatch,
@@ -68,7 +67,6 @@ import type { ChronicaDatabase } from "@chronica/db";
 import {
   commitResolution,
   listActiveInventedWorkflows,
-  insertInventedWorkflows,
   failTurn,
   claimTurnForResolution,
   ingestChronicleEntries,
@@ -79,7 +77,6 @@ import {
   listUnappliedCharacterSocialEvents,
   markCharacterSocialEventsApplied,
   markCharacterSocialEventsRejected,
-  upsertCharacterProfile,
 } from "@chronica/db";
 import type { ChronicleEntryInput } from "@chronica/db";
 import type { InventedWorkflowDefinition } from "@chronica/shared";
@@ -98,9 +95,13 @@ import {
   rewriteClaimsUnsupportedWar,
 } from "./chronicle-from-facts";
 import { materializeCanvasProvince } from "../canvas-world";
-import { advanceWorldDynamics } from "./world-dynamics";
 import { selectDevelopmentActors } from "./world-development-scheduler";
 import { decideElasticStop } from "./elastic-scheduler";
+import { advanceEventQueue, createDbEventQueuePort } from "./event-loop";
+import { deriveWorldInstant, factualEventToFact } from "@chronica/shared";
+import { runMultiAgentTurn } from "./agents/orchestrator";
+import { createReactionRunner } from "./agents/reaction-runner";
+import { advanceProjectsTick, ensureProjectTicksSeeded } from "./project-tick";
 
 export type ProgressCallback = (progress: ResolutionProgress) => void;
 
@@ -263,6 +264,8 @@ export interface ResolveTurnInput {
   readonly scenarioChronicle?: ScenarioChronicleRules | undefined;
   /** The immutable canvas whose province IDs the opening world may materialize on demand. */
   readonly mapAssetId?: string | null;
+  /** 1 (default) = today's single-GM path. 2 = the multi-agent dispatcher (docs/32, Part B.7). */
+  readonly agentArchitectureVersion?: number;
 }
 
 export async function resolveTurn(
@@ -353,7 +356,38 @@ export async function resolveTurn(
     // living representative stays visible as a real problem for the Game
     // Master to solve with create_world_character; the pipeline never casts
     // one on the model's behalf.
-    const worldDynamics = advanceWorldDynamics(backfilled, materializedWorld.elapsedStep + 1);
+    //
+    // docs/32 Phase 7: routed through the persistent event queue instead of
+    // an unconditional per-turn call. `advanceEventQueue` seeds and resolves
+    // exactly one `midnight_tick` (whose handler is `advanceWorldDynamics`,
+    // unchanged) for this turn's day, preserving today's "once per turn"
+    // cadence -- windowEnd equals the tick's own day, and the queue's
+    // self-scheduling of the *next* day's tick is what carries the daily
+    // cadence forward turn over turn. Widening one turn to resolve every day
+    // in its window is later, separately reviewed work.
+    const preEventQueueDay = deriveWorldInstant(materializedWorld.elapsedStep + 1, input.scenarioClock).day;
+    // docs/32, Part C.6: `advance_project` rides the same queue -- a project
+    // with a due milestone gets its own pending `world_process_tick` event,
+    // seeded here exactly like `midnight_tick` is, and resolved by
+    // `advanceProjectsTick` when the queue picks it up.
+    await ensureProjectTicksSeeded(createDbEventQueuePort(db, gameId), backfilled, materializedWorld.elapsedStep + 1);
+    // docs/32 corrective pass, requirement 3: only `agentArchitectureVersion
+    // === 2` gets the real selector/runner and a queue bounded to more than
+    // one event per call -- an in-flight v1 campaign's resolution model
+    // never changes mid-play, so it keeps exactly today's "one midnight
+    // tick, no agent dispatch from the queue" behavior.
+    const worldDynamics = await advanceEventQueue(
+      db,
+      backfilled,
+      { day: preEventQueueDay, minute: 0 },
+      materializedWorld.elapsedStep + 1,
+      {
+        gameId,
+        maxEventsPerCall: input.agentArchitectureVersion === 2 ? 20 : 1,
+        handlers: { world_process_tick: advanceProjectsTick },
+        ...(input.agentArchitectureVersion === 2 ? { agentRunner: createReactionRunner(gameMasterAdapter) } : {}),
+      },
+    );
     const resolutionWorld: WorldState = worldDynamics.world;
     const actor = resolutionWorld.characters.find((character) => character.id === actorCharacterId)!;
     console.log(
@@ -426,12 +460,10 @@ export async function resolveTurn(
 
     // ── Step 4: Game Master ────────────────────────────────────────────────
     //
-    // One agent, one staged world. It reads with the inspect tools, attempts
-    // the player's orders with the registered workflows, lets the world answer
-    // through the same tools, and ends with a structured report. Nothing it
-    // writes as prose reaches state, and there is no invented-workflow or
-    // JSON-patch path for it to reach state by: `executeWorkflow` resolves
-    // registered ids only.
+    // One agent, one staged world. It reads with the inspect tools, uses
+    // built-in or campaign-defined workflows to interact with the data, lets
+    // the world answer through those validated tools, and ends with a
+    // structured report. Prose never reaches state directly.
     //
     // The staged world is discarded wholesale if anything below throws -- the
     // committed snapshot is only written by `commitResolution` at the very
@@ -459,12 +491,36 @@ export async function resolveTurn(
       scenarioLife: input.scenarioLife,
       scenarioClock: input.scenarioClock,
       definedActions,
-      // Off by default (docs/27): `request_capability` is the supported path
-      // for an unanticipated player intent. This is a developer-controlled
-      // rollout/testing exception, not a normal-play setting.
-      allowInventedActions: process.env.CHRONICA_ALLOW_INVENTED_ACTIONS === "true",
+      // Campaign-defined workflows are available in normal play. A caller can
+      // opt out only for a deliberately constrained environment.
+      allowInventedActions: process.env.CHRONICA_DISABLE_DEFINED_ACTIONS !== "true",
     };
-    let gameMasterOutcome = await runGameMaster(gameMasterAdapter, gameMasterInput);
+    // docs/32, Part B.7: an in-flight campaign's resolution model never changes
+    // mid-play, so this branches once per turn on the game's own pinned
+    // version rather than a global setting. Version 2 replaces the single
+    // centralized call with the sequenced player/NPC/star-context/closing
+    // agents (`agents/orchestrator.ts`), all against the same staged session;
+    // version 1 (default, everything before this turn) is completely
+    // untouched by that path.
+    const runGameMasterAttempt = () => (input.agentArchitectureVersion === 2
+      ? runMultiAgentTurn(gameMasterAdapter, {
+        db,
+        gameId,
+        world: agencyWorld,
+        atStep,
+        atInstant: deriveWorldInstant(atStep, input.scenarioClock),
+        actorCharacterId,
+        directives: gameMasterDirectives,
+        scenarioGovernment: input.scenarioGovernment,
+        scenarioChronicle: input.scenarioChronicle,
+        scenarioLife: input.scenarioLife,
+        scenarioClock: input.scenarioClock,
+        definedActions,
+        allowInventedActions: gameMasterInput.allowInventedActions,
+        persistentPlans: true,
+      })
+      : runGameMaster(gameMasterAdapter, gameMasterInput));
+    let gameMasterOutcome = await runGameMasterAttempt();
 
     // A session that did not submit an accepted finish_turn report is not a
     // player-facing outcome. Its staged mutations have not been committed, so
@@ -479,7 +535,7 @@ export async function resolveTurn(
         `${tag()} [game_master] retrying unreported session: termination=${initialGameMasterTermination}; `
         + `discarding ${gameMasterOutcome.executedInvocations.length} staged action(s) and restarting from the pre-GM world`,
       );
-      gameMasterOutcome = await runGameMaster(gameMasterAdapter, gameMasterInput);
+      gameMasterOutcome = await runGameMasterAttempt();
       console.warn(
         `${tag()} [game_master] retry finished: initialTermination=${initialGameMasterTermination} `
         + `retryTermination=${gameMasterOutcome.termination} reported=${gameMasterOutcome.report !== null}`,
@@ -492,6 +548,17 @@ export async function resolveTurn(
         + `${gameMasterOutcome.executedInvocations.length} staged action(s) will neither commit nor enter the Chronicle`,
       );
     }
+    // docs/32, Part C.1/C.6: a world tool's own facts (e.g. record_fact)
+    // never fold into the committed snapshot -- they belong in the fact
+    // ledger (Part A's `worldFacts` table), same as the event queue's own
+    // handler-produced facts. Discarded along with everything else when the
+    // session never reported.
+    //
+    // docs/32 corrective pass, requirement 4: staged here, not written --
+    // every fact this turn produced (world-tool, event-queue, and every
+    // successful workflow's own fact below) is inserted inside
+    // `commitResolution`'s single transaction, never before it.
+    const worldToolFacts = gameMasterCompleted ? gameMasterOutcome.worldToolFacts : [];
     // A second unreported session is no more authoritative than the first.
     // Preserve only deterministic pre-GM work (social events, pressure
     // maintenance, and world setup); otherwise partial actions would both
@@ -519,9 +586,20 @@ export async function resolveTurn(
     const committedGameMasterEvents = gameMasterCompleted ? gameMasterOutcome.events : [];
     const factualEvents = [
       ...committedGameMasterEvents,
-      ...worldDynamics.events.map((event, index) => ({ ...event, id: `fact-${atStep}-${committedGameMasterEvents.length + index + 1}` })),
+      ...worldDynamics.handlerEvents.map((event, index) => ({ ...event, id: `fact-${atStep}-${committedGameMasterEvents.length + index + 1}` })),
     ];
     const capabilityRequests = gameMasterCompleted ? gameMasterOutcome.capabilityRequests : [];
+    // docs/32 corrective pass, requirement 4/5: every successful
+    // state-changing workflow this turn also emits one durable Fact into the
+    // canonical ledger -- not just Chronicle prose (`chronicleInputs`, built
+    // separately from the same `factualEvents`) that a later agent has no
+    // way to query back. Stamped with the turn's real `WorldInstant`, the
+    // same one the Game Master's own world tools use.
+    const turnInstant = deriveWorldInstant(atStep, input.scenarioClock);
+    const canonicalWorkflowFacts = committedGameMasterEvents
+      .filter((event) => event.materialConsequence)
+      .map((event) => factualEventToFact(event, turnInstant));
+    const allWorldFacts = [...worldDynamics.facts, ...worldToolFacts, ...canonicalWorkflowFacts];
     console.log(
       `${tag()} [game_master] OUT: termination=${gameMasterOutcome.termination} committed=${gameMasterCompleted} `
       + `actions=${gameMasterOutcome.executedInvocations.length} facts=${factualEvents.length} capabilityGaps=${capabilityRequests.length}`,
@@ -1163,6 +1241,23 @@ export async function resolveTurn(
       plans: finalWorld.playerPlans ?? [],
     });
 
+    const definedWorkflows = gameMasterCompleted
+      ? gameMasterOutcome.definedActions.map((definition) => ({
+        id: `defined-${gameId}-${definition.actionId}`,
+        gameId,
+        definition,
+        status: "active" as const,
+      }))
+      : [];
+    const definedWorkflowUses = gameMasterCompleted
+      ? gameMasterOutcome.definedActionUses.map((use) => ({
+        workflowId: `defined-${gameId}-${use.actionId}`,
+        parameters: use.parameters,
+        resolvedPatch: use.resolvedPatch,
+        success: true,
+      }))
+      : [];
+
     await commitResolution(db, {
       gameId,
       turnId,
@@ -1174,7 +1269,12 @@ export async function resolveTurn(
       stoppingFactIds: elasticShadowDecision.stoppingFactIds,
       requestedPlayerDecision: elasticShadowDecision.requestedPlayerDecision,
       workflowAudit: finalWorkflowAudit,
+      inventedWorkflows: definedWorkflows,
+      inventedWorkflowUses: definedWorkflowUses,
       capabilityRequests,
+      worldFacts: allWorldFacts,
+      pendingWorldEvents: worldDynamics.pendingEventInserts,
+      pendingEventResolutions: worldDynamics.pendingResolutions,
       gameMasterReport: {
         atStep,
         termination: gameMasterOutcome.termination,
@@ -1193,22 +1293,9 @@ export async function resolveTurn(
       gameMasterAudit: gameMasterCompleted ? gameMasterOutcome.auditEntries : [],
     });
 
-    // Written only after the turn itself committed, so a capability the world
-    // gained is never persisted for a turn that did not happen. From here on
-    // it is part of this campaign: every later turn is handed it back.
-    if (gameMasterCompleted && gameMasterOutcome.definedActions.length > 0) {
-      await insertInventedWorkflows(
-        db,
-        gameMasterOutcome.definedActions.map((definition) => ({
-          id: `defined-${gameId}-${definition.actionId}`,
-          gameId,
-          definition,
-          status: "active" as const,
-        })),
-        turnId,
-      ).catch((err: unknown) => {
-        console.error(`${tag()} [defined-actions] could not be persisted; they will not survive the turn`, err);
-      });
+    // Defined workflows and their use records now commit with the staged
+    // world. A later turn can therefore rely on every workflow it receives.
+    if (definedWorkflows.length > 0) {
       console.log(`${tag()} [defined-actions] ${gameMasterOutcome.definedActions.map((definition) => definition.actionId).join(", ")}`);
     }
 
@@ -1217,9 +1304,9 @@ export async function resolveTurn(
 
     // Guarded by `WHERE status = 'proposed'` inside the query itself, so this
     // can never re-apply an event a concurrent resolution already committed.
-    for (const profile of [...socialEventOutcome.introducedProfiles, ...contactSocialOutcome.introducedProfiles, ...contactDialogueOutcome.introducedProfiles]) {
-      await upsertCharacterProfile(db, profile);
-    }
+    // character_profiles is a legacy UI projection.  Rich NPC information is
+    // kept in the required NPC knowledgebase; no resolution path writes an
+    // independent biography, role, or voice record.
     await markCharacterSocialEventsApplied(db, appliedSocialEventIds, atStep, turnId);
     await markCharacterSocialEventsRejected(db, [...socialEventOutcome.rejectedIds, ...contactSocialOutcome.rejectedIds, ...contactDialogueOutcome.rejectedIds]);
 

@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { EntityIdSchema, ElapsedStepSchema, MoneyAmountSchema } from "../material-state";
 import type { WorldState } from "../world/world-state";
+import { deriveWorldInstant, type ScenarioClock } from "../world/clock";
+import type { WorldInstant } from "../world/instant";
+import type { WorldEventPayload } from "../world/event-queue";
 import type { OrderDirective } from "./orders";
 import { OrderPartyRefSchema } from "./orders";
 
@@ -286,6 +289,8 @@ export const ActionPlanStageSchema = z.object({
   completedAtStep: ElapsedStepSchema.nullable().default(null),
   resultFactIds: z.array(z.string().max(120)).default([]),
   statusReason: z.string().max(600).nullable().default(null),
+  /** docs/32 Phase 7: the `world_events` row that will advance this stage, once it has one. */
+  queuedEventId: EntityIdSchema.optional(),
 }).strict();
 export type ActionPlanStage = z.infer<typeof ActionPlanStageSchema>;
 
@@ -399,6 +404,62 @@ export function upgradePlayerPlansToActionPlans(playerPlans: readonly PlayerPlan
   return (playerPlans ?? []).map(playerPlanToActionPlan);
 }
 
+/**
+ * A not-yet-persisted `action_phase` event, ready to insert into the event
+ * queue (`packages/db/src/schema/events.ts`'s `worldEvents`). Kept as a
+ * narrow local shape rather than importing `NewWorldEvent` from
+ * `packages/db` -- `packages/shared` does not depend on `packages/db`.
+ */
+export interface ScheduledEventDraft {
+  readonly kind: "action_phase";
+  readonly instant: WorldInstant;
+  readonly subjectRef: { readonly kind: "character"; readonly id: string };
+  readonly payload: WorldEventPayload;
+  readonly actionId: string;
+  readonly createdAtStep: number;
+}
+
+/**
+ * Migration step 3 (docs/32, Phase 7): synthesizes `action_phase` events for
+ * a plan's in-progress and not-yet-ready-but-scheduled stages, so existing
+ * `playerPlans`/`ActionPlan`s migrate into the event queue without changing
+ * any already-completed historical outcome. Pure and unit-testable, in the
+ * same style as `upgradePlayerPlansToActionPlans` above -- the one-time
+ * backfill script (`apps/web/scripts/backfill-event-queue.ts`) calls this
+ * per active plan and bulk-inserts the result.
+ *
+ * - A stage `in_progress` with a known `expectedCompletionStep` schedules at
+ *   that instant (its next tick is due then).
+ * - A stage `pending`/`ready` with a `notBeforeStep` schedules at that
+ *   instant (it becomes eligible to start then).
+ * - Every other stage (no completion/start estimate, or already terminal)
+ *   is left alone: it keeps resolving once per player turn exactly as
+ *   today, via the pre-event-queue per-turn scan, until it acquires an
+ *   estimate of its own.
+ */
+export function upgradeActionPlanToScheduledEvents(
+  plan: ActionPlan,
+  createdAtStep: number,
+  scenarioClock?: ScenarioClock,
+): ScheduledEventDraft[] {
+  const drafts: ScheduledEventDraft[] = [];
+  for (const stage of plan.stages) {
+    let atStep: number | null = null;
+    if (stage.status === "in_progress" && stage.expectedCompletionStep !== null) atStep = stage.expectedCompletionStep;
+    else if ((stage.status === "pending" || stage.status === "ready") && stage.notBeforeStep !== null) atStep = stage.notBeforeStep;
+    if (atStep === null) continue;
+    drafts.push({
+      kind: "action_phase",
+      instant: deriveWorldInstant(atStep, scenarioClock),
+      subjectRef: { kind: "character", id: stage.actorId },
+      payload: { kind: "action_phase", actionId: stage.id },
+      actionId: stage.id,
+      createdAtStep,
+    });
+  }
+  return drafts;
+}
+
 /*
  * Stage start/completion lifecycle (docs/32, Phase 8).
  *
@@ -436,7 +497,7 @@ export function startPlanStage(
   plan: ActionPlan,
   stageId: string,
   atStep: number,
-  options: { durationEstimate?: ActionPlanStage["durationEstimate"]; reservationIds?: readonly string[] } = {},
+  options: { durationEstimate?: ActionPlanStage["durationEstimate"]; reservationIds?: readonly string[]; queuedEventId?: string } = {},
 ): ActionPlan | string {
   const stage = planStageOrError(plan, stageId);
   if (typeof stage === "string") return stage;
@@ -452,6 +513,7 @@ export function startPlanStage(
     durationEstimate,
     expectedCompletionStep: durationEstimate ? atStep + durationEstimate.likelySteps : stage.expectedCompletionStep,
     reservationIds: options.reservationIds ? [...stage.reservationIds, ...options.reservationIds] : stage.reservationIds,
+    queuedEventId: options.queuedEventId ?? stage.queuedEventId,
   };
   return { ...plan, updatedAtStep: atStep, stages: plan.stages.map((s) => (s.id === stageId ? updated : s)) };
 }

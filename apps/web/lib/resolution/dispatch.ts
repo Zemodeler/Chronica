@@ -39,6 +39,7 @@ export async function resolveQueuedTurn(
     actorCharacterId: player.characterId ?? worldView.world.characters[0]?.id ?? "", playerId: player.id,
     scenarioClock: worldView.scenarioClock, scenarioLife: worldView.scenarioLife, scenarioGovernment: worldView.scenarioGovernment,
     scenarioChronicle: worldView.scenarioChronicle, mapAssetId: worldView.mapAssetId,
+    agentArchitectureVersion: worldView.agentArchitectureVersion,
   }, progressWriter);
 }
 

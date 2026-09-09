@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { findPosition } from "../../warfare/position";
 import { EntityIdSchema } from "../../material-state";
 import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
 import { BattlePostureSchema } from "../../warfare/battle-resolver";
@@ -168,19 +169,27 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
 
   defineWorkflow({
     id: "move_force",
-    description: "Move a military force to a different province. The force's locationId changes immediately.",
+    description: "Move a military force to a different province, or to a named operational position within its current province. The force's locationId and, when specified, positionId change immediately.",
     category: "military",
     duration: { minimumDays: 3, likelyDays: 14, maximumDays: 45 },
     parametersSchema: z.object({
       forceId: EntityIdSchema,
       destinationProvinceId: EntityIdSchema,
+      /** Optional in-province destination such as a pass, camp, or landmark. */
+      destinationPositionId: EntityIdSchema.optional(),
     }).strict(),
     apply(world, params, _context) {
       const force = world.material.forces.find((f) => f.id === params.forceId);
       if (!force) return null;
       const province = world.map.provinces.find((p) => p.id === params.destinationProvinceId);
       if (!province) return null;
-      if (force.locationId === params.destinationProvinceId) {
+      const destinationPosition = params.destinationPositionId === undefined
+        ? null
+        : findPosition(province, params.destinationPositionId);
+      if (params.destinationPositionId !== undefined && !destinationPosition) {
+        return refuse(`No operational position "${params.destinationPositionId}" exists in ${province.name}. Inspect the province to see its named positions.`);
+      }
+      if (force.locationId === params.destinationProvinceId && params.destinationPositionId === undefined) {
         return {
           world,
           result: {
@@ -196,12 +205,14 @@ export const militaryWorkflows: AnyWorkflowDefinition[] = [
           material: {
             ...world.material,
             forces: world.material.forces.map((f) =>
-              f.id === params.forceId ? { ...f, locationId: params.destinationProvinceId } : f,
+              f.id === params.forceId
+                ? { ...f, locationId: params.destinationProvinceId, positionId: params.destinationPositionId ?? null }
+                : f,
             ),
           },
         },
         result: {
-          summary: `${force.name} moves to ${province.name}.`,
+          summary: `${force.name} moves to ${destinationPosition ? `${destinationPosition.label} in ${province.name}` : province.name}.`,
           applied: true,
         },
       };

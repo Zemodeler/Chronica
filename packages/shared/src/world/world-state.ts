@@ -4,7 +4,13 @@ import { OngoingActionSchema } from "../actions/orders";
 import { PersistentOperationSchema } from "../actions/operations";
 import { CharacterSchema } from "../characters/character";
 import { CharacterContinuitySchema, EncounterMemorySchema } from "../continuity/continuity";
-import { WorldPinsSchema } from "./clock";
+import { WorldPinsSchema, deriveWorldInstant, type ScenarioClock } from "./clock";
+import { WorldInstantSchema } from "./instant";
+import { AuthorityGrantSchema } from "../authority/authority-grant";
+import { OrderAttemptSchema } from "../authority/order-attempt";
+import { ProjectSchema } from "./project";
+import { StructureSchema } from "./structure";
+import { GenericEntitySchema } from "./generic-entity";
 import { ProvinceGraphSchema } from "./map";
 import { MapConflictsOverlaySchema } from "./map-presentation";
 import { WorldStorylineSchema } from "./storylines";
@@ -54,6 +60,15 @@ export const WorldStateSchema = z
      * reads one value and a replay stops at one step.
      */
     elapsedStep: ElapsedStepSchema,
+    /**
+     * Minute-precision clock (docs/32 Phase 7 target architecture), additive
+     * to `elapsedStep` -- see `world/instant.ts`'s module comment. Absent on
+     * every snapshot predating the event queue; `upgradeWorldStateInstant`
+     * fills it deterministically from `elapsedStep` on load. Once populated,
+     * it is authoritative only *within* the current turn's resolution window;
+     * `elapsedStep` still owns turn/snapshot identity.
+     */
+    instant: WorldInstantSchema.optional(),
     /** Optional for existing snapshots; the scheduler materializes it on first use. */
     worldDevelopments: z.array(WorldDevelopmentSchema).optional(),
     playerPlans: z.array(PlayerPlanSchema).optional(),
@@ -159,6 +174,22 @@ export const WorldStateSchema = z
      * Defaulted so every snapshot written before this existed still parses.
      */
     polityStances: z.array(PolityStanceSchema).default([]),
+    /**
+     * docs/32 Phase 7: persisted `AuthorityGrant`s from sources with no other
+     * live-state projection (delegation/custom/conquest/emergency/explicit
+     * law) -- office- and command-derived grants are computed fresh from
+     * `officeSeats`/`forces` by `buildAuthorityIndex`, never stored here.
+     * Defaulted so every snapshot written before this existed still parses.
+     */
+    authorityGrants: z.array(AuthorityGrantSchema).default([]),
+    /** docs/32 Phase 7: orders-to-others tracked through the attempt lifecycle -- see `authority/order-attempt.ts`. */
+    orderAttempts: z.array(OrderAttemptSchema).default([]),
+    /** docs/32, Part C.2: multi-turn sponsored efforts (an academy, a fortress) -- see `world/project.ts`. */
+    projects: z.array(ProjectSchema).default([]),
+    /** docs/32, Part C.2: built, standing structures a project (or a workflow) raises -- see `world/structure.ts`. */
+    structures: z.array(StructureSchema).default([]),
+    /** docs/32, Part C.1: the true generic fallback for a genuinely novel composition -- see `world/generic-entity.ts`. */
+    genericEntities: z.array(GenericEntitySchema).default([]),
   })
   .strict()
   .superRefine((world, context) => {
@@ -212,3 +243,15 @@ export const WorldStateSchema = z
     });
   });
 export type WorldState = z.infer<typeof WorldStateSchema>;
+
+/**
+ * Snapshot upgrader (docs/32, Phase 7): fills `WorldState.instant` from the
+ * authoritative `elapsedStep` for a snapshot that predates the event queue.
+ * Idempotent -- a world that already carries `instant` is returned as-is, so
+ * this is safe to call unconditionally on every load rather than gating on a
+ * schema-version check.
+ */
+export function upgradeWorldStateInstant(world: WorldState, scenarioClock?: ScenarioClock): WorldState {
+  if (world.instant !== undefined) return world;
+  return { ...world, instant: deriveWorldInstant(world.elapsedStep, scenarioClock) };
+}

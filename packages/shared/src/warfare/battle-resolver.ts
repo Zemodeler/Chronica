@@ -18,6 +18,7 @@ import type { Force, ProvinceMaterial } from "../material-state";
 import type { Province } from "../world/map";
 import { resolveForcePosition } from "./position";
 import type { TacticalModifierProposal } from "../actions/verdict";
+import type { Structure } from "../world/structure";
 
 // Deterministic battle resolution (docs/19 Phase 3, ADR-0031).
 //
@@ -89,8 +90,24 @@ function commanderModifierBps(commander: Character | null): number {
   return Math.round((commander.skills.martial - 50) * 10 * healthFactor);
 }
 
-function supplyModifierBps(force: Force, material: ProvinceMaterial | null): number {
-  const statusPenalty = force.provisionStatus === "critical" ? -1_500 : force.provisionStatus === "shortage" ? -700 : 0;
+/**
+ * Whether a depot/fortress actually reaches this force with real supply
+ * (docs/32 corrective pass, requirement 5) -- standing in the same province
+ * always reaches it; a `supplyRadius` of at least 1 also reaches an
+ * immediately adjacent province. Never the attacker's/an unrelated polity's
+ * structure, same ownership rule as `structureDefenseBps`.
+ */
+function reachedBySupplyStructure(force: Force, provinceId: string, adjacentProvinceIds: readonly string[], structures: readonly Structure[]): boolean {
+  return structures.some((structure) => {
+    if (structure.ownerPolityId !== null && structure.ownerPolityId !== force.polityId) return false;
+    if (structure.provinceId === provinceId) return true;
+    return structure.supplyRadius >= 1 && adjacentProvinceIds.includes(structure.provinceId);
+  });
+}
+
+function supplyModifierBps(force: Force, material: ProvinceMaterial | null, provinceId: string, adjacentProvinceIds: readonly string[], structures: readonly Structure[]): number {
+  const relieved = reachedBySupplyStructure(force, provinceId, adjacentProvinceIds, structures);
+  const statusPenalty = relieved ? 0 : force.provisionStatus === "critical" ? -1_500 : force.provisionStatus === "shortage" ? -700 : 0;
   const foodPenalty = material ? Math.round(((material.foodSecurityBps - 8_000) / 8_000) * 500) : 0;
   return statusPenalty + Math.min(0, foodPenalty);
 }
@@ -130,6 +147,14 @@ export interface ResolveBattleInput {
   readonly warfareRules?: ScenarioWarfareRules;
   /** Novel tactics a player/NPC proposed for this battle (docs/19 Phase 3). */
   readonly tacticalProposals?: readonly TacticalModifierProposal[] | undefined;
+  /**
+   * Standing structures in this battle's province (docs/32 corrective pass,
+   * requirement 5) -- a fortress/wall's `defensiveEffectsBps` adds directly
+   * to the defender's modifier, the same way terrain and position already
+   * do. Optional so a caller with no structures in scope (or a test fixture
+   * that predates this) simply contributes nothing.
+   */
+  readonly structures?: readonly Structure[];
 }
 
 const MAGNITUDE_BPS: Record<TacticalModifierProposal["magnitude"], number> = {
@@ -158,6 +183,44 @@ interface ForceContribution {
   readonly effectiveStrength: number;
 }
 
+/**
+ * The sum of every standing structure's `defensiveEffectsBps` in this
+ * battle's province that stands for the defending force's own polity (or
+ * for no polity at all -- an unclaimed watchtower still shelters whoever
+ * holds the ground) -- never the attacker's. A structure the attacker's own
+ * polity owns in this province contributes nothing here; it is not the
+ * thing being defended.
+ */
+function structureDefenseBps(participant: ResolveBattleParticipant, province: Province, structures: readonly Structure[]): number {
+  if (participant.side !== "defender") return 0;
+  return structures
+    .filter((structure) => structure.provinceId === province.id && (structure.ownerPolityId === null || structure.ownerPolityId === participant.force.polityId))
+    .reduce((sum, structure) => sum + structure.defensiveEffectsBps, 0);
+}
+
+/**
+ * A defending garrison packed well past what the local structures can
+ * actually shelter (`Structure.garrisonCapacity`) fights at a real
+ * disadvantage -- crowded, poorly billeted, and harder to command -- capped
+ * at the same order of magnitude as the other modifiers here so it can
+ * matter without dominating the outcome by itself. A province with no
+ * capacity-bearing structure at all imposes no such penalty (unbounded, as
+ * every existing battle without a `Structure` already behaves).
+ */
+function garrisonOvercrowdingBps(participant: ResolveBattleParticipant, province: Province, structures: readonly Structure[]): number {
+  if (participant.side !== "defender") return 0;
+  const relevant = structures.filter((structure) =>
+    structure.provinceId === province.id && structure.garrisonCapacity > 0
+    && (structure.ownerPolityId === null || structure.ownerPolityId === participant.force.polityId),
+  );
+  if (relevant.length === 0) return 0;
+  const capacity = relevant.reduce((sum, structure) => sum + structure.garrisonCapacity, 0);
+  const personnel = totalPersonnel(participant.force);
+  if (personnel <= capacity) return 0;
+  const overRatio = (personnel - capacity) / capacity;
+  return -Math.min(2_000, Math.round(overRatio * 2_000));
+}
+
 function computeForceContribution(
   participant: ResolveBattleParticipant,
   province: Province,
@@ -165,6 +228,8 @@ function computeForceContribution(
   rules: ScenarioWarfareRules | undefined,
   varianceBps: number,
   tacticBps: number,
+  structures: readonly Structure[],
+  adjacentProvinceIds: readonly string[],
 ): ForceContribution {
   const { force } = participant;
   const baseStrength = force.personnel.reduce((sum, category) => {
@@ -180,7 +245,9 @@ function computeForceContribution(
   const terrainBps = participant.side === "defender" ? (TERRAIN_DEFENSE_BPS[province.terrainId] ?? 0) : 0;
   const postureBps = participant.posture ? POSTURE_MODIFIER_BPS[participant.posture] : 0;
   const modifierBps = positionBps + terrainBps
-    + supplyModifierBps(force, provinceMaterial)
+    + structureDefenseBps(participant, province, structures)
+    + garrisonOvercrowdingBps(participant, province, structures)
+    + supplyModifierBps(force, provinceMaterial, province.id, adjacentProvinceIds, structures)
     + commanderModifierBps(participant.commander)
     + postureBps
     + varianceBps
@@ -228,7 +295,7 @@ export function summarizeBattleResult(result: BattleResult, forceNameById: Reado
 }
 
 export function resolveBattle(input: ResolveBattleInput, seed: string): BattleResult {
-  const { battle, participants, province, provinceMaterial, adjacentProvinceIds, warfareRules } = input;
+  const { battle, participants, province, provinceMaterial, adjacentProvinceIds, warfareRules, structures = [] } = input;
   const rng = createRng(seed);
   const draws: RecordedRandomDraw[] = [];
 
@@ -267,8 +334,8 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
   const attackerVarianceBps = drawVariance("attacker");
   const defenderVarianceBps = drawVariance("defender");
 
-  const attackerContributions = attackers.map((p) => computeForceContribution(p, province, provinceMaterial, warfareRules, attackerVarianceBps, tacticBpsByForceId.get(p.forceId) ?? 0));
-  const defenderContributions = defenders.map((p) => computeForceContribution(p, province, provinceMaterial, warfareRules, defenderVarianceBps, tacticBpsByForceId.get(p.forceId) ?? 0));
+  const attackerContributions = attackers.map((p) => computeForceContribution(p, province, provinceMaterial, warfareRules, attackerVarianceBps, tacticBpsByForceId.get(p.forceId) ?? 0, structures, adjacentProvinceIds));
+  const defenderContributions = defenders.map((p) => computeForceContribution(p, province, provinceMaterial, warfareRules, defenderVarianceBps, tacticBpsByForceId.get(p.forceId) ?? 0, structures, adjacentProvinceIds));
   const attackerEffectiveStrength = Math.round(attackerContributions.reduce((sum, c) => sum + c.effectiveStrength, 0));
   const defenderEffectiveStrength = Math.round(defenderContributions.reduce((sum, c) => sum + c.effectiveStrength, 0));
 

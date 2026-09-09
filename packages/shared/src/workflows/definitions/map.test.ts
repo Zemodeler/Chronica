@@ -74,6 +74,38 @@ describe("change_province_control", () => {
     expect(outcomeA).toEqual(outcomeB);
   });
 
+  // docs/32, Part C.4: control/claim separation.
+  it("opens a control record and ends whatever was previously active there, without touching a rival's claim", () => {
+    const w = world();
+    const seeded = {
+      ...w,
+      map: {
+        ...w.map,
+        controlRecords: [{
+          id: "existing", locationKind: "province" as const, locationId: "ita-72843720b81376294924159-sicily-northeast",
+          controllerPolityId: "rome", firmnessBps: 5_000, startedAtStep: 0, endedAtStep: null, status: "active" as const,
+        }],
+        claimRecords: [{
+          id: "syracuse-claim", locationKind: "province" as const, locationId: "ita-72843720b81376294924159-sicily-northeast",
+          claimantPolityId: "syracuse", claimKind: "historical" as const, strengthBps: 3_000, rationale: "Old ties to the region.",
+          startedAtStep: 0, endedAtStep: null, status: "active" as const,
+        }],
+      },
+    };
+    const outcome = executeWorkflow(
+      { actionId: "change_province_control", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-northeast", newControllerPolityId: "carthage", reason: "Taken by force." } },
+      seeded,
+      5,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const records = outcome.world.map.controlRecords;
+    expect(records.find((r) => r.id === "existing")?.status).toBe("ended");
+    expect(records.find((r) => r.status === "active")?.controllerPolityId).toBe("carthage");
+    // The rival's claim survives the handover untouched.
+    expect(outcome.world.map.claimRecords.find((c) => c.id === "syracuse-claim")?.status).toBe("active");
+  });
+
   it("does not require any force present when only firmness changes for the existing controller", () => {
     const w = world();
     const outcome = executeWorkflow(
@@ -267,6 +299,96 @@ describe("fortify_province_capital", () => {
       { actionId: "fortify_province_capital", actorId: "test-actor", parameters: { provinceId: "ita-local-23120603B86473916475875", settlementId: "nowhere", newFortificationLevel: 5 } },
       w,
       0,
+    );
+    expect(outcome.ok).toBe(false);
+  });
+});
+
+// docs/32, Part C.4: physical/political separation -- control, occupation,
+// and administration change independently of one another.
+describe("change_occupation", () => {
+  it("opens an active occupation record and ends whatever was active before", () => {
+    const w = world();
+    const first = executeWorkflow(
+      { actionId: "change_occupation", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-northeast", occupyingPolityId: "carthage", reason: "Overrun." } },
+      w,
+      1,
+    );
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const second = executeWorkflow(
+      { actionId: "change_occupation", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-northeast", occupyingPolityId: "rome", reason: "Retaken." } },
+      first.world,
+      2,
+    );
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    const records = second.world.map.occupationRecords;
+    expect(records.filter((r) => r.status === "active")).toHaveLength(1);
+    expect(records.find((r) => r.status === "active")?.occupyingPolityId).toBe("rome");
+  });
+
+  it("withdraws without opening a new record when occupyingPolityId is null", () => {
+    const w = world();
+    const occupied = executeWorkflow(
+      { actionId: "change_occupation", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-northeast", occupyingPolityId: "carthage", reason: "Overrun." } },
+      w,
+      1,
+    );
+    expect(occupied.ok).toBe(true);
+    if (!occupied.ok) return;
+    const withdrawn = executeWorkflow(
+      { actionId: "change_occupation", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-northeast", occupyingPolityId: null, reason: "Withdrew." } },
+      occupied.world,
+      2,
+    );
+    expect(withdrawn.ok).toBe(true);
+    if (!withdrawn.ok) return;
+    expect(withdrawn.world.map.occupationRecords.every((r) => r.status === "ended")).toBe(true);
+  });
+
+  it("leaves control and claim records completely untouched", () => {
+    const w = world();
+    const outcome = executeWorkflow(
+      { actionId: "change_occupation", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-northeast", occupyingPolityId: "carthage", reason: "Overrun." } },
+      w,
+      1,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.world.map.provinces.find((p) => p.id === "ita-72843720b81376294924159-sicily-northeast")?.controllerPolityId).toBe("rome");
+    expect(outcome.world.map.controlRecords).toHaveLength(0);
+    expect(outcome.world.map.claimRecords).toHaveLength(0);
+  });
+});
+
+describe("change_administration", () => {
+  it("opens an active administration record and ends whatever was active before", () => {
+    const w = world();
+    const first = executeWorkflow(
+      { actionId: "change_administration", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-northeast", administeringPolityId: "carthage", taxCapacityBps: 3_000, reason: "Occupied and taxed." } },
+      w,
+      1,
+    );
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const second = executeWorkflow(
+      { actionId: "change_administration", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-northeast", administeringPolityId: "rome", taxCapacityBps: 8_000, reason: "Restored." } },
+      first.world,
+      2,
+    );
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    const records = second.world.map.administrationRecords;
+    expect(records.filter((r) => r.status === "active")).toHaveLength(1);
+    expect(records.find((r) => r.status === "active")?.administeringPolityId).toBe("rome");
+  });
+
+  it("refuses an administrator that is not a declared polity", () => {
+    const outcome = executeWorkflow(
+      { actionId: "change_administration", actorId: "test-actor", parameters: { provinceId: "ita-72843720b81376294924159-sicily-northeast", administeringPolityId: "no-such-polity", reason: "test" } },
+      world(),
+      1,
     );
     expect(outcome.ok).toBe(false);
   });

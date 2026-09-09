@@ -192,7 +192,7 @@ const inspectForce: AnyReadToolDefinition = {
 const inspectProvince: AnyReadToolDefinition = {
   name: "inspect_province",
   description:
-    "One province: controller, firmness of control, terrain, settlements, neighbours, forces present, and material condition (population, manpower, food, stability, war damage).",
+    "One province: controller, firmness of control, terrain, settlements, named operational positions, neighbours, forces present, and material condition (population, manpower, food, stability, war damage).",
   parametersSchema: z.object({ provinceId: EntityIdSchema }).strict(),
   read(context, params: { provinceId: string }) {
     const { world } = context;
@@ -210,6 +210,7 @@ const inspectProvince: AnyReadToolDefinition = {
       .slice(0, MAX_LIST)
       .map((force) => ({ id: force.id, name: force.name, polityId: force.polityId, fitStrength: forceStrength(force) }));
     const material = world.material.provinceMaterial?.find((entry) => entry.provinceId === province.id) ?? null;
+    const positions = province.positions ?? [];
     const data = {
       id: province.id,
       name: province.name,
@@ -218,6 +219,7 @@ const inspectProvince: AnyReadToolDefinition = {
       controllerName: polityName(world, province.controllerPolityId),
       controlFirmnessBps: province.controlFirmnessBps,
       settlements: province.settlements.slice(0, MAX_LIST).map((settlement) => ({ id: settlement.id, name: settlement.name })),
+      positions: positions.slice(0, MAX_LIST).map((position) => ({ id: position.id, label: position.label, type: position.type })),
       neighbours,
       forcesPresent,
       material,
@@ -230,6 +232,7 @@ const inspectProvince: AnyReadToolDefinition = {
         // With ids: a settlement named but not identified cannot be besieged,
         // fortified, or captured, and the id gets guessed instead.
         `Settlements: ${data.settlements.map((settlement) => `${settlement.name} (${settlement.id})`).join("; ") || "none"}.`,
+        `Operational positions: ${data.positions.map((position) => `${position.label} (${position.id}, ${position.type})`).join("; ") || "none authored"}.`,
         `Borders: ${neighbours.map((neighbour) => `${neighbour.name} (${neighbour.provinceId}, ${neighbour.crossing}, distance ${neighbour.distance})`).join("; ") || "none"}.`,
         `Forces present: ${forcesPresent.map((force) => `${force.name} (${force.id}, ${force.fitStrength} fit)`).join("; ") || "none"}.`,
         material === null
