@@ -73,11 +73,12 @@ export const games = pgTable("games", {
   newsTimeoutSeconds: integer("news_timeout_seconds").notNull().default(60),
   aiProfileVersion: integer("ai_profile_version").notNull(),
   /**
-   * 1 = single centralized Game Master call (today's path, kept indefinitely for
-   * in-flight campaigns). 2 = the multi-agent dispatcher (docs/32, Part B). An
-   * active story's resolution model never changes mid-play.
+   * 2 = the multi-agent dispatcher (`agents/orchestrator.ts`), and what every
+   * new campaign gets. 1 = the deprecated single centralized Game Master call,
+   * kept only so campaigns that began under it can finish under it. An active
+   * story's resolution model never changes mid-play.
    */
-  agentArchitectureVersion: integer("agent_architecture_version").notNull().default(1),
+  agentArchitectureVersion: integer("agent_architecture_version").notNull().default(2),
   payerUserId: uuid("payer_user_id").notNull().references(() => users.id),
   creditRateCardVersion: integer("credit_rate_card_version").notNull(),
   creditBudgetMicrocredits: bigint("credit_budget_microcredits", { mode: "bigint" }).notNull(),
