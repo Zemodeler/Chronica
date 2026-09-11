@@ -232,6 +232,13 @@
       "when": 1788400300000,
       "tag": "0032_agent_architecture_and_event_queue",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1788400400000,
+      "tag": "0033_multi_agent_default",
+      "breakpoints": true
     }
   ]
 }
