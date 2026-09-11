@@ -38,6 +38,7 @@ import {
   deriveAuthoritySummary,
   chronicleHeadline,
   humanizeRefusalReason,
+  isMechanicalFailureReason,
   orderNounPhrase,
   describePoliticalQuestion,
   stripEngineJargon,
@@ -495,13 +496,16 @@ export async function resolveTurn(
       // opt out only for a deliberately constrained environment.
       allowInventedActions: process.env.CHRONICA_DISABLE_DEFINED_ACTIONS !== "true",
     };
-    // docs/32, Part B.7: an in-flight campaign's resolution model never changes
-    // mid-play, so this branches once per turn on the game's own pinned
-    // version rather than a global setting. Version 2 replaces the single
-    // centralized call with the sequenced player/NPC/star-context/closing
-    // agents (`agents/orchestrator.ts`), all against the same staged session;
-    // version 1 (default, everything before this turn) is completely
-    // untouched by that path.
+    // An in-flight campaign's resolution model never changes mid-play, so this
+    // branches once per turn on the game's own pinned version rather than a
+    // global setting. Version 2 -- the sequenced player/NPC/star-context/
+    // closing agents (`agents/orchestrator.ts`) against one staged session --
+    // is the architecture, and what every new campaign is created with.
+    //
+    // Version 1 is deprecated: the single centralized Game Master call
+    // (`game-master.ts`), kept only so campaigns that began under it can
+    // finish under it. Nothing new should be built against it, and it can be
+    // removed once no active game pins version 1.
     const runGameMasterAttempt = () => (input.agentArchitectureVersion === 2
       ? runMultiAgentTurn(gameMasterAdapter, {
         db,
@@ -746,17 +750,25 @@ export async function resolveTurn(
       // fact that nothing followed is exact; the reason is the engine's own,
       // restated in plain words rather than in the executor's.
       const noun = orderNounPhrase(refusal.actionId);
-      const verb = refusal.kind === "authority" ? "was refused him" : "found no ears";
+      // A dry-run or execution failure whose reason is about the call rather
+      // than the world is not a refusal, and must not be written as one: no
+      // one heard this, so no one can have turned it down. Same distinction
+      // `buildChronicleFromFacts` draws for a player directive.
+      const mechanical = refusal.kind !== "authority" && isMechanicalFailureReason(refusal.reason);
+      const verb = refusal.kind === "authority" ? "was refused him"
+        : mechanical ? "could not be carried through as it was given"
+        : "found no ears";
+      const closing = mechanical ? "No one refused it, and the matter remains open." : "The matter went no further.";
       return {
         sequence: 0,
-        scope: "order_refusal",
+        scope: mechanical ? "order_unresolved" : "order_refusal",
         scopeRef: `${refusal.actorId}:${refusal.actionId}:${atStep}`,
         audience: "all_players",
-        body: `${actorName} pressed for ${noun}, but it ${verb}: ${humanizeRefusalReason(refusal.reason)}. The matter went no further.`,
+        body: `${actorName} pressed for ${noun}, but it ${verb}: ${humanizeRefusalReason(refusal.reason)}. ${closing}`,
         atStep,
         materialConsequence: false,
         simulatedDurationDays: 1,
-        title: chronicleHeadline(`${noun.replace(/^the /, "The ")} Refused`),
+        title: chronicleHeadline(`${noun.replace(/^the /, "The ")} ${mechanical ? "Left Unresolved" : "Refused"}`),
         knowledgeStatus: "confirmed",
         participants: actor ? [{ name: actor.name }] : [],
         playerRelevance: refusal.actorId === actorCharacterId ? "high" : "low",

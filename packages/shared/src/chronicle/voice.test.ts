@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chronicleHeadline, humanizeIdentifiers, humanizeRefusalReason, stripEngineJargon, titleCase, ORDER_NOUNS } from "./voice";
+import { chronicleHeadline, humanizeIdentifiers, humanizeRefusalReason, isMechanicalFailureReason, stripEngineJargon, titleCase, ORDER_NOUNS } from "./voice";
 import { WORKFLOW_IDS } from "../workflows/registry";
 import { INVOKE_DEFINED_ACTION_TOOL, RECORD_REFUSAL_AFTERMATH_TOOL } from "../gm/tools";
 
@@ -106,5 +106,34 @@ describe("a schema complaint quoted back by the Game Master", () => {
 
   it("leaves a proper name in mixed case alone", () => {
     expect(humanizeIdentifiers("Hieron II and Lucius Aemilius Barbula")).toBe("Hieron II and Lucius Aemilius Barbula");
+  });
+});
+
+// The distinction that keeps a misspelled id from becoming history. "It found
+// no ears" says the world heard an order and would not act on it -- a real
+// claim about real people. For an engine failure it is simply false.
+describe("isMechanicalFailureReason", () => {
+  it("recognises the engine failing to carry a call out", () => {
+    for (const reason of [
+      'No character exists with the id "hieron"',
+      "Nothing in the world answers to settlementId \"messana\"",
+      "Invalid params for start_siege: besiegingForceId is required",
+      "start_siege cannot be applied to the current world state",
+      "The change would leave a dangling reference",
+      "No registered workflow named ransom_prisoners",
+    ]) {
+      expect(isMechanicalFailureReason(reason), reason).toBe(true);
+    }
+  });
+
+  it("leaves a genuine refusal alone, so it still reads as one", () => {
+    for (const reason of [
+      "Hanno holds no authority over the Carthaginian treasury",
+      "The Senate has no eligible sponsor for this motion",
+      "Rome cannot fund this: the war account is empty",
+      "That alliance was already broken this turn",
+    ]) {
+      expect(isMechanicalFailureReason(reason), reason).toBe(false);
+    }
   });
 });
