@@ -214,11 +214,10 @@ const initialWorld: WorldState = WorldStateSchema.parse({
   storylines: [{ id: "mamertine-syracusan-crisis", title: "The Messana Crisis", participantIds: ["hieron-ii", "mamertine-spokesman", "hanno-carthage"], provinceId: "ita-72843720b81376294924159-sicily-northeast", phase: "escalating", stakes: "Syracuse seeks to contain the Mamertines without drawing Rome and Carthage into a wider war.", history: ["Hieron II's forces pressure the Mamertines around the Strait of Messana.", "Carthage watches the strait for any opening or threat to its own position in Sicily."], nextDevelopment: "Envoys may seek outside support if the local balance collapses.", visibility: "public", updatedAtStep: 0 }],
   conflicts: { battles: [], sieges: [], wars: [] },
   // Carthage's opening objective and first concrete response to the Messana
-  // crisis (character-sim phase 3): a goal or an ambition-shaped hope is not
-  // enough to make an NPC act -- the plot's `nextIntendedMove` is what
-  // `generateCandidateActions` turns into a real, registered-workflow
-  // candidate (`advance_character_plot`) the Game Master can actually invoke,
-  // rather than free-form prose about Hanno's intentions.
+  // crisis: a goal or an ambition-shaped hope is not enough to make an NPC
+  // act -- the plot's `nextIntendedMove` is the concrete thing its agent can
+  // carry out through a registered workflow, rather than free-form prose
+  // about Hanno's intentions.
   characterGoals: [
     { id: "hanno-goal-messana-watch", characterId: "hanno-carthage", objective: "Keep Carthage's position in Sicily secure without being drawn into the Messana quarrel before Carthage's own interests in it are clear.", category: "preserve_power", targetEntityIds: ["mamertines", "syracuse"], priority: 3, status: "active", visibility: "polity", causalFactIds: [], createdAtStep: 0, updatedAtStep: 0, history: [] },
   ],
