@@ -18,9 +18,8 @@ export interface LifeEventResult {
 }
 
 /**
- * Deterministic via `stableHash` (the same tie-break mechanism
- * `character-agency/scoring.ts` already uses) -- never `Math.random()`. Two
- * identical worlds at the same step always roll the same outcome.
+ * Deterministic via `stableHash` -- never `Math.random()`. Two identical
+ * worlds at the same step always roll the same outcome.
  */
 export function rollLifeEvent(
   character: Pick<Character, "id" | "disqualifyingStatuses">,

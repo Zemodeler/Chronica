@@ -2,8 +2,8 @@
 //
 // Every decision the agency system makes must be reproducible from the same
 // world state and the same step: no `Math.random()`, no wall-clock, no
-// per-process entropy. Scoring (`character-agency/scoring.ts`) already sorts
-// candidates by a documented formula; this module exists only for the rare
+// per-process entropy. Relevance selection (`character-agency/selector.ts`)
+// sorts by a documented formula; this module exists only for the rare
 // case where two candidates score exactly equal and something still has to
 // break the tie in a way that varies sensibly across characters and turns
 // without ever being "random" in the sense a replay could disagree with.

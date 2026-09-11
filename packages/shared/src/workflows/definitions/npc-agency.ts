@@ -20,9 +20,9 @@ import { investigateBelief } from "../../characters/beliefs";
 // command layer now instead of only from the pipeline.
 //
 // A command must not decide whether an actor "would want" to act -- that is
-// exactly what character-agency/scoring.ts's candidate ranking used to do on
-// the Game Master's behalf. It stays as advisory context (surfaced in the
-// prompt); which candidate to act on, if any, is the Game Master's choice.
+// exactly what the retired candidate-ranking pass used to do on the actor's
+// behalf. It stays as advisory context (surfaced in the prompt); what to act
+// on, if any, is the acting agent's own choice.
 
 /** The one-word social effect this workflow may record; its magnitude/dimension mapping is a fixed game-balance fact, not a choice. */
 export const SocialActionKindSchema = z.enum([
