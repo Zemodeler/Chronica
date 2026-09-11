@@ -13,8 +13,9 @@ The game accepts ambitious, conditional orders instead of a menu of verbs. AI in
 - [Product guide](docs/product.md) — player experience, scope, content, and current priorities.
 - [Architecture guide](docs/architecture.md) — authoritative rules, turn resolution, plans, time, data, and development notes.
 - [Workflow reference](docs/workflows.md) — every built-in MCP-style world-data tool and its input contract.
+- [World cycles](docs/world-cycles/README.md) — designs for what the world does between decisions: money, upkeep, and terms of office. Specifications for unbuilt work, not descriptions of current behaviour.
 
-The documentation intentionally describes the current direction, not a chronological record of replaced proposals.
+The documentation intentionally describes the current direction, not a chronological record of replaced proposals. Anything not yet built says so at the top.
 
 ## Run locally
 
