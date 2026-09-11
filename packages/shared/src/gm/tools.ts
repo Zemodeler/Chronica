@@ -26,7 +26,7 @@ import { InterpretPlanSchema, ExecutePlanStageSchema, RespondToAssignmentSchema,
 // reviewable workflow; `invoke_defined_action` then uses it. Every use is
 // re-validated against the whole world document just like a built-in workflow.
 
-export type GameMasterToolKind = "read" | "action" | "capability" | "finish" | "define" | "aftermath" | "plan";
+export type GameMasterToolKind = "read" | "action" | "capability" | "finish" | "define" | "aftermath" | "plan" | "intent";
 
 export interface GameMasterToolDefinition {
   readonly name: string;
@@ -44,6 +44,7 @@ export const RECORD_REFUSAL_AFTERMATH_TOOL = "record_refusal_aftermath";
 export const RECORD_ENTITY_NOTE_TOOL = "record_entity_note";
 export const FLAG_NPC_INITIATED_DIALOGUE_TOOL = "flag_npc_initiated_dialogue";
 export const FLAG_AMBIENT_EVENT_TOOL = "flag_ambient_event";
+export const DECLARE_INTENT_TOOL = "declare_intent";
 
 /**
  * JSON Schema keywords a provider's function-calling validator has no use for
@@ -310,6 +311,41 @@ export function buildInvokeDefinedActionTool(): GameMasterToolDefinition {
   };
 }
 
+const DeclareIntentArgsSchema = z
+  .object({
+    actorId: EntityIdSchema,
+    /** What this character means to do, in their own terms. Not a tool call. */
+    intent: z.string().trim().min(8).max(600),
+    /** Why they are doing it -- carried into the interpretation so a faithful reading is possible. */
+    reason: z.string().trim().min(1).max(400),
+    /** Ids the actor believes are involved. Advisory: the interpreter verifies them. */
+    referencedEntityIds: z.array(EntityIdSchema).max(8).default([]),
+  })
+  .strict();
+
+/**
+ * How a character who is not the player says what they are doing.
+ *
+ * A character does not reach into the world's data and change a row; they
+ * decide something, and what follows is whatever the world permits. So an
+ * actor's own agent states intent here, and a later interpretation pass works
+ * out which validated workflows -- if any -- that intent amounts to. The
+ * separation buys two things worth the extra pass: an actor can want
+ * something the tool catalogue has no verb for (and be honestly recorded as
+ * having failed to get it, rather than silently doing something adjacent that
+ * happened to be callable), and no character's own reasoning is shaped by
+ * which function signatures happen to exist.
+ */
+export function buildDeclareIntentTool(): GameMasterToolDefinition {
+  return {
+    name: DECLARE_INTENT_TOOL,
+    kind: "intent",
+    description:
+      "State what you intend to do and why, in your own words -- not as a tool call. Say it concretely enough to be acted on: who or what you are acting against, where, and with which of your own people or forces. This does not change the world by itself; it is read afterwards and carried out as far as the world actually allows, which may be not at all. Declare one intent per call, and only for yourself. If you intend nothing this turn, call nothing.",
+    parameters: toJsonSchema(DeclareIntentArgsSchema),
+  };
+}
+
 const cachedTools = new Map<boolean, GameMasterToolDefinition[]>();
 
 /**
@@ -331,6 +367,7 @@ export function buildGameMasterTools(options: { readonly allowInventedActions?: 
       buildRecordEntityNoteTool(),
       buildFlagNpcInitiatedDialogueTool(),
       buildFlagAmbientEventTool(),
+      buildDeclareIntentTool(),
       buildFinishTool(),
       { name: "interpret_plan", kind: "plan", description: "Interpret a saved player plan as up to twelve concrete stages, OR ask clarification questions -- never both in the same call. First classify every factual assertion the plan's own text makes as a claim (world_premise, actor_belief, deliberate_message, preference, or condition) and check it against known facts; a world_premise you know to be contradicted must never become the basis for a stage. Ask clarification only when several interpretations would diverge materially, an actor or target cannot be inferred safely, the order could start a war, spend beyond an unstated amount, surrender territory, kill someone, or abandon a major commitment, or no interpretation preserves every stated constraint -- never for a harmless implementation detail. Infer method, conditions, secrecy, named delegates and any spending cap from the plan's own words -- never invent a delegate or a sum the player did not name. Preserve original intent, completed stages and, once spending has occurred, the same budget account. One stage corresponds to one action; use dependencies and time/location conditions. This records a plan, not an outcome.", parameters: toJsonSchema(InterpretPlanSchema) },
       { name: "execute_plan_stage", kind: "plan", description: "Attempt one ready plan stage through a registered or defined action. Dependencies, delegate acceptance, personal time, authority and actual spending are checked. Completed stages are never repeated; blocked stages persist for retry.", parameters: toJsonSchema(ExecutePlanStageSchema) },
@@ -347,6 +384,7 @@ export const CapabilityToolArguments = CapabilityToolArgsSchema;
 export const FinishToolArguments = FinishToolArgsSchema;
 export const RefusalAftermathToolArguments = RefusalAftermathToolArgsSchema;
 export const RecordEntityNoteToolArguments = RecordEntityNoteToolArgsSchema;
+export const DeclareIntentToolArguments = DeclareIntentArgsSchema;
 export const FlagNpcInitiatedDialogueArguments = FlagNpcInitiatedDialogueArgsSchema;
 export const FlagAmbientEventArguments = FlagAmbientEventArgsSchema;
 

@@ -53,10 +53,10 @@ export async function runStarContextAgent(input: RunStarContextAgentInput): Prom
   const representativeId = input.context.representativeCharacterId;
 
   const allTools = input.session.listTools();
-  // Acting through a living representative gets the same scoped surface an
-  // NPC agent gets (own-identity action tools only, never treasury/world-
-  // authoring); with no representative, this context can only read and
-  // record a note -- there is no character to bind a mutating principal to.
+  // Acting through a living representative gets the same surface an NPC agent
+  // gets: read and declare intent, never a workflow call. With no
+  // representative, this context can only read and record a note -- there is
+  // no character to attribute an intention to, let alone an action.
   const tools = representativeId !== null
     ? npcToolSurface(allTools)
     : allTools.filter((tool) => tool.kind === "read" || tool.name === RECORD_ENTITY_NOTE_TOOL);
@@ -65,7 +65,7 @@ export async function runStarContextAgent(input: RunStarContextAgentInput): Prom
   const systemPrompt = [
     summarizePayload(input.context, payload, visibleFacts),
     representativeId !== null
-      ? `You act through ${representativeId}, its living representative, at step ${input.atStep}.`
+      ? `You act through ${representativeId}, its living representative, at step ${input.atStep}. Say what they mean to do with declare_intent, in plain terms; it is carried out afterwards as far as the world allows.`
       : `This scope currently has no living representative -- you may read and record what continues here, but nothing here can act (no character to attribute an action to).`,
     "This is background continuation, not the player's own theatre: resolve it plausibly and economically, without inventing detail beyond what a distant, mostly self-running process would produce.",
     "When you have done what is warranted, stop calling tools.",

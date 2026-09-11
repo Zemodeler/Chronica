@@ -18,7 +18,16 @@ import type { InventedWorkflowDefinition } from "@chronica/shared";
 import { buildGameMasterOpeningMessage, buildGameMasterSystemPrompt } from "./game-master-prompt";
 import type { ResolutionPlayerContext } from "./prompts";
 
-// The Game Master loop (GM refactor, requirement 3).
+// The single centralized Game Master loop -- DEPRECATED (architecture
+// version 1).
+//
+// Version 2 (`agents/orchestrator.ts`) is the architecture now, and every new
+// campaign is created with it. This path survives only so campaigns that began
+// under it can finish under it, because a story's resolution model never
+// changes mid-play. Do not build new behavior here: anything that should shape
+// how turns resolve belongs in the orchestrator's agents or, if it is a rule
+// rather than a prompt, in `GameMasterSession` where both paths share it. Once
+// no active game pins version 1, this file and its prompt go.
 //
 // This owns the conversation; the adapter owns one provider round-trip and the
 // session owns the staged world. Nothing else can move state. The loop is
@@ -116,11 +125,16 @@ export async function runGameMaster(
     scenarioChronicle: input.scenarioChronicle,
     allowInventedActions: input.allowInventedActions ?? true,
   });
-  const tools: AiToolDefinition[] = session.listTools().map((tool) => ({
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.parameters,
-  }));
+  // `declare_intent` is withheld here. This path has no interpretation pass:
+  // this one agent decides and executes for every character itself, so an
+  // intent declared on it would be recorded and then carried out by nobody.
+  const tools: AiToolDefinition[] = session.listTools()
+    .filter((tool) => tool.kind !== "intent")
+    .map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    }));
 
   const messages: AiConversationMessage[] = [
     { role: "user", content: buildGameMasterOpeningMessage(input.atStep) },

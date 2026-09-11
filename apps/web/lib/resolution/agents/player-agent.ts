@@ -45,7 +45,12 @@ function buildOpeningMessage(input: RunPlayerAgentInput): string {
 }
 
 export async function runPlayerAgent(input: RunPlayerAgentInput): Promise<AgentLoopResult> {
-  const tools = input.session.listTools().filter((tool) => tool.kind !== "finish");
+  // Everything but `finish_turn` (the closing pass owns that) and
+  // `declare_intent`. The player already declared their intent -- it is the
+  // directive text, in their own words, and it becomes stages through
+  // `interpret_plan`. A second, agent-authored intent alongside it would
+  // route the player's own turn through a paraphrase of what they wrote.
+  const tools = input.session.listTools().filter((tool) => tool.kind !== "finish" && tool.kind !== "intent");
   const principal: Principal = { kind: "player", characterId: input.actorCharacterId };
   return runAgentLoop({
     adapter: input.adapter,

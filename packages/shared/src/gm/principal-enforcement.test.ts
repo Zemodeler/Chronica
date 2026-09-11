@@ -26,6 +26,7 @@ const NPC_A: Principal = { kind: "npc", characterId: "hanno" };
 const NPC_B: Principal = { kind: "npc", characterId: "hamilcar" };
 const PLAYER: Principal = { kind: "player", characterId: "marcus-atilius" };
 const CLOSING: Principal = { kind: "closing" };
+const INTERPRETER: Principal = { kind: "interpreter" };
 
 describe("GameMasterSession principal enforcement", () => {
   it("refuses an NPC agent calling a workflow action as a different character", () => {
@@ -124,5 +125,53 @@ describe("GameMasterSession principal enforcement", () => {
     expect(outcome.factual).toMatch(/order-1 issued/i);
     expect(session.stagedWorld.orderAttempts[0]?.authorityCheck.authorized).toBe(false);
     expect(session.stagedWorld.orderAttempts[0]?.authorityCheck.reason).toMatch(/held by character "hamilcar", not character "hanno"/i);
+  });
+});
+
+// Routing NPCs through declared intent moves the identity question one step:
+// the interpreter is not bound to one character, so what stops it acting for
+// someone who decided nothing is the session's own record of what was
+// actually declared -- never the interpreter's own say-so.
+describe("GameMasterSession interpreter principal", () => {
+  const declare = (actorId: string, intent: string) =>
+    call("declare_intent", { actorId, intent, reason: "It serves my position to do so." });
+
+  it("refuses to act for a character who declared no intent", () => {
+    const session = createGameMasterSession({ world: world(), atStep: 1, actorCharacterId: "marcus-atilius", directiveIds: [] });
+    const outcome = session.invoke(call("move_character", { actorId: "hanno", characterId: "hanno", destinationProvinceId: "x" }), INTERPRETER);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.factual).toMatch(/declared no intent this turn/i);
+  });
+
+  it("acts for a character who did declare one", () => {
+    const session = createGameMasterSession({ world: world(), atStep: 1, actorCharacterId: "marcus-atilius", directiveIds: [] });
+    expect(session.invoke(declare("hanno", "Move myself to the strait and see the crossing for myself."), NPC_A).ok).toBe(true);
+
+    // Reaches the workflow rather than the identity gate: refused for a bad
+    // province id, which is a fact about the world, not about who is asking.
+    const outcome = session.invoke(call("move_character", { actorId: "hanno", characterId: "hanno", destinationProvinceId: "nowhere-at-all" }), INTERPRETER);
+    expect(outcome.factual).not.toMatch(/declared no intent/i);
+  });
+
+  it("still refuses an NPC agent declaring an intent for someone else", () => {
+    const session = createGameMasterSession({ world: world(), atStep: 1, actorCharacterId: "marcus-atilius", directiveIds: [] });
+    const outcome = session.invoke(declare("hamilcar", "Sail for Sicily at once with every ship I hold."), NPC_A);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.factual).toMatch(/you may only act as "hanno"/i);
+  });
+
+  it("records an intent without moving the world, and reports it uncarried", () => {
+    const session = createGameMasterSession({ world: world(), atStep: 1, actorCharacterId: "marcus-atilius", directiveIds: [] });
+    const before = session.stagedWorld;
+
+    const outcome = session.invoke(declare("hanno", "Raise the whole of Carthage against Syracuse this season."), NPC_A);
+
+    expect(outcome.ok).toBe(true);
+    expect(session.stagedWorld).toBe(before);
+    const [intent] = session.result().declaredIntents;
+    expect(intent?.actorId).toBe("hanno");
+    expect(intent?.carried).toBe(false);
+    // An intention is not an event. Nothing here may reach the Chronicle.
+    expect(session.result().events).toEqual([]);
   });
 });
