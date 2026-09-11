@@ -2,7 +2,7 @@ import "server-only";
 
 import type { ChronicleEntryInput } from "@chronica/db";
 import type { EntityStateDelta, FactualEvent, GameMasterTurnReport, ScenarioClock, WorldState } from "@chronica/shared";
-import { chronicleHeadline, deriveChronicleDepth, deriveWorldTime, estimateWorkflowDurationDays, humanizeRefusalReason, stripEngineJargon, RECORD_REFUSAL_AFTERMATH_TOOL, FLAG_AMBIENT_EVENT_TOOL, FLAG_NPC_INITIATED_DIALOGUE_TOOL } from "@chronica/shared";
+import { chronicleHeadline, deriveChronicleDepth, deriveWorldTime, estimateWorkflowDurationDays, humanizeRefusalReason, isMechanicalFailureReason, stripEngineJargon, RECORD_REFUSAL_AFTERMATH_TOOL, FLAG_AMBIENT_EVENT_TOOL, FLAG_NPC_INITIATED_DIALOGUE_TOOL } from "@chronica/shared";
 
 // Chronicle from facts (GM refactor, requirement 8).
 //
@@ -31,6 +31,18 @@ const WORLD_SCOPE = "world_event";
  * to answer them.
  */
 const INCOMPLETE_SCOPE = "resolution_incomplete";
+/**
+ * The order was given, the engine could not carry it out, and nothing in the
+ * world declined it -- a guessed id, arguments the call itself rejected, an
+ * action the registry does not have. The session already retries these (with
+ * an automatic id repair first), so reaching here means the retry failed too.
+ *
+ * Deliberately not `REFUSAL_SCOPE`. "It found no ears" asserts that the world
+ * heard the order and would not act on it, which is a real historical claim
+ * and, for this class of failure, a false one. The matter is left open
+ * instead, which is what actually happened.
+ */
+const UNRESOLVED_SCOPE = "order_unresolved";
 
 /** Reasons a directive produced no world change. These stay executor-worded. */
 const NON_SUCCESS_OUTCOMES = new Set(["refused", "failed", "unsupported"]);
@@ -257,20 +269,29 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
     // way; it is deliberately kept out of the narrator pass downstream so no
     // invented institutional explanation can attach to it.
     const actorName = world.characters.find((character) => character.id === input.actorCharacterId)?.name ?? "The order's author";
+    // Nothing in the world refused this one; it could not be carried out as
+    // written. It is reported as still open rather than as rejected.
+    const failureReason = outcome?.reason;
+    const mechanicalReason = !succeeded && namedRefusal === undefined && report !== null
+      && failureReason !== undefined && isMechanicalFailureReason(failureReason)
+      ? failureReason
+      : null;
     const body = succeeded
       ? factBody(events, refs)
       : namedRefusal !== undefined
           ? factBody(events, refs)
         : report === null
           ? `${actorName}'s order was still being carried through when this turn's resolution stopped short. What became of it is not yet known.`
-        : outcome?.reason !== undefined
-          ? `${actorName} gave the order, but it found no ears: ${humanizeRefusalReason(outcome.reason)}. The matter went no further.`
+        : mechanicalReason !== null
+          ? `${actorName}'s order could not be carried out as it was given: ${humanizeRefusalReason(mechanicalReason)}. No one refused it, and the matter remains open.`
+        : failureReason !== undefined
+          ? `${actorName} gave the order, but it found no ears: ${humanizeRefusalReason(failureReason)}. The matter went no further.`
           : "The order was given, but it found no ears. The matter went no further.";
     const directiveDialogue = initiatedDialogueOf(refEvents, world);
     const directiveInitiatedDialogue = directiveDialogue === undefined ? {} : { initiatedDialogue: directiveDialogue };
 
     entries.push({
-      scope: succeeded ? PLAYER_SCOPE : report === null ? INCOMPLETE_SCOPE : REFUSAL_SCOPE,
+      scope: succeeded ? PLAYER_SCOPE : report === null ? INCOMPLETE_SCOPE : mechanicalReason !== null ? UNRESOLVED_SCOPE : REFUSAL_SCOPE,
       scopeRef: directiveId,
       audience: "all_players",
       body,
@@ -279,7 +300,11 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
       materialConsequence: succeeded,
       simulatedDurationDays: estimateWorkflowDurationDays(applied.map((event) => event.actionId)),
       factActionIds: [...new Set(applied.map((event) => event.actionId))],
-      title: succeeded ? playerTitle(applied, world, input.actorCharacterId) : namedRefusal !== undefined ? "The Refusal Answered" : report === null ? "Resolution Incomplete" : "The Unheard Order",
+      title: succeeded ? playerTitle(applied, world, input.actorCharacterId)
+        : namedRefusal !== undefined ? "The Refusal Answered"
+        : report === null ? "Resolution Incomplete"
+        : mechanicalReason !== null ? "The Order Left Unresolved"
+        : "The Unheard Order",
       knowledgeStatus: "confirmed",
       sourceDirector: "player",
       chainPosition: "root",
@@ -381,7 +406,7 @@ export function buildChronicleFromFacts(input: ChronicleFromFactsInput): Chronic
  * A refusal says exactly why nothing happened; a free-form rewrite could only
  * add an institutional cause the engine never gave, so it is left alone.
  */
-export const NARRATOR_EXEMPT_SCOPES: ReadonlySet<string> = new Set([REFUSAL_SCOPE, INCOMPLETE_SCOPE]);
+export const NARRATOR_EXEMPT_SCOPES: ReadonlySet<string> = new Set([REFUSAL_SCOPE, INCOMPLETE_SCOPE, UNRESOLVED_SCOPE]);
 
 /**
  * Scopes the narrator may write, but only under a hard outcome lock: the

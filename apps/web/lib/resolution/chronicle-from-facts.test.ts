@@ -327,7 +327,7 @@ describe("a refused order", () => {
         directiveOutcomes: [{
           directiveId: "directive-0",
           outcome: "refused",
-          reason: 'Refused: Workflow "create_force" cannot be applied to the current world state.',
+          reason: "Refused: Hanno holds no authority over the Carthaginian treasury.",
           factRefs: [],
         }],
       }),
@@ -338,9 +338,42 @@ describe("a refused order", () => {
     expect(entry?.scope).toBe("order_refusal");
     // The refusal survives exactly; the executor's wording of it does not.
     expect(entry?.body).toContain("found no ears");
-    expect(entry?.body).toContain("circumstances as they stood did not admit it");
+    expect(entry?.body).toContain("holds no authority over the Carthaginian treasury");
+    expect(entry?.materialConsequence).toBe(false);
+    expect(NARRATOR_EXEMPT_SCOPES.has(entry!.scope)).toBe(true);
+  });
+
+  // The bug: every failure read as a refusal, so an order that died on a
+  // guessed id was written up as one the world heard and rejected. Nobody
+  // heard it. Nobody refused it. Saying otherwise invents a decision that no
+  // one in the world ever made.
+  it("does not call an engine failure a refusal", () => {
+    const entries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      events: [],
+      report: report({
+        directiveOutcomes: [{
+          directiveId: "directive-0",
+          outcome: "failed",
+          reason: 'Refused: Workflow "create_force" cannot be applied to the current world state.',
+          factRefs: [],
+        }],
+      }),
+      directiveIds: ["directive-0"],
+    });
+    const entry = entries[0];
+
+    expect(entry?.scope).toBe("order_unresolved");
+    expect(entry?.title).toBe("The Order Left Unresolved");
+    expect(entry?.body).not.toContain("found no ears");
+    expect(entry?.body).toContain("could not be carried out");
+    expect(entry?.body).toContain("No one refused it");
     expect(entry?.body).not.toMatch(/workflow|world state|create_force/i);
     expect(entry?.materialConsequence).toBe(false);
+    // Still executor-worded: the narrator may not dress an engine failure in
+    // an institutional cause it never had.
     expect(NARRATOR_EXEMPT_SCOPES.has(entry!.scope)).toBe(true);
   });
 

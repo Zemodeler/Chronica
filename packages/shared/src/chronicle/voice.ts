@@ -98,6 +98,41 @@ export function humanizeRefusalReason(reason: string): string {
 }
 
 /**
+ * Reasons that describe the engine failing to carry a call out, rather than
+ * anything in the world declining it: a guessed id, arguments the call itself
+ * rejected, an unregistered action, a mutation that would have broken the
+ * world document.
+ *
+ * These are exactly the classes `humanizeRefusalReason` above already maps to
+ * a machine cause rather than an in-world one, and exactly the classes
+ * `GameMasterSession` treats as recoverable. Kept as one list because the
+ * distinction they draw matters twice: the session retries them, and the
+ * Chronicle must not report them as the world saying no.
+ */
+const MECHANICAL_FAILURE_PATTERNS: readonly RegExp[] = [
+  /\bwith the id\b/i,
+  /\banswers to\b/i,
+  /\bdoes not exist in world state\b/i,
+  /\binvalid param/i,
+  /cannot be applied to the current world state/i,
+  /would leave a dangling reference|produced an invalid world state/i,
+  /no (?:registered )?workflow|unknown (?:action|workflow)/i,
+];
+
+/**
+ * Whether nothing in the world actually refused this -- the attempt simply
+ * could not be carried out as written.
+ *
+ * The distinction is the difference between history and a lie. A consul who
+ * refuses a command is an event; a misspelled province id is not, and a
+ * Chronicle that reports the second as the first has invented a refusal that
+ * never happened.
+ */
+export function isMechanicalFailureReason(reason: string): boolean {
+  return MECHANICAL_FAILURE_PATTERNS.some((pattern) => pattern.test(reason));
+}
+
+/**
  * Last-resort scrub: replaces machine vocabulary with ordinary words in prose
  * that is otherwise fine. Substitution, not deletion -- cutting a term out of
  * a sentence leaves a gap a reader can see just as plainly as the term itself.
