@@ -26,17 +26,24 @@ import type { RunGameMasterResult } from "../game-master";
 import { runPlayerAgent } from "./player-agent";
 import { runNpcAgent } from "./npc-agent";
 import { runStarContextAgent } from "./star-context-agent";
+import { runIntentInterpreter } from "./interpreter-agent";
 import { runClosingAgent } from "./closing-agent";
 
 // The multi-agent dispatcher (docs/32, Part B.1/B.7 -- `agentArchitectureVersion: 2`).
 //
 // One canonical mutator, several sequential LLM conversations: player-
 // reasoning always first and uncounted against budget, then up to 8 selected
-// NPC/star-context agents (at most 2 of them star contexts), then one closing
-// pass that reads the stage back and submits the turn report. Every agent
-// shares one `GameMasterSession`, so `session.invoke()`'s own re-validation
-// against current staged state is what keeps this race-free -- there is no
-// separate "merge N diffs" step.
+// NPC/star-context agents (at most 2 of them star contexts), then the intent
+// interpreter, then one closing pass that reads the stage back and submits
+// the turn report. Every agent shares one `GameMasterSession`, so
+// `session.invoke()`'s own re-validation against current staged state is what
+// keeps this race-free -- there is no separate "merge N diffs" step.
+//
+// The actor agents decide; the interpreter acts. Those agents hold no
+// mutating tool at all (`npcToolSurface`), so between the player pass and the
+// interpreter the staged world does not move on any NPC's account -- which is
+// also why the interpreter runs once, at the end, rather than after each
+// actor: it is the only pass that can see the turn's intentions together.
 //
 // Returns the same shape `runGameMaster` does (`RunGameMasterResult`) so
 // `pipeline.ts`'s existing post-processing (Chronicle, commit) needs no
@@ -142,6 +149,23 @@ export async function runMultiAgentTurn(adapter: AiAdapter, input: RunMultiAgent
     modelSteps += result.modelSteps;
     if (result.providerError !== null) providerError = result.providerError;
     console.log(`${tag(input.atStep)} ${actor.kind} agent (${actor.kind === "npc" ? actor.characterId : actor.context.id}) finished: termination=${result.termination} toolCalls=${result.toolCallsMade}`);
+  }
+
+  // Everything the actors decided, carried out in one pass. Skipped entirely
+  // when nobody declared anything, so a quiet turn costs no model call here.
+  if (!session.isFinished && !session.exhausted) {
+    const interpreterResult = await runIntentInterpreter({ adapter, session, atStep: input.atStep });
+    if (interpreterResult !== undefined) {
+      modelSteps += interpreterResult.modelSteps;
+      if (interpreterResult.providerError !== null) providerError = interpreterResult.providerError;
+      const intents = session.result().declaredIntents;
+      const uncarried = intents.filter((intent) => !intent.carried);
+      console.log(
+        `${tag(input.atStep)} interpreter finished: termination=${interpreterResult.termination} `
+        + `toolCalls=${interpreterResult.toolCallsMade} intents=${intents.length} uncarried=${uncarried.length}`
+        + (uncarried.length === 0 ? "" : ` [${uncarried.map((intent) => `${intent.actorId}:${intent.id}`).join(", ")}]`),
+      );
+    }
   }
 
   const closingResult = await runClosingAgent({ adapter, session, atStep: input.atStep });

@@ -6,6 +6,7 @@ import type { ProposedInvocation } from "../actions/orders";
 import { WORKFLOW_REGISTRY } from "../workflows/registry";
 import { executeWorkflow } from "../workflows/executor";
 import { validateCandidate, createInvocationDuplicateGuard, type PolicyViolation } from "../workflows/policy";
+import { repairInvocationIds } from "../workflows/diagnose";
 import { InventedWorkflowDefinitionSchema, applyInventedWorkflow, validateInventedWorkflowDefinition, type InventedWorkflowDefinition } from "../workflows/invented-workflow";
 import type { WorkflowAuditEntry, WorkflowCandidate } from "../workflows/manager-types";
 import { READ_TOOL_BY_NAME, type PrivateInformationPolicy, type ReadToolContext } from "./read-tools";
@@ -33,6 +34,8 @@ import {
   FlagNpcInitiatedDialogueArguments,
   FLAG_AMBIENT_EVENT_TOOL,
   FlagAmbientEventArguments,
+  DECLARE_INTENT_TOOL,
+  DeclareIntentToolArguments,
   buildGameMasterTools,
   type GameMasterToolDefinition,
 } from "./tools";
@@ -93,6 +96,30 @@ export interface FactualEvent {
    * from `summary` alone.
    */
   readonly stateDeltas?: readonly EntityStateDelta[];
+}
+
+/**
+ * What one character decided to do this turn, before anything worked out
+ * whether the world allows it.
+ *
+ * This is a record of will, not of action. It changes nothing on its own: the
+ * interpreter pass reads these and attempts the workflows each one amounts
+ * to, and `carried` says whether any of them actually took. An intent that
+ * ends the turn uncarried is a real and reportable outcome -- the character
+ * tried and the world did not move -- which is exactly the thing that gets
+ * lost when an actor can only ever "decide" things the tool catalogue already
+ * has a verb for.
+ */
+export interface DeclaredIntent {
+  readonly id: string;
+  readonly actorId: string;
+  readonly actorName: string;
+  readonly intent: string;
+  readonly reason: string;
+  readonly referencedEntityIds: readonly string[];
+  readonly atStep: number;
+  /** Set once an action taken for this actor by the interpreter applies. */
+  carried: boolean;
 }
 
 /** Structured, deterministic facts about one resolved battle, for the Chronicle. */
@@ -345,6 +372,13 @@ export interface GameMasterSessionResult {
    * scheduling primitive (an order attempt awaits its own later decision).
    */
   readonly scheduledActions: readonly { readonly actionId: string; readonly actorId: string; readonly parameters: Record<string, unknown> }[];
+  /**
+   * Every intent declared this turn, each flagged with whether the
+   * interpreter got anything done for that actor. An uncarried intent is
+   * diagnostic, not history: it says a character wanted something the world
+   * would not give them.
+   */
+  readonly declaredIntents: readonly DeclaredIntent[];
 }
 
 const DEFAULT_MAX_TOOL_CALLS = 60;
@@ -354,6 +388,21 @@ const DEFAULT_MAX_TOOL_CALLS = 60;
  * cap keeps a single turn focused on the world already in play.
  */
 const MAX_DEFINITIONS_PER_TURN = 3;
+
+/**
+ * How many times a turn may be sent back to correct the same failed call
+ * before its report is accepted anyway.
+ *
+ * The first push-back asks for a corrected retry. The second offers the way
+ * out: define an action for the intent, or report plainly that it was not
+ * carried out. After that the report stands, because the alternative is
+ * worse -- an unbounded correction loop burns the tool budget, the turn ends
+ * with no accepted report at all, and the player gets a blank turn instead of
+ * an honest "this did not go through". The Chronicle words a failure of this
+ * class as unresolved rather than as a refusal, so letting it through does
+ * not put a lie in the record.
+ */
+const MAX_RECOVERABLE_RETRY_PUSHBACKS = 2;
 
 /**
  * A battle's outcome is the deterministic resolver's, never a model's. The
@@ -400,6 +449,8 @@ export class GameMasterSession {
    * one corrected attempt.
    */
   private readonly pendingRecoverableRetries = new Set<string>();
+  /** How many times `finish` has been refused over `pendingRecoverableRetries`; see `MAX_RECOVERABLE_RETRY_PUSHBACKS`. */
+  private recoverableRetryPushbacks = 0;
   /** Actions this campaign has: the ones carried in from earlier turns, plus any defined now. */
   private readonly definedActions: Map<string, InventedWorkflowDefinition>;
   private readonly definedThisTurn: InventedWorkflowDefinition[] = [];
@@ -420,6 +471,7 @@ export class GameMasterSession {
   private readonly worldToolAuthorityIndex: AuthorityIndex | undefined;
   private readonly worldToolInvocations: { toolId: string; actorId: string; parameters: Record<string, unknown> }[] = [];
   private readonly worldToolFacts: Fact[] = [];
+  private readonly declaredIntents: DeclaredIntent[] = [];
   /** Monotonic, per-session counter for `record_fact`'s deterministic id (docs/32 corrective pass, requirement 4). */
   private worldToolCallSequence = 0;
   private readonly deferMutations: boolean;
@@ -484,6 +536,11 @@ export class GameMasterSession {
     return this.toolCallCount >= this.maxToolCalls;
   }
 
+  /** What the non-player actors said they mean to do, for the interpreter pass to act on. */
+  get intents(): readonly DeclaredIntent[] {
+    return this.declaredIntents;
+  }
+
   result(): GameMasterSessionResult {
     return {
       world: this.staged,
@@ -499,6 +556,7 @@ export class GameMasterSession {
       worldToolInvocations: [...this.worldToolInvocations],
       worldToolFacts: [...this.worldToolFacts],
       scheduledActions: [...this.scheduledActions],
+      declaredIntents: this.declaredIntents.map((intent) => ({ ...intent })),
     };
   }
 
@@ -553,6 +611,7 @@ export class GameMasterSession {
     if (call.name === RECORD_ENTITY_NOTE_TOOL) return this.recordEntityNote(args);
     if (call.name === FLAG_NPC_INITIATED_DIALOGUE_TOOL) return this.flagNpcInitiatedDialogue(args);
     if (call.name === FLAG_AMBIENT_EVENT_TOOL) return this.flagAmbientEvent(args);
+    if (call.name === DECLARE_INTENT_TOOL) return this.declareIntent(args);
     if (READ_TOOL_BY_NAME.has(call.name)) return this.read(call.name, args);
     if (WORKFLOW_REGISTRY.has(call.name)) return this.act(call.name, args);
     if (this.enableWorldTools && (WORLD_TOOL_BY_NAME.has(call.name) || WORLD_READ_TOOL_BY_NAME.has(call.name))) {
@@ -713,6 +772,17 @@ export class GameMasterSession {
     if (!canActAsPrincipal(this.currentPrincipal)) {
       return "Refused: this pass may not take state-changing actions.";
     }
+    // The interpreter is bound to a set rather than to one identity: it may
+    // act for exactly those actors that declared an intent this turn, and the
+    // set is this session's own record, not anything the pass can assert. An
+    // interpreter acting for someone who declared nothing would be inventing
+    // a decision no character made -- the precise thing routing NPCs through
+    // intent exists to prevent.
+    if (this.currentPrincipal.kind === "interpreter") {
+      return this.declaredIntents.some((intent) => intent.actorId === actorId)
+        ? null
+        : `Refused: "${actorId}" declared no intent this turn, so nothing may be done in their name. Act only for the actors whose intents you were given.`;
+    }
     const boundActorId = actorIdForPrincipal(this.currentPrincipal);
     if (boundActorId !== null && actorId !== boundActorId) {
       return `Refused: you may only act as "${boundActorId}", not "${actorId}".`;
@@ -783,7 +853,7 @@ export class GameMasterSession {
       const eventsBefore = this.events.length;
       const executedBefore = this.executedInvocations.length;
       const auditBefore = this.auditEntries.length;
-      const outcome = this.applyInvocation(invocation, "game_master");
+      const outcome = this.applyInvocationRepairingIds(invocation, "game_master");
       if (!outcome.ok) {
         if (outcome.recoverable) this.pendingRecoverableRetries.add(retryKey);
         return {
@@ -798,10 +868,12 @@ export class GameMasterSession {
       this.executedInvocations.length = executedBefore;
       this.auditEntries.length = auditBefore;
       this.pendingRecoverableRetries.delete(retryKey);
-      this.scheduledActions.push({ actionId, actorId, parameters });
+      // The repaired parameters, so the event the queue schedules names the
+      // entity the validated call actually resolved to.
+      this.scheduledActions.push({ actionId, actorId, parameters: outcome.appliedParameters });
       return { ok: true, finished: false, factual: `Scheduled: "${actionId}" by ${actorId} will take effect on the world's own timeline, not instantly.` };
     }
-    const outcome = this.applyInvocation(invocation, "game_master");
+    const outcome = this.applyInvocationRepairingIds(invocation, "game_master");
     if (!outcome.ok) {
       if (outcome.recoverable) this.pendingRecoverableRetries.add(retryKey);
       this.recordCapabilityRepairAttempt(actorId, outcome);
@@ -815,15 +887,21 @@ export class GameMasterSession {
 
     this.recordCapabilityRepairAttempt(actorId, outcome);
 
+    // Everything below keys off what the call actually ran with, which is not
+    // necessarily what was asked for: an id the repair above resolved must be
+    // matched against the real entity, or a due life review stays open
+    // because it was cleared under the guessed id.
+    const applied = outcome.appliedParameters;
+
     // A due life review or political procedure is addressed the instant the
     // matching action succeeds for the same character/procedure it was
     // reported for -- never merely by being read.
     if (actionId === "kill_character" || actionId === "incapacitate_character" || actionId === "recover_from_incapacity") {
-      const characterId = parameters["characterId"];
+      const characterId = applied["characterId"];
       if (typeof characterId === "string") this.unaddressedDueLifeReviews.delete(characterId);
     }
     if (actionId === "resolve_procedure") {
-      const procedureId = parameters["procedureId"];
+      const procedureId = applied["procedureId"];
       if (typeof procedureId === "string") this.unaddressedDueProcedures.delete(procedureId);
     }
 
@@ -832,7 +910,7 @@ export class GameMasterSession {
     // decision is made against the real casualties and the real retreat.
     let factual = outcome.factual;
     if (actionId === "start_battle") {
-      const battleId = parameters["battleId"];
+      const battleId = applied["battleId"];
       if (typeof battleId === "string") {
         const resolved = this.applyInvocation(
           {
@@ -840,8 +918,8 @@ export class GameMasterSession {
             actorId: SYSTEM_ACTOR,
             parameters: {
               battleId,
-              ...(parameters["attackerPosture"] !== undefined ? { attackerPosture: parameters["attackerPosture"] } : {}),
-              ...(parameters["defenderPosture"] !== undefined ? { defenderPosture: parameters["defenderPosture"] } : {}),
+              ...(applied["attackerPosture"] !== undefined ? { attackerPosture: applied["attackerPosture"] } : {}),
+              ...(applied["defenderPosture"] !== undefined ? { defenderPosture: applied["defenderPosture"] } : {}),
             },
           },
           "system",
@@ -903,11 +981,59 @@ export class GameMasterSession {
     if (!outcome.ok) return { ok: false, finished: false, factual: outcome.reason };
 
     this.staged = outcome.world;
+    this.markIntentCarried(actorId);
     this.worldToolInvocations.push({ toolId, actorId, parameters });
     if (outcome.factsToPersist !== undefined && outcome.factsToPersist.length > 0) {
       this.worldToolFacts.push(...outcome.factsToPersist);
     }
     return { ok: true, finished: false, factual: outcome.summary };
+  }
+
+  /**
+   * `applyInvocation`, plus one automatic repair attempt.
+   *
+   * A call that failed only because an id was written the way a person says
+   * it ("messana") rather than the way the record stores it
+   * ("settlement-messana") has not been refused by anything in the world. If
+   * the world leaves exactly one thing that id could have meant,
+   * `repairInvocationIds` resolves it and the call is made again, once,
+   * before the caller is ever told it failed.
+   *
+   * Only ever one retry, and only for a failure already classified
+   * recoverable: a genuine refusal (no authority, ineligible sponsor,
+   * insufficient resource, already done) is returned untouched, because
+   * repairing it would be inventing a different order than the one given.
+   * Both attempts stay in the audit trail.
+   */
+  private applyInvocationRepairingIds(
+    invocation: ProposedInvocation,
+    source: "game_master" | "system",
+  ): {
+    ok: boolean;
+    factual: string;
+    factId?: string;
+    refusalId?: string;
+    recoverable?: boolean;
+    /** The parameters the call actually ran with -- the repaired ones when a repair took. */
+    appliedParameters: Record<string, unknown>;
+  } {
+    const first = this.applyInvocation(invocation, source);
+    if (first.ok || first.recoverable !== true) return { ...first, appliedParameters: invocation.parameters };
+
+    const repair = repairInvocationIds(this.staged, invocation.actionId, invocation.parameters);
+    if (repair === null) return { ...first, appliedParameters: invocation.parameters };
+
+    const retried = this.applyInvocation({ ...invocation, parameters: repair.parameters }, source);
+    // The repair is reported back to the model so the rest of the turn uses
+    // the real id, but it never reaches the Chronicle: the narrated summary
+    // is the executor's own, and nothing about how the id was spelled is a
+    // thing that happened in the world.
+    if (!retried.ok) return { ...retried, appliedParameters: repair.parameters };
+    return {
+      ...retried,
+      factual: `${retried.factual} (resolved ${repair.repairs.join("; ")})`,
+      appliedParameters: repair.parameters,
+    };
   }
 
   /**
@@ -1053,7 +1179,21 @@ export class GameMasterSession {
       ...(battleBrief === null ? {} : { battleBrief }),
       ...(stateDeltas.length === 0 ? {} : { stateDeltas }),
     });
+    this.markIntentCarried(invocation.actorId);
     return { ok: true, factual: `Done [${factId}]: ${executed.result.summary}`, factId };
+  }
+
+  /**
+   * One of this actor's declared intents produced a real change. Recorded so
+   * the turn can tell the difference between an intent the world carried out
+   * and one it simply did not -- the latter is a fact about the world worth
+   * reporting, not an error to be hidden.
+   */
+  private markIntentCarried(actorId: string): void {
+    if (this.currentPrincipal.kind !== "interpreter") return;
+    for (const intent of this.declaredIntents) {
+      if (intent.actorId === actorId) intent.carried = true;
+    }
   }
 
   // -- named refusal aftermath ---------------------------------------------
@@ -1168,6 +1308,48 @@ export class GameMasterSession {
       materialConsequence: false,
     });
     return { ok: true, finished: false, factual: `Recorded [${factId}].`, factId };
+  }
+
+  /**
+   * Record what a character means to do. Changes nothing.
+   *
+   * Deliberately not a fact: an intent is not something that happened, and a
+   * Chronicle that reports intentions reports a world that did not move. What
+   * the interpreter manages to carry out becomes a fact through the ordinary
+   * action path, like anything else.
+   */
+  private declareIntent(args: Record<string, unknown>): GameMasterToolOutcome {
+    const parsed = DeclareIntentToolArguments.safeParse(args);
+    if (!parsed.success) {
+      return { ok: false, finished: false, factual: `That intent was rejected: ${parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}.` };
+    }
+    const { actorId, intent, reason, referencedEntityIds } = parsed.data;
+    const principalRefusal = this.principalRefusal(actorId);
+    if (principalRefusal !== null) return { ok: false, finished: false, factual: principalRefusal };
+    const actor = this.staged.characters.find((character) => character.id === actorId);
+    if (!actor || !actor.alive) {
+      return { ok: false, finished: false, factual: `"${actorId}" is not a living character in this world.` };
+    }
+    if (this.declaredIntents.some((declared) => declared.actorId === actorId && declared.intent === intent)) {
+      return { ok: false, finished: false, factual: "You have already declared that intent this turn." };
+    }
+
+    const id = `intent-${this.atStep}-${this.declaredIntents.length + 1}`;
+    this.declaredIntents.push({
+      id,
+      actorId,
+      actorName: actor.name,
+      intent,
+      reason,
+      referencedEntityIds,
+      atStep: this.atStep,
+      carried: false,
+    });
+    return {
+      ok: true,
+      finished: false,
+      factual: `Noted [${id}]. Nothing has happened yet: this is read afterwards and carried out as far as the world allows.`,
+    };
   }
 
   private recordRefusalAftermath(args: Record<string, unknown>): GameMasterToolOutcome {
@@ -1378,6 +1560,7 @@ export class GameMasterSession {
       materialConsequence: true,
     });
     this.recordCapabilityRepairAttempt(actorId, { ok: true, factId });
+    this.markIntentCarried(actorId);
     return { ok: true, factId, finished: false, factual: `Done [${factId}]: ${actor.name} — ${definition.intent}` };
   }
 
@@ -1503,20 +1686,26 @@ export class GameMasterSession {
     }
 
     // A recoverable mistake -- a bad/missing id, or arguments the call itself
-    // rejected -- must never be reported as the world's own refusal. This is
-    // checked on every attempt, not pushed back only once like the world-
-    // agency reminder below: an unretried lookup error must never ride
-    // through on that single reminder and leave an otherwise-empty turn
-    // reported as a real refusal.
-    if (this.pendingRecoverableRetries.size > 0) {
+    // rejected -- must never be reported as the world's own refusal. Anything
+    // still owed here has already survived the automatic id repair
+    // (`applyInvocationRepairingIds`), so it needs the model's own attention.
+    //
+    // Bounded, unlike the checks above that push back exactly once: the first
+    // pass asks for a correction, the second offers the escalation, and then
+    // the report stands. Looping until the tool budget runs out produces no
+    // report at all, which serves the player worse than an honestly-worded
+    // unresolved order.
+    if (this.pendingRecoverableRetries.size > 0 && this.recoverableRetryPushbacks < MAX_RECOVERABLE_RETRY_PUSHBACKS) {
+      this.recoverableRetryPushbacks += 1;
       const owed = [...this.pendingRecoverableRetries]
         .map((key) => { const [actionId, actorId] = key.split("::"); return `${actionId} by ${actorId}`; })
         .join("; ");
       return {
         ok: false,
         finished: false,
-        factual:
-          `Before finishing, correct and retry: ${owed}. That attempt failed only because of a bad or missing id, or arguments the call itself rejected -- not because the world refused it. Inspect the entity to get its real id (or fix the arguments) and call the tool again. Only report a directive as refused or failed once the corrected retry itself does not succeed.`,
+        factual: this.recoverableRetryPushbacks === 1
+          ? `Before finishing, correct and retry: ${owed}. That attempt failed only because of a bad or missing id, or arguments the call itself rejected -- not because the world refused it. Inspect the entity to get its real id (or fix the arguments) and call the tool again. Only report a directive as refused or failed once the corrected retry itself does not succeed.`
+          : `Still not carried out: ${owed}. Stop correcting it and choose one of two endings now, then call ${FINISH_TURN_TOOL} again. If the intent genuinely has no registered action behind it, use ${DEFINE_ACTION_TOOL} and ${INVOKE_DEFINED_ACTION_TOOL} to give it one and carry it out. If it does not matter enough to be worth that, report the directive plainly as not carried out and say what stopped it -- but do not write it up as a refusal, and do not name anyone as having rejected it. Nothing in the world refused this.`,
       };
     }
 

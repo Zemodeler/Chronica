@@ -11,6 +11,7 @@ import type { NewWorldEvent } from "@chronica/db";
 import type { AffectedAgentRunner, AffectedAgentRunnerInput, AffectedAgentRunnerResult } from "../event-loop";
 import { runNpcAgent } from "./npc-agent";
 import { runStarContextAgent } from "./star-context-agent";
+import { runIntentInterpreter } from "./interpreter-agent";
 import { selectStarContext } from "@chronica/shared";
 
 // The real `AffectedAgentRunner` (docs/32 corrective pass, requirement 3):
@@ -18,9 +19,17 @@ import { selectStarContext } from "@chronica/shared";
 // one resolved event, sequentially, against ONE shared session bound to the
 // event loop's own current world (never a frozen pre-turn snapshot -- this
 // call happens once per due event, with whatever `currentWorld` the loop
-// has reached by then). Every mutating tool call the session accepts is
-// validated for real but never applied here (`deferMutations: true`); what
-// comes back (`GameMasterSessionResult.scheduledActions`) is converted into
+// has reached by then).
+//
+// A reaction is decided the same way a turn is: the reacting agents declare
+// intent and nothing else, then one interpretation pass turns what they
+// decided into real calls. Without that pass a reaction would decide
+// something and schedule nothing, because the agents themselves hold no
+// mutating tool.
+//
+// Every mutating call the session then accepts is validated for real but
+// never applied here (`deferMutations: true`); what comes back
+// (`GameMasterSessionResult.scheduledActions`) is converted into
 // `action_phase` events at the triggering event's own instant, which the
 // loop's existing causal-depth-capped follow-up scheduling then owns --
 // exactly the "convert reactions into scheduled events, not a whole world
@@ -28,11 +37,16 @@ import { selectStarContext } from "@chronica/shared";
 //
 // Bounded reasoning only: a reaction gets a small, fixed step budget (this
 // is a reaction to one event, not a full turn) and never touches
-// `finish_turn`, `interpret_plan`, or any player-only tool -- the same
-// scoped surface `npcToolSurface` already gives a per-turn NPC agent.
+// `finish_turn`, `interpret_plan`, or any player-only tool.
 
 const REACTION_ACTION_ALLOWANCE = 2;
 const REACTION_MAX_STEPS = 3;
+/**
+ * A reaction's interpretation is deliberately tighter than a turn's. These
+ * agents are answering one event with at most two intents each, so the pass
+ * needs room to check an id and act, not to deliberate.
+ */
+const REACTION_INTERPRETER_MAX_STEPS = 6;
 
 const LEVEL_TO_SCOPE_KIND: Readonly<Record<StarContextLevel, OrderPartyRef["kind"]>> = {
   person: "character",
@@ -95,6 +109,17 @@ export function createReactionRunner(adapter: AiAdapter): AffectedAgentRunner {
           atInstant: event.instant, maxSteps: REACTION_MAX_STEPS,
         });
       }
+
+      // The reacting agents only declared intent; this is the pass that turns
+      // any of it into real (deferred) actions. Without it a reaction would
+      // decide something and schedule nothing.
+      await runIntentInterpreter({
+        adapter,
+        session,
+        atStep,
+        maxSteps: REACTION_INTERPRETER_MAX_STEPS,
+        logTag: `[reaction-interpreter:${event.id}:step-${atStep}]`,
+      });
 
       const scheduledEvents: Omit<NewWorldEvent, "gameId">[] = session.result().scheduledActions.map((scheduled) => ({
         kind: "action_phase",

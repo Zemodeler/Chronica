@@ -76,4 +76,84 @@ describe("runMultiAgentTurn (docs/32, Part B.1/B.7)", () => {
     });
     expect(result.termination).toBe("reported");
   });
+
+  // An NPC decides; the interpreter acts. The guarantee that matters is that
+  // no actor agent is ever handed a mutating tool -- an NPC that could call a
+  // workflow directly would be choosing its intentions from a menu of what
+  // the engine happens to implement.
+  it("offers actor agents no mutating tool, only reads and declare_intent", async () => {
+    const surfaces: { offeredDeclareIntent: boolean; names: string[] }[] = [];
+    const adapter: AiAdapter = {
+      call: () => Promise.resolve({ content: "{}", model: "mock", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }),
+      callWithTools: (_operation, _systemPrompt, _messages, tools): Promise<AiToolCallResult> => {
+        const names = tools.map((tool) => tool.name);
+        const offersFinish = names.includes("finish_turn");
+        const offersDeclareIntent = names.includes("declare_intent");
+        // Only an actor agent is offered declare_intent; record its surface.
+        if (offersDeclareIntent) surfaces.push({ offeredDeclareIntent: true, names });
+        const toolCalls = offersFinish
+          ? [{ id: "call-finish", name: "finish_turn", arguments: { report: { directiveOutcomes: [], events: [], openThreads: [], turnSummary: "A quiet decision point." } } }]
+          : [];
+        return Promise.resolve({
+          content: "", model: "mock", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+          toolCalls, stopReason: toolCalls.length > 0 ? "tool_calls" : "stop",
+        });
+      },
+    };
+
+    await runMultiAgentTurn(adapter, {
+      db: fakeDb,
+      gameId: "test-game",
+      world: world(),
+      atStep: 1,
+      atInstant: { day: 0, minute: 0 },
+      actorCharacterId: "marcus-atilius",
+      directives: [],
+      scenarioGovernment: undefined,
+      scenarioChronicle: undefined,
+    });
+
+    expect(surfaces.length).toBeGreaterThan(0);
+    for (const surface of surfaces) {
+      expect(surface.names).not.toContain("finish_turn");
+      // The workflows an NPC used to be able to call outright.
+      expect(surface.names).not.toContain("move_force");
+      expect(surface.names).not.toContain("start_battle");
+      expect(surface.names).not.toContain("start_war");
+      expect(surface.names).not.toContain("issue_order");
+      expect(surface.names).not.toContain("create_commitment");
+    }
+  });
+
+  it("runs no interpreter pass when nobody declared anything", async () => {
+    let interpreterPasses = 0;
+    const adapter: AiAdapter = {
+      call: () => Promise.resolve({ content: "{}", model: "mock", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }),
+      callWithTools: (_operation, systemPrompt, _messages, tools): Promise<AiToolCallResult> => {
+        if (systemPrompt.startsWith("You carry out what the world's characters have decided")) interpreterPasses += 1;
+        const toolCalls = tools.some((tool) => tool.name === "finish_turn")
+          ? [{ id: "call-finish", name: "finish_turn", arguments: { report: { directiveOutcomes: [], events: [], openThreads: [], turnSummary: "A quiet decision point." } } }]
+          : [];
+        return Promise.resolve({
+          content: "", model: "mock", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+          toolCalls, stopReason: toolCalls.length > 0 ? "tool_calls" : "stop",
+        });
+      },
+    };
+
+    const result = await runMultiAgentTurn(adapter, {
+      db: fakeDb,
+      gameId: "test-game",
+      world: world(),
+      atStep: 1,
+      atInstant: { day: 0, minute: 0 },
+      actorCharacterId: "marcus-atilius",
+      directives: [],
+      scenarioGovernment: undefined,
+      scenarioChronicle: undefined,
+    });
+
+    expect(interpreterPasses).toBe(0);
+    expect(result.declaredIntents).toEqual([]);
+  });
 });

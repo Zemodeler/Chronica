@@ -2,7 +2,7 @@ import "server-only";
 
 import type { AiAdapter } from "@chronica/ai";
 import type { AuthorityIndex, Fact, GameMasterSession, GameMasterToolDefinition, NpcAgentContext, Principal, WorldInstant, WorldState } from "@chronica/shared";
-import { buildNpcAgentContext, WORKFLOW_REGISTRY } from "@chronica/shared";
+import { buildNpcAgentContext } from "@chronica/shared";
 import { runAgentLoop, type AgentLoopResult } from "./agent-loop";
 
 // One NPC agent (docs/32, Part B.4): its own bounded tool-loop against the
@@ -11,47 +11,48 @@ import { runAgentLoop, type AgentLoopResult } from "./agent-loop";
 // own pending orders, and only the Facts visible to it. `finish_turn` is
 // withheld, same reasoning as the player agent.
 //
-// Two independent backstops keep this agent inside its own identity and a
-// scoped tool surface, neither of them prompt discipline (docs/32 corrective
-// pass, requirement 1):
-//  1. Every tool call this agent makes is bound to an `{kind:"npc",
-//     characterId}` principal, enforced inside `GameMasterSession` itself --
-//     a claimed `actorId` other than its own character is refused before any
-//     lookup or authority check runs, regardless of what this prompt says.
-//  2. `npcToolSurface` below narrows *which* tools this agent is even
-//     offered: every well-scoped read tool, but only the personal/order
-//     action tools and registered workflows whose category cannot move a
-//     treasury, found a settlement, or author new world entities -- an NPC
-//     reasons and acts entirely in its own name, never across the whole
-//     world's ledger.
-
-/** Registered-workflow categories an NPC agent may act through -- deliberately excludes "economic"/"material"/"map" (treasury, world-authoring). */
-const NPC_ACTION_CATEGORIES = new Set(["character", "military", "political", "narrative"]);
-/** World-tool ids an NPC agent may call -- its own orders/commitments, never force-raising, settlement-founding, or grant-authoring. */
-const NPC_WORLD_TOOL_IDS = new Set(["issue_order", "record_response", "record_fact", "create_commitment"]);
+// An NPC does not call workflows. It reads, it decides, and it says what it
+// means to do; `interpreter-agent.ts` afterwards works out which validated
+// actions -- if any -- that intent amounts to.
+//
+// This is what lets an NPC have the same reach as the player without handing
+// it the player's tool belt. The old surface bounded an NPC by *category*
+// (no treasury, no map, no world-authoring), which bounded the wrong thing:
+// it stopped a governor from levying a tax his office plainly permits, while
+// saying nothing about whether he should. Authority, not tool availability,
+// is the right constraint on that, and the authority index already enforces
+// it at execution. What an NPC may attempt is now the whole world; what it
+// may *get* is whatever the session's own validation allows.
+//
+// Two backstops remain, neither of them prompt discipline:
+//  1. Every call is bound to an `{kind:"npc", characterId}` principal,
+//     enforced inside `GameMasterSession` -- a claimed `actorId` other than
+//     its own character is refused before any lookup runs.
+//  2. The surface below carries no mutating tool at all, so there is nothing
+//     for a misbehaving agent to reach for in the first place.
 
 /**
- * The tool surface offered to one NPC agent: every read tool the base
- * catalog already scopes (`gm/read-tools.ts` -- never the unrestricted
+ * World tools an NPC may still call directly, because they are answers
+ * rather than actions: someone put a question to this character and only
+ * this character can answer it. Routing a reply through interpretation would
+ * add a pass that decides nothing.
+ */
+const NPC_DIRECT_RESPONSE_TOOL_IDS = new Set(["record_response"]);
+
+/**
+ * The tool surface offered to one NPC agent: every read tool the base catalog
+ * already scopes (`gm/read-tools.ts` -- never the unrestricted
  * `inspect_entity`/`inspect_context` world-tool readers, which return whole
- * entities/institutions with no actor-relative filtering), plus a curated
- * action surface. `finish_turn` is never offered here (`kind !== "finish"`
- * on top of the allowlist below would be redundant, but is kept for
- * defense-in-depth against a future tool being added with the wrong kind).
+ * entities with no actor-relative filtering), `declare_intent`, and the
+ * replies above. Nothing here changes world state.
  */
 export function npcToolSurface(tools: readonly GameMasterToolDefinition[]): GameMasterToolDefinition[] {
   return tools.filter((tool) => {
-    if (tool.kind === "finish") return false;
     if (tool.kind === "read") return tool.name !== "inspect_entity" && tool.name !== "inspect_context";
+    if (tool.kind === "intent") return true;
     if (tool.kind === "plan") return tool.name === "respond_to_plan_assignment";
-    if (tool.kind !== "action") return false;
-    // A registered workflow (curated or auto-wrapped into the world-tool
-    // catalog under the same id) is scoped by its own category; a pure
-    // world tool with no registry entry (issue_order/record_response/
-    // record_fact/create_commitment, or a world-authoring tool like
-    // create_force/create_entity) is scoped by an explicit id allowlist.
-    const category = WORKFLOW_REGISTRY.get(tool.name)?.category;
-    return category !== undefined ? NPC_ACTION_CATEGORIES.has(category) : NPC_WORLD_TOOL_IDS.has(tool.name);
+    if (tool.kind === "action") return NPC_DIRECT_RESPONSE_TOOL_IDS.has(tool.name);
+    return false;
   });
 }
 
@@ -92,13 +93,17 @@ function summarize(context: NpcAgentContext): string {
   return lines.join("\n");
 }
 
-function buildSystemPrompt(context: NpcAgentContext, atStep: number): string {
+function buildSystemPrompt(context: NpcAgentContext, atStep: number, actionAllowance: number): string {
   return [
     summarize(context),
     `It is step ${atStep}.`,
     "You are not obliged to help the player, and nothing requires you to act at all -- a character with nothing pressing them may do nothing.",
-    "Read what you need with the inspect tools. Act only through the tools you were given; nothing else has any effect.",
-    "When you have done what you judge worth doing this turn, stop calling tools.",
+    "Read what you need with the inspect tools, then say what you mean to do with declare_intent.",
+    // The point of the separation, stated plainly, because an agent that
+    // believes it is picking from a menu writes menu-shaped intentions.
+    "Do not think in terms of what the game can do. Decide what this person would decide, and say it as they would: who you are acting on, where, with what, and why. What you intend is then carried out as far as the world genuinely allows -- possibly in full, possibly in part, possibly not at all. Wanting something you cannot have is a real thing to want.",
+    `Declare at most ${actionAllowance} intent${actionAllowance === 1 ? "" : "s"}, and only for yourself.`,
+    "When you have said what you mean to do, stop calling tools.",
   ].join("\n");
 }
 
@@ -113,8 +118,8 @@ export async function runNpcAgent(input: RunNpcAgentInput): Promise<AgentLoopRes
     operation: "game_master",
     session: input.session,
     principal,
-    systemPrompt: buildSystemPrompt(context, input.atStep),
-    openingMessage: `Act as ${context.character.name} for this decision point, or decide there is nothing for you to do.`,
+    systemPrompt: buildSystemPrompt(context, input.atStep, input.actionAllowance),
+    openingMessage: `You are ${context.character.name}. Decide what you mean to do at this point, or decide there is nothing for you to do.`,
     tools,
     maxSteps: Math.max(2, input.actionAllowance),
     logTag: `[npc-agent:${input.characterId}:step-${input.atStep}]`,
