@@ -63,7 +63,7 @@ export interface InventedWorkflowExecution {
   readonly resolvedOperations: InventedPatchOperation[];
 }
 
-const PROTECTED_ROOTS = new Set(["schemaVersion", "pins", "elapsedStep", "lastTurnSummary", "playerPlans", "actorActivities"]);
+const PROTECTED_ROOTS = new Set(["schemaVersion", "pins", "elapsedStep", "lastTurnSummary", "plans", "actorActivities"]);
 const PLACEHOLDER = /{{([a-z][a-zA-Z0-9_]*)}}/g;
 
 /**

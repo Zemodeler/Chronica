@@ -3,19 +3,14 @@ import "server-only";
 import type { AiAdapter, AiConversationMessage, AiToolDefinition } from "@chronica/ai";
 import type { GameMasterSession, GameMasterToolCall, GameMasterToolDefinition, Principal } from "@chronica/shared";
 
-// The multi-agent split (docs/32, Part B.1) keeps one canonical mutator --
-// `GameMasterSession` -- but drives it from several separate, sequential LLM
-// conversations instead of one. This is the one loop shape every agent type
-// (player-reasoning, NPC, star-context, closing) reuses: it is exactly
-// `game-master.ts`'s own loop, generalized to (a) accept an already-created,
-// possibly-shared session rather than own one, and (b) accept an explicit
-// tool subset, so a sub-agent can never even name a tool outside its own
-// bounded surface (most importantly, `finish_turn` -- reserved for the
-// closing pass, per B.1's "small deterministic closing pass" step).
-//
-// `game-master.ts` itself is left untouched: it is still the single-agent
-// (`agentArchitectureVersion: 1`) path, and an in-flight campaign's
-// resolution model must never change mid-play (B.7).
+// The multi-agent dispatcher keeps one canonical mutator -- `GameMasterSession`
+// -- but drives it from several separate, sequential LLM conversations
+// instead of one. This is the one loop shape every agent type (NPC,
+// star-context, the intent interpreter, closing) reuses: (a) it accepts an
+// already-created, shared session rather than owning one, and (b) it accepts
+// an explicit tool subset, so a sub-agent can never even name a tool outside
+// its own bounded surface (most importantly, `finish_turn` -- reserved for
+// the closing pass).
 
 export interface AgentLoopInput {
   readonly adapter: AiAdapter;

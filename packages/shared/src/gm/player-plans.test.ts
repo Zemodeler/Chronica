@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import { WorldStateSchema, type WorldState } from "../world/world-state";
 import { createGameMasterSession } from "./session";
-import { preparePlayerPlans, PlanOptionsSchema, type PlayerPlan } from "../actions/plans";
+import { preparePlayerPlans, PlanOptionsSchema, type ActionPlan } from "../actions/plans";
 import { OrderBatchSchema } from "../actions/orders";
 import { buildGameMasterTools } from "./tools";
 
@@ -46,7 +46,7 @@ describe("persistent player plans", () => {
     // not a deterministic cap -- an over-budget spend still applies.
     expect(execute(gm, "payment", "remove_gold", { accountId: account.id, amount: 20, reason: "Pay for work" }).ok).toBe(true);
     expect(gm.stagedWorld.material.accounts.find(a => a.id === account.id)!.balance).toBe(980);
-    expect(gm.stagedWorld.playerPlans![0]!.spent).toBe(20);
+    expect(gm.stagedWorld.plans![0]!.spent).toBe(20);
   });
   it("retains completed stages over a save/load and refuses to repeat their effects", () => {
     const gm = session();
@@ -56,8 +56,8 @@ describe("persistent player plans", () => {
     const resumed = session(WorldStateSchema.parse(gm.stagedWorld), 2, false);
     expect(execute(resumed, "first", "rename_character", { characterId: PLAYER, newName: "Repeated" }).ok).toBe(false);
     expect(execute(resumed, "second", "rename_character", { characterId: PLAYER, newName: "Second name" }).ok).toBe(true);
-    expect(resumed.stagedWorld.playerPlans![0]!.status).toBe("completed");
-    expect(resumed.stagedWorld.playerPlans![0]!.stages.every(s => s.factRefs.length === 1)).toBe(true);
+    expect(resumed.stagedWorld.plans![0]!.status).toBe("completed");
+    expect(resumed.stagedWorld.plans![0]!.stages.every(s => s.resultFactIds.length === 1)).toBe(true);
     expect(WorldStateSchema.safeParse(resumed.stagedWorld).success).toBe(true);
   });
 
@@ -88,8 +88,8 @@ describe("persistent player plans", () => {
     expect(execute(gm, "first", "spend_to_960", {}).ok).toBe(true);
     expect(execute(gm, "second", "spend_to_930", {}).ok).toBe(true);
     expect(gm.stagedWorld.material.accounts.find(a => a.id === account.id)!.balance).toBe(930);
-    expect(gm.stagedWorld.playerPlans![0]!.spent).toBe(70);
-    expect(gm.stagedWorld.playerPlans![0]!.stages[1]!.status).toBe("completed");
+    expect(gm.stagedWorld.plans![0]!.spent).toBe(70);
+    expect(gm.stagedWorld.plans![0]!.stages[1]!.status).toBe("completed");
   });
 
   it("requires a delegate's acceptance before they can execute a stage", () => {
@@ -110,8 +110,8 @@ describe("persistent player plans", () => {
     expect(interpret(gm, [stage("first"), stage("second")]).ok).toBe(true);
     expect(execute(gm, "first", "rename_character", { characterId: PLAYER, newName: "Done" }).ok).toBe(true);
     const revised = preparePlayerPlans(gm.stagedWorld, PLAYER, 2, [{ id: "revision", directive: { kind: "revise", actionId: PLAN, text: "Use another approach for the rest." } }]);
-    expect(revised.playerPlans![0]!.stages).toHaveLength(1);
-    expect(revised.playerPlans![0]!.revisions).toHaveLength(2);
+    expect(revised.plans![0]!.stages).toHaveLength(1);
+    expect(revised.plans![0]!.revisions).toHaveLength(2);
     const stopped = preparePlayerPlans(revised, PLAYER, 3, [{ id: "cancel", directive: { kind: "cancel", actionId: PLAN } }]);
     expect(execute(session(stopped, 3, false), "first", "rename_character", { characterId: PLAYER, newName: "Again" }).ok).toBe(false);
   });
@@ -120,7 +120,7 @@ describe("persistent player plans", () => {
     const gm = session();
     expect(interpret(gm, [stage("repeat", { repeatEverySteps: 2 })]).ok).toBe(true);
     expect(execute(gm, "repeat", "rename_character", { characterId: PLAYER, newName: "Standing task" }).ok).toBe(true);
-    const readStage = (world: WorldState): PlayerPlan["stages"][number] => world.playerPlans![0]!.stages[0]!;
+    const readStage = (world: WorldState): ActionPlan["stages"][number] => world.plans![0]!.stages[0]!;
     expect(readStage(preparePlayerPlans(gm.stagedWorld, PLAYER, 2, [])).status).toBe("completed");
     expect(readStage(preparePlayerPlans(gm.stagedWorld, PLAYER, 3, [])).status).toBe("pending");
     expect(OrderBatchSchema.safeParse({ directives: [] }).success).toBe(true);

@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { after } from "next/server";
 import { eq, and, desc } from "drizzle-orm";
 import { createDatabase, submitPlayerOrder, getWorldView, schema } from "@chronica/db";
-import { OrderBatchSchema } from "@chronica/shared";
+import { isActionPlanOngoing, OrderBatchSchema } from "@chronica/shared";
 import { isAuthenticationConfigured, getAuthentication } from "../../../../../lib/authentication";
 import { dispatchQueuedTurn } from "../../../../../lib/resolution/dispatch";
 
@@ -90,7 +90,7 @@ export async function POST(
 
     const view = await getWorldView(db, gameId);
     if (!view) return Response.json({ error: "The world is not available." }, { status: 409 });
-    const owned = view.world.playerPlans?.filter(p => p.ownerId === player.characterId && p.status === "active") ?? [];
+    const owned = view.world.plans?.filter(p => p.ownerCharacterId === player.characterId && isActionPlanOngoing(p)) ?? [];
     const cancellations = new Set(batch.directives.filter(d => d.kind === "cancel").map(d => d.actionId));
     if (owned.filter(p => !cancellations.has(p.id)).length + batch.directives.filter(d => d.kind === "new").length > 32) return Response.json({ error: "You have 32 active plans. Complete or cancel a plan before adding another." }, { status: 422 });
     for (const d of batch.directives) {

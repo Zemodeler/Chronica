@@ -5,19 +5,15 @@ import {
   ActionPlanSchema,
   ActionPlanStageSchema,
   InterpretPlanSchema,
-  PlayerPlanSchema,
   attemptPlanStageAtomically,
   completePlanStage,
   interpretPlan,
   originateActionPlan,
-  playerPlanToActionPlan,
   preparePlayerPlans,
   respondToActionPlanAssignment,
   startPlanStage,
   upgradeActionPlanToScheduledEvents,
-  upgradePlayerPlansToActionPlans,
   type ActionPlan,
-  type PlayerPlan,
 } from "./plans";
 import { defaultPriorityContextFor, detectResourceConflicts, resolveConflicts, type StageResourceClaim } from "./conflicts";
 
@@ -42,64 +38,6 @@ function actionPlan(overrides: Partial<ActionPlan> = {}): ActionPlan {
     ...overrides,
   });
 }
-
-function playerPlan(overrides: Partial<PlayerPlan> = {}): PlayerPlan {
-  return PlayerPlanSchema.parse({
-    id: "plan-1-directive-0",
-    ownerId: "marcus-atilius",
-    sourceDirectiveId: "directive-0",
-    rawText: "Carry out the plan in stages.",
-    revisions: [{ atStep: 1, text: "Carry out the plan in stages." }],
-    options: {},
-    interpretation: "Carry out the requested stages",
-    status: "active",
-    stages: [
-      { id: "first", objective: "Task first", actorId: "marcus-atilius", status: "completed", reason: null, factRefs: ["fact-1"], lastCompletedStep: 3 },
-      { id: "second", objective: "Task second", actorId: "marcus-atilius", dependsOn: ["first"], status: "pending", reason: null, factRefs: [] },
-    ],
-    assignments: [],
-    spent: 20,
-    createdAtStep: 1,
-    updatedAtStep: 3,
-    ...overrides,
-  });
-}
-
-describe("playerPlanToActionPlan", () => {
-  it("preserves identity, revisions, and completed-stage history exactly", () => {
-    const plan = playerPlan();
-    const converted = playerPlanToActionPlan(plan);
-    expect(ActionPlanSchema.safeParse(converted).success).toBe(true);
-    expect(converted.id).toBe(plan.id);
-    expect(converted.revisions).toEqual(plan.revisions);
-    expect(converted.origin).toEqual({ kind: "player", sourceId: plan.ownerId, directiveId: plan.sourceDirectiveId });
-    expect(converted.stages[0]).toMatchObject({ id: "first", status: "completed", resultFactIds: ["fact-1"], completedAtStep: 3 });
-    expect(converted.stages[1]).toMatchObject({ id: "second", status: "pending", dependsOn: ["first"] });
-    expect(converted.spent).toBe(plan.spent);
-  });
-
-  it("maps every PlayerPlan status to its ActionPlan successor, including the renamed terminal state", () => {
-    expect(playerPlanToActionPlan(playerPlan({ status: "completed" })).status).toBe("completed");
-    expect(playerPlanToActionPlan(playerPlan({ status: "cancelled" })).status).toBe("abandoned");
-  });
-
-  it("leaves Phase 2-4 fields at their inert defaults, since nothing populates them yet", () => {
-    const converted = playerPlanToActionPlan(playerPlan());
-    expect(converted.feasibility).toBeNull();
-    expect(converted.reservationIds).toEqual([]);
-    expect(converted.standingInstructions).toEqual([]);
-    expect(converted.stages.every(s => s.reservationIds.length === 0 && s.durationEstimate === null)).toBe(true);
-  });
-});
-
-describe("upgradePlayerPlansToActionPlans", () => {
-  it("converts every plan and tolerates an absent collection", () => {
-    expect(upgradePlayerPlansToActionPlans(undefined)).toEqual([]);
-    const upgraded = upgradePlayerPlansToActionPlans([playerPlan(), playerPlan({ id: "plan-2", status: "cancelled" })]);
-    expect(upgraded).toHaveLength(2);
-    expect(upgraded[1]!.status).toBe("abandoned");
-  });
-});
 
 describe("upgradeActionPlanToScheduledEvents (docs/32, Phase 7)", () => {
   it("schedules an action_phase event at an in-progress stage's expected completion", () => {
@@ -181,7 +119,7 @@ describe("interpretPlan claim enforcement (docs/32, Phase 2)", () => {
       clarificationQuestions: [],
     }), 1);
     expect(typeof result).not.toBe("string");
-    const plan = (result as WorldState).playerPlans!.find(p => p.id === "plan-1-directive-0")!;
+    const plan = (result as WorldState).plans!.find(p => p.id === "plan-1-directive-0")!;
     expect(plan.claims).toHaveLength(1);
     expect(plan.claims[0]!.verification).toBe("confirmed");
     expect(plan.stages).toHaveLength(1);
@@ -198,7 +136,7 @@ describe("interpretPlan claim enforcement (docs/32, Phase 2)", () => {
       clarificationQuestions: ["Which legion do you mean?"],
     }), 1);
     expect(typeof result).not.toBe("string");
-    const plan = (result as WorldState).playerPlans!.find(p => p.id === "plan-1-directive-0")!;
+    const plan = (result as WorldState).plans!.find(p => p.id === "plan-1-directive-0")!;
     expect(plan.clarificationQuestions).toEqual(["Which legion do you mean?"]);
     expect(plan.stages).toEqual([]);
   });
@@ -327,11 +265,12 @@ describe("originateActionPlan / respondToActionPlanAssignment (docs/32, Phase 9)
 });
 
 describe("WorldState.plans", () => {
-  it("stays absent on a snapshot that only ever populated playerPlans, and can be derived on demand", () => {
+  it("stays absent on a fresh scenario snapshot, and validates once populated by a player directive", () => {
     const world = structuredClone(firstPunicWarScenario.initialWorld);
     expect(WorldStateSchema.safeParse(world).success).toBe(true);
     expect(world.plans).toBeUndefined();
-    const derived = upgradePlayerPlansToActionPlans(world.playerPlans);
-    expect(WorldStateSchema.safeParse({ ...world, plans: derived }).success).toBe(true);
+    const withPlan = preparePlayerPlans(world, "marcus-atilius", 1, [{ id: "directive-0", directive: { kind: "new", text: "Do something." } }]);
+    expect(WorldStateSchema.safeParse(withPlan).success).toBe(true);
+    expect(withPlan.plans).toHaveLength(1);
   });
 });

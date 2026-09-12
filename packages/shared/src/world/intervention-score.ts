@@ -189,7 +189,7 @@ export function computeInterventionScore(input: InterventionScoreInput): Interve
     strategicConsequence: strategicConsequence.points,
     uncertainty: uncertainty.points,
   };
-  const score = Math.min(100, Object.values(breakdown).reduce((sum, points) => sum + points, 0));
+  const score = Math.min(100, breakdown.irreversibility + breakdown.deviationFromPlan + breakdown.directPlayerInvolvement + breakdown.strategicConsequence + breakdown.uncertainty);
   const threshold = input.threshold ?? DEFAULT_THRESHOLD;
   const requiresIntervention = score >= threshold;
 

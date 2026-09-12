@@ -6,9 +6,13 @@ import { runAgentLoop, type AgentLoopResult } from "./agent-loop";
 
 // The intent interpreter.
 //
-// Non-player actors declare what they mean to do (`declare_intent`) and never
-// call a workflow themselves. This pass reads every intent declared this turn
-// and works out which validated actions, if any, each one amounts to.
+// No actor -- player or NPC -- calls a workflow directly. Every one of them
+// declares what they mean to do (the player's own directive stands as their
+// declared intent, registered by `GameMasterSession`'s constructor; an NPC
+// calls `declare_intent`), and this single pass reads every intent declared
+// this turn and works out which validated actions, if any, each one amounts
+// to -- including the plan/stage tools that track the player's own
+// multi-stage orders.
 //
 // One pass for the whole turn rather than one per actor: interpretation is the
 // same job whoever declared the intent, and doing it once means an interpreter
@@ -21,20 +25,22 @@ import { runAgentLoop, type AgentLoopResult } from "./agent-loop";
 // cannot invent an actor, and it cannot finish the turn.
 
 /**
- * Everything the interpreter may do: read the world and take actions. It is
- * denied `finish_turn` (the closing pass owns that), every `plan` tool (those
- * belong to the player's own orders), `declare_intent` itself (it carries out
- * intents, it does not author them), and the narrative flags, which are the
- * turn's voice rather than an actor's deed.
+ * Everything the interpreter may do: read the world, take actions, and drive
+ * a plan's stages. It is denied `finish_turn` (the closing pass owns that),
+ * `declare_intent` itself (it carries out intents, it does not author them),
+ * and the narrative flags, which are the turn's voice rather than an actor's
+ * deed.
  */
 export function interpreterToolSurface(tools: readonly GameMasterToolDefinition[]): GameMasterToolDefinition[] {
-  return tools.filter((tool) => tool.kind === "read" || tool.kind === "action" || tool.kind === "define" || tool.kind === "capability");
+  return tools.filter((tool) => tool.kind === "read" || tool.kind === "action" || tool.kind === "define" || tool.kind === "capability" || tool.kind === "plan");
 }
 
 export interface RunIntentInterpreterInput {
   readonly adapter: AiAdapter;
   readonly session: GameMasterSession;
   readonly atStep: number;
+  /** Whose directive-derived intent, if any among `session.intents`, is plan-tracked. Omit for a reaction pass with no player intent in scope. */
+  readonly playerCharacterId?: string;
   /** Bounds the loop. A reaction to one event gets a much smaller budget than a full turn. */
   readonly maxSteps?: number;
   readonly logTag?: string;
@@ -51,7 +57,7 @@ function renderIntents(intents: readonly DeclaredIntent[]): string {
     .join("\n\n");
 }
 
-function buildSystemPrompt(intents: readonly DeclaredIntent[], atStep: number): string {
+function buildSystemPrompt(intents: readonly DeclaredIntent[], atStep: number, playerCharacterId: string | undefined): string {
   return [
     "You carry out what the world's characters have decided to do. You are not one of them and you want nothing yourself.",
     `It is step ${atStep}. These characters have each decided on something:`,
@@ -64,6 +70,9 @@ function buildSystemPrompt(intents: readonly DeclaredIntent[], atStep: number): 
     "Be faithful, not accommodating. Carry out what was intended, at the scale it was intended, against the target it named. If part of an intent is possible and part is not, do the possible part and leave the rest undone. If none of it is possible, leave it undone entirely -- do not substitute a smaller or different act the tools happen to support, and do not record something adjacent so that the turn has an outcome. A character who wanted something the world would not give them is an ordinary event, and reporting it as such is correct.",
     "A refusal from a tool is the world answering. Read what it says: correct a wrong id and try again, but never argue with a refusal about authority, resources, or eligibility by finding another route to the same effect. That authority is exactly what the character does not have.",
     "You may act only for the characters listed above, and only on what they said. Never act for anyone else, and never add an intention nobody declared.",
+    ...(playerCharacterId === undefined ? [] : [
+      `${playerCharacterId}'s intent is tracked by a plan: use interpret_plan to turn their order into stages (or ask a clarification question), then execute_plan_stage to attempt each one -- do not call an action tool directly for ${playerCharacterId}.`,
+    ]),
     "If an intent is real and no tool covers it, define one with define_action and use it -- but only when the act is genuinely outside the catalogue, not when an existing tool is merely inconvenient.",
     "When every intent has been carried out or honestly left undone, stop calling tools.",
   ].join("\n");
@@ -85,7 +94,7 @@ export async function runIntentInterpreter(input: RunIntentInterpreterInput): Pr
     operation: "game_master",
     session: input.session,
     principal,
-    systemPrompt: buildSystemPrompt(intents, input.atStep),
+    systemPrompt: buildSystemPrompt(intents, input.atStep, input.playerCharacterId),
     openingMessage: `Carry out the ${intents.length} declared intent${intents.length === 1 ? "" : "s"}, as far as this world allows.`,
     tools,
     // Enough to read before acting on each intent, without letting one turn's

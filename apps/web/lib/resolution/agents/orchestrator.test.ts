@@ -5,18 +5,23 @@ import type { WorldState } from "@chronica/shared";
 import { runMultiAgentTurn } from "./orchestrator";
 
 // The orchestrator's job is to sequence several bounded agent loops against
-// one shared session and come back with the same result shape `runGameMaster`
-// does. A fake adapter that only ever calls `finish_turn` (when it is offered
-// -- i.e. only to the closing pass) and stays silent otherwise exercises the
-// full sequence -- player, every selected NPC/star-context actor, closing --
-// without depending on exactly how many steps each one takes.
+// one shared session and come back with `RunGameMasterResult`. A fake
+// adapter that only ever calls `finish_turn` (when it is offered -- i.e.
+// only to the closing pass) and stays silent otherwise exercises the full
+// sequence -- every selected NPC/star-context actor, the intent interpreter,
+// closing -- without depending on exactly how many steps each one takes.
 
 function world(): WorldState {
   return structuredClone(firstPunicWarScenario.initialWorld);
 }
 
 function closingOnlyAdapter(directiveIds: readonly string[] = []): AiAdapter {
-  const directiveOutcomes = directiveIds.map((directiveId) => ({ directiveId, outcome: "carried_out" as const, reason: "Attempted as best judgment allowed.", factRefs: [] }));
+  // "unsupported", not "carried_out": this mock never calls interpret_plan/
+  // execute_plan_stage, so the player's directive-derived plan genuinely has
+  // no completed stages -- the session's own honesty check
+  // (`prematurelyCompleted` in `finish()`) rightly refuses a "carried_out"
+  // claim for a plan nothing actually interpreted.
+  const directiveOutcomes = directiveIds.map((directiveId) => ({ directiveId, outcome: "unsupported" as const, reason: "Attempted as best judgment allowed.", factRefs: [] }));
   return {
     call: () => Promise.resolve({ content: "{}", model: "mock", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }),
     callWithTools: (_operation, _systemPrompt, _messages, tools): Promise<AiToolCallResult> => {
@@ -59,8 +64,8 @@ describe("runMultiAgentTurn (docs/32, Part B.1/B.7)", () => {
 
   it("never lets a non-closing agent end the turn: only the closing pass is offered finish_turn", async () => {
     // If any earlier agent could see finish_turn, this fake would call it
-    // immediately on its very first (player-agent) step, and the run would
-    // finish before any NPC/star-context agent or the real closing pass ran.
+    // immediately on its very first step, and the run would finish before
+    // any NPC/star-context agent, the interpreter, or the real closing pass ran.
     // Reaching "reported" at all here already proves finish_turn was refused
     // until the closing pass -- this test names that guarantee explicitly.
     const result = await runMultiAgentTurn(closingOnlyAdapter(["d1"]), {

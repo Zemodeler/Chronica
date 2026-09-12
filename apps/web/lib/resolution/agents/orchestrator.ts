@@ -22,32 +22,39 @@ import {
 import type { InventedWorkflowDefinition } from "@chronica/shared";
 import type { ChronicaDatabase } from "@chronica/db";
 import { listFactsForGame } from "@chronica/db";
-import type { RunGameMasterResult } from "../game-master";
-import { runPlayerAgent } from "./player-agent";
 import { runNpcAgent } from "./npc-agent";
 import { runStarContextAgent } from "./star-context-agent";
 import { runIntentInterpreter } from "./interpreter-agent";
 import { runClosingAgent } from "./closing-agent";
 
-// The multi-agent dispatcher (docs/32, Part B.1/B.7 -- `agentArchitectureVersion: 2`).
+// The multi-agent dispatcher: one canonical mutator, several sequential LLM
+// conversations, and the only turn-resolution architecture (unified action
+// runtime cutover -- the deprecated single-GM `game-master.ts` is gone).
 //
-// One canonical mutator, several sequential LLM conversations: player-
-// reasoning always first and uncounted against budget, then up to 8 selected
-// NPC/star-context agents (at most 2 of them star contexts), then the intent
-// interpreter, then one closing pass that reads the stage back and submits
-// the turn report. Every agent shares one `GameMasterSession`, so
-// `session.invoke()`'s own re-validation against current staged state is what
-// keeps this race-free -- there is no separate "merge N diffs" step.
+// The player's own directive stands as their declared intent directly, the
+// same way an NPC's `declare_intent` call does (`GameMasterSession`'s
+// constructor registers it, so no model call paraphrases the player's exact
+// wording). From there: up to 8 selected NPC/star-context agents (at most 2
+// of them star contexts) each decide and declare, then the intent
+// interpreter carries out every declared intent -- the player's and every
+// selected actor's alike -- in one shared pass, then a closing pass reads
+// the stage back and submits the turn report. Every agent shares one
+// `GameMasterSession`, so `session.invoke()`'s own re-validation against
+// current staged state is what keeps this race-free -- there is no separate
+// "merge N diffs" step.
 //
 // The actor agents decide; the interpreter acts. Those agents hold no
-// mutating tool at all (`npcToolSurface`), so between the player pass and the
-// interpreter the staged world does not move on any NPC's account -- which is
-// also why the interpreter runs once, at the end, rather than after each
-// actor: it is the only pass that can see the turn's intentions together.
-//
-// Returns the same shape `runGameMaster` does (`RunGameMasterResult`) so
-// `pipeline.ts`'s existing post-processing (Chronicle, commit) needs no
-// changes regardless of which path produced it.
+// mutating tool at all (`npcToolSurface`), so the staged world does not move
+// on any actor's account until the interpreter's single pass -- which is
+// exactly why it runs once, at the end, rather than after each actor: it is
+// the only pass that can see the turn's intentions together.
+
+export interface RunGameMasterResult extends GameMasterSessionResult {
+  /** Why the loop stopped. Only "reported" means the model finished on its own. */
+  readonly termination: "reported" | "step_budget" | "tool_budget" | "model_stopped" | "provider_error";
+  readonly modelSteps: number;
+  readonly providerError: string | null;
+}
 
 export interface RunMultiAgentTurnInput {
   readonly db: ChronicaDatabase;
@@ -63,7 +70,6 @@ export interface RunMultiAgentTurnInput {
   readonly scenarioClock?: ScenarioClock | undefined;
   readonly definedActions?: readonly InventedWorkflowDefinition[];
   readonly allowInventedActions?: boolean;
-  readonly persistentPlans?: boolean;
 }
 
 function tag(atStep: number): string {
@@ -83,15 +89,12 @@ export async function runMultiAgentTurn(adapter: AiAdapter, input: RunMultiAgent
     atStep: input.atStep,
     actorCharacterId: input.actorCharacterId,
     directiveIds: input.directives.map((entry) => entry.id),
-    ...(input.persistentPlans ? { directives: input.directives } : {}),
+    directives: input.directives,
     definedActions: input.definedActions ?? [],
     allowInventedActions: input.allowInventedActions ?? true,
     scenarioLife: input.scenarioLife,
     scenarioClock: input.scenarioClock,
     maxToolCalls: 120,
-    // docs/32, Part C.6 step 9: the multi-agent path is exactly where the
-    // typed world-tool catalog belongs -- version 1 (today's single-GM path,
-    // `game-master.ts`) is untouched and never sets this.
     enableWorldTools: true,
     worldToolAuthorityIndex: authorityIndex,
   });
@@ -106,20 +109,7 @@ export async function runMultiAgentTurn(adapter: AiAdapter, input: RunMultiAgent
   let providerError: string | null = null;
   let modelSteps = 0;
 
-  const playerResult = await runPlayerAgent({
-    adapter,
-    session,
-    atStep: input.atStep,
-    actorCharacterId: input.actorCharacterId,
-    directives: input.directives,
-  });
-  modelSteps += playerResult.modelSteps;
-  if (playerResult.providerError !== null) providerError = playerResult.providerError;
-  console.log(`${tag(input.atStep)} player agent finished: termination=${playerResult.termination} toolCalls=${playerResult.toolCallsMade}`);
-
-  const selected = providerError === null
-    ? selectRelevantActors(session.stagedWorld, input.actorCharacterId, authorityIndex, input.atStep, MAX_RICH_AGENTS_PER_DECISION_POINT, MAX_STAR_CONTEXTS_PER_DECISION_POINT)
-    : [];
+  const selected = selectRelevantActors(session.stagedWorld, input.actorCharacterId, authorityIndex, input.atStep, MAX_RICH_AGENTS_PER_DECISION_POINT, MAX_STAR_CONTEXTS_PER_DECISION_POINT);
 
   for (const actor of selected) {
     if (session.isFinished || session.exhausted) break;
@@ -151,10 +141,11 @@ export async function runMultiAgentTurn(adapter: AiAdapter, input: RunMultiAgent
     console.log(`${tag(input.atStep)} ${actor.kind} agent (${actor.kind === "npc" ? actor.characterId : actor.context.id}) finished: termination=${result.termination} toolCalls=${result.toolCallsMade}`);
   }
 
-  // Everything the actors decided, carried out in one pass. Skipped entirely
-  // when nobody declared anything, so a quiet turn costs no model call here.
+  // Everything the actors -- the player included -- decided, carried out in
+  // one pass. Skipped entirely when nobody declared anything (a quiet turn
+  // with no player directives and no NPC intents costs no model call here).
   if (!session.isFinished && !session.exhausted) {
-    const interpreterResult = await runIntentInterpreter({ adapter, session, atStep: input.atStep });
+    const interpreterResult = await runIntentInterpreter({ adapter, session, atStep: input.atStep, playerCharacterId: input.actorCharacterId });
     if (interpreterResult !== undefined) {
       modelSteps += interpreterResult.modelSteps;
       if (interpreterResult.providerError !== null) providerError = interpreterResult.providerError;
