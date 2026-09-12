@@ -3,6 +3,7 @@ import { OrderPartyRefSchema, type OrderPartyRef } from "../actions/orders";
 import { MoneyAmountSchema, EntityIdSchema, ElapsedStepSchema } from "../material-state";
 import { WorldInstantSchema, type WorldInstant } from "./instant";
 import type { FactualEvent } from "../gm/session";
+import type { EntityStateDelta } from "../gm/world-diff";
 
 /**
  * The durable historical record an event's resolution produces (docs/32,
@@ -162,6 +163,39 @@ export const FactSchema = z
   .strict();
 export type Fact = z.infer<typeof FactSchema>;
 
+/** Only entity kinds `diffWorldState` produces that are also a reactable `OrderPartyRef` kind -- a war, a diplomatic message, or a political procedure changing is not itself a scope anything reacts to. */
+const ENTITY_TYPE_TO_PARTY_KIND: Readonly<Partial<Record<string, OrderPartyRef["kind"]>>> = {
+  character: "character",
+  force: "force",
+  province: "province",
+  settlement: "settlement",
+  account: "account",
+};
+
+/**
+ * Derives `affectedEntities` generically from a `FactualEvent`'s own
+ * `stateDeltas` -- every tracked entity a call actually changed, found by
+ * `diffWorldState` comparing the staged world immediately before and after,
+ * never by inspecting which action ran. This is what makes fact-scoped
+ * reaction selection (`world/affected-agent-selector.ts`) actually see
+ * something for an ordinary workflow call, without every producer having
+ * to name its own affected parties by hand.
+ */
+function deriveAffectedEntities(stateDeltas: readonly EntityStateDelta[] | undefined): OrderPartyRef[] {
+  if (!stateDeltas || stateDeltas.length === 0) return [];
+  const seen = new Set<string>();
+  const refs: OrderPartyRef[] = [];
+  for (const delta of stateDeltas) {
+    const kind = ENTITY_TYPE_TO_PARTY_KIND[delta.entityType];
+    if (kind === undefined) continue;
+    const key = `${kind}:${delta.entityId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    refs.push({ kind, id: delta.entityId });
+  }
+  return refs;
+}
+
 /**
  * One committed Fact per `FactualEvent` (`gm/session.ts`), called at the
  * point `resolution/pipeline.ts` already builds its `factualEvents` array --
@@ -183,7 +217,7 @@ export function factualEventToFact(
     atStep: event.atStep,
     kind: event.actionId,
     summary: event.summary,
-    affectedEntities: overrides?.affectedEntities ?? [],
+    affectedEntities: overrides?.affectedEntities ?? deriveAffectedEntities(event.stateDeltas),
     resourceChanges: [],
     authorityChange: overrides?.authorityChange,
     visibility,

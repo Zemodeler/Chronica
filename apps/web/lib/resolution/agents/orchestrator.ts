@@ -15,8 +15,10 @@ import type {
 import {
   buildAuthorityIndex,
   createGameMasterSession,
+  factualEventToFact,
   MAX_RICH_AGENTS_PER_DECISION_POINT,
   MAX_STAR_CONTEXTS_PER_DECISION_POINT,
+  selectAffectedAgentsForFacts,
   selectRelevantActors,
 } from "@chronica/shared";
 import type { InventedWorkflowDefinition } from "@chronica/shared";
@@ -26,6 +28,16 @@ import { runNpcAgent } from "./npc-agent";
 import { runStarContextAgent } from "./star-context-agent";
 import { runIntentInterpreter } from "./interpreter-agent";
 import { runClosingAgent } from "./closing-agent";
+import { runAffectedAgents } from "./run-affected-agents";
+
+/**
+ * Bounds for the fresh-context reaction pass below (unified action runtime,
+ * Stage 4) -- matches `reaction-runner.ts`'s own bounds for the same
+ * conceptual reason: reacting to what just happened is a smaller job than
+ * an actor's own full turn.
+ */
+const TURN_REACTION_ACTION_ALLOWANCE = 2;
+const TURN_REACTION_STAR_CONTEXT_MAX_STEPS = 3;
 
 // The multi-agent dispatcher: one canonical mutator, several sequential LLM
 // conversations, and the only turn-resolution architecture (unified action
@@ -156,6 +168,40 @@ export async function runMultiAgentTurn(adapter: AiAdapter, input: RunMultiAgent
         + `toolCalls=${interpreterResult.toolCallsMade} intents=${intents.length} uncarried=${uncarried.length}`
         + (uncarried.length === 0 ? "" : ` [${uncarried.map((intent) => `${intent.actorId}:${intent.id}`).join(", ")}]`),
       );
+    }
+  }
+
+  // Fresh-context reactions to this turn's own facts (unified action
+  // runtime, Stage 4): the event queue's own advance already selects
+  // reactions by exactly which facts an event produced
+  // (`REAL_AGENT_SELECTOR`); this applies that same fact-scoped selection
+  // to what THIS turn's own interpreted actions just produced, rather than
+  // relying solely on the upfront whole-turn relevance ranking above. A
+  // single bounded round -- reactions to a reaction are the event queue's
+  // own causal-depth-capped job (`event-loop.ts`), not a same-turn loop.
+  if (!session.isFinished && !session.exhausted) {
+    const turnFacts = session.result().events
+      .filter((event) => event.materialConsequence)
+      .map((event) => factualEventToFact(event, input.atInstant));
+    const reactionSelection = selectAffectedAgentsForFacts(session.stagedWorld, turnFacts);
+    if (reactionSelection.npcCharacterIds.length > 0 || reactionSelection.starContextRefs.length > 0) {
+      const reactionAgentsResult = await runAffectedAgents({
+        adapter, session, atStep: input.atStep, atInstant: input.atInstant, authorityIndex, facts, selection: reactionSelection,
+        npcActionAllowance: TURN_REACTION_ACTION_ALLOWANCE, starContextMaxSteps: TURN_REACTION_STAR_CONTEXT_MAX_STEPS,
+      });
+      modelSteps += reactionAgentsResult.modelSteps;
+      if (reactionAgentsResult.providerError !== null) providerError = reactionAgentsResult.providerError;
+      if (!session.isFinished && !session.exhausted) {
+        const reactionInterpreterResult = await runIntentInterpreter({
+          adapter, session, atStep: input.atStep, playerCharacterId: input.actorCharacterId,
+          logTag: `[reaction-interpreter:step-${input.atStep}]`,
+        });
+        if (reactionInterpreterResult !== undefined) {
+          modelSteps += reactionInterpreterResult.modelSteps;
+          if (reactionInterpreterResult.providerError !== null) providerError = reactionInterpreterResult.providerError;
+        }
+      }
+      console.log(`${tag(input.atStep)} fresh-context reactions: npcs=${reactionSelection.npcCharacterIds.length} starContexts=${reactionSelection.starContextRefs.length}`);
     }
   }
 

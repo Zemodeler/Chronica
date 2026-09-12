@@ -80,11 +80,15 @@ function buildSystemPrompt(intents: readonly DeclaredIntent[], atStep: number, p
 }
 
 /**
- * Run the interpretation pass. Returns undefined when nothing was declared,
- * so the caller spends no model call on an empty turn.
+ * Run the interpretation pass over every not-yet-carried declared intent.
+ * Returns undefined when there is nothing left to carry out, so the caller
+ * spends no model call on an empty turn -- and so a second call this same
+ * turn (a fresh-context reaction pass, unified action runtime Stage 4)
+ * shows the model only what's actually new, not intents an earlier pass
+ * already carried.
  */
 export async function runIntentInterpreter(input: RunIntentInterpreterInput): Promise<AgentLoopResult | undefined> {
-  const intents = input.session.intents;
+  const intents = input.session.intents.filter((intent) => !intent.carried);
   if (intents.length === 0) return undefined;
 
   const tools = interpreterToolSurface(input.session.listTools());

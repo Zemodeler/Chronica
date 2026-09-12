@@ -1,18 +1,11 @@
 import "server-only";
 
 import type { AiAdapter } from "@chronica/ai";
-import {
-  buildAuthorityIndex,
-  createGameMasterSession,
-  type OrderPartyRef,
-  type StarContextLevel,
-} from "@chronica/shared";
+import { buildAuthorityIndex, createGameMasterSession } from "@chronica/shared";
 import type { NewWorldEvent } from "@chronica/db";
 import type { AffectedAgentRunner, AffectedAgentRunnerInput, AffectedAgentRunnerResult } from "../event-loop";
-import { runNpcAgent } from "./npc-agent";
-import { runStarContextAgent } from "./star-context-agent";
+import { runAffectedAgents } from "./run-affected-agents";
 import { runIntentInterpreter } from "./interpreter-agent";
-import { selectStarContext } from "@chronica/shared";
 
 // The real `AffectedAgentRunner` (docs/32 corrective pass, requirement 3):
 // runs every NPC/star-context agent `selectAffectedAgentsForEvent` chose for
@@ -50,17 +43,6 @@ const REACTION_MAX_STEPS = 3;
  */
 const REACTION_INTERPRETER_MAX_STEPS = 6;
 
-const LEVEL_TO_SCOPE_KIND: Readonly<Record<StarContextLevel, OrderPartyRef["kind"]>> = {
-  person: "character",
-  unit: "force",
-  settlement: "settlement",
-  province: "province",
-  region: "region",
-  theatre: "theatre",
-  polity: "polity",
-  world: "world",
-};
-
 export function createReactionRunner(adapter: AiAdapter): AffectedAgentRunner {
   return {
     async runReactions(input: AffectedAgentRunnerInput): Promise<AffectedAgentRunnerResult> {
@@ -94,23 +76,10 @@ export function createReactionRunner(adapter: AiAdapter): AffectedAgentRunner {
         deferMutations: true,
       });
 
-      for (const characterId of selection.npcCharacterIds) {
-        if (session.exhausted) break;
-        await runNpcAgent({
-          adapter, session, world: session.stagedWorld, atStep, characterId, authorityIndex, facts,
-          atInstant: event.instant, actionAllowance: REACTION_ACTION_ALLOWANCE,
-        });
-      }
-
-      for (const ref of selection.starContextRefs) {
-        if (session.exhausted) break;
-        const nativeRef: OrderPartyRef = { kind: LEVEL_TO_SCOPE_KIND[ref.level], id: ref.id };
-        const context = selectStarContext(session.stagedWorld, nativeRef, authorityIndex, atStep);
-        await runStarContextAgent({
-          adapter, session, world: session.stagedWorld, atStep, context, authorityIndex, facts,
-          atInstant: event.instant, maxSteps: REACTION_MAX_STEPS,
-        });
-      }
+      await runAffectedAgents({
+        adapter, session, atStep, atInstant: event.instant, authorityIndex, facts, selection,
+        npcActionAllowance: REACTION_ACTION_ALLOWANCE, starContextMaxSteps: REACTION_MAX_STEPS,
+      });
 
       // The reacting agents only declared intent; this is the pass that turns
       // any of it into real (deferred) actions. Without it a reaction would
