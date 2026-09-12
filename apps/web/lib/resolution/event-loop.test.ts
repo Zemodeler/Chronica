@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
-import type { AffectedAgentSelection, Fact, WorldEventRecord, WorldState } from "@chronica/shared";
+import type { AffectedAgentSelection, InterventionDecision, WorldEventRecord, WorldState } from "@chronica/shared";
 import { advanceEventQueueWithPort, ensureMidnightTickSeeded, type AffectedAgentRunner, type EventQueuePort } from "./event-loop";
 import type { NewWorldEvent } from "@chronica/db";
 
@@ -10,17 +10,17 @@ function fakePort(seed: readonly WorldEventRecord[]): EventQueuePort & { readonl
   let nextId = events.length;
   return {
     events,
-    async listDuePendingEvents(atOrBefore) {
+    listDuePendingEvents(atOrBefore) {
       const key = atOrBefore.day * 1440 + atOrBefore.minute;
-      return events.filter((e) => e.status === "pending" && e.instant.day * 1440 + e.instant.minute <= key);
+      return Promise.resolve(events.filter((e) => e.status === "pending" && e.instant.day * 1440 + e.instant.minute <= key));
     },
-    async claimEvent(id) {
+    claimEvent(id) {
       const event = events.find((e) => e.id === id);
-      if (event === undefined || event.status !== "pending") return false;
+      if (event === undefined || event.status !== "pending") return Promise.resolve(false);
       event.status = "claimed";
-      return true;
+      return Promise.resolve(true);
     },
-    async insertEvents(newEvents: readonly NewWorldEvent[]) {
+    insertEvents(newEvents: readonly NewWorldEvent[]) {
       for (const input of newEvents) {
         events.push({
           id: `evt-${nextId++}`,
@@ -43,6 +43,7 @@ function fakePort(seed: readonly WorldEventRecord[]): EventQueuePort & { readonl
           resolvedFactIds: [],
         });
       }
+      return Promise.resolve();
     },
   };
 }
@@ -173,21 +174,106 @@ describe("advanceEventQueueWithPort (docs/32, Phase 7)", () => {
     expect(result.stopReason).toBe("decision_point");
   });
 
+  describe("elastic continuation (unified action runtime, Stage 5)", () => {
+    it("resolves a same-call follow-up once it becomes due within this call's own window, instead of only a future call noticing it", async () => {
+      const root = baseEvent({ id: "root", instant: { day: 1, minute: 0 } });
+      const port = fakePort([root]);
+      const resolvedIds: string[] = [];
+      const result = await advanceEventQueueWithPort(port, "game-1", world(), { day: 1, minute: 10 }, 1, {
+        handlers: {
+          action_phase: (w, event) => {
+            resolvedIds.push(event.id);
+            if (event.id !== "root") return { world: w, events: [] };
+            return {
+              world: w,
+              events: [],
+              followUpEvents: [{
+                kind: "action_phase", instant: { day: 1, minute: 5 },
+                subjectRef: { kind: "character", id: "char-1" }, payload: { kind: "action_phase", actionId: "act-2" }, createdAtStep: 1,
+              }],
+            };
+          },
+        },
+      });
+      expect(resolvedIds).toEqual(["root", expect.stringMatching(/^staged-/)]);
+      expect(result.resolvedEventIds).toHaveLength(2);
+      // Resolved within this same call -- nothing left to write as still-pending.
+      expect(result.pendingEventInserts).toEqual([]);
+      // The staged follow-up never touched the DB, so only the real,
+      // DB-sourced "root" gets a resolution write.
+      expect(result.pendingResolutions).toEqual([{ id: "root", atStep: 1, factIds: [] }]);
+      expect(result.stopReason).toBe("window_end");
+    });
+
+    it("leaves a follow-up that never becomes due within this call's window exactly as before -- staged in-memory visibility changes nothing about it", async () => {
+      const root = baseEvent({ id: "root", instant: { day: 1, minute: 0 } });
+      const port = fakePort([root]);
+      const result = await advanceEventQueueWithPort(port, "game-1", world(), { day: 1, minute: 0 }, 1, {
+        handlers: {
+          action_phase: (w) => ({
+            world: w,
+            events: [],
+            followUpEvents: [{
+              kind: "action_phase", instant: { day: 1, minute: 5 },
+              subjectRef: { kind: "character", id: "char-1" }, payload: { kind: "action_phase", actionId: "act-2" }, createdAtStep: 1,
+            }],
+          }),
+        },
+      });
+      expect(result.resolvedEventIds).toEqual(["root"]);
+      const [scheduled] = result.pendingEventInserts;
+      expect(scheduled?.instant).toEqual({ day: 1, minute: 5 });
+    });
+
+    it("stops at a decision point when checkIntervention reports requiresIntervention, mid-window rather than at handler/budget/window boundaries", async () => {
+      const first = baseEvent({ id: "first", instant: { day: 1, minute: 0 } });
+      const second = baseEvent({ id: "second", instant: { day: 1, minute: 10 } });
+      const port = fakePort([first, second]);
+      const stubDecision: InterventionDecision = {
+        hardStopReason: "salient_event",
+        requestedPlayerDecision: "Something demands your attention.",
+        score: 100,
+        breakdown: { irreversibility: 0, deviationFromPlan: 0, directPlayerInvolvement: 0, strategicConsequence: 0, uncertainty: 0 },
+        requiresIntervention: true,
+        contributingFactIds: ["fact-x"],
+      };
+      const result = await advanceEventQueueWithPort(port, "game-1", world(), { day: 1, minute: 30 }, 1, {
+        handlers: { action_phase: (w) => ({ world: w, events: [] }) },
+        checkIntervention: () => stubDecision,
+      });
+      expect(result.resolvedEventIds).toEqual(["first"]);
+      expect(result.stopReason).toBe("decision_point");
+      expect(result.interventionDecision).toEqual(stubDecision);
+    });
+
+    it("never calls checkIntervention when the caller omits it, running unconditionally to window end or budget as before", async () => {
+      const first = baseEvent({ id: "first", instant: { day: 1, minute: 0 } });
+      const second = baseEvent({ id: "second", instant: { day: 1, minute: 10 } });
+      const port = fakePort([first, second]);
+      const result = await advanceEventQueueWithPort(port, "game-1", world(), { day: 1, minute: 30 }, 1, {
+        handlers: { action_phase: (w) => ({ world: w, events: [] }) },
+      });
+      expect(result.resolvedEventIds).toEqual(["first", "second"]);
+      expect(result.stopReason).toBe("window_end");
+      expect(result.interventionDecision).toBeUndefined();
+    });
+  });
+
   describe("agentRunner wiring (docs/32 corrective pass, requirement 3)", () => {
     it("calls the agent runner with the current world/facts/event whenever the selector picks someone, and folds its scheduled events through the normal causal-depth path", async () => {
       const root = baseEvent({ id: "root", instant: { day: 1, minute: 0 } });
       const port = fakePort([root]);
       const seenInputs: { atStep: number; eventId: string; factsCount: number }[] = [];
       const agentRunner: AffectedAgentRunner = {
-        async runReactions(input) {
+        runReactions(input) {
           seenInputs.push({ atStep: input.atStep, eventId: input.event.id, factsCount: input.facts.length });
-          return {
+          return Promise.resolve({
             scheduledEvents: [{
               kind: "action_phase", instant: { day: 1, minute: 5 }, subjectRef: { kind: "character", id: "char-1" },
               payload: { kind: "action_phase", actionId: "move_character", actorId: "char-1", parameters: { characterId: "char-1", destinationProvinceId: "neighbor-a" } },
               createdAtStep: 1,
             }],
-          };
+          });
         },
       };
       const selection: AffectedAgentSelection = { npcCharacterIds: ["char-1"], starContextRefs: [], withinBudget: true };
@@ -216,7 +302,7 @@ describe("advanceEventQueueWithPort (docs/32, Phase 7)", () => {
       const root = baseEvent({ id: "root", instant: { day: 1, minute: 0 } });
       const port = fakePort([root]);
       let called = false;
-      const agentRunner: AffectedAgentRunner = { async runReactions() { called = true; return { scheduledEvents: [] }; } };
+      const agentRunner: AffectedAgentRunner = { runReactions() { called = true; return Promise.resolve({ scheduledEvents: [] }); } };
 
       await advanceEventQueueWithPort(port, "game-1", world(), { day: 1, minute: 0 }, 1, {
         agentSelector: { selectAffectedAgents: () => ({ npcCharacterIds: [], starContextRefs: [], withinBudget: true }) },
@@ -230,14 +316,14 @@ describe("advanceEventQueueWithPort (docs/32, Phase 7)", () => {
       const root = baseEvent({ id: "root", instant: { day: 1, minute: 0 }, causalDepth: 3 });
       const port = fakePort([root]);
       const agentRunner: AffectedAgentRunner = {
-        async runReactions() {
-          return {
+        runReactions() {
+          return Promise.resolve({
             scheduledEvents: [{
               kind: "action_phase", instant: { day: 1, minute: 5 }, subjectRef: { kind: "character", id: "char-1" },
               payload: { kind: "action_phase", actionId: "move_character", actorId: "char-1", parameters: {} },
               createdAtStep: 1,
             }],
-          };
+          });
         },
       };
       const result = await advanceEventQueueWithPort(port, "game-1", world(), { day: 1, minute: 0 }, 1, {

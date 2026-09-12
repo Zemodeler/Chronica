@@ -629,7 +629,7 @@ describe("the turn report", () => {
 // arguments must never be reported as a real refusal without at least one
 // corrected retry.
 describe("a recoverable lookup failure (start_siege named the wrong settlement id)", () => {
-  it("is refused, naming the real id, when start_siege is called with the display name instead of the authoritative id", () => {
+  it("silently repairs the display name to the authoritative id and succeeds, never telling the caller it failed", () => {
     const gm = punicSession();
     const outcome = gm.invoke(call("start_siege", {
       actorId: "hieron-ii",
@@ -637,14 +637,23 @@ describe("a recoverable lookup failure (start_siege named the wrong settlement i
       invadingForceIds: ["syracusan-army"],
     }));
 
-    expect(outcome.ok).toBe(false);
-    expect(outcome.factual).toContain('No settlement exists with the id "messana"');
-    expect(outcome.factual).toContain("settlement-messana");
+    // One string was written the way a person says it rather than the way
+    // the record stores it -- nothing about the world said no, so this is
+    // not a refusal (`applyInvocationRepairingIds`'s one automatic retry).
+    expect(outcome.ok).toBe(true);
+    expect(outcome.factual).toContain('resolved settlementId "messana" -> "settlement-messana"');
+    expect(gm.stagedWorld.conflicts.sieges.some((siege) => siege.settlementId === "settlement-messana")).toBe(true);
   });
 
-  it("refuses to finish the turn until that recoverable failure is retried", () => {
+  it("still refuses, and blocks finishing the turn, when the guess cannot be resolved unambiguously", () => {
     const gm = punicSession();
-    gm.invoke(call("start_siege", { actorId: "hieron-ii", settlementId: "messana", invadingForceIds: ["syracusan-army"] }));
+    const outcome = gm.invoke(call("start_siege", {
+      actorId: "hieron-ii",
+      settlementId: "atlantis",
+      invadingForceIds: ["syracusan-army"],
+    }));
+    expect(outcome.ok).toBe(false);
+    expect(outcome.factual).toContain('No settlement exists with the id "atlantis"');
 
     const attempted = gm.invoke(call(FINISH_TURN_TOOL, {
       report: { directiveOutcomes: [], events: [], openThreads: [], turnSummary: "Nothing happened." },

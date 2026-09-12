@@ -93,12 +93,32 @@ import {
   rewriteClaimsUnsupportedWar,
 } from "./chronicle-from-facts";
 import { materializeCanvasProvince } from "../canvas-world";
-import { decideElasticStop } from "./elastic-scheduler";
 import { advanceEventQueue, createDbEventQueuePort } from "./event-loop";
-import { computeInterventionScore, deriveWorldInstant, factualEventToFact } from "@chronica/shared";
+import {
+  computeInterventionScore,
+  daysPerStep,
+  deriveWorldInstant,
+  factualEventToFact,
+  midnight,
+  type Fact,
+  type InterventionDecision,
+  type StopReason,
+} from "@chronica/shared";
 import { runMultiAgentTurn } from "./agents/orchestrator";
 import { createReactionRunner } from "./agents/reaction-runner";
 import { advanceProjectsTick, ensureProjectTicksSeeded } from "./project-tick";
+
+/**
+ * Wall-clock/cost safety bound for the elastic continuation (unified action
+ * runtime, Stage 5) -- deliberately distinct from a scenario's own narrative
+ * `ScenarioClock.maxSpan`: even a scenario with a generous max span must not
+ * let one player request resolve an unbounded chain of due events (and their
+ * own reaction agent calls) in a single turn.
+ */
+const MAX_ELASTIC_EVENTS_PER_TURN = 20;
+
+/** Used only when a scenario declares no clock at all -- mirrors how `intervention-score.ts`'s own default threshold is a fallback, not a real absence of a bound. */
+const MAX_UNATTENDED_SPAN_DAYS_FALLBACK = 3650;
 
 export type ProgressCallback = (progress: ResolutionProgress) => void;
 
@@ -527,7 +547,7 @@ export async function resolveTurn(
     const contactDialogueOutcome = applySocialEvents(newWorld, readyContactDialogueEvents, atStep, turnId);
     newWorld = contactDialogueOutcome.world;
     const committedGameMasterEvents = gameMasterCompleted ? gameMasterOutcome.events : [];
-    const factualEvents = [
+    let factualEvents = [
       ...committedGameMasterEvents,
       ...worldDynamics.handlerEvents.map((event, index) => ({ ...event, id: `fact-${atStep}-${committedGameMasterEvents.length + index + 1}` })),
     ];
@@ -542,7 +562,7 @@ export async function resolveTurn(
     const canonicalWorkflowFacts = committedGameMasterEvents
       .filter((event) => event.materialConsequence)
       .map((event) => factualEventToFact(event, turnInstant));
-    const allWorldFacts = [...worldDynamics.facts, ...worldToolFacts, ...canonicalWorkflowFacts];
+    let allWorldFacts: Fact[] = [...worldDynamics.facts, ...worldToolFacts, ...canonicalWorkflowFacts];
     console.log(
       `${tag()} [game_master] OUT: termination=${gameMasterOutcome.termination} committed=${gameMasterCompleted} `
       + `actions=${gameMasterOutcome.executedInvocations.length} facts=${factualEvents.length} capabilityGaps=${capabilityRequests.length}`,
@@ -561,6 +581,96 @@ export async function resolveTurn(
       );
     }
     emit(onProgress, "game_master", true);
+
+    // ── Elastic continuation (unified action runtime, Stage 5) ────────────
+    // The turn does not stop merely because the Game Master finished
+    // carrying out the player's own directives. The real player-intervention
+    // decision (Stage 1's `computeInterventionScore`) is evaluated against
+    // everything this turn has produced so far; if nothing yet requires the
+    // player's attention, the runtime keeps resolving whatever queued work
+    // is already due (Stage 3's phase completions, ticks) together with its
+    // own immediate reactions (Stage 4's machinery), folding the result into
+    // THIS turn rather than waiting for a future call to notice. Nothing
+    // here touches the event queue or fact ledger directly -- exactly like
+    // the pre-turn backlog catch-up above, it is all staged for the single
+    // commit at the end.
+    const elapsedDayStart = turnInstant.day;
+    const gmTurnEstimatedDayEnd = elapsedDayStart + Math.max(1, estimateWorkflowDurationDays(factualEvents.map((event) => event.actionId)));
+    const extraPendingEventInserts: Omit<NewWorldEvent, "gameId">[] = [];
+    const extraPendingResolutions: { id: string; atStep: number; factIds: readonly string[] }[] = [];
+    let elasticStopReason: StopReason;
+    let elapsedDayEnd: number;
+    let stoppingFactIds: readonly string[];
+    let requestedPlayerDecision: string | null;
+
+    const immediateDecision: InterventionDecision = computeInterventionScore({
+      facts: allWorldFacts,
+      plans: newWorld.plans ?? [],
+      conflicts: [],
+    });
+    console.log(
+      `${tag()} [intervention] after game_master: score=${immediateDecision.score} `
+      + `hardStop=${immediateDecision.hardStopReason ?? "none"} requiresIntervention=${immediateDecision.requiresIntervention}`,
+    );
+
+    if (immediateDecision.requiresIntervention) {
+      elasticStopReason = immediateDecision.hardStopReason ?? "threshold_crossed";
+      elapsedDayEnd = gmTurnEstimatedDayEnd;
+      stoppingFactIds = immediateDecision.contributingFactIds;
+      requestedPlayerDecision = immediateDecision.requestedPlayerDecision;
+    } else {
+      const maxSpanDays = input.scenarioClock?.maxSpan !== undefined
+        ? input.scenarioClock.maxSpan * daysPerStep(input.scenarioClock)
+        : MAX_UNATTENDED_SPAN_DAYS_FALLBACK;
+      const continuationWindowEnd = midnight(Math.round(elapsedDayStart + maxSpanDays));
+      const factsBeforeContinuation = allWorldFacts;
+      const continuation = await advanceEventQueue(db, newWorld, continuationWindowEnd, atStep, {
+        gameId,
+        maxEventsPerCall: MAX_ELASTIC_EVENTS_PER_TURN,
+        handlers: { world_process_tick: advanceProjectsTick },
+        agentRunner: createReactionRunner(gameMasterAdapter),
+        checkIntervention: (factsSoFar, plans) => computeInterventionScore({
+          facts: [...factsBeforeContinuation, ...factsSoFar],
+          plans,
+          conflicts: [],
+        }),
+      });
+      newWorld = continuation.world;
+      factualEvents = [
+        ...factualEvents,
+        ...continuation.handlerEvents.map((event, index) => ({ ...event, id: `fact-${atStep}-continuation-${index + 1}` })),
+      ];
+      allWorldFacts = [...allWorldFacts, ...continuation.facts];
+      extraPendingEventInserts.push(...continuation.pendingEventInserts);
+      extraPendingResolutions.push(...continuation.pendingResolutions);
+      console.log(
+        `${tag()} [elastic] continuation: resolved=${continuation.resolvedEventIds.length} stopReason=${continuation.stopReason} `
+        + `stoppedAt=day${continuation.stoppedAt.day}`,
+      );
+
+      if (continuation.stopReason === "decision_point" && continuation.interventionDecision !== undefined) {
+        const decision = continuation.interventionDecision;
+        elasticStopReason = decision.hardStopReason ?? "threshold_crossed";
+        stoppingFactIds = decision.contributingFactIds;
+        requestedPlayerDecision = decision.requestedPlayerDecision;
+      } else if (continuation.stopReason === "budget_exhausted") {
+        // The cost safety valve fired, not a real decision point -- there is
+        // nothing specific to ask the player, only that time has passed.
+        elasticStopReason = "max_span";
+        stoppingFactIds = [];
+        requestedPlayerDecision = null;
+      } else {
+        // "window_end": genuinely caught up to the scenario's own max span
+        // (or simply nothing else is due) with nothing requiring
+        // intervention. The only thing left is to ask the player what to
+        // do next -- the same default this pipeline always committed before
+        // Stage 5.
+        elasticStopReason = "player_decision";
+        stoppingFactIds = [];
+        requestedPlayerDecision = null;
+      }
+      elapsedDayEnd = Math.max(gmTurnEstimatedDayEnd, continuation.world.instant?.day ?? gmTurnEstimatedDayEnd);
+    }
 
     // Audit is the session's, verbatim: every refusal carries the exact
     // deterministic reason the policy or the executor produced.
@@ -1180,39 +1290,6 @@ export async function resolveTurn(
       ),
     };
 
-    // Shadow-mode only (docs/32, Phase 7): computes what an elastic scheduler
-    // would have decided, purely for later comparison. `elapsedStepEnd`/
-    // `stopReason` below remain exactly what they were before this phase --
-    // the live pipeline still resolves one turn per call and always returns
-    // control to the player, regardless of this decision.
-    const elasticShadowDecision = decideElasticStop({
-      elapsedStepStart: resolutionWorld.elapsedStep,
-      scenarioClock: input.scenarioClock,
-      factualEvents,
-      plans: finalWorld.plans ?? [],
-    });
-
-    // Shadow-mode only, alongside the above (unified-action-runtime plan,
-    // Stage 1): the real 0-100 intervention score and hard-stop checks,
-    // computed purely for comparison against `elasticShadowDecision`'s
-    // existing two-condition heuristic -- neither decision drives
-    // `stopReason`/commit below yet. `conflicts` is empty because plan-stage
-    // resource claims (`actions/conflicts.ts`) are not populated until
-    // reservations are actually acquired in `execute_plan_stage` (a later
-    // stage), so that hard-stop check cannot fire today; every other check
-    // reads real facts/plans.
-    const interventionShadowDecision = computeInterventionScore({
-      facts: allWorldFacts,
-      plans: finalWorld.plans ?? [],
-      conflicts: [],
-    });
-    console.log(
-      `[intervention-shadow:step-${atStep}] score=${interventionShadowDecision.score} `
-      + `hardStop=${interventionShadowDecision.hardStopReason ?? "none"} `
-      + `requiresIntervention=${interventionShadowDecision.requiresIntervention} `
-      + `vs elasticShadow.stopReason=${elasticShadowDecision.stopReason ?? "none (would keep advancing)"}`,
-    );
-
     const definedWorkflows = gameMasterCompleted
       ? gameMasterOutcome.definedActions.map((definition) => ({
         id: `defined-${gameId}-${definition.actionId}`,
@@ -1251,17 +1328,17 @@ export async function resolveTurn(
       newWorld: finalWorld,
       elapsedStepEnd: atStep,
       chronicleEntries: chronicleInputs,
-      stopReason: "player_decision",
-      elapsedDayEnd: elasticShadowDecision.elapsedDayEnd,
-      stoppingFactIds: elasticShadowDecision.stoppingFactIds,
-      requestedPlayerDecision: elasticShadowDecision.requestedPlayerDecision,
+      stopReason: elasticStopReason,
+      elapsedDayEnd,
+      stoppingFactIds,
+      requestedPlayerDecision,
       workflowAudit: finalWorkflowAudit,
       inventedWorkflows: definedWorkflows,
       inventedWorkflowUses: definedWorkflowUses,
       capabilityRequests,
       worldFacts: allWorldFacts,
-      pendingWorldEvents: [...worldDynamics.pendingEventInserts, ...scheduledPlanPhaseEvents],
-      pendingEventResolutions: worldDynamics.pendingResolutions,
+      pendingWorldEvents: [...worldDynamics.pendingEventInserts, ...extraPendingEventInserts, ...scheduledPlanPhaseEvents],
+      pendingEventResolutions: [...worldDynamics.pendingResolutions, ...extraPendingResolutions],
       gameMasterReport: {
         atStep,
         termination: gameMasterOutcome.termination,

@@ -96,9 +96,10 @@ export function diagnoseFailedInvocation(
   for (const [key, value] of Object.entries(parameters as Record<string, unknown>)) {
     if (!/Id$|Ids$/.test(key)) continue;
     if (creating && CREATED_ID_KEYS.has(key)) continue;
+    const kind = expectedKind(key);
     const candidates = typeof value === "string" ? [value] : Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
     for (const candidate of candidates) {
-      if (index.has(candidate)) continue;
+      if (alreadyResolves(candidate, index, kind)) continue;
       unknown.push(`${key} "${candidate}"`);
     }
   }
@@ -153,6 +154,20 @@ function expectedKind(key: string): string | null {
     if (normalized.endsWith(suffix)) return kind;
   }
   return null;
+}
+
+/**
+ * Whether `id` already answers to something of the kind this parameter
+ * requires -- not merely something. "rome" is a real id (the polity), but a
+ * `settlementId` naming it is not resolved: the actual settlement is
+ * "settlement-rome", a different entity that happens to share a spelling.
+ * Without this, a guess that collides with an unrelated entity's real id
+ * would short-circuit as "already fine" instead of ever reaching repair.
+ */
+function alreadyResolves(id: string, index: Map<string, IndexedEntity>, kind: string | null): boolean {
+  const entity = index.get(id);
+  if (entity === undefined) return false;
+  return kind === null || entity.kind === kind;
 }
 
 /** Casing, underscores, and hyphens are spelling, not identity. */
@@ -236,7 +251,7 @@ export function repairInvocationIds(
     const kind = expectedKind(key);
 
     if (typeof value === "string") {
-      if (index.has(value)) continue;
+      if (alreadyResolves(value, index, kind)) continue;
       const candidates = resolutionCandidates(value, index, kind);
       if (candidates.length !== 1) return null;
       repaired[key] = candidates[0]!;
@@ -249,7 +264,7 @@ export function repairInvocationIds(
     let changed = false;
     for (let position = 0; position < entries.length; position += 1) {
       const entry = entries[position];
-      if (typeof entry !== "string" || index.has(entry)) continue;
+      if (typeof entry !== "string" || alreadyResolves(entry, index, kind)) continue;
       const candidates = resolutionCandidates(entry, index, kind);
       if (candidates.length !== 1) return null;
       entries[position] = candidates[0]!;
