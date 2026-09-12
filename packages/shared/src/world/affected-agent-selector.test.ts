@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
-import { selectAffectedAgentsForEvent } from "./affected-agent-selector";
+import { selectAffectedAgentsForEvent, selectAffectedAgentsForFacts } from "./affected-agent-selector";
 import { NO_INTERVENTION_SIGNALS, type Fact } from "./facts";
 import type { WorldEventRecord } from "./event-queue";
 import type { WorldState } from "./world-state";
@@ -109,5 +109,27 @@ describe("selectAffectedAgentsForEvent (docs/32 corrective pass, requirement 3)"
     const selection = selectAffectedAgentsForEvent(manyCharacters, manyFacts, dueEvent);
     expect(selection.npcCharacterIds.length).toBeLessThanOrEqual(8);
     expect(selection.withinBudget).toBe(false);
+  });
+});
+
+describe("selectAffectedAgentsForFacts (unified action runtime, Stage 4)", () => {
+  it("selects directly from a given batch of facts, with no event or sourceEventId involved at all", () => {
+    const w = world();
+    const facts = [fact({ affectedEntities: [{ kind: "character", id: "hanno" }], sourceEventId: null })];
+    const selection = selectAffectedAgentsForFacts(w, facts);
+    expect(selection.npcCharacterIds).toEqual(["hanno"]);
+  });
+
+  it("selectAffectedAgentsForEvent is exactly selectAffectedAgentsForFacts narrowed to one event's own facts first", () => {
+    const w = world();
+    const facts = [
+      fact({ affectedEntities: [{ kind: "character", id: "hanno" }], sourceEventId: "event-1" }),
+      fact({ affectedEntities: [{ kind: "character", id: "hamilcar" }], sourceEventId: "some-other-event" }),
+    ];
+    // Passed directly, selectAffectedAgentsForFacts sees both facts and selects both characters.
+    expect([...selectAffectedAgentsForFacts(w, facts).npcCharacterIds].sort()).toEqual(["hamilcar", "hanno"]);
+    // Narrowed through the event, only the fact naming this event's own id counts.
+    const viaEvent = selectAffectedAgentsForEvent(w, facts, dueEvent);
+    expect(viaEvent.npcCharacterIds).toEqual(["hanno"]);
   });
 });

@@ -33,6 +33,34 @@ describe("factualEventToFact (docs/32, Phase 7)", () => {
     expect(fact.visibility).toBe("private");
     expect(fact.discovery.state).toBe("private");
   });
+
+  it("derives affectedEntities from the event's own stateDeltas when the caller supplies no override (unified action runtime, Stage 4)", () => {
+    const withDeltas: FactualEvent = {
+      ...baseEvent,
+      stateDeltas: [
+        { entityType: "character", entityId: "hanno", entityName: "Hanno", change: "updated", fields: [] },
+        { entityType: "force", entityId: "legion-1", entityName: "First Legion", change: "updated", fields: [] },
+        // Not a reactable OrderPartyRef kind -- left out rather than invented into one.
+        { entityType: "war", entityId: "war-1", entityName: "The Punic War", change: "updated", fields: [] },
+      ],
+    };
+    const fact = factualEventToFact(withDeltas, { day: 10, minute: 0 });
+    expect(fact.affectedEntities).toEqual([
+      { kind: "character", id: "hanno" },
+      { kind: "force", id: "legion-1" },
+    ]);
+  });
+
+  it("still lets an explicit override take precedence over stateDeltas", () => {
+    const withDeltas: FactualEvent = { ...baseEvent, stateDeltas: [{ entityType: "character", entityId: "hanno", entityName: "Hanno", change: "updated", fields: [] }] };
+    const fact = factualEventToFact(withDeltas, { day: 10, minute: 0 }, "public", undefined, { affectedEntities: [{ kind: "polity", id: "carthage" }] });
+    expect(fact.affectedEntities).toEqual([{ kind: "polity", id: "carthage" }]);
+  });
+
+  it("defaults to no affected entities when the event carries no stateDeltas", () => {
+    const fact = factualEventToFact(baseEvent, { day: 10, minute: 0 });
+    expect(fact.affectedEntities).toEqual([]);
+  });
 });
 
 describe("emitFacts", () => {

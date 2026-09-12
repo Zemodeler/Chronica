@@ -7,15 +7,17 @@ import type { Fact, StarContextLevel } from "./facts";
 import type { WorldEventRecord } from "./event-queue";
 import type { WorldState } from "./world-state";
 
-// The real per-event affected-agent selector (docs/32 corrective pass,
-// requirement 3): replaces `NO_OP_AGENT_SELECTOR` in the live event-queue
-// path. Deliberately narrower than `character-agency/selector.ts`'s
-// `selectRelevantActors` (whole-world relevance, used once per turn by
-// `agents/orchestrator.ts`) -- this selector only ever looks at who this
-// *specific resolved event*'s own Facts actually named or touched, so a
-// minor local event (a personal dispute, a small skirmish) selects only the
-// handful of characters and institutions it actually concerns, never a
-// whole polity's office-holders just because they exist.
+// The real affected-agent selector (docs/32 corrective pass, requirement
+// 3): replaces `NO_OP_AGENT_SELECTOR` in the live event-queue path, and
+// (unified action runtime, Stage 4) also selects reactions to a turn's own
+// interpreted facts. Deliberately narrower than `character-agency/
+// selector.ts`'s `selectRelevantActors` (whole-world relevance, used once
+// per turn to decide who gets to declare an intent at all) -- this
+// selector only ever looks at who a specific batch of Facts actually named
+// or touched, so a minor local event (a personal dispute, a small
+// skirmish) selects only the handful of characters and institutions it
+// actually concerns, never a whole polity's office-holders just because
+// they exist.
 
 const SCOPE_KIND_TO_STAR_LEVEL: Readonly<Partial<Record<string, StarContextLevel>>> = {
   force: "unit",
@@ -40,21 +42,29 @@ function dedupeStarRefs(refs: readonly { readonly level: StarContextLevel; reado
 }
 
 /**
- * Selects the NPC characters and star contexts one resolved event's own
- * Facts actually concern: living characters directly named in
- * `affectedEntities`, plus living office/command holders over a named
- * institution/force/polity/province/settlement -- but only for Facts that
- * declared `eligibleReactionScopes` (an event with none is not eligible to
- * trigger any reaction at all, by its own producer's declaration). A named
+ * Selects the NPC characters and star contexts a batch of Facts actually
+ * concern: living characters directly named in `affectedEntities`, plus
+ * living office/command holders over a named institution/force/polity/
+ * province/settlement -- but only for Facts that declared
+ * `eligibleReactionScopes` (a Fact with none is not eligible to trigger any
+ * reaction at all, by its own producer's declaration). A named
  * institutional scope with no living representative becomes a star-context
  * candidate instead of being silently dropped.
+ *
+ * The caller has already narrowed `facts` to whichever batch it means --
+ * one resolved event's own output (`selectAffectedAgentsForEvent` below) or
+ * a turn's own interpreted facts (`agents/orchestrator.ts`'s fresh-context
+ * reaction pass, unified action runtime Stage 4). Either way this is the
+ * one real selector: narrower than `character-agency/selector.ts`'s
+ * `selectRelevantActors` (whole-world relevance, used once to decide who
+ * gets to declare an intent at all), because this only ever looks at who a
+ * *specific* batch of facts actually named or touched.
  */
-export function selectAffectedAgentsForEvent(world: WorldState, facts: readonly Fact[], event: WorldEventRecord): AffectedAgentSelection {
-  const relevantFacts = facts.filter((fact) => fact.sourceEventId === event.id);
+export function selectAffectedAgentsForFacts(world: WorldState, facts: readonly Fact[]): AffectedAgentSelection {
   const characterIds = new Set<string>();
   const institutionalRefs: OrderPartyRef[] = [];
 
-  for (const fact of relevantFacts) {
+  for (const fact of facts) {
     for (const ref of fact.affectedEntities) {
       if (ref.kind === "character") {
         if (world.characters.some((character) => character.id === ref.id && character.alive)) characterIds.add(ref.id);
@@ -96,6 +106,11 @@ export function selectAffectedAgentsForEvent(world: WorldState, facts: readonly 
   const withinBudget = boundedNpcIds.length === npcCharacterIds.length && boundedStarRefs.length === starContextRefs.length;
 
   return { npcCharacterIds: boundedNpcIds, starContextRefs: boundedStarRefs, withinBudget };
+}
+
+/** `selectAffectedAgentsForFacts`, narrowed to one resolved event's own output first. */
+export function selectAffectedAgentsForEvent(world: WorldState, facts: readonly Fact[], event: WorldEventRecord): AffectedAgentSelection {
+  return selectAffectedAgentsForFacts(world, facts.filter((fact) => fact.sourceEventId === event.id));
 }
 
 export const REAL_AGENT_SELECTOR: AffectedAgentSelector = { selectAffectedAgents: selectAffectedAgentsForEvent };
