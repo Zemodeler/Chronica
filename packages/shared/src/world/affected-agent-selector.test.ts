@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import { selectAffectedAgentsForEvent } from "./affected-agent-selector";
-import type { Fact } from "./facts";
+import { NO_INTERVENTION_SIGNALS, type Fact } from "./facts";
 import type { WorldEventRecord } from "./event-queue";
 import type { WorldState } from "./world-state";
 
@@ -26,6 +26,7 @@ function fact(overrides: Partial<Fact> & Pick<Fact, "affectedEntities">): Fact {
     discovery: { state: "public", knowableAtInstant: null, discoveredBy: [] },
     evidence: null,
     eligibleReactionScopes: [],
+    interventionSignals: NO_INTERVENTION_SIGNALS,
     sourceEventId: "event-1",
     sourceActionId: null,
     causalDepth: 0,

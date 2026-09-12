@@ -102,6 +102,36 @@ export const StarContextLevelSchema = z.enum([
 ]);
 export type StarContextLevel = z.infer<typeof StarContextLevelSchema>;
 
+/**
+ * Recorded classifications behind the player-intervention score (unified
+ * action runtime, "Player-intervention threshold"). A fact's producer
+ * records what kind of thing happened -- categorical, not a numeric guess --
+ * and `world/intervention-score.ts` is the one place that turns these
+ * classifications into the actual 0-100 score. Keeping the point arithmetic
+ * out of the producer is the same "engine owns the calculation, AI owns the
+ * classification" split `eligibleReactionScopes` already established for
+ * reaction selection.
+ */
+export const InterventionSeveritySchema = z.enum(["none", "minor", "moderate", "major"]);
+export type InterventionSeverity = z.infer<typeof InterventionSeveritySchema>;
+
+export const FactInterventionSignalsSchema = z.object({
+  /** Death, permanent loss, war, surrender, removal from office, or another outcome that cannot simply be revised later. */
+  irreversibility: InterventionSeveritySchema.default("none"),
+  /** The expected method, cost, timing, target, or likely outcome has materially changed from what was planned. */
+  deviationFromPlan: InterventionSeveritySchema.default("none"),
+  /** The player character, their command, office, household, or expressly reserved resources are directly affected. */
+  directPlayerInvolvement: InterventionSeveritySchema.default("none"),
+  /** Territory, a major force, treasury solvency, an alliance, or a principal objective is at stake. */
+  strategicConsequence: InterventionSeveritySchema.default("none"),
+  /** Several lawful continuations exist and the standing plan does not clearly choose among them. */
+  uncertainty: InterventionSeveritySchema.default("none"),
+}).strict();
+export type FactInterventionSignals = z.infer<typeof FactInterventionSignalsSchema>;
+
+/** The safe default for a fact whose producer records no intervention classification -- every factor reads as "none". */
+export const NO_INTERVENTION_SIGNALS: FactInterventionSignals = FactInterventionSignalsSchema.parse({});
+
 export const FactSchema = z
   .object({
     id: EntityIdSchema,
@@ -119,6 +149,10 @@ export const FactSchema = z
     evidence: FactEvidenceSchema.nullable().default(null),
     /** Which star-context/relevance scopes may treat this as a valid reaction trigger. */
     eligibleReactionScopes: z.array(StarContextLevelSchema).default([]),
+    /** Recorded classifications the intervention-score engine reads; absent signals default to "none" (never intervenes on their own). */
+    interventionSignals: FactInterventionSignalsSchema.default({
+      irreversibility: "none", deviationFromPlan: "none", directPlayerInvolvement: "none", strategicConsequence: "none", uncertainty: "none",
+    }),
     /** The `world_events` row that produced this fact, if any. */
     sourceEventId: z.string().max(120).nullable().default(null),
     sourceActionId: EntityIdSchema.nullable().default(null),
@@ -141,7 +175,7 @@ export function factualEventToFact(
   time: WorldInstant,
   visibility: FactVisibility = "public",
   discovery?: FactDiscovery,
-  overrides?: Partial<Pick<Fact, "eligibleReactionScopes" | "sourceEventId" | "causalDepth" | "authorityChange" | "evidence" | "affectedEntities">>,
+  overrides?: Partial<Pick<Fact, "eligibleReactionScopes" | "sourceEventId" | "causalDepth" | "authorityChange" | "evidence" | "affectedEntities" | "interventionSignals">>,
 ): Fact {
   return FactSchema.parse({
     id: event.id,
@@ -156,6 +190,7 @@ export function factualEventToFact(
     discovery: discovery ?? { state: visibility, knowableAtInstant: null, discoveredBy: [] },
     evidence: overrides?.evidence ?? null,
     eligibleReactionScopes: overrides?.eligibleReactionScopes ?? [],
+    interventionSignals: overrides?.interventionSignals ?? NO_INTERVENTION_SIGNALS,
     sourceEventId: overrides?.sourceEventId ?? null,
     sourceActionId: event.actionId ?? null,
     causalDepth: overrides?.causalDepth ?? 0,

@@ -3,7 +3,7 @@ import { firstPunicWarScenario } from "@chronica/db";
 import type { WorldState } from "../world/world-state";
 import { buildAuthorityIndex } from "../authority/authority-grant";
 import { issueOrderAttempt } from "../authority/order-attempt";
-import { emitFacts, type FactDraft } from "../world/facts";
+import { emitFacts, NO_INTERVENTION_SIGNALS, type FactDraft } from "../world/facts";
 import { buildNpcAgentContext } from "./npc-context";
 
 function world(): WorldState {
@@ -35,6 +35,7 @@ describe("buildNpcAgentContext (docs/32, Part B.4)", () => {
         visibility: "public",
         discovery: { state: "public", knowableAtInstant: atInstant, discoveredBy: [] },
         eligibleReactionScopes: ["world"],
+        interventionSignals: NO_INTERVENTION_SIGNALS,
         sourceEventId: null,
         sourceActionId: null,
         causalDepth: 0,
@@ -51,6 +52,7 @@ describe("buildNpcAgentContext (docs/32, Part B.4)", () => {
         visibility: "private",
         discovery: { state: "private", knowableAtInstant: atInstant, discoveredBy: [] },
         eligibleReactionScopes: ["world"],
+        interventionSignals: NO_INTERVENTION_SIGNALS,
         sourceEventId: null,
         sourceActionId: null,
         causalDepth: 0,
