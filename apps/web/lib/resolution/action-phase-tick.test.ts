@@ -17,14 +17,14 @@ function event(overrides: Partial<Extract<WorldEventRecord["payload"], { kind: "
   };
 }
 
-function planWithInProgressStage(stageId: string, actionId: string): ActionPlan {
+function planWithInProgressStage(stageId: string, actionId: string, overrides: { options?: Record<string, unknown>; spent?: number } = {}): ActionPlan {
   return ActionPlanSchema.parse({
     id: "plan-1",
     origin: { kind: "player", sourceId: "hanno", directiveId: "d1" },
     ownerCharacterId: "hanno",
     rawText: "Move to the northeast.",
     revisions: [{ atStep: 1, text: "Move to the northeast." }],
-    options: {},
+    options: overrides.options ?? {},
     interpretation: "Move to the northeast.",
     status: "active",
     stages: [{
@@ -33,7 +33,7 @@ function planWithInProgressStage(stageId: string, actionId: string): ActionPlan 
       startedAtStep: 1, durationEstimate: { minimumSteps: 1, likelySteps: 3, maximumSteps: 5, basis: ["test"] }, expectedCompletionStep: 4,
     }],
     assignments: [],
-    spent: 0,
+    spent: overrides.spent ?? 0,
     createdAtStep: 1,
     updatedAtStep: 1,
   });
@@ -75,6 +75,79 @@ describe("resolveActionPhase -- closing out a scheduled plan stage (unified acti
     );
     expect(result.world.characters.find((c) => c.id === "hanno")?.locationProvinceId).toBe("ita-72843720b81376294924159-sicily-northeast");
     expect(result.world.plans).toEqual([]);
+  });
+
+  it("releases every reservation the stage held, on success", async () => {
+    const w = {
+      ...world(),
+      plans: [planWithInProgressStage("travel", "move_character")],
+      stageReservations: [
+        { id: "r-1", planId: "plan-1", stageId: "travel", kind: "character_time" as const, resourceId: "hanno", createdAtStep: 1, releasedAtStep: null },
+      ],
+    };
+    const result = await resolveActionPhase(
+      w,
+      event({ actorId: "hanno", stageId: "travel", parameters: { characterId: "hanno", destinationProvinceId: "ita-72843720b81376294924159-sicily-northeast" } }),
+      4,
+    );
+    expect(result.world.stageReservations?.[0]?.releasedAtStep).toBe(4);
+  });
+
+  it("releases every reservation the stage held, on failure too", async () => {
+    const w = {
+      ...world(),
+      plans: [planWithInProgressStage("travel", "move_character")],
+      stageReservations: [
+        { id: "r-1", planId: "plan-1", stageId: "travel", kind: "character_time" as const, resourceId: "hanno", createdAtStep: 1, releasedAtStep: null },
+      ],
+    };
+    const result = await resolveActionPhase(
+      w,
+      event({ actorId: "hanno", stageId: "travel", parameters: { characterId: "hanno", destinationProvinceId: "no-such-province" } }),
+      4,
+    );
+    expect(result.world.stageReservations?.[0]?.releasedAtStep).toBe(4);
+  });
+});
+
+describe("resolveActionPhase -- mechanical budget enforcement (unified action runtime, Stage 6)", () => {
+  it("refuses a scheduled spend that would exceed the plan's own stated budget, undoing it entirely", async () => {
+    const account = firstPunicWarScenario.initialWorld.material.accounts[0]!;
+    const w = {
+      ...world(),
+      plans: [planWithInProgressStage("pay", "remove_gold", { options: { budget: { accountId: account.id, amount: 10 } }, spent: 0 })],
+    };
+    const before = w.material.accounts.find((a) => a.id === account.id)!.balance;
+    const result = await resolveActionPhase(
+      w,
+      event({ actorId: "hanno", stageId: "pay", actionId: "remove_gold", parameters: { accountId: account.id, amount: 20, reason: "Pay for work" } }),
+      4,
+    );
+    const stage = result.world.plans?.[0]?.stages.find((s) => s.id === "pay");
+    expect(stage?.status).toBe("failed");
+    expect(stage?.statusReason).toMatch(/exceeding the 10-limit/);
+    // Undone entirely -- the account never moved, and nothing was recorded as spent.
+    expect(result.world.material.accounts.find((a) => a.id === account.id)!.balance).toBe(before);
+    expect(result.world.plans?.[0]?.spent).toBe(0);
+    expect(result.events[0]?.kind).toBe("capability_gap");
+  });
+
+  it("applies and records a spend within the plan's own stated budget", async () => {
+    const account = firstPunicWarScenario.initialWorld.material.accounts[0]!;
+    const w = {
+      ...world(),
+      plans: [planWithInProgressStage("pay", "remove_gold", { options: { budget: { accountId: account.id, amount: 10 } }, spent: 0 })],
+    };
+    const before = w.material.accounts.find((a) => a.id === account.id)!.balance;
+    const result = await resolveActionPhase(
+      w,
+      event({ actorId: "hanno", stageId: "pay", actionId: "remove_gold", parameters: { accountId: account.id, amount: 5, reason: "Pay for work" } }),
+      4,
+    );
+    const stage = result.world.plans?.[0]?.stages.find((s) => s.id === "pay");
+    expect(stage?.status).toBe("completed");
+    expect(result.world.material.accounts.find((a) => a.id === account.id)!.balance).toBe(before - 5);
+    expect(result.world.plans?.[0]?.spent).toBe(5);
   });
 });
 

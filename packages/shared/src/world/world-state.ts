@@ -28,6 +28,7 @@ import { DiplomaticMessageSchema, PolityStanceSchema } from "./diplomacy";
 import { WorldDevelopmentSchema } from "./developments";
 import { ActionPlanSchema } from "../actions/plans";
 import { ActorActivitySchema } from "../actions/activity";
+import { ResourceReservationSchema } from "../actions/reservations";
 
 /**
  * Bumped when an old snapshot needs upgrading on load.
@@ -78,6 +79,14 @@ export const WorldStateSchema = z
      * player-only `PlayerPlan`/`playerPlans` this superseded is gone.
      */
     plans: z.array(ActionPlanSchema).optional(),
+    /**
+     * Which plan/stage currently holds exclusive claim on a character's
+     * time, a force, an account, or an office (unified action runtime, Stage
+     * 6) -- mechanical enforcement of what a plan claims while one of its
+     * stages is still unfinished, not merely advisory. Optional for every
+     * snapshot predating this; absent means nothing is currently held.
+     */
+    stageReservations: z.array(ResourceReservationSchema).optional(),
     actorActivities: z.array(ActorActivitySchema).optional(),
     /**
      * The province graph is the map (ADR-0015). Detail tiers live on the

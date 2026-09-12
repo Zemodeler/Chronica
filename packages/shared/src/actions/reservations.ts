@@ -52,3 +52,45 @@ export function activeReservations(
     (filter.kind === undefined || r.kind === filter.kind) &&
     (filter.resourceId === undefined || r.resourceId === filter.resourceId));
 }
+
+/** Parameter-key suffix -> the resource kind that key names, mirroring `workflows/diagnose.ts`'s own `KEY_KIND_BY_SUFFIX` for the same reason: a call's own argument names tell you what it claims without a per-workflow declaration. */
+const CLAIM_KIND_BY_PARAM_SUFFIX: readonly (readonly [string, ReservationKind])[] = [
+  ["forceid", "force"],
+  ["accountid", "account"],
+  ["officeid", "office"],
+];
+
+export interface ResourceClaim {
+  readonly kind: ReservationKind;
+  readonly resourceId: string;
+}
+
+/**
+ * What a plan stage claims exclusive use of while it runs (unified action
+ * runtime, Stage 6): the acting character's own time, always, plus whichever
+ * of the call's own id parameters name a force, an account, or an office --
+ * found generically from the parameter key's own suffix, not a per-workflow
+ * declaration. A stage with no such parameter (a read, a social act) still
+ * claims its actor's time; that alone is enough to keep two plans from
+ * scheduling the same character into two unfinished stages at once.
+ */
+export function claimedResourcesForStage(actorId: string, parameters: Record<string, unknown>): ResourceClaim[] {
+  const claims: ResourceClaim[] = [{ kind: "character_time", resourceId: actorId }];
+  const seen = new Set(claims.map((c) => `${c.kind}:${c.resourceId}`));
+  const add = (kind: ReservationKind, resourceId: string) => {
+    const key = `${kind}:${resourceId}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    claims.push({ kind, resourceId });
+  };
+  for (const [key, value] of Object.entries(parameters)) {
+    if (!/Id$|Ids$/.test(key)) continue;
+    const normalized = key.toLowerCase().replace(/s$/, "");
+    const match = CLAIM_KIND_BY_PARAM_SUFFIX.find(([suffix]) => normalized.endsWith(suffix));
+    if (!match) continue;
+    const [, kind] = match;
+    const ids = typeof value === "string" ? [value] : Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+    for (const id of ids) add(kind, id);
+  }
+  return claims;
+}
