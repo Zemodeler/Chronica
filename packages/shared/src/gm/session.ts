@@ -11,7 +11,7 @@ import { InventedWorkflowDefinitionSchema, applyInventedWorkflow, validateInvent
 import type { WorkflowAuditEntry, WorkflowCandidate } from "../workflows/manager-types";
 import { READ_TOOL_BY_NAME, type PrivateInformationPolicy, type ReadToolContext } from "./read-tools";
 import type { ScenarioLifeRules } from "../characters/family";
-import { deriveWorldInstant, type ScenarioClock } from "../world/clock";
+import { daysPerStep, deriveWorldInstant, type ScenarioClock } from "../world/clock";
 import {
   CapabilityRequestSchema,
   recordCapabilityRequest,
@@ -373,6 +373,13 @@ export interface GameMasterSessionResult {
    */
   readonly scheduledActions: readonly { readonly actionId: string; readonly actorId: string; readonly parameters: Record<string, unknown> }[];
   /**
+   * A plan stage `execute_plan_stage` deliberately left to resolve later --
+   * see `GameMasterSession`'s own `scheduledPlanPhases` field for the full
+   * explanation. The caller converts each into a queued `action_phase`
+   * `WorldEvent` at `atStep`.
+   */
+  readonly scheduledPlanPhases: readonly { readonly planId: string; readonly stageId: string; readonly actionId: string; readonly actorId: string; readonly parameters: Record<string, unknown>; readonly atStep: number }[];
+  /**
    * Every intent declared this turn, each flagged with whether the
    * interpreter got anything done for that actor. An uncarried intent is
    * diagnostic, not history: it says a character wanted something the world
@@ -477,6 +484,16 @@ export class GameMasterSession {
   private readonly deferMutations: boolean;
   private readonly scheduledActions: { actionId: string; actorId: string; parameters: Record<string, unknown> }[] = [];
   /**
+   * A plan stage `execute_plan_stage` started but deliberately left to
+   * resolve later (unified action runtime, "Duration and milestones") --
+   * the interpreter judged this specific call's own effect should land at
+   * `atStep` rather than now. The caller (`pipeline.ts`) converts each of
+   * these into a queued `action_phase` `WorldEvent`; `action-phase-tick.ts`'s
+   * handler applies the real call when the queue reaches it and closes out
+   * the stage via `completePlanStage`.
+   */
+  private readonly scheduledPlanPhases: { planId: string; stageId: string; actionId: string; actorId: string; parameters: Record<string, unknown>; atStep: number }[] = [];
+  /**
    * Who is actually calling, for the duration of the current `invoke()`.
    * Defaults to the player -- v1's single-agent path never supplies a
    * `principal` argument, so it always resolves to exactly today's behavior
@@ -578,6 +595,7 @@ export class GameMasterSession {
       worldToolInvocations: [...this.worldToolInvocations],
       worldToolFacts: [...this.worldToolFacts],
       scheduledActions: [...this.scheduledActions],
+      scheduledPlanPhases: [...this.scheduledPlanPhases],
       declaredIntents: this.declaredIntents.map((intent) => ({ ...intent })),
     };
   }
@@ -760,17 +778,16 @@ export class GameMasterSession {
       : stage.dependsOn.some(id => plan.stages.find(s => s.id === id)?.status !== "completed") ? "An earlier stage has not completed."
       : stage.notBeforeStep !== null && stage.notBeforeStep > this.atStep ? "The scheduled time has not arrived."
       : stage.actorId !== plan.ownerCharacterId && !plan.assignments.some(a => a.actorId === stage.actorId && a.accepted) ? "The delegate has not accepted this assignment." : null;
+    if (obstacle) return { ok: false, finished: false, factual: obstacle };
+    if (input.completesAtStep !== undefined) return this.schedulePlanStage(plan, stage, input.actionId, input.parameters, input.completesAtStep);
     let result: GameMasterToolOutcome;
     const before = this.staged;
-    if (obstacle) result = { ok: false, finished: false, factual: obstacle };
-    else {
-      this.executingPlanId = plan.id;
-      try {
-        result = WORKFLOW_REGISTRY.has(input.actionId) ? this.act(input.actionId, { ...input.parameters, actorId: stage.actorId })
-          : this.allowInventedActions && this.definedActions.has(input.actionId) ? this.invokeDefinedAction({ actionId: input.actionId, actorId: stage.actorId, parameters: input.parameters })
-          : { ok: false, finished: false, factual: "Use a registered action for this stage." };
-      } finally { this.executingPlanId = null; }
-    }
+    this.executingPlanId = plan.id;
+    try {
+      result = WORKFLOW_REGISTRY.has(input.actionId) ? this.act(input.actionId, { ...input.parameters, actorId: stage.actorId })
+        : this.allowInventedActions && this.definedActions.has(input.actionId) ? this.invokeDefinedAction({ actionId: input.actionId, actorId: stage.actorId, parameters: input.parameters })
+        : { ok: false, finished: false, factual: "Use a registered action for this stage." };
+    } finally { this.executingPlanId = null; }
     const debit = planSpending(before, this.staged, plan);
     this.staged = { ...this.staged, plans: this.staged.plans!.map(p => {
       if (p.id !== plan.id) return p;
@@ -778,6 +795,66 @@ export class GameMasterSession {
       return { ...p, stages, spent: p.spent + (typeof debit === "number" ? debit : 0), updatedAtStep: this.atStep, status: stages.every(s => s.status === "completed" && s.repeatEverySteps === null) ? "completed" : "active" };
     }) };
     return result;
+  }
+
+  /**
+   * `execute_plan_stage` called with a `completesAtStep`: the interpreter
+   * has judged that this specific call's own effect should take hold later
+   * rather than now (unified action runtime, "Duration and milestones").
+   * Nothing is applied to the world here -- the stage starts, and the real
+   * call happens when the queue reaches `completesAtStep`
+   * (`action-phase-tick.ts`'s `resolveActionPhase`, which already applies a
+   * scheduled action exactly this way for reactions). This is why a
+   * refusal here can only be structural (a bad step, an unregistered
+   * action): whether the call itself succeeds is unknowable until it
+   * actually runs.
+   */
+  private schedulePlanStage(
+    plan: ActionPlan,
+    stage: ActionPlan["stages"][number],
+    actionId: string,
+    parameters: Record<string, unknown>,
+    completesAtStep: number,
+  ): GameMasterToolOutcome {
+    if (completesAtStep <= this.atStep) {
+      return { ok: false, finished: false, factual: `A stage scheduled to complete later must name a step after the current one (${this.atStep}); ${completesAtStep} is not.` };
+    }
+    const isBuiltIn = WORKFLOW_REGISTRY.has(actionId);
+    if (!isBuiltIn && !(this.allowInventedActions && this.definedActions.has(actionId))) {
+      return { ok: false, finished: false, factual: "Use a registered action for this stage." };
+    }
+    const duration = WORKFLOW_REGISTRY.get(actionId)?.duration;
+    const perStep = daysPerStep(this.scenarioClock);
+    const proposedSteps = completesAtStep - this.atStep;
+    let durationEstimate: NonNullable<ActionPlan["stages"][number]["durationEstimate"]>;
+    if (duration) {
+      const minimumSteps = Math.max(1, Math.round(duration.minimumDays / perStep));
+      const maximumSteps = Math.max(minimumSteps, Math.round(duration.maximumDays / perStep));
+      if (proposedSteps < minimumSteps || proposedSteps > maximumSteps) {
+        return {
+          ok: false, finished: false,
+          factual: `${actionId} takes between ${duration.minimumDays} and ${duration.maximumDays} days -- step ${completesAtStep} is outside the range its own duration estimate supports from step ${this.atStep}. Choose a completion step within that range.`,
+        };
+      }
+      durationEstimate = { minimumSteps, likelySteps: proposedSteps, maximumSteps, basis: [`${actionId}'s own declared duration estimate`] };
+    } else {
+      durationEstimate = { minimumSteps: proposedSteps, likelySteps: proposedSteps, maximumSteps: proposedSteps, basis: ["the interpreter's own judgment; this action declares no duration estimate"] };
+    }
+
+    this.scheduledPlanPhases.push({ planId: plan.id, stageId: stage.id, actionId, actorId: stage.actorId, parameters, atStep: completesAtStep });
+    this.staged = { ...this.staged, plans: this.staged.plans!.map((p) => {
+      if (p.id !== plan.id) return p;
+      const stages: ActionPlan["stages"] = p.stages.map((s) => s.id !== stage.id ? s : {
+        ...s,
+        status: "in_progress",
+        action: { kind: isBuiltIn ? "built_in" : "invented", actionId, parameters },
+        startedAtStep: this.atStep,
+        durationEstimate,
+        expectedCompletionStep: completesAtStep,
+      });
+      return { ...p, stages, updatedAtStep: this.atStep, status: "active" as const };
+    }) };
+    return { ok: true, finished: false, factual: `${stage.objective} is now underway and is expected to conclude around step ${completesAtStep}.` };
   }
 
   /**

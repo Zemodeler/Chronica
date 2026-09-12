@@ -4,6 +4,7 @@ import { WorldStateSchema, type WorldState } from "../world/world-state";
 import { createGameMasterSession } from "./session";
 import { preparePlayerPlans, PlanOptionsSchema, type ActionPlan } from "../actions/plans";
 import { OrderBatchSchema } from "../actions/orders";
+import { ScenarioClockSchema } from "../world/clock";
 import { buildGameMasterTools } from "./tools";
 
 const PLAYER = "marcus-atilius";
@@ -29,6 +30,21 @@ function spendAction(gm: ReturnType<typeof session>, accountId: string, balance:
   return gm.invoke(call("define_action", { actionId: `spend_to_${balance}`, intent: "Pay for the planned work", description: "Pay for work", parameters: [],
     operations: [{ op: "replace", path: `/material/accounts[id=${accountId}]/balance`, value: balance }] }));
 }
+
+const DAILY_CLOCK = ScenarioClockSchema.parse({ stepLabel: "day", stepLabelPlural: "days", stepsPerYear: 365, minSpan: 1, maxSpan: 10_000 });
+
+function sessionWithClock(world = base(), atStep = 1) {
+  return createGameMasterSession({
+    world, atStep, actorCharacterId: PLAYER, directiveIds: ["directive-0"],
+    directives: [{ id: "directive-0", directive: { kind: "new", text: "Send an ultimatum to Carthage." } }],
+    scenarioClock: DAILY_CLOCK,
+  });
+}
+
+const diplomaticMessageParams = {
+  messageId: "msg-1", kind: "ultimatum", fromPolityId: "rome", fromCharacterId: PLAYER, toPolityId: "carthage",
+  toCharacterId: null, subject: "Withdraw from Sicily", terms: "Carthage demands nothing here; Rome does.",
+};
 
 describe("persistent player plans", () => {
   it("keeps the combined tool surface within the provider limit", () => {
@@ -131,5 +147,64 @@ describe("persistent player plans", () => {
     expect(gm.invoke(call("define_action", { actionId: "erase_time", intent: "Erase time", description: "Erase time", parameters: [], operations: [{ op: "replace", path: "/actorActivities", value: [] }] })).ok).toBe(true);
     expect(interpret(gm, [stage("first")]).ok).toBe(true);
     expect(execute(gm, "first", "erase_time", {}).ok).toBe(false);
+  });
+});
+
+describe("execute_plan_stage with completesAtStep (unified action runtime, Stage 3)", () => {
+  it("starts the stage and schedules it, without applying the action yet, when completesAtStep is given", () => {
+    const gm = sessionWithClock();
+    expect(interpret(gm, [stage("send")]).ok).toBe(true);
+    const result = gm.invoke(call("execute_plan_stage", {
+      planId: PLAN, stageId: "send", actionId: "send_diplomatic_message", parameters: diplomaticMessageParams, completesAtStep: 4,
+    }));
+    expect(result.ok).toBe(true);
+    const planStage = gm.stagedWorld.plans![0]!.stages.find((s) => s.id === "send")!;
+    expect(planStage.status).toBe("in_progress");
+    expect(planStage.expectedCompletionStep).toBe(4);
+    expect(planStage.durationEstimate).toMatchObject({ minimumSteps: 1, likelySteps: 3, maximumSteps: 14 });
+    expect(gm.result().scheduledPlanPhases).toEqual([
+      { planId: PLAN, stageId: "send", actionId: "send_diplomatic_message", actorId: PLAYER, parameters: diplomaticMessageParams, atStep: 4 },
+    ]);
+    // Not applied yet -- no diplomatic message exists in the staged world.
+    expect(gm.stagedWorld.diplomacy ?? []).toEqual([]);
+  });
+
+  it("refuses a completesAtStep outside the action's own declared duration range", () => {
+    const gm = sessionWithClock();
+    expect(interpret(gm, [stage("send")]).ok).toBe(true);
+    const result = gm.invoke(call("execute_plan_stage", {
+      planId: PLAN, stageId: "send", actionId: "send_diplomatic_message", parameters: diplomaticMessageParams, completesAtStep: 100,
+    }));
+    expect(result.ok).toBe(false);
+    expect(result.factual).toMatch(/duration estimate/i);
+    expect(gm.stagedWorld.plans![0]!.stages.find((s) => s.id === "send")!.status).toBe("pending");
+  });
+
+  it("refuses a completesAtStep at or before the current step", () => {
+    const gm = sessionWithClock();
+    expect(interpret(gm, [stage("send")]).ok).toBe(true);
+    const result = gm.invoke(call("execute_plan_stage", {
+      planId: PLAN, stageId: "send", actionId: "send_diplomatic_message", parameters: diplomaticMessageParams, completesAtStep: 1,
+    }));
+    expect(result.ok).toBe(false);
+  });
+
+  it("accepts any future step for an action with no declared duration estimate", () => {
+    const gm = sessionWithClock();
+    expect(interpret(gm, [stage("first")]).ok).toBe(true);
+    const result = gm.invoke(call("execute_plan_stage", {
+      planId: PLAN, stageId: "first", actionId: "rename_character", parameters: { characterId: PLAYER, newName: "Later" }, completesAtStep: 50,
+    }));
+    expect(result.ok).toBe(true);
+    expect(gm.stagedWorld.plans![0]!.stages.find((s) => s.id === "first")!.durationEstimate).toMatchObject({ minimumSteps: 49, likelySteps: 49, maximumSteps: 49 });
+  });
+
+  it("omitting completesAtStep still resolves the stage atomically, exactly as before", () => {
+    const gm = sessionWithClock();
+    expect(interpret(gm, [stage("first")]).ok).toBe(true);
+    const result = gm.invoke(call("execute_plan_stage", { planId: PLAN, stageId: "first", actionId: "rename_character", parameters: { characterId: PLAYER, newName: "Now" } }));
+    expect(result.ok).toBe(true);
+    expect(gm.stagedWorld.plans![0]!.stages.find((s) => s.id === "first")!.status).toBe("completed");
+    expect(gm.result().scheduledPlanPhases).toEqual([]);
   });
 });

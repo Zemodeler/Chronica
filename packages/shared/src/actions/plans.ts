@@ -88,7 +88,26 @@ export const InterpretPlanSchema = z.object({
       context.addIssue({ code: "custom", path: ["clarificationQuestions"], message: "Ask clarification questions on their own; do not also commit stages the answer could still change." });
     }
   });
-export const ExecutePlanStageSchema = z.object({ planId: EntityIdSchema, stageId: EntityIdSchema, actionId: EntityIdSchema, parameters: z.record(z.string(), z.unknown()).default({}) }).strict();
+export const ExecutePlanStageSchema = z.object({
+  planId: EntityIdSchema,
+  stageId: EntityIdSchema,
+  actionId: EntityIdSchema,
+  parameters: z.record(z.string(), z.unknown()).default({}),
+  /**
+   * The step this stage's own effect should actually take hold at, when the
+   * interpreter judges that this specific call's consequence should land
+   * later rather than immediately (unified action runtime, "Duration and
+   * milestones"). Omitted -- the default -- resolves exactly as before:
+   * atomically, right now. This is never inferred from a workflow's own
+   * declared duration estimate: several workflows (`start_siege`,
+   * `start_battle`, ...) already model a long process as an immediate
+   * "begins" fact concluded by a *separate* later call (`end_siege`), and
+   * blindly deferring their own effect would delay it from ever truly
+   * beginning. Only the interpreter's own judgment that *this* call's
+   * result should wait may set this.
+   */
+  completesAtStep: ElapsedStepSchema.optional(),
+}).strict();
 export const RespondToAssignmentSchema = z.object({ planId: EntityIdSchema, actorId: EntityIdSchema, accepted: z.boolean(), reason: z.string().trim().min(1).max(400) }).strict();
 export const DeferPlanStageSchema = z.object({ planId: EntityIdSchema, stageId: EntityIdSchema, reason: z.string().trim().min(1).max(600) }).strict();
 
