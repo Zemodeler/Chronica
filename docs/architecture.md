@@ -52,9 +52,13 @@ The same validation protects all data interactions: valid parameters, living act
 
 ## Clock and elastic simulation
 
-Legacy `elapsedStep` remains supported. `WorldTime` adds authoritative day projection and the database stores nullable day boundaries, stopping facts, and a requested player decision so old turns remain readable. Workflows own duration ranges, with a single shared estimator.
+Resolution runs on `WorldInstant` (day and minute), not a fixed one-step-per-turn boundary. A workflow's declared duration schedules an `action_phase` event on the shared queue, with a single shared estimator owning duration ranges: immediate and routine actions land within the turn that ordered them, while longer work reports its own commencement, an update, and a completion as those milestones actually resolve.
 
-`decideElasticStop` currently runs in shadow mode. It records what would stop the simulation according to this priority: mandatory player decision or clarification; an irreversible player-involving event; a watch condition, plan interruption, or scenario threshold after the minimum span; or the maximum unattended span. It does not yet replace the live one-step resolution boundary. Treat the day fields and shadow decision as diagnostic foundations until a deliberate cutover wires plan lifecycle signals and multi-day advancement into the live path.
+After the Game Master's own turn, `computeInterventionScore` decides whether to stop or keep going, in priority order: a mandatory player decision or clarification; an irreversible player-involving event; a genuine plan conflict; or a scored combination of irreversibility, deviation from plan, direct player involvement, strategic consequence, and uncertainty crossing the scenario's threshold. When none of these fire, one bounded pass resolves further due events and their reactions within the same call — up to a fixed per-turn cap or the scenario's own maximum unattended span — before control returns to the player. `stopReason`, `elapsedDayEnd`, `stoppingFactIds`, and `requestedPlayerDecision` are the live values a turn commits, not diagnostics; the Chronicle shows the requested decision and the facts that prompted it whenever a turn stops for the player specifically.
+
+A plan stage claims the resources its own parameters name — a character's time, a named force, an account, an office — before it may run. A claim already held by a more recently instructed plan is preempted; a claim a stage cannot win refuses the stage outright, with the specific blocking claim as the reason. A plan's own stated budget is a mechanical cap, not advisory context: a call that would exceed it is refused and rolled back entirely, in both the immediate and the deferred (queued) execution path.
+
+Turn resolution is crash-safe. A resolution claim carries a real, expiring lease, so a process that dies mid-turn leaves the turn reclaimable rather than stuck; a transient failure requeues the turn, bounded, rather than silently dropping the player's submitted orders.
 
 ## Memory, narration, and persistence
 

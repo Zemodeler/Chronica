@@ -1,6 +1,6 @@
 # Unified action and time runtime
 
-**Status: intended design, not built.**
+**Status: built.** Player and NPC actions share one `ActionPlan` model, one interpreter, and one `WorldInstant`-scheduled event queue; elastic stopping, mechanical reservations/budgets, and turn-resolution resilience are all live. See `docs/architecture.md`'s "Turn resolution" and "Clock and elastic simulation" sections for the current behavior this document originally proposed.
 
 Player and NPC actions should travel through the same simulation path. The player supplies their character's intent directly; an NPC agent declares its character's intent. After that difference at the point of authorship, interpretation, planning, scheduling, execution, persistence, reactions, and factual reporting are the same.
 
