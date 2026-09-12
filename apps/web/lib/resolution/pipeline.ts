@@ -63,7 +63,7 @@ import {
 } from "@chronica/shared";
 
 import { callWithCoinGate, callWithToolsAndCoinGate, type AiAdapter } from "@chronica/ai";
-import type { ChronicaDatabase } from "@chronica/db";
+import type { ChronicaDatabase, NewWorldEvent } from "@chronica/db";
 import {
   commitResolution,
   listActiveInventedWorkflows,
@@ -1230,6 +1230,21 @@ export async function resolveTurn(
       }))
       : [];
 
+    // A stage `execute_plan_stage` scheduled with `completesAtStep` (unified
+    // action runtime, "Duration and milestones") rather than applying now --
+    // queued alongside the event loop's own pre-turn follow-ups, so a turn
+    // that fails to commit leaves no orphaned event behind either.
+    const scheduledPlanPhaseEvents: Omit<NewWorldEvent, "gameId">[] = gameMasterCompleted
+      ? gameMasterOutcome.scheduledPlanPhases.map((scheduled) => ({
+        kind: "action_phase",
+        instant: deriveWorldInstant(scheduled.atStep, input.scenarioClock),
+        subjectRef: { kind: "character", id: scheduled.actorId },
+        payload: { kind: "action_phase", actionId: scheduled.actionId, stageId: scheduled.stageId, actorId: scheduled.actorId, parameters: scheduled.parameters },
+        isPlayerAction: scheduled.actorId === actorCharacterId,
+        createdAtStep: atStep,
+      }))
+      : [];
+
     await commitResolution(db, {
       gameId,
       turnId,
@@ -1245,7 +1260,7 @@ export async function resolveTurn(
       inventedWorkflowUses: definedWorkflowUses,
       capabilityRequests,
       worldFacts: allWorldFacts,
-      pendingWorldEvents: worldDynamics.pendingEventInserts,
+      pendingWorldEvents: [...worldDynamics.pendingEventInserts, ...scheduledPlanPhaseEvents],
       pendingEventResolutions: worldDynamics.pendingResolutions,
       gameMasterReport: {
         atStep,

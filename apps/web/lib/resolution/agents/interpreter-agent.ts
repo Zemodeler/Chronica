@@ -73,6 +73,7 @@ function buildSystemPrompt(intents: readonly DeclaredIntent[], atStep: number, p
     ...(playerCharacterId === undefined ? [] : [
       `${playerCharacterId}'s intent is tracked by a plan: use interpret_plan to turn their order into stages (or ask a clarification question), then execute_plan_stage to attempt each one -- do not call an action tool directly for ${playerCharacterId}.`,
     ]),
+    "Most stages resolve now, the same call producing the whole effect. Only when this specific stage's own consequence genuinely takes real time to unfold -- and only when you judge that, never guessed from a workflow's category -- give execute_plan_stage a completesAtStep naming the later step it actually concludes at. Leave it out for everything else, including any action whose duration is really a separate later decision (a siege or a battle already has its own distinct conclude-it call) rather than this same call's own delayed effect.",
     "If an intent is real and no tool covers it, define one with define_action and use it -- but only when the act is genuinely outside the catalogue, not when an existing tool is merely inconvenient.",
     "When every intent has been carried out or honestly left undone, stop calling tools.",
   ].join("\n");
