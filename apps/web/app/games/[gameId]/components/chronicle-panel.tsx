@@ -75,6 +75,10 @@ interface ChronicleData {
   readonly turnIndex: number;
   readonly entries: readonly ChronicleEntry[];
   readonly dispatch?: ChronicleDispatch;
+  /** What this turn's resolution stopped to ask the player, if that's why it stopped (unified action runtime, Stage 7). */
+  readonly requestedPlayerDecision?: string;
+  /** The facts cited as the reason resolution stopped, resolved to their own summaries. */
+  readonly stoppingFacts?: readonly { readonly id: string; readonly summary: string }[];
 }
 
 const KNOWLEDGE_STATUS_LABEL: Record<NonNullable<ChronicleEntry["knowledgeStatus"]>, string> = {
@@ -346,6 +350,9 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
     || dispatch.items.length > 0
     || dispatch.uncertaintyNote !== null
   );
+  const requestedPlayerDecision = chronicle?.requestedPlayerDecision;
+  const stoppingFacts = chronicle?.stoppingFacts ?? [];
+  const showDecisionBanner = hasEntries && isAtEnd && requestedPlayerDecision !== undefined;
 
   return (
     <>
@@ -518,6 +525,27 @@ export function ChroniclePanel({ gameId, phase, forceOpen, onForceOpenConsumed, 
                     dialogue={currentEntry.initiatedDialogue}
                     {...(onDialogueOpened ? { onDialogueOpened } : {})}
                   />
+                )}
+
+                {showDecisionBanner && requestedPlayerDecision && (
+                  <section
+                    aria-label="Waiting for your decision"
+                    style={{
+                      border: "1px solid var(--accent, #d69e2e)",
+                      borderRadius: "6px",
+                      padding: "0.6rem 0.75rem",
+                    }}
+                  >
+                    <p style={{ fontSize: "0.7rem", color: "var(--accent, #d69e2e)", letterSpacing: "0.08em", textTransform: "uppercase", margin: "0 0 0.35rem", fontWeight: 600 }}>
+                      Waiting for your decision
+                    </p>
+                    <p style={{ fontSize: "0.9375rem", margin: 0, color: "var(--text)" }}>{requestedPlayerDecision}</p>
+                    {stoppingFacts.length > 0 && (
+                      <ul style={{ margin: "0.4rem 0 0", paddingLeft: "1.1rem", fontSize: "0.8125rem", color: "var(--text-secondary, var(--text-muted))" }}>
+                        {stoppingFacts.map((fact) => <li key={fact.id}>{fact.summary}</li>)}
+                      </ul>
+                    )}
+                  </section>
                 )}
 
                 {showDispatch && dispatch && (

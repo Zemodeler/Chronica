@@ -159,6 +159,15 @@ export const turns = pgTable("turns", {
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   claimedBy: text("claimed_by"),
   claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
+  /**
+   * How many times resolution has been attempted for this turn (unified
+   * action runtime, Stage 7). Lets a transient failure (a provider error
+   * mid-resolution) requeue for retry instead of permanently dropping the
+   * player's submitted order batch, while still giving up after
+   * `MAX_TURN_RESOLVE_ATTEMPTS` so a genuinely broken turn doesn't retry
+   * forever. See `claimTurnForResolution`/`failTurn` in queries/resolution.ts.
+   */
+  resolveAttempts: integer("resolve_attempts").notNull().default(0),
   elapsedStepStart: integer("elapsed_step_start").notNull(),
   elapsedStepEnd: integer("elapsed_step_end"),
   /**

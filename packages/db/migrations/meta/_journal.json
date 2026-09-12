@@ -89,7 +89,7 @@
     {
       "idx": 12,
       "version": "7",
-      "when": 1756598400000,
+      "when": 1787830900000,
       "tag": "0012_character_knowledgebases",
       "breakpoints": true
     },
@@ -238,6 +238,13 @@
       "version": "7",
       "when": 1788400400000,
       "tag": "0033_multi_agent_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1788400500000,
+      "tag": "0034_turn_resolve_attempts",
       "breakpoints": true
     }
   ]
