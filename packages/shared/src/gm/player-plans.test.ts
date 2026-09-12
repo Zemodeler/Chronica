@@ -51,18 +51,33 @@ describe("persistent player plans", () => {
     expect(buildGameMasterTools().length).toBeLessThanOrEqual(128);
   });
 
-  it("checks registered spending actions and tracks a plan's cumulative debit, without capping it", () => {
+  it("checks registered spending actions and tracks a plan's cumulative debit", () => {
     const world = base();
     const account = world.material.accounts[0]!;
     account.balance = 1_000;
     world.material.accountAccess.push({ id: "test-access", characterId: PLAYER, accountId: account.id, permissions: ["spend_without_vote"], sourceKind: "ownership", sourceId: PLAYER });
     const gm = session(world);
     expect(interpret(gm, [stage("payment")], PlanOptionsSchema.parse({ budget: { accountId: account.id, amount: 10 } })).ok).toBe(true);
-    // A stated plan budget is guidance for the Game Master's own judgement,
-    // not a deterministic cap -- an over-budget spend still applies.
-    expect(execute(gm, "payment", "remove_gold", { accountId: account.id, amount: 20, reason: "Pay for work" }).ok).toBe(true);
-    expect(gm.stagedWorld.material.accounts.find(a => a.id === account.id)!.balance).toBe(980);
-    expect(gm.stagedWorld.plans![0]!.spent).toBe(20);
+    // Within budget: applies and is tracked.
+    expect(execute(gm, "payment", "remove_gold", { accountId: account.id, amount: 8, reason: "Pay for work" }).ok).toBe(true);
+    expect(gm.stagedWorld.material.accounts.find(a => a.id === account.id)!.balance).toBe(992);
+    expect(gm.stagedWorld.plans![0]!.spent).toBe(8);
+  });
+
+  it("mechanically refuses a stage's spend that would exceed the plan's own stated budget (unified action runtime, Stage 6)", () => {
+    const world = base();
+    const account = world.material.accounts[0]!;
+    account.balance = 1_000;
+    world.material.accountAccess.push({ id: "test-access", characterId: PLAYER, accountId: account.id, permissions: ["spend_without_vote"], sourceKind: "ownership", sourceId: PLAYER });
+    const gm = session(world);
+    expect(interpret(gm, [stage("payment")], PlanOptionsSchema.parse({ budget: { accountId: account.id, amount: 10 } })).ok).toBe(true);
+    const result = execute(gm, "payment", "remove_gold", { accountId: account.id, amount: 20, reason: "Pay for work" });
+    expect(result.ok).toBe(false);
+    expect(result.factual).toMatch(/exceeding the 10-limit/);
+    // Undone entirely -- the account never moved, and the stage is blocked, not completed.
+    expect(gm.stagedWorld.material.accounts.find(a => a.id === account.id)!.balance).toBe(1_000);
+    expect(gm.stagedWorld.plans![0]!.spent).toBe(0);
+    expect(gm.stagedWorld.plans![0]!.stages[0]!.status).toBe("blocked");
   });
   it("retains completed stages over a save/load and refuses to repeat their effects", () => {
     const gm = session();
@@ -93,7 +108,7 @@ describe("persistent player plans", () => {
     expect(interpret(gm, [stage("first", { objective: "Different objective" }), stage("second")]).ok).toBe(false);
   });
 
-  it("tracks cumulative spending across stages without capping it at the stated budget", () => {
+  it("mechanically refuses the stage that would push cumulative spending past the stated budget, keeping the prior stage's own spend intact", () => {
     const world = base();
     const account = world.material.accounts[0]!;
     account.balance = 1_000;
@@ -102,10 +117,13 @@ describe("persistent player plans", () => {
     expect(spendAction(gm, account.id, 960).ok).toBe(true);
     expect(spendAction(gm, account.id, 930).ok).toBe(true);
     expect(execute(gm, "first", "spend_to_960", {}).ok).toBe(true);
-    expect(execute(gm, "second", "spend_to_930", {}).ok).toBe(true);
-    expect(gm.stagedWorld.material.accounts.find(a => a.id === account.id)!.balance).toBe(930);
-    expect(gm.stagedWorld.plans![0]!.spent).toBe(70);
-    expect(gm.stagedWorld.plans![0]!.stages[1]!.status).toBe("completed");
+    const second = execute(gm, "second", "spend_to_930", {});
+    expect(second.ok).toBe(false);
+    expect(second.factual).toMatch(/exceeding the 60-limit/);
+    // The first stage's own spend stands; the second's is undone entirely.
+    expect(gm.stagedWorld.material.accounts.find(a => a.id === account.id)!.balance).toBe(960);
+    expect(gm.stagedWorld.plans![0]!.spent).toBe(40);
+    expect(gm.stagedWorld.plans![0]!.stages[1]!.status).toBe("blocked");
   });
 
   it("requires a delegate's acceptance before they can execute a stage", () => {
@@ -206,5 +224,83 @@ describe("execute_plan_stage with completesAtStep (unified action runtime, Stage
     expect(result.ok).toBe(true);
     expect(gm.stagedWorld.plans![0]!.stages.find((s) => s.id === "first")!.status).toBe("completed");
     expect(gm.result().scheduledPlanPhases).toEqual([]);
+  });
+});
+
+describe("plan-stage resource reservations and preemption (unified action runtime, Stage 6)", () => {
+  const FORCE_ID = "legio-i";
+  const DESTINATION = "ita-72843720b81376294924159-sicily-southeast";
+  const PLAN2 = "plan-5-directive-1";
+
+  function scheduleMove(gm: ReturnType<typeof session>, planId: string, stageId: string, completesAtStep: number) {
+    return gm.invoke(call("execute_plan_stage", {
+      planId, stageId, actionId: "move_force", parameters: { forceId: FORCE_ID, destinationProvinceId: DESTINATION }, completesAtStep,
+    }));
+  }
+
+  it("reserves the actor's own time and the force a scheduled stage claims, for as long as it stays in progress", () => {
+    const gm = sessionWithClock();
+    expect(interpret(gm, [stage("march")]).ok).toBe(true);
+    expect(scheduleMove(gm, PLAN, "march", 10).ok).toBe(true);
+    const held = (gm.stagedWorld.stageReservations ?? []).filter((r) => r.releasedAtStep === null);
+    expect(held).toHaveLength(2);
+    expect(held.map((r) => r.kind).sort()).toEqual(["character_time", "force"]);
+    expect(held.every((r) => r.planId === PLAN && r.stageId === "march")).toBe(true);
+    expect(held.some((r) => r.kind === "force" && r.resourceId === FORCE_ID)).toBe(true);
+  });
+
+  it("a freshly given instruction preempts a standing plan's hold on the same force, interrupting it and releasing its reservation", () => {
+    const gm = sessionWithClock();
+    expect(interpret(gm, [stage("march")]).ok).toBe(true);
+    expect(scheduleMove(gm, PLAN, "march", 10).ok).toBe(true);
+
+    // A new turn, a fresh directive: recall the same force. Nothing about
+    // PLAN was touched this turn, so it is only ever standing work; the
+    // recall is the newer explicit instruction docs/32 says wins.
+    const resumed = createGameMasterSession({
+      world: gm.stagedWorld, atStep: 5, actorCharacterId: PLAYER, directiveIds: ["directive-1"],
+      directives: [{ id: "directive-1", directive: { kind: "new", text: "Recall the legion to Rome instead." } }],
+      scenarioClock: DAILY_CLOCK,
+    });
+    expect(resumed.invoke(call("interpret_plan", { planId: PLAN2, interpretation: "Recall the legion.", stages: [stage("recall")], options: PlanOptionsSchema.parse({}) })).ok).toBe(true);
+    expect(scheduleMove(resumed, PLAN2, "recall", 20).ok).toBe(true);
+
+    const march = resumed.stagedWorld.plans!.find((p) => p.id === PLAN)!.stages.find((s) => s.id === "march")!;
+    expect(march.status).toBe("interrupted");
+    const marchReservation = resumed.stagedWorld.stageReservations!.find((r) => r.stageId === "march" && r.kind === "force")!;
+    expect(marchReservation.releasedAtStep).toBe(5);
+    const recallReservation = resumed.stagedWorld.stageReservations!.find((r) => r.stageId === "recall" && r.kind === "force")!;
+    expect(recallReservation.releasedAtStep).toBeNull();
+  });
+
+  it("refuses a standing plan's later attempt on a force a more recently touched plan already holds", () => {
+    const gm = sessionWithClock();
+    // Both stages interpreted now, but only "march" ever gets scheduled --
+    // "march-again" stays pending, so PLAN itself is never touched again
+    // after this turn (no preemption bookkeeping will ever revise it).
+    expect(interpret(gm, [stage("march"), stage("march-again")]).ok).toBe(true);
+
+    // A second, independent plan claims the force first -- nothing else
+    // holds it yet, so this succeeds cleanly.
+    const withSecondPlan = createGameMasterSession({
+      world: gm.stagedWorld, atStep: 5, actorCharacterId: PLAYER, directiveIds: ["directive-1"],
+      directives: [{ id: "directive-1", directive: { kind: "new", text: "Move the legion to Syracuse instead." } }],
+      scenarioClock: DAILY_CLOCK,
+    });
+    expect(withSecondPlan.invoke(call("interpret_plan", { planId: PLAN2, interpretation: "Move the legion.", stages: [stage("advance")], options: PlanOptionsSchema.parse({}) })).ok).toBe(true);
+    expect(scheduleMove(withSecondPlan, PLAN2, "advance", 20).ok).toBe(true);
+
+    // A later turn: PLAN is still exactly as it was interpreted at step 1
+    // ("existing_plan", updatedAtStep 1) and now tries its OTHER stage
+    // against the same force -- PLAN2's more recently touched hold
+    // (updatedAtStep 5) wins the tie between two equally-ranked standing plans.
+    const later = createGameMasterSession({
+      world: withSecondPlan.stagedWorld, atStep: 8, actorCharacterId: PLAYER, directiveIds: [],
+      directives: [], scenarioClock: DAILY_CLOCK,
+    });
+    const result = scheduleMove(later, PLAN, "march-again", 30);
+    expect(result.ok).toBe(false);
+    expect(result.factual).toMatch(/force/);
+    expect(later.stagedWorld.plans!.find((p) => p.id === PLAN)!.stages.find((s) => s.id === "march-again")!.status).toBe("pending");
   });
 });

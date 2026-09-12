@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { InterpretPlanSchema, ExecutePlanStageSchema, RespondToAssignmentSchema, DeferPlanStageSchema, preparePlayerPlans, interpretPlan, planSpending, isActionPlanOngoing, type ActionPlan } from "../actions/plans";
+import { activeReservations, claimedResourcesForStage, reserveResource, type ResourceClaim } from "../actions/reservations";
+import { applyPreemption, defaultPriorityContextFor, detectResourceConflicts, resolveConflicts, type StageResourceClaim } from "../actions/conflicts";
 import type { OrderDirective } from "../actions/orders";
 import type { WorldState } from "../world/world-state";
 import type { ProposedInvocation } from "../actions/orders";
@@ -789,12 +791,23 @@ export class GameMasterSession {
         : { ok: false, finished: false, factual: "Use a registered action for this stage." };
     } finally { this.executingPlanId = null; }
     const debit = planSpending(before, this.staged, plan);
+    // Unified action runtime, Stage 6: a stated plan budget is now a real
+    // cap, not merely advisory context for the interpreter's own judgment --
+    // a call that would push this plan's total spend past it is undone
+    // (the world reverts to `before`, exactly as if it had never run) rather
+    // than committed and merely noted.
+    const budget = plan.options.budget;
+    const overBudget = result.ok && budget !== null && plan.spent + debit > budget.amount;
+    if (overBudget) this.staged = before;
+    const effectiveResult: GameMasterToolOutcome = overBudget
+      ? { ok: false, finished: false, factual: `This would spend ${debit} more from the account, exceeding the ${budget.amount}-limit you set for this plan (${budget.amount - plan.spent} remained).` }
+      : result;
     this.staged = { ...this.staged, plans: this.staged.plans!.map(p => {
       if (p.id !== plan.id) return p;
-      const stages: ActionPlan["stages"] = p.stages.map(s => s.id !== stage.id ? s : { ...s, status: result.ok ? "completed" : "blocked", statusReason: result.ok ? null : result.factual.slice(0, 600), resultFactIds: result.factId ? [result.factId] : [], completedAtStep: result.ok ? this.atStep : s.completedAtStep });
-      return { ...p, stages, spent: p.spent + (typeof debit === "number" ? debit : 0), updatedAtStep: this.atStep, status: stages.every(s => s.status === "completed" && s.repeatEverySteps === null) ? "completed" : "active" };
+      const stages: ActionPlan["stages"] = p.stages.map(s => s.id !== stage.id ? s : { ...s, status: effectiveResult.ok ? "completed" : "blocked", statusReason: effectiveResult.ok ? null : effectiveResult.factual.slice(0, 600), resultFactIds: effectiveResult.factId ? [effectiveResult.factId] : [], completedAtStep: effectiveResult.ok ? this.atStep : s.completedAtStep });
+      return { ...p, stages, spent: p.spent + (overBudget ? 0 : debit), updatedAtStep: this.atStep, status: stages.every(s => s.status === "completed" && s.repeatEverySteps === null) ? "completed" : "active" };
     }) };
-    return result;
+    return effectiveResult;
   }
 
   /**
@@ -841,6 +854,17 @@ export class GameMasterSession {
       durationEstimate = { minimumSteps: proposedSteps, likelySteps: proposedSteps, maximumSteps: proposedSteps, basis: ["the interpreter's own judgment; this action declares no duration estimate"] };
     }
 
+    // Unified action runtime, Stage 6: this stage will hold its claimed
+    // resources (the actor's own time, and whichever force/account/office
+    // its own parameters name) for the whole span it is `in_progress`, not
+    // merely for this one call -- so a second plan cannot start moving the
+    // same force, or the same character, into an unfinished stage's
+    // outcome out from under it. Refuses, or preempts the standing claim,
+    // exactly like `applyPreemption`'s own vertical slice.
+    const claims = claimedResourcesForStage(stage.actorId, parameters);
+    const claimOutcome = this.claimStageResources(plan, stage.id, claims);
+    if (!claimOutcome.ok) return { ok: false, finished: false, factual: claimOutcome.reason };
+
     this.scheduledPlanPhases.push({ planId: plan.id, stageId: stage.id, actionId, actorId: stage.actorId, parameters, atStep: completesAtStep });
     this.staged = { ...this.staged, plans: this.staged.plans!.map((p) => {
       if (p.id !== plan.id) return p;
@@ -854,7 +878,63 @@ export class GameMasterSession {
       });
       return { ...p, stages, updatedAtStep: this.atStep, status: "active" as const };
     }) };
+    let reservations = this.staged.stageReservations ?? [];
+    for (const claim of claims) {
+      reservations = reserveResource(reservations, { planId: plan.id, stageId: stage.id, kind: claim.kind, resourceId: claim.resourceId, atStep: this.atStep });
+    }
+    this.staged = { ...this.staged, stageReservations: reservations };
     return { ok: true, finished: false, factual: `${stage.objective} is now underway and is expected to conclude around step ${completesAtStep}.` };
+  }
+
+  /**
+   * Resolves this stage's own resource claims against whatever another
+   * plan's active reservation already holds. No conflict at all: claimed
+   * freely. A genuine conflict: the plan whose interpretation this session
+   * itself touched this very turn (`updatedAtStep === this.atStep`) counts
+   * as the fresh instruction (docs/32's "the newer explicit instruction
+   * wins"); a plan untouched this turn is only ever its own origin's
+   * standing priority. If this stage still loses that comparison, it is
+   * refused -- not scheduled and then immediately preempted -- so its
+   * caller sees the real reason instead of a stage that started and died in
+   * the same breath. If it wins, the loser's stage is interrupted/superseded
+   * and its own reservations released, via the exact same pure
+   * `applyPreemption` the vertical slice already proves.
+   */
+  private claimStageResources(
+    plan: ActionPlan,
+    stageId: string,
+    claims: readonly ResourceClaim[],
+  ): { ok: true } | { ok: false; reason: string } {
+    const reservations = this.staged.stageReservations ?? [];
+    const priorityFor = (candidate: ActionPlan) => candidate.updatedAtStep === this.atStep ? "new_instruction" : defaultPriorityContextFor(candidate.origin);
+    const otherClaims = new Map<string, StageResourceClaim>();
+    for (const claim of claims) {
+      for (const held of activeReservations(reservations, { kind: claim.kind, resourceId: claim.resourceId })) {
+        if (held.planId === plan.id) continue;
+        const holderPlan = this.staged.plans?.find((p) => p.id === held.planId);
+        if (!holderPlan) continue;
+        otherClaims.set(`${held.planId}::${held.stageId}::${claim.kind}::${claim.resourceId}`, {
+          planId: held.planId, stageId: held.stageId, kind: claim.kind, resourceId: claim.resourceId,
+          priorityContext: priorityFor(holderPlan), updatedAtStep: holderPlan.updatedAtStep,
+        });
+      }
+    }
+    if (otherClaims.size === 0) return { ok: true };
+
+    const thisPriority = priorityFor(plan);
+    const allClaims: StageResourceClaim[] = [
+      ...otherClaims.values(),
+      ...claims.map((c) => ({ planId: plan.id, stageId, kind: c.kind, resourceId: c.resourceId, priorityContext: thisPriority, updatedAtStep: plan.updatedAtStep })),
+    ];
+    const losers = resolveConflicts(detectResourceConflicts(allClaims));
+    const ownReason = losers.get(stageId);
+    if (ownReason !== undefined) return { ok: false, reason: ownReason };
+
+    if (losers.size > 0) {
+      const preempted = applyPreemption(this.staged.plans ?? [], losers, reservations, this.atStep);
+      this.staged = { ...this.staged, plans: preempted.plans, stageReservations: preempted.reservations };
+    }
+    return { ok: true };
   }
 
   /**
