@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createAiAdapter } from "@chronica/ai";
-import { createDatabase, getOrdersForTurn, getQueuedTurn, getWorldView, schema, updateTurnProgressStep, type ChronicaDatabase } from "@chronica/db";
+import { createDatabase, getOrdersForTurn, getQueuedTurn, getWorldView, releaseExpiredTurnClaims, schema, updateTurnProgressStep, type ChronicaDatabase } from "@chronica/db";
 import { OrderBatchSchema } from "@chronica/shared";
 import { and, eq } from "drizzle-orm";
 import { resolveTurn, type ResolveTurnResult } from "./pipeline";
@@ -19,6 +19,10 @@ export async function resolveQueuedTurn(
   gameId: string,
   onProgress: (progress: ResolutionProgress) => void = () => {},
 ): Promise<ResolveTurnResult | undefined> {
+  // Unified action runtime, Stage 7: a turn whose claimant crashed before
+  // finishing is stuck in "resolving" forever otherwise -- nothing else ever
+  // looks at it once it falls out of `getQueuedTurn`'s "queued" filter.
+  await releaseExpiredTurnClaims(db, gameId);
   const queuedTurn = await getQueuedTurn(db, gameId);
   if (queuedTurn === undefined) return undefined;
   const worldView = await getWorldView(db, gameId);
@@ -42,9 +46,37 @@ export async function resolveQueuedTurn(
   }, progressWriter);
 }
 
+/**
+ * Bounds how many times one `dispatchQueuedTurn` call retries in place after
+ * a failed attempt (unified action runtime, Stage 7). Independent of
+ * `failTurn`'s own `MAX_TURN_RESOLVE_ATTEMPTS`: that cap only applies once a
+ * turn reaches `resolveTurn`'s try block, so a precondition that throws
+ * earlier every time (e.g. "Game not found") would otherwise never touch
+ * `resolveAttempts` and could loop here forever without its own bound.
+ */
+const MAX_DISPATCH_RETRIES = 3;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Server-owned entrypoint used after order submission. */
 export async function dispatchQueuedTurn(gameId: string): Promise<ResolveTurnResult | undefined> {
   const { db, close } = createDatabase(requiredDatabaseUrl());
-  try { return await resolveQueuedTurn(db, gameId); }
-  finally { await close(); }
+  try {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await resolveQueuedTurn(db, gameId);
+      } catch (error) {
+        // `failTurn` (inside resolveTurn's catch, packages/db/src/queries/resolution.ts)
+        // already requeued the turn if it has attempts left, or left it
+        // terminally "failed" otherwise -- either way, retrying here just
+        // means calling back in, not re-deriving that decision.
+        const stillQueued = attempt < MAX_DISPATCH_RETRIES && (await getQueuedTurn(db, gameId)) !== undefined;
+        if (!stillQueued) throw error;
+        console.error(`[resolution-dispatch] attempt ${attempt} failed, retrying`, error);
+        await delay(1000 * attempt);
+      }
+    }
+  } finally { await close(); }
 }

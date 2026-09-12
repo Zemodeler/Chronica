@@ -8,7 +8,7 @@ import { games, scenarios, turns, worldSnapshots, chronicleEntries } from "../sc
 import { users } from "../schema/auth";
 import { worldEvents, worldFacts } from "../schema/events";
 import { eq } from "drizzle-orm";
-import { commitResolution } from "./resolution";
+import { claimTurnForResolution, commitResolution, failTurn, MAX_TURN_RESOLVE_ATTEMPTS, releaseExpiredTurnClaims } from "./resolution";
 import type { NewWorldEvent } from "./events";
 
 // A real, live-Postgres integration test (docs/32 corrective pass,
@@ -48,7 +48,7 @@ describe.skipIf(process.env.SKIP_DB_TESTS === "true")("commitResolution atomicit
     await handle?.close();
   });
 
-  async function seedGameAndTurn(): Promise<{ gameId: string; turnId: string }> {
+  async function seedGameAndTurn(status: "resolving" | "queued" = "resolving"): Promise<{ gameId: string; turnId: string }> {
     const [user] = await db.insert(users).values({ name: "Test User", email: `test-${randomUUID()}@example.test` }).returning({ id: users.id });
     const [scenario] = await db.insert(scenarios).values({ slug: `test-scenario-${randomUUID()}`, title: "Test Scenario", period: "test" }).returning({ id: scenarios.id });
     const [game] = await db.insert(games).values({
@@ -57,7 +57,7 @@ describe.skipIf(process.env.SKIP_DB_TESTS === "true")("commitResolution atomicit
       startingSeatCount: 1, createdBy: user!.id,
     }).returning({ id: games.id });
     const [turn] = await db.insert(turns).values({
-      gameId: game!.id, index: 0, status: "resolving", seed: `${game!.id}:0`, openedAt: new Date(), elapsedStepStart: 0,
+      gameId: game!.id, index: 0, status, seed: `${game!.id}:0`, openedAt: new Date(), elapsedStepStart: 0,
     }).returning({ id: turns.id });
     return { gameId: game!.id, turnId: turn!.id };
   }
@@ -174,6 +174,135 @@ describe.skipIf(process.env.SKIP_DB_TESTS === "true")("commitResolution atomicit
 
       const factRows = await db.select().from(worldFacts).where(eq(worldFacts.id, factId));
       expect(factRows).toHaveLength(1);
+    } finally {
+      await deleteGame(gameId);
+    }
+  });
+});
+
+describe.skipIf(process.env.SKIP_DB_TESTS === "true")("turn-claim resilience (unified action runtime, Stage 7; live Postgres)", () => {
+  let handle: ReturnType<typeof createDatabase> | null = null;
+  let db: ChronicaDatabase;
+  let reachable = true;
+
+  beforeAll(async () => {
+    handle = createDatabase(DATABASE_URL);
+    db = handle.db;
+    try {
+      await db.execute("select 1");
+    } catch {
+      reachable = false;
+    }
+  });
+
+  afterAll(async () => {
+    await handle?.close();
+  });
+
+  async function seedGame(): Promise<string> {
+    const [user] = await db.insert(users).values({ name: "Test User", email: `test-${randomUUID()}@example.test` }).returning({ id: users.id });
+    const [scenario] = await db.insert(scenarios).values({ slug: `test-scenario-${randomUUID()}`, title: "Test Scenario", period: "test" }).returning({ id: scenarios.id });
+    const [game] = await db.insert(games).values({
+      scenarioId: scenario!.id, title: "Test Game", aiProfileVersion: 1, payerUserId: user!.id,
+      creditRateCardVersion: 1, creditBudgetMicrocredits: 0n, scenarioVersion: 1, libraryVersion: 1,
+      startingSeatCount: 1, createdBy: user!.id,
+    }).returning({ id: games.id });
+    return game!.id;
+  }
+
+  async function seedTurn(gameId: string, status: "queued" | "resolving", extra: Partial<typeof turns.$inferInsert> = {}): Promise<string> {
+    const [turn] = await db.insert(turns).values({
+      gameId, index: 0, status, seed: `${gameId}:0`, openedAt: new Date(), elapsedStepStart: 0, ...extra,
+    }).returning({ id: turns.id });
+    return turn!.id;
+  }
+
+  async function deleteGame(gameId: string): Promise<void> {
+    await db.delete(games).where(eq(games.id, gameId));
+  }
+
+  it("claims a queued turn with a real, expiring lease", async () => {
+    if (!reachable) { console.warn("Skipping live-Postgres test: could not reach", DATABASE_URL); return; }
+    const gameId = await seedGame();
+    try {
+      const turnId = await seedTurn(gameId, "queued");
+      const expiresAt = new Date(Date.now() + 60_000);
+      const claimed = await claimTurnForResolution(db, turnId, "worker-1", expiresAt);
+      expect(claimed).toBe(true);
+      const [turn] = await db.select().from(turns).where(eq(turns.id, turnId));
+      expect(turn?.status).toBe("resolving");
+      expect(turn?.claimedBy).toBe("worker-1");
+      expect(turn?.claimExpiresAt?.getTime()).toBe(expiresAt.getTime());
+    } finally {
+      await deleteGame(gameId);
+    }
+  });
+
+  it("refuses to claim a turn that is not queued", async () => {
+    if (!reachable) { console.warn("Skipping live-Postgres test: could not reach", DATABASE_URL); return; }
+    const gameId = await seedGame();
+    try {
+      const turnId = await seedTurn(gameId, "resolving");
+      expect(await claimTurnForResolution(db, turnId)).toBe(false);
+    } finally {
+      await deleteGame(gameId);
+    }
+  });
+
+  it("releaseExpiredTurnClaims reclaims a resolving turn whose lease already expired, back to queued", async () => {
+    if (!reachable) { console.warn("Skipping live-Postgres test: could not reach", DATABASE_URL); return; }
+    const gameId = await seedGame();
+    try {
+      const turnId = await seedTurn(gameId, "resolving", { claimedBy: "worker-1", claimExpiresAt: new Date(Date.now() - 1000) });
+      const releasedCount = await releaseExpiredTurnClaims(db, gameId);
+      expect(releasedCount).toBe(1);
+      const [turn] = await db.select().from(turns).where(eq(turns.id, turnId));
+      expect(turn?.status).toBe("queued");
+      expect(turn?.claimedBy).toBeNull();
+      expect(turn?.claimExpiresAt).toBeNull();
+    } finally {
+      await deleteGame(gameId);
+    }
+  });
+
+  it("releaseExpiredTurnClaims leaves an unexpired lease alone", async () => {
+    if (!reachable) { console.warn("Skipping live-Postgres test: could not reach", DATABASE_URL); return; }
+    const gameId = await seedGame();
+    try {
+      const turnId = await seedTurn(gameId, "resolving", { claimedBy: "worker-1", claimExpiresAt: new Date(Date.now() + 60_000) });
+      expect(await releaseExpiredTurnClaims(db, gameId)).toBe(0);
+      const [turn] = await db.select({ status: turns.status }).from(turns).where(eq(turns.id, turnId));
+      expect(turn?.status).toBe("resolving");
+    } finally {
+      await deleteGame(gameId);
+    }
+  });
+
+  it("failTurn requeues a failed attempt while attempts remain, instead of dropping the turn", async () => {
+    if (!reachable) { console.warn("Skipping live-Postgres test: could not reach", DATABASE_URL); return; }
+    const gameId = await seedGame();
+    try {
+      const turnId = await seedTurn(gameId, "resolving", { claimedBy: "worker-1", claimExpiresAt: new Date(Date.now() + 60_000) });
+      await failTurn(db, turnId, "provider error");
+      const [turn] = await db.select().from(turns).where(eq(turns.id, turnId));
+      expect(turn?.status).toBe("queued");
+      expect(turn?.resolveAttempts).toBe(1);
+      expect(turn?.claimedBy).toBeNull();
+      expect(turn?.claimExpiresAt).toBeNull();
+    } finally {
+      await deleteGame(gameId);
+    }
+  });
+
+  it("failTurn marks the turn terminally failed once MAX_TURN_RESOLVE_ATTEMPTS is reached", async () => {
+    if (!reachable) { console.warn("Skipping live-Postgres test: could not reach", DATABASE_URL); return; }
+    const gameId = await seedGame();
+    try {
+      const turnId = await seedTurn(gameId, "resolving", { resolveAttempts: MAX_TURN_RESOLVE_ATTEMPTS - 1 });
+      await failTurn(db, turnId, "provider error, again");
+      const [turn] = await db.select().from(turns).where(eq(turns.id, turnId));
+      expect(turn?.status).toBe("failed");
+      expect(turn?.resolveAttempts).toBe(MAX_TURN_RESOLVE_ATTEMPTS);
     } finally {
       await deleteGame(gameId);
     }

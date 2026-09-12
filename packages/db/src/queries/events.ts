@@ -1,4 +1,4 @@
-import { and, asc, eq, lte } from "drizzle-orm";
+import { and, asc, eq, inArray, lte } from "drizzle-orm";
 import type { Fact, WorldEventKind, WorldEventPayload, WorldEventRecord, WorldInstant } from "@chronica/shared";
 import { worldInstantFromSortKey, worldInstantToSortKey } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
@@ -155,6 +155,22 @@ export async function listFactsForGame(db: ChronicaDatabase, gameId: string, lim
     .where(eq(worldFacts.gameId, gameId))
     .orderBy(asc(worldFacts.atStep))
     .limit(limit);
+  return rows.map((row) => row.data);
+}
+
+/**
+ * Resolves specific fact ids to their full `Fact`s (unified action runtime,
+ * Stage 7) -- lets the UI show *why* resolution stopped (a turn's
+ * `stoppingFactIds`) as real fact summaries instead of opaque ids. Returns
+ * only the ids that still exist, in no particular order; an empty `ids`
+ * skips the query entirely.
+ */
+export async function getFactsByIds(db: ChronicaDatabase, gameId: string, ids: readonly string[]): Promise<Fact[]> {
+  if (ids.length === 0) return [];
+  const rows = await db
+    .select({ data: worldFacts.data })
+    .from(worldFacts)
+    .where(and(eq(worldFacts.gameId, gameId), inArray(worldFacts.id, [...ids])));
   return rows.map((row) => row.data);
 }
 

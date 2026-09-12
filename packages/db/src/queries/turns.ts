@@ -15,6 +15,7 @@ import {
   turns,
   worldSnapshots,
 } from "../schema/game";
+import { getFactsByIds } from "./events";
 
 // The persistence apps/web needs for a single-player demo match, built on the
 // same tables and turn lifecycle apps/worker drives (docs/04). Scoped
@@ -440,6 +441,14 @@ export interface ChronicleView {
     readonly items: readonly string[];
     readonly uncertaintyNote: string | null;
   };
+  /**
+   * What this turn's resolution stopped to ask the player, if the elastic
+   * scheduler's intervention check is what ended it (unified action
+   * runtime, Stage 7) -- absent when the turn simply ran its course.
+   */
+  readonly requestedPlayerDecision?: string;
+  /** The facts the intervention check cited, resolved to their own summaries so the player sees why, not just an id. */
+  readonly stoppingFacts?: readonly { readonly id: string; readonly summary: string }[];
   readonly entries: readonly {
     readonly id: string;
     readonly sequence: number;
@@ -533,7 +542,10 @@ export async function getChronicleForLatestTurn(
       .where(eq(games.id, gameId))
       .limit(1),
     db
-      .select({ id: turns.id, index: turns.index, elapsedStepEnd: turns.elapsedStepEnd })
+      .select({
+        id: turns.id, index: turns.index, elapsedStepEnd: turns.elapsedStepEnd,
+        stoppingFactIds: turns.stoppingFactIds, requestedPlayerDecision: turns.requestedPlayerDecision,
+      })
       .from(turns)
       .where(and(eq(turns.gameId, gameId), eq(turns.status, "news")))
       .orderBy(desc(turns.index))
@@ -671,6 +683,10 @@ export async function getChronicleForLatestTurn(
     projected.push({ ...view, playerInvolvement: row.playerInvolvement });
   }
 
+  const stoppingFacts = turn.stoppingFactIds && turn.stoppingFactIds.length > 0
+    ? (await getFactsByIds(db, gameId, turn.stoppingFactIds)).map((fact) => ({ id: fact.id, summary: fact.summary }))
+    : undefined;
+
   return {
     turnId: turn.id,
     turnIndex: turn.index,
@@ -678,6 +694,8 @@ export async function getChronicleForLatestTurn(
     entries: projected,
     ...(dispatch === undefined ? {} : { dispatch }),
     ...(scenarioClock === undefined ? {} : { scenarioClock }),
+    ...(turn.requestedPlayerDecision == null ? {} : { requestedPlayerDecision: turn.requestedPlayerDecision }),
+    ...(stoppingFacts === undefined || stoppingFacts.length === 0 ? {} : { stoppingFacts }),
   };
 }
 

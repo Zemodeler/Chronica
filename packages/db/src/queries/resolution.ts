@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, lte } from "drizzle-orm";
 import type {
   CommittedGameMasterReport,
   Fact,
@@ -383,17 +383,52 @@ export async function getOrdersForTurn(
   }));
 }
 
-/** Advance a turn's status from queued → resolving. */
+/**
+ * How many times resolution may be attempted for one turn (unified action
+ * runtime, Stage 7) before a failure becomes terminal. Bounds the requeue
+ * `failTurn` performs on a transient failure -- without this, a genuinely
+ * broken turn (bad data that fails every attempt identically) would requeue
+ * forever instead of ever surfacing as failed.
+ */
+export const MAX_TURN_RESOLVE_ATTEMPTS = 3;
+
+/**
+ * How long a resolution claim is honored before it is considered abandoned
+ * (unified action runtime, Stage 7). Generous relative to `world_events`'
+ * 60s lease: a full turn can run many chained AI calls (Stage 5's elastic
+ * continuation included), so the bar for "the claimant crashed" needs to sit
+ * well above ordinary resolution time.
+ */
+export const TURN_CLAIM_TIMEOUT_MS = 10 * 60_000;
+
+/** Advance a turn's status from queued → resolving, with a real, expiring lease. */
 export async function claimTurnForResolution(
   db: ChronicaDatabase,
   turnId: string,
+  claimedBy = "resolve-turn",
+  claimExpiresAt: Date = new Date(Date.now() + TURN_CLAIM_TIMEOUT_MS),
 ): Promise<boolean> {
   const rows = await db
     .update(turns)
-    .set({ status: "resolving" })
+    .set({ status: "resolving", claimedBy, claimExpiresAt })
     .where(and(eq(turns.id, turnId), eq(turns.status, "queued")))
     .returning({ id: turns.id });
   return rows.length > 0;
+}
+
+/**
+ * Releases any turn this game claimed whose lease has expired -- the caller
+ * crashed or was killed mid-resolution -- back to `queued`, so it is picked
+ * up again rather than stuck in `resolving` forever. Same purpose as
+ * `releaseExpiredWorldEventClaims`, applied to the coarser per-turn claim.
+ */
+export async function releaseExpiredTurnClaims(db: ChronicaDatabase, gameId: string): Promise<number> {
+  const rows = await db
+    .update(turns)
+    .set({ status: "queued", claimedBy: null, claimExpiresAt: null })
+    .where(and(eq(turns.gameId, gameId), eq(turns.status, "resolving"), lte(turns.claimExpiresAt, new Date())))
+    .returning({ id: turns.id });
+  return rows.length;
 }
 
 /** Write the current pipeline step so the SSE stream can report live progress. */
@@ -405,13 +440,21 @@ export async function updateTurnProgressStep(
   await db.update(turns).set({ progressStep: step }).where(eq(turns.id, turnId));
 }
 
-/** Mark a turn as failed with an error reason. */
+/**
+ * Records a failed resolution attempt. Within `MAX_TURN_RESOLVE_ATTEMPTS`,
+ * requeues the turn so the player's submitted order batch gets another
+ * attempt instead of being silently dropped (unified action runtime, Stage
+ * 7); once attempts are exhausted, marks the turn terminally `failed`.
+ */
 export async function failTurn(
   db: ChronicaDatabase,
   turnId: string,
   _reason: string,
 ): Promise<void> {
-  await db.update(turns).set({ status: "failed" }).where(eq(turns.id, turnId));
+  const [turn] = await db.select({ resolveAttempts: turns.resolveAttempts }).from(turns).where(eq(turns.id, turnId)).limit(1);
+  const resolveAttempts = (turn?.resolveAttempts ?? 0) + 1;
+  const status = resolveAttempts >= MAX_TURN_RESOLVE_ATTEMPTS ? "failed" : "queued";
+  await db.update(turns).set({ status, resolveAttempts, claimedBy: null, claimExpiresAt: null }).where(eq(turns.id, turnId));
 }
 
 /** Get the queued turn for a game, if one exists. */
