@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Fact, WorldState } from "@chronica/shared";
+import { NO_INTERVENTION_SIGNALS } from "@chronica/shared";
 import { firstPunicWarScenario } from "../built-in-scenarios";
 import { createDatabase, type ChronicaDatabase } from "../database";
 import { games, scenarios, turns, worldSnapshots, chronicleEntries } from "../schema/game";
@@ -80,7 +81,7 @@ describe.skipIf(process.env.SKIP_DB_TESTS === "true")("commitResolution atomicit
         id: duplicateFactId, time: { day: 1, minute: 0 }, atStep: 1, kind: "test_event", summary: "First copy.",
         affectedEntities: [], resourceChanges: [], authorityChange: undefined, visibility: "public",
         discovery: { state: "public", knowableAtInstant: null, discoveredBy: [] }, evidence: null,
-        eligibleReactionScopes: [], sourceEventId: null, sourceActionId: null, causalDepth: 0,
+        eligibleReactionScopes: [], interventionSignals: NO_INTERVENTION_SIGNALS, sourceEventId: null, sourceActionId: null, causalDepth: 0,
       };
       // A genuine forced failure: two facts sharing the same primary key.
       // `worldFacts` is inserted LAST inside `commitResolution`'s
@@ -143,7 +144,7 @@ describe.skipIf(process.env.SKIP_DB_TESTS === "true")("commitResolution atomicit
         id: factId, time: { day: 1, minute: 0 }, atStep: 1, kind: "test_event", summary: "A real fact.",
         affectedEntities: [], resourceChanges: [], authorityChange: undefined, visibility: "public",
         discovery: { state: "public", knowableAtInstant: null, discoveredBy: [] }, evidence: null,
-        eligibleReactionScopes: [], sourceEventId: null, sourceActionId: null, causalDepth: 0,
+        eligibleReactionScopes: [], interventionSignals: NO_INTERVENTION_SIGNALS, sourceEventId: null, sourceActionId: null, causalDepth: 0,
       };
       const pendingWorldEvents: NewWorldEvent[] = [{
         kind: "action_phase", instant: { day: 1, minute: 0 }, subjectRef: { kind: "character", id: "hanno" },

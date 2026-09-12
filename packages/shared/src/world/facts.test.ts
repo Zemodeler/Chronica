@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emitFacts, factsVisibleTo, factualEventToFact, type Fact, type FactDraft } from "./facts";
+import { emitFacts, factsVisibleTo, factualEventToFact, NO_INTERVENTION_SIGNALS, type Fact, type FactDraft } from "./facts";
 import type { FactualEvent } from "../gm/session";
 
 const baseEvent: FactualEvent = {
@@ -48,6 +48,7 @@ describe("emitFacts", () => {
       discovery: { state: "public", knowableAtInstant: null, discoveredBy: [] },
       evidence: null,
       eligibleReactionScopes: [],
+      interventionSignals: NO_INTERVENTION_SIGNALS,
       sourceEventId: null,
       sourceActionId: null,
       causalDepth: 0,
@@ -74,6 +75,7 @@ describe("factsVisibleTo", () => {
       discovery: { state: "private", knowableAtInstant: null, discoveredBy },
       evidence: null,
       eligibleReactionScopes: [],
+      interventionSignals: NO_INTERVENTION_SIGNALS,
       sourceEventId: null,
       sourceActionId: null,
       causalDepth: 0,

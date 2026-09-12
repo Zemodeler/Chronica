@@ -8,7 +8,7 @@ import {
   type AuthorityCheckResult, type AuthorityDomain, type AuthorityGrant, type AuthorityPower, type AuthorityScope, type AuthorityScopeKind,
 } from "../authority/authority-grant";
 import { decideOrderAttempt, issueOrderAttempt, receiveOrderAttempt, type OrderAttemptDecision } from "../authority/order-attempt";
-import { emitFacts, FactSchema, type FactDraft } from "../world/facts";
+import { emitFacts, FactSchema, NO_INTERVENTION_SIGNALS, type FactDraft } from "../world/facts";
 import { createCommitment, CommitmentActionKindSchema } from "../character-agency/commitments";
 import { WORKFLOW_REGISTRY } from "../workflows/registry";
 import type { WorldToolContext, WorldToolDefinition } from "./types";
@@ -302,6 +302,7 @@ export const recordFactTool: WorldToolDefinition<z.infer<typeof RecordFactParams
       discovery: { state: params.visibility, knowableAtInstant: null, discoveredBy: [] },
       evidence: null,
       eligibleReactionScopes: params.eligibleReactionScopes,
+      interventionSignals: NO_INTERVENTION_SIGNALS,
       sourceEventId: null,
       sourceActionId: null,
       causalDepth: 0,

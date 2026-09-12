@@ -2,6 +2,7 @@ export * from "./clock";
 export * from "./instant";
 export * from "./event-queue";
 export * from "./facts";
+export * from "./intervention-score";
 export * from "./agent-selection-contract";
 export * from "./affected-agent-selector";
 export * from "./authority-records";

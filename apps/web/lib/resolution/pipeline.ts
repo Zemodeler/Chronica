@@ -99,7 +99,7 @@ import { materializeCanvasProvince } from "../canvas-world";
 import { selectDevelopmentActors } from "./world-development-scheduler";
 import { decideElasticStop } from "./elastic-scheduler";
 import { advanceEventQueue, createDbEventQueuePort } from "./event-loop";
-import { deriveWorldInstant, factualEventToFact } from "@chronica/shared";
+import { computeInterventionScore, deriveWorldInstant, factualEventToFact } from "@chronica/shared";
 import { runMultiAgentTurn } from "./agents/orchestrator";
 import { createReactionRunner } from "./agents/reaction-runner";
 import { advanceProjectsTick, ensureProjectTicksSeeded } from "./project-tick";
@@ -1252,6 +1252,26 @@ export async function resolveTurn(
       factualEvents,
       plans: finalWorld.playerPlans ?? [],
     });
+
+    // Shadow-mode only, alongside the above (unified-action-runtime plan,
+    // Stage 1): the real 0-100 intervention score and hard-stop checks,
+    // computed purely for comparison against `elasticShadowDecision`'s
+    // existing two-condition heuristic -- neither decision drives
+    // `stopReason`/commit below yet. `conflicts` is empty because plan-stage
+    // resource claims (`actions/conflicts.ts`) are not populated until
+    // `ActionPlan` becomes the live write path (Stage 2), so that hard-stop
+    // check cannot fire today; every other check reads real facts/plans.
+    const interventionShadowDecision = computeInterventionScore({
+      facts: allWorldFacts,
+      plans: finalWorld.playerPlans ?? [],
+      conflicts: [],
+    });
+    console.log(
+      `[intervention-shadow:step-${atStep}] score=${interventionShadowDecision.score} `
+      + `hardStop=${interventionShadowDecision.hardStopReason ?? "none"} `
+      + `requiresIntervention=${interventionShadowDecision.requiresIntervention} `
+      + `vs elasticShadow.stopReason=${elasticShadowDecision.stopReason ?? "none (would keep advancing)"}`,
+    );
 
     const definedWorkflows = gameMasterCompleted
       ? gameMasterOutcome.definedActions.map((definition) => ({

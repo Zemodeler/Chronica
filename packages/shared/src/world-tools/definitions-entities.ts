@@ -3,7 +3,7 @@ import { EntityIdSchema } from "../material-state";
 import { OrderPartyRefSchema } from "../actions/orders";
 import { GenericEntitySchema } from "../world/generic-entity";
 import { StructureSchema } from "../world/structure";
-import { emitFacts, type FactDraft } from "../world/facts";
+import { emitFacts, NO_INTERVENTION_SIGNALS, type FactDraft } from "../world/facts";
 import type { WorldToolDefinition } from "./types";
 
 // `create_entity`/`update_entity`/`link_entities` (docs/32, Part C.1): the
@@ -57,6 +57,7 @@ export const createEntityTool: WorldToolDefinition<z.infer<typeof CreateEntityPa
       discovery: { state: "private", knowableAtInstant: null, discoveredBy: [] },
       evidence: null,
       eligibleReactionScopes: [],
+      interventionSignals: NO_INTERVENTION_SIGNALS,
       sourceEventId: null,
       sourceActionId: null,
       causalDepth: 0,
