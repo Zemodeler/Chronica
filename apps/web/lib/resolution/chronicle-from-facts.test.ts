@@ -609,13 +609,15 @@ describe("the chronicle body", () => {
 });
 
 describe("a siege recovered from a bad settlement id (the messana/settlement-messana bug)", () => {
-  // Regression: start_siege named with the display name "messana" was
-  // refused because the authoritative id is "settlement-messana", and the
-  // engine's own refusal text -- not a real siege -- used to be exactly what
-  // reached the Chronicle. Driving the actual GameMasterSession through the
-  // corrected retry proves the Chronicle body it produces describes the real
-  // siege, never the lookup mistake that preceded it.
-  it("describes the real siege, not the earlier engine-error refusal", () => {
+  // Regression: start_siege named with the display name "messana" used to be
+  // refused outright because the authoritative id is "settlement-messana",
+  // and the engine's own refusal text -- not a real siege -- was exactly
+  // what reached the Chronicle. `GameMasterSession` now repairs a guessed id
+  // like this one automatically, in the same call, whenever the world leaves
+  // exactly one thing it could have meant (`applyInvocationRepairingIds`) --
+  // so this proves the Chronicle body describes the real siege the repaired
+  // call produced, never a lookup mistake the caller was never even told about.
+  it("describes the real siege, not a lookup mistake the caller was never told about", () => {
     const session = createGameMasterSession({
       world: structuredClone(punicWarsScenario.initialWorld),
       atStep: 1,
@@ -627,15 +629,13 @@ describe("a siege recovered from a bad settlement id (the messana/settlement-mes
     // a real army outside a real wall, not a claim.
     session.invoke({ id: "call-0", name: "move_force", arguments: { actorId: "hieron-ii", forceId: "syracusan-army", destinationProvinceId: "ita-72843720b81376294924159-sicily-northeast" } });
 
-    const refused = session.invoke({ id: "call-1", name: "start_siege", arguments: { actorId: "hieron-ii", settlementId: "messana", invadingForceIds: ["syracusan-army"] } });
-    expect(refused.ok).toBe(false);
-
-    const retried = session.invoke({
-      id: "call-2",
+    const outcome = session.invoke({
+      id: "call-1",
       name: "start_siege",
-      arguments: { actorId: "hieron-ii", settlementId: "settlement-messana", invadingForceIds: ["syracusan-army"], defendingForceIds: ["mamertine-garrison"] },
+      arguments: { actorId: "hieron-ii", settlementId: "messana", invadingForceIds: ["syracusan-army"], defendingForceIds: ["mamertine-garrison"] },
     });
-    expect(retried.ok).toBe(true);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.factual).toContain('resolved settlementId "messana" -> "settlement-messana"');
 
     const result = session.result();
     const siegeEvent = result.events.find((event) => event.actionId === "start_siege");

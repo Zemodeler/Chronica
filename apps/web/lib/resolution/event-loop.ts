@@ -9,10 +9,12 @@ import {
   factualEventToFact,
   midnight,
   nextDueEvent,
+  type ActionPlan,
   type AffectedAgentSelection,
   type AffectedAgentSelector,
   type Fact,
   type FactualEvent,
+  type InterventionDecision,
   type WorldEventKind,
   type WorldEventRecord,
   type WorldInstant,
@@ -116,7 +118,7 @@ export interface AffectedAgentRunnerResult {
 export interface AffectedAgentRunner {
   runReactions(input: AffectedAgentRunnerInput): Promise<AffectedAgentRunnerResult>;
 }
-export const NO_OP_AGENT_RUNNER: AffectedAgentRunner = { runReactions: async () => ({ scheduledEvents: [] }) };
+export const NO_OP_AGENT_RUNNER: AffectedAgentRunner = { runReactions: () => Promise.resolve({ scheduledEvents: [] }) };
 
 export interface EventLoopOptions {
   readonly gameId: string;
@@ -125,6 +127,20 @@ export interface EventLoopOptions {
   readonly agentRunner?: AffectedAgentRunner;
   /** Safety valve so one turn's resolution cannot loop indefinitely. Default 200. */
   readonly maxEventsPerCall?: number;
+  /**
+   * Unified action runtime, Stage 5: called after each event's own facts and
+   * immediate reactions are folded in, with every fact this loop has
+   * produced so far (a caller with facts from BEFORE this call started, e.g.
+   * the turn's own actor agents, folds those in via closure) and the
+   * world's current plans. Returning `requiresIntervention: true` stops the
+   * loop at a real decision point -- `stopReason: "decision_point"`, with
+   * the decision itself on `EventLoopResult.interventionDecision` -- instead
+   * of continuing to the next due event or window end. Absent for a caller
+   * that wants the pre-Stage-5 behavior of running unconditionally to
+   * window end or budget (the pre-turn backlog catch-up, which runs before
+   * the player's own directives are even evaluated, still does this).
+   */
+  readonly checkIntervention?: (factsSoFar: readonly Fact[], plans: readonly ActionPlan[]) => InterventionDecision;
 }
 
 export interface EventLoopResult {
@@ -152,6 +168,8 @@ export interface EventLoopResult {
   readonly pendingEventInserts: readonly Omit<NewWorldEvent, "gameId">[];
   /** Which claimed events this run resolved, and with which fact ids -- staged for the same commit transaction. */
   readonly pendingResolutions: readonly { readonly id: string; readonly atStep: number; readonly factIds: readonly string[] }[];
+  /** Set only when `checkIntervention` is what caused a "decision_point" stop (unified action runtime, Stage 5). */
+  readonly interventionDecision?: InterventionDecision;
 }
 
 const DEFAULT_MAX_EVENTS_PER_CALL = 200;
@@ -208,23 +226,39 @@ export async function advanceEventQueueWithPort(
   const allHandlerEvents: Omit<FactualEvent, "id">[] = [];
   const resolvedEventIds: string[] = [];
   const agentSelections: { event: WorldEventRecord; selection: AffectedAgentSelection }[] = [];
-  const pendingEventInserts: Omit<NewWorldEvent, "gameId">[] = [];
   const pendingResolutions: { id: string; atStep: number; factIds: readonly string[] }[] = [];
   let stoppedAt: WorldInstant = world.instant ?? midnight(0);
   let stopReason: EventLoopResult["stopReason"] = "window_end";
+  let interventionDecision: InterventionDecision | undefined;
   let exhaustedBudget = true;
 
+  // A follow-up this loop schedules (a handler's own, or a reaction's) is
+  // visible to THIS SAME call's later iterations -- staged in memory with a
+  // synthetic id rather than the DB port, exactly the way `pendingEventInserts`
+  // below is never written until the caller's own commit. Without this, a
+  // multi-day elastic continuation (unified action runtime, Stage 5) could
+  // never resolve a same-run follow-up (e.g. a reaction due an hour later)
+  // until a LATER call's pre-turn catch-up picked it up from the DB.
+  const stagedPending = new Map<string, WorldEventRecord>();
+  const stagedOriginals = new Map<string, Omit<NewWorldEvent, "gameId">>();
+  let stagedIdCounter = 0;
+
   for (let i = 0; i < maxEvents; i += 1) {
-    const pending = await port.listDuePendingEvents(windowEnd);
-    const due = nextDueEvent(pending, windowEnd);
+    const dbPending = await port.listDuePendingEvents(windowEnd);
+    const due = nextDueEvent([...dbPending, ...stagedPending.values()], windowEnd);
     if (due === null) {
       stopReason = "window_end";
       exhaustedBudget = false;
       break;
     }
 
-    const claimed = await port.claimEvent(due.id);
-    if (!claimed) continue; // lost the race to another resolver; re-select next iteration.
+    const isStaged = stagedPending.has(due.id);
+    if (isStaged) {
+      stagedPending.delete(due.id);
+    } else {
+      const claimed = await port.claimEvent(due.id);
+      if (!claimed) continue; // lost the race to another resolver; re-select next iteration.
+    }
 
     stoppedAt = due.instant;
     const handler = handlerFor(due.kind, options.handlers);
@@ -275,9 +309,37 @@ export async function advanceEventQueueWithPort(
     // nor this event's own resolution are written here -- both are staged
     // for the caller to persist inside the same transaction as the turn's
     // committed snapshot, so a turn that fails after this point leaves no
-    // resolved event or fact behind.
-    pendingEventInserts.push(...followUps);
-    pendingResolutions.push({ id: due.id, atStep, factIds: newFacts.map((f) => f.id) });
+    // resolved event or fact behind. Staged in memory (see above) rather
+    // than immediately, so a follow-up due within this same call's window
+    // is still resolved here, not merely re-discovered by a future call.
+    for (const followUp of followUps) {
+      const stagedId = `staged-${stagedIdCounter += 1}`;
+      stagedOriginals.set(stagedId, followUp);
+      stagedPending.set(stagedId, {
+        id: stagedId,
+        gameId,
+        scheduledForTurnId: null,
+        kind: followUp.kind,
+        status: "pending",
+        instant: followUp.instant,
+        priority: followUp.priority ?? 0,
+        isPlayerAction: followUp.isPlayerAction ?? false,
+        subjectRef: followUp.subjectRef,
+        actionId: followUp.actionId ?? null,
+        operationId: followUp.operationId ?? null,
+        payload: followUp.payload,
+        causalDepth: followUp.causalDepth ?? 0,
+        causedByEventId: followUp.causedByEventId ?? null,
+        causedByFactId: followUp.causedByFactId ?? null,
+        createdAtStep: followUp.createdAtStep,
+        resolvedAtStep: null,
+        resolvedFactIds: [],
+      });
+    }
+    // A staged follow-up this same call already resolved never touched the
+    // DB, so there is no real row for the caller to mark resolved either --
+    // only a genuinely DB-sourced due event gets a pendingResolutions entry.
+    if (!isStaged) pendingResolutions.push({ id: due.id, atStep, factIds: newFacts.map((f) => f.id) });
     resolvedEventIds.push(due.id);
 
     if (result.requiresPlayerDecision) {
@@ -285,9 +347,29 @@ export async function advanceEventQueueWithPort(
       exhaustedBudget = false;
       break;
     }
+
+    // Unified action runtime, Stage 5: the real player-intervention decision,
+    // evaluated after this event and its immediate reaction window -- the
+    // design's own step 7. A caller with nothing to add (the pre-turn
+    // backlog catch-up) simply omits `checkIntervention` and this is a no-op.
+    if (options.checkIntervention) {
+      const decision = options.checkIntervention(allFacts, currentWorld.plans ?? []);
+      if (decision.requiresIntervention) {
+        interventionDecision = decision;
+        stopReason = "decision_point";
+        exhaustedBudget = false;
+        break;
+      }
+    }
   }
 
   if (exhaustedBudget) stopReason = "budget_exhausted";
+
+  // Whatever is still staged and unresolved at the end of this run -- never
+  // written by the loop itself -- is exactly what the caller must persist as
+  // still-pending, alongside any follow-up never even reached this call's
+  // window (which was never staged in memory in the first place; see below).
+  const pendingEventInserts: Omit<NewWorldEvent, "gameId">[] = [...stagedPending.keys()].map((id) => stagedOriginals.get(id)!);
 
   return {
     world: { ...currentWorld, instant: stoppedAt },
@@ -299,6 +381,7 @@ export async function advanceEventQueueWithPort(
     stoppedAt,
     stopReason,
     agentSelections,
+    ...(interventionDecision !== undefined ? { interventionDecision } : {}),
   };
 }
 
