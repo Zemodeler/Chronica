@@ -42,7 +42,7 @@ Orders become durable plans with stages. A plan can name delegates, constraints,
 
 When interpreting an order, the Game Master separates claims from intent. A contradicted world premise cannot be used as the basis of a stage. Materially ambiguous, dangerous, or irreversible instructions may require clarification; clarification never commits stages in the same operation.
 
-The game is moving from fixed turn increments to elapsed in-world days and meaningful stopping points. Day-level fields and an elastic-stop decision already provide diagnostics in shadow mode; the existing live resolution still returns control after one step. That is intentional until the remaining lifecycle and UI integration are ready.
+Play runs on elapsed in-world days and meaningful stopping points, not fixed turn increments: resolution keeps going through scheduled work and reactions on its own, and returns control to the player only when a real decision, clarification, or irreversible consequence needs them specifically.
 
 ## Chronicle and memory
 
