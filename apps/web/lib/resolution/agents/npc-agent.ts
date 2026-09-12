@@ -9,11 +9,12 @@ import { runAgentLoop, type AgentLoopResult } from "./agent-loop";
 // shared session, informed only by `buildNpcAgentContext`'s hard allowlist --
 // own goals/beliefs/pressures/plots/commitments/relationships/authority, its
 // own pending orders, and only the Facts visible to it. `finish_turn` is
-// withheld, same reasoning as the player agent.
+// withheld -- ending the turn is the closing pass's job, not any actor's.
 //
 // An NPC does not call workflows. It reads, it decides, and it says what it
 // means to do; `interpreter-agent.ts` afterwards works out which validated
-// actions -- if any -- that intent amounts to.
+// actions -- if any -- that intent amounts to, the same way it carries out
+// the player's own directive-derived intent.
 //
 // This is what lets an NPC have the same reach as the player without handing
 // it the player's tool belt. The old surface bounded an NPC by *category*

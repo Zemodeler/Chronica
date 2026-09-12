@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { FactualEvent, PlayerPlan, ScenarioClock, StopReason } from "@chronica/shared";
+import type { ActionPlan, FactualEvent, ScenarioClock, StopReason } from "@chronica/shared";
 import { daysPerStep, estimateWorkflowDurationDays } from "@chronica/shared";
 
 // Elastic simulation scheduler (docs/32, Phase 7) -- SHADOW MODE ONLY.
@@ -34,13 +34,13 @@ export interface ElasticSchedulerInput {
   readonly elapsedStepStart: number;
   readonly scenarioClock?: ScenarioClock | undefined;
   readonly factualEvents: readonly FactualEvent[];
-  /** Every plan touched this turn, across every owner -- `PlayerPlan` today, `ActionPlan` once Phase 9 unifies the write path. */
-  readonly plans: readonly PlayerPlan[];
+  /** Every plan touched this turn, across every owner. */
+  readonly plans: readonly ActionPlan[];
   /** A direct attack, death, succession, betrayal, or surrender involving the player this turn. Not yet detected anywhere -- pass explicitly once an upstream source exists. */
   readonly irreversibleEventFactIds?: readonly string[];
   /** A scenario-authored watch condition became true. No watch-condition mechanism exists yet. */
   readonly watchConditionFactIds?: readonly string[];
-  /** A plan stage was interrupted by preemption this turn (docs/32, Phase 4/9). Not yet populated -- `ActionPlan` isn't the live write path yet. */
+  /** A plan stage was interrupted by preemption this turn. Not yet populated -- preemption isn't wired into the live path yet. */
   readonly planInterruptionFactIds?: readonly string[];
   /** A scenario-defined salience threshold was crossed. No such threshold mechanism exists yet. */
   readonly thresholdCrossedFactIds?: readonly string[];
@@ -66,7 +66,7 @@ const FLAG_NPC_INITIATED_DIALOGUE_ACTION_ID = "flag_npc_initiated_dialogue";
 
 function mandatoryPlayerDecision(
   factualEvents: readonly FactualEvent[],
-  plans: readonly PlayerPlan[],
+  plans: readonly ActionPlan[],
 ): { factIds: string[]; description: string } | null {
   const dialogueFacts = factualEvents.filter((event) => event.actionId === FLAG_NPC_INITIATED_DIALOGUE_ACTION_ID);
   if (dialogueFacts.length > 0) {

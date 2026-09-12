@@ -2,33 +2,32 @@ import "server-only";
 
 // Turn resolution (Game Master architecture).
 //
-// The AI part of a turn is one agent with tools, not a committee, and it is
-// the sole authority on every outcome that used to be decided for it: life,
-// death, incapacity, what an NPC does, and how a political procedure
-// resolves are all its own judgment calls now, informed by read tools that
-// report facts (a scenario's authored life-review rates, a procedure's
-// recorded support) rather than a pre-computed decision. What stays
-// deterministic around it is bookkeeping and physics, not judgment: dialogue
-// social events and pressure lifecycle before; battle/war-damage math,
-// storyline auto-resolution, and background material society after; then
-// Chronicle and commit.
+// The AI part of a turn is several sequential agents against one shared,
+// staged session (`agents/orchestrator.ts`'s `runMultiAgentTurn`), not a
+// single omniscient call, and it is the sole authority on every outcome that
+// used to be decided for it: life, death, incapacity, what an NPC does, and
+// how a political procedure resolves are all its own judgment calls now,
+// informed by read tools that report facts (a scenario's authored
+// life-review rates, a procedure's recorded support) rather than a
+// pre-computed decision. What stays deterministic around it is bookkeeping
+// and physics, not judgment: dialogue social events and pressure lifecycle
+// before; battle/war-damage math, storyline auto-resolution, and background
+// material society after; then Chronicle and commit.
 //
-// The agent's route to state is `runGameMaster`, which stages every built-in
-// or campaign-defined workflow in memory. Prose changes nothing; a defined
-// workflow is a named, validated data operation rather than a free-form patch.
-// The committed snapshot is written once, at the end, by `commitResolution`.
+// The agent's route to state stages every built-in or campaign-defined
+// workflow in memory. Prose changes nothing; a defined workflow is a named,
+// validated data operation rather than a free-form patch. The committed
+// snapshot is written once, at the end, by `commitResolution`.
 
 import type {
   OrderBatch,
   ProposedInvocation,
-  SelectedCharacter,
   WorkflowAuditBlob,
   CharacterIntent,
   WorldState,
 } from "@chronica/shared";
 import {
   executeWorkflow,
-  selectRelevantCharacters,
   applySocialEvents,
   advancePressureLifecycle,
   derivePressureTriggers,
@@ -86,9 +85,7 @@ import { STEP_LABELS } from "./types";
 import {
   buildChronicleNarratorPrompt,
   type NarratorEntry,
-  type ResolutionPlayerContext,
 } from "./prompts";
-import { runGameMaster } from "./game-master";
 import {
   NARRATOR_EXEMPT_SCOPES,
   NARRATOR_OUTCOME_LOCKED_SCOPES,
@@ -96,7 +93,6 @@ import {
   rewriteClaimsUnsupportedWar,
 } from "./chronicle-from-facts";
 import { materializeCanvasProvince } from "../canvas-world";
-import { selectDevelopmentActors } from "./world-development-scheduler";
 import { decideElasticStop } from "./elastic-scheduler";
 import { advanceEventQueue, createDbEventQueuePort } from "./event-loop";
 import { computeInterventionScore, deriveWorldInstant, factualEventToFact } from "@chronica/shared";
@@ -265,8 +261,6 @@ export interface ResolveTurnInput {
   readonly scenarioChronicle?: ScenarioChronicleRules | undefined;
   /** The immutable canvas whose province IDs the opening world may materialize on demand. */
   readonly mapAssetId?: string | null;
-  /** 1 (default) = today's single-GM path. 2 = the multi-agent dispatcher (docs/32, Part B.7). */
-  readonly agentArchitectureVersion?: number;
 }
 
 export async function resolveTurn(
@@ -329,7 +323,6 @@ export async function resolveTurn(
       roleLabel: event.introducedProfile?.roleLabel ?? "contact",
     }));
     const pendingContactIds = new Set(pendingContactDiscoveries.map((contact) => contact.characterId));
-    const resolutionContext: ResolutionPlayerContext = { knowledgebase: playerKnowledgebase, pendingCommitments, pendingContactDiscoveries };
     const socialEventOutcome = applySocialEvents(
       materializedWorld,
       pendingSocialEvents.filter((event) =>
@@ -372,11 +365,6 @@ export async function resolveTurn(
     // seeded here exactly like `midnight_tick` is, and resolved by
     // `advanceProjectsTick` when the queue picks it up.
     await ensureProjectTicksSeeded(createDbEventQueuePort(db, gameId), backfilled, materializedWorld.elapsedStep + 1);
-    // docs/32 corrective pass, requirement 3: only `agentArchitectureVersion
-    // === 2` gets the real selector/runner and a queue bounded to more than
-    // one event per call -- an in-flight v1 campaign's resolution model
-    // never changes mid-play, so it keeps exactly today's "one midnight
-    // tick, no agent dispatch from the queue" behavior.
     const worldDynamics = await advanceEventQueue(
       db,
       backfilled,
@@ -384,9 +372,9 @@ export async function resolveTurn(
       materializedWorld.elapsedStep + 1,
       {
         gameId,
-        maxEventsPerCall: input.agentArchitectureVersion === 2 ? 20 : 1,
+        maxEventsPerCall: 20,
         handlers: { world_process_tick: advanceProjectsTick },
-        ...(input.agentArchitectureVersion === 2 ? { agentRunner: createReactionRunner(gameMasterAdapter) } : {}),
+        agentRunner: createReactionRunner(gameMasterAdapter),
       },
     );
     const resolutionWorld: WorldState = worldDynamics.world;
@@ -411,29 +399,7 @@ export async function resolveTurn(
       id: `directive-${index}`,
       directive,
     }));
-    // One bounded working set for the whole turn: the characters agency
-    // scores and the ones the Game Master is told about are the same people,
-    // chosen once by the deterministic selector rather than twice by two
-    // different callers.
-    const scoredCharacters: SelectedCharacter[] = selectRelevantCharacters(
-      resolutionWorld,
-      actorCharacterId,
-      undefined,
-      pendingCommitments.map((commitment) => commitment.npcCharacterId),
-    );
-    const selectedCharacters: SelectedCharacter[] = [...scoredCharacters];
-    // Background reviews have their own small allocation; player activity cannot displace them.
-    const developmentActors = selectDevelopmentActors(resolutionWorld, atStep, actorCharacterId);
-    for (const selected of developmentActors) {
-      const index = selectedCharacters.findIndex(c => c.characterId === selected.characterId);
-      if (index < 0) selectedCharacters.unshift(selected);
-      else {
-        const existing = selectedCharacters[index]!;
-        selectedCharacters.splice(index, 1);
-        selectedCharacters.unshift({ ...existing, actionAllowance: Math.max(existing.actionAllowance, selected.actionAllowance), reasons: [...selected.reasons, ...existing.reasons] });
-      }
-    }
-    console.log(`${tag()} [game_master] IN: atStep=${atStep} directives=${gameMasterDirectives.length} relevantCharacters=${selectedCharacters.length}`);
+    console.log(`${tag()} [game_master] IN: atStep=${atStep} directives=${gameMasterDirectives.length}`);
 
     // ── Step 2: Life review — aging, health, incapacity, death ────────────
     //
@@ -479,51 +445,24 @@ export async function resolveTurn(
         console.error(`${tag()} [defined-actions] could not be loaded; this turn runs with built-ins only`, err);
         return [] as InventedWorkflowDefinition[];
       });
-    const gameMasterInput = {
+    // Campaign-defined workflows are available in normal play. A caller can
+    // opt out only for a deliberately constrained environment.
+    const allowInventedActions = process.env.CHRONICA_DISABLE_DEFINED_ACTIONS !== "true";
+    const runGameMasterAttempt = () => runMultiAgentTurn(gameMasterAdapter, {
+      db,
+      gameId,
       world: agencyWorld,
       atStep,
+      atInstant: deriveWorldInstant(atStep, input.scenarioClock),
       actorCharacterId,
       directives: gameMasterDirectives,
-      selectedCharacters,
-      persistentPlans: true,
-      playerContext: resolutionContext,
       scenarioGovernment: input.scenarioGovernment,
       scenarioChronicle: input.scenarioChronicle,
       scenarioLife: input.scenarioLife,
       scenarioClock: input.scenarioClock,
       definedActions,
-      // Campaign-defined workflows are available in normal play. A caller can
-      // opt out only for a deliberately constrained environment.
-      allowInventedActions: process.env.CHRONICA_DISABLE_DEFINED_ACTIONS !== "true",
-    };
-    // An in-flight campaign's resolution model never changes mid-play, so this
-    // branches once per turn on the game's own pinned version rather than a
-    // global setting. Version 2 -- the sequenced player/NPC/star-context/
-    // closing agents (`agents/orchestrator.ts`) against one staged session --
-    // is the architecture, and what every new campaign is created with.
-    //
-    // Version 1 is deprecated: the single centralized Game Master call
-    // (`game-master.ts`), kept only so campaigns that began under it can
-    // finish under it. Nothing new should be built against it, and it can be
-    // removed once no active game pins version 1.
-    const runGameMasterAttempt = () => (input.agentArchitectureVersion === 2
-      ? runMultiAgentTurn(gameMasterAdapter, {
-        db,
-        gameId,
-        world: agencyWorld,
-        atStep,
-        atInstant: deriveWorldInstant(atStep, input.scenarioClock),
-        actorCharacterId,
-        directives: gameMasterDirectives,
-        scenarioGovernment: input.scenarioGovernment,
-        scenarioChronicle: input.scenarioChronicle,
-        scenarioLife: input.scenarioLife,
-        scenarioClock: input.scenarioClock,
-        definedActions,
-        allowInventedActions: gameMasterInput.allowInventedActions,
-        persistentPlans: true,
-      })
-      : runGameMaster(gameMasterAdapter, gameMasterInput));
+      allowInventedActions,
+    });
     let gameMasterOutcome = await runGameMasterAttempt();
 
     // A session that did not submit an accepted finish_turn report is not a
@@ -1250,7 +1189,7 @@ export async function resolveTurn(
       elapsedStepStart: resolutionWorld.elapsedStep,
       scenarioClock: input.scenarioClock,
       factualEvents,
-      plans: finalWorld.playerPlans ?? [],
+      plans: finalWorld.plans ?? [],
     });
 
     // Shadow-mode only, alongside the above (unified-action-runtime plan,
@@ -1259,11 +1198,12 @@ export async function resolveTurn(
     // existing two-condition heuristic -- neither decision drives
     // `stopReason`/commit below yet. `conflicts` is empty because plan-stage
     // resource claims (`actions/conflicts.ts`) are not populated until
-    // `ActionPlan` becomes the live write path (Stage 2), so that hard-stop
-    // check cannot fire today; every other check reads real facts/plans.
+    // reservations are actually acquired in `execute_plan_stage` (a later
+    // stage), so that hard-stop check cannot fire today; every other check
+    // reads real facts/plans.
     const interventionShadowDecision = computeInterventionScore({
       facts: allWorldFacts,
-      plans: finalWorld.playerPlans ?? [],
+      plans: finalWorld.plans ?? [],
       conflicts: [],
     });
     console.log(

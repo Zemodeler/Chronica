@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { InterpretPlanSchema, ExecutePlanStageSchema, RespondToAssignmentSchema, DeferPlanStageSchema, preparePlayerPlans, interpretPlan, planSpending, type PlayerPlan } from "../actions/plans";
+import { InterpretPlanSchema, ExecutePlanStageSchema, RespondToAssignmentSchema, DeferPlanStageSchema, preparePlayerPlans, interpretPlan, planSpending, isActionPlanOngoing, type ActionPlan } from "../actions/plans";
 import type { OrderDirective } from "../actions/orders";
 import type { WorldState } from "../world/world-state";
 import type { ProposedInvocation } from "../actions/orders";
@@ -510,10 +510,32 @@ export class GameMasterSession {
     // -- so its default, unbound principal is "system", not "player". Only
     // the multi-agent path (`invoke(call, principal)`) ever narrows this.
     this.currentPrincipal = { kind: "system" };
-    for (const { directive } of options.directives ?? []) {
-      if (directive.kind === "new") continue;
-      const plan = options.world.playerPlans?.find(p => p.id === directive.actionId && p.ownerId === options.actorCharacterId && p.status === "active");
-      if (plan) this.planFact(`The player ${directive.kind === "cancel" ? "cancelled" : "revised"} a continuing plan. Completed work remains in its history.`);
+    // The player's own directive stands as their declared intent directly --
+    // no separate model call paraphrases it (unified action runtime: "the
+    // player's exact wording remains immutable evidence of intent"). The
+    // shared interpreter then carries it out exactly as it would an NPC's
+    // `declare_intent` call, via the same `principalRefusal` check.
+    const actorName = options.world.characters.find(c => c.id === options.actorCharacterId)?.name ?? options.actorCharacterId;
+    for (const { id, directive } of options.directives ?? []) {
+      if (directive.kind === "cancel") {
+        const plan = options.world.plans?.find(p => p.id === directive.actionId && p.ownerCharacterId === options.actorCharacterId && isActionPlanOngoing(p));
+        if (plan) this.planFact("The player cancelled a continuing plan. Completed work remains in its history.");
+        continue;
+      }
+      if (directive.kind === "revise") {
+        const plan = options.world.plans?.find(p => p.id === directive.actionId && p.ownerCharacterId === options.actorCharacterId && isActionPlanOngoing(p));
+        if (plan) this.planFact("The player revised a continuing plan. Completed work remains in its history.");
+      }
+      this.declaredIntents.push({
+        id: `intent-${options.atStep}-${id}`,
+        actorId: options.actorCharacterId,
+        actorName,
+        intent: directive.text,
+        reason: "The player's own order.",
+        referencedEntityIds: [],
+        atStep: options.atStep,
+        carried: false,
+      });
     }
   }
 
@@ -590,9 +612,9 @@ export class GameMasterSession {
       const parsed = DeferPlanStageSchema.safeParse(args);
       if (!parsed.success) return { ok: false, finished: false, factual: parsed.error.message };
       const { planId, stageId, reason } = parsed.data;
-      const plan = this.staged.playerPlans?.find(p => p.id === planId && p.ownerId === this.actorCharacterId && p.status === "active");
+      const plan = this.staged.plans?.find(p => p.id === planId && p.ownerCharacterId === this.actorCharacterId && isActionPlanOngoing(p));
       if (!plan?.stages.some(s => s.id === stageId && s.status !== "completed")) return { ok: false, finished: false, factual: "Only an unfinished stage can be deferred." };
-      this.staged = { ...this.staged, playerPlans: this.staged.playerPlans!.map(p => p.id !== planId ? p : { ...p, updatedAtStep: this.atStep, stages: p.stages.map(s => s.id !== stageId ? s : { ...s, status: "blocked", reason }) }) };
+      this.staged = { ...this.staged, plans: this.staged.plans!.map(p => p.id !== planId ? p : { ...p, updatedAtStep: this.atStep, stages: p.stages.map(s => s.id !== stageId ? s : { ...s, status: "blocked", statusReason: reason }) }) };
       return { ok: true, finished: false, factual: `The stage remains unfinished: ${reason}` };
     }
     if (call.name === FINISH_TURN_TOOL) return this.finish(args);
@@ -699,7 +721,7 @@ export class GameMasterSession {
 
   private planInterpretation(args: Record<string, unknown>): GameMasterToolOutcome {
     const principalRefusal = this.principalRefusal(this.actorCharacterId);
-    if (principalRefusal !== null) return { ok: false, finished: false, factual: "Refused: only the player's own agent may interpret the player's plan." };
+    if (principalRefusal !== null) return { ok: false, finished: false, factual: "Refused: only whoever is carrying out the player's own declared intent may interpret the player's plan." };
     const parsed = InterpretPlanSchema.safeParse(args);
     if (!parsed.success) return { ok: false, finished: false, factual: parsed.error.message };
     const result = interpretPlan(this.staged, this.actorCharacterId, parsed.data, this.atStep);
@@ -717,10 +739,10 @@ export class GameMasterSession {
     const input = parsed.data;
     const principalRefusal = this.principalRefusal(input.actorId);
     if (principalRefusal !== null) return { ok: false, finished: false, factual: `Refused: only ${input.actorId} may answer an assignment addressed to them.` };
-    const plan = this.staged.playerPlans?.find(p => p.id === input.planId && p.ownerId === this.actorCharacterId && p.status === "active");
+    const plan = this.staged.plans?.find(p => p.id === input.planId && p.ownerCharacterId === this.actorCharacterId && isActionPlanOngoing(p));
     const actor = this.staged.characters.find(c => c.id === input.actorId && c.alive);
     if (!plan || !actor || input.actorId === this.actorCharacterId || !plan.options.delegateIds.includes(input.actorId)) return { ok: false, finished: false, factual: "Only a living NPC named as a delegate may answer this assignment." };
-    this.staged = { ...this.staged, playerPlans: this.staged.playerPlans!.map(p => p.id !== plan.id ? p : { ...p, updatedAtStep: this.atStep,
+    this.staged = { ...this.staged, plans: this.staged.plans!.map(p => p.id !== plan.id ? p : { ...p, updatedAtStep: this.atStep,
       assignments: [...p.assignments.filter(a => a.actorId !== input.actorId), { actorId: input.actorId, accepted: input.accepted, reason: input.reason }] }) };
     return this.planFact(`${actor.name} ${input.accepted ? "accepted" : "declined"} an assignment: ${input.reason}`);
   }
@@ -729,7 +751,7 @@ export class GameMasterSession {
     const parsed = ExecutePlanStageSchema.safeParse(args);
     if (!parsed.success) return { ok: false, finished: false, factual: parsed.error.message };
     const input = parsed.data;
-    const plan = this.staged.playerPlans?.find(p => p.id === input.planId && p.ownerId === this.actorCharacterId && p.status === "active");
+    const plan = this.staged.plans?.find(p => p.id === input.planId && p.ownerCharacterId === this.actorCharacterId && isActionPlanOngoing(p));
     const stage = plan?.stages.find(s => s.id === input.stageId);
     if (!plan || !stage || !plan.interpretation) return { ok: false, finished: false, factual: "Interpret an active plan before attempting its stages." };
     if (stage.status === "completed") return { ok: false, finished: false, factual: "This stage already completed; its effects must not be repeated." };
@@ -737,7 +759,7 @@ export class GameMasterSession {
     const obstacle = !actor ? "The assigned character is no longer available. Revise the plan."
       : stage.dependsOn.some(id => plan.stages.find(s => s.id === id)?.status !== "completed") ? "An earlier stage has not completed."
       : stage.notBeforeStep !== null && stage.notBeforeStep > this.atStep ? "The scheduled time has not arrived."
-      : stage.actorId !== plan.ownerId && !plan.assignments.some(a => a.actorId === stage.actorId && a.accepted) ? "The delegate has not accepted this assignment." : null;
+      : stage.actorId !== plan.ownerCharacterId && !plan.assignments.some(a => a.actorId === stage.actorId && a.accepted) ? "The delegate has not accepted this assignment." : null;
     let result: GameMasterToolOutcome;
     const before = this.staged;
     if (obstacle) result = { ok: false, finished: false, factual: obstacle };
@@ -750,9 +772,9 @@ export class GameMasterSession {
       } finally { this.executingPlanId = null; }
     }
     const debit = planSpending(before, this.staged, plan);
-    this.staged = { ...this.staged, playerPlans: this.staged.playerPlans!.map(p => {
+    this.staged = { ...this.staged, plans: this.staged.plans!.map(p => {
       if (p.id !== plan.id) return p;
-      const stages: PlayerPlan["stages"] = p.stages.map(s => s.id !== stage.id ? s : { ...s, status: result.ok ? "completed" : "blocked", reason: result.ok ? null : result.factual.slice(0, 600), factRefs: result.factId ? [result.factId] : [], lastCompletedStep: result.ok ? this.atStep : s.lastCompletedStep });
+      const stages: ActionPlan["stages"] = p.stages.map(s => s.id !== stage.id ? s : { ...s, status: result.ok ? "completed" : "blocked", statusReason: result.ok ? null : result.factual.slice(0, 600), resultFactIds: result.factId ? [result.factId] : [], completedAtStep: result.ok ? this.atStep : s.completedAtStep });
       return { ...p, stages, spent: p.spent + (typeof debit === "number" ? debit : 0), updatedAtStep: this.atStep, status: stages.every(s => s.status === "completed" && s.repeatEverySteps === null) ? "completed" : "active" };
     }) };
     return result;
@@ -1673,7 +1695,7 @@ export class GameMasterSession {
       (id) => !parsed.data.directiveOutcomes.some((outcome) => outcome.directiveId === id),
     );
     const prematurelyCompleted = parsed.data.directiveOutcomes.find(outcome => {
-      const plan = this.staged.playerPlans?.find(p => p.ownerId === this.actorCharacterId && p.createdAtStep === this.atStep && p.sourceDirectiveId === outcome.directiveId);
+      const plan = this.staged.plans?.find(p => p.ownerCharacterId === this.actorCharacterId && p.createdAtStep === this.atStep && p.origin.directiveId === outcome.directiveId);
       return plan && outcome.outcome === "carried_out" && (plan.stages.length === 0 || plan.stages.some(s => s.status !== "completed"));
     });
     if (prematurelyCompleted) return { ok: false, finished: false, factual: `Directive ${prematurelyCompleted.directiveId} still has unfinished plan stages. Report its actual partial progress or obstacle; do not declare the whole plan completed.` };

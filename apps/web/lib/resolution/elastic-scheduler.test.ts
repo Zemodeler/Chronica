@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { FactualEvent, PlayerPlan, ScenarioClock } from "@chronica/shared";
-import { ScenarioClockSchema, PlayerPlanSchema } from "@chronica/shared";
+import type { ActionPlan, FactualEvent, ScenarioClock } from "@chronica/shared";
+import { ActionPlanSchema, ScenarioClockSchema } from "@chronica/shared";
 import { decideElasticStop } from "./elastic-scheduler";
 
 const clock: ScenarioClock = ScenarioClockSchema.parse({
@@ -25,11 +25,11 @@ function fact(overrides: Partial<FactualEvent> = {}): FactualEvent {
   };
 }
 
-function plan(overrides: Partial<PlayerPlan> = {}): PlayerPlan {
-  return PlayerPlanSchema.parse({
+function plan(overrides: Partial<ActionPlan> = {}): ActionPlan {
+  return ActionPlanSchema.parse({
     id: "plan-1",
-    ownerId: "marcus-atilius",
-    sourceDirectiveId: "directive-0",
+    origin: { kind: "player", sourceId: "marcus-atilius", directiveId: "directive-0" },
+    ownerCharacterId: "marcus-atilius",
     rawText: "Do something",
     revisions: [{ atStep: 1, text: "Do something" }],
     options: {},

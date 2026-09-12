@@ -3,7 +3,7 @@ import { detectResourceConflicts, type StageResourceClaim } from "../actions/con
 import { computeInterventionScore, type InterventionPlanLike } from "./intervention-score";
 import { FactSchema, type Fact, type FactInterventionSignals } from "./facts";
 
-function fact(overrides: Partial<Fact> & { interventionSignals?: Partial<FactInterventionSignals> } = {}): Fact {
+function fact(overrides: Omit<Partial<Fact>, "interventionSignals"> & { id?: string; interventionSignals?: Partial<FactInterventionSignals> } = {}): Fact {
   const { interventionSignals, ...rest } = overrides;
   return FactSchema.parse({
     id: rest.id ?? `fact-${Math.random()}`,
@@ -154,7 +154,7 @@ describe("computeInterventionScore -- hard stops bypass the score entirely", () 
       conflicts: detectResourceConflicts(claims),
     });
     expect(decision.hardStopReason).toBe("plan_interrupted");
-    expect(decision.contributingFactIds.sort()).toEqual(["plan-march-syracuse", "plan-remain-messana"]);
+    expect([...decision.contributingFactIds].sort()).toEqual(["plan-march-syracuse", "plan-remain-messana"]);
   });
 
   it("does not stop when a newer explicit instruction outranks the standing plan", () => {

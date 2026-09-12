@@ -26,7 +26,7 @@ import { LegacyCauseSchema } from "../continuity/continuity";
 import { CampaignMemorySchema, EMPTY_CAMPAIGN_MEMORY } from "../gm/campaign-memory";
 import { DiplomaticMessageSchema, PolityStanceSchema } from "./diplomacy";
 import { WorldDevelopmentSchema } from "./developments";
-import { PlayerPlanSchema, ActionPlanSchema } from "../actions/plans";
+import { ActionPlanSchema } from "../actions/plans";
 import { ActorActivitySchema } from "../actions/activity";
 
 /**
@@ -71,14 +71,11 @@ export const WorldStateSchema = z
     instant: WorldInstantSchema.optional(),
     /** Optional for existing snapshots; the scheduler materializes it on first use. */
     worldDevelopments: z.array(WorldDevelopmentSchema).optional(),
-    playerPlans: z.array(PlayerPlanSchema).optional(),
     /**
-     * Universal plan model (docs/32, Phase 1): `ActionPlan`'s successor
-     * collection to `playerPlans`, generalized to any actor. Optional and
-     * unpopulated by the live pipeline for now -- `playerPlans` remains the
-     * authoritative write path; `upgradePlayerPlansToActionPlans` (actions/plans.ts)
-     * derives this view on demand rather than the schema deriving it on
-     * every parse, so parsing an old snapshot stays a pure identity op.
+     * Universal plan model (unified action runtime): one plan collection for
+     * player, NPC, and world-originated work alike, generalized over
+     * `ActionPlan.origin.kind`. The authoritative write path -- the legacy
+     * player-only `PlayerPlan`/`playerPlans` this superseded is gone.
      */
     plans: z.array(ActionPlanSchema).optional(),
     actorActivities: z.array(ActorActivitySchema).optional(),

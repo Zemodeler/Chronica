@@ -37,7 +37,9 @@ import { selectStarContext } from "@chronica/shared";
 //
 // Bounded reasoning only: a reaction gets a small, fixed step budget (this
 // is a reaction to one event, not a full turn) and never touches
-// `finish_turn`, `interpret_plan`, or any player-only tool.
+// `finish_turn`. No player directive is in scope here (`actorCharacterId`
+// below is a synthetic id, and no `directives` are given this session), so
+// no plan exists for the interpreter's plan tools to act on either.
 
 const REACTION_ACTION_ALLOWANCE = 2;
 const REACTION_MAX_STEPS = 3;
@@ -83,8 +85,8 @@ export function createReactionRunner(adapter: AiAdapter): AffectedAgentRunner {
         world,
         atStep,
         // No real player is acting in this call; nothing offered to a
-        // reaction agent's scoped tool surface reads or compares against
-        // this id (see `npcToolSurface`'s exclusion of player-only tools).
+        // reaction agent's scoped tool surface (`npcToolSurface`) reads or
+        // compares against this id.
         actorCharacterId: "__reaction_runner__",
         directiveIds: [],
         enableWorldTools: true,

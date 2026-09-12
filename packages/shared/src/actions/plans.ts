@@ -61,32 +61,6 @@ export const PlanStageInputSchema = z.object({
   provinceId: EntityIdSchema.nullable().default(null),
   repeatEverySteps: z.number().int().min(1).max(100).nullable().default(null),
 }).strict();
-export const PlayerPlanSchema = z.object({
-  id: EntityIdSchema,
-  ownerId: EntityIdSchema,
-  sourceDirectiveId: z.string().min(1).max(120),
-  rawText: z.string().min(1).max(4_000),
-  revisions: z.array(z.object({ atStep: ElapsedStepSchema, text: z.string().min(1).max(4_000) }).strict()).min(1),
-  options: PlanOptionsSchema,
-  interpretation: z.string().max(800),
-  status: z.enum(["active", "completed", "cancelled"]),
-  stages: z.array(PlanStageInputSchema.extend({
-    status: z.enum(["pending", "blocked", "completed"]),
-    reason: z.string().max(600).nullable(),
-    factRefs: z.array(z.string().max(120)),
-    lastCompletedStep: ElapsedStepSchema.nullable().default(null),
-  }).strict()).max(12),
-  assignments: z.array(z.object({ actorId: EntityIdSchema, accepted: z.boolean(), reason: z.string().min(1).max(400) }).strict()).max(8),
-  spent: MoneyAmountSchema,
-  createdAtStep: ElapsedStepSchema,
-  updatedAtStep: ElapsedStepSchema,
-  /** Every factual assertion extracted from the plan's own text on its last interpretation (docs/32, Phase 2). */
-  claims: z.array(InterpretedClaimSchema).max(20).default([]),
-  /** Outstanding questions the GM must have the player answer before this plan's stages may commit. */
-  clarificationQuestions: z.array(z.string().trim().min(1).max(300)).max(6).default([]),
-}).strict();
-export type PlayerPlan = z.infer<typeof PlayerPlanSchema>;
-
 export const InterpretPlanSchema = z.object({
   planId: EntityIdSchema,
   interpretation: z.string().trim().min(1).max(800),
@@ -118,38 +92,46 @@ export const ExecutePlanStageSchema = z.object({ planId: EntityIdSchema, stageId
 export const RespondToAssignmentSchema = z.object({ planId: EntityIdSchema, actorId: EntityIdSchema, accepted: z.boolean(), reason: z.string().trim().min(1).max(400) }).strict();
 export const DeferPlanStageSchema = z.object({ planId: EntityIdSchema, stageId: EntityIdSchema, reason: z.string().trim().min(1).max(600) }).strict();
 
+/**
+ * Every non-terminal `ActionPlan` status -- draft/active/waiting/blocked/
+ * interrupted all still have unfinished work. A plan in one of these counts
+ * against a per-owner plan cap and is eligible for revision/cancellation;
+ * completed/failed/abandoned/superseded are its closed history.
+ */
+export function isActionPlanOngoing(plan: Pick<ActionPlan, "status">): boolean {
+  return plan.status !== "completed" && plan.status !== "failed" && plan.status !== "abandoned" && plan.status !== "superseded";
+}
+
 /** Submitted text is immutable history. Revisions preserve completed stages and require reinterpretation. */
 export function preparePlayerPlans(world: WorldState, ownerId: string, atStep: number, directives: readonly { id: string; directive: OrderDirective }[]): WorldState {
-  let plans = (world.playerPlans ?? []).map(p => p.status !== "active" || p.ownerId !== ownerId ? p : { ...p, stages: p.stages.map(s =>
-    s.repeatEverySteps !== null && s.lastCompletedStep !== null && s.lastCompletedStep + s.repeatEverySteps <= atStep
+  let plans = (world.plans ?? []).map(p => !isActionPlanOngoing(p) || p.ownerCharacterId !== ownerId ? p : { ...p, stages: p.stages.map(s =>
+    s.repeatEverySteps !== null && s.completedAtStep !== null && s.completedAtStep + s.repeatEverySteps <= atStep
       ? { ...s, status: "pending" as const } : s) });
   for (const { id, directive } of directives) {
     if (directive.kind === "new") {
       const planId = `plan-${atStep}-${id}`;
       if (plans.some(p => p.id === planId)) continue;
-      plans.push({ id: planId, ownerId, sourceDirectiveId: id, rawText: directive.text, revisions: [{ atStep, text: directive.text }],
-        options: PlanOptionsSchema.parse({}), interpretation: "", status: "active", stages: [], assignments: [], spent: 0, createdAtStep: atStep, updatedAtStep: atStep,
-        claims: [], clarificationQuestions: [] });
+      plans.push({ ...originateActionPlan(planId, { kind: "player", sourceId: ownerId, directiveId: id }, ownerId, directive.text, atStep), status: "active" });
     } else {
       plans = plans.map(p => {
-        if (p.id !== directive.actionId || p.ownerId !== ownerId || p.status !== "active") return p;
-        if (directive.kind === "cancel") return { ...p, status: "cancelled", updatedAtStep: atStep };
+        if (p.id !== directive.actionId || p.ownerCharacterId !== ownerId || !isActionPlanOngoing(p)) return p;
+        if (directive.kind === "cancel") return { ...p, status: "abandoned", updatedAtStep: atStep, terminalReason: "The player cancelled this plan." };
         return { ...p, rawText: directive.text, interpretation: "", stages: p.stages.filter(s => s.status === "completed"),
-          assignments: [], revisions: [...p.revisions, { atStep, text: directive.text }], updatedAtStep: atStep,
+          assignments: [], revisions: [...p.revisions, { atStep, text: directive.text }], updatedAtStep: atStep, status: "active" as const,
           claims: [], clarificationQuestions: [] };
       });
     }
   }
-  const cancelled = new Set(plans.filter(p => p.ownerId === ownerId && p.status === "cancelled").map(p => p.id));
+  const cancelled = new Set(plans.filter(p => p.ownerCharacterId === ownerId && p.status === "abandoned").map(p => p.id));
   const stoppedActionIds = new Set(world.actions.filter(a => cancelled.has(a.sourceIntentId) && (a.status === "active" || a.status === "waiting")).map(a => a.id));
   return { ...world,
     actions: world.actions.map(a => stoppedActionIds.has(a.id) ? { ...a, status: "cancelled", terminalReason: "The player cancelled the originating plan.", updatedAtStep: atStep } : a),
     operations: world.operations.map(o => stoppedActionIds.has(o.originatingOrderId) && (o.status === "active" || o.status === "paused") ? { ...o, status: "cancelled", statusReason: "The player cancelled the originating plan.", updatedAtStep: atStep } : o),
-    playerPlans: [...plans.filter(p => p.status === "active"), ...plans.filter(p => p.status !== "active").sort((a, b) => b.updatedAtStep - a.updatedAtStep).slice(0, 64)] };
+    plans: [...plans.filter(isActionPlanOngoing), ...plans.filter(p => !isActionPlanOngoing(p)).sort((a, b) => b.updatedAtStep - a.updatedAtStep).slice(0, 64)] };
 }
 
 export function interpretPlan(world: WorldState, ownerId: string, input: z.infer<typeof InterpretPlanSchema>, atStep: number): WorldState | string {
-  const plan = world.playerPlans?.find(p => p.id === input.planId && p.ownerId === ownerId && p.status === "active");
+  const plan = world.plans?.find(p => p.id === input.planId && p.ownerCharacterId === ownerId && isActionPlanOngoing(p));
   if (!plan) return "No active plan of yours has that identity.";
   const owner = world.characters.find(c => c.id === ownerId);
   const budget = input.options.budget;
@@ -164,14 +146,14 @@ export function interpretPlan(world: WorldState, ownerId: string, input: z.infer
   for (const delegateId of input.options.delegateIds) {
     if (!world.characters.some(c => c.id === delegateId && c.alive && c.id !== ownerId && (c.locationProvinceId === owner?.locationProvinceId || (owner?.polityId != null && c.polityId === owner.polityId)))) return "A named delegate must be a living contact of the player.";
   }
-  // Rule #2 (docs/32): a contradicted world premise is never a fact merely because the plan's own text asserted it.
+  // A contradicted world premise is never a fact merely because the plan's own text asserted it.
   if (input.claims.some(c => c.kind === "world_premise" && c.verification === "contradicted")) {
     return "A contradicted world premise cannot be the basis for a stage. Drop or revise that claim before interpreting stages.";
   }
   // Clarification is required on its own (InterpretPlanSchema already forbids also committing stages this same call):
   // record the questions and leave existing stages untouched until the player answers.
   if (input.clarificationQuestions.length > 0) {
-    return { ...world, playerPlans: world.playerPlans!.map(p => p.id !== plan.id ? p : { ...p, interpretation: input.interpretation, updatedAtStep: atStep,
+    return { ...world, plans: world.plans!.map(p => p.id !== plan.id ? p : { ...p, interpretation: input.interpretation, updatedAtStep: atStep,
       claims: input.claims, clarificationQuestions: input.clarificationQuestions }) };
   }
   const ids = new Set<string>();
@@ -183,13 +165,16 @@ export function interpretPlan(world: WorldState, ownerId: string, input: z.infer
     if (!world.characters.some(c => c.id === stage.actorId && c.alive)) return "Every executor must be a living character.";
     if (stage.provinceId !== null && !world.map.provinces.some(p => p.id === stage.provinceId)) return "A stage condition names an unknown province.";
     const old = completed.find(s => s.id === stage.id);
-    if (old && JSON.stringify({ ...stage, status: old.status, reason: old.reason, factRefs: old.factRefs, lastCompletedStep: old.lastCompletedStep }) !== JSON.stringify(old)) return "Completed stages cannot be changed or repeated.";
+    // Merging `stage` (only the fields the AI supplies) onto `old` (the stage's full stored shape) and
+    // comparing against `old` catches any change to an AI-controlled field while leaving every
+    // lifecycle field (status/resultFactIds/completedAtStep/...) out of the comparison entirely.
+    if (old && JSON.stringify({ ...old, ...stage }) !== JSON.stringify(old)) return "Completed stages cannot be changed or repeated.";
     ids.add(stage.id);
   }
   if (completed.some(s => !ids.has(s.id))) return "Keep completed stages as the plan's history.";
-  return { ...world, playerPlans: world.playerPlans!.map(p => p.id !== plan.id ? p : { ...p, interpretation: input.interpretation, options: input.options, updatedAtStep: atStep,
+  return { ...world, plans: world.plans!.map(p => p.id !== plan.id ? p : { ...p, interpretation: input.interpretation, options: input.options, updatedAtStep: atStep,
     claims: input.claims, clarificationQuestions: [],
-    stages: input.stages.map(s => completed.find(c => c.id === s.id) ?? { ...s, status: "pending", reason: null, factRefs: [], lastCompletedStep: null }) }) };
+    stages: input.stages.map(s => completed.find(c => c.id === s.id) ?? ActionPlanStageSchema.parse({ ...s, status: "pending" })) }) };
 }
 
 /**
@@ -198,7 +183,7 @@ export function interpretPlan(world: WorldState, ownerId: string, input: z.infer
  * deterministic spending cap -- so this only measures the debit, it never
  * refuses one.
  */
-export function planSpending(before: WorldState, after: WorldState, plan: PlayerPlan): number {
+export function planSpending(before: WorldState, after: WorldState, plan: ActionPlan): number {
   if (!plan.options.budget) return 0;
   let debit = 0;
   for (const account of before.material.accounts) {
@@ -209,16 +194,13 @@ export function planSpending(before: WorldState, after: WorldState, plan: Player
 }
 
 /*
- * Universal plan model (docs/32, Phase 1).
+ * Universal plan model.
  *
- * `ActionPlan` is `PlayerPlan`'s successor: the same multi-stage container,
- * generalized to any actor (player, NPC, or the world itself) with a richer
- * status machine. It is additive -- `WorldState.plans` sits alongside the
- * existing `playerPlans`, upgraded from it by `upgradePlayerPlansToActionPlans`
- * below -- so nothing that reads `playerPlans` today needs to change yet.
- * `interpret_plan`/`execute_plan_stage` keep writing `playerPlans` until a
- * later phase retargets the GM tool loop at `ActionPlan` directly (docs/32,
- * Phase 8) and removes this compatibility path.
+ * `ActionPlan` is the one plan record for every origin -- player, NPC, or
+ * the world itself. `preparePlayerPlans`/`interpretPlan` above and
+ * `execute_plan_stage`/`respond_to_plan_assignment` (`gm/session.ts`) all
+ * read and write `WorldState.plans`; the player-only `PlayerPlan` this
+ * superseded is gone.
  */
 
 export const ActionPlanOriginSchema = z.object({
@@ -327,83 +309,6 @@ export const ActionPlanSchema = z.object({
 }).strict();
 export type ActionPlan = z.infer<typeof ActionPlanSchema>;
 
-const PLAYER_PLAN_STATUS_TO_ACTION_PLAN_STATUS: Record<PlayerPlan["status"], ActionPlanStatus> = {
-  active: "active",
-  completed: "completed",
-  cancelled: "abandoned",
-};
-const PLAYER_PLAN_STAGE_STATUS_TO_ACTION_PLAN_STAGE_STATUS: Record<PlayerPlan["stages"][number]["status"], ActionPlanStageStatus> = {
-  pending: "pending",
-  blocked: "blocked",
-  completed: "completed",
-};
-
-/**
- * Pure conversion of one `PlayerPlan` into its `ActionPlan` successor.
- *
- * Ids and revision history are preserved exactly. `PlayerPlan` has no
- * `action.kind`/`action.actionId` recorded per stage (only what
- * `execute_plan_stage` was called with, which the plan itself never stored),
- * so a converted stage's `action` is always null -- this loses nothing a
- * replay needs, because `resultFactIds` (from `factRefs`) is what a replay
- * actually reads.
- */
-export function playerPlanToActionPlan(plan: PlayerPlan): ActionPlan {
-  return {
-    id: plan.id,
-    origin: { kind: "player", sourceId: plan.ownerId, directiveId: plan.sourceDirectiveId },
-    ownerCharacterId: plan.ownerId,
-    issuingEntityRef: null,
-    rawText: plan.rawText,
-    revisions: plan.revisions,
-    options: plan.options,
-    interpretation: plan.interpretation,
-    claims: plan.claims,
-    clarificationQuestions: plan.clarificationQuestions,
-    standingInstructions: [],
-    priority: 0,
-    priorityEpoch: 0,
-    status: PLAYER_PLAN_STATUS_TO_ACTION_PLAN_STATUS[plan.status],
-    feasibility: null,
-    stages: plan.stages.map(stage => ({
-      id: stage.id,
-      objective: stage.objective,
-      actorId: stage.actorId,
-      action: null,
-      dependsOn: stage.dependsOn,
-      provinceId: stage.provinceId,
-      notBeforeStep: stage.notBeforeStep,
-      repeatEverySteps: stage.repeatEverySteps,
-      reservationIds: [],
-      durationEstimate: null,
-      status: PLAYER_PLAN_STAGE_STATUS_TO_ACTION_PLAN_STAGE_STATUS[stage.status],
-      plannedStartStep: null,
-      startedAtStep: null,
-      expectedCompletionStep: null,
-      completedAtStep: stage.lastCompletedStep,
-      resultFactIds: stage.factRefs,
-      statusReason: stage.reason,
-    })),
-    assignments: plan.assignments,
-    reservationIds: [],
-    spent: plan.spent,
-    createdAtStep: plan.createdAtStep,
-    updatedAtStep: plan.updatedAtStep,
-    terminalReason: null,
-  };
-}
-
-/**
- * Snapshot upgrader (docs/32, Phase 1): derives `WorldState.plans` from the
- * authoritative `playerPlans` collection. Called on load so an old snapshot
- * that only ever populated `playerPlans` still gets a `plans` view; never
- * the other way around, since `playerPlans` remains the write path until a
- * later phase retargets the GM tool loop.
- */
-export function upgradePlayerPlansToActionPlans(playerPlans: readonly PlayerPlan[] | undefined): ActionPlan[] {
-  return (playerPlans ?? []).map(playerPlanToActionPlan);
-}
-
 /**
  * A not-yet-persisted `action_phase` event, ready to insert into the event
  * queue (`packages/db/src/schema/events.ts`'s `worldEvents`). Kept as a
@@ -420,13 +325,11 @@ export interface ScheduledEventDraft {
 }
 
 /**
- * Migration step 3 (docs/32, Phase 7): synthesizes `action_phase` events for
- * a plan's in-progress and not-yet-ready-but-scheduled stages, so existing
- * `playerPlans`/`ActionPlan`s migrate into the event queue without changing
- * any already-completed historical outcome. Pure and unit-testable, in the
- * same style as `upgradePlayerPlansToActionPlans` above -- the one-time
- * backfill script (`apps/web/scripts/backfill-event-queue.ts`) calls this
- * per active plan and bulk-inserts the result.
+ * Synthesizes `action_phase` events for a plan's in-progress and
+ * not-yet-ready-but-scheduled stages, so an `ActionPlan` migrates into the
+ * event queue without changing any already-completed historical outcome.
+ * Pure and unit-testable -- a one-time backfill script for pre-event-queue
+ * plans would call this per active plan and bulk-insert the result.
  *
  * - A stage `in_progress` with a known `expectedCompletionStep` schedules at
  *   that instant (its next tick is due then).
@@ -461,20 +364,19 @@ export function upgradeActionPlanToScheduledEvents(
 }
 
 /*
- * Stage start/completion lifecycle (docs/32, Phase 8).
+ * Stage start/completion lifecycle.
  *
  * These operate on a single `ActionPlan` value, the same level `conflicts.ts`
  * and `reservations.ts` already work at -- pure functions, no `WorldState`
- * dependency, since `ActionPlan` is not yet the live write path (still
- * `playerPlans`/`execute_plan_stage`, docs/32 Phase 1/9). This is the
- * mechanism ready for whichever later phase actually retargets the GM tool
- * loop; it does not itself change what `execute_plan_stage` does today.
+ * dependency. `execute_plan_stage` (`gm/session.ts`) still resolves most
+ * built-in actions atomically today (`attemptPlanStageAtomically` below);
+ * phased `WorldInstant` scheduling for stages with a real duration is a
+ * later cutover.
  *
  * An atomic action may still start and complete in one call --
  * `attemptPlanStageAtomically` below does exactly that -- but a stage that
- * genuinely spans time (docs/32's siege/campaign examples) uses the two
- * calls separately, with the scheduler (Phase 7) deciding when the
- * completion call is due.
+ * genuinely spans time (a siege, a campaign) uses the two calls separately,
+ * with a scheduler deciding when the completion call is due.
  */
 
 function planStageOrError(plan: ActionPlan, stageId: string): ActionPlanStage | string {
@@ -570,27 +472,22 @@ export function attemptPlanStageAtomically(
 }
 
 /*
- * Unifying player, NPC, and world plans (docs/32, Phase 9).
+ * Unifying player, NPC, and world plans.
  *
- * `conflicts.ts` (Phase 4) and the stage lifecycle above (Phase 8) already
- * operate on `ActionPlan` with no branch anywhere on `origin.kind` -- an
- * NPC- or world-authored plan already goes through identical conflict
- * detection, preemption, and start/completion as a player's. What was
- * actually missing was origination: `preparePlayerPlans` only ever creates
- * a *player* plan, from a submitted directive. `originateActionPlan` below
- * generalizes that to any origin, so an NPC's self-directed intent or a
- * world/institutional development can become a first-class `ActionPlan`
- * the same way a player's order does.
+ * `conflicts.ts` and the stage lifecycle above operate on `ActionPlan` with
+ * no branch anywhere on `origin.kind` -- an NPC- or world-authored plan
+ * goes through identical conflict detection, preemption, and
+ * start/completion as a player's. `preparePlayerPlans` originates the
+ * player's own directive-sourced plans; `originateActionPlan` below
+ * generalizes the same construction to any origin, so an NPC's
+ * self-directed intent or a world/institutional development can become a
+ * first-class `ActionPlan` the same way a player's order does.
  *
- * What this phase does not do: source real NPC intent from goals,
- * pressures, beliefs, and commitments, or real world intent from scheduled
- * developments -- that requires `gm/campaign-memory.ts` and
- * `character-agency/*` to actually call `originateActionPlan`, which is
- * live-wiring work for the GM tool loop itself (interpret_plan/
- * execute_plan_stage are still the player-only, `playerPlans`-backed
- * mechanism, docs/32 Phase 1). This phase proves the destination pipeline
- * already treats every origin identically; a later phase connects NPC/world
- * intent sources to it.
+ * What remains future work: sourcing real NPC intent from goals, pressures,
+ * beliefs, and commitments, or real world intent from scheduled
+ * developments, into a call to `originateActionPlan` -- today an NPC's
+ * declared intent is still carried out atomically by the interpreter
+ * (`gm/session.ts`'s `act`), not wrapped in its own tracked `ActionPlan`.
  */
 
 /** Creates a fresh, unfinished `ActionPlan` for any origin -- the same starting shape `preparePlayerPlans` builds for a player's "new" directive, generalized. */
