@@ -32,7 +32,9 @@ import { runIntentInterpreter } from "./interpreter-agent";
 // is a reaction to one event, not a full turn) and never touches
 // `finish_turn`. No player directive is in scope here (`actorCharacterId`
 // below is a synthetic id, and no `directives` are given this session), so
-// no plan exists for the interpreter's plan tools to act on either.
+// no player-owned plan exists -- but a reacting NPC's own `declare_intent`
+// still originates its own `ActionPlan` (unified action runtime,
+// requirement 2), exactly as it does in a full turn.
 
 const REACTION_ACTION_ALLOWANCE = 2;
 const REACTION_MAX_STEPS = 3;

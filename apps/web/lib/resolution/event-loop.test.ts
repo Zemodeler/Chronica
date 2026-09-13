@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
-import type { AffectedAgentSelection, InterventionDecision, WorldEventRecord, WorldState } from "@chronica/shared";
+import {
+  ScenarioClockSchema,
+  currentWorldInstant,
+  deriveWorldInstant,
+  type AffectedAgentSelection,
+  type InterventionDecision,
+  type WorldEventRecord,
+  type WorldState,
+} from "@chronica/shared";
 import { advanceEventQueueWithPort, ensureMidnightTickSeeded, type AffectedAgentRunner, type EventQueuePort } from "./event-loop";
 import type { NewWorldEvent } from "@chronica/db";
 
@@ -333,5 +341,67 @@ describe("advanceEventQueueWithPort (docs/32, Phase 7)", () => {
       expect(result.pendingEventInserts[0]?.causalDepth).toBe(0);
       expect(result.pendingEventInserts[0]?.instant.day).toBeGreaterThan(1);
     });
+  });
+});
+
+describe("authoritative time continuity across turns (unified action runtime)", () => {
+  // A daily clock makes deriveWorldInstant(elapsedStep) trivial to reason
+  // about: elapsedStep N derives to day N exactly.
+  const DAILY_CLOCK = ScenarioClockSchema.parse({ stepLabel: "day", stepLabelPlural: "days", stepsPerYear: 365, minSpan: 1, maxSpan: 10_000 });
+
+  it("an unattended continuation that reaches a later instant commits a world whose currentWorldInstant reflects it, not a step-derived boundary", async () => {
+    // Turn 1: elapsedStep 0 -> 1, with a single due event far out at day 40
+    // and nothing else pending before the (generously wide) window end --
+    // exactly the shape of an elastic continuation that ran unattended far
+    // past its own turn's nominal one-step window.
+    const farEvent = baseEvent({ id: "far-event", instant: { day: 40, minute: 0 } });
+    const port = fakePort([farEvent]);
+    const continuation = await advanceEventQueueWithPort(port, "game-1", world(), { day: 100, minute: 0 }, 1, {});
+
+    expect(continuation.resolvedEventIds).toEqual(["far-event"]);
+    expect(continuation.stopReason).toBe("window_end");
+    expect(continuation.world.instant).toEqual({ day: 40, minute: 0 });
+
+    // Committed world: elapsedStep is the turn ordinal (always +1), instant
+    // is the real stopping point the continuation actually reached.
+    const committedWorld = { elapsedStep: 1, instant: continuation.world.instant };
+
+    // The regression this guards against: naively deriving the next turn's
+    // "now" from the step count alone regresses far behind what actually
+    // happened -- elapsedStep 2 derives to day 2 under this clock, nearly 40
+    // days before the world's real, already-committed instant.
+    const naiveNextTurnDay = deriveWorldInstant(committedWorld.elapsedStep + 1, DAILY_CLOCK).day;
+    expect(naiveNextTurnDay).toBe(2);
+
+    // The fix: the next turn's own "now" must come from the world's own
+    // carried instant, never a fresh step-derived guess.
+    const turnStartInstant = currentWorldInstant(committedWorld, DAILY_CLOCK);
+    expect(turnStartInstant).toEqual({ day: 40, minute: 0 });
+    expect(turnStartInstant.day).toBeGreaterThan(naiveNextTurnDay);
+  });
+
+  it("opens the next turn's own catch-up window from the committed stopping instant, and it resolves nothing already accounted for", async () => {
+    const farEvent = baseEvent({ id: "far-event", instant: { day: 40, minute: 0 } });
+    const turn1Port = fakePort([farEvent]);
+    const continuation = await advanceEventQueueWithPort(turn1Port, "game-1", world(), { day: 100, minute: 0 }, 1, {});
+    const committedWorld = { elapsedStep: 1, instant: continuation.world.instant };
+    const turnStartInstant = currentWorldInstant(committedWorld, DAILY_CLOCK);
+
+    // Turn 2's own pre-turn catch-up: only a follow-up genuinely scheduled
+    // AFTER the real stopping instant is still pending (e.g. the world's own
+    // self-scheduling for a later day); nothing between the naive,
+    // step-derived boundary (day 2) and the real one (day 40) is silently
+    // reprocessed or skipped, because the window is seeded from the real
+    // instant in the first place.
+    const laterFollowUp = baseEvent({ id: "later-follow-up", instant: { day: 45, minute: 0 } });
+    const turn2Port = fakePort([laterFollowUp]);
+    const turn2Catchup = await advanceEventQueueWithPort(turn2Port, "game-1", committedWorld as unknown as WorldState, turnStartInstant, 2, {});
+
+    // Nothing is due yet at the real stopping instant -- the catch-up is a
+    // clean no-op, not a resolution run at a stale, regressed boundary.
+    expect(turn2Catchup.resolvedEventIds).toEqual([]);
+    expect(turn2Catchup.stopReason).toBe("window_end");
+    // The later follow-up remains exactly as scheduled, untouched.
+    expect(turn2Port.events.find((e) => e.id === "later-follow-up")?.status).toBe("pending");
   });
 });

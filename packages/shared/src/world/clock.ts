@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ElapsedStepSchema } from "../material-state";
-import { type WorldInstant, midnight } from "./instant";
+import { type WorldInstant, addMinutes, midnight } from "./instant";
 
 // The elastic clock's scale (ADR-0016, ADR-0032).
 //
@@ -123,12 +123,55 @@ export function deriveWorldTime(elapsedStep: number, scenarioClock?: ScenarioClo
 /**
  * Derives a `WorldInstant` from the authoritative `elapsedStep`, at that
  * step's day boundary (minute 0 -- a step boundary is always midnight-
- * aligned until finer-grained intra-step scheduling exists). Used to upgrade
- * pre-Phase-7 snapshots (which lack `WorldState.instant`) and to compute a
- * turn's resolution window `[deriveWorldInstant(step), deriveWorldInstant(step+1))`.
+ * aligned until finer-grained intra-step scheduling exists).
+ *
+ * Unified action runtime, "authoritative time continuity": once elastic
+ * continuation can carry a single commit many days past `elapsedStep`'s own
+ * nominal window, `elapsedStep * daysPerStep` is no longer a faithful
+ * reconstruction of "now" -- it is only ever a fallback for a snapshot that
+ * predates `WorldState.instant` (pre-Phase-7), used once to seed that field.
+ * A caller holding a `WorldState` that already carries `.instant` must read
+ * time from `currentWorldInstant` below, never re-derive it from `elapsedStep`.
  */
 export function deriveWorldInstant(elapsedStep: number, scenarioClock?: ScenarioClock): WorldInstant {
   return midnight(Math.floor(elapsedStep * daysPerStep(scenarioClock)));
+}
+
+/**
+ * The world's authoritative current instant (unified action runtime,
+ * "authoritative time continuity").
+ *
+ * `elapsedStep` is a turn ordinal: it identifies and orders turns/snapshots
+ * and increments by exactly 1 per committed turn, nothing more. `instant`,
+ * once present, is the sole source of truth for what time it is in the
+ * simulation -- advanced only by the event queue/elastic continuation and
+ * carried forward unchanged on every commit. The two are NOT a fixed linear
+ * function of one another past the first turn: an elastic continuation can
+ * carry one `elapsedStep` many days forward, so `deriveWorldInstant(elapsedStep)`
+ * must never be used to reconstruct or override a real `instant` -- it is a
+ * migration fallback ONLY, for a snapshot old enough to have none.
+ *
+ * Every caller that needs "now" -- seeding the next turn's event-queue
+ * catch-up window, stamping this turn's own facts, scheduling a plan stage's
+ * completion -- must go through this function against the world it was
+ * actually handed, not recompute a day from a step count.
+ */
+export function currentWorldInstant(world: { readonly instant?: WorldInstant | undefined; readonly elapsedStep: number }, scenarioClock?: ScenarioClock): WorldInstant {
+  return world.instant ?? deriveWorldInstant(world.elapsedStep, scenarioClock);
+}
+
+/**
+ * Converts a step offset from `fromStep` (the step a schedule was made at)
+ * into a real `WorldInstant`, relative to `baseInstant` -- `fromStep`'s own
+ * current instant. Used to schedule a plan stage's `completesAtStep` (an
+ * absolute step number, always expressed by its caller as `fromStep + N`)
+ * onto the real event queue without re-deriving an absolute day from the
+ * step number itself, which would silently drift once elastic continuation
+ * has decoupled `elapsedStep` from real elapsed days (see `currentWorldInstant`).
+ */
+export function instantForStepOffset(baseInstant: WorldInstant, fromStep: number, targetStep: number, scenarioClock?: ScenarioClock): WorldInstant {
+  const days = (targetStep - fromStep) * daysPerStep(scenarioClock);
+  return addMinutes(baseInstant, Math.round(days * 1440));
 }
 
 export { ElapsedStepSchema };

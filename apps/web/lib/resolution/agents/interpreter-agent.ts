@@ -52,7 +52,14 @@ function renderIntents(intents: readonly DeclaredIntent[]): string {
       const referenced = intent.referencedEntityIds.length > 0
         ? ` They named these as involved: ${intent.referencedEntityIds.join(", ")} (verify each; a named id may be wrong).`
         : "";
-      return `[${intent.id}] ${intent.actorName} (${intent.actorId}) intends: ${intent.intent}\n  Their reason: ${intent.reason}${referenced}`;
+      // Unified action runtime, requirement 2: this intent is tracked by its
+      // own ActionPlan (a player's directive-derived one, or an NPC's own,
+      // originated the instant it was declared) -- the concrete id is given
+      // here because there is no read tool that lists plans by owner.
+      const planNote = intent.planId !== undefined
+        ? ` This is tracked as plan ${intent.planId}: use interpret_plan to turn it into stages (or ask a clarification question), then execute_plan_stage to attempt each one -- never call an action tool directly for this actor.`
+        : "";
+      return `[${intent.id}] ${intent.actorName} (${intent.actorId}) intends: ${intent.intent}\n  Their reason: ${intent.reason}${referenced}${planNote}`;
     })
     .join("\n\n");
 }

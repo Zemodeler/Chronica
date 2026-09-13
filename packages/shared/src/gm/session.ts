@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { InterpretPlanSchema, ExecutePlanStageSchema, RespondToAssignmentSchema, DeferPlanStageSchema, preparePlayerPlans, interpretPlan, planSpending, isActionPlanOngoing, type ActionPlan } from "../actions/plans";
+import { InterpretPlanSchema, ExecutePlanStageSchema, RespondToAssignmentSchema, DeferPlanStageSchema, preparePlayerPlans, interpretPlan, originateActionPlan, planSpending, isActionPlanOngoing, type ActionPlan } from "../actions/plans";
 import { activeReservations, claimedResourcesForStage, reserveResource, type ResourceClaim } from "../actions/reservations";
 import { applyPreemption, defaultPriorityContextFor, detectResourceConflicts, resolveConflicts, type StageResourceClaim } from "../actions/conflicts";
 import type { OrderDirective } from "../actions/orders";
@@ -122,6 +122,15 @@ export interface DeclaredIntent {
   readonly atStep: number;
   /** Set once an action taken for this actor by the interpreter applies. */
   carried: boolean;
+  /**
+   * The persistent `ActionPlan` this intent is tracked by (unified action
+   * runtime, requirement 2) -- an NPC's own declared intent originates one
+   * exactly like a player's directive does (`preparePlayerPlans`), so the
+   * interpreter carries it out through `interpret_plan`/`execute_plan_stage`
+   * rather than an atomic, untracked action call. Undefined only for a
+   * pre-existing record that predates this (never produced fresh).
+   */
+  readonly planId?: string;
 }
 
 /** Structured, deterministic facts about one resolved battle, for the Chronicle. */
@@ -545,6 +554,12 @@ export class GameMasterSession {
         const plan = options.world.plans?.find(p => p.id === directive.actionId && p.ownerCharacterId === options.actorCharacterId && isActionPlanOngoing(p));
         if (plan) this.planFact("The player revised a continuing plan. Completed work remains in its history.");
       }
+      // The exact plan id `preparePlayerPlans` (just run above) originated
+      // for a "new" directive, or is still revising for a "revise" one --
+      // carried alongside the intent so the interpreter can be told the
+      // concrete id to call `interpret_plan`/`execute_plan_stage` with,
+      // rather than needing to discover or guess it.
+      const planId = directive.kind === "new" ? `plan-${options.atStep}-${id}` : directive.actionId;
       this.declaredIntents.push({
         id: `intent-${options.atStep}-${id}`,
         actorId: options.actorCharacterId,
@@ -554,6 +569,7 @@ export class GameMasterSession {
         referencedEntityIds: [],
         atStep: options.atStep,
         carried: false,
+        planId,
       });
     }
   }
@@ -632,8 +648,12 @@ export class GameMasterSession {
       const parsed = DeferPlanStageSchema.safeParse(args);
       if (!parsed.success) return { ok: false, finished: false, factual: parsed.error.message };
       const { planId, stageId, reason } = parsed.data;
-      const plan = this.staged.plans?.find(p => p.id === planId && p.ownerCharacterId === this.actorCharacterId && isActionPlanOngoing(p));
+      const plan = this.staged.plans?.find(p => p.id === planId && isActionPlanOngoing(p));
       if (!plan?.stages.some(s => s.id === stageId && s.status !== "completed")) return { ok: false, finished: false, factual: "Only an unfinished stage can be deferred." };
+      if (plan.ownerCharacterId !== null) {
+        const principalRefusal = this.principalRefusal(plan.ownerCharacterId);
+        if (principalRefusal !== null) return { ok: false, finished: false, factual: principalRefusal };
+      }
       this.staged = { ...this.staged, plans: this.staged.plans!.map(p => p.id !== planId ? p : { ...p, updatedAtStep: this.atStep, stages: p.stages.map(s => s.id !== stageId ? s : { ...s, status: "blocked", statusReason: reason }) }) };
       return { ok: true, finished: false, factual: `The stage remains unfinished: ${reason}` };
     }
@@ -703,14 +723,21 @@ export class GameMasterSession {
   // -- actions ---------------------------------------------------------------
 
   /**
-   * The only remaining deterministic gate on an action: player orders must
-   * flow through their own plan so progress and revisions stay attached to
-   * it. Whether an actor has the time, standing, or relevance to act at all
-   * is judgement now, left entirely to the Game Master.
+   * The only remaining deterministic gate on an action: an order tracked by
+   * a plan -- the player's own directive-derived order, or an NPC's own
+   * declared intent (unified action runtime, requirement 2: an NPC's
+   * `declare_intent` now originates an `ActionPlan` exactly like a player's
+   * directive does) -- must flow through that plan so progress, duration,
+   * reservations, and budget stay attached to it. Whether an actor has the
+   * time, standing, or relevance to act at all is judgement now, left
+   * entirely to the Game Master.
    */
   private actionLimitRefusal(actorId: string, actionId?: string): string | null {
-    if (actionId && this.managedPlans && actorId === this.actorCharacterId && this.executingPlanId === null) {
-      return "Use execute_plan_stage for player orders so progress and limits stay attached to their plan.";
+    if (!actionId || this.executingPlanId !== null) return null;
+    const isManagedPlayerOrder = this.managedPlans && actorId === this.actorCharacterId;
+    const hasPlanTrackedIntent = this.declaredIntents.some((intent) => intent.actorId === actorId && intent.planId !== undefined);
+    if (isManagedPlayerOrder || hasPlanTrackedIntent) {
+      return "Use execute_plan_stage for this actor's own order so progress and limits stay attached to their plan.";
     }
     return null;
   }
@@ -739,12 +766,21 @@ export class GameMasterSession {
     return { ok: true, finished: false, factId: id, factual: `[${id}] ${summary}` };
   }
 
+  /**
+   * Owner-generic (unified action runtime, requirement 2): the plan may
+   * belong to the player or to an NPC (`origin.kind: "npc"`, originated by
+   * `declareIntent`) -- what gates access is `principalRefusal` against the
+   * plan's own owner, the same identity check `act()` already applies, never
+   * a static comparison against `this.actorCharacterId`.
+   */
   private planInterpretation(args: Record<string, unknown>): GameMasterToolOutcome {
-    const principalRefusal = this.principalRefusal(this.actorCharacterId);
-    if (principalRefusal !== null) return { ok: false, finished: false, factual: "Refused: only whoever is carrying out the player's own declared intent may interpret the player's plan." };
     const parsed = InterpretPlanSchema.safeParse(args);
     if (!parsed.success) return { ok: false, finished: false, factual: parsed.error.message };
-    const result = interpretPlan(this.staged, this.actorCharacterId, parsed.data, this.atStep);
+    const plan = this.staged.plans?.find(p => p.id === parsed.data.planId && isActionPlanOngoing(p));
+    if (!plan || plan.ownerCharacterId === null) return { ok: false, finished: false, factual: "No active plan of yours has that identity." };
+    const principalRefusal = this.principalRefusal(plan.ownerCharacterId);
+    if (principalRefusal !== null) return { ok: false, finished: false, factual: "Refused: only whoever is carrying out this plan's own actor's declared intent may interpret it." };
+    const result = interpretPlan(this.staged, plan.ownerCharacterId, parsed.data, this.atStep);
     if (typeof result === "string") return { ok: false, finished: false, factual: result };
     this.staged = result;
     if (parsed.data.clarificationQuestions.length > 0) {
@@ -759,9 +795,9 @@ export class GameMasterSession {
     const input = parsed.data;
     const principalRefusal = this.principalRefusal(input.actorId);
     if (principalRefusal !== null) return { ok: false, finished: false, factual: `Refused: only ${input.actorId} may answer an assignment addressed to them.` };
-    const plan = this.staged.plans?.find(p => p.id === input.planId && p.ownerCharacterId === this.actorCharacterId && isActionPlanOngoing(p));
+    const plan = this.staged.plans?.find(p => p.id === input.planId && isActionPlanOngoing(p));
     const actor = this.staged.characters.find(c => c.id === input.actorId && c.alive);
-    if (!plan || !actor || input.actorId === this.actorCharacterId || !plan.options.delegateIds.includes(input.actorId)) return { ok: false, finished: false, factual: "Only a living NPC named as a delegate may answer this assignment." };
+    if (!plan || !actor || input.actorId === plan.ownerCharacterId || !plan.options.delegateIds.includes(input.actorId)) return { ok: false, finished: false, factual: "Only a living NPC named as a delegate may answer this assignment." };
     this.staged = { ...this.staged, plans: this.staged.plans!.map(p => p.id !== plan.id ? p : { ...p, updatedAtStep: this.atStep,
       assignments: [...p.assignments.filter(a => a.actorId !== input.actorId), { actorId: input.actorId, accepted: input.accepted, reason: input.reason }] }) };
     return this.planFact(`${actor.name} ${input.accepted ? "accepted" : "declined"} an assignment: ${input.reason}`);
@@ -771,8 +807,12 @@ export class GameMasterSession {
     const parsed = ExecutePlanStageSchema.safeParse(args);
     if (!parsed.success) return { ok: false, finished: false, factual: parsed.error.message };
     const input = parsed.data;
-    const plan = this.staged.plans?.find(p => p.id === input.planId && p.ownerCharacterId === this.actorCharacterId && isActionPlanOngoing(p));
+    const plan = this.staged.plans?.find(p => p.id === input.planId && isActionPlanOngoing(p));
     const stage = plan?.stages.find(s => s.id === input.stageId);
+    if (plan && plan.ownerCharacterId !== null) {
+      const principalRefusal = this.principalRefusal(plan.ownerCharacterId);
+      if (principalRefusal !== null) return { ok: false, finished: false, factual: principalRefusal };
+    }
     if (!plan || !stage || !plan.interpretation) return { ok: false, finished: false, factual: "Interpret an active plan before attempting its stages." };
     if (stage.status === "completed") return { ok: false, finished: false, factual: "This stage already completed; its effects must not be repeated." };
     const actor = this.staged.characters.find(c => c.id === stage.actorId && c.alive);
@@ -1514,6 +1554,18 @@ export class GameMasterSession {
     }
 
     const id = `intent-${this.atStep}-${this.declaredIntents.length + 1}`;
+    // Unified action runtime, requirement 2: an NPC's declared intent is a
+    // real, persistent `ActionPlan` from the moment it is declared -- the
+    // same interpretation/stage/duration/reservation/budget mechanics a
+    // player's own directive already gets via `preparePlayerPlans`. The
+    // player's own intent already carries its plan id from the constructor,
+    // so this only ever originates a fresh one for someone else.
+    let planId: string | undefined;
+    if (actorId !== this.actorCharacterId) {
+      planId = `plan-npc-${id}`;
+      const plan: ActionPlan = { ...originateActionPlan(planId, { kind: "npc", sourceId: actorId, directiveId: id }, actorId, intent, this.atStep), status: "active" };
+      this.staged = { ...this.staged, plans: [...(this.staged.plans ?? []), plan] };
+    }
     this.declaredIntents.push({
       id,
       actorId,
@@ -1523,11 +1575,14 @@ export class GameMasterSession {
       referencedEntityIds,
       atStep: this.atStep,
       carried: false,
+      ...(planId === undefined ? {} : { planId }),
     });
     return {
       ok: true,
       finished: false,
-      factual: `Noted [${id}]. Nothing has happened yet: this is read afterwards and carried out as far as the world allows.`,
+      factual: planId === undefined
+        ? `Noted [${id}]. Nothing has happened yet: this is read afterwards and carried out as far as the world allows.`
+        : `Noted [${id}] as plan ${planId}. Nothing has happened yet: interpret_plan then execute_plan_stage carry it out as far as the world allows.`,
     };
   }
 

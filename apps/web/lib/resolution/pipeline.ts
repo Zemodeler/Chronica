@@ -96,9 +96,10 @@ import { materializeCanvasProvince } from "../canvas-world";
 import { advanceEventQueue, createDbEventQueuePort } from "./event-loop";
 import {
   computeInterventionScore,
+  currentWorldInstant,
   daysPerStep,
-  deriveWorldInstant,
   factualEventToFact,
+  instantForStepOffset,
   midnight,
   type Fact,
   type InterventionDecision,
@@ -295,6 +296,15 @@ export async function resolveTurn(
   const claimed = await claimTurnForResolution(db, turnId);
   if (!claimed) return { workflowDownloads: [] };
 
+  // Unified action runtime, "authoritative time continuity": the world's own
+  // carried instant (set by the last commit's event queue/elastic
+  // continuation) is "now" -- never `deriveWorldInstant(elapsedStep)`, which
+  // silently regresses once a continuation has carried a prior turn many
+  // days past its own nominal step window. Computed once, from the world as
+  // it was actually handed in, before player materialization or anything
+  // else touches it (neither of which mutate `.instant`/`.elapsedStep`).
+  const turnStartInstant = currentWorldInstant(world, input.scenarioClock);
+
   try {
     const payerUserId = await getGamePayerUserId(db, gameId);
     if (payerUserId === undefined) throw new Error("Game payer not found for resolution.");
@@ -379,7 +389,7 @@ export async function resolveTurn(
     // self-scheduling of the *next* day's tick is what carries the daily
     // cadence forward turn over turn. Widening one turn to resolve every day
     // in its window is later, separately reviewed work.
-    const preEventQueueDay = deriveWorldInstant(materializedWorld.elapsedStep + 1, input.scenarioClock).day;
+    const preEventQueueDay = turnStartInstant.day;
     // docs/32, Part C.6: `advance_project` rides the same queue -- a project
     // with a due milestone gets its own pending `world_process_tick` event,
     // seeded here exactly like `midnight_tick` is, and resolved by
@@ -473,7 +483,7 @@ export async function resolveTurn(
       gameId,
       world: agencyWorld,
       atStep,
-      atInstant: deriveWorldInstant(atStep, input.scenarioClock),
+      atInstant: turnStartInstant,
       actorCharacterId,
       directives: gameMasterDirectives,
       scenarioGovernment: input.scenarioGovernment,
@@ -556,9 +566,11 @@ export async function resolveTurn(
     // state-changing workflow this turn also emits one durable Fact into the
     // canonical ledger -- not just Chronicle prose (`chronicleInputs`, built
     // separately from the same `factualEvents`) that a later agent has no
-    // way to query back. Stamped with the turn's real `WorldInstant`, the
-    // same one the Game Master's own world tools use.
-    const turnInstant = deriveWorldInstant(atStep, input.scenarioClock);
+    // way to query back. Stamped with the turn's real `WorldInstant` -- the
+    // world's own carried-forward instant, the same one the Game Master's
+    // own world tools use -- never a fresh derivation from `atStep` (unified
+    // action runtime, "authoritative time continuity").
+    const turnInstant = turnStartInstant;
     const canonicalWorkflowFacts = committedGameMasterEvents
       .filter((event) => event.materialConsequence)
       .map((event) => factualEventToFact(event, turnInstant));
@@ -1266,6 +1278,13 @@ export async function resolveTurn(
     const finalWorld = {
       ...worldWithTriggeredPressures,
       elapsedStep: atStep,
+      // Unified action runtime, "authoritative time continuity": the real
+      // stopping instant this turn actually reached -- carried through from
+      // the event queue/elastic continuation above -- is what the NEXT
+      // turn's own `currentWorldInstant` call will read back as "now".
+      // Falls back to `turnStartInstant` only for the (should-never-happen)
+      // case that nothing along the way ever set `.instant`.
+      instant: worldWithTriggeredPressures.instant ?? turnStartInstant,
       characterRelevance: updatedRelevance,
       // Universal order/operation model (docs/14, Phase 1): this turn's
       // complete order history plus every still-open persistent operation,
@@ -1310,11 +1329,16 @@ export async function resolveTurn(
     // A stage `execute_plan_stage` scheduled with `completesAtStep` (unified
     // action runtime, "Duration and milestones") rather than applying now --
     // queued alongside the event loop's own pre-turn follow-ups, so a turn
-    // that fails to commit leaves no orphaned event behind either.
+    // that fails to commit leaves no orphaned event behind either. Scheduled
+    // relative to this turn's own real `turnInstant` (unified action
+    // runtime, requirement 3) -- never `deriveWorldInstant(scheduled.atStep)`,
+    // which reconstructs an absolute day straight from the step count and
+    // drifts the moment elastic continuation has decoupled `elapsedStep`
+    // from real elapsed days.
     const scheduledPlanPhaseEvents: Omit<NewWorldEvent, "gameId">[] = gameMasterCompleted
       ? gameMasterOutcome.scheduledPlanPhases.map((scheduled) => ({
         kind: "action_phase",
-        instant: deriveWorldInstant(scheduled.atStep, input.scenarioClock),
+        instant: instantForStepOffset(turnInstant, atStep, scheduled.atStep, input.scenarioClock),
         subjectRef: { kind: "character", id: scheduled.actorId },
         payload: { kind: "action_phase", actionId: scheduled.actionId, stageId: scheduled.stageId, actorId: scheduled.actorId, parameters: scheduled.parameters },
         isPlayerAction: scheduled.actorId === actorCharacterId,

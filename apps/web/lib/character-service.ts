@@ -516,7 +516,7 @@ export async function confirmDeclaredCharacter(gameId: string): Promise<Characte
     );
     for (const relation of existing.relations) {
       if (relation.kind !== "person") continue;
-      const npcId = `declared-npc-${relation.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${playerId}`;
+      const npcId = `declared-npc-${relation.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60)}-${playerId}`;
       const relationScore = scoreForDeclaredConnection(relation.relationship, relation.notes);
       const player = canonicalWorld.characters.find((candidate) => candidate.id === characterId);
       if (player === undefined) return { status: "error", message: "The confirmed player could not enter canonical world state." };
