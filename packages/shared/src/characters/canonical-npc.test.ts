@@ -36,4 +36,22 @@ describe("canonical NPC construction", () => {
     });
     expect(again?.world.characters.filter((character) => character.id === "npc-relation")).toHaveLength(1);
   });
+
+  it("keeps the relation cause id within EntityIdSchema's 120-char cap even when the source ids are long", () => {
+    let world = materializePlayerCharacter(structuredClone(firstPunicWarScenario.initialWorld), "declared-player", playerKnowledgebase, undefined);
+    const longNpcId = `declared-npc-${"a-very-long-slugified-declared-npc-name".repeat(3)}-11111111-1111-1111-1111-111111111111`;
+    const created = createCanonicalNpc(world, {
+      characterId: longNpcId, name: "A Character With An Unusually Long Declared Name", locationProvinceId: playerKnowledgebase.locationProvinceId!, polityId: "rome",
+      startingMoney: 0, createdAtStep: world.elapsedStep, creationReason: "Declared relation.",
+    });
+    expect(created).not.toBeNull();
+    if (created === null) return;
+    world = linkCanonicalCharacters(created.world, "declared-player", longNpcId, "acquaintance", 10, world.elapsedStep);
+    world = linkCanonicalCharacters(world, longNpcId, "declared-player", "acquaintance", 10, world.elapsedStep);
+    const player = world.characters.find((character) => character.id === "declared-player");
+    const npc = world.characters.find((character) => character.id === longNpcId);
+    for (const causeId of [...player!.relations, ...npc!.relations].flatMap((relation) => relation.causes.map((cause) => cause.id))) {
+      expect(causeId.length).toBeLessThanOrEqual(120);
+    }
+  });
 });

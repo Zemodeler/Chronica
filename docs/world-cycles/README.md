@@ -8,9 +8,11 @@ That warning is not boilerplate. The codebase already contains comments claiming
 
 A campaign turn is driven by what people decide: the player gives an order, characters decide what they mean to do, and the interpreter carries out as much of it as the world allows. This folder is about everything that happens *between* those decisions — the world running itself on its own schedule, whether or not anyone acted.
 
-- [Fiscal runtime](fiscal-runtime.md) — money that moves because time passed. Polity treasuries, income that arrives, obligations that fall due, armies that cost something to keep, and what happens to troops who go unpaid.
-- [Income and awards](income-and-awards.md) — where the money comes from, and why the amounts are judged rather than computed.
-- [Institutional cycles](institutional-cycles.md) — offices whose terms actually end, and the elections that follow.
+- [AI world-matters runtime](ai-world-matters-runtime.md) — the shared core that turns scheduled concerns into NPC opportunities, carries their intentions through validated workflows, and synchronizes the resulting facts with the Chronicle without letting reminders become history.
+- [Fiscal runtime](plans/fiscal-runtime.md) — money that moves because time passed. Polity treasuries, income that arrives, obligations that fall due, armies that cost something to keep, and what happens to troops who go unpaid.
+- [Income and awards](plans/income-and-awards.md) — where the money comes from, and why the amounts are judged rather than computed.
+- [Institutional cycles](plans/institutional-cycles.md) — offices whose terms actually end, and the elections that follow.
+- [Unified action and time runtime](unified-action-runtime.md) — the intended shared path for player and NPC intent, scheduled action phases, fresh-context reactions, persistent unfinished work, and the threshold that returns control to the player.
 
 ## The situation these share
 

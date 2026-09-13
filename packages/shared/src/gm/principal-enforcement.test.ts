@@ -143,14 +143,32 @@ describe("GameMasterSession interpreter principal", () => {
     expect(outcome.factual).toMatch(/declared no intent this turn/i);
   });
 
-  it("acts for a character who did declare one", () => {
+  it("acts for a character who did declare one, once carried out through that intent's own plan", () => {
     const session = createGameMasterSession({ world: world(), atStep: 1, actorCharacterId: "marcus-atilius", directiveIds: [] });
-    expect(session.invoke(declare("hanno", "Move myself to the strait and see the crossing for myself."), NPC_A).ok).toBe(true);
+    const declared = session.invoke(declare("hanno", "Move myself to the strait and see the crossing for myself."), NPC_A);
+    expect(declared.ok).toBe(true);
+    const [intent] = session.result().declaredIntents;
+    const planId = intent?.planId;
+    expect(planId).toBeDefined();
 
-    // Reaches the workflow rather than the identity gate: refused for a bad
-    // province id, which is a fact about the world, not about who is asking.
-    const outcome = session.invoke(call("move_character", { actorId: "hanno", characterId: "hanno", destinationProvinceId: "nowhere-at-all" }), INTERPRETER);
+    // Unified action runtime, requirement 2: a direct action call now
+    // bypasses the plan the declared intent originated -- refused exactly
+    // the way a player's own unplotted order already is.
+    const direct = session.invoke(call("move_character", { actorId: "hanno", characterId: "hanno", destinationProvinceId: "nowhere-at-all" }), INTERPRETER);
+    expect(direct.ok).toBe(false);
+    expect(direct.factual).toMatch(/execute_plan_stage/i);
+
+    // Routed through the plan, the same call reaches the workflow instead:
+    // refused only for a bad province id, a fact about the world, not the
+    // identity gate.
+    expect(session.invoke(call("interpret_plan", {
+      planId, interpretation: "Go see the strait.", stages: [{ id: "look", objective: "See the crossing", actorId: "hanno" }], options: {},
+    }), INTERPRETER).ok).toBe(true);
+    const outcome = session.invoke(call("execute_plan_stage", {
+      planId, stageId: "look", actionId: "move_character", parameters: { characterId: "hanno", destinationProvinceId: "nowhere-at-all" },
+    }), INTERPRETER);
     expect(outcome.factual).not.toMatch(/declared no intent/i);
+    expect(outcome.factual).not.toMatch(/execute_plan_stage/i);
   });
 
   it("still refuses an NPC agent declaring an intent for someone else", () => {
@@ -160,17 +178,22 @@ describe("GameMasterSession interpreter principal", () => {
     expect(outcome.factual).toMatch(/you may only act as "hanno"/i);
   });
 
-  it("records an intent without moving the world, and reports it uncarried", () => {
+  it("records an intent by originating its own plan, without producing any fact, and reports it uncarried", () => {
     const session = createGameMasterSession({ world: world(), atStep: 1, actorCharacterId: "marcus-atilius", directiveIds: [] });
-    const before = session.stagedWorld;
 
     const outcome = session.invoke(declare("hanno", "Raise the whole of Carthage against Syracuse this season."), NPC_A);
 
     expect(outcome.ok).toBe(true);
-    expect(session.stagedWorld).toBe(before);
     const [intent] = session.result().declaredIntents;
     expect(intent?.actorId).toBe("hanno");
     expect(intent?.carried).toBe(false);
+    // Unified action runtime, requirement 2: bookkeeping only -- a fresh,
+    // unfinished plan now exists for the declaring actor, but nothing has
+    // happened yet.
+    const plan = session.stagedWorld.plans?.find((p) => p.id === intent?.planId);
+    expect(plan?.origin).toEqual({ kind: "npc", sourceId: "hanno", directiveId: intent?.id });
+    expect(plan?.status).toBe("active");
+    expect(plan?.stages).toEqual([]);
     // An intention is not an event. Nothing here may reach the Chronicle.
     expect(session.result().events).toEqual([]);
   });

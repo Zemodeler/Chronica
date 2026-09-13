@@ -71,6 +71,23 @@ export function createCanonicalNpc(
   return { world: { ...world, characters: [...world.characters, character], material }, character };
 }
 
+/**
+ * Entity IDs are free text (often slugified from AI-declared names) and can run long, but
+ * EntityIdSchema caps every id at 120 chars. Fall back to a short hash so this composite id
+ * never breaks that cap regardless of how long the source ids are; nothing reads the id's
+ * content (it's a write-only key), so a hash fallback is safe.
+ */
+function relationCauseId(subjectCharacterId: string, targetCharacterId: string): string {
+  const raw = `relation-${subjectCharacterId}-${targetCharacterId}`;
+  if (raw.length <= 120) return raw;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < raw.length; i++) {
+    hash ^= raw.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `relation-${(hash >>> 0).toString(36)}`;
+}
+
 /** Add one permanent, directed source-of-truth relationship without duplicates. */
 export function linkCanonicalCharacters(
   world: WorldState,
@@ -92,7 +109,7 @@ export function linkCanonicalCharacters(
         relations: [...character.relations, {
           subjectCharacterId: targetCharacterId,
           causes: [{
-            id: `relation-${subjectCharacterId}-${targetCharacterId}`,
+            id: relationCauseId(subjectCharacterId, targetCharacterId),
             label,
             score: Math.max(-100, Math.min(100, Math.round(score))),
             occurredAtStep: atStep,
