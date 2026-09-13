@@ -1,6 +1,6 @@
 # Unified action and time runtime
 
-**Status: built.** Player and NPC actions share one `ActionPlan` model, one interpreter, and one `WorldInstant`-scheduled event queue; elastic stopping, mechanical reservations/budgets, and turn-resolution resilience are all live. See `docs/architecture.md`'s "Turn resolution" and "Clock and elastic simulation" sections for the current behavior this document originally proposed.
+**Status: completed and archived.** This design is implemented. The maintained description of the live order-to-resolution loop is [Turns and resolution](../../../architecture.md). This document is retained as the original implementation plan and acceptance record.
 
 Player and NPC actions should travel through the same simulation path. The player supplies their character's intent directly; an NPC agent declares its character's intent. After that difference at the point of authorship, interpretation, planning, scheduling, execution, persistence, reactions, and factual reporting are the same.
 
@@ -153,9 +153,9 @@ AI owns interpretation, character judgment, milestone framing, and choosing a pl
 
 No prose changes state. Every phase and reaction still requires a validated workflow or world tool. A failed call changes nothing; a genuine refusal becomes a fact; a malformed call is repaired or reported as unresolved rather than invented into history.
 
-## Required changes from the current runtime
+## Completed implementation scope
 
-This design requires the implementation to:
+The completed implementation includes:
 
 - route player directives through the same declared-intent and shared-interpretation contract used for NPCs, while retaining the player's exact wording;
 - make `ActionPlan` the canonical plan type for player, NPC, and world work instead of continuing to execute player-only `PlayerPlan` records;
@@ -168,4 +168,4 @@ This design requires the implementation to:
 - surface clarification questions and the requested player decision directly in the player UI;
 - preserve newly submitted intentions safely if the AI provider fails, so a failed resolution cannot consume a turn while dropping its staged plans.
 
-Until those changes land, this document describes the intended path rather than current behaviour.
+Focused verification on 13 September 2026: the action-plan, clock, intervention-score, and event-loop suites passed (69 tests). This archive should not be used as the current product or runtime reference.

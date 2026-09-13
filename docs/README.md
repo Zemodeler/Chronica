@@ -1,6 +1,6 @@
 # World cycles
 
-**Status: designed, not built.** Nothing described in this folder exists in the running game yet. Read these as specifications for work to be done, never as descriptions of current behaviour.
+**Status: designed, not built.** The active world-matters design in this folder is a specification for work to be done, never a description of current behaviour. Completed implementation plans live in [`plans/old`](plans/old/).
 
 That warning is not boilerplate. The codebase already contains comments claiming this work is done — `midnight-tick.ts` says its pass covers "income, debt, pay, supply, construction, travel, upkeep", and `advanceWorldDevelopments` is described as performing "obligation/income/development settlement". Neither is true. There is no such code. A reader who trusts those comments will conclude the economy runs and go looking for a bug that is really an absence. When any part of this folder ships, fix the comment that lied about it in the same change.
 
@@ -8,11 +8,8 @@ That warning is not boilerplate. The codebase already contains comments claiming
 
 A campaign turn is driven by what people decide: the player gives an order, characters decide what they mean to do, and the interpreter carries out as much of it as the world allows. This folder is about everything that happens *between* those decisions — the world running itself on its own schedule, whether or not anyone acted.
 
-- [AI world-matters runtime](ai-world-matters-runtime.md) — the shared core that turns scheduled concerns into NPC opportunities, carries their intentions through validated workflows, and synchronizes the resulting facts with the Chronicle without letting reminders become history.
-- [Fiscal runtime](plans/fiscal-runtime.md) — money that moves because time passed. Polity treasuries, income that arrives, obligations that fall due, armies that cost something to keep, and what happens to troops who go unpaid.
-- [Income and awards](plans/income-and-awards.md) — where the money comes from, and why the amounts are judged rather than computed.
-- [Institutional cycles](plans/institutional-cycles.md) — offices whose terms actually end, and the elections that follow.
-- [Unified action and time runtime](unified-action-runtime.md) — the intended shared path for player and NPC intent, scheduled action phases, fresh-context reactions, persistent unfinished work, and the threshold that returns control to the player.
+- [AI world-matters runtime](plans/ai-world-matters-runtime.md) — the shared core that turns scheduled concerns into NPC opportunities, carries their intentions through validated workflows, and synchronizes the resulting facts with the Chronicle without letting reminders become history.
+- [Unified action and time runtime](plans/old/unified-action-runtime.md) — completed and archived; its maintained description is now [Turns and resolution](../architecture.md).
 
 ## The situation these share
 

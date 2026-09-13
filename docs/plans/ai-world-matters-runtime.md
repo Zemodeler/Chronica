@@ -2,7 +2,7 @@
 
 **Status: intended design, not built.**
 
-[Back to world cycles](README.md)
+[Back to world cycles](../README.md)
 
 Time should make responsibilities, needs, opportunities, and disputes impossible for the simulation to forget. It should not decide their outcomes. The existing AI character simulation remains the source of judgment: NPCs decide what they want, the shared interpreter turns their intentions into actions, validated workflows change canonical state, and the Chronicle reports the facts those workflows produced.
 

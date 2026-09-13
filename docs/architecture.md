@@ -1,4 +1,52 @@
-# Architecture guide
+# Turns and resolution
+
+This is the core runtime of Chronica: a player or NPC expresses an intention, the shared system turns it into lawful work, time advances through its consequences, and the game stops only when the player genuinely needs to decide again.
+
+## The core concept
+
+Chronica has one world and one action path. A player directive and an NPC decision differ only in who authored the intent. Neither directly mutates the world. Both become `ActionPlan`s, pass through the same interpreter and workflow validation, and produce facts only when accepted work changes canonical state.
+
+```text
+order or NPC judgment
+        -> declared intent
+        -> ActionPlan and stages
+        -> validated workflow
+        -> scheduled world event
+        -> factual state change
+        -> affected-character reactions
+        -> Chronicle and next player decision
+```
+
+This preserves agency without allowing prose to overwrite reality: AI judges meaning and motivation; the runtime protects mechanism, time, authority, resources, and persistence.
+
+## A resolution window
+
+1. **Start from committed state.** The world snapshot is authoritative: its `WorldInstant`, plans, event queue, facts, and character state describe the exact point from which play continues.
+2. **Collect intent.** The player's exact directive is stored as immutable evidence. Relevant NPCs and star contexts may declare their own intent from what they know, their authority, commitments, pressures, and goals.
+3. **Interpret into plans.** The shared interpreter translates intent into one or more `ActionPlan` stages. It may fill in ordinary implementation detail but cannot invent a consequential target, delegation, spending authority, or political choice.
+4. **Validate and schedule.** A ready stage uses a workflow from the [workflow reference](workflows.md). The session validates its parameters, actor, authority, scope, references, resources, and resulting world. Work with duration schedules phase events; it does not receive a special immediate mutation path.
+5. **Resolve chronological events.** The event queue takes the earliest due `WorldInstant`, applies that phase, and records facts for the actual state delta. Longer work persists through commencement, meaningful updates, and completion rather than repeating empty daily progress.
+6. **Refresh only affected context.** Characters and represented contexts who are directly affected or plausibly informed see the post-event world and may react. Their reaction re-enters the same declare, interpret, validate, and schedule path.
+7. **Continue or stop.** The runtime proceeds through compatible ongoing work. It stops for a required clarification or player decision, a material conflict or change beyond recorded player latitude, an intervention threshold, or the unattended-time bound.
+8. **Commit atomically.** At the decision point, the world, plans, event queue, facts, audit trail, memory, and Chronicle commit together. The next player turn begins at that exact instant.
+
+The loop is chronological, not round-robin. Later actors see facts made by earlier events; the player never loses an order merely because a provider or executor failed.
+
+## Plans, time, and conflicts
+
+An `ActionPlan` is durable state for player, NPC, and world work. Its stages can have dependencies, conditions, recurrence, durations, budgets, and reservations. Completed effects never reverse merely because a later instruction changes direction; blocked work persists until it can resume, fails, is cancelled, or is superseded.
+
+`WorldInstant` is the source of simulated time. `elapsedStep` orders commits, while the event queue advances the actual day and minute. This lets a single resolution window carry the world through routine time without pretending every player decision consumes a fixed interval.
+
+Named resources such as a character's time, force, account, or office are mechanically reserved. A newer clear instruction can pre-empt incompatible unfinished work; an ambiguous conflict that matters to the player becomes a decision rather than an engine guess. Plan budgets are hard limits, not prompt suggestions.
+
+## Facts, Chronicle, and memory
+
+Workflows and non-judgmental system mechanisms are the only sources of material state change. Every accepted result emits a factual event with its actor, parameters, affected entities, and concrete delta. A genuine refusal can become history; a malformed or unsupported call changes nothing and stays unresolved.
+
+The Chronicle groups and narrates these facts, retaining their actual dates. It never treats an order, reminder, plan, scheduler pressure, or failed tool call as evidence that an outcome occurred. Campaign memory folds factual history forward while current open threads are derived from committed state.
+
+## Authority and safety
 
 ## Source of truth and authority
 
