@@ -74,6 +74,16 @@ export interface InterventionScoreInput {
   readonly plans: readonly InterventionPlanLike[];
   /** Resource conflicts detected this window (`actions/conflicts.ts`'s `detectResourceConflicts`), if the caller has them. */
   readonly conflicts?: readonly PlanConflict[];
+  /**
+   * World matter ids `matterPriorityActors` routed to the player instead of
+   * an autonomous NPC pass this window (docs/plans/ai-world-matters-runtime.md,
+   * Phase 6 -- "Player intervention": "the player holds the responsibility
+   * and no standing instruction answers it"). A non-empty list is always a
+   * hard stop -- categorical, since the doc frames this as the player's own
+   * responsibility going unanswered, not a matter of degree a score could
+   * weigh against other factors.
+   */
+  readonly playerResponsibleMatterIds?: readonly string[];
   /** Default 60, per the design doc. Scenario rules may override; one campaign must keep its selected threshold stable. */
   readonly threshold?: number;
 }
@@ -94,6 +104,15 @@ const DEFAULT_THRESHOLD = 60;
  *   an irreversible action can proceed."
  */
 function findHardStop(input: InterventionScoreInput): { reason: StopReason; description: string | null; factIds: string[] } | null {
+  const playerResponsibleMatterIds = input.playerResponsibleMatterIds ?? [];
+  if (playerResponsibleMatterIds.length > 0) {
+    return {
+      reason: "salient_event",
+      description: "A matter needing your attention has no standing instruction to answer it.",
+      factIds: [...playerResponsibleMatterIds],
+    };
+  }
+
   const dialogueFacts = input.facts.filter((fact) => fact.kind === NPC_INITIATED_DIALOGUE_ACTION_ID);
   if (dialogueFacts.length > 0) {
     return { reason: "salient_event", description: "A character wants to speak with you.", factIds: dialogueFacts.map((f) => f.id) };

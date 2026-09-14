@@ -103,6 +103,30 @@ describe("computeInterventionScore -- the 0-100 score (unified action runtime)",
   });
 });
 
+describe("computeInterventionScore -- world matters player-responsibility hard stop (docs/plans/ai-world-matters-runtime.md, Phase 6)", () => {
+  it("stops when a world matter was routed to the player with no standing instruction answering it, regardless of any fact's score", () => {
+    const decision = computeInterventionScore({
+      facts: [fact()],
+      plans: [plan()],
+      playerResponsibleMatterIds: ["obligation:legio-pay:period-1"],
+    });
+    expect(decision.hardStopReason).toBe("salient_event");
+    expect(decision.contributingFactIds).toEqual(["obligation:legio-pay:period-1"]);
+    expect(decision.requiresIntervention).toBe(true);
+  });
+
+  it("does not stop when no world matter was routed to the player", () => {
+    const decision = computeInterventionScore({ facts: [fact()], plans: [plan()], playerResponsibleMatterIds: [] });
+    expect(decision.hardStopReason).toBeNull();
+  });
+
+  it("is categorical, not scored -- it fires even when it is the ONLY signal present", () => {
+    const decision = computeInterventionScore({ facts: [], plans: [], playerResponsibleMatterIds: ["matter-1"] });
+    expect(decision.requiresIntervention).toBe(true);
+    expect(decision.hardStopReason).toBe("salient_event");
+  });
+});
+
 describe("computeInterventionScore -- hard stops bypass the score entirely", () => {
   it("stops for an outstanding clarification question, regardless of any fact's score", () => {
     const decision = computeInterventionScore({

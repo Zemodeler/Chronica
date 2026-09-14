@@ -50,6 +50,7 @@ import {
   applyRevisionDirectives,
   ensureProvinceMaterial,
   ensureCharacterAccounts,
+  ensurePolityTreasuries,
   advanceProvinceMaterial,
   applyWarDamageForExecutedWorkflows,
   deriveChronicleDepth,
@@ -98,6 +99,7 @@ import {
   computeInterventionScore,
   currentWorldInstant,
   daysPerStep,
+  evaluateMatterDisposition,
   factualEventToFact,
   instantForStepOffset,
   midnight,
@@ -108,6 +110,22 @@ import {
 import { runMultiAgentTurn } from "./agents/orchestrator";
 import { createReactionRunner } from "./agents/reaction-runner";
 import { advanceProjectsTick, ensureProjectTicksSeeded } from "./project-tick";
+import { runMatterReviewTick } from "./matters/matter-review-tick";
+import { ensureMatterTicksSeeded } from "./matters/matter-events";
+import type { EventHandler } from "./event-loop";
+
+/**
+ * World matters, Phase 6: the queue's only `world_process_tick` handler
+ * dispatches by `payload.processKind`, same as any other tagged-union
+ * handling in this codebase -- `advanceProjectsTick` on its own does not
+ * check `processKind` at all (it only looks up `event.subjectRef.id` in
+ * `world.projects`, so a "matter" event would silently no-op through it
+ * rather than ever reaching `runMatterReviewTick`).
+ */
+const worldProcessTickHandler: EventHandler = (world, event, atStep) =>
+  event.payload.kind === "world_process_tick" && event.payload.processKind === "matter"
+    ? runMatterReviewTick(world, event, atStep)
+    : advanceProjectsTick(world, event, atStep);
 
 /**
  * Wall-clock/cost safety bound for the elastic continuation (unified action
@@ -366,15 +384,18 @@ export async function resolveTurn(
     // character selection, so a stale or spent pressure never shapes this
     // turn's working set.
     const pressureAdvanced = advancePressureLifecycle(socialEventOutcome.world, materializedWorld.elapsedStep + 1);
-    // Two backfills for snapshots older than the systems that need them: a
-    // material record per province, and a purse for any character created by
-    // a runtime workflow back when those workflows named an account without
-    // opening it. Both are no-ops once a game is current.
-    const backfilled: WorldState = ensureCharacterAccounts(ensureProvinceMaterial({
+    // Three backfills for snapshots older than the systems that need them: a
+    // material record per province, a purse for any character created by a
+    // runtime workflow back when those workflows named an account without
+    // opening it, and a polity treasury for world matters' fiscal domain
+    // (docs/plans/ai-world-matters-runtime.md, "Polity treasuries" -- opened
+    // at balance 0, never backfilled with retroactive wealth). All three are
+    // no-ops once a game is current.
+    const backfilled: WorldState = ensurePolityTreasuries(ensureCharacterAccounts(ensureProvinceMaterial({
       ...socialEventOutcome.world,
       characters: [...pressureAdvanced.characters],
       characterPressures: [...pressureAdvanced.characterPressures],
-    }, materializedWorld.elapsedStep + 1));
+    }, materializedWorld.elapsedStep + 1)), materializedWorld.elapsedStep + 1);
     // Turn foreign occupations and Roman public business into durable,
     // state-backed pressures before character selection.  A power without a
     // living representative stays visible as a real problem for the Game
@@ -395,6 +416,11 @@ export async function resolveTurn(
     // seeded here exactly like `midnight_tick` is, and resolved by
     // `advanceProjectsTick` when the queue picks it up.
     await ensureProjectTicksSeeded(createDbEventQueuePort(db, gameId), backfilled, materializedWorld.elapsedStep + 1);
+    // World matters, Phase 6: same idempotent seeding, for due/overdue
+    // matters -- see `matter-events.ts`'s own doc comment for why this
+    // reads `backfilled` (this turn's own midnight_tick, where matters are
+    // actually (re)detected, has not run yet at this point).
+    await ensureMatterTicksSeeded(createDbEventQueuePort(db, gameId), backfilled, materializedWorld.elapsedStep + 1);
     const worldDynamics = await advanceEventQueue(
       db,
       backfilled,
@@ -403,7 +429,7 @@ export async function resolveTurn(
       {
         gameId,
         maxEventsPerCall: 20,
-        handlers: { world_process_tick: advanceProjectsTick },
+        handlers: { world_process_tick: worldProcessTickHandler },
         agentRunner: createReactionRunner(gameMasterAdapter),
       },
     );
@@ -619,6 +645,7 @@ export async function resolveTurn(
       facts: allWorldFacts,
       plans: newWorld.plans ?? [],
       conflicts: [],
+      playerResponsibleMatterIds: gameMasterOutcome.playerResponsibleMatterIds,
     });
     console.log(
       `${tag()} [intervention] after game_master: score=${immediateDecision.score} `
@@ -639,12 +666,13 @@ export async function resolveTurn(
       const continuation = await advanceEventQueue(db, newWorld, continuationWindowEnd, atStep, {
         gameId,
         maxEventsPerCall: MAX_ELASTIC_EVENTS_PER_TURN,
-        handlers: { world_process_tick: advanceProjectsTick },
+        handlers: { world_process_tick: worldProcessTickHandler },
         agentRunner: createReactionRunner(gameMasterAdapter),
         checkIntervention: (factsSoFar, plans) => computeInterventionScore({
           facts: [...factsBeforeContinuation, ...factsSoFar],
           plans,
           conflicts: [],
+          playerResponsibleMatterIds: gameMasterOutcome.playerResponsibleMatterIds,
         }),
       });
       newWorld = continuation.world;
@@ -1029,6 +1057,16 @@ export async function resolveTurn(
           outcome: contractAfter.status,
         },
       });
+    }
+
+    // World matters (docs/plans/ai-world-matters-runtime.md, Phase 3): a
+    // matter this turn's own facts actually resolved is `addressed`/
+    // `partially_addressed`/etc. in what gets persisted, not left `due` for
+    // want of a fact this exact pass already has in hand. Re-runs the same
+    // pure pass `matter-scheduler.ts` already applied against the scheduler's
+    // own narrower view, now against every fact the whole turn produced.
+    if (newWorld.worldMatters !== undefined && newWorld.worldMatters.length > 0) {
+      newWorld = { ...newWorld, worldMatters: [...evaluateMatterDisposition(newWorld, newWorld.worldMatters, allWorldFacts)] };
     }
 
     const displayPatch = buildDisplayPatch(resolutionWorld, newWorld);

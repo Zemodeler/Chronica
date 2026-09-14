@@ -42,7 +42,12 @@ export const WorldEventPayloadSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("world_process_tick"),
     // docs/32, Part C.6: "project" advances a Project's next due milestone (world/project.ts).
-    processKind: z.enum(["construction", "travel", "supply", "siege", "project"]),
+    // World matters, Phase 6 (docs/plans/ai-world-matters-runtime.md,
+    // "Chronological integration"): "matter" reviews one named `WorldMatter`
+    // at its own real `WorldInstant`. `processKind` lives only in this Zod
+    // schema, not a Postgres enum (`packages/db/src/schema/events.ts` stores
+    // `payload` as `jsonb`), so adding this value needs no migration.
+    processKind: z.enum(["construction", "travel", "supply", "siege", "project", "matter"]),
     targetRef: SubjectRefSchema,
   }).strict(),
   z.object({ kind: z.literal("midnight_tick") }).strict(),
