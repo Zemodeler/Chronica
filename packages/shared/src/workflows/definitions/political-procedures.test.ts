@@ -143,11 +143,31 @@ describe("sponsor_procedure", () => {
   });
 });
 
-describe("pledge_support / withdraw_support", () => {
+describe("set_support_position (merges the former pledge_support/withdraw_support)", () => {
+  it("refuses a support/oppose/abstain position with no stated reason", () => {
+    const w = world();
+    const outcome = executeWorkflow(
+      { actionId: "set_support_position", actorId: "marcus-atilius", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "marcus-atilius", position: "support" } },
+      w,
+      1,
+    );
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("accepts a withdrawal to undecided with no reason at all", () => {
+    const w = world();
+    const outcome = executeWorkflow(
+      { actionId: "set_support_position", actorId: "marcus-atilius", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "marcus-atilius", position: "undecided" } },
+      w,
+      1,
+    );
+    expect(outcome.ok).toBe(true);
+  });
+
   it("records the caller's own stated position for an eligible participant", () => {
     const w = world();
     const outcome = executeWorkflow(
-      { actionId: "pledge_support", actorId: "marcus-atilius", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "marcus-atilius", position: "support", reasonKind: "material_interest", reasonLabel: "It clears his name and costs him nothing." } },
+      { actionId: "set_support_position", actorId: "marcus-atilius", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "marcus-atilius", position: "support", reasonKind: "material_interest", reasonLabel: "It clears his name and costs him nothing." } },
       w,
       1,
     );
@@ -164,7 +184,7 @@ describe("pledge_support / withdraw_support", () => {
   it("records exactly the requested position, even one evaluateSupport's scoring would not have chosen", () => {
     const w = world();
     const outcome = executeWorkflow(
-      { actionId: "pledge_support", actorId: "marcus-atilius", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "marcus-atilius", position: "oppose", reasonKind: "belief", reasonLabel: "He believes the charge is just." } },
+      { actionId: "set_support_position", actorId: "marcus-atilius", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "marcus-atilius", position: "oppose", reasonKind: "belief", reasonLabel: "He believes the charge is just." } },
       w,
       1,
     );
@@ -176,7 +196,7 @@ describe("pledge_support / withdraw_support", () => {
   it("records a position for a supporter who is not an eligible participant of the procedure", () => {
     const w = world();
     const outcome = executeWorkflow(
-      { actionId: "pledge_support", actorId: "hamilcar", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "hamilcar", position: "support", reasonKind: "belief", reasonLabel: "n/a" } },
+      { actionId: "set_support_position", actorId: "hamilcar", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "hamilcar", position: "support", reasonKind: "belief", reasonLabel: "n/a" } },
       w,
       1,
     );
@@ -188,14 +208,14 @@ describe("pledge_support / withdraw_support", () => {
   it("withdraws a previously recorded position before resolution", () => {
     const w = world();
     const pledged = executeWorkflow(
-      { actionId: "pledge_support", actorId: "marcus-atilius", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "marcus-atilius", position: "support", reasonKind: "belief", reasonLabel: "n/a" } },
+      { actionId: "set_support_position", actorId: "marcus-atilius", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "marcus-atilius", position: "support", reasonKind: "belief", reasonLabel: "n/a" } },
       w,
       1,
     );
     expect(pledged.ok).toBe(true);
     if (!pledged.ok) return;
     const withdrawn = executeWorkflow(
-      { actionId: "withdraw_support", actorId: "marcus-atilius", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "marcus-atilius" } },
+      { actionId: "set_support_position", actorId: "marcus-atilius", parameters: { procedureId: "senate-censure-marcus", supporterKind: "character", supporterId: "marcus-atilius", position: "undecided" } },
       pledged.world,
       2,
     );

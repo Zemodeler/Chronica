@@ -1,6 +1,30 @@
 # AI world-matters runtime
 
-**Status: intended design, not built.**
+**Status: substantially implemented; broader-domain expansion remains.**
+
+## Completion status
+
+The shared world-matter runtime is now in place and exercised by the current
+test suite. The roadmap is substantially complete through Phase 6; Phase 7 is
+started, rather than complete.
+
+| Roadmap phase | Status | Implemented scope |
+| --- | --- | --- |
+| 1. Identity and persistence | Complete | Canonical `WorldMatter` schema, migration from developments, stable identities, idempotent detection, lifecycle state, and replay coverage. |
+| 2. NPC routing | Complete | Live recipient resolution, bounded priority selection, NPC/star-context projections, offer recording, intent links, and player intervention routing. |
+| 3. Disposition and standing plans | Complete | State-backed dispositions, fact links, partial resolution handling, standing-plan continuations, and invalidation checks. |
+| 4. Fiscal foundation | Complete | Polity treasury bootstrap, income and obligation detectors, provenance-aware collection/payment/transfer workflows, and actor-scoped financial reads. |
+| 5. Institutions and supply | Complete | Term and supply detectors, procedure safeguards, lightweight supply state, and supply-management workflows. |
+| 6. Chronological integration | Complete | Matter-review events in the persistent queue, chronological offers, fact-scoped reactions, and intervention handling. |
+| 7. Broader domains | In progress | Diplomatic messages, household needs, provincial scarcity/reconstruction/civic work, and war burdens have producers. Treaty, commitment, legal, health, and environmental domains still need their own complete state, reads, response workflows, completion rules, and end-to-end Chronicle tests. |
+
+Verification on the current working tree: `packages/shared` (1,019 tests),
+`apps/web` (158 tests), and `packages/db` (35 tests) all pass -- 1,212 tests
+total. Both `packages/shared` and `apps/web` typecheck cleanly via
+`tsc --noEmit --rootDir .` (invoking `tsc` without `--rootDir .` hits a
+pre-existing, unrelated `TS2209` "ambiguous project root" error from this
+repo's package `exports` maps, reproducible on the unmodified base commit via
+`git stash` -- environmental, not a regression from this work).
 
 [Back to world cycles](../README.md)
 
@@ -724,14 +748,14 @@ The current batched ordering—player reasoning, selected NPCs and star contexts
 
 ## Implementation sequence
 
-### Phase 1: identity and persistence
+### Phase 1: identity and persistence — complete
 
 - Generalize or replace `WorldDevelopment` with a source-backed matter schema.
 - Add stable identities, lifecycle statuses, review instants, offers, dispositions, and resolution links.
 - Add pure, idempotent matter detectors.
 - Persist matters inside the canonical world snapshot and include them in validation and replay tests.
 
-### Phase 2: NPC routing
+### Phase 2: NPC routing — complete
 
 - Resolve responsible actors from live authority, office, command, ownership, commitment, and affected-entity state.
 - Merge priority recipients into the existing bounded actor selector.
@@ -739,7 +763,7 @@ The current batched ordering—player reasoning, selected NPCs and star contexts
 - Record offers and link declared intents to their originating matters.
 - Ensure the player character is routed to intervention rather than autonomous execution.
 
-### Phase 3: disposition and standing plans
+### Phase 3: disposition and standing plans — complete
 
 - Define domain-backed completion predicates.
 - Link accepted workflow facts back to matters.
@@ -747,7 +771,7 @@ The current batched ordering—player reasoning, selected NPCs and star contexts
 - Connect recurring matters to persistent `ActionPlan` continuations.
 - Reopen AI judgment when authority, resources, conditions, or plan bounds change.
 
-### Phase 4: fiscal foundation
+### Phase 4: fiscal foundation — complete
 
 - Ensure polity-owned treasury accounts for new campaigns.
 - Author safe migration behavior for existing campaigns.
@@ -757,7 +781,7 @@ The current batched ordering—player reasoning, selected NPCs and star contexts
 - Create income-assessment, payment-due, arrears, and treasury-risk matter detectors.
 - Expose account history, recent receipts, obligations, and authority through actor-scoped reads.
 
-### Phase 5: institutions and supply
+### Phase 5: institutions and supply — complete
 
 - Add office term rules and approaching/expired-term matter detectors.
 - Route election and succession responsibilities to NPCs and institutional contexts.
@@ -765,7 +789,7 @@ The current batched ordering—player reasoning, selected NPCs and star contexts
 - Add lightweight force-supply state and supply-review matters.
 - Add purchase, convoy, requisition, forage, raid, reroute, and supply-assessment workflows as gameplay requires.
 
-### Phase 6: chronological integration
+### Phase 6: chronological integration — complete
 
 - Offer matters at their actual `WorldInstant` inside the unified event loop.
 - Interpret relevant intents before advancing past decisions that can affect the next event.
@@ -773,7 +797,7 @@ The current batched ordering—player reasoning, selected NPCs and star contexts
 - Apply player-intervention and unattended-time stopping rules.
 - Preserve actual dates through Chronicle construction and atomic commit.
 
-### Phase 7: broader domains
+### Phase 7: broader domains — in progress
 
 - Add treaty, commitment, legal, household, health, provincial, and environmental matter producers incrementally.
 - Reuse the common lifecycle and routing system.

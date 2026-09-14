@@ -161,6 +161,20 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
     },
   }),
 
+  // No dedicated `convene_election` workflow (docs/plans/
+  // ai-world-matters-runtime.md, "Institutional time": "The engine does
+  // not automatically open and resolve an election as one deadline
+  // handler... a responsible actor or institution decides to convene it
+  // through the ordinary procedure workflows"). `sponsor_procedure` above
+  // already opens a nomination-stage procedure for an office seat with no
+  // extra ceremony; a second, thinner wrapper over the exact same call
+  // would only cost a tool slot against the combined Game Master tool
+  // surface's hard provider limit (`gm/player-plans.test.ts`) for no real
+  // capability gain -- an election is composed from `sponsor_procedure`
+  // (nomination) + `pledge_support`/`call_vote` + a later
+  // `sponsor_procedure` (appointment, naming whoever won), exactly as the
+  // doc describes, with no engine-side shortcut standing in for any of it.
+
   defineWorkflow({
     id: "nominate_candidate",
     description: "Name a candidate for a proposed nomination or appointment procedure, subject to its eligibility requirements.",
@@ -197,8 +211,16 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
   }),
 
   defineWorkflow({
-    id: "pledge_support",
-    description: "Record a character's or group's canonical support position on an open procedure, with the stated reason for it. Use inspect_political_procedure first: it surfaces each participant's relationship/legitimacy context as a suggestion, never a decision -- the position and reason here are yours to choose.",
+    // World matters, Phase 7 (docs/plans/ai-world-matters-runtime.md): merges
+    // the former `pledge_support`/`withdraw_support` into one tool -- the
+    // combined Game Master tool surface sits at a hard provider limit
+    // (`gm/player-plans.test.ts`'s "keeps the combined tool surface within
+    // the provider limit"), and a withdrawal was already exactly a pledge of
+    // "undecided" (`SupportPositionChoiceSchema` already includes it) minus
+    // a required reason, which the schema below simply makes optional for
+    // that one case rather than needing a second tool.
+    id: "set_support_position",
+    description: "Record a character's or group's canonical support position on an open procedure -- support, oppose, abstain, or withdraw to undecided. A stated reason is required for support/oppose/abstain; withdrawing to undecided needs none. Use inspect_political_procedure first: it surfaces each participant's relationship/legitimacy context as a suggestion, never a decision -- the position and reason here are yours to choose.",
     category: "political",
     parametersSchema: z
       .object({
@@ -206,72 +228,53 @@ export const politicalProcedureWorkflows: AnyWorkflowDefinition[] = [
         supporterKind: SupportPositionKindSchema,
         supporterId: EntityIdSchema,
         position: SupportPositionChoiceSchema,
-        reasonKind: SupportReasonKindSchema,
-        reasonLabel: z.string().trim().min(1).max(200),
+        reasonKind: SupportReasonKindSchema.optional(),
+        reasonLabel: z.string().trim().min(1).max(200).optional(),
       })
-      .strict(),
+      .strict()
+      .superRefine((params, ctx) => {
+        if (params.position !== "undecided" && (params.reasonKind === undefined || params.reasonLabel === undefined)) {
+          ctx.addIssue({ code: "custom", path: ["reasonLabel"], message: "A support, oppose, or abstain position needs a stated reasonKind and reasonLabel." });
+        }
+      }),
     apply(world, params, context) {
       const procedure = world.material.politicalProcedures.find((p) => p.id === params.procedureId);
       if (!procedure) return null;
 
-      if (params.supporterKind === "character") {
-        const supporter = world.characters.find((c) => c.id === params.supporterId);
-        if (!supporter) return null;
-      } else {
-        const group = world.material.politicalGroups.find((g) => g.id === params.supporterId);
-        if (!group) return null;
+      if (params.position !== "undecided") {
+        if (params.supporterKind === "character") {
+          const supporter = world.characters.find((c) => c.id === params.supporterId);
+          if (!supporter) return null;
+        } else {
+          const group = world.material.politicalGroups.find((g) => g.id === params.supporterId);
+          if (!group) return null;
+        }
       }
 
       const nominalScore = params.position === "support" ? 20 : params.position === "oppose" ? -20 : 0;
+      const withdrawing = params.position === "undecided";
       const position: SupportPosition = {
         id: `${procedure.id}:support:${params.supporterId}:${context.atStep}`,
         procedureId: procedure.id,
         supporterKind: params.supporterKind,
         supporterId: params.supporterId,
         position: params.position,
-        influenceWeight: Math.max(1, Math.abs(nominalScore)),
+        influenceWeight: withdrawing ? 0 : Math.max(1, Math.abs(nominalScore)),
         visibility: procedure.visibility,
-        reasons: [{ kind: params.reasonKind, label: params.reasonLabel, score: nominalScore, sourceId: params.supporterId }],
+        reasons: withdrawing
+          ? [{ kind: "ideology", label: "Support withdrawn before resolution.", score: 0, sourceId: procedure.id }]
+          : [{ kind: params.reasonKind!, label: params.reasonLabel!, score: nominalScore, sourceId: params.supporterId }],
         provenanceEventIds: [],
         changedAtStep: context.atStep,
       };
       return {
         world: { ...world, material: { ...world.material, supportPositions: [...world.material.supportPositions, position] } },
-        result: { summary: `${params.supporterId} records a "${position.position}" position on procedure "${procedure.id}": ${params.reasonLabel}`, applied: true },
-      };
-    },
-  }),
-
-  defineWorkflow({
-    id: "withdraw_support",
-    description: "Withdraw a previously recorded support position before a procedure resolves.",
-    category: "political",
-    parametersSchema: z
-      .object({
-        procedureId: EntityIdSchema,
-        supporterKind: SupportPositionKindSchema,
-        supporterId: EntityIdSchema,
-      })
-      .strict(),
-    apply(world, params, context) {
-      const procedure = world.material.politicalProcedures.find((p) => p.id === params.procedureId);
-      if (!procedure) return null;
-
-      const withdrawal: SupportPosition = {
-        id: `${procedure.id}:support:${params.supporterId}:${context.atStep}`,
-        procedureId: procedure.id,
-        supporterKind: params.supporterKind,
-        supporterId: params.supporterId,
-        position: "undecided",
-        influenceWeight: 0,
-        visibility: procedure.visibility,
-        reasons: [{ kind: "ideology", label: "Support withdrawn before resolution.", score: 0, sourceId: procedure.id }],
-        provenanceEventIds: [],
-        changedAtStep: context.atStep,
-      };
-      return {
-        world: { ...world, material: { ...world.material, supportPositions: [...world.material.supportPositions, withdrawal] } },
-        result: { summary: `${params.supporterId} withdraws their position on procedure "${procedure.id}".`, applied: true },
+        result: {
+          summary: withdrawing
+            ? `${params.supporterId} withdraws their position on procedure "${procedure.id}".`
+            : `${params.supporterId} records a "${position.position}" position on procedure "${procedure.id}": ${params.reasonLabel}`,
+          applied: true,
+        },
       };
     },
   }),
