@@ -4,12 +4,17 @@ import type { CharacterGoal, CharacterPlot } from "../character-agency/schemas";
 import type { CharacterPressure } from "../characters/pressures";
 import type { CharacterBelief } from "../characters/beliefs";
 import type { Commitment } from "../character-agency/commitments";
+import type { Household } from "../characters/family";
 import type { AuthorityGrant, AuthorityIndex } from "../authority/authority-grant";
 import type { OrderAttempt } from "../authority/order-attempt";
 import type { Fact } from "../world/facts";
 import { factsVisibleTo } from "../world/facts";
 import type { WorldInstant } from "../world/instant";
 import type { WorldState } from "../world/world-state";
+import type { MaterialWorldState } from "../material-state";
+import type { ProvinceGraph } from "../world/map";
+import { projectMattersForCharacter, type ProjectedMatter } from "../matters/projection";
+import type { WorldMatter } from "../matters/schema";
 
 /**
  * A hard allowlist of what one NPC agent (docs/32, Part B.4) is given: its own
@@ -31,9 +36,19 @@ export interface NpcAgentContext {
   /** Orders/petitions naming this character as recipient, still awaiting their decision. */
   readonly pendingOrders: readonly OrderAttempt[];
   readonly visibleFacts: readonly Fact[];
+  /** Bounded world-matters projection (docs/plans/ai-world-matters-runtime.md, Phase 2 -- "Context projection"): only matters `resolveMatterRecipients` names this character for, already filtered by visibility and fact-knowledge. */
+  readonly matters: readonly ProjectedMatter[];
 }
 
-/** Everything `buildNpcAgentContext` reads from `WorldState`, named explicitly so the allowlist is visible at the call site. */
+/**
+ * Everything `buildNpcAgentContext` reads from `WorldState`, named explicitly
+ * so the allowlist is visible at the call site. `map`/`material`/`households`/
+ * `worldMatters`/`elapsedStep` were added for the matters projection below --
+ * unlike the rest of this list, these are institutional/public-record reads
+ * (office seats, forces, accounts, provinces), the same class of data an NPC's
+ * own read tools already expose to it (`npc-agent.ts`'s `npcToolSurface`), not
+ * a widening of what private character data this context hands over directly.
+ */
 export interface NpcAgentContextSource {
   readonly characters: readonly Character[];
   readonly characterGoals: readonly CharacterGoal[];
@@ -43,6 +58,11 @@ export interface NpcAgentContextSource {
   readonly commitments: readonly Commitment[];
   readonly socialLinks: readonly SocialLink[];
   readonly orderAttempts: readonly OrderAttempt[];
+  readonly map: ProvinceGraph;
+  readonly material: MaterialWorldState;
+  readonly households: readonly Household[];
+  readonly worldMatters?: readonly WorldMatter[];
+  readonly elapsedStep: number;
 }
 
 export function buildNpcAgentContext(
@@ -71,6 +91,7 @@ export function buildNpcAgentContext(
       (attempt) => attempt.recipientRef.kind === "character" && attempt.recipientRef.id === characterId && !isDecided(attempt),
     ),
     visibleFacts: factsVisibleTo(facts, observer, atInstant),
+    matters: projectMattersForCharacter(world as WorldState, characterId, authorityIndex, facts, atInstant),
   };
 }
 

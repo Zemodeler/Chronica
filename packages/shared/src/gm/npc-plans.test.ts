@@ -4,6 +4,8 @@ import { createGameMasterSession } from "./session";
 import { PlanOptionsSchema } from "../actions/plans";
 import { ScenarioClockSchema } from "../world/clock";
 import type { Principal } from "../authority/principal";
+import type { WorldMatter } from "../matters/schema";
+import type { WorldState } from "../world/world-state";
 
 // Unified action runtime, requirement 2: an NPC's declared intent must
 // become a real, persistent `ActionPlan` (`origin.kind: "npc"`), carried out
@@ -189,5 +191,77 @@ describe("NPC plan-stage resource reservations and preemption (unified action ru
     expect(marchReservation.releasedAtStep).toBe(5);
     const recallReservation = resumed.stagedWorld.stageReservations!.find((r) => r.stageId === "recall" && r.kind === "force")!;
     expect(recallReservation.releasedAtStep).toBeNull();
+  });
+});
+
+// World matters, Phase 2 (docs/plans/ai-world-matters-runtime.md, "5.
+// Intention and interpretation": "The matter ID becomes causal metadata on
+// the intent").
+describe("declare_intent's matterIds", () => {
+  const INSTANT = { day: 1, minute: 0 };
+
+  function testMatter(overrides: Partial<WorldMatter> = {}): WorldMatter {
+    return {
+      id: "test-matter",
+      kind: "civic",
+      sourceRef: { kind: "institution", id: "test-institution" },
+      status: "due",
+      visibility: "public",
+      summary: "A test matter.",
+      urgency: 40,
+      createdAt: INSTANT,
+      dueAt: null,
+      nextReviewAt: INSTANT,
+      lastReviewedAt: null,
+      requiredAuthority: [],
+      responsibleScopeRefs: [],
+      stakeholderRefs: [],
+      relevantFactIds: [],
+      standingPlanId: null,
+      supersedesMatterId: null,
+      parentMatterId: null,
+      offers: [],
+      dispositions: [],
+      resolutionFactIds: [],
+      provinceId: null,
+      intensity: 40,
+      reviews: 1,
+      pressureId: null,
+      createdAtStep: 1,
+      lastReviewedStep: 1,
+      nextReviewStep: 2,
+      ...overrides,
+    };
+  }
+
+  function worldWithMatter(matter: WorldMatter): WorldState {
+    return { ...base(), worldMatters: [matter] };
+  }
+
+  it("flips the named matter's offer outcome to intent_declared", () => {
+    const gm = session(worldWithMatter(testMatter()));
+    const outcome = gm.invoke(
+      call("declare_intent", { actorId: NPC, intent: "Attend to the civic business myself.", reason: "It is mine to handle.", matterIds: ["test-matter"] }),
+      NPC_PRINCIPAL,
+    );
+    expect(outcome.ok).toBe(true);
+    const declared = gm.result().declaredIntents.find((i) => i.actorId === NPC)!;
+    expect(declared.matterIds).toEqual(["test-matter"]);
+    const matter = gm.stagedWorld.worldMatters!.find((m) => m.id === "test-matter")!;
+    const offer = matter.offers.find((o) => o.actorRef.kind === "character" && o.actorRef.id === NPC)!;
+    expect(offer).toBeDefined();
+    expect(offer.outcome).toBe("intent_declared");
+    expect(offer.intentIds).toEqual([declared.id]);
+  });
+
+  it("accepts a declare_intent naming an unknown matter id without refusing it, and records nothing extra", () => {
+    const gm = session(worldWithMatter(testMatter()));
+    const outcome = gm.invoke(
+      call("declare_intent", { actorId: NPC, intent: "Do something unrelated entirely.", reason: "My own business.", matterIds: ["no-such-matter"] }),
+      NPC_PRINCIPAL,
+    );
+    expect(outcome.ok).toBe(true);
+    const matter = gm.stagedWorld.worldMatters!.find((m) => m.id === "test-matter")!;
+    expect(matter.offers).toEqual([]);
   });
 });

@@ -1,5 +1,13 @@
 import type { WorldState } from "../world/world-state";
 import type { Force, GovernmentInstitution, MoneyAccount, PoliticalProcedure } from "../material-state";
+import type { AuthorityIndex } from "../authority/authority-grant";
+import { checkAuthority } from "../authority/authority-grant";
+import type { Fact } from "../world/facts";
+import { factsVisibleTo } from "../world/facts";
+import { deriveWorldInstant } from "../world/clock";
+import type { WorldInstant } from "../world/instant";
+import type { WorldMatter } from "../matters/schema";
+import type { ProjectedMatter } from "../matters/projection";
 import type { StarContext } from "./schema";
 import { deriveTheatre } from "./selector";
 
@@ -28,6 +36,15 @@ export interface StarContextPayload {
   readonly publicAccounts: readonly Pick<MoneyAccount, "id" | "owner" | "balance" | "currencyId">[];
   readonly activeSiegeSettlementIds: readonly string[];
   readonly activeWarPolityPairs: readonly { readonly polityAId: string; readonly polityBId: string }[];
+  /**
+   * World matters (docs/plans/ai-world-matters-runtime.md, Phase 2) whose
+   * source, province, or named entities fall within this context's own
+   * scope -- a simpler, scope-based filter than `projectMattersForCharacter`'s
+   * per-character ladder, since a star context has no single observing
+   * character to route through. Bounded and urgency-ordered, same as the
+   * per-character projection.
+   */
+  readonly matters: readonly ProjectedMatter[];
 }
 
 function provinceIdsInScope(world: WorldState, context: StarContext): readonly string[] {
@@ -73,9 +90,73 @@ function polityIdsInScope(world: WorldState, context: StarContext): readonly str
   return [...controllers];
 }
 
-export function buildStarContextPayload(world: WorldState, context: StarContext): StarContextPayload {
+const MAX_STAR_CONTEXT_MATTERS = 5;
+const TERMINAL_MATTER_STATUSES: ReadonlySet<WorldMatter["status"]> = new Set(["addressed", "cancelled"]);
+
+function mattersInScope(world: WorldState, context: StarContext, provinceIds: ReadonlySet<string>, polityIds: ReadonlySet<string>): WorldMatter[] {
+  return (world.worldMatters ?? []).filter((matter) => {
+    if (TERMINAL_MATTER_STATUSES.has(matter.status)) return false;
+    if (matter.provinceId !== null && provinceIds.has(matter.provinceId)) return true;
+    const refs = [matter.sourceRef, ...matter.stakeholderRefs, ...matter.responsibleScopeRefs];
+    return refs.some(
+      (ref) =>
+        (ref.kind === context.scopeRef.kind && ref.id === context.scopeRef.id) ||
+        (ref.kind === "polity" && polityIds.has(ref.id)) ||
+        (ref.kind === "province" && provinceIds.has(ref.id)),
+    );
+  });
+}
+
+/**
+ * A simplified, scope-based projection for a matter this star context's own
+ * institutional records cover -- see `projectMattersForCharacter` for the
+ * richer per-character ladder this deliberately does not reproduce. The
+ * representative character (when this context has one) supplies fact
+ * visibility and any authority check; a context with no living
+ * representative sees only its own scope's public facts.
+ */
+function projectMatterForStarContext(world: WorldState, context: StarContext, matter: WorldMatter, authorityIndex: AuthorityIndex, facts: readonly Fact[], atInstant: WorldInstant): ProjectedMatter {
+  const observer = context.representativeCharacterId !== null ? { kind: "character" as const, id: context.representativeCharacterId } : context.scopeRef;
+  const visible = factsVisibleTo(facts, observer, atInstant);
+  const visibleIds = new Set(visible.map((f) => f.id));
+  const relevantAuthority = context.representativeCharacterId === null
+    ? []
+    : matter.requiredAuthority.map((requirement) => ({
+        requirement,
+        held: checkAuthority(authorityIndex, { holder: { kind: "character", id: context.representativeCharacterId! }, domain: requirement.domain, power: requirement.power, scope: requirement.scope }).authorized,
+      }));
+
+  return {
+    matterId: matter.id,
+    kind: matter.kind,
+    summary: matter.summary,
+    role: "representative",
+    whyRelevant: `Within ${context.label}'s institutional scope.`,
+    timing: matter.status,
+    urgency: matter.urgency,
+    dueAt: matter.dueAt,
+    knownEntities: [matter.sourceRef, ...matter.responsibleScopeRefs, ...matter.stakeholderRefs],
+    knownFactSummaries: matter.relevantFactIds.filter((id) => visibleIds.has(id)).map((id) => visible.find((f) => f.id === id)!.summary),
+    relevantAuthority,
+    existingPlanId: matter.standingPlanId,
+    lastDisposition: matter.dispositions.length > 0 ? matter.dispositions[matter.dispositions.length - 1]! : null,
+  };
+}
+
+export function buildStarContextPayload(
+  world: WorldState,
+  context: StarContext,
+  authorityIndex: AuthorityIndex = { grants: [] },
+  facts: readonly Fact[] = [],
+  atInstant: WorldInstant = deriveWorldInstant(world.elapsedStep),
+): StarContextPayload {
   const provinceIds = new Set(provinceIdsInScope(world, context));
   const polityIds = new Set(polityIdsInScope(world, context));
+
+  const matters = mattersInScope(world, context, provinceIds, polityIds)
+    .sort((a, b) => b.urgency - a.urgency || a.id.localeCompare(b.id))
+    .slice(0, MAX_STAR_CONTEXT_MATTERS)
+    .map((matter) => projectMatterForStarContext(world, context, matter, authorityIndex, facts, atInstant));
 
   const forces = world.material.forces.filter((force) => provinceIds.has(force.locationId) || polityIds.has(force.polityId));
   const institutions = world.material.institutions.filter((institution) => polityIds.has(institution.polityId));
@@ -98,5 +179,6 @@ export function buildStarContextPayload(world: WorldState, context: StarContext)
     publicAccounts: publicAccounts.map(({ id, owner, balance, currencyId }) => ({ id, owner, balance, currencyId })),
     activeSiegeSettlementIds,
     activeWarPolityPairs: activeWarPolityPairs.map(({ polityAId, polityBId }) => ({ polityAId, polityBId })),
+    matters,
   };
 }

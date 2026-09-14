@@ -320,6 +320,13 @@ const DeclareIntentArgsSchema = z
     reason: z.string().trim().min(1).max(400),
     /** Ids the actor believes are involved. Advisory: the interpreter verifies them. */
     referencedEntityIds: z.array(EntityIdSchema).max(8).default([]),
+    /**
+     * World matter ids (docs/plans/ai-world-matters-runtime.md, Phase 2)
+     * this intent addresses, if any -- advisory, like `referencedEntityIds`:
+     * a matter id this session's `staged.worldMatters` no longer recognizes
+     * is silently ignored rather than refusing the whole intent over it.
+     */
+    matterIds: z.array(z.string().min(1).max(400)).max(4).default([]),
   })
   .strict();
 

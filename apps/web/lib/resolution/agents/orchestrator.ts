@@ -3,6 +3,8 @@ import "server-only";
 import type { AiAdapter } from "@chronica/ai";
 import type {
   Fact,
+  GameMasterToolCall,
+  Principal,
   GameMasterSessionResult,
   OrderDirective,
   ScenarioChronicleRules,
@@ -16,6 +18,7 @@ import {
   buildAuthorityIndex,
   createGameMasterSession,
   factualEventToFact,
+  matterPriorityActors,
   MAX_RICH_AGENTS_PER_DECISION_POINT,
   MAX_STAR_CONTEXTS_PER_DECISION_POINT,
   selectAffectedAgentsForFacts,
@@ -29,6 +32,7 @@ import { runStarContextAgent } from "./star-context-agent";
 import { runIntentInterpreter } from "./interpreter-agent";
 import { runClosingAgent } from "./closing-agent";
 import { runAffectedAgents } from "./run-affected-agents";
+import { recordMatterOffers, type ActorTurnOutcome } from "../matters/offer-recording";
 
 /**
  * Bounds for the fresh-context reaction pass below (unified action runtime,
@@ -38,6 +42,8 @@ import { runAffectedAgents } from "./run-affected-agents";
  */
 const TURN_REACTION_ACTION_ALLOWANCE = 2;
 const TURN_REACTION_STAR_CONTEXT_MAX_STEPS = 3;
+/** Keep provider pressure bounded while reducing the initial actor phase's critical path. */
+const MAX_CONCURRENT_ACTOR_DECISIONS = 4;
 
 // The multi-agent dispatcher: one canonical mutator, several sequential LLM
 // conversations, and the only turn-resolution architecture (unified action
@@ -66,6 +72,18 @@ export interface RunGameMasterResult extends GameMasterSessionResult {
   readonly termination: "reported" | "step_budget" | "tool_budget" | "model_stopped" | "provider_error";
   readonly modelSteps: number;
   readonly providerError: string | null;
+  /**
+   * World matter ids this turn's `matterPriorityActors` routed to the
+   * player instead of an autonomous NPC pass (docs/plans/
+   * ai-world-matters-runtime.md, Phase 6 -- "Player intervention"). Fed
+   * into `computeInterventionScore` (`pipeline.ts`) as a categorical hard
+   * stop: the player holding responsibility for a due matter with no
+   * standing instruction answering it is decided here, at the turn level,
+   * where the player's own id is actually known -- not inside the event
+   * loop's `runMatterReviewTick`, which is a generic `EventHandler` with no
+   * player-id parameter at all.
+   */
+  readonly playerResponsibleMatterIds: readonly string[];
 }
 
 export interface RunMultiAgentTurnInput {
@@ -86,6 +104,20 @@ export interface RunMultiAgentTurnInput {
 
 function tag(atStep: number): string {
   return `[multi-agent:step-${atStep}]`;
+}
+
+async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, run: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (true) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await run(items[index]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 export async function runMultiAgentTurn(adapter: AiAdapter, input: RunMultiAgentTurnInput): Promise<RunGameMasterResult> {
@@ -121,36 +153,101 @@ export async function runMultiAgentTurn(adapter: AiAdapter, input: RunMultiAgent
   let providerError: string | null = null;
   let modelSteps = 0;
 
-  const selected = selectRelevantActors(session.stagedWorld, input.actorCharacterId, authorityIndex, input.atStep, MAX_RICH_AGENTS_PER_DECISION_POINT, MAX_STAR_CONTEXTS_PER_DECISION_POINT);
+  // World-matters priority (docs/plans/ai-world-matters-runtime.md, Phase 2 --
+  // "Selection budgets"): a bounded, deduplicated set of characters this
+  // turn's due/overdue matters name, merged into the same relevance selector
+  // rather than run as a second unbounded NPC pass. The player is never among
+  // these -- `matterPriorityActors` routes a player-responsible matter's id
+  // into `playerResponsibleMatterIds` instead, which is Phase 3's
+  // (player-intervention) concern, not consumed here.
+  const matterPriority = matterPriorityActors(session.stagedWorld, authorityIndex, input.atStep, input.actorCharacterId);
+  const selected = selectRelevantActors(
+    session.stagedWorld,
+    input.actorCharacterId,
+    authorityIndex,
+    input.atStep,
+    MAX_RICH_AGENTS_PER_DECISION_POINT,
+    MAX_STAR_CONTEXTS_PER_DECISION_POINT,
+    matterPriority.priorityCharacterIds,
+    matterPriority.reasons,
+  );
 
-  for (const actor of selected) {
-    if (session.isFinished || session.exhausted) break;
+  // Actors deliberate over the same decision-point snapshot. Their sessions
+  // are deliberately isolated, so provider completion order cannot decide
+  // intent order or mutate the canonical staged world.  The fan-in below
+  // replays accepted direct responses and intent declarations in `selected`'s
+  // stable relevance/id order before the one shared interpreter runs.
+  const decisionWorld = session.stagedWorld;
+  const actorDecisions = await mapWithConcurrency(selected, MAX_CONCURRENT_ACTOR_DECISIONS, async (actor) => {
+    const decisionSession = createGameMasterSession({
+      world: decisionWorld,
+      atStep: input.atStep,
+      actorCharacterId: input.actorCharacterId,
+      directiveIds: [],
+      directives: [],
+      definedActions: input.definedActions ?? [],
+      allowInventedActions: input.allowInventedActions ?? true,
+      scenarioLife: input.scenarioLife,
+      scenarioClock: input.scenarioClock,
+      maxToolCalls: 120,
+      enableWorldTools: true,
+      worldToolAuthorityIndex: authorityIndex,
+    });
+    const acceptedCalls: { call: GameMasterToolCall; principal: Principal }[] = [];
+    const recordAccepted = (principal: Principal) => (call: GameMasterToolCall) => {
+      if (call.name !== "declare_intent") acceptedCalls.push({ call, principal });
+    };
     const result = actor.kind === "npc"
       ? await runNpcAgent({
-        adapter,
-        session,
-        world: session.stagedWorld,
-        atStep: input.atStep,
-        characterId: actor.characterId,
-        authorityIndex,
-        facts,
-        atInstant: input.atInstant,
-        actionAllowance: actor.actionAllowance,
+        adapter, session: decisionSession, world: decisionWorld, atStep: input.atStep, characterId: actor.characterId,
+        authorityIndex, facts, atInstant: input.atInstant, actionAllowance: actor.actionAllowance,
+        onAcceptedToolCall: recordAccepted({ kind: "npc", characterId: actor.characterId }),
       })
       : await runStarContextAgent({
-        adapter,
-        session,
-        world: session.stagedWorld,
-        atStep: input.atStep,
-        context: actor.context,
-        authorityIndex,
-        facts,
-        atInstant: input.atInstant,
+        adapter, session: decisionSession, world: decisionWorld, atStep: input.atStep, context: actor.context,
+        authorityIndex, facts, atInstant: input.atInstant,
+        onAcceptedToolCall: recordAccepted({ kind: "star_context", representativeCharacterId: actor.context.representativeCharacterId, scopeRef: actor.context.scopeRef }),
       });
-    if (result === undefined) continue;
-    modelSteps += result.modelSteps;
-    if (result.providerError !== null) providerError = result.providerError;
-    console.log(`${tag(input.atStep)} ${actor.kind} agent (${actor.kind === "npc" ? actor.characterId : actor.context.id}) finished: termination=${result.termination} toolCalls=${result.toolCallsMade}`);
+    return { actor, result, acceptedCalls, intents: decisionSession.result().declaredIntents };
+  });
+
+  for (const decision of actorDecisions) {
+    const { actor, result } = decision;
+    if (result !== undefined) {
+      modelSteps += result.modelSteps;
+      if (result.providerError !== null) providerError = result.providerError;
+      console.log(`${tag(input.atStep)} ${actor.kind} agent (${actor.kind === "npc" ? actor.characterId : actor.context.id}) finished: termination=${result.termination} toolCalls=${result.toolCallsMade}`);
+    }
+    for (const accepted of decision.acceptedCalls) session.invoke(accepted.call, accepted.principal);
+    for (const intent of decision.intents) {
+      const principal: Principal = actor.kind === "npc"
+        ? { kind: "npc", characterId: actor.characterId }
+        : { kind: "star_context", representativeCharacterId: actor.context.representativeCharacterId, scopeRef: actor.context.scopeRef };
+      session.invoke({ id: `merge-${intent.id}`, name: "declare_intent", arguments: {
+        actorId: intent.actorId, intent: intent.intent, reason: intent.reason, referencedEntityIds: intent.referencedEntityIds, matterIds: intent.matterIds,
+      } }, principal);
+    }
+  }
+
+  // World-matters offer recording (Phase 2 -- "4. Offer"): fold each selected
+  // actor's turn outcome (did it declare anything, once merged into the
+  // shared session's own intent ids above) into the matters it was actually
+  // offered. Runs once per turn, after every actor has had its say and every
+  // accepted intent has been merged, so it reads the same final intent ids
+  // the rest of this turn's report does.
+  {
+    const mergedIntents = session.result().declaredIntents;
+    const outcomesByCharacterId = new Map<string, ActorTurnOutcome>();
+    for (const { actor } of actorDecisions) {
+      const characterId = actor.kind === "npc" ? actor.characterId : actor.context.representativeCharacterId;
+      if (characterId === null || outcomesByCharacterId.has(characterId)) continue;
+      outcomesByCharacterId.set(characterId, {
+        characterId,
+        declaredIntentIds: mergedIntents.filter((intent) => intent.actorId === characterId).map((intent) => intent.id),
+      });
+    }
+    const withOffers = recordMatterOffers(session.stagedWorld, authorityIndex, [...outcomesByCharacterId.values()], input.atStep, input.atInstant);
+    session.mergeWorldMatters(withOffers.worldMatters ?? []);
   }
 
   // Everything the actors -- the player included -- decided, carried out in
@@ -219,5 +316,5 @@ export async function runMultiAgentTurn(adapter: AiAdapter, input: RunMultiAgent
   console.log(
     `${tag(input.atStep)} finished: termination=${termination} modelSteps=${modelSteps} actions=${result.executedInvocations.length} reads=${result.readCallCount}`,
   );
-  return { ...result, termination, modelSteps, providerError };
+  return { ...result, termination, modelSteps, providerError, playerResponsibleMatterIds: matterPriority.playerResponsibleMatterIds };
 }

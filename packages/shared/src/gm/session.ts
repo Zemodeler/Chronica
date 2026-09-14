@@ -48,6 +48,7 @@ import { ALL_WORLD_TOOLS, ALL_WORLD_READ_TOOLS, buildWorldToolCatalog } from "..
 import type { AuthorityIndex } from "../authority/authority-grant";
 import { actorIdForPrincipal, canActAsPrincipal, type Principal } from "../authority/principal";
 import type { Fact } from "../world/facts";
+import type { MatterOffer, WorldMatter } from "../matters/schema";
 
 const WORLD_TOOL_BY_NAME = new Map(ALL_WORLD_TOOLS.map((tool) => [tool.id, tool]));
 const WORLD_READ_TOOL_BY_NAME = new Map(ALL_WORLD_READ_TOOLS.map((tool) => [tool.id, tool]));
@@ -119,6 +120,8 @@ export interface DeclaredIntent {
   readonly intent: string;
   readonly reason: string;
   readonly referencedEntityIds: readonly string[];
+  /** World matter ids (docs/plans/ai-world-matters-runtime.md, Phase 2) this intent addresses, if the actor named any. */
+  readonly matterIds: readonly string[];
   readonly atStep: number;
   /** Set once an action taken for this actor by the interpreter applies. */
   carried: boolean;
@@ -567,6 +570,7 @@ export class GameMasterSession {
         intent: directive.text,
         reason: "The player's own order.",
         referencedEntityIds: [],
+        matterIds: [],
         atStep: options.atStep,
         carried: false,
         planId,
@@ -583,6 +587,19 @@ export class GameMasterSession {
 
   get stagedWorld(): WorldState {
     return this.staged;
+  }
+
+  /**
+   * External hook for folding a non-tool-call world update back into the
+   * staged world (docs/plans/ai-world-matters-runtime.md, Phase 2): the
+   * orchestrator's own offer-recording pass runs after its actor-decision
+   * loop, over outcomes that were never a single `invoke()`-able tool call,
+   * so it has nothing else to go through. Replaces `worldMatters` wholesale
+   * -- the caller is expected to have derived `matters` from this exact
+   * `stagedWorld`, so this is never a stale overwrite in practice.
+   */
+  mergeWorldMatters(matters: WorldMatter[]): void {
+    this.staged = { ...this.staged, worldMatters: matters };
   }
 
   get isFinished(): boolean {
@@ -847,7 +864,37 @@ export class GameMasterSession {
       const stages: ActionPlan["stages"] = p.stages.map(s => s.id !== stage.id ? s : { ...s, status: effectiveResult.ok ? "completed" : "blocked", statusReason: effectiveResult.ok ? null : effectiveResult.factual.slice(0, 600), resultFactIds: effectiveResult.factId ? [effectiveResult.factId] : [], completedAtStep: effectiveResult.ok ? this.atStep : s.completedAtStep });
       return { ...p, stages, spent: p.spent + (overBudget ? 0 : debit), updatedAtStep: this.atStep, status: stages.every(s => s.status === "completed" && s.repeatEverySteps === null) ? "completed" : "active" };
     }) };
+    if (effectiveResult.ok && effectiveResult.factId !== undefined) this.recordMatterResolutionFact(plan, effectiveResult.factId);
     return effectiveResult;
+  }
+
+  /**
+   * Appends a fact id to `resolutionFactIds` for every world matter this
+   * plan addresses (docs/plans/ai-world-matters-runtime.md, Phase 3 --
+   * "A matter is not a plan": the matter links to the plan and its
+   * resulting facts without absorbing their responsibilities). A matter is
+   * addressed when its own `standingPlanId`/`sourceMatterIds` links here,
+   * OR when the declared intent that originated this plan named matter ids
+   * directly (`recordMatterIntentOffers` already flipped their offer;
+   * carrying the resulting fact id onward is this method's own job) --
+   * combining both sources rather than picking one, since a plan can be
+   * matter-linked either way depending on how it was originated. A matter
+   * id neither source names is left untouched, same silent-skip rule as
+   * `recordMatterIntentOffers`.
+   */
+  private recordMatterResolutionFact(plan: ActionPlan, factId: string): void {
+    const matters = this.staged.worldMatters;
+    if (matters === undefined || matters.length === 0) return;
+    const fromIntent = this.declaredIntents.find((intent) => intent.planId === plan.id)?.matterIds ?? [];
+    const matterIds = new Set([...plan.sourceMatterIds, ...fromIntent]);
+    if (matterIds.size === 0) return;
+    let changed = false;
+    const next = matters.map((matter) => {
+      if (!matterIds.has(matter.id) || matter.resolutionFactIds.includes(factId)) return matter;
+      changed = true;
+      return { ...matter, resolutionFactIds: [...matter.resolutionFactIds, factId].slice(-12) } satisfies WorldMatter;
+    });
+    if (changed) this.staged = { ...this.staged, worldMatters: next };
   }
 
   /**
@@ -1542,7 +1589,7 @@ export class GameMasterSession {
     if (!parsed.success) {
       return { ok: false, finished: false, factual: `That intent was rejected: ${parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}.` };
     }
-    const { actorId, intent, reason, referencedEntityIds } = parsed.data;
+    const { actorId, intent, reason, referencedEntityIds, matterIds } = parsed.data;
     const principalRefusal = this.principalRefusal(actorId);
     if (principalRefusal !== null) return { ok: false, finished: false, factual: principalRefusal };
     const actor = this.staged.characters.find((character) => character.id === actorId);
@@ -1554,6 +1601,7 @@ export class GameMasterSession {
     }
 
     const id = `intent-${this.atStep}-${this.declaredIntents.length + 1}`;
+    if (matterIds.length > 0) this.recordMatterIntentOffers(matterIds, actorId, id);
     // Unified action runtime, requirement 2: an NPC's declared intent is a
     // real, persistent `ActionPlan` from the moment it is declared -- the
     // same interpretation/stage/duration/reservation/budget mechanics a
@@ -1573,6 +1621,7 @@ export class GameMasterSession {
       intent,
       reason,
       referencedEntityIds,
+      matterIds,
       atStep: this.atStep,
       carried: false,
       ...(planId === undefined ? {} : { planId }),
@@ -1584,6 +1633,43 @@ export class GameMasterSession {
         ? `Noted [${id}]. Nothing has happened yet: this is read afterwards and carried out as far as the world allows.`
         : `Noted [${id}] as plan ${planId}. Nothing has happened yet: interpret_plan then execute_plan_stage carry it out as far as the world allows.`,
     };
+  }
+
+  /**
+   * Flips each named matter's own `responsible`-role offer for `actorId` to
+   * `intent_declared` (docs/plans/ai-world-matters-runtime.md, Phase 2 --
+   * "5. Intention and interpretation": "The matter ID becomes causal metadata
+   * on the intent"). A matter id `staged.worldMatters` no longer recognizes
+   * -- deleted, superseded, or simply never offered -- is skipped silently:
+   * naming a matter id the actor cannot currently see must never refuse an
+   * otherwise valid intent.
+   */
+  private recordMatterIntentOffers(matterIds: readonly string[], actorId: string, intentId: string): void {
+    const matters = this.staged.worldMatters;
+    if (matters === undefined || matters.length === 0) return;
+    const wanted = new Set(matterIds);
+    let changed = false;
+    const next = matters.map((matter) => {
+      if (!wanted.has(matter.id)) return matter;
+      const actorRef = { kind: "character" as const, id: actorId };
+      const existingIndex = matter.offers.findIndex((offer) => offer.actorRef.kind === "character" && offer.actorRef.id === actorId);
+      let offers: MatterOffer[];
+      if (existingIndex === -1) {
+        offers = [
+          ...matter.offers,
+          { actorRef, offeredAt: deriveWorldInstant(this.atStep), role: "responsible", knowledgeFactIds: [], outcome: "intent_declared", intentIds: [intentId] },
+        ];
+      } else {
+        offers = matter.offers.map((offer, index) =>
+          index === existingIndex
+            ? { ...offer, outcome: "intent_declared" as const, intentIds: [...offer.intentIds, intentId].slice(-4) }
+            : offer,
+        );
+      }
+      changed = true;
+      return { ...matter, offers } satisfies WorldMatter;
+    });
+    if (changed) this.staged = { ...this.staged, worldMatters: next };
   }
 
   private recordRefusalAftermath(args: Record<string, unknown>): GameMasterToolOutcome {
