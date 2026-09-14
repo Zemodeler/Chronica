@@ -2,11 +2,12 @@ import "server-only";
 
 import {
   createPressure,
+  deriveWorldInstant,
   refreshPressure,
   type FactualEvent,
   type WorldState,
 } from "@chronica/shared";
-import { advanceWorldDevelopments } from "./world-development-scheduler";
+import { advanceMatterSchedule } from "./matters/matter-scheduler";
 
 /**
  * Deterministic, state-backed pressures which make the political and military
@@ -145,6 +146,10 @@ export function advanceWorldDynamics(world: WorldState, atStep: number): WorldDy
     }
   }
 
-  const developments = advanceWorldDevelopments(next, atStep);
-  return { world: developments.world, events: [...events, ...developments.events] };
+  // World matters (docs/plans/ai-world-matters-runtime.md, Phase 1): no
+  // richer `WorldState.instant` continuity exists yet at this call site, so
+  // `deriveWorldInstant(atStep)` is the documented migration-fallback
+  // derivation (`world/clock.ts`) -- not a new clock abstraction.
+  const matters = advanceMatterSchedule(next, deriveWorldInstant(atStep), atStep);
+  return { world: matters.world, events: [...events, ...matters.events] };
 }

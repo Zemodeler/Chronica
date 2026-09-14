@@ -33,6 +33,17 @@ describe("WorldStateSchema — phase 2 backward compatibility", () => {
     }
   });
 
+  it("parses a snapshot with neither worldDevelopments nor worldMatters, leaving worldMatters undefined", () => {
+    const legacy = stripPhase2Fields(firstPunicWarScenario.initialWorld) as Record<string, unknown>;
+    delete legacy.worldDevelopments;
+    delete legacy.worldMatters;
+    const result = WorldStateSchema.safeParse(legacy);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.worldDevelopments).toBeUndefined();
+    expect(result.data.worldMatters).toBeUndefined();
+  });
+
   it("parses a legacy relation cause with no `dimensions` map", () => {
     const legacy = stripPhase2Fields(firstPunicWarScenario.initialWorld) as { characters: Record<string, unknown>[] };
     legacy.characters[0]!.relations = [{

@@ -55,6 +55,11 @@ const INTERNAL_FACT_ACTION_IDS = new Set([
   "plan_update",
   "record_entity_note",
   "world_development",
+  // World matters (docs/plans/ai-world-matters-runtime.md): a matter being
+  // detected, refreshed, or cancelled is scheduling/attention state, not
+  // evidence that anyone acted -- same rule as `world_development` above,
+  // which this is gradually superseding (`matters/advance.ts`).
+  "world_matter",
   "world_incursion_pressure",
   "roman_senate_scrutiny",
 ]);
