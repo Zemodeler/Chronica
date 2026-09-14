@@ -325,6 +325,21 @@ export const ActionPlanSchema = z.object({
   createdAtStep: ElapsedStepSchema,
   updatedAtStep: ElapsedStepSchema,
   terminalReason: z.string().max(600).nullable().default(null),
+  /** World matters (docs/plans/ai-world-matters-runtime.md, Phase 3) this plan addresses, if any. */
+  sourceMatterIds: z.array(EntityIdSchema).max(4).default([]),
+  /**
+   * Routine continuation without a fresh AI judgment every review (doc,
+   * "Standing plans and routine continuity"). `null` for an ordinary plan;
+   * set only when the plan's own owner authorized recurring, unattended
+   * work. `standing-plans.ts`'s `continuationDraftFor`/`standingPlanInvalidations`
+   * read this; nothing here expands what the owner actually authorized.
+   */
+  standing: z.object({
+    cadenceSteps: z.number().int().positive(),
+    nextReviewStep: ElapsedStepSchema,
+    exceptions: z.array(z.string().max(400)).max(6),
+    expiresAtStep: ElapsedStepSchema.nullable(),
+  }).strict().nullable().default(null),
 }).strict();
 export type ActionPlan = z.infer<typeof ActionPlanSchema>;
 

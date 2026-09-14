@@ -39,6 +39,23 @@ function actionPlan(overrides: Partial<ActionPlan> = {}): ActionPlan {
   });
 }
 
+describe("ActionPlanSchema.sourceMatterIds/standing (world matters, Phase 3)", () => {
+  it("parses a pre-existing plan object with neither field, defaulting both", () => {
+    const plan = actionPlan();
+    expect(plan.sourceMatterIds).toEqual([]);
+    expect(plan.standing).toBeNull();
+  });
+
+  it("accepts a standing configuration", () => {
+    const plan = actionPlan({
+      sourceMatterIds: ["income-assessment:sicily:period-3"],
+      standing: { cadenceSteps: 30, nextReviewStep: 31, exceptions: ["unless control is lost"], expiresAtStep: null },
+    });
+    expect(plan.sourceMatterIds).toEqual(["income-assessment:sicily:period-3"]);
+    expect(plan.standing).toEqual({ cadenceSteps: 30, nextReviewStep: 31, exceptions: ["unless control is lost"], expiresAtStep: null });
+  });
+});
+
 describe("upgradeActionPlanToScheduledEvents (docs/32, Phase 7)", () => {
   it("schedules an action_phase event at an in-progress stage's expected completion", () => {
     const started = startPlanStage(actionPlan(), "march", 2, {
