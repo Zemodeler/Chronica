@@ -290,6 +290,57 @@ describe("internal resolution records", () => {
     expect(entries).toEqual([]);
   });
 
+  it("never promotes a world_matter fact into a Chronicle event, even if materialConsequence is set", () => {
+    const matterEvent: FactualEvent = {
+      id: "fact-1-matter",
+      atStep: 1,
+      kind: "action",
+      actionId: "world_matter",
+      actorId: "hanno",
+      parameters: { matterId: "scarcity:sicily" },
+      summary: "Food insecurity in Sicily puts relief and provisioning before its governing authority.",
+      // A matter being detected/refreshed is scheduling state, not evidence
+      // that anyone acted -- this must be excluded regardless of this flag.
+      materialConsequence: true,
+    };
+
+    const entries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      events: [matterEvent],
+      report: report(),
+      directiveIds: [],
+    });
+
+    expect(entries).toEqual([]);
+  });
+
+  it("promotes a genuine answer_diplomatic_message fact into a Chronicle event (world matters, Phase 7)", () => {
+    const answerEvent: FactualEvent = {
+      id: "fact-1-answer",
+      atStep: 1,
+      kind: "action",
+      actionId: "answer_diplomatic_message",
+      actorId: PLAYER,
+      parameters: { messageId: "msg-1", answer: "accepted" },
+      summary: "Marcus Atilius accepts Hanno's peace offer.",
+      materialConsequence: true,
+    };
+
+    const entries = buildChronicleFromFacts({
+      world: world(),
+      atStep: 1,
+      actorCharacterId: PLAYER,
+      events: [answerEvent],
+      report: report(),
+      directiveIds: [],
+    });
+
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries.some((entry) => entry.body.includes("peace offer"))).toBe(true);
+  });
+
   it("does not represent preparing a plan as a carried-out player order", () => {
     const planFact: FactualEvent = {
       id: "fact-1-plan",

@@ -26,6 +26,8 @@ export * from "./material-view";
 export * from "./material/character-accounts";
 export * from "./material/legitimacy";
 export * from "./material/province-material";
+export * from "./material/treasury-bootstrap";
+export * from "./matters/index";
 export * from "./warfare/index";
 export * from "./web";
 export * from "./world/index";

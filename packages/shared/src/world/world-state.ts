@@ -26,6 +26,7 @@ import { LegacyCauseSchema } from "../continuity/continuity";
 import { CampaignMemorySchema, EMPTY_CAMPAIGN_MEMORY } from "../gm/campaign-memory";
 import { DiplomaticMessageSchema, PolityStanceSchema } from "./diplomacy";
 import { WorldDevelopmentSchema } from "./developments";
+import { WorldMatterSchema } from "../matters/schema";
 import { ActionPlanSchema } from "../actions/plans";
 import { ActorActivitySchema } from "../actions/activity";
 import { ResourceReservationSchema } from "../actions/reservations";
@@ -70,8 +71,15 @@ export const WorldStateSchema = z
      * `elapsedStep` still owns turn/snapshot identity.
      */
     instant: WorldInstantSchema.optional(),
-    /** Optional for existing snapshots; the scheduler materializes it on first use. */
+    /**
+     * @deprecated Read-only legacy scheduler state, superseded by
+     * `worldMatters` (docs/plans/ai-world-matters-runtime.md, Phase 1).
+     * Migrated via `upgradeWorldDevelopmentsToMatters`; never written to by
+     * new code. Optional for existing snapshots.
+     */
     worldDevelopments: z.array(WorldDevelopmentSchema).optional(),
+    /** Optional for existing snapshots; the matter scheduler materializes it on first use. See `matters/schema.ts`. */
+    worldMatters: z.array(WorldMatterSchema).optional(),
     /**
      * Universal plan model (unified action runtime): one plan collection for
      * player, NPC, and world-originated work alike, generalized over
