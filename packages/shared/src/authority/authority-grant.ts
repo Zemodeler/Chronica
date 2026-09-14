@@ -301,6 +301,17 @@ export const DEFAULT_AUTHORITY_REQUIREMENTS: Readonly<Record<string, WorkflowAut
   assign_command: { domain: "military", power: "command", scopeKind: "force", scopeParam: "forceId" },
   transfer_gold: { domain: "fiscal", power: "spend", scopeKind: "account", scopeParam: "sourceAccountId" },
   remove_gold: { domain: "fiscal", power: "spend", scopeKind: "account", scopeParam: "accountId" },
+  // World matters, Phase 4 (docs/plans/ai-world-matters-runtime.md): fiscal
+  // authority is scoped by whichever account each of these actually moves
+  // money through, not a generic "spend" grant. `collect_revenue`'s own
+  // scope is its beneficiary account, resolved from `incomeSourceId` rather
+  // than a direct parameter, so a requirement keyed to one of its call
+  // parameters cannot express it -- deliberately left untagged here;
+  // `pay_obligation` names its payer account directly and so can be.
+  // `restructure_obligation` changes only recorded terms, moves no money,
+  // and is gated by `invokerAuthority` alone.
+  add_gold: { domain: "fiscal", power: "spend", scopeKind: "account", scopeParam: "accountId" },
+  pay_obligation: { domain: "fiscal", power: "spend", scopeKind: "account", scopeParam: "payerAccountId" },
 };
 
 /**
