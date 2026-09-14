@@ -4,6 +4,7 @@ import type { WorldState } from "../world/world-state";
 import { buildAuthorityIndex } from "../authority/authority-grant";
 import { issueOrderAttempt } from "../authority/order-attempt";
 import { emitFacts, NO_INTERVENTION_SIGNALS, type FactDraft } from "../world/facts";
+import type { WorldMatter } from "../matters/schema";
 import { buildNpcAgentContext } from "./npc-context";
 
 function world(): WorldState {
@@ -88,5 +89,41 @@ describe("buildNpcAgentContext (docs/32, Part B.4)", () => {
     const index = buildAuthorityIndex({ officeSeats: [], forces: w.material.forces }, [], [], 1);
     const context = buildNpcAgentContext(w, "hanno", index, [], atInstant);
     expect(context?.ownAuthorityGrants.every((g) => g.holder.kind === "character" && g.holder.id === "hanno")).toBe(true);
+  });
+
+  it("populates the matters projection and respects fact visibility (docs/plans/ai-world-matters-runtime.md, Phase 2)", () => {
+    const w = world();
+    const index = buildAuthorityIndex({ officeSeats: [], forces: w.material.forces }, [], [], 1);
+    const drafts: FactDraft[] = [
+      {
+        time: atInstant, atStep: 1, kind: "public_fact", summary: "Public news about the matter.",
+        affectedEntities: [], resourceChanges: [], authorityChange: undefined, evidence: null,
+        visibility: "public", discovery: { state: "public", knowableAtInstant: atInstant, discoveredBy: [] },
+        eligibleReactionScopes: ["world"], interventionSignals: NO_INTERVENTION_SIGNALS, sourceEventId: null, sourceActionId: null, causalDepth: 0,
+      },
+      {
+        time: atInstant, atStep: 1, kind: "private_fact", summary: "A secret hanno never learns.",
+        affectedEntities: [], resourceChanges: [], authorityChange: undefined, evidence: null,
+        visibility: "private", discovery: { state: "private", knowableAtInstant: atInstant, discoveredBy: [] },
+        eligibleReactionScopes: ["world"], interventionSignals: NO_INTERVENTION_SIGNALS, sourceEventId: null, sourceActionId: null, causalDepth: 0,
+      },
+    ];
+    const facts = emitFacts(drafts, (() => { let n = 0; return () => `fact-${n++}`; })());
+    const matter: WorldMatter = {
+      id: "test-matter", kind: "civic", sourceRef: { kind: "institution", id: "test-institution" },
+      status: "due", visibility: "public", summary: "A test civic matter.", urgency: 30,
+      createdAt: atInstant, dueAt: null, nextReviewAt: atInstant, lastReviewedAt: null,
+      requiredAuthority: [], responsibleScopeRefs: [], stakeholderRefs: [],
+      relevantFactIds: facts.map((f) => f.id),
+      standingPlanId: null, supersedesMatterId: null, parentMatterId: null,
+      offers: [], dispositions: [], resolutionFactIds: [],
+      provinceId: "ita-72843720b81376294924159-sicily-west", // hanno's own location
+      intensity: 30, reviews: 1, pressureId: null, createdAtStep: 1, lastReviewedStep: 1, nextReviewStep: 2,
+    };
+    const w2: WorldState = { ...w, worldMatters: [matter] };
+    const context = buildNpcAgentContext(w2, "hanno", index, facts, atInstant);
+    expect(context?.matters).toHaveLength(1);
+    expect(context?.matters[0]?.matterId).toBe("test-matter");
+    expect(context?.matters[0]?.knownFactSummaries).toEqual(["Public news about the matter."]);
   });
 });

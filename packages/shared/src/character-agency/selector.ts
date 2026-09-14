@@ -18,6 +18,21 @@ import type { OrderPartyRef } from "../actions/orders";
 export const MAX_CHARACTERS_PER_TURN = 8;
 
 /**
+ * The score boost a `priorityCharacterIds` entry receives (docs/plans/
+ * ai-world-matters-runtime.md, "Selection budgets": "genuinely due
+ * responsibilities compete fairly with general relevance"). Below `nemesis`
+ * (1000) and the top of the chronicle-score band (capped at 600) so a due
+ * matter never automatically outranks the character the story is actually
+ * centered on -- but above every other single rule here (recent-encounter,
+ * active-goal/plot, storyline, office, command, war, siege, continuity), so
+ * a genuine standing responsibility is not quietly outcompeted by background
+ * relevance either. A documented constant rather than an inline number,
+ * because two unrelated callers rely on this exact boost: a pending-dialogue
+ * commitment (pre-existing) and, now, a matter-driven priority actor.
+ */
+export const PRIORITY_CHARACTER_SCORE_BOOST = 500;
+
+/**
  * Relevance is not merely a sorting hint: it determines how much agency an
  * NPC receives this turn. A distant background actor gets one meaningful
  * move; a nemesis, head of state, or person at the centre of a crisis may
@@ -50,6 +65,7 @@ export function selectRelevantCharacters(
   playerCharacterId: string,
   maxCharacters = MAX_CHARACTERS_PER_TURN,
   priorityCharacterIds: readonly string[] = [],
+  priorityReasons?: ReadonlyMap<string, readonly string[]>,
 ): SelectedCharacter[] {
   const scored: ScoredCharacter[] = [];
   // Multi-slot nemeses: all active ones score highly
@@ -128,8 +144,13 @@ export function selectRelevantCharacters(
     // A pending conversation promise is a direct, durable reason to consider
     // this character during the same turn's advice phase.
     if (priorityCharacterIdSet.has(character.id)) {
-      score += 500;
-      reasons.push("pending-dialogue-commitment");
+      score += PRIORITY_CHARACTER_SCORE_BOOST;
+      const specificReasons = priorityReasons?.get(character.id);
+      if (specificReasons !== undefined && specificReasons.length > 0) {
+        reasons.push(...specificReasons);
+      } else {
+        reasons.push("pending-dialogue-commitment");
+      }
     }
 
     // Rule 1: Nemesis — always included, top priority.
@@ -315,8 +336,9 @@ export function selectRelevantActors(
   maxTotal = MAX_RICH_AGENTS_PER_DECISION_POINT,
   maxStarContexts = MAX_STAR_CONTEXTS_PER_DECISION_POINT,
   priorityCharacterIds: readonly string[] = [],
+  priorityReasons?: ReadonlyMap<string, readonly string[]>,
 ): SelectedActor[] {
-  const npcCandidates: SelectedActor[] = selectRelevantCharacters(world, playerCharacterId, world.characters.length, priorityCharacterIds).map((c) => ({
+  const npcCandidates: SelectedActor[] = selectRelevantCharacters(world, playerCharacterId, world.characters.length, priorityCharacterIds, priorityReasons).map((c) => ({
     kind: "npc",
     ...c,
   }));

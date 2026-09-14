@@ -61,3 +61,28 @@ describe("selectRelevantActors (docs/32, Phase 7 -- combined NPC+star-context bu
     expect(selected.length).toBeLessThanOrEqual(1);
   });
 });
+
+describe("matter-driven priority actors (docs/plans/ai-world-matters-runtime.md, Phase 2)", () => {
+  it("includes a matter-priority character id in the result, carrying its specific reasons instead of the generic label", () => {
+    const reasons = new Map<string, readonly string[]>([["hanno", ["A treasury obligation is due (recorded responsibility)."]]]);
+    const selected = selectRelevantActors(world(), "marcus-atilius", index(), 1, MAX_RICH_AGENTS_PER_DECISION_POINT, MAX_STAR_CONTEXTS_PER_DECISION_POINT, ["hanno"], reasons);
+    const hannoEntry = selected.find((s) => s.kind === "npc" && s.characterId === "hanno");
+    expect(hannoEntry?.kind).toBe("npc");
+    if (hannoEntry?.kind === "npc") {
+      expect(hannoEntry.reasons).toContain("A treasury obligation is due (recorded responsibility).");
+      expect(hannoEntry.reasons).not.toContain("pending-dialogue-commitment");
+    }
+  });
+
+  it("still respects the combined total and star-context budgets when a matter priority id is supplied", () => {
+    const selected = selectRelevantActors(world(), "marcus-atilius", index(), 1, MAX_RICH_AGENTS_PER_DECISION_POINT, MAX_STAR_CONTEXTS_PER_DECISION_POINT, ["hanno"]);
+    expect(selected.length).toBeLessThanOrEqual(MAX_RICH_AGENTS_PER_DECISION_POINT);
+    expect(selected.filter((s) => s.kind === "star_context").length).toBeLessThanOrEqual(MAX_STAR_CONTEXTS_PER_DECISION_POINT);
+  });
+
+  it("falls back to the generic reason when no specific reasons are supplied for a priority id", () => {
+    const selected = selectRelevantCharacters(world(), "marcus-atilius", MAX_RICH_AGENTS_PER_DECISION_POINT, ["hanno"]);
+    const hannoEntry = selected.find((s) => s.characterId === "hanno");
+    expect(hannoEntry?.reasons).toContain("pending-dialogue-commitment");
+  });
+});

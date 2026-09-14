@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { AiAdapter } from "@chronica/ai";
-import type { AuthorityIndex, Fact, GameMasterSession, Principal, StarContext, StarContextPayload, WorldInstant, WorldState } from "@chronica/shared";
+import type { AuthorityIndex, Fact, GameMasterSession, GameMasterToolCall, Principal, StarContext, StarContextPayload, WorldInstant, WorldState } from "@chronica/shared";
 import { RECORD_ENTITY_NOTE_TOOL, buildStarContextPayload, factsVisibleTo } from "@chronica/shared";
 import { runAgentLoop, type AgentLoopResult } from "./agent-loop";
 import { npcToolSurface } from "./npc-agent";
@@ -25,6 +25,7 @@ export interface RunStarContextAgentInput {
   readonly facts: readonly Fact[];
   readonly atInstant: WorldInstant;
   readonly maxSteps?: number;
+  readonly onAcceptedToolCall?: (call: GameMasterToolCall) => void;
 }
 
 function summarizePayload(context: StarContext, payload: StarContextPayload, visibleFacts: readonly Fact[]): string {
@@ -44,11 +45,18 @@ function summarizePayload(context: StarContext, payload: StarContextPayload, vis
   if (visibleFacts.length > 0) {
     lines.push(`What has happened at or affecting this scope: ${visibleFacts.slice(0, 12).map((f) => f.summary).join(" | ")}`);
   }
+  if (payload.matters.length > 0) {
+    lines.push(
+      `What requires attention within this scope (you decide whether and how to respond, or to do nothing): ${payload.matters
+        .map((m) => `[${m.timing}, urgency ${m.urgency}] ${m.summary}`)
+        .join(" | ")}`,
+    );
+  }
   return lines.join("\n");
 }
 
 export async function runStarContextAgent(input: RunStarContextAgentInput): Promise<AgentLoopResult> {
-  const payload = buildStarContextPayload(input.world, input.context);
+  const payload = buildStarContextPayload(input.world, input.context, input.authorityIndex, input.facts, input.atInstant);
   const visibleFacts = factsVisibleTo(input.facts, input.context.scopeRef, input.atInstant);
   const representativeId = input.context.representativeCharacterId;
 
@@ -81,5 +89,6 @@ export async function runStarContextAgent(input: RunStarContextAgentInput): Prom
     tools,
     maxSteps: input.maxSteps ?? (representativeId !== null ? 4 : 2),
     logTag: `[star-context-agent:${input.context.id}:step-${input.atStep}]`,
+    ...(input.onAcceptedToolCall === undefined ? {} : { onAcceptedToolCall: input.onAcceptedToolCall }),
   });
 }

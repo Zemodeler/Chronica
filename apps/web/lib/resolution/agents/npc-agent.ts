@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { AiAdapter } from "@chronica/ai";
-import type { AuthorityIndex, Fact, GameMasterSession, GameMasterToolDefinition, NpcAgentContext, Principal, WorldInstant, WorldState } from "@chronica/shared";
+import type { AuthorityIndex, Fact, GameMasterSession, GameMasterToolCall, GameMasterToolDefinition, NpcAgentContext, Principal, WorldInstant, WorldState } from "@chronica/shared";
 import { buildNpcAgentContext } from "@chronica/shared";
 import { runAgentLoop, type AgentLoopResult } from "./agent-loop";
 
@@ -68,6 +68,7 @@ export interface RunNpcAgentInput {
   readonly atInstant: WorldInstant;
   /** `SelectedCharacter.actionAllowance` -- this agent's own tool-call-budget bound (B.4). */
   readonly actionAllowance: number;
+  readonly onAcceptedToolCall?: (call: GameMasterToolCall) => void;
 }
 
 function summarize(context: NpcAgentContext): string {
@@ -90,6 +91,20 @@ function summarize(context: NpcAgentContext): string {
   }
   if (context.visibleFacts.length > 0) {
     lines.push(`What has happened that you know of: ${context.visibleFacts.slice(0, 12).map((f) => f.summary).join(" | ")}`);
+  }
+  if (context.matters.length > 0) {
+    // Circumstantial framing, matching the doc's own worked example (docs/plans/ai-world-matters-runtime.md,
+    // "4. Offer") -- state what is true and what this character knows, never an instruction to act on it.
+    lines.push("What requires attention (you decide whether and how to respond, or to do nothing):");
+    for (const matter of context.matters) {
+      const authorityLine = matter.relevantAuthority.length === 0
+        ? ""
+        : ` ${matter.relevantAuthority.map((a) => `You ${a.held ? "hold" : "do not hold"} ${a.requirement.power} authority (${a.requirement.domain}) over ${a.requirement.scope.kind}:${a.requirement.scope.id}.`).join(" ")}`;
+      const factsLine = matter.knownFactSummaries.length === 0 ? "" : ` What you know: ${matter.knownFactSummaries.join(" | ")}.`;
+      const dispositionLine = matter.lastDisposition === null ? "" : ` Last time this was addressed: ${matter.lastDisposition.kind}.`;
+      const planLine = matter.existingPlanId === null ? "" : ` There is already a plan in motion for this.`;
+      lines.push(`- [${matter.timing}, urgency ${matter.urgency}] ${matter.summary} (${matter.whyRelevant})${authorityLine}${factsLine}${dispositionLine}${planLine}`);
+    }
   }
   return lines.join("\n");
 }
@@ -124,5 +139,6 @@ export async function runNpcAgent(input: RunNpcAgentInput): Promise<AgentLoopRes
     tools,
     maxSteps: Math.max(2, input.actionAllowance),
     logTag: `[npc-agent:${input.characterId}:step-${input.atStep}]`,
+    ...(input.onAcceptedToolCall === undefined ? {} : { onAcceptedToolCall: input.onAcceptedToolCall }),
   });
 }
