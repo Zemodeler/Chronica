@@ -11,6 +11,8 @@ import { buildPoliticalInspectorView } from "../characters/political-inspector";
 import { evaluateSupport, positionFromScore, dueProcedures, netSupportWeight } from "../character-agency/political-resolver";
 import { assessFeasibility } from "../actions/feasibility";
 import { InterpretedClaimSchema } from "../actions/plans";
+import { availableBalance } from "../world/money-reservations";
+import { unansweredMessages } from "../world/diplomacy";
 
 // Bounded read tools (GM refactor, requirement 5).
 //
@@ -742,6 +744,147 @@ const assessFeasibilityTool: AnyReadToolDefinition = {
   },
 };
 
+// -- inspect_account (world matters, Phase 4) ---------------------------------
+
+/** Whether `characterId` may see this account's balance/transaction detail: ownership, an explicit `AccountAccess` grant, or scenario-wide private-info access -- the same gate `visible()` applies to a private fact, not a separate rule. */
+function hasAccountAccess(world: WorldState, characterId: string, accountId: string, privateInformation: PrivateInformationPolicy): boolean {
+  if (privateInformation === "allow") return true;
+  const account = world.material.accounts.find((a) => a.id === accountId);
+  if (account?.owner.kind === "character" && account.owner.id === characterId) return true;
+  return world.material.accountAccess.some((access) => access.characterId === characterId && access.accountId === accountId);
+}
+
+const inspectAccount: AnyReadToolDefinition = {
+  name: "inspect_account",
+  description:
+    "One money account's balance, available balance (after active reservations), recent transactions, and the obligations/income sources tied to it. Full detail only if you own the account or hold recorded access to it; otherwise only its existence and currency -- the coarse view a rival plausibly has, never its exact balance.",
+  parametersSchema: z.object({ accountId: EntityIdSchema }).strict(),
+  read(context, params: { accountId: string }) {
+    const { world } = context;
+    const account = world.material.accounts.find((a) => a.id === params.accountId);
+    if (!account) return notFound("account", params.accountId);
+    if (!hasAccountAccess(world, context.actorCharacterId, account.id, context.privateInformation)) {
+      return {
+        ok: true,
+        data: { accountId: account.id, owner: account.owner, status: account.status, accessible: false },
+        factual: `Account "${account.id}" exists (owner: ${account.owner.kind} "${account.owner.id}", status ${account.status}). You have no recorded access to its balance or transactions.`,
+      };
+    }
+    const available = availableBalance(world.material, account.id);
+    const recentTransactions = world.material.transactions
+      .filter((t) => t.sourceAccountId === account.id || t.destinationAccountId === account.id)
+      .slice(-MAX_LIST);
+    const obligations = world.material.obligations.filter((o) => o.payerAccountId === account.id || o.recipientAccountId === account.id);
+    const incomeSources = world.material.incomeSources.filter((s) => s.beneficiaryAccountId === account.id);
+    return {
+      ok: true,
+      data: { accountId: account.id, owner: account.owner, balance: account.balance, availableBalance: available, status: account.status, recentTransactions, obligations, incomeSources },
+      factual: lines([
+        `Account "${account.id}" (owner: ${account.owner.kind} "${account.owner.id}"): balance ${account.balance}, available ${available}.`,
+        obligations.length > 0 ? `Obligations against it: ${obligations.map((o) => `${o.label} (${o.amount}${o.arrears > 0 ? `, ${o.arrears} in arrears` : ""})`).join("; ")}.` : null,
+        incomeSources.length > 0 ? `Income sources crediting it: ${incomeSources.map((s) => `${s.label} (${s.amount}/period)`).join("; ")}.` : null,
+        recentTransactions.length > 0
+          ? `Recent transactions: ${recentTransactions.map((t) => `step ${t.atStep}: ${t.amount} (${t.kind}, ${t.cause.explanation})`).join("; ")}.`
+          : "No recorded transactions.",
+      ]),
+    };
+  },
+};
+
+// -- inspect_income_source (world matters, Phase 4) ---------------------------
+
+const inspectIncomeSource: AnyReadToolDefinition = {
+  name: "inspect_income_source",
+  description:
+    "One income source's terms (amount, cadence, next due step) plus anchors for judging what a real collection should look like this period: its own declared amount, and the origin's current recorded condition. These are anchors for your own judgment, never a formula collect_revenue enforces beyond refusing an implausible departure from them.",
+  parametersSchema: z.object({ incomeSourceId: EntityIdSchema }).strict(),
+  read(context, params: { incomeSourceId: string }) {
+    const { world } = context;
+    const source = world.material.incomeSources.find((s) => s.id === params.incomeSourceId);
+    if (!source) return notFound("income source", params.incomeSourceId);
+    const recentReceipts = world.material.transactions
+      .filter((t) => t.cause.kind === "scheduled_income" && t.cause.id === source.id)
+      .slice(-6)
+      .map((t) => ({ atStep: t.atStep, amount: t.amount }));
+    const originCondition = source.originKind === "polity"
+      ? world.map.provinces.filter((p) => p.controllerPolityId === source.originId).map((p) => {
+        const material = world.material.provinceMaterial.find((m) => m.provinceId === p.id);
+        return material ? { provinceId: p.id, foodSecurityBps: material.foodSecurityBps, warDamageBps: material.warDamageBps, stabilityBps: material.stabilityBps } : null;
+      }).filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+      : [];
+    return {
+      ok: true,
+      data: { source, recentReceipts, originCondition },
+      factual: lines([
+        `"${source.label}" (${source.kind}): ${source.amount}/period every ${source.cadenceSteps} steps, next due step ${source.nextDueStep}, ${source.active ? "active" : "inactive"}.`,
+        recentReceipts.length > 0
+          ? `Recent receipts: ${recentReceipts.map((r) => `step ${r.atStep}: ${r.amount}`).join("; ")}.`
+          : "No recorded receipts yet.",
+        originCondition.length > 0
+          ? `Origin condition: ${originCondition.map((c) => `${c.provinceId} (food security ${c.foodSecurityBps}bps, war damage ${c.warDamageBps}bps, stability ${c.stabilityBps}bps)`).join("; ")}.`
+          : null,
+      ]),
+    };
+  },
+};
+
+// -- list_due_obligations (world matters, Phase 4) -----------------------------
+
+const listDueObligations: AnyReadToolDefinition = {
+  name: "list_due_obligations",
+  description:
+    "Every active money obligation due this step or already carrying arrears -- army pay, upkeep, salary, tribute, pension. Shows what is owed and by which account; it does not decide whether, or how much, to pay. Use pay_obligation to actually pay one, in full or in part.",
+  parametersSchema: z.object({}).strict(),
+  read(context) {
+    const { world } = context;
+    const due = world.material.obligations
+      .filter((o) => o.active && (o.nextDueStep <= context.atStep || o.arrears > 0))
+      .slice(0, MAX_LIST)
+      .map((o) => ({ obligationId: o.id, kind: o.kind, label: o.label, payerAccountId: o.payerAccountId, recipientAccountId: o.recipientAccountId ?? null, amount: o.amount, arrears: o.arrears, missedPeriods: o.missedPeriods, nextDueStep: o.nextDueStep }));
+    return {
+      ok: true,
+      data: { dueObligations: due },
+      factual:
+        due.length === 0
+          ? "No obligation is due or in arrears this step."
+          : due.map((o) => `${o.label} (${o.obligationId}): ${o.amount} due from "${o.payerAccountId}"${o.arrears > 0 ? `, plus ${o.arrears} in arrears over ${o.missedPeriods} missed period(s)` : ""}.`).join("\n"),
+    };
+  },
+};
+
+// -- list_pending_diplomatic_messages (world matters, Phase 7) ---------------
+
+const listPendingDiplomaticMessages: AnyReadToolDefinition = {
+  name: "list_pending_diplomatic_messages",
+  description:
+    "Every diplomatic message awaiting a reply, oldest first: who sent it, what it proposes, and when a reply is due if the sender said. Answer one with answer_diplomatic_message, or withdraw your own unanswered message with withdraw_diplomatic_message. A message not listed here has already been answered.",
+  parametersSchema: z.object({}).strict(),
+  read(context) {
+    const { world } = context;
+    const pending = unansweredMessages(world.diplomacy).slice(0, MAX_LIST).map((message) => ({
+      messageId: message.id,
+      kind: message.kind,
+      fromPolityId: message.fromPolityId,
+      fromCharacterName: characterName(world, message.fromCharacterId),
+      toPolityId: message.toPolityId,
+      toCharacterName: message.toCharacterId === null ? null : characterName(world, message.toCharacterId),
+      subject: message.subject,
+      terms: message.terms,
+      replyDueByStep: message.replyDueByStep,
+    }));
+    return {
+      ok: true,
+      data: { pendingMessages: pending },
+      factual:
+        pending.length === 0
+          ? "No diplomatic message is currently awaiting a reply."
+          : pending
+              .map((m) => `${m.messageId}: ${m.fromCharacterName} (${m.fromPolityId}) to ${m.toCharacterName ?? polityName(world, m.toPolityId)} -- ${m.subject}${m.replyDueByStep !== null ? `, reply due step ${m.replyDueByStep}` : ""}.`)
+              .join("\n"),
+    };
+  },
+};
+
 export const GAME_MASTER_READ_TOOLS: readonly AnyReadToolDefinition[] = [
   inspectWorld,
   inspectForce,
@@ -756,6 +899,10 @@ export const GAME_MASTER_READ_TOOLS: readonly AnyReadToolDefinition[] = [
   listDueLifeReviews,
   listDuePoliticalProcedures,
   assessFeasibilityTool,
+  inspectAccount,
+  inspectIncomeSource,
+  listDueObligations,
+  listPendingDiplomaticMessages,
 ];
 
 export const READ_TOOL_BY_NAME: ReadonlyMap<string, AnyReadToolDefinition> = new Map(
