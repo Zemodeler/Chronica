@@ -247,12 +247,23 @@ export async function commitResolution(
       })
       .where(eq(turns.id, input.turnId));
 
-    // Write world snapshot
+    // `persistOpeningWorld` may already have written the pre-turn snapshot
+    // for this exact collecting turn (for example while materialising a
+    // player character). Resolution owns the replacement of that provisional
+    // view with the authoritative resolved state; it must not turn that
+    // normal lifecycle into a duplicate-key failure.
     await tx.insert(worldSnapshots).values({
       turnId: input.turnId,
       state: JSON.parse(worldJson) as unknown,
       schemaVersion: input.newWorld.schemaVersion,
       stateHash,
+    }).onConflictDoUpdate({
+      target: worldSnapshots.turnId,
+      set: {
+        state: JSON.parse(worldJson) as unknown,
+        schemaVersion: input.newWorld.schemaVersion,
+        stateHash,
+      },
     });
 
     // Write chronicle entries
@@ -451,7 +462,14 @@ export async function failTurn(
   turnId: string,
   _reason: string,
 ): Promise<void> {
-  const [turn] = await db.select({ resolveAttempts: turns.resolveAttempts }).from(turns).where(eq(turns.id, turnId)).limit(1);
+  const [turn] = await db
+    .select({ resolveAttempts: turns.resolveAttempts, status: turns.status })
+    .from(turns)
+    .where(eq(turns.id, turnId))
+    .limit(1);
+  // A late worker can observe an error after another resolver has committed
+  // the turn. Never turn confirmed news back into a queued duplicate.
+  if (turn === undefined || turn.status !== "resolving") return;
   const resolveAttempts = (turn?.resolveAttempts ?? 0) + 1;
   const status = resolveAttempts >= MAX_TURN_RESOLVE_ATTEMPTS ? "failed" : "queued";
   await db.update(turns).set({ status, resolveAttempts, claimedBy: null, claimExpiresAt: null }).where(eq(turns.id, turnId));

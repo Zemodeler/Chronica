@@ -44,6 +44,47 @@ function closingOnlyAdapter(directiveIds: readonly string[] = []): AiAdapter {
 const fakeDb = {} as Parameters<typeof runMultiAgentTurn>[1]["db"];
 
 describe("runMultiAgentTurn (docs/32, Part B.1/B.7)", () => {
+  it("collects independent actor decisions concurrently before the serial closing pass", async () => {
+    let activeActorCalls = 0;
+    let maxActiveActorCalls = 0;
+    const adapter: AiAdapter = {
+      call: () => Promise.resolve({ content: "{}", model: "mock", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }),
+      callWithTools: async (_operation, _systemPrompt, messages, tools): Promise<AiToolCallResult> => {
+        const offersFinish = tools.some((tool) => tool.name === "finish_turn");
+        if (offersFinish) {
+          return {
+            content: "", model: "mock", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+            toolCalls: [{ id: "call-finish", name: "finish_turn", arguments: { report: { directiveOutcomes: [], events: [], openThreads: [], turnSummary: "Actors considered the moment." } } }],
+            stopReason: "tool_calls",
+          };
+        }
+        // The opening call of every actor has one message. Hold it briefly:
+        // a serial dispatcher could never make this counter exceed one.
+        if (messages.length === 1) {
+          activeActorCalls += 1;
+          maxActiveActorCalls = Math.max(maxActiveActorCalls, activeActorCalls);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          activeActorCalls -= 1;
+        }
+        return { content: "", model: "mock", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, toolCalls: [], stopReason: "stop" };
+      },
+    };
+
+    await runMultiAgentTurn(adapter, {
+      db: fakeDb,
+      gameId: "test-game",
+      world: world(),
+      atStep: 1,
+      atInstant: { day: 0, minute: 0 },
+      actorCharacterId: "marcus-atilius",
+      directives: [],
+      scenarioGovernment: undefined,
+      scenarioChronicle: undefined,
+    });
+
+    expect(maxActiveActorCalls).toBeGreaterThan(1);
+  });
+
   it("sequences player, selected actors, and the closing pass to a reported finish against a shared session", async () => {
     const result = await runMultiAgentTurn(closingOnlyAdapter(), {
       db: fakeDb,

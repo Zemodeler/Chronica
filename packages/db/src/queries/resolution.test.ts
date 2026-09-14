@@ -178,6 +178,35 @@ describe.skipIf(process.env.SKIP_DB_TESTS === "true")("commitResolution atomicit
       await deleteGame(gameId);
     }
   });
+
+  it("replaces a provisional opening snapshot when resolving that same turn", async () => {
+    if (!reachable) {
+      console.warn("Skipping live-Postgres atomicity test: could not reach", DATABASE_URL);
+      return;
+    }
+    const { gameId, turnId } = await seedGameAndTurn();
+    try {
+      const opening = world();
+      await db.insert(worldSnapshots).values({
+        turnId,
+        state: opening,
+        schemaVersion: opening.schemaVersion,
+        stateHash: "provisional",
+      });
+
+      const resolved = { ...opening, elapsedStep: 1 };
+      await commitResolution(db, {
+        gameId, turnId, newWorld: resolved, elapsedStepEnd: 1,
+        chronicleEntries: [], stopReason: "player_decision",
+      });
+
+      const [snapshot] = await db.select().from(worldSnapshots).where(eq(worldSnapshots.turnId, turnId));
+      expect(snapshot?.state).toEqual(resolved);
+      expect(snapshot?.stateHash).not.toBe("provisional");
+    } finally {
+      await deleteGame(gameId);
+    }
+  });
 });
 
 describe.skipIf(process.env.SKIP_DB_TESTS === "true")("turn-claim resilience (unified action runtime, Stage 7; live Postgres)", () => {

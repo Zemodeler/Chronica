@@ -29,6 +29,11 @@ export interface AgentLoopInput {
   readonly tools: readonly GameMasterToolDefinition[];
   readonly maxSteps: number;
   readonly logTag: string;
+  /**
+   * Used by isolated actor-decision sessions: accepted non-intent calls are
+   * replayed later on the canonical session in a deterministic order.
+   */
+  readonly onAcceptedToolCall?: (call: GameMasterToolCall) => void;
 }
 
 export interface AgentLoopResult {
@@ -46,6 +51,7 @@ const NO_TOOL_CALL_NUDGE =
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
   const { adapter, operation, session, tools, maxSteps, logTag } = input;
   const allowedNames = new Set(tools.map((tool) => tool.name));
+  const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
   const toolDefinitions: AiToolDefinition[] = tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters }));
 
   const messages: AiConversationMessage[] = [{ role: "user", content: input.openingMessage }];
@@ -92,6 +98,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       toolCallsMade += 1;
       const call: GameMasterToolCall = { id: toolCall.id, name: toolCall.name, arguments: toolCall.arguments };
       const outcome = session.invoke(call, input.principal);
+      // Reads have no state to replay, and declarations are revalidated and
+      // merged explicitly by the concurrent actor collector.
+      const tool = toolsByName.get(call.name);
+      if (outcome.ok && tool?.kind !== "read" && tool?.kind !== "intent") input.onAcceptedToolCall?.(call);
       console.log(`${logTag} ${toolCall.name} -> ${outcome.ok ? "accepted" : "refused"}`);
       return { callId: toolCall.id, name: toolCall.name, content: outcome.factual };
     });
