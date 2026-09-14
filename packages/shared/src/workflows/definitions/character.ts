@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { WorldState } from "../../world/world-state";
 import { EntityIdSchema } from "../../material-state";
 import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
 import { vacateOfficeSeatsFor } from "../../characters/succession";
@@ -6,6 +7,43 @@ import { settleEstate } from "../../characters/inheritance";
 
 /** Default years-per-step used when no scenario clock is available to a workflow. */
 const DEFAULT_STEPS_PER_YEAR = 4;
+
+/**
+ * Verifies a claimed `authorization.procedureId` actually is what it says
+ * it is (docs/plans/ai-world-matters-runtime.md, "Institutional time":
+ * "Any appointment authorized by a procedure must verify that the real
+ * procedure and its recorded disposition support that exact workflow" --
+ * before this, `authorization` was accepted and stored on the seat's
+ * `appointmentProcedureId`/`removalProcedureId` without ever being checked
+ * against the procedure it names). Returns a refusal reason, or `null` when
+ * the authorization holds (or none was offered at all -- the "restricted
+ * shortcut" path this deliberately leaves untouched, see
+ * `character.test.ts`'s own tests for it). Checks only the structural
+ * fields (`characterId`/`officeId`) a real procedure would have recorded,
+ * never free-text fields like a removal's `reason`, which may legitimately
+ * be restated at execution time.
+ */
+function verifiedProcedureAuthorization(
+  world: WorldState,
+  authorization: { readonly procedureId: string } | undefined,
+  expected: { readonly linkedWorkflowId: string; readonly matchParams: Readonly<Record<string, unknown>> },
+): string | null {
+  if (authorization === undefined) return null;
+  const procedure = world.material.politicalProcedures.find((p) => p.id === authorization.procedureId);
+  if (!procedure) return `No political procedure "${authorization.procedureId}" exists.`;
+  if (procedure.stage !== "resolved" || procedure.outcome !== "passed") {
+    return `Procedure "${procedure.id}" is not a resolved, passed authorization (stage: ${procedure.stage}, outcome: ${procedure.outcome ?? "none"}).`;
+  }
+  if (procedure.linkedWorkflowId !== expected.linkedWorkflowId) {
+    return `Procedure "${procedure.id}" authorizes "${procedure.linkedWorkflowId}", not "${expected.linkedWorkflowId}".`;
+  }
+  for (const [key, value] of Object.entries(expected.matchParams)) {
+    if (key in procedure.linkedWorkflowParams && procedure.linkedWorkflowParams[key] !== value) {
+      return `Procedure "${procedure.id}" authorized ${key} "${String(procedure.linkedWorkflowParams[key])}", not "${String(value)}".`;
+    }
+  }
+  return null;
+}
 
 export const characterWorkflows: AnyWorkflowDefinition[] = [
   defineWorkflow({
@@ -306,6 +344,11 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
     apply(world, params, context) {
       const character = world.characters.find((c) => c.id === params.characterId);
       if (!character) return null;
+      const authorizationError = verifiedProcedureAuthorization(world, params.authorization, {
+        linkedWorkflowId: "appoint_to_office",
+        matchParams: { characterId: params.characterId, officeId: params.officeId },
+      });
+      if (authorizationError !== null) return refuse(authorizationError);
       const seat = world.material.officeSeats.find((s) => s.officeId === params.officeId && s.seatIndex === 0);
       const procedureId = params.authorization?.procedureId ?? null;
       return {
@@ -368,6 +411,11 @@ export const characterWorkflows: AnyWorkflowDefinition[] = [
     apply(world, params) {
       const character = world.characters.find((c) => c.id === params.characterId);
       if (!character) return null;
+      const authorizationError = verifiedProcedureAuthorization(world, params.authorization, {
+        linkedWorkflowId: "remove_from_office",
+        matchParams: { characterId: params.characterId },
+      });
+      if (authorizationError !== null) return refuse(authorizationError);
       const officeId = character.officeId;
       const procedureId = params.authorization?.procedureId ?? null;
       return {

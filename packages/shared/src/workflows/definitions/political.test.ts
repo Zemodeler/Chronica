@@ -156,6 +156,41 @@ describe("end_war", () => {
   });
 });
 
+describe("expire_office_term (docs/plans/ai-world-matters-runtime.md, \"Institutional time\")", () => {
+  it("mechanically vacates a seat once its own term has expired", () => {
+    const w = world();
+    // roman-command:seat:0 is seeded held by marcus-atilius, termExpiresAtStep 4.
+    const outcome = executeWorkflow(
+      { actionId: "expire_office_term", actorId: "system", parameters: { seatId: "roman-command:seat:0" } },
+      w,
+      4,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const seat = outcome.world.material.officeSeats.find((s) => s.id === "roman-command:seat:0")!;
+    expect(seat.status).toBe("vacant");
+    expect(seat.vacancyCause).toBe("term_expired");
+    expect(outcome.world.characters.find((c) => c.id === "marcus-atilius")?.officeId).toBeNull();
+  });
+
+  it("refuses when the term has not actually expired yet", () => {
+    const w = world();
+    const outcome = executeWorkflow(
+      { actionId: "expire_office_term", actorId: "system", parameters: { seatId: "roman-command:seat:0" } },
+      w,
+      1,
+    );
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("cannot be proposed directly by a player order or a character-directed source -- system-invoked only", () => {
+    const w = world();
+    const invocation = { actionId: "expire_office_term", actorId: "marcus-atilius", parameters: { seatId: "roman-command:seat:0" } };
+    const asPlayer = validateCandidate({ correlationId: "33333333-3333-3333-3333-333333333333", source: "player_directive", sourceRef: "d", sourceRationale: "", requestedInvocation: invocation }, w);
+    expect(asPlayer?.kind).toBe("authority_mismatch");
+  });
+});
+
 describe("rename_polity", () => {
   it("renames a polity", () => {
     const w = world();

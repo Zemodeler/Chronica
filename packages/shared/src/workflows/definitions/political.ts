@@ -4,6 +4,41 @@ import { defineWorkflow, refuse, type AnyWorkflowDefinition } from "../types";
 
 export const politicalWorkflows: AnyWorkflowDefinition[] = [
   defineWorkflow({
+    id: "expire_office_term",
+    description: "Mechanically vacate a seat once its own recorded term has expired -- system-invoked only, and only for a scenario whose own government rules make a term self-terminating (docs/plans/ai-world-matters-runtime.md, \"Institutional time\"). Not wired to any automatic caller yet: nothing in this codebase currently decides WHEN a scenario's rules call for this, so an untouched expired term leaves the seat held with an expired authority grant -- itself a live, contestable political matter -- rather than being silently vacated by this workflow running unprompted.",
+    category: "political",
+    invokerAuthority: ["system"],
+    parametersSchema: z.object({
+      seatId: EntityIdSchema,
+    }).strict(),
+    apply(world, params, context) {
+      const seat = world.material.officeSeats.find((s) => s.id === params.seatId);
+      if (!seat) return refuse(`No office seat "${params.seatId}" exists.`);
+      if (seat.status !== "held") return refuse(`Seat "${params.seatId}" is not currently held; nothing to expire.`);
+      if (seat.termExpiresAtStep === null || seat.termExpiresAtStep > context.atStep) {
+        return refuse(`Seat "${params.seatId}"'s term has not expired (expires: ${seat.termExpiresAtStep ?? "never"}).`);
+      }
+      const holder = world.characters.find((c) => c.id === seat.holderCharacterId);
+      return {
+        world: {
+          ...world,
+          characters: seat.holderCharacterId === null ? world.characters : world.characters.map((c) => (c.id === seat.holderCharacterId ? { ...c, officeId: null } : c)),
+          material: {
+            ...world.material,
+            officeSeats: world.material.officeSeats.map((s) =>
+              s.id === seat.id ? { ...s, holderCharacterId: null, status: "vacant" as const, vacancyCause: "term_expired" as const } : s,
+            ),
+          },
+        },
+        result: {
+          summary: `${holder?.name ?? "The seat's holder"}'s term in office ${seat.officeId} has mechanically expired; the seat is now vacant.`,
+          applied: true,
+        },
+      };
+    },
+  }),
+
+  defineWorkflow({
     id: "start_war",
     description: "Declare war between two polities. Creates a war entry in conflicts.",
     category: "political",

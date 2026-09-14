@@ -732,6 +732,31 @@ export const ForcePersonnelEventSchema = z.object({
   causeId: EntityIdSchema,
 });
 
+/**
+ * A force's lightweight supply continuity (docs/plans/ai-world-matters-runtime.md,
+ * "Supply and logistics", Phase 5). Deliberately not a second commodity
+ * economy: `lastConfirmedAtStep`/`sourceRef`/`routeProvinceIds` are
+ * inspectable continuity a `supply_review` matter and its detector read;
+ * only `purchase_supplies`/`requisition_supplies`/`forage`/
+ * `establish_supply_route`/`raid_supply_route` (`workflows/definitions/
+ * logistics.ts`) ever change them or `Force.provisionStatus`/
+ * `provisionedThroughStep` -- no detector mutates supply state itself.
+ * Defaulted so every existing `Force` (which predates this field) still
+ * parses unchanged.
+ */
+export const ForceSupplyStateSchema = z.object({
+  lastConfirmedAtStep: ElapsedStepSchema.nullable().default(null),
+  /** The ordinary source/route this force draws on, if any -- an account, province, or holding. */
+  sourceRef: z.object({ kind: z.string().min(1).max(40), id: EntityIdSchema }).strict().nullable().default(null),
+  routeProvinceIds: z.array(EntityIdSchema).max(8).default([]),
+  /** Short labels of known disruptions (a raided convoy, a blocked pass), not fact ids -- kept small and human-readable, not a foreign-key list into the fact log. */
+  disruptions: z.array(z.string().max(120)).max(6).default([]),
+  standingPlanId: EntityIdSchema.nullable().default(null),
+}).strict();
+export type ForceSupplyState = z.infer<typeof ForceSupplyStateSchema>;
+/** `Force.supply`'s value when a `Force` predating this field is read without it -- never written back silently; a workflow that actually changes supply state writes a real object instead. */
+export const DEFAULT_FORCE_SUPPLY_STATE: ForceSupplyState = { lastConfirmedAtStep: null, sourceRef: null, routeProvinceIds: [], disruptions: [], standingPlanId: null };
+
 export const ForceSchema = z.object({
   id: EntityIdSchema,
   name: z.string().trim().min(1).max(120),
@@ -751,6 +776,8 @@ export const ForceSchema = z.object({
   payObligationId: EntityIdSchema.nullable(),
   payArrearsPeriods: z.number().int().nonnegative(),
   history: z.array(ForcePersonnelEventSchema),
+  /** Optional -- see `DEFAULT_FORCE_SUPPLY_STATE`. Every existing `Force` literal across the codebase predates this field and stays valid without it. */
+  supply: ForceSupplyStateSchema.optional(),
 });
 export type Force = z.infer<typeof ForceSchema>;
 
