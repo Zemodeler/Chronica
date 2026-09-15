@@ -8,7 +8,7 @@ import { games, scenarios, turns, worldSnapshots, chronicleEntries } from "../sc
 import { users } from "../schema/auth";
 import { worldEvents, worldFacts } from "../schema/events";
 import { eq } from "drizzle-orm";
-import { claimTurnForResolution, commitResolution, failTurn, MAX_TURN_RESOLVE_ATTEMPTS, releaseExpiredTurnClaims, retryFailedTurn } from "./resolution";
+import { claimTurnForResolution, commitResolution, failTurn, getGameIdsNeedingResolution, MAX_TURN_RESOLVE_ATTEMPTS, releaseExpiredTurnClaims, retryFailedTurn } from "./resolution";
 import type { NewWorldEvent } from "./events";
 
 // A real, live-Postgres integration test (docs/32 corrective pass,
@@ -239,7 +239,7 @@ describe.skipIf(process.env.SKIP_DB_TESTS === "true")("turn-claim resilience (un
     return game!.id;
   }
 
-  async function seedTurn(gameId: string, status: "queued" | "resolving", extra: Partial<typeof turns.$inferInsert> = {}): Promise<string> {
+  async function seedTurn(gameId: string, status: "queued" | "resolving" | "collecting", extra: Partial<typeof turns.$inferInsert> = {}): Promise<string> {
     const [turn] = await db.insert(turns).values({
       gameId, index: 0, status, seed: `${gameId}:0`, openedAt: new Date(), elapsedStepStart: 0, ...extra,
     }).returning({ id: turns.id });
@@ -318,6 +318,7 @@ describe.skipIf(process.env.SKIP_DB_TESTS === "true")("turn-claim resilience (un
       expect(turn?.resolveAttempts).toBe(1);
       expect(turn?.claimedBy).toBeNull();
       expect(turn?.claimExpiresAt).toBeNull();
+      expect(turn?.lastFailureReason).toBe("provider error");
     } finally {
       await deleteGame(gameId);
     }
@@ -371,6 +372,46 @@ describe.skipIf(process.env.SKIP_DB_TESTS === "true")("turn-claim resilience (un
       expect(turn?.status).toBe("resolving");
     } finally {
       await deleteGame(gameId);
+    }
+  });
+
+  it("failTurn({ terminal: true }) marks a turn failed immediately, without spending the retry budget (AI-HANDSHAKE issue-02)", async () => {
+    if (!reachable) { console.warn("Skipping live-Postgres test: could not reach", DATABASE_URL); return; }
+    const gameId = await seedGame();
+    try {
+      const turnId = await seedTurn(gameId, "resolving", { claimedBy: "worker-1", claimExpiresAt: new Date(Date.now() + 60_000) });
+      await failTurn(db, turnId, "Queued turn's player is no longer active.", { terminal: true });
+      const [turn] = await db.select().from(turns).where(eq(turns.id, turnId));
+      expect(turn?.status).toBe("failed");
+      expect(turn?.resolveAttempts).toBe(1);
+      expect(turn?.lastFailureReason).toBe("Queued turn's player is no longer active.");
+    } finally {
+      await deleteGame(gameId);
+    }
+  });
+
+  it("getGameIdsNeedingResolution finds a queued turn and an expired-claim resolving turn, but not an unexpired claim or a collecting turn", async () => {
+    if (!reachable) { console.warn("Skipping live-Postgres test: could not reach", DATABASE_URL); return; }
+    const queuedGameId = await seedGame();
+    const expiredGameId = await seedGame();
+    const activeGameId = await seedGame();
+    const idleGameId = await seedGame();
+    try {
+      await seedTurn(queuedGameId, "queued");
+      await seedTurn(expiredGameId, "resolving", { claimedBy: "worker-1", claimExpiresAt: new Date(Date.now() - 1000) });
+      await seedTurn(activeGameId, "resolving", { claimedBy: "worker-1", claimExpiresAt: new Date(Date.now() + 60_000) });
+      await seedTurn(idleGameId, "collecting");
+
+      const gameIds = await getGameIdsNeedingResolution(db);
+
+      expect(gameIds).toEqual(expect.arrayContaining([queuedGameId, expiredGameId]));
+      expect(gameIds).not.toContain(activeGameId);
+      expect(gameIds).not.toContain(idleGameId);
+    } finally {
+      await deleteGame(queuedGameId);
+      await deleteGame(expiredGameId);
+      await deleteGame(activeGameId);
+      await deleteGame(idleGameId);
     }
   });
 });

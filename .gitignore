@@ -51,6 +51,7 @@ logs/
 /tmp/
 .ai-cache/
 *.prompt.local.*
+AI-HANDSHAKE-PROMPTS/
 
 # Developer-only GeoJSON fixtures. Never ship or publish supplied map sources.
 /apps/web/private-worlds/*.geojson

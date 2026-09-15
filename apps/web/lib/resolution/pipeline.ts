@@ -1,4 +1,5 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 
 // Turn resolution (Game Master architecture).
 //
@@ -68,8 +69,6 @@ import type { ChronicaDatabase, NewWorldEvent } from "@chronica/db";
 import {
   commitResolution,
   listActiveInventedWorkflows,
-  failTurn,
-  claimTurnForResolution,
   ingestChronicleEntries,
   getCharacterKnowledgebase,
   getGamePayerUserId,
@@ -80,7 +79,6 @@ import {
   markCharacterSocialEventsRejected,
 } from "@chronica/db";
 import type { ChronicleEntryInput } from "@chronica/db";
-import type { InventedWorkflowDefinition } from "@chronica/shared";
 import type { ResolutionProgress, ResolutionStep } from "./types";
 import { STEP_LABELS } from "./types";
 import {
@@ -311,8 +309,11 @@ export async function resolveTurn(
   const { gameId, turnId, world, batch, actorCharacterId, playerId } = input;
   _logTurnId = turnId;
 
-  const claimed = await claimTurnForResolution(db, turnId);
-  if (!claimed) return { workflowDownloads: [] };
+  // AI-HANDSHAKE issue-02: the caller (`resolveQueuedTurn` in dispatch.ts,
+  // this function's sole caller) now owns claiming the turn -- it claims
+  // before its own precondition checks too, so those go through the same
+  // durable failure lifecycle this function's catch below provides. Claiming
+  // again here would just fail against the caller's own claim.
 
   // Unified action runtime, "authoritative time continuity": the world's own
   // carried instant (set by the last commit's event queue/elastic
@@ -495,12 +496,17 @@ export async function resolveTurn(
     // Capabilities this campaign has already given itself. A world that once
     // learned how to send a gift or swear an oath does not have to relearn it
     // every turn -- the definition is persisted and handed back here.
-    const definedActions = await listActiveInventedWorkflows(db, gameId)
-      .then((rows) => rows.map((row) => row.definition))
+    const definedActionRows = await listActiveInventedWorkflows(db, gameId)
       .catch((err: unknown) => {
         console.error(`${tag()} [defined-actions] could not be loaded; this turn runs with built-ins only`, err);
-        return [] as InventedWorkflowDefinition[];
+        return [] as Awaited<ReturnType<typeof listActiveInventedWorkflows>>;
       });
+    const definedActions = definedActionRows.map((row) => row.definition);
+    // `invented_workflows.id` is the real database uuid this actionId already
+    // has (assigned when it was first defined, possibly turns ago) -- the
+    // game-master session only ever deals in `actionId` slugs, so a use of a
+    // pre-existing workflow needs this map to find the row it must reference.
+    const existingWorkflowIds = new Map(definedActionRows.map((row) => [row.definition.actionId, row.id]));
     // Campaign-defined workflows are available in normal play. A caller can
     // opt out only for a deliberately constrained environment.
     const allowInventedActions = process.env.CHRONICA_DISABLE_DEFINED_ACTIONS !== "true";
@@ -1347,21 +1353,32 @@ export async function resolveTurn(
       ),
     };
 
+    // `invented_workflows.id` is a real uuid primary key with no default, so
+    // each newly-defined action gets a freshly generated one here -- and that
+    // same id is recorded below so a use of it later in this same turn
+    // resolves to the row this insert is about to create.
+    const newWorkflowIds = new Map<string, string>();
     const definedWorkflows = gameMasterCompleted
-      ? gameMasterOutcome.definedActions.map((definition) => ({
-        id: `defined-${gameId}-${definition.actionId}`,
-        gameId,
-        definition,
-        status: "active" as const,
-      }))
+      ? gameMasterOutcome.definedActions.map((definition) => {
+        const id = randomUUID();
+        newWorkflowIds.set(definition.actionId, id);
+        return { id, gameId, definition, status: "active" as const };
+      })
       : [];
     const definedWorkflowUses = gameMasterCompleted
-      ? gameMasterOutcome.definedActionUses.map((use) => ({
-        workflowId: `defined-${gameId}-${use.actionId}`,
-        parameters: use.parameters,
-        resolvedPatch: use.resolvedPatch,
-        success: true,
-      }))
+      ? gameMasterOutcome.definedActionUses.flatMap((use) => {
+        const workflowId = newWorkflowIds.get(use.actionId) ?? existingWorkflowIds.get(use.actionId);
+        if (workflowId === undefined) {
+          console.error(`${tag()} [defined-actions] use of unknown action "${use.actionId}" -- dropping its use record`);
+          return [];
+        }
+        return [{
+          workflowId,
+          parameters: use.parameters,
+          resolvedPatch: use.resolvedPatch,
+          success: true,
+        }];
+      })
       : [];
 
     // A stage `execute_plan_stage` scheduled with `completesAtStep` (unified
@@ -1451,8 +1468,10 @@ export async function resolveTurn(
     emit(onProgress, "commit", true);
     return { workflowDownloads: [] };
   } catch (error) {
+    // The caller (`resolveQueuedTurn`) records this durably via `failTurn` --
+    // it wraps this whole call in the same try/catch it uses for its own
+    // precondition checks, so there is exactly one call site for that.
     console.error("[resolution] pipeline failed", error);
-    await failTurn(db, turnId, String(error));
     throw error;
   }
 }
