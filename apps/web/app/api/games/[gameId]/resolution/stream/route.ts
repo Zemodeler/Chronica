@@ -48,7 +48,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ game
           ]);
           const turn = newsTurn ?? latestTurn;
           if (turn === undefined) { send({ error: "Game not found." }); await finish(); return; }
-          if (turn.status === "failed") { send({ error: "Resolution failed." }); await finish(); return; }
+          // Distinguished from every other `error` payload above (a
+          // transient connection/lookup problem) so the client can offer a
+          // retry instead of treating this like any other stream hiccup --
+          // resolve_attempts is exhausted (MAX_TURN_RESOLVE_ATTEMPTS,
+          // packages/db/src/queries/resolution.ts) and nothing here will
+          // change until the player asks for a retry.
+          if (turn.status === "failed") { send({ error: "Resolution failed after several attempts.", failed: true }); await finish(); return; }
           if (turn.status === "news" || turn.status === "resolved") {
             send({ step: "done", label: "Complete", done: true });
             await finish();

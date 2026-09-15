@@ -37,6 +37,13 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
   const [steps, setSteps] = useState<ResolutionStep[]>([]);
   const [currentStep, setCurrentStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Distinguished from a transient stream `error` (a dropped connection, a
+  // momentary lookup miss): this means resolve_attempts is exhausted
+  // (MAX_TURN_RESOLVE_ATTEMPTS) and the turn will not change state again on
+  // its own. Kept separate so the overlay can persist and offer a retry
+  // instead of auto-clearing the way a normal completion does.
+  const [resolutionFailed, setResolutionFailed] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [currentOrder, setCurrentOrder] = useState<{ rawText: string } | null>(null);
   const [turnStatus, setTurnStatus] = useState<string | null>(null);
   // Interrupt (docs/22): dismisses the full-screen progress overlay and
@@ -81,6 +88,7 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
     setSteps([]);
     setCurrentStep(null);
     setError(null);
+    setResolutionFailed(false);
     setResolving(true);
     setDismissed(false);
 
@@ -88,9 +96,10 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
     sseRef.current = sse;
 
     sse.onmessage = (event) => {
-      const data = JSON.parse(event.data as string) as ResolutionStep & { error?: string; workflowDownloads?: Array<{ fileName: string; content: string }> };
+      const data = JSON.parse(event.data as string) as ResolutionStep & { error?: string; failed?: boolean; workflowDownloads?: Array<{ fileName: string; content: string }> };
       if (data.error) {
         setError(data.error);
+        setResolutionFailed(data.failed === true);
         setResolving(false);
         sse.close();
         return;
@@ -180,6 +189,30 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
     }
   }, [gameId, orderInput, orders, startSseStream, makeDirective]);
 
+  // Gives a permanently failed turn (resolve_attempts exhausted) another
+  // MAX_TURN_RESOLVE_ATTEMPTS. The player's orders are untouched server-side
+  // (they were never cleared -- only the turn's own status was), so this
+  // just asks the server to requeue and resume watching.
+  const retryResolution = useCallback(async () => {
+    setRetrying(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/resolution/retry`, { method: "POST" });
+      const data = await res.json() as { retried?: boolean; error?: string };
+      if (!res.ok || !data.retried) {
+        setError(data.error ?? "Could not retry. Reopen Orders and try again.");
+        setRetrying(false);
+        return;
+      }
+      setRetrying(false);
+      setTurnStatus("queued");
+      startSseStream();
+    } catch {
+      setError("Could not retry. Reopen Orders and try again.");
+      setRetrying(false);
+    }
+  }, [gameId, startSseStream]);
+
   // If the turn becomes queued (polled from another tab), auto-start resolution
   useEffect(() => {
     if (turnStatus === "queued" && !resolving) {
@@ -194,10 +227,13 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
   const canSubmit = !submitting && !resolving;
   const isCollecting = turnStatus === "collecting" || turnStatus === null;
 
-  const resolutionDone = !resolving && steps.length > 0;
+  const resolutionDone = !resolving && steps.length > 0 && !resolutionFailed;
 
   // Leave the final state visible long enough to acknowledge completion, then
-  // clear it so the overlay does not remain over the game indefinitely.
+  // clear it so the overlay does not remain over the game indefinitely. A
+  // failed resolution is deliberately excluded: it stays on screen (offering
+  // a retry) until the player acts, rather than silently clearing itself the
+  // same way a real completion does.
   useEffect(() => {
     if (!resolutionDone) return;
     const dismissTimeout = window.setTimeout(() => {
@@ -354,7 +390,23 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
             </form>
           )}
 
-          {!isCollecting && !resolving && (
+          {!isCollecting && !resolving && turnStatus === "failed" && (
+            <section style={{ padding: "0.75rem", background: "var(--surface-raised)", borderRadius: "0.375rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              <p style={{ fontSize: "0.875rem", color: "var(--text-error, #e53e3e)", margin: 0 }}>
+                This turn failed to resolve. Your orders are still saved -- retry to try again.
+              </p>
+              <button
+                type="button"
+                className="chat-message-send"
+                onClick={() => { void retryResolution(); }}
+                disabled={retrying}
+              >
+                {retrying ? "Retrying…" : "Retry"}
+              </button>
+            </section>
+          )}
+
+          {!isCollecting && !resolving && turnStatus !== "failed" && (
             <p style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>
               {turnStatus === "news" ? "The chronicle is ready to read." : "Orders are locked for this turn."}
             </p>
@@ -364,8 +416,12 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
 
       {/* Full-screen resolution overlay -- dismissible (docs/22 interrupt):
           closing it only stops watching; resolution keeps running and still
-          commits, so nothing here is ever undone by returning to the map. */}
-      {(resolving || resolutionDone) && !dismissed && (
+          commits, so nothing here is ever undone by returning to the map.
+          A failed resolution is the one state that does NOT keep running in
+          the background -- resolve_attempts is exhausted -- so it stays
+          visible (not auto-cleared like `resolutionDone`) until the player
+          retries or dismisses it. */}
+      {(resolving || resolutionDone || resolutionFailed) && !dismissed && (
         <div
           style={{
             position: "fixed",
@@ -396,14 +452,14 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
                   textTransform: "uppercase",
                 }}
               >
-                {resolving ? "Resolving your orders…" : "Resolution complete"}
+                {resolving ? "Resolving your orders…" : resolutionFailed ? "Resolution failed" : "Resolution complete"}
               </p>
-              {resolving && (
+              {(resolving || resolutionFailed) && (
                 <button
                   type="button"
                   onClick={() => setDismissed(true)}
-                  aria-label="Return to map; resolution continues in the background"
-                  title="Return to map"
+                  aria-label={resolutionFailed ? "Dismiss; your orders are still saved" : "Return to map; resolution continues in the background"}
+                  title={resolutionFailed ? "Dismiss" : "Return to map"}
                   style={{
                     background: "none",
                     border: "1px solid var(--border-subtle)",
@@ -414,10 +470,26 @@ export function OrdersPanel({ gameId, onResolutionComplete }: OrdersPanelProps) 
                     padding: "0.25rem 0.5rem",
                   }}
                 >
-                  Return to map
+                  {resolutionFailed ? "Dismiss" : "Return to map"}
                 </button>
               )}
             </div>
+            {resolutionFailed && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "0.5rem" }}>
+                <p style={{ fontSize: "0.9375rem", color: "var(--text)", margin: 0 }}>
+                  {error ?? "Resolution failed after several attempts."} Your orders are still saved -- retry to try again.
+                </p>
+                <button
+                  type="button"
+                  className="chat-message-send"
+                  onClick={() => { void retryResolution(); }}
+                  disabled={retrying}
+                  style={{ alignSelf: "flex-start" }}
+                >
+                  {retrying ? "Retrying…" : "Retry"}
+                </button>
+              </div>
+            )}
             <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
               {RESOLUTION_PROGRESS_STAGES.map(({ step, group }, index) => {
                 const stepState = steps.find((s) => s.step === step);
