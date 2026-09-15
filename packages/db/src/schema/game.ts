@@ -168,6 +168,14 @@ export const turns = pgTable("turns", {
    * forever. See `claimTurnForResolution`/`failTurn` in queries/resolution.ts.
    */
   resolveAttempts: integer("resolve_attempts").notNull().default(0),
+  /**
+   * The error `failTurn` recorded on the most recent failed attempt --
+   * internal diagnostic text (a stringified engine error), never shown to a
+   * player verbatim. Cleared whenever the turn is retried or resolves.
+   * Exists so a permanently `failed` turn is diagnosable after the fact
+   * instead of only ever appearing in server logs.
+   */
+  lastFailureReason: text("last_failure_reason"),
   elapsedStepStart: integer("elapsed_step_start").notNull(),
   elapsedStepEnd: integer("elapsed_step_end"),
   /**

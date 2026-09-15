@@ -456,11 +456,16 @@ export async function updateTurnProgressStep(
  * requeues the turn so the player's submitted order batch gets another
  * attempt instead of being silently dropped (unified action runtime, Stage
  * 7); once attempts are exhausted, marks the turn terminally `failed`.
+ *
+ * `reason` is internal diagnostic text (a stringified engine error) --
+ * persisted so a terminally failed turn is diagnosable after the fact, never
+ * shown to a player verbatim (the resolution stream reports a generic
+ * message instead; see `resolution/stream/route.ts`).
  */
 export async function failTurn(
   db: ChronicaDatabase,
   turnId: string,
-  _reason: string,
+  reason: string,
 ): Promise<void> {
   const [turn] = await db
     .select({ resolveAttempts: turns.resolveAttempts, status: turns.status })
@@ -472,7 +477,24 @@ export async function failTurn(
   if (turn === undefined || turn.status !== "resolving") return;
   const resolveAttempts = (turn?.resolveAttempts ?? 0) + 1;
   const status = resolveAttempts >= MAX_TURN_RESOLVE_ATTEMPTS ? "failed" : "queued";
-  await db.update(turns).set({ status, resolveAttempts, claimedBy: null, claimExpiresAt: null }).where(eq(turns.id, turnId));
+  await db.update(turns).set({ status, resolveAttempts, claimedBy: null, claimExpiresAt: null, lastFailureReason: reason }).where(eq(turns.id, turnId));
+}
+
+/**
+ * Gives a permanently `failed` turn another `MAX_TURN_RESOLVE_ATTEMPTS`: the
+ * player's already-submitted orders are untouched (they live in the `orders`
+ * table, keyed by this same turn id, not by anything `failTurn` cleared), so
+ * requeuing is enough to try resolving them again. Only ever moves a turn
+ * that is actually `failed` -- a concurrent retry or a turn that has since
+ * moved on (should never happen, but never overwritten) is a no-op.
+ */
+export async function retryFailedTurn(db: ChronicaDatabase, turnId: string): Promise<boolean> {
+  const rows = await db
+    .update(turns)
+    .set({ status: "queued", resolveAttempts: 0, lastFailureReason: null, claimedBy: null, claimExpiresAt: null })
+    .where(and(eq(turns.id, turnId), eq(turns.status, "failed")))
+    .returning({ id: turns.id });
+  return rows.length > 0;
 }
 
 /** Get the queued turn for a game, if one exists. */

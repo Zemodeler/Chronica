@@ -8,7 +8,7 @@ import { games, scenarios, turns, worldSnapshots, chronicleEntries } from "../sc
 import { users } from "../schema/auth";
 import { worldEvents, worldFacts } from "../schema/events";
 import { eq } from "drizzle-orm";
-import { claimTurnForResolution, commitResolution, failTurn, MAX_TURN_RESOLVE_ATTEMPTS, releaseExpiredTurnClaims } from "./resolution";
+import { claimTurnForResolution, commitResolution, failTurn, MAX_TURN_RESOLVE_ATTEMPTS, releaseExpiredTurnClaims, retryFailedTurn } from "./resolution";
 import type { NewWorldEvent } from "./events";
 
 // A real, live-Postgres integration test (docs/32 corrective pass,
@@ -332,6 +332,43 @@ describe.skipIf(process.env.SKIP_DB_TESTS === "true")("turn-claim resilience (un
       const [turn] = await db.select().from(turns).where(eq(turns.id, turnId));
       expect(turn?.status).toBe("failed");
       expect(turn?.resolveAttempts).toBe(MAX_TURN_RESOLVE_ATTEMPTS);
+      expect(turn?.lastFailureReason).toBe("provider error, again");
+    } finally {
+      await deleteGame(gameId);
+    }
+  });
+
+  it("retryFailedTurn requeues a terminally failed turn with a fresh attempt budget", async () => {
+    if (!reachable) { console.warn("Skipping live-Postgres test: could not reach", DATABASE_URL); return; }
+    const gameId = await seedGame();
+    try {
+      const turnId = await seedTurn(gameId, "resolving", {
+        resolveAttempts: MAX_TURN_RESOLVE_ATTEMPTS - 1,
+        claimedBy: "worker-1",
+        claimExpiresAt: new Date(Date.now() + 60_000),
+      });
+      await failTurn(db, turnId, "duplicate key value violates unique constraint \"world_facts_pkey\"");
+      const retried = await retryFailedTurn(db, turnId);
+      expect(retried).toBe(true);
+      const [turn] = await db.select().from(turns).where(eq(turns.id, turnId));
+      expect(turn?.status).toBe("queued");
+      expect(turn?.resolveAttempts).toBe(0);
+      expect(turn?.lastFailureReason).toBeNull();
+      expect(turn?.claimedBy).toBeNull();
+      expect(turn?.claimExpiresAt).toBeNull();
+    } finally {
+      await deleteGame(gameId);
+    }
+  });
+
+  it("retryFailedTurn is a no-op against a turn that is not failed", async () => {
+    if (!reachable) { console.warn("Skipping live-Postgres test: could not reach", DATABASE_URL); return; }
+    const gameId = await seedGame();
+    try {
+      const turnId = await seedTurn(gameId, "resolving");
+      expect(await retryFailedTurn(db, turnId)).toBe(false);
+      const [turn] = await db.select().from(turns).where(eq(turns.id, turnId));
+      expect(turn?.status).toBe("resolving");
     } finally {
       await deleteGame(gameId);
     }
