@@ -858,6 +858,49 @@ describe("the audit and the stage", () => {
   });
 });
 
+describe("fact id uniqueness across sessions sharing an atStep", () => {
+  // Regression for a `world_facts_pkey` violation: one turn resolution
+  // (`apps/web/lib/resolution/pipeline.ts`) constructs several
+  // `GameMasterSession`s at the exact same `atStep` -- a one-time retry of
+  // an unreported session, one throwaway decision session per selected
+  // actor (`orchestrator.ts`), and one throwaway session per reacted-to
+  // event during the event queue's advance (`reaction-runner.ts`). Each
+  // session's `factCounter` starts at 0, so two sessions that each carry
+  // out one action land on the identical id `fact-${atStep}-1` unless each
+  // session's ids are also distinguished from one another.
+  it("gives two independently-constructed sessions at the same atStep different ids for the same action", () => {
+    const args = { actorId: PLAYER, polityId: ROME, locationProvinceId: LATIUM, name: "Legio III", size: 4_000, kind: "infantry" };
+
+    const first = session();
+    const second = session();
+
+    const firstOutcome = first.invoke(call("create_force", args));
+    const secondOutcome = second.invoke(call("create_force", args));
+
+    expect(firstOutcome.ok).toBe(true);
+    expect(secondOutcome.ok).toBe(true);
+    expect(firstOutcome.factId).toBeDefined();
+    expect(secondOutcome.factId).toBeDefined();
+    // Both sessions ran the same single action first, so absent a
+    // per-session discriminator both would compute `fact-1-1`.
+    expect(firstOutcome.factId).not.toBe(secondOutcome.factId);
+  });
+
+  it("keeps ids unique across many sessions at the same atStep, matching a turn's several decision/reaction sessions", () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 10; i += 1) {
+      const gm = session();
+      const outcome = gm.invoke(call("create_force", {
+        actorId: PLAYER, polityId: ROME, locationProvinceId: LATIUM, name: `Legio ${i}`, size: 4_000, kind: "infantry",
+      }));
+      expect(outcome.ok).toBe(true);
+      const factId = outcome.factId!;
+      expect(seen.has(factId)).toBe(false);
+      seen.add(factId);
+    }
+  });
+});
+
 describe("existing saves", () => {
   it("parse safely without the campaign memory this refactor added", () => {
     const legacy = structuredClone(firstPunicWarScenario.initialWorld) as Record<string, unknown>;

@@ -484,6 +484,22 @@ export class GameMasterSession {
   private toolCallCount = 0;
   private readCallCount = 0;
   private factCounter = 0;
+  /**
+   * A fact id is `fact-${atStep}-${factCounter}`, but `atStep` is not unique
+   * to this session: the same turn resolution constructs several concurrent
+   * or sequential `GameMasterSession`s at the same `atStep` -- a one-time
+   * retry of an unreported session (`pipeline.ts`), one throwaway decision
+   * session per selected actor (`orchestrator.ts`), and one throwaway
+   * session per reacted-to event during the event queue's advance
+   * (`reaction-runner.ts`). Each starts its own `factCounter` at 0, so
+   * without a per-instance discriminator two of them can mint the exact
+   * same id -- surfacing as a `world_facts_pkey` violation once both sets
+   * of facts reached the same commit. Every id this session mints includes
+   * this instance's own random tag, so a collision now requires the same
+   * session to mint the same counter value twice, not merely two sessions
+   * to share an `atStep`.
+   */
+  private readonly instanceTag: string = globalThis.crypto.randomUUID().slice(0, 8);
   private ambientEventUsed = false;
   private finished = false;
   private readonly allowInventedActions: boolean;
@@ -778,7 +794,7 @@ export class GameMasterSession {
   }
 
   private planFact(summary: string): GameMasterToolOutcome {
-    const id = `fact-${this.atStep}-${++this.factCounter}`;
+    const id = `fact-${this.atStep}-${this.instanceTag}-${++this.factCounter}`;
     this.events.push({ id, atStep: this.atStep, kind: "action", actionId: "plan_update", actorId: this.actorCharacterId, parameters: {}, summary, materialConsequence: false });
     return { ok: true, finished: false, factId: id, factual: `[${id}] ${summary}` };
   }
@@ -1421,7 +1437,7 @@ export class GameMasterSession {
     this.auditEntries.push({ ...auditBase, finalInvocation: invocation, dryRunOk: true, executionOk: true });
 
     this.factCounter += 1;
-    const factId = `fact-${this.atStep}-${this.factCounter}`;
+    const factId = `fact-${this.atStep}-${this.instanceTag}-${this.factCounter}`;
     const battleId = invocation.actionId === "resolve_battle" ? invocation.parameters["battleId"] : undefined;
     const battleBrief = typeof battleId === "string" ? deriveBattleBrief(before, executed.world, battleId) : null;
     // Generic and action-agnostic: whatever this call actually changed on any
@@ -1501,7 +1517,7 @@ export class GameMasterSession {
     this.factCounter += 1;
     const note: EntityNote = { id: `note-${this.atStep}-${this.factCounter}`, entityId, entityType, text, createdAtStep: this.atStep };
     this.staged = { ...this.staged, campaignMemory: appendEntityNote(this.staged.campaignMemory, note) };
-    const factId = `fact-${this.atStep}-${this.factCounter}`;
+    const factId = `fact-${this.atStep}-${this.instanceTag}-${this.factCounter}`;
     // Memory-only: this is deliberately not narrated as a world event on its
     // own (materialConsequence: false) -- nothing in the world changed, only
     // what will be remembered about it next time.
@@ -1532,7 +1548,7 @@ export class GameMasterSession {
     if (!character.alive) return { ok: false, finished: false, factual: `${character.name} is dead and cannot open a conversation.` };
 
     this.factCounter += 1;
-    const factId = `fact-${this.atStep}-${this.factCounter}`;
+    const factId = `fact-${this.atStep}-${this.instanceTag}-${this.factCounter}`;
     // Deliberately not a world mutation: this only surfaces an affordance.
     // The Chronicle layer reads this action id specifically and attaches the
     // topic/opening line to the event it belongs to.
@@ -1559,7 +1575,7 @@ export class GameMasterSession {
     }
     this.ambientEventUsed = true;
     this.factCounter += 1;
-    const factId = `fact-${this.atStep}-${this.factCounter}`;
+    const factId = `fact-${this.atStep}-${this.instanceTag}-${this.factCounter}`;
     // Not a world mutation of any kind: pure flavor, cited by the report like
     // any other fact so the Chronicle can narrate it, but with nothing behind
     // it for a directConsequences card to ever show.
@@ -1752,7 +1768,7 @@ export class GameMasterSession {
     this.staged = socialOutcome.world;
     refusal.used = true;
     this.factCounter += 1;
-    const factId = `fact-${this.atStep}-${this.factCounter}`;
+    const factId = `fact-${this.atStep}-${this.instanceTag}-${this.factCounter}`;
     const summary = `${refuser.name} refused ${requester.name}'s attempt to ${action}. “${input.quote}” ${input.reason}`;
     this.events.push({
       id: factId,
@@ -1866,7 +1882,7 @@ export class GameMasterSession {
     this.definedActionUses.push({ actionId, actorId, parameters, resolvedPatch: executed.resolvedOperations });
 
     this.factCounter += 1;
-    const factId = `fact-${this.atStep}-${this.factCounter}`;
+    const factId = `fact-${this.atStep}-${this.instanceTag}-${this.factCounter}`;
     this.events.push({
       id: factId,
       atStep: this.atStep,
@@ -1926,7 +1942,7 @@ export class GameMasterSession {
     });
 
     this.factCounter += 1;
-    const factId = `fact-${this.atStep}-${this.factCounter}`;
+    const factId = `fact-${this.atStep}-${this.instanceTag}-${this.factCounter}`;
     this.events.push({
       id: factId,
       atStep: this.atStep,
