@@ -1,7 +1,5 @@
 import { z } from "zod";
 import { ElapsedStepSchema, MaterialWorldStateSchema } from "../material-state";
-import { OngoingActionSchema } from "../actions/orders";
-import { PersistentOperationSchema } from "../actions/operations";
 import { CharacterSchema } from "../characters/character";
 import { CharacterContinuitySchema, EncounterMemorySchema } from "../continuity/continuity";
 import { WorldPinsSchema, deriveWorldInstant, type ScenarioClock } from "./clock";
@@ -14,20 +12,15 @@ import { GenericEntitySchema } from "./generic-entity";
 import { ProvinceGraphSchema } from "./map";
 import { MapConflictsOverlaySchema } from "./map-presentation";
 import { WorldStorylineSchema } from "./storylines";
-import { CharacterGoalSchema, CharacterPlotSchema, NemesisStateSchema, DEFAULT_NEMESIS_STATE, NemesisEntrySchema, CharacterRelevanceEntrySchema } from "../character-agency/schemas";
-import { ChronicleChainSchema } from "./chronicle-chains";
 import { CharacterPressureSchema } from "../characters/pressures";
 import { CharacterBeliefSchema } from "../characters/beliefs";
 import { SocialLinkSchema } from "../characters/relationship-dimensions";
-import { CommitmentSchema } from "../character-agency/commitments";
-import { CharacterIntentSchema } from "../character-agency/intents";
+import { CommitmentSchema } from "../characters/commitments";
+import { CharacterIntentSchema } from "../characters/intents";
 import { FamilyLinkSchema, HouseholdSchema, LifeContractSchema } from "../characters/family";
 import { LegacyCauseSchema } from "../continuity/continuity";
-import { CampaignMemorySchema, EMPTY_CAMPAIGN_MEMORY } from "../gm/campaign-memory";
 import { DiplomaticMessageSchema, PolityStanceSchema } from "./diplomacy";
 import { WorldDevelopmentSchema } from "./developments";
-import { PlayerPlanSchema, ActionPlanSchema } from "../actions/plans";
-import { ActorActivitySchema } from "../actions/activity";
 
 /**
  * Bumped when an old snapshot needs upgrading on load.
@@ -71,36 +64,12 @@ export const WorldStateSchema = z
     instant: WorldInstantSchema.optional(),
     /** Optional for existing snapshots; the scheduler materializes it on first use. */
     worldDevelopments: z.array(WorldDevelopmentSchema).optional(),
-    playerPlans: z.array(PlayerPlanSchema).optional(),
-    /**
-     * Universal plan model (docs/32, Phase 1): `ActionPlan`'s successor
-     * collection to `playerPlans`, generalized to any actor. Optional and
-     * unpopulated by the live pipeline for now -- `playerPlans` remains the
-     * authoritative write path; `upgradePlayerPlansToActionPlans` (actions/plans.ts)
-     * derives this view on demand rather than the schema deriving it on
-     * every parse, so parsing an old snapshot stays a pure identity op.
-     */
-    plans: z.array(ActionPlanSchema).optional(),
-    actorActivities: z.array(ActorActivitySchema).optional(),
     /**
      * The province graph is the map (ADR-0015). Detail tiers live on the
      * provinces because they are state the simulation mutates deterministically,
      * so they must be inside the thing the determinism test hashes.
      */
     map: ProvinceGraphSchema,
-    /**
-     * Work in progress, as authoritative state rather than a relational job
-     * queue (docs/03). It lives in the snapshot because an interruption must
-     * not change it: the same actions, progress and waiting reasons have to
-     * come back out of a replay.
-     */
-    actions: z.array(OngoingActionSchema),
-    /**
-     * Multi-turn efforts an `OngoingAction` opened (docs/14, Phase 1): moving
-     * an army, a siege, a recruitment drive. Defaulted so archived snapshots
-     * (none of which ever populated this) load cleanly.
-     */
-    operations: z.array(PersistentOperationSchema).default([]),
     /** Everyone the world currently holds as an individual, players included. */
     characters: z.array(CharacterSchema),
     /**
@@ -116,16 +85,6 @@ export const WorldStateSchema = z
     /** Current authoritative combat, siege, and war state for map projection. */
     conflicts: MapConflictsOverlaySchema.default({ battles: [], sieges: [], wars: [] }),
     material: MaterialWorldStateSchema,
-    // Character Director agency state. Defaulted so archived snapshots load cleanly.
-    characterGoals: z.array(CharacterGoalSchema).default([]),
-    characterPlots: z.array(CharacterPlotSchema).default([]),
-    nemesis: NemesisStateSchema.default(DEFAULT_NEMESIS_STATE),
-    // Multi-slot nemeses (new); old `nemesis` kept for backward compat.
-    nemeses: z.array(NemesisEntrySchema).default([]),
-    // Chronicle-weighted relevance entries for character selector.
-    characterRelevance: z.array(CharacterRelevanceEntrySchema).default([]),
-    // Active chronicle chains for the World Director to see open pressures.
-    chronicleChains: z.array(ChronicleChainSchema).default([]),
     // Character-sim phase 2: canonical pressures, individually-owned beliefs,
     // and typed social links. Defaulted so archived snapshots load cleanly;
     // see packages/shared/src/characters/{pressures,beliefs,relationship-dimensions}.ts.
@@ -146,19 +105,6 @@ export const WorldStateSchema = z
     households: z.array(HouseholdSchema).default([]),
     lifeContracts: z.array(LifeContractSchema).default([]),
     legacyCauses: z.array(LegacyCauseSchema).default([]),
-    /**
-     * Compact account of the turn that produced this snapshot.  It is kept in
-     * the snapshot so the following turn's AI calls can use committed history
-     * without having to reconstruct it from Chronicle projections.
-     */
-    lastTurnSummary: z.string().trim().min(1).max(1_800).nullable().default(null),
-    /**
-     * Compact campaign memory for the Game Master (GM refactor, requirement
-     * 6). Derived from committed facts -- executed tool results and the
-     * deterministic turn record -- never from Chronicle prose. Defaulted so
-     * every archived snapshot, none of which carried this, still parses.
-     */
-    campaignMemory: CampaignMemorySchema.default(EMPTY_CAMPAIGN_MEMORY),
     /**
      * Standing diplomacy: every message one power has sent another, and how
      * it was answered. Defaulted so every snapshot written before diplomacy

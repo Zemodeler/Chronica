@@ -3,7 +3,7 @@ import { and, count, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizz
 import { ScenarioDefinitionSchema } from "@chronica/shared";
 import type { ChronicaDatabase } from "../database";
 import { users } from "../schema/auth";
-import { characterClaims, gameInvites, games, players, scenarioMapAssets, scenarioVersions, scenarios, turnNewsReadiness, turns } from "../schema/game";
+import { characterClaims, gameInvites, games, players, scenarioMapAssets, scenarioVersions, scenarios } from "../schema/game";
 import { creditHolds, creditLedgerEntries, creditLots, creditWallets } from "../schema/billing";
 import { CHRONICA_SYSTEM_USER_ID, FIRST_PUNIC_WAR_SCENARIO_ID, FIRST_PUNIC_WAR_SLUG, firstPunicWarScenario } from "../built-in-scenarios";
 import { PUNIC_WARS_SCENARIO_ID, PUNIC_WARS_SLUG, punicWarsScenario } from "../punic-wars-scenario";
@@ -292,24 +292,6 @@ export interface CharacterClaimRow {
  * happens in apps/worker, which has the world context needed to resolve
  * `cultureId`/`officeId` for each contact.
  */
-export async function getPendingCharacterIntroductions(db: ChronicaDatabase, gameId: string): Promise<readonly CharacterClaimRow[]> {
-  const rows = await db
-    .select({
-      id: characterClaims.id,
-      characterId: characterClaims.characterId,
-      playerId: characterClaims.playerId,
-      resolvedRole: characterClaims.resolvedRole,
-    })
-    .from(characterClaims)
-    .where(and(
-      eq(characterClaims.gameId, gameId),
-      isNotNull(characterClaims.resolvedRole),
-      isNull(characterClaims.introducedAtTurnId),
-      isNull(characterClaims.releasedAt),
-    ));
-  return rows;
-}
-
 export interface GameSummaryRow {
   readonly gameId: string;
   readonly title: string;
@@ -367,30 +349,6 @@ export async function deleteOwnedGame(db: ChronicaDatabase, gameId: string, user
 
     await tx.delete(games).where(eq(games.id, gameId));
     return true;
-  });
-}
-
-export async function acknowledgeTurnNews(
-  db: ChronicaDatabase,
-  input: Readonly<{ gameId: string; turnId: string; playerId: string; readyAt: Date }>,
-): Promise<"acknowledged" | "not-eligible"> {
-  return db.transaction(async (tx) => {
-    const [eligible] = await tx.select({ turnId: turns.id }).from(turns)
-      .innerJoin(players, and(eq(players.id, input.playerId), eq(players.gameId, turns.gameId)))
-      .where(and(eq(turns.id, input.turnId), eq(turns.gameId, input.gameId), eq(turns.status, "news")))
-      .limit(1);
-    if (eligible === undefined) return "not-eligible";
-
-    await tx.insert(turnNewsReadiness).values({
-      turnId: input.turnId,
-      playerId: input.playerId,
-      readyAt: input.readyAt,
-      autoReady: false,
-    }).onConflictDoUpdate({
-      target: [turnNewsReadiness.turnId, turnNewsReadiness.playerId],
-      set: { readyAt: input.readyAt },
-    });
-    return "acknowledged";
   });
 }
 

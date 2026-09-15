@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WORKFLOW_REGISTRY } from "../workflows/registry";
-import { ProjectSchema, completeMilestone, nextDueMilestone, type Project } from "./project";
-
-const [firstRegisteredWorkflowId] = [...WORKFLOW_REGISTRY.keys()];
+import { completeMilestone, nextDueMilestone, type Project } from "./project";
 
 function project(overrides: Partial<Project> = {}): Project {
   return {
@@ -26,23 +23,6 @@ function project(overrides: Partial<Project> = {}): Project {
     ...overrides,
   };
 }
-
-describe("ProjectSchema (docs/32, Part C.2)", () => {
-  it("accepts a project whose linked workflow ids are registered", () => {
-    const result = ProjectSchema.safeParse(project({ milestones: [{ id: "m1", label: "x", requiredAtElapsedOffset: 0, costAmount: 1, status: "pending", linkedWorkflowId: firstRegisteredWorkflowId ?? null, linkedWorkflowParams: {}, completedAtStep: null }] }));
-    expect(result.success).toBe(true);
-  });
-
-  it("rejects a milestone naming an unregistered workflow", () => {
-    const result = ProjectSchema.safeParse(project({ milestones: [{ id: "m1", label: "x", requiredAtElapsedOffset: 0, costAmount: 1, status: "pending", linkedWorkflowId: "not_a_real_workflow", linkedWorkflowParams: {}, completedAtStep: null }] }));
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects a completionWorkflowId that is not registered", () => {
-    const result = ProjectSchema.safeParse(project({ completionWorkflowId: "not_a_real_workflow" }));
-    expect(result.success).toBe(false);
-  });
-});
 
 describe("nextDueMilestone", () => {
   it("returns the earliest pending milestone due by atStep", () => {

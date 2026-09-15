@@ -6,7 +6,6 @@ import {
   CredentialRegistrationSchema,
   DeveloperGiftCreateSchema,
   EmailAttachmentSchema,
-  OrderBatchSchema,
   ProfileUpdateSchema,
 } from "./index";
 
@@ -16,14 +15,12 @@ describe("web boundary contracts", () => {
       title: "The Sicilian Crisis",
       scenarioId: "sicily-m1",
       continuity: { startingSeatCount: 5, extraPrincipalsPerPlayer: 1 },
-      newsTimeoutSeconds: 60,
       coinCap: "10",
     });
     const invalid = GameCreationSchema.safeParse({
       title: "The Sicilian Crisis",
       scenarioId: "sicily-m1",
       continuity: { startingSeatCount: 5, extraPrincipalsPerPlayer: 4 },
-      newsTimeoutSeconds: 60,
       coinCap: "10",
     });
     expect(valid.success).toBe(true);
@@ -33,7 +30,6 @@ describe("web boundary contracts", () => {
         title: "A shared world",
         scenarioId: "shared-world",
         continuity: { startingSeatCount, extraPrincipalsPerPlayer: 1 },
-        newsTimeoutSeconds: 60,
         coinCap: "10",
       }).success).toBe(true);
     }
@@ -41,17 +37,10 @@ describe("web boundary contracts", () => {
       title: "Too many players",
       scenarioId: "shared-world",
       continuity: { startingSeatCount: 33, extraPrincipalsPerPlayer: 1 },
-      newsTimeoutSeconds: 60,
       coinCap: "10",
     }).success).toBe(false);
   });
 
-  it("keeps exact OrderBatch limits as the form submission authority", () => {
-    expect(OrderBatchSchema.safeParse({ directives: [{ kind: "new", text: "Hold the road" }] }).success).toBe(true);
-    // Raised from 8 to 32 in M1.5 (ADR-0039): chat-style composer has no fixed slot count.
-    expect(OrderBatchSchema.safeParse({ directives: Array.from({ length: 32 }, () => ({ kind: "new", text: "Wait" })) }).success).toBe(true);
-    expect(OrderBatchSchema.safeParse({ directives: Array.from({ length: 33 }, () => ({ kind: "new", text: "Wait" })) }).success).toBe(false);
-  });
 
   it("validates credential and email-attachment input at the boundary", () => {
     expect(CredentialLoginSchema.safeParse({ username: "host_player", password: "a-long-password" }).success).toBe(true);
@@ -62,7 +51,7 @@ describe("web boundary contracts", () => {
     if (normalizedRegistration.success) expect(normalizedRegistration.data.username).toBe("host_player");
     expect(EmailAttachmentSchema.safeParse({ email: "host@example.test" }).success).toBe(true);
     expect(EmailAttachmentSchema.safeParse({ email: "not-an-address" }).success).toBe(false);
-    expect(LiveGameEventSchema.safeParse({ id: "13:collecting:2", kind: "submission_count", announcement: "2 of 5 players submitted." }).success).toBe(true);
+    expect(LiveGameEventSchema.safeParse({ id: "13:dialogue:2", kind: "dialogue_ready", announcement: "A character wants to speak with you." }).success).toBe(true);
   });
 
   it("accepts only bundled avatars and normalized profile usernames", () => {

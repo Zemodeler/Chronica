@@ -1,5 +1,14 @@
 import type { AiOperation } from "@chronica/shared";
 
+/**
+ * Model tier an adapter picks per operation. Adapter-internal only -- the
+ * turn-resolution routing profile this once shared space with in
+ * `@chronica/shared` (`actions/ai-routing.ts`) was removed along with the
+ * rest of the workflow-execution engine (see
+ * docs/plans/delete-chronicle-orders-turns.md).
+ */
+export type AiTier = "basic" | "standard" | "premium";
+
 export interface AiCallResult {
   content: string;
   inputTokens: number;

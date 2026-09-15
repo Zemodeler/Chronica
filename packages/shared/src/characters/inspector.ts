@@ -5,8 +5,8 @@ import { resolveTraits, type TraitDefinition } from "./traits";
 import { getActivePressures, type CharacterPressure } from "./pressures";
 import { queryBeliefs, type CharacterBelief } from "./beliefs";
 import type { ContinuityTier } from "../continuity/continuity";
-import type { Commitment } from "../character-agency/commitments";
-import type { CharacterIntent } from "../character-agency/intents";
+import type { Commitment } from "./commitments";
+import type { CharacterIntent } from "./intents";
 
 // A structured, developer-facing view of everything canonical known about one
 // character (character-sim phase 2). Never rendered in ordinary player UI --

@@ -1,9 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { AiOperation, AiTier } from "@chronica/shared";
+import type { AiOperation } from "@chronica/shared";
 import type {
   AiAdapter,
   AiCallResult,
   AiConversationMessage,
+  AiTier,
   AiToolCall,
   AiToolCallResult,
   AiToolDefinition,
@@ -13,22 +14,10 @@ import { getConfiguredApiKey, getSelectedLocalAiModel } from "../local-key-selec
 // Operations that must return raw JSON — we use an assistant prefill of "{" to
 // prevent the model from emitting prose preamble before the JSON object.
 const JSON_MODE_OPERATIONS = new Set<AiOperation>([
-  "interpret_order",
-  "assess_orders",
-  "adjudicate",
-  "propose_near_events",
-  "propose_far_events",
-  "propose_coarse_events",
-  "character_director",
-  "reaction_director",
-  "simulator",
-  "world_director",
-  "chronicle_narrator",
   "enrich_npc_profile",
   "resolve_contact",
   "extract_knowledge",
   "propose_social_events",
-  "workflow_manager",
   "declare_character",
   "confirm_character",
 ]);
@@ -39,20 +28,10 @@ const TIER_MODELS: Record<AiTier, string> = {
   premium: process.env.CHRONICA_AI_MODEL_PREMIUM ?? "claude-haiku-4-5",
 };
 
-const STANDARD_TIER_OPERATIONS = new Set<AiOperation>([
-  // The Game Master reasons over a whole turn with tools; never basic tier.
-  "game_master",
-  "adjudicate",
-  "narrate",
-  "resolve_solo_turn",
-  "propose_near_events",
-  "chronicle_narrator",
-  "character_director",
-  "reaction_director",
-  "simulator",
-  "world_director",
-  "workflow_manager",
-]);
+// None of the surviving operations (see docs/plans/delete-chronicle-orders-turns.md)
+// were in the standard tier before this wipe -- preserved as empty rather than
+// guessing a new tier assignment.
+const STANDARD_TIER_OPERATIONS = new Set<AiOperation>([]);
 
 function resolveModel(operation: AiOperation): string {
   const selectedModel = getSelectedLocalAiModel("anthropic");

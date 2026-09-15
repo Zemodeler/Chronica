@@ -17,7 +17,7 @@ import type { Character } from "../characters/character";
 import type { Force, ProvinceMaterial } from "../material-state";
 import type { Province } from "../world/map";
 import { resolveForcePosition } from "./position";
-import type { TacticalModifierProposal } from "../actions/verdict";
+import type { TacticalModifierProposal } from "./tactical-modifier";
 import type { Structure } from "../world/structure";
 
 // Deterministic battle resolution (docs/19 Phase 3, ADR-0031).

@@ -4,9 +4,22 @@ import {
   EntityIdSchema,
   VisibilitySchema,
 } from "../material-state";
-import { StateDeltaReferenceSchema } from "../actions/verdict";
 import { SalienceSchema } from "../world/scope";
 import { RelationCauseSchema } from "../characters/character";
+
+/**
+ * A pointer back to an applied delta, so a consequence can name its cause.
+ * Relocated from the removed `actions/verdict.ts` (see
+ * docs/plans/delete-chronicle-orders-turns.md) -- this is the only shape
+ * from that module continuity actually needed.
+ */
+const StateDeltaReferenceSchema = z
+  .object({
+    id: EntityIdSchema,
+    kind: z.enum(["material_effect", "relationship_cause", "knowledge_grant", "workflow"]),
+    explanation: z.string().trim().min(1).max(240),
+  })
+  .strict();
 
 // Character continuity (docs/16, ADR-0023).
 //

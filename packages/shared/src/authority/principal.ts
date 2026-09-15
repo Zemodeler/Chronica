@@ -1,4 +1,4 @@
-import type { OrderPartyRef } from "../actions/orders";
+import type { OrderPartyRef } from "../world/party-ref";
 
 /**
  * Who is actually calling a tool this turn, bound by the orchestrator

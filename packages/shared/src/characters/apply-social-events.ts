@@ -6,8 +6,8 @@ import type { SocialLink } from "./relationship-dimensions";
 import type { CharacterBelief } from "./beliefs";
 import { KNOWLEDGE_CHANNEL_DEFAULTS, resolveRecipients } from "./beliefs";
 import { createPressure, refreshPressure, resolvePressure } from "./pressures";
-import type { Commitment } from "../character-agency/commitments";
-import { createCommitment } from "../character-agency/commitments";
+import type { Commitment } from "./commitments";
+import { createCommitment } from "./commitments";
 
 // The single point where a proposed social event becomes canonical world
 // state (character-sim phase 1, extended in phase 2 with beliefs, pressure

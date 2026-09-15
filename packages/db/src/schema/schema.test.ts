@@ -2,7 +2,7 @@ import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import { authAccounts, authSessions, authVerifications } from "./auth";
 import { aiCalls, billingEvents, creditHolds, creditLedgerEntries, creditWallets } from "./billing";
-import { characterClaims, gameInvites, games, orders, scenarioMapAssets, scenarioVersions, turnNewsReadiness, turns } from "./game";
+import { characterClaims, gameInvites, games, scenarioMapAssets, scenarioVersions } from "./game";
 
 describe("database-enforced M1 boundaries", () => {
   it("keeps authentication and invite tokens unique", () => {
@@ -24,7 +24,6 @@ describe("database-enforced M1 boundaries", () => {
     expect(getTableConfig(games).columns.map((column) => column.name)).toEqual(expect.arrayContaining([
       "starting_seat_count",
       "extra_principals_per_player",
-      "news_timeout_seconds",
     ]));
   });
 
@@ -42,24 +41,17 @@ describe("database-enforced M1 boundaries", () => {
   });
 
   it("cascades every player-owned save record", () => {
-    for (const table of [characterClaims, gameInvites, orders, turnNewsReadiness]) {
+    for (const table of [characterClaims, gameInvites]) {
       expect(getTableConfig(table).foreignKeys.some((key) => key.onDelete === "cascade")).toBe(true);
     }
   });
 
   it("keeps a scenario version's starting world beside its rules, not inside them", () => {
     // `definition` is validated against ScenarioDefinitionSchema (rules only);
-    // `initial_world` is what packages/db/src/queries/turns.ts createGame reads to
-    // open a new game's turn 0 -- see the column comment in schema/game.ts.
+    // `initial_world` is a game's starting WorldState -- see the column
+    // comment in schema/game.ts.
     expect(getTableConfig(scenarioVersions).columns.map((column) => column.name)).toEqual(
       expect.arrayContaining(["definition", "initial_world"]),
-    );
-  });
-
-  it("keeps the current GM tool loop's audit trail distinct from the legacy Workflow Manager blob (docs/27)", () => {
-    expect(column(turns, "game_master_audit").notNull).toBe(false);
-    expect(getTableConfig(turns).columns.map((c) => c.name)).toEqual(
-      expect.arrayContaining(["workflow_audit", "game_master_report", "game_master_audit"]),
     );
   });
 

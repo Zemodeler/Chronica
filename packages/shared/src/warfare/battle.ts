@@ -5,7 +5,7 @@ import {
   EntityIdSchema,
   VisibilitySchema,
 } from "../material-state";
-import { BattlePhaseSchema, TacticalModifierProposalSchema } from "../actions/verdict";
+import { BattlePhaseSchema, TacticalModifierProposalSchema } from "./tactical-modifier";
 import { PlayerInvolvementSchema, SalienceSchema } from "../world/scope";
 
 // Warfare (docs/19, ADR-0031).

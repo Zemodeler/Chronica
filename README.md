@@ -10,10 +10,9 @@ The game accepts ambitious, conditional orders instead of a menu of verbs. AI in
 
 ## Documentation
 
-- [Product guide](docs/product.md) — player experience, scope, content, and current priorities.
-- [Architecture guide](docs/architecture.md) — authoritative rules, turn resolution, plans, time, data, and development notes.
-- [Workflow reference](docs/workflows.md) — every built-in MCP-style world-data tool and its input contract.
-- [World cycles](docs/world-cycles/README.md) — designs for what the world does between decisions: money, upkeep, and terms of office. Specifications for unbuilt work, not descriptions of current behaviour.
+- [Core vision](docs/CORE-VISION.md) — what this project is building toward (elastic time, the character system) and what the Chronicle/Orders/Turns/workflow-execution wipe removed and why.
+- [Deletion plan](docs/plans/delete-chronicle-orders-turns.md) — what was actually deleted, relocated, and left broken for the next system to pick up.
+- [Product guide](docs/product.md) and [Architecture guide](docs/architecture.md) — still describe the pre-wipe Chronicle/Orders/Turns loop; due for a rewrite against the current codebase.
 
 The documentation intentionally describes the current direction, not a chronological record of replaced proposals. Anything not yet built says so at the top.
 
