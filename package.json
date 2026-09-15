@@ -15,7 +15,6 @@
     "build": "npm run build --workspaces --if-present",
     "dev": "npm run dev --workspace @chronica/web",
     "docs:check": "node scripts/check-docs.mjs",
-    "docs:workflows": "tsx scripts/generate-workflow-reference.ts",
     "lint": "eslint .",
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "npm run test:e2e --workspace @chronica/web",

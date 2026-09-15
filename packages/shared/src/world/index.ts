@@ -1,9 +1,7 @@
 export * from "./clock";
 export * from "./instant";
-export * from "./event-queue";
+export * from "./party-ref";
 export * from "./facts";
-export * from "./agent-selection-contract";
-export * from "./affected-agent-selector";
 export * from "./authority-records";
 export * from "./money-reservations";
 export * from "./project";
@@ -20,5 +18,4 @@ export * from "./scope";
 export * from "./world-state";
 export * from "./watch";
 export * from "./scenario";
-export * from "./chronicle-chains";
 export * from "./theatre";

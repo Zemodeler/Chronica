@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { EntityIdSchema, ElapsedStepSchema } from "../material-state";
-import { OrderPartyRefSchema } from "../actions/orders";
+import { OrderPartyRefSchema } from "../world/party-ref";
 import { AuthorityCheckResultSchema } from "./authority-grant";
 
 /**

@@ -7,11 +7,10 @@ export interface PlayerGameUiStateRow {
   readonly playerId: string;
   readonly generatedCast: unknown;
   readonly selectedThreadId: string | null;
-  readonly chronicleReadSequence: number;
   readonly updatedAt: Date;
 }
 
-/** A player's durable UI state for a game -- selection, generated cast, chronicle read position. */
+/** A player's durable UI state for a game -- selection, generated cast. */
 export async function getPlayerGameUiState(
   db: ChronicaDatabase,
   gameId: string,
@@ -23,7 +22,6 @@ export async function getPlayerGameUiState(
       playerId: playerGameUiState.playerId,
       generatedCast: playerGameUiState.generatedCast,
       selectedThreadId: playerGameUiState.selectedThreadId,
-      chronicleReadSequence: playerGameUiState.chronicleReadSequence,
       updatedAt: playerGameUiState.updatedAt,
     })
     .from(playerGameUiState)
@@ -37,7 +35,6 @@ export interface UpsertPlayerGameUiStateInput {
   readonly playerId: string;
   readonly generatedCast?: unknown;
   readonly selectedThreadId?: string | null;
-  readonly chronicleReadSequence?: number;
 }
 
 /**
@@ -52,7 +49,6 @@ export async function upsertPlayerGameUiState(db: ChronicaDatabase, input: Upser
   const set: Partial<typeof playerGameUiState.$inferInsert> = { updatedAt };
   if (input.generatedCast !== undefined) set.generatedCast = input.generatedCast;
   if (input.selectedThreadId !== undefined) set.selectedThreadId = input.selectedThreadId;
-  if (input.chronicleReadSequence !== undefined) set.chronicleReadSequence = input.chronicleReadSequence;
 
   await db
     .insert(playerGameUiState)
@@ -61,7 +57,6 @@ export async function upsertPlayerGameUiState(db: ChronicaDatabase, input: Upser
       playerId: input.playerId,
       generatedCast: input.generatedCast ?? null,
       selectedThreadId: input.selectedThreadId ?? null,
-      ...(input.chronicleReadSequence !== undefined ? { chronicleReadSequence: input.chronicleReadSequence } : {}),
       updatedAt,
     })
     .onConflictDoUpdate({

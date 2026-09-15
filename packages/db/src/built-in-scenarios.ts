@@ -85,7 +85,6 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { from: "ita-72843720b81376294924159-sicily-southeast", to: "ita-72843720b81376294924159-sicily-northeast", crossing: "land", distance: 1 },
     ],
   },
-  actions: [],
   characters: [
     { id: "marcus-atilius", name: "Marcus Atilius", cultureId: "roman", faithId: null, dynastyId: "atilii", locationProvinceId: "ita-72843720b81376294924159-sicily-northeast", polityId: "rome", ageYearsAtStart: 38, officeId: "roman-command", personalAccountId: "marcus-purse", skills: { martial: 70, intrigue: 35, learning: 45, piety: 40, stewardship: 55, diplomacy: 50, body: 70, subSkills: {} }, traits: [], healthBps: 9_000, prestigeBps: 6_000, relations: [], ambitions: [], heirCharacterId: "marcus-atilius-minor", alive: true, diedAtStep: null, disqualifyingStatuses: [] },
     // Life vertical slice (character-sim phase 5): Marcus's son and named

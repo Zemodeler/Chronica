@@ -1,8 +1,7 @@
 import { z } from "zod";
-import { OrderPartyRefSchema, type OrderPartyRef } from "../actions/orders";
+import { OrderPartyRefSchema, type OrderPartyRef } from "../world/party-ref";
 import { EntityIdSchema, ElapsedStepSchema, VisibilitySchema, type MaterialWorldState } from "../material-state";
 import type { Office } from "../characters/character";
-import { WORKFLOW_REGISTRY } from "../workflows/registry";
 
 /**
  * `AuthorityGrant` (docs/32, Phase 7): a persistent, first-class "who may do
@@ -75,38 +74,16 @@ export const AuthorityGrantSchema = z
   .strict();
 export type AuthorityGrant = z.infer<typeof AuthorityGrantSchema>;
 
-function officeIdToDomainPowers(office: Office): { readonly domain: AuthorityDomain; readonly powers: readonly AuthorityPower[] }[] {
-  const seenCategories = new Set<string>();
-  const results: { domain: AuthorityDomain; powers: readonly AuthorityPower[] }[] = [];
-  for (const actionId of office.authorisedActionIds) {
-    const category = WORKFLOW_REGISTRY.get(actionId)?.category;
-    if (category === undefined || seenCategories.has(category)) continue;
-    seenCategories.add(category);
-    switch (category) {
-      case "military":
-        results.push({ domain: "military", powers: ["command"] });
-        break;
-      case "political":
-        results.push({ domain: "civil", powers: ["propose", "appoint"] });
-        break;
-      case "economic":
-        results.push({ domain: "fiscal", powers: ["propose"] });
-        break;
-      case "map":
-        results.push({ domain: "civil", powers: ["propose"] });
-        break;
-      case "material":
-        results.push({ domain: "fiscal", powers: ["propose"] });
-        break;
-      case "character":
-      case "narrative":
-        results.push({ domain: "social", powers: ["propose"] });
-        break;
-      default:
-        break;
-    }
-  }
-  return results;
+/**
+ * The workflow registry this used to classify `office.authorisedActionIds`
+ * against was removed along with the rest of the workflow-execution engine
+ * (see docs/plans/delete-chronicle-orders-turns.md). Nothing currently
+ * repopulates that classification, so this deliberately yields no derived
+ * domain/power pairs rather than guessing -- a follow-up for whatever new
+ * system replaces workflow-driven office authority.
+ */
+function officeIdToDomainPowers(_office: Office): { readonly domain: AuthorityDomain; readonly powers: readonly AuthorityPower[] }[] {
+  return [];
 }
 
 /**

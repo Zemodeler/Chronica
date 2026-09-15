@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import { WorldStateSchema, type WorldState } from "../world/world-state";
 import { findWorldReferenceViolations } from "../world/references";
-import { executeWorkflow } from "../workflows/executor";
 import { characterPurseId, ensureCharacterAccounts, openCharacterAccount } from "./character-accounts";
 
 const world = (): WorldState => structuredClone(firstPunicWarScenario.initialWorld);
@@ -97,24 +96,5 @@ describe("ensureCharacterAccounts", () => {
     expect(healed.characters.find((character) => character.id === owner.id)?.personalAccountId).toBe(ownedId);
     expect(healed.material.accounts.filter((account) => account.owner.kind === "character" && account.owner.id === owner.id)).toHaveLength(1);
     expect(WorldStateSchema.safeParse(healed).success).toBe(true);
-  });
-});
-
-describe("create_child_character", () => {
-  it("gives a newborn the purse it names, so inheritance to them can land", () => {
-    const outcome = executeWorkflow(
-      { actionId: "create_child_character", actorId: "system", parameters: { childCharacterId: "new-child", name: "Aula", parentCharacterIds: ["marcus-atilius"] } },
-      world(),
-      4,
-    );
-
-    expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
-    const child = outcome.world.characters.find((character) => character.id === "new-child");
-    const account = outcome.world.material.accounts.find((candidate) => candidate.id === child?.personalAccountId);
-
-    expect(account?.owner).toEqual({ kind: "character", id: "new-child" });
-    expect(account?.balance).toBe(0);
-    expect(findWorldReferenceViolations(outcome.world)).toEqual([]);
   });
 });

@@ -1,5 +1,26 @@
 import { z } from "zod";
-import { AiOperationSchema } from "./actions/ai-routing";
+
+/**
+ * AI operations still routed/coin-gated after the Chronicle/Orders/Turns/
+ * workflow-execution wipe (see docs/plans/delete-chronicle-orders-turns.md)
+ * -- the Chat NPC system's own calls (dialogue, contact discovery, NPC
+ * profile enrichment, knowledge extraction, character declaration) plus
+ * dialogue's social-event proposal channel. Every turn-resolution-only
+ * operation (game_master, adjudicate, the narrator/director passes, etc.)
+ * was removed along with the code that issued it; a future action-resolution
+ * engine will need to add its own operations back here.
+ */
+export const AiOperationSchema = z.enum([
+  "resolve_contact",
+  "enrich_npc_profile",
+  "dialogue_ordinary",
+  "dialogue_principal",
+  "extract_knowledge",
+  "propose_social_events",
+  "declare_character",
+  "confirm_character",
+]);
+export type AiOperation = z.infer<typeof AiOperationSchema>;
 
 /** Bundled assets only: a stored key can never become an arbitrary URL. */
 export const AvatarKeySchema = z.enum([

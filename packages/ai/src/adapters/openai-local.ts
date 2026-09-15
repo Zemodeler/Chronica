@@ -1,9 +1,10 @@
 import OpenAI from "openai";
-import type { AiOperation, AiTier } from "@chronica/shared";
+import type { AiOperation } from "@chronica/shared";
 import type {
   AiAdapter,
   AiCallResult,
   AiConversationMessage,
+  AiTier,
   AiToolCall,
   AiToolCallResult,
   AiToolDefinition,
@@ -12,22 +13,10 @@ import { parseToolArguments } from "../adapter";
 import { getConfiguredApiKey, getSelectedLocalAiModel } from "../local-key-selection";
 
 const JSON_MODE_OPERATIONS = new Set<AiOperation>([
-  "interpret_order",
-  "assess_orders",
-  "adjudicate",
-  "propose_near_events",
-  "propose_far_events",
-  "propose_coarse_events",
-  "character_director",
-  "reaction_director",
-  "simulator",
-  "world_director",
-  "chronicle_narrator",
   "enrich_npc_profile",
   "resolve_contact",
   "extract_knowledge",
   "propose_social_events",
-  "workflow_manager",
   "declare_character",
   "confirm_character",
 ]);
@@ -39,43 +28,24 @@ const TIER_MODELS: Record<AiTier, string> = {
   premium: process.env.CHRONICA_AI_MODEL_PREMIUM ?? "gpt-5.6-sol",
 };
 
-// Operations that use standard tier (everything else is basic).
-const STANDARD_TIER_OPERATIONS = new Set<AiOperation>([
-  // The Game Master reasons over a whole turn with tools; never basic tier.
-  "game_master",
-  "adjudicate",
-  "narrate",
-  "resolve_solo_turn",
-  "propose_near_events",
-  "chronicle_narrator",
-  "character_director",
-  "reaction_director",
-  "simulator",
-  "world_director",
-  "workflow_manager",
-]);
+// Operations that use standard tier (everything else is basic). None of the
+// surviving operations (see docs/plans/delete-chronicle-orders-turns.md) were
+// in the standard tier before this wipe -- preserved as empty rather than
+// guessing a new tier assignment.
+const STANDARD_TIER_OPERATIONS = new Set<AiOperation>([]);
 
 // These are ceilings, not targets. They keep structured routing calls from
 // spending a turn's latency and coins on prose the parser will discard, while
-// leaving the chronicle enough room for its explicitly requested scenes.
-const MAX_COMPLETION_TOKENS: Partial<Record<AiOperation, number>> = {
-  interpret_order: 700,
-  assess_orders: 500,
-  adjudicate: 1_000,
-  reaction_director: 1_200,
-  simulator: 1_600,
-  character_director: 1_600,
-  world_director: 1_800,
-  workflow_manager: 1_600,
-  chronicle_narrator: 3_000,
-};
+// leaving the chronicle enough room for its explicitly requested scenes. None
+// of the surviving operations had an entry before this wipe -- preserved as
+// empty (falls through to `undefined`, the original behavior for these ops).
+const MAX_COMPLETION_TOKENS: Partial<Record<AiOperation, number>> = {};
 
 // Responses-API budget for the tool loop: one step, not the whole turn. Set
 // well above what the visible tool calls need, because reasoning tokens are
-// drawn from the same budget.
-const MAX_OUTPUT_TOKENS: Partial<Record<AiOperation, number>> = {
-  game_master: 8_000,
-};
+// drawn from the same budget. Empty for the same reason as above -- this
+// always fell through to the 8_000 default for every surviving operation.
+const MAX_OUTPUT_TOKENS: Partial<Record<AiOperation, number>> = {};
 
 function resolveModel(operation: AiOperation): string {
   const selectedModel = getSelectedLocalAiModel("openai");

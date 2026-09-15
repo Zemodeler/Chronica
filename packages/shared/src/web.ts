@@ -1,10 +1,7 @@
 import { z } from "zod";
-import { OrderBatchSchema, OngoingActionSchema } from "./actions/index";
 import { ContinuityConfigSchema } from "./continuity/index";
 import { DialogueChannelSchema, DialogueMessageSchema } from "./dialogue/index";
 import { EntityIdSchema } from "./material-state";
-import { MaterialWorldViewModelSchema } from "./material-view";
-import { CrossingTypeSchema, DetailTierSchema, DynamicMapOverlaySchema, GeoJsonMapSchema } from "./world/index";
 import { AccountRoleSchema, AvatarKeySchema, CoinAmountStringSchema } from "./coins";
 
 export const EmailAddressSchema = z.string().trim().email().max(254);
@@ -36,24 +33,10 @@ export const GameCreationSchema = z
     title: z.string().trim().min(3).max(120),
     scenarioId: EntityIdSchema,
     continuity: ContinuityConfigSchema,
-    newsTimeoutSeconds: z.number().int().min(15).max(600).default(60),
     coinCap: CoinAmountStringSchema,
   })
   .strict();
 export type GameCreation = z.infer<typeof GameCreationSchema>;
-
-export const GamePhaseSchema = z.enum([
-  "lobby",
-  "collecting",
-  "queued",
-  "resolving",
-  "news",
-  "resolved",
-  "finished",
-  "failed",
-  "payment_paused",
-]);
-export type GamePhase = z.infer<typeof GamePhaseSchema>;
 
 export const CharacterChoiceSchema = z
   .object({
@@ -87,145 +70,6 @@ export const LobbyViewModelSchema = z
   })
   .strict();
 export type LobbyViewModel = z.infer<typeof LobbyViewModelSchema>;
-
-export const ProvinceActionSchema = z
-  .object({
-    id: EntityIdSchema,
-    label: z.string().trim().min(1).max(120),
-    href: z.string().trim().min(1),
-  })
-  .strict();
-export type ProvinceAction = z.infer<typeof ProvinceActionSchema>;
-
-export const ProvinceViewSchema = z
-  .object({
-    id: EntityIdSchema,
-    name: z.string().trim().min(1),
-    controller: z.string().trim().min(1),
-    terrain: z.string().trim().min(1),
-    tier: DetailTierSchema,
-    controlLabel: z.string().trim().min(1),
-    garrisonLabel: z.string().trim().min(1),
-    unrestLabel: z.string().trim().min(1),
-    knowledgeLabel: z.string().trim().min(1),
-    x: z.number().finite(),
-    y: z.number().finite(),
-    water: z.boolean().optional(),
-    neighbours: z.array(
-      z
-        .object({
-          provinceId: EntityIdSchema,
-          provinceName: z.string().trim().min(1),
-          crossing: CrossingTypeSchema,
-        })
-        .strict(),
-    ),
-    actions: z.array(ProvinceActionSchema),
-  })
-  .strict();
-export type ProvinceView = z.infer<typeof ProvinceViewSchema>;
-
-export const ArmyViewSchema = z
-  .object({
-    id: EntityIdSchema,
-    name: z.string().trim().min(1),
-    location: z.string().trim().min(1),
-    commander: z.string().trim().min(1),
-    strengthLabel: z.string().trim().min(1),
-    currentOrder: z.string().trim().min(1),
-  })
-  .strict();
-export type ArmyView = z.infer<typeof ArmyViewSchema>;
-
-/** Minimal display update to apply when a Chronicle entry is revealed. Pure view data: no model may emit this directly. */
-export const DisplayPatchSchema = z
-  .object({
-    provincesChanged: z
-      .array(
-        z.object({ id: EntityIdSchema, controller: z.string().optional(), controlLabel: z.string().optional() }).strict(),
-      )
-      .optional(),
-    armiesAdded: z.array(ArmyViewSchema).optional(),
-    armiesRemoved: z.array(EntityIdSchema).optional(),
-    armiesMoved: z.array(z.object({ id: EntityIdSchema, location: z.string() }).strict()).optional(),
-  })
-  .strict();
-export type DisplayPatch = z.infer<typeof DisplayPatchSchema>;
-
-export const WorldViewModelSchema = z
-  .object({
-    gameId: EntityIdSchema,
-    gameTitle: z.string().trim().min(1),
-    phase: GamePhaseSchema,
-    turnIndex: z.number().int().nonnegative(),
-    elapsedStepLabel: z.string().trim().min(1),
-    submittedPlayers: z.number().int().nonnegative(),
-    totalPlayers: z.number().int().positive(),
-    lowBandwidth: z.boolean(),
-    /** GeoJSON is the map contract for authored and developer-private worlds. */
-    mapGeoJson: GeoJsonMapSchema.optional(),
-    /** Player-scoped mutable control, settlement and force state keyed to the static map asset. */
-    mapOverlay: DynamicMapOverlaySchema.optional(),
-    provinces: z.array(ProvinceViewSchema),
-    armies: z.array(ArmyViewSchema),
-    material: MaterialWorldViewModelSchema,
-    ongoingActions: z.array(OngoingActionSchema),
-  })
-  .strict();
-export type WorldViewModel = z.infer<typeof WorldViewModelSchema>;
-
-export const OrderReviewSchema = z
-  .object({
-    gameId: EntityIdSchema,
-    batch: OrderBatchSchema,
-    payingAccount: z.string().trim().min(1),
-    fullCostLabel: z.string().trim().min(1),
-    approvalLabel: z.string().trim().min(1),
-    progressReadbacks: z.array(z.string().trim().min(1)),
-  })
-  .strict();
-export type OrderReview = z.infer<typeof OrderReviewSchema>;
-
-export const ChronicleEntryViewSchema = z
-  .object({
-    id: EntityIdSchema,
-    sequence: z.number().int().nonnegative(),
-    title: z.string().trim().min(1),
-    body: z.string().trim().min(1),
-    knowledgeStatus: z.enum(["confirmed", "report", "rumour", "suspicion"]).optional(),
-    audience: z.enum(["all_players", "knowledge_scoped"]),
-    characterKnows: z.boolean(),
-    involvementLabel: z.string().trim().min(1),
-    /** True when this entry corresponds to a material world change (force, province, etc.). */
-    materialConsequence: z.boolean(),
-    /** Display update to apply to the staged world when this entry is revealed. Absent for purely narrative entries. */
-    displayPatch: DisplayPatchSchema.optional(),
-    /** Calendar date projected from the event's deterministic elapsed step. Never includes wall-clock time. */
-    dateLabel: z.string().trim().min(1),
-  })
-  .strict();
-export type ChronicleEntryView = z.infer<typeof ChronicleEntryViewSchema>;
-
-export const NewsViewModelSchema = z
-  .object({
-    gameId: EntityIdSchema,
-    turnIndex: z.number().int().nonnegative(),
-    phase: GamePhaseSchema,
-    entries: z.array(ChronicleEntryViewSchema),
-    readyPlayers: z.number().int().nonnegative(),
-    totalPlayers: z.number().int().positive(),
-    currentPlayerReady: z.boolean(),
-    /**
-     * Durable read position (`player_game_ui_state.chronicle_read_sequence`);
-     * absent for older/fixture data. -1 is the deliberate "nothing read yet"
-     * sentinel (matching that column's DB default), not an error case --
-     * chronicle sequences themselves start at 0, so -1 never collides with a
-     * real entry.
-     */
-    chronicleReadSequence: z.number().int().min(-1).optional(),
-  })
-  .strict();
-export type NewsViewModel = z.infer<typeof NewsViewModelSchema>;
 
 export const ContactViewSchema = z
   .object({
@@ -289,27 +133,15 @@ export type SendChatMessageResponse = z.infer<typeof SendChatMessageResponseSche
 export const PatchUiStateRequestSchema = z
   .object({
     selectedThreadId: EntityIdSchema.nullable().optional(),
-    chronicleReadSequence: z.number().int().nonnegative().optional(),
   })
   .strict()
-  .refine((value) => value.selectedThreadId !== undefined || value.chronicleReadSequence !== undefined, {
+  .refine((value) => value.selectedThreadId !== undefined, {
     message: "At least one field must be set.",
   });
 export type PatchUiStateRequest = z.infer<typeof PatchUiStateRequestSchema>;
 
 export const PatchUiStateResponseSchema = z.object({ ok: z.literal(true) }).strict();
 export type PatchUiStateResponse = z.infer<typeof PatchUiStateResponseSchema>;
-
-export const OrdersStatusResponseSchema = z
-  .object({
-    gameId: EntityIdSchema,
-    turnIndex: z.number().int().nonnegative(),
-    submitted: z.boolean(),
-    batch: OrderBatchSchema.nullable(),
-    ongoingActions: z.array(OngoingActionSchema),
-  })
-  .strict();
-export type OrdersStatusResponse = z.infer<typeof OrdersStatusResponseSchema>;
 
 /** @deprecated Use CoinAmountStringSchema. */
 export const CreditAmountStringSchema = CoinAmountStringSchema;
@@ -362,12 +194,10 @@ export const AdminGiftCreationSchema = z
 export const LiveGameEventSchema = z
   .object({
     id: z.string().trim().min(1),
-    kind: z.enum(["submission_count", "phase_changed", "turn_opened", "payment_changed", "dialogue_ready"]),
+    kind: z.enum(["payment_changed", "dialogue_ready"]),
     announcement: z.string().trim().min(1),
     revision: z.number().int().nonnegative().optional(),
     changedSlices: z.array(z.string()).optional(),
-    /** Provinces whose controller/firmness changed this turn, so a client can patch just the map overlay. */
-    changedRegionIds: z.array(EntityIdSchema).optional(),
   })
   .strict();
 export type LiveGameEvent = z.infer<typeof LiveGameEventSchema>;

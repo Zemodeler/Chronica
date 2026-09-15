@@ -1,8 +1,7 @@
 import { z } from "zod";
-import { OrderPartyRefSchema, type OrderPartyRef } from "../actions/orders";
+import { OrderPartyRefSchema, type OrderPartyRef } from "./party-ref";
 import { MoneyAmountSchema, EntityIdSchema, ElapsedStepSchema } from "../material-state";
 import { WorldInstantSchema, type WorldInstant } from "./instant";
-import type { FactualEvent } from "../gm/session";
 
 /**
  * The durable historical record an event's resolution produces (docs/32,
@@ -127,40 +126,6 @@ export const FactSchema = z
   })
   .strict();
 export type Fact = z.infer<typeof FactSchema>;
-
-/**
- * One committed Fact per `FactualEvent` (`gm/session.ts`), called at the
- * point `resolution/pipeline.ts` already builds its `factualEvents` array --
- * every existing Fact producer (Game Master tool calls, world dynamics)
- * gets a Fact for free with no producer-side change. `discovery` defaults to
- * a state matching the event's own `visibility` tag with no discoverers yet
- * recorded, unless the caller supplies a richer discovery record.
- */
-export function factualEventToFact(
-  event: FactualEvent,
-  time: WorldInstant,
-  visibility: FactVisibility = "public",
-  discovery?: FactDiscovery,
-  overrides?: Partial<Pick<Fact, "eligibleReactionScopes" | "sourceEventId" | "causalDepth" | "authorityChange" | "evidence" | "affectedEntities">>,
-): Fact {
-  return FactSchema.parse({
-    id: event.id,
-    time,
-    atStep: event.atStep,
-    kind: event.actionId,
-    summary: event.summary,
-    affectedEntities: overrides?.affectedEntities ?? [],
-    resourceChanges: [],
-    authorityChange: overrides?.authorityChange,
-    visibility,
-    discovery: discovery ?? { state: visibility, knowableAtInstant: null, discoveredBy: [] },
-    evidence: overrides?.evidence ?? null,
-    eligibleReactionScopes: overrides?.eligibleReactionScopes ?? [],
-    sourceEventId: overrides?.sourceEventId ?? null,
-    sourceActionId: event.actionId ?? null,
-    causalDepth: overrides?.causalDepth ?? 0,
-  });
-}
 
 /**
  * A not-yet-persisted Fact: everything `FactSchema` needs except `id`

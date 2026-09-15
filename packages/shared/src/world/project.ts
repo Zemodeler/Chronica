@@ -1,15 +1,14 @@
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema, MoneyAmountSchema } from "../material-state";
-import { OrderPartyRefSchema } from "../actions/orders";
-import { WORKFLOW_REGISTRY } from "../workflows/registry";
+import { OrderPartyRefSchema } from "./party-ref";
 
 // Generalizes `PoliticalProcedure.linkedWorkflowId` (docs/32, Part C.2): a
 // multi-turn sponsored effort -- an academy, a fortress -- reserves funds up
-// front and, at each milestone, spends from that reservation and invokes one
-// already-registered, already-validated workflow. Every `linkedWorkflowId`/
-// `completionWorkflowId` is checked against `WORKFLOW_REGISTRY` at creation,
-// the same discipline `sponsor_procedure` already applies -- this is not a
-// new kind of unrestricted patch, only a schedule for calling real workflows.
+// front and, at each milestone, spends from that reservation and invokes a
+// registered action. The workflow-execution engine this used to validate
+// `linkedWorkflowId`/`completionWorkflowId` against was removed (see
+// docs/plans/delete-chronicle-orders-turns.md); a future execution engine
+// should reinstate that validation.
 
 export const ProjectMilestoneStatusSchema = z.enum(["pending", "completed", "skipped"]);
 export type ProjectMilestoneStatus = z.infer<typeof ProjectMilestoneStatusSchema>;
@@ -54,17 +53,7 @@ export const ProjectSchema = z
     /** So an entity this project later produces can point back at why it exists. */
     provenanceEventIds: z.array(z.string().max(120)).max(20).default([]),
   })
-  .strict()
-  .superRefine((project, context) => {
-    project.milestones.forEach((milestone, index) => {
-      if (milestone.linkedWorkflowId !== null && !WORKFLOW_REGISTRY.has(milestone.linkedWorkflowId)) {
-        context.addIssue({ code: "custom", path: ["milestones", index, "linkedWorkflowId"], message: `"${milestone.linkedWorkflowId}" is not a registered workflow.` });
-      }
-    });
-    if (project.completionWorkflowId !== null && !WORKFLOW_REGISTRY.has(project.completionWorkflowId)) {
-      context.addIssue({ code: "custom", path: ["completionWorkflowId"], message: `"${project.completionWorkflowId}" is not a registered workflow.` });
-    }
-  });
+  .strict();
 export type Project = z.infer<typeof ProjectSchema>;
 
 /** The earliest pending milestone due by `atStep`, if any -- what `advance_project` (Part A's event queue) would act on next. */

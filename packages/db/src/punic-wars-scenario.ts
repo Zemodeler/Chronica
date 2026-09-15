@@ -190,7 +190,6 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       ["ita-72843720b81376294924159-sicily-southeast", "ita-72843720b81376294924159-sicily-northeast"],
     ].map(([from, to]) => ({ from, to, crossing: "land" as const, distance: 1 })),
   },
-  actions: [],
   characters: [
     { id: "gaius-genucius", name: "Gaius Genucius Clepsina", cultureId: "roman", faithId: null, dynastyId: null, locationProvinceId: "punic-italy-latium", polityId: "rome", ageYearsAtStart: 45, officeId: "roman-consul", personalAccountId: "gaius-purse", skills: { martial: 65, intrigue: 40, learning: 50, piety: 45, stewardship: 55, diplomacy: 60, body: 65, subSkills: {} }, traits: ["dutiful", "disciplined"], healthBps: 9_000, prestigeBps: 7_000, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null },
     // Carthage is a real party watching the Messana crisis, not a passive
@@ -213,17 +212,6 @@ const initialWorld: WorldState = WorldStateSchema.parse({
   // has its own stake in whether Messana falls to Syracuse or holds.
   storylines: [{ id: "mamertine-syracusan-crisis", title: "The Messana Crisis", participantIds: ["hieron-ii", "mamertine-spokesman", "hanno-carthage"], provinceId: "ita-72843720b81376294924159-sicily-northeast", phase: "escalating", stakes: "Syracuse seeks to contain the Mamertines without drawing Rome and Carthage into a wider war.", history: ["Hieron II's forces pressure the Mamertines around the Strait of Messana.", "Carthage watches the strait for any opening or threat to its own position in Sicily."], nextDevelopment: "Envoys may seek outside support if the local balance collapses.", visibility: "public", updatedAtStep: 0 }],
   conflicts: { battles: [], sieges: [], wars: [] },
-  // Carthage's opening objective and first concrete response to the Messana
-  // crisis: a goal or an ambition-shaped hope is not enough to make an NPC
-  // act -- the plot's `nextIntendedMove` is the concrete thing its agent can
-  // carry out through a registered workflow, rather than free-form prose
-  // about Hanno's intentions.
-  characterGoals: [
-    { id: "hanno-goal-messana-watch", characterId: "hanno-carthage", objective: "Keep Carthage's position in Sicily secure without being drawn into the Messana quarrel before Carthage's own interests in it are clear.", category: "preserve_power", targetEntityIds: ["mamertines", "syracuse"], priority: 3, status: "active", visibility: "polity", causalFactIds: [], createdAtStep: 0, updatedAtStep: 0, history: [] },
-  ],
-  characterPlots: [
-    { id: "hanno-plot-messana-watch", characterId: "hanno-carthage", goalId: "hanno-goal-messana-watch", worldStorylineId: "mamertine-syracusan-crisis", participantIds: [], allyIds: [], targetIds: ["mamertines"], objective: "Decide whether Carthage backs the Mamertines, stands aside, or contests Syracuse's move against Messana.", stage: "forming", momentum: 75, stakes: "If Syracuse secures Messana unopposed, Carthage loses its opening to extend influence across the strait; move too soon or too openly, and Carthage risks provoking Rome instead.", visibility: "polity", currentObstacle: "No word yet from Messana on what help, if any, the Mamertines would accept from Carthage.", nextIntendedMove: "Send an envoy toward Messana to sound out the Mamertines and gauge Syracuse's intentions before committing any Carthaginian force.", status: "active", causalHistory: [], createdAtStep: 0, updatedAtStep: 0 },
-  ],
   characterPressures: [
     { id: "mamertine-pressure-hieron", characterId: "hieron-ii", kind: "political_danger", intensity: 55, label: "The Mamertine crisis threatens to draw in Rome or Carthage.", sourceEventId: null, createdAtStep: 0, reviewAtStep: 8, expiresAtStep: null, visibility: "polity" },
     { id: "mamertine-pressure-spokesman", characterId: "mamertine-spokesman", kind: "military_emergency", intensity: 70, label: "Syracusan forces threaten Messana directly.", sourceEventId: null, createdAtStep: 0, reviewAtStep: 6, expiresAtStep: null, visibility: "public" },

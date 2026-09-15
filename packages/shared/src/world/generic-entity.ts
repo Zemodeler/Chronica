@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema } from "../material-state";
-import { OrderPartyRefSchema } from "../actions/orders";
+import { OrderPartyRefSchema } from "./party-ref";
 
 // The true generic fallback (docs/32, Part C.1): used only for a genuinely
 // novel composition no typed schema (Force, Institution, Structure, Project,
