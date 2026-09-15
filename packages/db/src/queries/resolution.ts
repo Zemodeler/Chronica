@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
-import { and, desc, eq, lte } from "drizzle-orm";
+import { and, desc, eq, lte, or } from "drizzle-orm";
 import type {
   CommittedGameMasterReport,
   Fact,
@@ -462,10 +462,14 @@ export async function updateTurnProgressStep(
  * shown to a player verbatim (the resolution stream reports a generic
  * message instead; see `resolution/stream/route.ts`).
  */
+/** Longest `lastFailureReason` persisted -- an engineered error message, never a raw provider payload, but capped defensively regardless. */
+const MAX_FAILURE_REASON_LENGTH = 2000;
+
 export async function failTurn(
   db: ChronicaDatabase,
   turnId: string,
   reason: string,
+  options: { readonly terminal?: boolean } = {},
 ): Promise<void> {
   const [turn] = await db
     .select({ resolveAttempts: turns.resolveAttempts, status: turns.status })
@@ -476,8 +480,15 @@ export async function failTurn(
   // the turn. Never turn confirmed news back into a queued duplicate.
   if (turn === undefined || turn.status !== "resolving") return;
   const resolveAttempts = (turn?.resolveAttempts ?? 0) + 1;
-  const status = resolveAttempts >= MAX_TURN_RESOLVE_ATTEMPTS ? "failed" : "queued";
-  await db.update(turns).set({ status, resolveAttempts, claimedBy: null, claimExpiresAt: null, lastFailureReason: reason }).where(eq(turns.id, turnId));
+  // AI-HANDSHAKE issue-02: a precondition that can never succeed (a deleted
+  // orders row, a player who is no longer active) skips straight to
+  // terminal instead of burning `MAX_TURN_RESOLVE_ATTEMPTS` retrying
+  // something retrying cannot fix.
+  const status = options.terminal || resolveAttempts >= MAX_TURN_RESOLVE_ATTEMPTS ? "failed" : "queued";
+  await db.update(turns).set({
+    status, resolveAttempts, claimedBy: null, claimExpiresAt: null,
+    lastFailureReason: reason.slice(0, MAX_FAILURE_REASON_LENGTH),
+  }).where(eq(turns.id, turnId));
 }
 
 /**
@@ -509,6 +520,21 @@ export async function getQueuedTurn(
     .orderBy(desc(turns.index))
     .limit(1);
   return turn;
+}
+
+/**
+ * Every game with resolution work outstanding right now: a queued turn, or a
+ * `resolving` turn whose claim lease already expired (its claimant crashed).
+ * The durable worker (unified action runtime, durable dispatch) polls this
+ * instead of needing to know which games exist up front -- it has no other
+ * way to discover work, since nothing pushes it a queued turn.
+ */
+export async function getGameIdsNeedingResolution(db: ChronicaDatabase): Promise<string[]> {
+  const rows = await db
+    .select({ gameId: turns.gameId })
+    .from(turns)
+    .where(or(eq(turns.status, "queued"), and(eq(turns.status, "resolving"), lte(turns.claimExpiresAt, new Date()))));
+  return [...new Set(rows.map((row) => row.gameId))];
 }
 
 /** The account responsible for provider charges incurred while resolving a game. */
