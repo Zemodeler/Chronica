@@ -86,7 +86,7 @@ const visibleSettlementsByProvince: Readonly<Record<string, readonly Settlement[
 };
 
 const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
-  clock: { stepLabel: "season", stepLabelPlural: "seasons", stepsPerYear: 4, minSpan: 1, maxSpan: 4, epoch: { year: 270, month: 3, day: 1, era: "BCE" } },
+  clock: { epoch: { year: 270, month: 3, day: 1, era: "BCE" }, minSpanDays: 7, maxSpanDays: 365 },
   map: {
     terrains: [
       { id: "coastal-plain", label: "Coastal plain", allowedCrossings: ["land", "strait", "sea_lane"], water: false },
@@ -103,7 +103,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
     phases: ["contact", "engagement", "cohesion", "withdrawal", "aftermath"], routCohesionBps: 2_000, arrearsMoralePeriods: 1, arrearsDesertionPeriods: 2,
   },
   government: {
-    offices: [{ id: "roman-consul", label: "Roman consul", polityId: "rome", authorisedActionIds: ["assign_command", "create_force", "move_force", "start_siege", "start_battle", "sponsor_procedure", "call_vote", "move_character"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "roman-election", eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-not-disqualified"] }],
+    offices: [{ id: "roman-consul", label: "Roman consul", polityId: "rome", authorisedActionIds: ["force_create", "force_modify", "project_create", "character_intent_set", "polity_stance_shift"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "roman-election", eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-not-disqualified"] }],
     successionRules: [{ id: "roman-election", label: "Election by the Senate", kind: "elective", institutionId: "roman-senate" }], decreeAuthorityCostBps: 500, decreeMinimumPrestigeBps: 2_000,
   },
   dialogue: { roleSlots: [], namePools: { roman: ["Gaius", "Lucius"], carthaginian: ["Hanno", "Hamilcar"], greek: ["Hieron", "Sosistratus"] } },
@@ -115,9 +115,10 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
 });
 
 const initialWorld: WorldState = WorldStateSchema.parse({
-  schemaVersion: 1,
+  schemaVersion: 2,
   pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 11, libraryVersion: 1 },
   elapsedStep: 0,
+  instant: { day: 0, minute: 0 },
   map: {
     polities: [
       { id: "rome", name: "Roman Republic", capitalSettlementId: "settlement-rome" },
@@ -213,9 +214,9 @@ const initialWorld: WorldState = WorldStateSchema.parse({
   storylines: [{ id: "mamertine-syracusan-crisis", title: "The Messana Crisis", participantIds: ["hieron-ii", "mamertine-spokesman", "hanno-carthage"], provinceId: "ita-72843720b81376294924159-sicily-northeast", phase: "escalating", stakes: "Syracuse seeks to contain the Mamertines without drawing Rome and Carthage into a wider war.", history: ["Hieron II's forces pressure the Mamertines around the Strait of Messana.", "Carthage watches the strait for any opening or threat to its own position in Sicily."], nextDevelopment: "Envoys may seek outside support if the local balance collapses.", visibility: "public", updatedAtStep: 0 }],
   conflicts: { battles: [], sieges: [], wars: [] },
   characterPressures: [
-    { id: "mamertine-pressure-hieron", characterId: "hieron-ii", kind: "political_danger", intensity: 55, label: "The Mamertine crisis threatens to draw in Rome or Carthage.", sourceEventId: null, createdAtStep: 0, reviewAtStep: 8, expiresAtStep: null, visibility: "polity" },
-    { id: "mamertine-pressure-spokesman", characterId: "mamertine-spokesman", kind: "military_emergency", intensity: 70, label: "Syracusan forces threaten Messana directly.", sourceEventId: null, createdAtStep: 0, reviewAtStep: 6, expiresAtStep: null, visibility: "public" },
-    { id: "hanno-pressure-messana", characterId: "hanno-carthage", kind: "political_danger", intensity: 45, label: "Syracuse's move against Messana could reshape the strategic balance across the strait before Carthage has answered it.", sourceEventId: null, createdAtStep: 0, reviewAtStep: 8, expiresAtStep: null, visibility: "polity" },
+    { id: "mamertine-pressure-hieron", characterId: "hieron-ii", kind: "political_danger", intensity: 55, label: "The Mamertine crisis threatens to draw in Rome or Carthage.", sourceEventId: null, createdAtStep: 0, reviewAtStep: 730, expiresAtStep: null, visibility: "polity" },
+    { id: "mamertine-pressure-spokesman", characterId: "mamertine-spokesman", kind: "military_emergency", intensity: 70, label: "Syracusan forces threaten Messana directly.", sourceEventId: null, createdAtStep: 0, reviewAtStep: 545, expiresAtStep: null, visibility: "public" },
+    { id: "hanno-pressure-messana", characterId: "hanno-carthage", kind: "political_danger", intensity: 45, label: "Syracuse's move against Messana could reshape the strategic balance across the strait before Carthage has answered it.", sourceEventId: null, createdAtStep: 0, reviewAtStep: 730, expiresAtStep: null, visibility: "polity" },
   ].map((pressure) => ({ ...pressure, status: "active" })),
   socialLinks: [
     { id: "hieron-mamertine-rivals", subjectCharacterId: "hieron-ii", targetCharacterId: "mamertine-spokesman", kind: "rival", sourceEventId: null, createdAtStep: 0, visibility: "public" },
@@ -258,7 +259,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { id: "req-not-disqualified", kind: "not_disqualified", label: "Must carry no disqualifying status", params: {} },
     ],
     officeSeats: [
-      { id: "roman-consul:seat:0", officeId: "roman-consul", seatIndex: 0, holderCharacterId: "gaius-genucius", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: 4, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-not-disqualified"] },
+      { id: "roman-consul:seat:0", officeId: "roman-consul", seatIndex: 0, holderCharacterId: "gaius-genucius", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: 365, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-not-disqualified"] },
       // Rome elected two consuls a year, and the scenario only ever seated
       // one. The empty chair matters mechanically: a player who declares
       // themselves consul has nowhere to sit if the college is modelled as a
@@ -266,10 +267,10 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { id: "roman-consul:seat:1", officeId: "roman-consul", seatIndex: 1, holderCharacterId: null, status: "vacant", vacancyCause: "never_filled", termStartedAtStep: null, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-not-disqualified"] },
     ],
     forces: [
-      { id: "roman-field-army", name: "Roman field army", polityId: "rome", commanderCharacterId: "gaius-genucius", controllerCharacterId: "gaius-genucius", locationId: "punic-italy-latium", authorizedStrength: 4_000, personnel: [{ categoryId: "infantry", label: "Legionaries", fit: 3_500, unavailable: [] }], moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 4, payObligationId: null, payArrearsPeriods: 0, history: [] },
-      { id: "carthaginian-garrison", name: "Carthaginian field force", polityId: "carthage", commanderCharacterId: "hanno-carthage", controllerCharacterId: "hanno-carthage", locationId: "tun-13205935b88806172084765", authorizedStrength: 3_500, personnel: [{ categoryId: "infantry", label: "Infantry", fit: 3_000, unavailable: [] }], moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 4, payObligationId: null, payArrearsPeriods: 0, history: [] },
-      { id: "syracusan-army", name: "Syracusan army", polityId: "syracuse", commanderCharacterId: "hieron-ii", controllerCharacterId: "hieron-ii", locationId: "ita-72843720b81376294924159-sicily-southeast", authorizedStrength: 3_000, personnel: [{ categoryId: "infantry", label: "Hoplites", fit: 2_600, unavailable: [] }], moraleBps: 7_500, cohesionBps: 7_500, fatigueBps: 1_000, provisionStatus: "provisioned", provisionedThroughStep: 4, payObligationId: null, payArrearsPeriods: 0, history: [] },
-      { id: "mamertine-garrison", name: "Mamertine garrison", polityId: "mamertines", commanderCharacterId: "mamertine-spokesman", controllerCharacterId: "mamertine-spokesman", locationId: "ita-72843720b81376294924159-sicily-northeast", authorizedStrength: 1_600, personnel: [{ categoryId: "infantry", label: "Mercenaries", fit: 1_400, unavailable: [] }], moraleBps: 7_000, cohesionBps: 7_000, fatigueBps: 1_000, provisionStatus: "provisioned", provisionedThroughStep: 4, payObligationId: null, payArrearsPeriods: 0, history: [] },
+      { id: "roman-field-army", name: "Roman field army", polityId: "rome", commanderCharacterId: "gaius-genucius", controllerCharacterId: "gaius-genucius", locationId: "punic-italy-latium", authorizedStrength: 4_000, personnel: [{ categoryId: "infantry", label: "Legionaries", fit: 3_500, unavailable: [] }], moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: null, payArrearsPeriods: 0, history: [] },
+      { id: "carthaginian-garrison", name: "Carthaginian field force", polityId: "carthage", commanderCharacterId: "hanno-carthage", controllerCharacterId: "hanno-carthage", locationId: "tun-13205935b88806172084765", authorizedStrength: 3_500, personnel: [{ categoryId: "infantry", label: "Infantry", fit: 3_000, unavailable: [] }], moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: null, payArrearsPeriods: 0, history: [] },
+      { id: "syracusan-army", name: "Syracusan army", polityId: "syracuse", commanderCharacterId: "hieron-ii", controllerCharacterId: "hieron-ii", locationId: "ita-72843720b81376294924159-sicily-southeast", authorizedStrength: 3_000, personnel: [{ categoryId: "infantry", label: "Hoplites", fit: 2_600, unavailable: [] }], moraleBps: 7_500, cohesionBps: 7_500, fatigueBps: 1_000, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: null, payArrearsPeriods: 0, history: [] },
+      { id: "mamertine-garrison", name: "Mamertine garrison", polityId: "mamertines", commanderCharacterId: "mamertine-spokesman", controllerCharacterId: "mamertine-spokesman", locationId: "ita-72843720b81376294924159-sicily-northeast", authorizedStrength: 1_600, personnel: [{ categoryId: "infantry", label: "Mercenaries", fit: 1_400, unavailable: [] }], moraleBps: 7_000, cohesionBps: 7_000, fatigueBps: 1_000, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: null, payArrearsPeriods: 0, history: [] },
     ],
   },
 });

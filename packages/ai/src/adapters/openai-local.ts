@@ -19,6 +19,8 @@ const JSON_MODE_OPERATIONS = new Set<AiOperation>([
   "propose_social_events",
   "declare_character",
   "confirm_character",
+  "simulate_orchestrate",
+  "simulate_cognition",
 ]);
 
 // Model assignments per tier. Override via env vars if needed.
@@ -32,7 +34,10 @@ const TIER_MODELS: Record<AiTier, string> = {
 // surviving operations (see docs/plans/delete-chronicle-orders-turns.md) were
 // in the standard tier before this wipe -- preserved as empty rather than
 // guessing a new tier assignment.
-const STANDARD_TIER_OPERATIONS = new Set<AiOperation>([]);
+// The loop's reasoning calls: orchestration weighs an entire world slice and
+// cognition roleplays several actors from their own knowledge. Both are the
+// judgment the design rests on, so neither runs on the cheapest tier.
+const STANDARD_TIER_OPERATIONS = new Set<AiOperation>(["simulate_orchestrate", "simulate_cognition"]);
 
 // These are ceilings, not targets. They keep structured routing calls from
 // spending a turn's latency and coins on prose the parser will discard, while

@@ -5,9 +5,10 @@ scoped below. See "What was actually executed" at the bottom of this document fo
 final decisions -- the plan phases below are the original proposal and are kept for the reasoning
 they record, not as a description of the current codebase.
 
-**Read first:** [`docs/CORE-VISION.md`](../CORE-VISION.md) — it captures the vision and reasoning
-behind the systems this plan deletes (elastic time, the plan/stage claims discipline, the
-Chronicle's refusal/unresolved distinction) before that context is gone from the repo.
+**Note:** the vision and reasoning this document originally pointed to (`docs/CORE-VISION.md`) has
+been superseded by [`docs/VISION.md`](../VISION.md), which does not cover the deleted
+elastic-time/plan-stage/Chronicle reasoning. This plan is kept below purely as a record of what was
+deleted and why, not as a pointer to still-current design rationale.
 
 ## Why this is a bigger cut than "drop three tables"
 
@@ -38,10 +39,10 @@ sequence breaks Chat NPCs partway through, which the user explicitly does not wa
 ## Non-negotiable constraint
 
 **Chat NPCs must work, uninterrupted, as a standalone feature after every phase below.** They must
-remain "actual characters," not a stateless chatbot — see `docs/CORE-VISION.md`'s description of
-what makes them that today (canonical world record, durable per-player knowledgebase, relationship
-ledger, beliefs/pressures/mind read into the prompt, commitment ledger, canonical identity for
-newly discovered NPCs, historical grounding). None of `packages/shared/src/characters/*` is touched
+remain "actual characters," not a stateless chatbot (canonical world record, durable per-player
+knowledgebase, relationship ledger, beliefs/pressures/mind read into the prompt, commitment ledger,
+canonical identity for newly discovered NPCs, historical grounding). None of
+`packages/shared/src/characters/*` is touched
 by this deletion except where explicitly called out below, and none of it should need to be.
 
 ---
@@ -119,8 +120,7 @@ Delete outright:
 
 Keep, unmodified: the claims-classification discipline (`world_premise`/`actor_belief`/
 `deliberate_message`/`preference`/`condition`) is a *concept*, not code that needs to survive this
-deletion — it's preserved in `docs/CORE-VISION.md` for whoever designs the next intent-interpretation
-mechanism.
+deletion, though it is no longer documented anywhere in this repo.
 
 ## Phase 3 — Delete turn resolution: the multi-agent dispatcher, Game Master session, and workflow execution's caller
 
@@ -128,8 +128,7 @@ This is the largest single chunk. Delete:
 
 - `apps/web/lib/resolution/pipeline.ts`, `dispatch.ts`, `game-master.ts`, `game-master-prompt.ts`,
   `elastic-scheduler.ts` (and its test) — elastic time's shadow-mode implementation is turn-scoped
-  by construction; its logic is preserved conceptually in `docs/CORE-VISION.md` for whatever
-  eventually drives the event queue instead.
+  by construction and is not preserved elsewhere in this repo.
 - `apps/web/lib/resolution/agents/orchestrator.ts`, `reaction-runner.ts`, `interpreter-agent.ts`,
   `npc-agent.ts`, and their tests.
 - `packages/shared/src/gm/session.ts`, `memory.ts` (+ `campaign-memory.ts` if separate),
@@ -201,10 +200,9 @@ lifecycle config. Now:
    are very likely fully dead and safe to drop outright — verify no other code path writes to them
    before assuming that, but expect "drop," not "rework," to be the right call for most of these.
 5. `worldEvents.scheduledForTurnId`, `worldFacts.turnId` — make the columns nullable-and-unused or
-   drop them, but **keep the `worldEvents`/`worldFacts` tables themselves**. Per
-   `docs/CORE-VISION.md`, these are the standing candidate substrate for whatever eventually paces
-   the world going forward, and they cost nothing to leave in place, dormant, versus rebuilding
-   later from scratch.
+   drop them, but **keep the `worldEvents`/`worldFacts` tables themselves**. These were the standing
+   candidate substrate for whatever eventually paces the world going forward, and they cost nothing
+   to leave in place, dormant, versus rebuilding later from scratch.
 6. `games` table: drop `turnMode`, `turnTimeoutSeconds`, `newsTimeoutSeconds`,
    `agentArchitectureVersion` (all turn-lifecycle config with no remaining reader).
 7. Rework `apps/web/lib/game-repository.ts` (1139 lines): remove `submitOrders`, `getOrdersStatus`,
@@ -248,8 +246,7 @@ with an NPC, entirely without a `turns` table existing.
 ## Deferred / explicitly out of scope for this deletion
 
 - Designing the actual replacement pacing mechanism (what makes the world feel alive between
-  conversations, once Chronicle/Orders/Turns are gone). `docs/CORE-VISION.md` records what elastic
-  time was meant to become; building it is separate, future work.
+  conversations, once Chronicle/Orders/Turns are gone) is separate, future work.
 - A replacement for NPC-initiated contact (Phase 1, option (b) if chosen later).
 - Any redesign of `packages/shared/src/workflows/*` beyond disconnecting its turn-resolution caller
   (Phase 3's explicit judgment call — confirm with the user before deleting workflow definitions
@@ -340,8 +337,8 @@ to be load-bearing for code this plan says must survive (`WorldState` itself, `a
   `CharacterIntent` (was `character-agency/intents.ts`) → moved to
   `packages/shared/src/characters/commitments.ts` and `.../intents.ts` respectively, along with
   their tests. These were miscategorized under the turn-resolution-only `character-agency/`
-  directory but are genuinely part of the character model -- the commitment/promise ledger
-  `docs/CORE-VISION.md` calls out as part of what makes an NPC an "actual character."
+  directory but are genuinely part of the character model -- the commitment/promise ledger that
+  makes an NPC an "actual character."
 - `AiOperationSchema`/`AiOperation` (was `actions/ai-routing.ts`) → rewritten in-place in
   `packages/shared/src/coins.ts`, trimmed from ~30 turn-resolution operation kinds down to the 8
   Chat/character operations actually still issued anywhere in the codebase (`resolve_contact`,

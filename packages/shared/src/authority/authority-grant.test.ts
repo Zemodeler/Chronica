@@ -14,7 +14,7 @@ const kingOffice: Office = {
   id: "office-king",
   label: "King",
   polityId: "nation",
-  authorisedActionIds: ["assign_command"], // a "military" workflow, per WORKFLOW_REGISTRY
+  authorisedActionIds: ["force_modify"], // a military delta op -- command power over the office's polity
   sponsorableCategories: [],
   treasuryAccountId: "national-treasury",
   treasuryPermissions: ["spend_without_vote"],
@@ -28,7 +28,7 @@ const governorOffice: Office = {
   id: "office-governor",
   label: "Governor",
   polityId: "nation",
-  authorisedActionIds: ["move_force"], // a "military" workflow -- command power, but no treasury at all
+  authorisedActionIds: ["force_modify"], // military command power, but no treasury at all
   sponsorableCategories: [],
   treasuryAccountId: null,
   treasuryPermissions: [],
@@ -94,7 +94,7 @@ describe("deriveOfficeGrants (docs/32, Phase 7)", () => {
     expect(grants.some((g) => g.domain === "fiscal")).toBe(false);
   });
 
-  it.skip("grants a military-category authorised action as command power, scoped to the office's polity -- SKIPPED: officeIdToDomainPowers now returns [] pending a workflow-execution replacement, see docs/plans/delete-chronicle-orders-turns.md", () => {
+  it("grants a military authorised action as command power, scoped to the office's polity", () => {
     const grants = deriveOfficeGrants([seat()], [kingOffice], 1);
     const military = grants.find((g) => g.domain === "military");
     expect(military?.scope).toEqual({ kind: "polity", id: "nation" });
@@ -144,7 +144,7 @@ describe("checkAuthority: king vs governor over the national treasury (docs/32 t
     expect(result.grant).toBeNull();
   });
 
-  it.skip("refuses a governor's polity-wide military grant from satisfying a fiscal check -- SKIPPED: same reason", () => {
+  it("refuses a governor's polity-wide military grant from satisfying a fiscal check", () => {
     const index = buildAuthorityIndex(
       { officeSeats: [seat({ id: "seat-2", officeId: "office-governor", holderCharacterId: "char-governor" })], forces: [] },
       [],
@@ -176,7 +176,7 @@ describe("checkAuthority: garrison command (docs/32 test plan -- unlawful order 
 });
 
 describe("checkAuthority: scope-hierarchy walk", () => {
-  it.skip("lets a broader scope satisfy a narrower check via an injected containment predicate -- SKIPPED: same reason", () => {
+  it("lets a broader scope satisfy a narrower check via an injected containment predicate", () => {
     const index = buildAuthorityIndex({ officeSeats: [seat()], forces: [] }, [], [kingOffice], 1);
     const containsProvinceInPolity = (broader: { kind: string; id: string }, narrower: { kind: string; id: string }) =>
       broader.kind === "polity" && broader.id === "nation" && narrower.kind === "province";

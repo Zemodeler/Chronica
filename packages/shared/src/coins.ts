@@ -1,14 +1,14 @@
 import { z } from "zod";
 
 /**
- * AI operations still routed/coin-gated after the Chronicle/Orders/Turns/
- * workflow-execution wipe (see docs/plans/delete-chronicle-orders-turns.md)
- * -- the Chat NPC system's own calls (dialogue, contact discovery, NPC
- * profile enrichment, knowledge extraction, character declaration) plus
- * dialogue's social-event proposal channel. Every turn-resolution-only
- * operation (game_master, adjudicate, the narrator/director passes, etc.)
- * was removed along with the code that issued it; a future action-resolution
- * engine will need to add its own operations back here.
+ * Every coin-gated model call the engine makes.
+ *
+ * The first group is the Chat NPC system's own calls. The second is the
+ * simulation loop's, and there are deliberately only three of them: VISION §29
+ * budgets a normal player interaction at two to four major model calls, so
+ * every stage that could be deterministic is (attention routing, arithmetic,
+ * scheduling, pressure), and the ones that remain are the ones that genuinely
+ * need judgment.
  */
 export const AiOperationSchema = z.enum([
   "resolve_contact",
@@ -19,6 +19,12 @@ export const AiOperationSchema = z.enum([
   "propose_social_events",
   "declare_character",
   "confirm_character",
+  /** Reads the player's intent and proposes what the world does about it. */
+  "simulate_orchestrate",
+  /** One batched call answering for every actor the attention router selected. */
+  "simulate_cognition",
+  /** Writes the player's Chronicle, from what they could actually know. */
+  "compose_chronicle",
 ]);
 export type AiOperation = z.infer<typeof AiOperationSchema>;
 

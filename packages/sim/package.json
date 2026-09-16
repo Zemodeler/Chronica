@@ -1,0 +1,20 @@
+{
+  "name": "@chronica/sim",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@chronica/shared": "0.0.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@chronica/db": "0.0.0"
+  }
+}

@@ -2,6 +2,18 @@ import { z } from "zod";
 import { OrderPartyRefSchema, type OrderPartyRef } from "../world/party-ref";
 import { EntityIdSchema, ElapsedStepSchema, VisibilitySchema, type MaterialWorldState } from "../material-state";
 import type { Office } from "../characters/character";
+import {
+  AuthorityDomainSchema,
+  AuthorityPowerSchema,
+  AuthorityScopeSchema,
+  AuthoritySourceSchema,
+  AuthorityStandingSchema,
+  type AuthorityDomain,
+  type AuthorityPower,
+  type AuthorityScope,
+  type AuthorityStanding,
+} from "./vocabulary";
+import { DELTA_AUTHORITY_DOMAIN, type WorldDeltaOp } from "../sim/deltas";
 
 /**
  * `AuthorityGrant` (docs/32, Phase 7): a persistent, first-class "who may do
@@ -34,23 +46,15 @@ import type { Office } from "../characters/character";
  * scenario or a workflow explicitly records.
  */
 
-export const AuthoritySourceSchema = z.enum(["office", "law", "command", "delegation", "custom", "conquest", "emergency"]);
-export type AuthoritySource = z.infer<typeof AuthoritySourceSchema>;
-
-export const AuthorityDomainSchema = z.enum(["military", "civil", "fiscal", "judicial", "diplomatic", "religious", "social"]);
-export type AuthorityDomain = z.infer<typeof AuthorityDomainSchema>;
-
-export const AuthorityScopeKindSchema = z.enum(["force", "settlement", "province", "region", "polity", "institution", "account"]);
-export type AuthorityScopeKind = z.infer<typeof AuthorityScopeKindSchema>;
-
-export const AuthorityScopeSchema = z.object({ kind: AuthorityScopeKindSchema, id: EntityIdSchema }).strict();
-export type AuthorityScope = z.infer<typeof AuthorityScopeSchema>;
-
-export const AuthorityPowerSchema = z.enum(["command", "spend", "propose", "appoint", "negotiate", "punish", "override"]);
-export type AuthorityPower = z.infer<typeof AuthorityPowerSchema>;
-
-export const AuthorityStandingSchema = z.enum(["lawful", "delegated", "de_facto", "disputed", "usurped", "emergency"]);
-export type AuthorityStanding = z.infer<typeof AuthorityStandingSchema>;
+export {
+  AuthoritySourceSchema,
+  AuthorityDomainSchema,
+  AuthorityScopeKindSchema,
+  AuthorityScopeSchema,
+  AuthorityPowerSchema,
+  AuthorityStandingSchema,
+} from "./vocabulary";
+export type { AuthoritySource, AuthorityDomain, AuthorityScopeKind, AuthorityScope, AuthorityPower, AuthorityStanding } from "./vocabulary";
 
 export const AuthorityGrantSchema = z
   .object({
@@ -75,15 +79,48 @@ export const AuthorityGrantSchema = z
 export type AuthorityGrant = z.infer<typeof AuthorityGrantSchema>;
 
 /**
- * The workflow registry this used to classify `office.authorisedActionIds`
- * against was removed along with the rest of the workflow-execution engine
- * (see docs/plans/delete-chronicle-orders-turns.md). Nothing currently
- * repopulates that classification, so this deliberately yields no derived
- * domain/power pairs rather than guessing -- a follow-up for whatever new
- * system replaces workflow-driven office authority.
+ * What power an office's authorised actions actually confer.
+ *
+ * This used to classify `office.authorisedActionIds` against the workflow
+ * registry, and became a stub returning nothing when that registry was deleted.
+ * The registry's replacement is the simulation's closed delta union
+ * (`sim/deltas.ts`), so an office is now described in exactly the vocabulary
+ * the world can be changed in -- an office authorising `force_create` holds
+ * military command power, one authorising `money_transfer` holds fiscal spend
+ * power, and an id in neither vocabulary confers nothing rather than guessing.
  */
-function officeIdToDomainPowers(_office: Office): { readonly domain: AuthorityDomain; readonly powers: readonly AuthorityPower[] }[] {
-  return [];
+const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = {
+  force_create: "command",
+  force_modify: "command",
+  money_transfer: "spend",
+  income_source_upsert: "spend",
+  obligation_upsert: "spend",
+  project_create: "propose",
+  project_milestone_update: "propose",
+  character_create: "appoint",
+  authority_grant_upsert: "appoint",
+  order_attempt_decide: "command",
+  polity_stance_shift: "negotiate",
+  generic_entity_create: "propose",
+  character_intent_set: "propose",
+  social_events: "propose",
+};
+
+function officeIdToDomainPowers(office: Office): { readonly domain: AuthorityDomain; readonly powers: readonly AuthorityPower[] }[] {
+  const byDomain = new Map<AuthorityDomain, Set<AuthorityPower>>();
+  for (const actionId of office.authorisedActionIds) {
+    const domain = DELTA_AUTHORITY_DOMAIN[actionId as WorldDeltaOp];
+    const power = DOMAIN_POWER_BY_ACTION[actionId];
+    if (domain === undefined || power === undefined) continue;
+    // Fiscal authority is never polity-wide here: it is scoped to the office's
+    // own named treasury account below, so that a governor authorised to spend
+    // does not thereby reach the national treasury.
+    if (domain === "fiscal") continue;
+    const powers = byDomain.get(domain) ?? new Set<AuthorityPower>();
+    powers.add(power);
+    byDomain.set(domain, powers);
+  }
+  return [...byDomain].map(([domain, powers]) => ({ domain, powers: [...powers] }));
 }
 
 /**
@@ -253,56 +290,5 @@ export function checkAuthority(index: AuthorityIndex, input: AuthorityCheckInput
     grant: null,
     standing: null,
     reason: `No active grant gives ${input.holder.kind} "${input.holder.id}" ${input.power} power in the ${input.domain} domain over ${input.scope.kind} "${input.scope.id}".`,
-  };
-}
-
-// -- session.invoke() gate ----------------------------------------------------
-
-export interface WorkflowAuthorityRequirement {
-  readonly domain: AuthorityDomain;
-  readonly power: AuthorityPower;
-  readonly scopeKind: AuthorityScopeKind;
-  /** Which call parameter names the scope id (e.g. "forceId", "sourceAccountId"). */
-  readonly scopeParam: string;
-}
-
-/**
- * A deliberately small, explicit starting set -- not an attempt to tag all
- * ~90 `WORKFLOW_REGISTRY` entries in one pass. Matches the spec's own
- * test-plan examples exactly: "authority and order-response resolution
- * before broader agents mutate forces, treasuries, or institutions." More
- * workflows are tagged incrementally as rollout needs them; an untagged
- * workflow is simply not authority-gated yet, exactly like today.
- */
-export const DEFAULT_AUTHORITY_REQUIREMENTS: Readonly<Record<string, WorkflowAuthorityRequirement>> = {
-  assign_command: { domain: "military", power: "command", scopeKind: "force", scopeParam: "forceId" },
-  transfer_gold: { domain: "fiscal", power: "spend", scopeKind: "account", scopeParam: "sourceAccountId" },
-  remove_gold: { domain: "fiscal", power: "spend", scopeKind: "account", scopeParam: "accountId" },
-};
-
-/**
- * Builds the `GameMasterSession.authorityGate` hook (`gm/session.ts`) from
- * an `AuthorityIndex` and a requirement map -- kept out of `session.ts`
- * itself so that already-large file stays decoupled from this module. A
- * call whose `actionId` has no entry in `requirements` is allowed
- * unconditionally, same as before the gate existed; only tagged, missing-
- * grant calls are refused. `holderOf` resolves a call's `actorId` into the
- * `OrderPartyRef` `checkAuthority` needs (normally `{kind:"character", id:
- * actorId}` -- overridable for a caller acting through an institution).
- */
-export function buildWorkflowAuthorityGate(
-  index: AuthorityIndex,
-  requirements: Readonly<Record<string, WorkflowAuthorityRequirement>> = DEFAULT_AUTHORITY_REQUIREMENTS,
-  holderOf: (actorId: string) => OrderPartyRef = (actorId) => ({ kind: "character", id: actorId }),
-): { check(actionId: string, actorId: string, parameters: Record<string, unknown>): string | null } {
-  return {
-    check(actionId, actorId, parameters) {
-      const requirement = requirements[actionId];
-      if (requirement === undefined) return null;
-      const scopeId = parameters[requirement.scopeParam];
-      if (typeof scopeId !== "string" || scopeId.trim().length === 0) return null; // a missing/malformed id is the workflow's own lookup-error to report, not an authority refusal
-      const result = checkAuthority(index, { holder: holderOf(actorId), domain: requirement.domain, scope: { kind: requirement.scopeKind, id: scopeId }, power: requirement.power });
-      return result.authorized ? null : `Refused: ${result.reason}`;
-    },
   };
 }

@@ -6,12 +6,13 @@ Chronica is a single-player historical world game. Play one person in a curated 
 choose a character → converse → give orders → world advances → read the Chronicle → act again
 ```
 
-The game accepts ambitious, conditional orders instead of a menu of verbs. AI interprets intent and directs the living world through workflows: MCP-style tools for reading and changing the world's data. A workflow defines the capability and its input contract; the AI decides when and why to call it. The engine validates the resulting world so records, references, and replay remain sound. The map is the world's stage, not a management screen.
+The game accepts ambitious, conditional orders instead of a menu of verbs. The AI interprets intent and decides what the world does about it; the engine owns the arithmetic, the calendar, entity identity and the record, so consequences persist and stay consistent. The map is the world's stage, not a management screen.
 
 ## Documentation
 
-- [Core vision](docs/CORE-VISION.md) — what this project is building toward (elastic time, the character system) and what the Chronicle/Orders/Turns/workflow-execution wipe removed and why.
-- [Deletion plan](docs/plans/delete-chronicle-orders-turns.md) — what was actually deleted, relocated, and left broken for the next system to pick up.
+- [Vision](docs/VISION.md) — the AI-native grand-strategy design this project is building toward.
+- [Simulation Loop v1](docs/SIMULATION-LOOP-V1.md) — the engine that exists today: the AI↔code contract, the burst loop, and the reasoning behind each boundary.
+- [Deletion plan](docs/plans/delete-chronicle-orders-turns.md) — what the pre-loop wipe deleted, relocated, and left broken.
 - [Product guide](docs/product.md) and [Architecture guide](docs/architecture.md) — still describe the pre-wipe Chronicle/Orders/Turns loop; due for a rewrite against the current codebase.
 
 The documentation intentionally describes the current direction, not a chronological record of replaced proposals. Anything not yet built says so at the top.

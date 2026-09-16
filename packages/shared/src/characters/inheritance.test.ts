@@ -9,7 +9,7 @@ describe("resolveBeneficiaries", () => {
     const w = world();
     const estate = w.material.estates.find((e) => e.id === "marcus-estate")!;
     const rule = w.material.inheritanceRules.find((r) => r.id === "marcus-estate-rule")!;
-    const resolution = resolveBeneficiaries(w, estate, rule, 4, 0);
+    const resolution = resolveBeneficiaries(w, estate, rule, 0);
     expect(resolution.beneficiaryIds).toEqual(["marcus-atilius-minor"]);
     expect(resolution.status).toBe("settled");
   });
@@ -19,7 +19,7 @@ describe("resolveBeneficiaries", () => {
     w.characters = w.characters.map((c) => (c.id === "marcus-atilius-minor" ? { ...c, alive: false, diedAtStep: 0 } : c));
     const estate = w.material.estates.find((e) => e.id === "marcus-estate")!;
     const rule = w.material.inheritanceRules.find((r) => r.id === "marcus-estate-rule")!;
-    const resolution = resolveBeneficiaries(w, estate, rule, 4, 0);
+    const resolution = resolveBeneficiaries(w, estate, rule, 0);
     expect(resolution.beneficiaryIds).toEqual([]);
     expect(resolution.status).toBe("disputed");
   });
@@ -29,7 +29,7 @@ describe("resolveBeneficiaries", () => {
     w.familyLinks.push({ id: "marcus:parent:hamilcar-as-child", characterId: "marcus-atilius", relatedCharacterId: "hamilcar", kind: "parent", startedAtStep: 0, endedAtStep: null, visibility: "polity", provenanceEventId: null });
     const estate = w.material.estates.find((e) => e.id === "marcus-estate")!;
     const rule = { id: "equal-rule", kind: "equal_division" as const, institutionId: null, debtsTransfer: true };
-    const resolution = resolveBeneficiaries(w, estate, rule, 4, 0);
+    const resolution = resolveBeneficiaries(w, estate, rule, 0);
     expect([...resolution.beneficiaryIds].sort()).toEqual(["hamilcar", "marcus-atilius-minor"]);
   });
 
@@ -37,7 +37,7 @@ describe("resolveBeneficiaries", () => {
     const w = world();
     const estate = { ...w.material.estates.find((e) => e.id === "marcus-estate")!, testamentaryBeneficiaryIds: ["hanno", "hamilcar"] };
     const rule = { id: "appointment-rule", kind: "appointment" as const, institutionId: null, debtsTransfer: true };
-    const resolution = resolveBeneficiaries(w, estate, rule, 4, 0);
+    const resolution = resolveBeneficiaries(w, estate, rule, 0);
     expect(resolution.beneficiaryIds).toEqual(["hanno"]);
   });
 
@@ -45,7 +45,7 @@ describe("resolveBeneficiaries", () => {
     const w = world();
     const estate = w.material.estates.find((e) => e.id === "marcus-estate")!;
     const rule = { id: "elective-rule", kind: "elective" as const, institutionId: "roman-senate", debtsTransfer: true };
-    const resolution = resolveBeneficiaries(w, estate, rule, 4, 0);
+    const resolution = resolveBeneficiaries(w, estate, rule, 0);
     expect(resolution.beneficiaryIds).toEqual([]);
     expect(resolution.status).toBe("disputed");
   });
@@ -57,7 +57,7 @@ describe("settleEstate", () => {
     const before = w.characters.find((c) => c.id === "marcus-atilius")!;
     expect(before.officeId).toBe("roman-command");
 
-    const { material, transfers, beneficiaryIds } = settleEstate(w, "marcus-atilius", 4, 0);
+    const { material, transfers, beneficiaryIds } = settleEstate(w, "marcus-atilius", 0);
     expect(beneficiaryIds).toEqual(["marcus-atilius-minor"]);
     expect(transfers.some((t) => t.assetKind === "account_balance" && t.beneficiaryCharacterId === "marcus-atilius-minor")).toBe(true);
 
@@ -73,7 +73,7 @@ describe("settleEstate", () => {
 
   it("transfers debts when the rule says so", () => {
     const w = world();
-    const { material } = settleEstate(w, "marcus-atilius", 4, 0);
+    const { material } = settleEstate(w, "marcus-atilius", 0);
     const obligation = material.obligations.find((o) => o.id === "legio-pay")!;
     expect(obligation.payerAccountId).toBe("marcus-minor-purse");
     expect(obligation.active).toBe(true);
@@ -82,14 +82,14 @@ describe("settleEstate", () => {
   it("forgives debts when the rule says not to transfer them", () => {
     const w = world();
     w.material.inheritanceRules = w.material.inheritanceRules.map((r) => (r.id === "marcus-estate-rule" ? { ...r, debtsTransfer: false } : r));
-    const { material } = settleEstate(w, "marcus-atilius", 4, 0);
+    const { material } = settleEstate(w, "marcus-atilius", 0);
     const obligation = material.obligations.find((o) => o.id === "legio-pay")!;
     expect(obligation.active).toBe(false);
   });
 
   it("is a no-op for a character with no open estate", () => {
     const w = world();
-    const { material, transfers, beneficiaryIds } = settleEstate(w, "hanno", 4, 0);
+    const { material, transfers, beneficiaryIds } = settleEstate(w, "hanno", 0);
     expect(transfers).toEqual([]);
     expect(beneficiaryIds).toEqual([]);
     expect(material).toBe(w.material);
@@ -116,19 +116,19 @@ describe("deriveLegacyCauses", () => {
 
 describe("findPlayerSuccessors", () => {
   it("prefers the living named heir first", () => {
-    const successors = findPlayerSuccessors(world(), "marcus-atilius", 4, 0);
+    const successors = findPlayerSuccessors(world(), "marcus-atilius", 0);
     expect(successors[0]).toBe("marcus-atilius-minor");
   });
 
   it("returns an empty list for a character with no eligible kin and no heir", () => {
     const w = world();
     w.characters = w.characters.map((c) => (c.id === "hanno" ? { ...c, heirCharacterId: null } : c));
-    expect(findPlayerSuccessors(w, "hanno", 4, 0)).toEqual([]);
+    expect(findPlayerSuccessors(w, "hanno", 0)).toEqual([]);
   });
 
   it("excludes a disqualified heir", () => {
     const w = world();
     w.characters = w.characters.map((c) => (c.id === "marcus-atilius-minor" ? { ...c, disqualifyingStatuses: ["incapacitated"] } : c));
-    expect(findPlayerSuccessors(w, "marcus-atilius", 4, 0)).not.toContain("marcus-atilius-minor");
+    expect(findPlayerSuccessors(w, "marcus-atilius", 0)).not.toContain("marcus-atilius-minor");
   });
 });

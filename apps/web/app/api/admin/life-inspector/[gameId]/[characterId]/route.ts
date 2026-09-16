@@ -29,9 +29,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ gam
     const worldView = await getWorldView(db, gameId);
     if (worldView === undefined) return Response.json({ error: "Game not found." }, { status: 404 });
 
-    const scenario = worldView.scenarioClock && worldView.scenarioLife
-      ? { stepsPerYear: worldView.scenarioClock.stepsPerYear, lifeStages: worldView.scenarioLife.lifeStages }
-      : undefined;
+    const scenario = worldView.scenarioLife ? { lifeStages: worldView.scenarioLife.lifeStages } : undefined;
     const view = buildLifeInspectorView(worldView.world, characterId, scenario);
     if (view === undefined) return Response.json({ error: "Character not found." }, { status: 404 });
 

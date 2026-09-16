@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BasisPointsSchema, EntityIdSchema } from "../material-state";
+import { DAYS_PER_YEAR } from "../world/clock";
 import type { Character } from "./character";
 
 // Canonical age and life status (character-sim phase 5).
@@ -10,16 +11,20 @@ import type { Character } from "./character";
 // scenario-authored life-stage classification the engine never hardcodes to
 // any one culture.
 
-/** Today's age in whole years, derived from the clock -- never recomputed into the snapshot. */
+/**
+ * Today's age in whole years, derived from the clock -- never recomputed into
+ * the snapshot. A step is a day (see `world/clock.ts`), so this reads the day
+ * count directly rather than taking a scenario's steps-per-year, which was a
+ * turn-era notion.
+ */
 export function currentAgeYears(
   character: Pick<Character, "ageYearsAtStart" | "birthStep">,
-  stepsPerYear: number,
   elapsedStep: number,
 ): number {
   if (character.birthStep !== null) {
-    return Math.floor((elapsedStep - character.birthStep) / stepsPerYear);
+    return Math.floor((elapsedStep - character.birthStep) / DAYS_PER_YEAR);
   }
-  return character.ageYearsAtStart + Math.floor(elapsedStep / stepsPerYear);
+  return character.ageYearsAtStart + Math.floor(elapsedStep / DAYS_PER_YEAR);
 }
 
 /**

@@ -1112,7 +1112,7 @@ export async function resolveDialogueContext(gameId: string): Promise<DialogueCo
     const characterId = player.characterId ?? world.characters[0]?.id ?? "";
     const character = world.characters.find((c) => c.id === characterId);
     const continuity = world.continuity.find((c) => c.characterId === characterId);
-    const period = worldView.scenarioClock?.stepLabel ?? "antiquity";
+    const period = worldView.scenarioPeriod;
 
     const locationProvinceId = character?.locationProvinceId ?? null;
     const officeId = character?.officeId ?? null;

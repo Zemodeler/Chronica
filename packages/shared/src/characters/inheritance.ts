@@ -36,14 +36,14 @@ function livingChildren(world: { characters: readonly Character[]; familyLinks: 
   return world.characters.filter((c) => childIds.has(c.id) && c.alive);
 }
 
-function eldestOrSenior(world: { characters: readonly Character[]; familyLinks: readonly FamilyLink[] }, ownerCharacterId: string, stepsPerYear: number, elapsedStep: number): Character | undefined {
+function eldestOrSenior(world: { characters: readonly Character[]; familyLinks: readonly FamilyLink[] }, ownerCharacterId: string, elapsedStep: number): Character | undefined {
   const kin = familyLinksOf(world, ownerCharacterId)
     .filter((view) => ["child", "sibling", "spouse_or_partner", "other_relative"].includes(view.kind))
     .map((view) => world.characters.find((c) => c.id === view.counterpartCharacterId))
     .filter((c): c is Character => c !== undefined && c.alive);
   if (kin.length === 0) return undefined;
   const ranked = [...kin].sort((a, b) => {
-    const ageDiff = currentAgeYears(b, stepsPerYear, elapsedStep) - currentAgeYears(a, stepsPerYear, elapsedStep);
+    const ageDiff = currentAgeYears(b, elapsedStep) - currentAgeYears(a, elapsedStep);
     if (ageDiff !== 0) return ageDiff;
     return stableChoice([a.id, b.id, "seniority-tie"], 2) === 0 ? -1 : 1;
   });
@@ -55,7 +55,6 @@ export function resolveBeneficiaries(
   world: { characters: readonly Character[]; familyLinks: readonly FamilyLink[] },
   estate: Estate,
   rule: InheritanceRule,
-  stepsPerYear: number,
   elapsedStep: number,
 ): BeneficiaryResolution {
   switch (rule.kind) {
@@ -63,13 +62,13 @@ export function resolveBeneficiaries(
       const children = livingChildren(world, estate.ownerCharacterId);
       if (children.length === 0) return { beneficiaryIds: [], status: "disputed", reason: "No living child exists to inherit by primogeniture." };
       const eldest = [...children].sort((a, b) => {
-        const diff = currentAgeYears(b, stepsPerYear, elapsedStep) - currentAgeYears(a, stepsPerYear, elapsedStep);
+        const diff = currentAgeYears(b, elapsedStep) - currentAgeYears(a, elapsedStep);
         return diff !== 0 ? diff : stableChoice([a.id, b.id, "primogeniture-tie"], 2) === 0 ? -1 : 1;
       })[0]!;
       return { beneficiaryIds: [eldest.id], status: "settled", reason: `${eldest.name} inherits as the eldest living child.` };
     }
     case "seniority": {
-      const senior = eldestOrSenior(world, estate.ownerCharacterId, stepsPerYear, elapsedStep);
+      const senior = eldestOrSenior(world, estate.ownerCharacterId, elapsedStep);
       if (senior === undefined) return { beneficiaryIds: [], status: "disputed", reason: "No living kin exists to inherit by seniority." };
       return { beneficiaryIds: [senior.id], status: "settled", reason: `${senior.name} inherits as the senior living kin.` };
     }
@@ -97,7 +96,6 @@ export function resolveBeneficiaries(
 export function settleEstate(
   world: { characters: readonly Character[]; material: MaterialWorldState; familyLinks: readonly FamilyLink[] },
   ownerCharacterId: string,
-  stepsPerYear: number,
   atStep: number,
 ): { material: MaterialWorldState; transfers: readonly InheritanceTransfer[]; beneficiaryIds: readonly string[] } {
   const estate = world.material.estates.find((e) => e.ownerCharacterId === ownerCharacterId && e.status !== "settled" && e.status !== "escheated");
@@ -105,7 +103,7 @@ export function settleEstate(
   const rule = world.material.inheritanceRules.find((r) => r.id === estate.inheritanceRuleId);
   if (rule === undefined) return { material: world.material, transfers: [], beneficiaryIds: [] };
 
-  const resolution = resolveBeneficiaries(world, estate, rule, stepsPerYear, atStep);
+  const resolution = resolveBeneficiaries(world, estate, rule, atStep);
   const transfers: InheritanceTransfer[] = [];
   let material = world.material;
   const primaryBeneficiaryId = resolution.beneficiaryIds[0] ?? null;
@@ -264,7 +262,6 @@ export function deriveLegacyCauses(
 export function findPlayerSuccessors(
   world: { characters: readonly Character[]; familyLinks: readonly FamilyLink[] },
   deadCharacterId: string,
-  stepsPerYear: number,
   atStep: number,
   maxCandidates = 5,
 ): readonly string[] {
@@ -280,7 +277,7 @@ export function findPlayerSuccessors(
 
   const children = livingChildren(world, deadCharacterId)
     .filter(isEligible)
-    .sort((a, b) => currentAgeYears(b, stepsPerYear, atStep) - currentAgeYears(a, stepsPerYear, atStep));
+    .sort((a, b) => currentAgeYears(b, atStep) - currentAgeYears(a, atStep));
   for (const child of children) if (!ordered.includes(child.id)) ordered.push(child.id);
 
   const spouse = familyLinksOf(world, deadCharacterId)

@@ -5,17 +5,17 @@ import { firstPunicWarScenario } from "@chronica/db";
 const world = () => structuredClone(firstPunicWarScenario.initialWorld);
 
 describe("currentAgeYears", () => {
-  it("derives age for a legacy character (no birthStep) from ageYearsAtStart plus elapsed time", () => {
+  it("derives age for a scenario character (no birthStep) from ageYearsAtStart plus elapsed days", () => {
     const marcus = world().characters.find((c) => c.id === "marcus-atilius")!;
     expect(marcus.birthStep).toBeNull();
-    expect(currentAgeYears(marcus, 4, 0)).toBe(38);
-    expect(currentAgeYears(marcus, 4, 8)).toBe(40);
+    expect(currentAgeYears(marcus, 0)).toBe(38);
+    expect(currentAgeYears(marcus, 730)).toBe(40);
   });
 
   it("derives age for a character born during play from birthStep, ignoring ageYearsAtStart", () => {
-    const newborn = { ageYearsAtStart: 0, birthStep: 12 };
-    expect(currentAgeYears(newborn, 4, 12)).toBe(0);
-    expect(currentAgeYears(newborn, 4, 20)).toBe(2);
+    const newborn = { ageYearsAtStart: 0, birthStep: 1_095 };
+    expect(currentAgeYears(newborn, 1_095)).toBe(0);
+    expect(currentAgeYears(newborn, 1_825)).toBe(2);
   });
 });
 
