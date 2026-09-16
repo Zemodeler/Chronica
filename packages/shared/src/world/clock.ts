@@ -1,53 +1,50 @@
 import { z } from "zod";
 import { ElapsedStepSchema } from "../material-state";
-import { type WorldInstant, midnight } from "./instant";
+import type { WorldInstant } from "./instant";
 
-// The elastic clock's scale (ADR-0016, ADR-0032).
+// The world's clock.
 //
-// The authoritative world stores only a non-negative elapsedStep. The scenario
-// supplies what a step means to a human and how many of them make a year, so
-// ageing and scheduled systems stay deterministic without the simulation ever
-// choosing a historical calendar. Historical dates are descriptive setting
-// material, not simulation state.
+// Time used to be a turn counter: `elapsedStep` was authoritative, a step meant
+// "a season", and `WorldInstant` was a fine clock derived *inside* one turn's
+// resolution window. VISION §15 removes turns entirely and §16 asks for real
+// timestamps, so the relationship is inverted: `WorldInstant` (day + minute
+// from the scenario epoch) is authoritative, and `elapsedStep` is maintained as
+// exactly `instant.day`.
+//
+// Keeping `elapsedStep` as a day count rather than deleting it is deliberate:
+// roughly forty schemas across material state, projects, authority and the
+// character system store `*AtStep` fields, and every one of them stays
+// meaningful when a step is a day. What changes is only what a step *means* --
+// no longer a turn, just a date.
 
 export const ScenarioClockSchema = z
   .object({
-    /** What one step is called: "a week", "a season". Presentation only. */
-    stepLabel: z.string().trim().min(1).max(40),
-    stepLabelPlural: z.string().trim().min(1).max(40),
     /**
-     * How many steps a scenario calls a year. Ageing and annual income read
-     * this; nothing derives an absolute date from it.
-     */
-    stepsPerYear: z.number().int().positive().max(3_660),
-    /** Below this, the clock does not stop -- it keeps players from being woken for trivia. */
-    minSpan: z.number().int().positive().max(10_000),
-    /** At this, the clock stops regardless -- an era may not pass unattended. */
-    maxSpan: z.number().int().positive().max(10_000),
-    /**
-     * Optional calendar anchor for the game's opening step.
-     * When present, the web layer can derive a human-readable date label like
-     * "12th of September 1683" from `elapsedStep`. Absent → fall back to the
-     * raw step count. Presentation only — the simulation never reads this.
+     * The calendar date of day 0. Required, unlike its turn-era predecessor:
+     * §16 wants events to carry real timestamps, and a world that cannot name
+     * its own date cannot produce them.
      */
     epoch: z
       .object({
         year: z.number().int().positive(),
         month: z.number().int().min(1).max(12),
         day: z.number().int().min(1).max(31),
-        era: z.enum(["BCE", "CE"]).optional(),
+        era: z.enum(["BCE", "CE"]).default("CE"),
       })
-      .optional(),
+      .strict(),
+    /** Below this many simulated days a burst does not stop for the player -- it keeps them from being woken for trivia. */
+    minSpanDays: z.number().int().positive().max(3_660),
+    /** At this many simulated days a burst stops regardless: an era may not pass unattended (VISION §22's hard safeguard). */
+    maxSpanDays: z.number().int().positive().max(36_600),
   })
-  .refine((clock) => clock.maxSpan >= clock.minSpan, {
-    message: "A scenario's maxSpan must be at least its minSpan.",
-    path: ["maxSpan"],
+  .strict()
+  .refine((clock) => clock.maxSpanDays >= clock.minSpanDays, {
+    message: "A scenario's maxSpanDays must be at least its minSpanDays.",
+    path: ["maxSpanDays"],
   })
   .refine((clock) => {
-    const epoch = clock.epoch;
-    if (epoch === undefined) return true;
-    const daysInMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    return epoch.day <= (daysInMonth[epoch.month - 1] ?? 0);
+    const daysInMonth = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    return clock.epoch.day <= (daysInMonth[clock.epoch.month - 1] ?? 0);
   }, {
     message: "A scenario epoch must name a real day in its month.",
     path: ["epoch", "day"],
@@ -58,9 +55,8 @@ export type ScenarioClock = z.infer<typeof ScenarioClockSchema>;
  * The versions a match pins when it starts.
  *
  * Stored in the snapshot rather than only on the game row, so a replay is
- * self-describing: docs/14-actions.md requires that promoting an action into
- * the library cannot alter a stored replay, and ADR-0024 requires that editing
- * a scenario cannot disturb a match already running on it.
+ * self-describing: editing a scenario cannot disturb a match already running
+ * on it.
  */
 export const WorldPinsSchema = z
   .object({
@@ -72,63 +68,92 @@ export const WorldPinsSchema = z
 export type WorldPins = z.infer<typeof WorldPinsSchema>;
 
 /**
- * Why the elastic clock stopped. Part of the determinism contract, not just
- * flavour. `salient_event`, `clarification_required`, `plan_interrupted`,
- * and `incoming_message` are declared here in docs/32 Phase 6, but the live
- * pipeline does not yet produce them -- every turn still commits
- * `stopReason: "player_decision"` unconditionally. Phase 7's elastic
- * scheduler is what actually starts choosing among these; see docs/32's
- * stop-condition priority order.
+ * Why a simulation burst stopped (VISION §23's three outcomes, with the reason
+ * preserved). `player_decision` and `incoming_message` interrupt; `salient_event`,
+ * `threshold_crossed`, `max_span` and `budget_exhausted` produce a Chronicle;
+ * `no_due_events` at low pressure continues silently.
  */
 export const StopReasonSchema = z.enum([
   "player_decision",
   "clarification_required",
   "salient_event",
   "watch_condition",
-  "plan_interrupted",
   "threshold_crossed",
   "action_completed",
   "scheduled_life_event",
   "incoming_message",
+  "no_due_events",
+  "budget_exhausted",
   "max_span",
 ]);
 export type StopReason = z.infer<typeof StopReasonSchema>;
 
-/**
- * Day-level authoritative time (docs/32, Phase 6), read alongside the
- * existing `elapsedStep`. `elapsedStep` -- renamed `coarseStep` here --
- * remains what the live pipeline actually advances by exactly 1 per turn
- * until Phase 7's elastic scheduler starts writing `elapsedDay` directly;
- * until then this is a read-only projection, not a second authoritative
- * clock in the snapshot.
+export const DAYS_PER_YEAR = 365;
+
+/*
+ * Calendar conversion, so a `WorldInstant` can be named as a date.
+ *
+ * Proleptic Gregorian throughout, including deep BCE, using astronomical year
+ * numbering internally (1 BCE is year 0, 264 BCE is year -263). This is
+ * presentation and prompt material -- the simulation itself only ever compares
+ * day numbers -- but it has to be consistent, because a model told the wrong
+ * date will reason from the wrong season.
  */
-export interface WorldTime {
-  readonly elapsedDay: number;
-  readonly coarseStep: number;
+
+export interface CalendarDate {
+  /** Positive, paired with `era` -- 264 with era "BCE" reads as 264 BC. */
+  readonly year: number;
+  readonly month: number;
+  readonly day: number;
+  readonly era: "BCE" | "CE";
 }
 
-/** Matches `gm/read-tools.ts`'s own default: used only when a scenario declares no clock at all. */
-const DEFAULT_STEPS_PER_YEAR = 4;
-
-/** How many days one step represents under a scenario's own clock, or the engine default absent one. */
-export function daysPerStep(scenarioClock?: ScenarioClock): number {
-  return 365 / (scenarioClock?.stepsPerYear ?? DEFAULT_STEPS_PER_YEAR);
+function toAstronomicalYear(year: number, era: "BCE" | "CE"): number {
+  return era === "BCE" ? 1 - year : year;
 }
 
-/** Derives day-level time from the authoritative `elapsedStep`. Pure and read-only -- see the module comment above. */
-export function deriveWorldTime(elapsedStep: number, scenarioClock?: ScenarioClock): WorldTime {
-  return { elapsedDay: Math.round(elapsedStep * daysPerStep(scenarioClock)), coarseStep: elapsedStep };
+function fromAstronomicalYear(year: number): { year: number; era: "BCE" | "CE" } {
+  return year <= 0 ? { year: 1 - year, era: "BCE" } : { year, era: "CE" };
 }
 
-/**
- * Derives a `WorldInstant` from the authoritative `elapsedStep`, at that
- * step's day boundary (minute 0 -- a step boundary is always midnight-
- * aligned until finer-grained intra-step scheduling exists). Used to upgrade
- * pre-Phase-7 snapshots (which lack `WorldState.instant`) and to compute a
- * turn's resolution window `[deriveWorldInstant(step), deriveWorldInstant(step+1))`.
- */
-export function deriveWorldInstant(elapsedStep: number, scenarioClock?: ScenarioClock): WorldInstant {
-  return midnight(Math.floor(elapsedStep * daysPerStep(scenarioClock)));
+/** Days from 1970-01-01 for a proleptic Gregorian date in astronomical year numbering (Hinnant's algorithm). */
+function daysFromCivil(year: number, month: number, day: number): number {
+  const y = month <= 2 ? year - 1 : year;
+  const era = Math.floor(y / 400);
+  const yoe = y - era * 400;
+  const mp = (month + 9) % 12;
+  const doy = Math.floor((153 * mp + 2) / 5) + day - 1;
+  const doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
+  return era * 146_097 + doe - 719_468;
+}
+
+function civilFromDays(days: number): { year: number; month: number; day: number } {
+  const z = days + 719_468;
+  const era = Math.floor(z / 146_097);
+  const doe = z - era * 146_097;
+  const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36_524) - Math.floor(doe / 146_096)) / 365);
+  const y = yoe + era * 400;
+  const doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100));
+  const mp = Math.floor((5 * doy + 2) / 153);
+  const day = doy - Math.floor((153 * mp + 2) / 5) + 1;
+  const month = mp < 10 ? mp + 3 : mp - 9;
+  return { year: month <= 2 ? y + 1 : y, month, day };
+}
+
+/** The calendar date `instant` falls on, under the scenario's epoch. */
+export function calendarDateOf(instant: WorldInstant, clock: ScenarioClock): CalendarDate {
+  const epochDays = daysFromCivil(toAstronomicalYear(clock.epoch.year, clock.epoch.era), clock.epoch.month, clock.epoch.day);
+  const civil = civilFromDays(epochDays + instant.day);
+  return { ...fromAstronomicalYear(civil.year), month: civil.month, day: civil.day };
+}
+
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"] as const;
+
+/** "1 March 264 BC" -- what a prompt, a Chronicle heading, or the UI shows. */
+export function formatWorldDate(instant: WorldInstant, clock: ScenarioClock): string {
+  const date = calendarDateOf(instant, clock);
+  const month = MONTH_NAMES[date.month - 1] ?? "";
+  return `${date.day} ${month} ${date.year} ${date.era === "BCE" ? "BC" : "AD"}`;
 }
 
 export { ElapsedStepSchema };

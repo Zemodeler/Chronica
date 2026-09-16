@@ -1,0 +1,142 @@
+import { z } from "zod";
+import { FactDiscoveryStateSchema, FactVisibilitySchema } from "../world/facts";
+import { OrderPartyRefSchema } from "../world/party-ref";
+import { LocalIdSchema, RefSchema } from "./refs";
+import { WorldDeltaSchema } from "./deltas";
+
+/**
+ * What one actor -- the world at large, or a single NPC -- proposes to do.
+ *
+ * VISION §10 asks that important NPCs and the player act through the same
+ * action language. That is this type: the orchestrator and an NPC's cognition
+ * return the *same* proposal shape, so symmetric agency falls out of one
+ * contract instead of a parallel NPC system that drifts from the player's.
+ */
+
+const SummarySchema = z.string().trim().min(1).max(600);
+
+/**
+ * A fact the actor claims it made true. The model supplies judgment --
+ * who is affected, how visible it is, how much it matters -- and the engine
+ * supplies the time, the causal depth, and the id.
+ *
+ * `significance` is how VISION §22's historical pressure gets contextual AI
+ * judgment without spending a whole model call on it: the actor scores the
+ * weight of what it just did, and deterministic code accumulates.
+ */
+export const FactProposalSchema = z.object({
+  localId: LocalIdSchema,
+  kind: z.string().trim().min(1).max(80),
+  summary: SummarySchema,
+  affectedRefs: z.array(OrderPartyRefSchema).max(16).default([]),
+  visibility: FactVisibilitySchema,
+  /** "delayed"/"rumoured"/"intercepted" need to say when it becomes knowable -- news travels (VISION §16). */
+  discoveryState: FactDiscoveryStateSchema,
+  knowableInDays: z.number().int().min(0).max(3_660).default(0),
+  significance: z.number().int().min(0).max(100),
+});
+export type FactProposal = z.infer<typeof FactProposalSchema>;
+
+/** VISION §13: an instruction aimed at someone who gets to decide about it. */
+export const DelegationProposalSchema = z.object({
+  localId: LocalIdSchema,
+  issuerRef: OrderPartyRefSchema,
+  recipientRef: OrderPartyRefSchema,
+  claimedAuthorityGrantRef: RefSchema.nullable().default(null),
+  instruction: SummarySchema,
+});
+export type DelegationProposal = z.infer<typeof DelegationProposalSchema>;
+
+/**
+ * VISION §17: a four-month recruitment is not reasoned through, it is
+ * scheduled. The event wakes when its time comes or something disturbs it.
+ */
+export const ScheduledEventProposalSchema = z.object({
+  kind: z.string().trim().min(1).max(80),
+  dueInDays: z.number().int().min(0).max(36_600),
+  summary: SummarySchema,
+  subjectRefs: z.array(RefSchema).max(8).default([]),
+  causeFactLocalId: LocalIdSchema.nullable().default(null),
+});
+export type ScheduledEventProposal = z.infer<typeof ScheduledEventProposalSchema>;
+
+export const ProposalSchema = z
+  .object({
+    /** What the actor did, in its own words -- the raw material a Chronicle is later written from. */
+    narrativeSummary: SummarySchema,
+    /**
+     * VISION §8: where an intent could not be met in full. Friction is the
+     * answer to "build 200 warships", not a refusal.
+     */
+    frictions: z.array(z.string().trim().min(1).max(300)).max(8).default([]),
+    deltas: z.array(WorldDeltaSchema).max(24).default([]),
+    facts: z.array(FactProposalSchema).max(16).default([]),
+    delegations: z.array(DelegationProposalSchema).max(8).default([]),
+    schedule: z.array(ScheduledEventProposalSchema).max(12).default([]),
+  })
+  .strict();
+export type Proposal = z.infer<typeof ProposalSchema>;
+
+export const PlayerDecisionSchema = z
+  .object({
+    prompt: z.string().trim().min(1).max(1_200),
+    options: z
+      .array(
+        z.object({
+          id: LocalIdSchema,
+          label: z.string().trim().min(1).max(120),
+          summary: SummarySchema,
+        }),
+      )
+      .min(2)
+      .max(5),
+  })
+  .strict();
+export type PlayerDecision = z.infer<typeof PlayerDecisionSchema>;
+
+export const OrchestratorOutputSchema = ProposalSchema.extend({
+  /** VISION §30 step 1: what the engine understood the player to want. */
+  intent: z
+    .object({
+      summary: SummarySchema,
+      domains: z.array(z.string().trim().min(1).max(40)).max(8).default([]),
+    })
+    .strict(),
+  /**
+   * Who the orchestrator thinks should think for themselves. Advisory only:
+   * the deterministic attention router (VISION §18) decides, because a model
+   * asked "who should react" will answer "everyone interesting".
+   */
+  cognitionCandidates: z
+    .array(
+      z.object({
+        actorRef: OrderPartyRefSchema,
+        question: SummarySchema,
+        urgency: z.number().int().min(0).max(100),
+      }),
+    )
+    .max(12)
+    .default([]),
+  /** VISION §23's three outcomes. Also advisory -- pressure and budget decide. */
+  outcome: z.enum(["continue", "chronicle", "player_decision"]),
+  playerDecision: PlayerDecisionSchema.nullable().default(null),
+}).strict();
+export type OrchestratorOutput = z.infer<typeof OrchestratorOutputSchema>;
+
+/** One batched call answers for several actors at once (VISION §29's call budget). */
+export const CognitionOutputSchema = z
+  .object({
+    actors: z
+      .array(
+        z.object({
+          actorRef: OrderPartyRefSchema,
+          /** Reasoning from that actor's knowledge alone (VISION §28) -- kept for inspection, never applied. */
+          reasoning: SummarySchema,
+          proposal: ProposalSchema,
+        }),
+      )
+      .max(6)
+      .default([]),
+  })
+  .strict();
+export type CognitionOutput = z.infer<typeof CognitionOutputSchema>;

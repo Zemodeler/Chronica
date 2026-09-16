@@ -9,7 +9,7 @@ loadEnvConfig(resolve(dirname(fileURLToPath(import.meta.url)), "../.."), true, c
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  transpilePackages: ["@chronica/billing", "@chronica/db", "@chronica/shared"],
+  transpilePackages: ["@chronica/billing", "@chronica/db", "@chronica/shared", "@chronica/sim"],
 };
 
 export default nextConfig;

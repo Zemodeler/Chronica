@@ -7,7 +7,7 @@ export const FIRST_PUNIC_WAR_SCENARIO_ID = "00000000-0000-4000-8000-000000000101
 export const FIRST_PUNIC_WAR_SLUG = "first-punic-war";
 
 const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
-  clock: { stepLabel: "season", stepLabelPlural: "seasons", stepsPerYear: 4, minSpan: 1, maxSpan: 4, epoch: { year: 264, month: 3, day: 1, era: "BCE" } },
+  clock: { epoch: { year: 264, month: 3, day: 1, era: "BCE" }, minSpanDays: 7, maxSpanDays: 365 },
   map: {
     terrains: [
       { id: "coastal-plain", label: "Coastal plain", allowedCrossings: ["land", "strait", "sea_lane"], water: false },
@@ -24,7 +24,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
     arrearsDesertionPeriods: 2,
   },
   government: {
-    offices: [{ id: "roman-command", label: "Roman field command", polityId: "rome", authorisedActionIds: ["assign_command", "create_force", "move_force", "start_battle"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "roman-election", eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-min-prestige-3000", "req-not-disqualified"] }],
+    offices: [{ id: "roman-command", label: "Roman field command", polityId: "rome", authorisedActionIds: ["force_create", "force_modify"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "roman-election", eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-min-prestige-3000", "req-not-disqualified"] }],
     successionRules: [{ id: "roman-election", label: "Election by the Senate", kind: "elective", institutionId: "roman-senate" }],
     decreeAuthorityCostBps: 500,
     decreeMinimumPrestigeBps: 2_000,
@@ -45,7 +45,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
     inheritanceRules: [
       { id: "marcus-estate-rule", kind: "primogeniture", institutionId: null, debtsTransfer: true },
     ],
-    reviewIntervalSteps: 4,
+    reviewIntervalSteps: 365,
   },
   // Chronicle-first legibility vertical slice (character-sim phase 6): the
   // player's opening dispatch, not a new fact system -- the Senate rivalry
@@ -62,9 +62,10 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
 });
 
 const initialWorld: WorldState = WorldStateSchema.parse({
-  schemaVersion: 1,
+  schemaVersion: 2,
   pins: { scenarioId: FIRST_PUNIC_WAR_SCENARIO_ID, scenarioVersion: 2, libraryVersion: 1 },
   elapsedStep: 0,
+  instant: { day: 0, minute: 0 },
   map: {
     // These IDs deliberately match the delivered geographic map asset. A
     // political overlay can therefore paint the real regions at turn zero.
@@ -125,7 +126,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { id: "marcus-minor-purse-access", characterId: "marcus-atilius-minor", accountId: "marcus-minor-purse", permissions: ["view", "spend_without_vote"], sourceKind: "ownership", sourceId: "marcus-atilius-minor" },
     ],
     incomeSources: [],
-    obligations: [{ id: "legio-pay", kind: "army_pay", label: "Pay for Legio I", payerAccountId: "marcus-purse", amount: 100, cadenceSteps: 1, nextDueStep: 1, priority: 1, arrears: 0, missedPeriods: 0, active: true }, { id: "carthaginian-pay", kind: "army_pay", label: "Pay for the Carthaginian army", payerAccountId: "hanno-purse", amount: 100, cadenceSteps: 1, nextDueStep: 1, priority: 1, arrears: 0, missedPeriods: 0, active: true }],
+    obligations: [{ id: "legio-pay", kind: "army_pay", label: "Pay for Legio I", payerAccountId: "marcus-purse", amount: 100, cadenceSteps: 30, nextDueStep: 30, priority: 1, arrears: 0, missedPeriods: 0, active: true }, { id: "carthaginian-pay", kind: "army_pay", label: "Pay for the Carthaginian army", payerAccountId: "hanno-purse", amount: 100, cadenceSteps: 30, nextDueStep: 30, priority: 1, arrears: 0, missedPeriods: 0, active: true }],
     transactions: [], capturableValues: [], holdings: [],
     // Political vertical slice (character-sim phase 4): a Roman Senate that
     // decides by vote, and a Carthaginian command decision that needs no
@@ -164,7 +165,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { characterId: "quintus-fabius", groupId: "popular-bloc", role: "leader", influenceBps: 7_000, loyaltyBps: 65, visibility: "polity", joinedAtStep: 0, leftAtStep: null, joinProvenanceEventId: null, leaveProvenanceEventId: null },
     ],
     officeSeats: [
-      { id: "roman-command:seat:0", officeId: "roman-command", seatIndex: 0, holderCharacterId: "marcus-atilius", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: 4, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-min-prestige-3000", "req-not-disqualified"] },
+      { id: "roman-command:seat:0", officeId: "roman-command", seatIndex: 0, holderCharacterId: "marcus-atilius", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: 365, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-min-prestige-3000", "req-not-disqualified"] },
     ],
     politicalProcedures: [
       {
@@ -229,7 +230,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { id: "marcus-estate", ownerCharacterId: "marcus-atilius", accountIds: ["marcus-purse"], holdingIds: [], obligationIds: ["legio-pay"], inheritanceRuleId: "marcus-estate-rule", testamentaryBeneficiaryIds: [], status: "intact", settledAtStep: null },
     ],
     inheritanceTransfers: [],
-    forces: [{ id: "legio-i", name: "Legio I", polityId: "rome", commanderCharacterId: "marcus-atilius", controllerCharacterId: "marcus-atilius", locationId: "ita-72843720b81376294924159-sicily-northeast", authorizedStrength: 4_000, personnel: [{ categoryId: "infantry", label: "Legionaries", fit: 3_200, unavailable: [] }], moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 1_000, provisionStatus: "provisioned", provisionedThroughStep: 4, payObligationId: "legio-pay", payArrearsPeriods: 0, history: [] }, { id: "carthaginian-army", name: "Carthaginian Army", polityId: "carthage", commanderCharacterId: "hanno", controllerCharacterId: "hanno", locationId: "ita-72843720b81376294924159-sicily-west", authorizedStrength: 3_000, personnel: [{ categoryId: "infantry", label: "Infantry", fit: 2_500, unavailable: [] }], moraleBps: 7_500, cohesionBps: 7_500, fatigueBps: 1_500, provisionStatus: "provisioned", provisionedThroughStep: 4, payObligationId: "carthaginian-pay", payArrearsPeriods: 0, history: [] }],
+    forces: [{ id: "legio-i", name: "Legio I", polityId: "rome", commanderCharacterId: "marcus-atilius", controllerCharacterId: "marcus-atilius", locationId: "ita-72843720b81376294924159-sicily-northeast", authorizedStrength: 4_000, personnel: [{ categoryId: "infantry", label: "Legionaries", fit: 3_200, unavailable: [] }], moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 1_000, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "legio-pay", payArrearsPeriods: 0, history: [] }, { id: "carthaginian-army", name: "Carthaginian Army", polityId: "carthage", commanderCharacterId: "hanno", controllerCharacterId: "hanno", locationId: "ita-72843720b81376294924159-sicily-west", authorizedStrength: 3_000, personnel: [{ categoryId: "infantry", label: "Infantry", fit: 2_500, unavailable: [] }], moraleBps: 7_500, cohesionBps: 7_500, fatigueBps: 1_500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "carthaginian-pay", payArrearsPeriods: 0, history: [] }],
   },
 });
 

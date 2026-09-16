@@ -2,8 +2,8 @@ import { z } from "zod";
 import { ElapsedStepSchema, MaterialWorldStateSchema } from "../material-state";
 import { CharacterSchema } from "../characters/character";
 import { CharacterContinuitySchema, EncounterMemorySchema } from "../continuity/continuity";
-import { WorldPinsSchema, deriveWorldInstant, type ScenarioClock } from "./clock";
-import { WorldInstantSchema } from "./instant";
+import { WorldPinsSchema } from "./clock";
+import { WorldInstantSchema, type WorldInstant } from "./instant";
 import { AuthorityGrantSchema } from "../authority/authority-grant";
 import { OrderAttemptSchema } from "../authority/order-attempt";
 import { ProjectSchema } from "./project";
@@ -29,7 +29,7 @@ import { WorldDevelopmentSchema } from "./developments";
  * change does not require rewriting history -- bump this and teach the reader
  * to upgrade old documents.
  */
-export const WORLD_SCHEMA_VERSION = 1;
+export const WORLD_SCHEMA_VERSION = 2;
 
 /**
  * The authoritative world: one immutable document per turn, hashed to
@@ -48,20 +48,19 @@ export const WorldStateSchema = z
     schemaVersion: z.literal(WORLD_SCHEMA_VERSION),
     pins: WorldPinsSchema,
     /**
-     * Non-negative elapsed simulation time. The only clock the world has.
-     * It lives here rather than on any subsystem, so every scheduled system
-     * reads one value and a replay stops at one step.
+     * The day `instant` falls on, denormalized so the forty-odd `*AtStep`
+     * fields across material state, projects, authority and the character
+     * system keep one shared unit to compare against. Kept equal to
+     * `instant.day` by the invariant below -- it is a date, not a turn.
      */
     elapsedStep: ElapsedStepSchema,
     /**
-     * Minute-precision clock (docs/32 Phase 7 target architecture), additive
-     * to `elapsedStep` -- see `world/instant.ts`'s module comment. Absent on
-     * every snapshot predating the event queue; `upgradeWorldStateInstant`
-     * fills it deterministically from `elapsedStep` on load. Once populated,
-     * it is authoritative only *within* the current turn's resolution window;
-     * `elapsedStep` still owns turn/snapshot identity.
+     * Authoritative simulation time: day from the scenario epoch, plus
+     * minute-of-day (VISION §16). Turns are gone, so nothing derives this
+     * from a coarser clock any more -- events carry real timestamps and the
+     * event queue orders them by `worldInstantToSortKey`.
      */
-    instant: WorldInstantSchema.optional(),
+    instant: WorldInstantSchema,
     /** Optional for existing snapshots; the scheduler materializes it on first use. */
     worldDevelopments: z.array(WorldDevelopmentSchema).optional(),
     /**
@@ -139,6 +138,10 @@ export const WorldStateSchema = z
   })
   .strict()
   .superRefine((world, context) => {
+    if (world.elapsedStep !== world.instant.day) {
+      context.addIssue({ code: "custom", path: ["elapsedStep"], message: "elapsedStep must equal instant.day -- a step is a day, not a turn." });
+    }
+
     const characterIds = new Set(world.characters.map((c) => c.id));
     const requireCharacter = (id: string, path: (string | number)[], message: string) => {
       if (!characterIds.has(id)) context.addIssue({ code: "custom", path, message });
@@ -191,13 +194,17 @@ export const WorldStateSchema = z
 export type WorldState = z.infer<typeof WorldStateSchema>;
 
 /**
- * Snapshot upgrader (docs/32, Phase 7): fills `WorldState.instant` from the
- * authoritative `elapsedStep` for a snapshot that predates the event queue.
- * Idempotent -- a world that already carries `instant` is returned as-is, so
- * this is safe to call unconditionally on every load rather than gating on a
- * schema-version check.
+ * Moves the world's clock, keeping `elapsedStep` and `instant.day` in step.
+ *
+ * The single place time advances, so the invariant above cannot be broken by a
+ * caller that remembers one field and forgets the other. Refuses to run
+ * backwards: a simulation that can rewind its own clock can schedule an event
+ * into its own past.
  */
-export function upgradeWorldStateInstant(world: WorldState, scenarioClock?: ScenarioClock): WorldState {
-  if (world.instant !== undefined) return world;
-  return { ...world, instant: deriveWorldInstant(world.elapsedStep, scenarioClock) };
+export function advanceWorldTo(world: WorldState, instant: WorldInstant): WorldState {
+  const current = world.instant.day * 1440 + world.instant.minute;
+  if (instant.day * 1440 + instant.minute < current) {
+    throw new Error(`The world clock cannot run backwards (from day ${world.instant.day} to day ${instant.day}).`);
+  }
+  return { ...world, instant, elapsedStep: instant.day };
 }

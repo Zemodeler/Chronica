@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef, type PointerEvent } from "react";
-import { DynamicMapOverlaySchema, GeoJsonMapSchema, type GeoJsonMap, type DynamicMapOverlay, type GamePhase } from "@chronica/shared";
+import { DynamicMapOverlaySchema, GeoJsonMapSchema, type GeoJsonMap, type DynamicMapOverlay } from "@chronica/shared";
 
 // Module-level cache provides geometry immediately during soft navigation; a
 // fresh request below then replaces it if the active scenario map was revised.
@@ -16,8 +16,7 @@ import { MapTooltip } from "./map-tooltip";
 import { MapControls } from "./map-controls";
 import { CharacterPanel, type CharacterPanelProps } from "./character-panel";
 import { ChatPanel } from "./chat-panel";
-import { OrdersPanel } from "./orders-panel";
-import { ChroniclePanel } from "./chronicle-panel";
+import { SimulationPanel } from "./simulation-panel";
 
 type ZoomBand = "far" | "medium" | "close";
 
@@ -97,7 +96,6 @@ function deriveZoomBand(scale: number): ZoomBand {
 interface GameShellProps {
   readonly gameId: string;
   readonly gameTitle: string;
-  readonly phase: GamePhase;
   readonly elapsedStepLabel: string;
   readonly initialGeoJson: GeoJsonMap | undefined;
   readonly initialOverlay: DynamicMapOverlay | undefined;
@@ -110,7 +108,6 @@ interface GameShellProps {
 export function GameShell({
   gameId,
   gameTitle,
-  phase,
   elapsedStepLabel,
   initialGeoJson,
   initialOverlay,
@@ -143,7 +140,6 @@ export function GameShell({
   const [forceFlagUrls, setForceFlagUrls] = useState<ReadonlyMap<string, ForceFlagAsset>>(() => new Map());
   const [flagCatalogForce, setFlagCatalogForce] = useState<ForceMapDetails | null>(null);
   const [coins, setCoins] = useState<string | null>(null);
-  const [chronicleOpen, setChronicleOpen] = useState(false);
   const [openChatSessionId, setOpenChatSessionId] = useState<string | null>(null);
   const zoomBand = deriveZoomBand(viewport.scale);
 
@@ -374,7 +370,6 @@ export function GameShell({
   }, []);
 
   useEffect(() => {
-    if (phase === "finished" || phase === "failed") return;
     const refreshOverlay = async () => {
       try {
         const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/overlay`);
@@ -392,7 +387,7 @@ export function GameShell({
     };
     const interval = setInterval(() => { void refreshOverlay(); }, 15_000);
     return () => clearInterval(interval);
-  }, [gameId, phase]);
+  }, [gameId]);
 
   if (!geoJson) {
     return (
@@ -503,36 +498,7 @@ export function GameShell({
           onOpenSessionConsumed={() => setOpenChatSessionId(null)}
         />
       )}
-      {playerCharacterId && (
-        <OrdersPanel
-          gameId={gameId}
-          onResolutionComplete={() => { setChronicleOpen(true); }}
-        />
-      )}
-      <ChroniclePanel
-        gameId={gameId}
-        phase={phase}
-        forceOpen={chronicleOpen}
-        onForceOpenConsumed={() => setChronicleOpen(false)}
-        onDialogueOpened={(sessionId) => setOpenChatSessionId(sessionId)}
-        onDisplayPatch={(patch) => {
-          // Apply chronicle display patches to the live overlay
-          // Patches are arrays of { kind, ... } objects written by buildDisplayPatch()
-          if (!Array.isArray(patch)) return;
-          setOverlay((current) => {
-            if (!current) return current;
-            let next = current;
-            for (const p of patch as Array<{ kind: string; provinceId?: string; newControllerPolityId?: string; forceId?: string; newLocationId?: string }>) {
-              if (p.kind === "province_control" && p.provinceId && p.newControllerPolityId) {
-                // Overlay province control changes are reflected in the next poll;
-                // for now just bump the revision so the map re-renders.
-                next = { ...next, revision: next.revision + 1 };
-              }
-            }
-            return next;
-          });
-        }}
-      />
+      {playerCharacterId && <SimulationPanel gameId={gameId} />}
     </>
   );
 }

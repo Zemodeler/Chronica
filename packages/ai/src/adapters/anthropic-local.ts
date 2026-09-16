@@ -20,6 +20,8 @@ const JSON_MODE_OPERATIONS = new Set<AiOperation>([
   "propose_social_events",
   "declare_character",
   "confirm_character",
+  "simulate_orchestrate",
+  "simulate_cognition",
 ]);
 
 const TIER_MODELS: Record<AiTier, string> = {
@@ -31,7 +33,10 @@ const TIER_MODELS: Record<AiTier, string> = {
 // None of the surviving operations (see docs/plans/delete-chronicle-orders-turns.md)
 // were in the standard tier before this wipe -- preserved as empty rather than
 // guessing a new tier assignment.
-const STANDARD_TIER_OPERATIONS = new Set<AiOperation>([]);
+// The loop's reasoning calls: orchestration weighs an entire world slice and
+// cognition roleplays several actors from their own knowledge. Both are the
+// judgment the design rests on, so neither runs on the cheapest tier.
+const STANDARD_TIER_OPERATIONS = new Set<AiOperation>(["simulate_orchestrate", "simulate_cognition"]);
 
 function resolveModel(operation: AiOperation): string {
   const selectedModel = getSelectedLocalAiModel("anthropic");

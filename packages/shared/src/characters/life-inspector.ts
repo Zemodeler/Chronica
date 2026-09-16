@@ -42,13 +42,15 @@ export function buildLifeInspectorView(
     readonly elapsedStep: number;
   },
   characterId: string,
-  scenario?: { readonly stepsPerYear: number; readonly lifeStages: readonly LifeStage[] },
+  scenario?: { readonly lifeStages: readonly LifeStage[] },
 ): LifeInspectorView | undefined {
   const character = world.characters.find((c) => c.id === characterId);
   if (character === undefined) return undefined;
 
-  const ageYears = scenario !== undefined ? currentAgeYears(character, scenario.stepsPerYear, world.elapsedStep) : null;
-  const lifeStage = scenario !== undefined && ageYears !== null ? classifyLifeStage(ageYears, scenario.lifeStages) ?? null : null;
+  // Age no longer needs the scenario: a step is a day, so it derives from the
+  // clock alone. The scenario is still what names the life stages.
+  const ageYears = currentAgeYears(character, world.elapsedStep);
+  const lifeStage = scenario !== undefined ? classifyLifeStage(ageYears, scenario.lifeStages) ?? null : null;
 
   const household = world.households.find((h) => h.headCharacterId === characterId) ?? null;
   const estate = world.material.estates.find((e) => e.ownerCharacterId === characterId) ?? null;
@@ -69,6 +71,6 @@ export function buildLifeInspectorView(
     legacyCausesAsPredecessor: world.legacyCauses.filter((c) => c.predecessorCharacterId === characterId),
     legacyCausesAsSuccessor: world.legacyCauses.filter((c) => c.successorCharacterId === characterId),
     successorCandidatesIfDeceasedToday:
-      scenario !== undefined ? findPlayerSuccessors(world, characterId, scenario.stepsPerYear, world.elapsedStep) : [],
+      findPlayerSuccessors(world, characterId, world.elapsedStep),
   };
 }
