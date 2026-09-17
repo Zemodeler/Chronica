@@ -498,3 +498,76 @@ describe("an arrangement the world invented", () => {
     expect(result.rejected[0]!.reason).toContain('No arrangement "lex-nonexistent"');
   });
 });
+
+describe("borrowing", () => {
+  const borrowFrom = (lenderId: string | null, principal: number): WorldDelta => ({
+    op: "loan_open",
+    localId: "merchant_loan",
+    lenderKind: lenderId === null ? "foreign" : "character",
+    lenderRef: lenderId,
+    borrowerAccountRef: "marcus-purse",
+    principal,
+    interestBps: 800,
+    cadenceDays: 90,
+    terms: "Merchant credit against the coming harvest",
+    collateralHoldingRef: null,
+    reason: "The legions must be paid before the levy comes in.",
+  });
+
+  it("moves the principal out of the lender's own reserves and into the borrower's", () => {
+    const before = world();
+    const lenderStart = before.material.accounts.find((account) => account.id === "hanno-purse")!.balance;
+    const borrowerStart = before.material.accounts.find((account) => account.id === "marcus-purse")!.balance;
+
+    const result = applyDeltas(before, [borrowFrom("hanno", 300)], context());
+    expect(result.world.material.accounts.find((a) => a.id === "hanno-purse")!.balance).toBe(lenderStart - 300);
+    expect(result.world.material.accounts.find((a) => a.id === "marcus-purse")!.balance).toBe(borrowerStart + 300);
+  });
+
+  it("opens the servicing obligation that makes an unpaid debt behave like unpaid wages", () => {
+    const result = applyDeltas(world(), [borrowFrom("hanno", 300)], context());
+    const loan = result.world.material.loans[0]!;
+    const servicing = result.world.material.obligations.find((obligation) => obligation.id === loan.serviceObligationId)!;
+    expect(servicing.kind).toBe("debt_service");
+    expect(servicing.amount).toBe(24);
+    // Below army pay: a state short of money starves its creditors first.
+    expect(servicing.priority).toBeLessThan(500);
+  });
+
+  it("refuses a loan the lender plainly cannot make", () => {
+    const result = applyDeltas(world(), [borrowFrom("hamilcar", 5_000)], context());
+    expect(result.world.material.loans).toHaveLength(0);
+    expect(result.rejected[0]!.reason).toContain("will not cover a loan of 5000");
+    expect(result.rejected[0]!.kind).toBe("world");
+  });
+
+  it("takes foreign money without anyone in the world being out of pocket", () => {
+    const before = world();
+    const total = totalMoney(before);
+    const result = applyDeltas(before, [borrowFrom(null, 400)], context());
+    expect(totalMoney(result.world)).toBe(total + 400);
+    expect(result.world.material.loans[0]!.lenderKind).toBe("foreign");
+  });
+
+  it("pays a debt down, and closes it when nothing is left", () => {
+    const opened = applyDeltas(world(), [borrowFrom("hanno", 300)], context());
+    const loanId = opened.world.material.loans[0]!.id;
+
+    const part = applyDeltas(opened.world, [{ op: "loan_settle", loanRef: loanId, action: "repay", amount: 100, reason: "A first instalment." }], context());
+    expect(part.world.material.loans[0]!.outstanding).toBe(200);
+    expect(part.world.material.loans[0]!.status).toBe("active");
+
+    const rest = applyDeltas(part.world, [{ op: "loan_settle", loanRef: loanId, action: "repay", amount: 200, reason: "Settled in full." }], context());
+    expect(rest.world.material.loans[0]!.status).toBe("repaid");
+    expect(rest.world.material.obligations.find((o) => o.kind === "debt_service")!.active).toBe(false);
+  });
+
+  it("stops servicing a debt that has been walked away from", () => {
+    const opened = applyDeltas(world(), [borrowFrom("hanno", 300)], context());
+    const loanId = opened.world.material.loans[0]!.id;
+    const result = applyDeltas(opened.world, [{ op: "loan_settle", loanRef: loanId, action: "default", amount: 0, reason: "There is nothing to pay them with." }], context());
+
+    expect(result.world.material.loans[0]!.status).toBe("defaulted");
+    expect(result.world.material.obligations.find((o) => o.kind === "debt_service")!.active).toBe(false);
+  });
+});

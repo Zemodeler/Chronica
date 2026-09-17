@@ -61,13 +61,22 @@ export const IncomeSourceSchema = z.object({
   cadenceSteps: z.number().int().positive().max(36_600),
   nextDueStep: ElapsedStepSchema,
   collectionRateBps: BasisPointsSchema.default(10_000),
+  /**
+   * Who the money comes from, where it comes from abroad.
+   *
+   * Trade was a label and nothing else: a "trade" income behaved exactly like
+   * rent from a farm, so a war with the very people paying it changed nothing.
+   * Naming the counterparty is what lets a blockade or a rupture cut a
+   * particular route rather than an abstraction. Null for domestic revenue.
+   */
+  counterpartyPolityId: EntityIdSchema.nullable().default(null),
   active: z.boolean(),
 });
 export type IncomeSource = z.infer<typeof IncomeSourceSchema>;
 
 export const MoneyObligationSchema = z.object({
   id: EntityIdSchema,
-  kind: z.enum(["army_pay", "army_upkeep", "salary", "tribute", "pension"]),
+  kind: z.enum(["army_pay", "army_upkeep", "salary", "tribute", "pension", "debt_service"]),
   label: z.string().trim().min(1).max(120),
   payerAccountId: EntityIdSchema,
   recipientAccountId: EntityIdSchema.optional(),
@@ -792,6 +801,48 @@ export const MaterialEffectProposalSchema = z.object({
 });
 export type MaterialEffectProposal = z.infer<typeof MaterialEffectProposalSchema>;
 
+/**
+ * Borrowed money (VISION §7, §20).
+ *
+ * Debt could not be represented at all: every amount in the world is
+ * non-negative and the tick floors balances at zero, so a treasury simply
+ * stopped at nothing and no one was owed anything. §20's chain -- a finance
+ * official borrows heavily from merchants, the merchant then demands political
+ * concessions -- had no mechanism behind it, because there were no merchants
+ * to owe and nothing to owe them.
+ *
+ * A loan is a liability record, not a negative balance. Servicing it is an
+ * ordinary `MoneyObligation` of kind "debt_service", so arrears, priority and
+ * missed periods all work exactly as they do for army pay -- which means a debt
+ * crisis is already modelled by the machinery that models an unpaid army.
+ */
+export const LoanSchema = z
+  .object({
+    id: EntityIdSchema,
+    /** "foreign" is money from outside the modelled world -- there is no lender to pay back in person. */
+    lenderKind: z.enum(["character", "polity", "foreign"]),
+    lenderId: EntityIdSchema.nullable(),
+    borrowerAccountId: EntityIdSchema,
+    principal: MoneyAmountSchema,
+    /** What is still owed. Repayment reduces it; this is the number that matters. */
+    outstanding: MoneyAmountSchema,
+    interestBps: BasisPointsSchema,
+    cadenceSteps: z.number().int().positive().max(36_600),
+    /** The obligation that services it, where one was opened. */
+    serviceObligationId: EntityIdSchema.nullable().default(null),
+    /** What was actually agreed, in words -- often the part that matters politically. */
+    terms: z.string().trim().min(1).max(300),
+    collateralHoldingId: EntityIdSchema.nullable().default(null),
+    status: z.enum(["active", "repaid", "defaulted", "renegotiated"]),
+    openedAtStep: ElapsedStepSchema,
+  })
+  .strict()
+  .refine((loan) => loan.lenderKind === "foreign" || loan.lenderId !== null, {
+    message: "A loan from someone in this world must name them.",
+    path: ["lenderId"],
+  });
+export type Loan = z.infer<typeof LoanSchema>;
+
 export const MaterialWorldStateSchema = z
   .object({
     currency: CurrencyDefinitionSchema,
@@ -826,6 +877,8 @@ export const MaterialWorldStateSchema = z
     // docs/32, Part C.3: project fund earmarks. Defaulted so archived
     // snapshots (none of which ever populated this) load cleanly.
     reservations: z.array(MoneyReservationSchema).default([]),
+    /** VISION §7: borrowed money, as a liability rather than a negative balance. */
+    loans: z.array(LoanSchema).default([]),
   })
   .superRefine((state, context) => {
     const ids = <T extends { id: string }>(values: T[]) => new Set(values.map((value) => value.id));

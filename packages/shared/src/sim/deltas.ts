@@ -69,6 +69,8 @@ const IncomeSourceUpsertSchema = z.object({
   amount: MoneyAmountSchema,
   cadenceDays: z.number().int().positive().max(36_600),
   collectionRateBps: BasisPointsSchema.optional(),
+  /** Who pays it, where it comes from abroad -- so a war can cut this particular route. */
+  counterpartyPolityId: EntityIdSchema.nullable().default(null),
   active: z.boolean().default(true),
   reason: ReasonSchema,
 }).strict();
@@ -78,7 +80,7 @@ const ObligationUpsertSchema = z.object({
   op: z.literal("obligation_upsert"),
   localId: LocalIdSchema.optional(),
   obligationRef: RefSchema.nullable(),
-  kind: z.enum(["army_pay", "army_upkeep", "salary", "tribute", "pension"]),
+  kind: z.enum(["army_pay", "army_upkeep", "salary", "tribute", "pension", "debt_service"]),
   label: z.string().trim().min(1).max(120),
   payerAccountRef: RefSchema,
   recipientAccountRef: RefSchema.nullable(),
@@ -388,6 +390,44 @@ const HoldingTransferSchema = z.object({
   reason: ReasonSchema,
 }).strict();
 
+/**
+ * VISION §7 and §20: a government borrows.
+ *
+ * The principal arrives now and the servicing is an ordinary obligation, so a
+ * debt that goes unpaid falls into arrears through the same machinery that
+ * makes an unpaid army desert. Where the lender is someone in this world, the
+ * money leaves their account -- and they become a person with a claim on the
+ * state, which is where political concessions start.
+ */
+const LoanOpenSchema = z.object({
+  op: z.literal("loan_open"),
+  localId: LocalIdSchema,
+  lenderKind: z.enum(["character", "polity", "foreign"]),
+  /** Omitted only for "foreign" money, which comes from outside the modelled world. */
+  lenderRef: RefSchema.nullable(),
+  borrowerAccountRef: RefSchema,
+  principal: MoneyAmountSchema,
+  /** Interest per servicing period, in basis points of the principal. */
+  interestBps: BasisPointsSchema,
+  cadenceDays: z.number().int().positive().max(36_600),
+  /** What was agreed, in words. Often the politically expensive part. */
+  terms: z.string().trim().min(1).max(300),
+  collateralHoldingRef: RefSchema.nullable().default(null),
+  reason: ReasonSchema,
+}).strict();
+
+/** Paying it down, walking away from it, or agreeing new terms under pressure. */
+const LoanSettleSchema = z.object({
+  op: z.literal("loan_settle"),
+  loanRef: RefSchema,
+  action: z.enum(["repay", "default", "renegotiate"]),
+  /** For "repay": how much of the outstanding principal is being paid off now. */
+  amount: MoneyAmountSchema.default(0),
+  newInterestBps: BasisPointsSchema.optional(),
+  newCadenceDays: z.number().int().positive().max(36_600).optional(),
+  reason: ReasonSchema,
+}).strict();
+
 export const WorldDeltaSchema = z.discriminatedUnion("op", [
   MoneyTransferSchema,
   IncomeSourceUpsertSchema,
@@ -411,6 +451,8 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   PoliticalProcedureResolveSchema,
   HoldingTransferSchema,
   GenericEntityUpdateSchema,
+  LoanOpenSchema,
+  LoanSettleSchema,
 ]);
 export type WorldDelta = z.infer<typeof WorldDeltaSchema>;
 export type WorldDeltaOp = WorldDelta["op"];
@@ -439,6 +481,8 @@ export const WORLD_DELTA_OPS = [
   "political_procedure_resolve",
   "holding_transfer",
   "generic_entity_update",
+  "loan_open",
+  "loan_settle",
 ] as const satisfies readonly WorldDeltaOp[];
 
 /**
@@ -470,4 +514,6 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   political_procedure_resolve: "civil",
   holding_transfer: "judicial",
   generic_entity_update: "civil",
+  loan_open: "fiscal",
+  loan_settle: "fiscal",
 };

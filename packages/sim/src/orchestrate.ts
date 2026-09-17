@@ -103,7 +103,15 @@ How to answer well:
    are yours to carry out. Each period it matters, make the actual change -- the
    money, the manpower, the support it wins or costs -- and keep its attributes
    honest with "generic_entity_update", retiring it when it is repealed.
-14. Keep each country's aims current. STANDING AIMS says what a power is trying
+14. Money can be borrowed, and borrowing has a lender. A government short of
+   funds does not simply fail to act: it goes to the merchants, and
+   "loan_open" is how. Where the lender is someone in this world the money
+   comes out of their own reserves and they acquire a claim on the state --
+   which is a political fact, not only a financial one. Servicing it is an
+   ordinary obligation, so an unpaid debt falls into arrears like unpaid wages.
+   Revenue that comes from another power should name that power, so a war can
+   cut it.
+15. Keep each country's aims current. STANDING AIMS says what a power is trying
    to do, what worries it and what it means to do next. Every polity with people
    in it should have one, and any power whose situation changed this turn should
    have theirs rewritten with "polity_outlook_set" -- a country that watched a

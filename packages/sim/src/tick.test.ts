@@ -16,7 +16,7 @@ function withIncome(world: WorldState, amount: number, cadenceDays: number): Wor
       incomeSources: [{
         id: "tax-1", kind: "tax", label: "Provincial tribute", beneficiaryAccountId: "marcus-purse",
         originKind: "polity", originId: "rome", amount, cadenceSteps: cadenceDays, nextDueStep: cadenceDays,
-        collectionRateBps: 10_000, active: true,
+        collectionRateBps: 10_000, counterpartyPolityId: null, active: true,
       }],
       obligations: [],
     },
@@ -277,5 +277,57 @@ describe("what a finished project leaves behind", () => {
     const result = tick(poor, state.instant.day + 10);
     const shortfall = result.factProposals.find((fact) => fact.kind === "project_shortfall");
     expect(shortfall?.summary).toContain("900");
+  });
+});
+
+describe("a debt that stops being paid", () => {
+  const indebted = (): WorldState => {
+    const state = base();
+    return {
+      ...state,
+      material: {
+        ...state.material,
+        // Nothing to pay anyone with, so the servicing simply cannot be met.
+        accounts: state.material.accounts.map((account) => ({ ...account, balance: 0 })),
+        obligations: [
+          {
+            id: "service-1", kind: "debt_service", label: "Interest on merchant credit",
+            payerAccountId: "marcus-purse", recipientAccountId: "hanno-purse", amount: 24,
+            cadenceSteps: 30, nextDueStep: state.elapsedStep + 30, priority: 400, arrears: 0, missedPeriods: 0, active: true,
+          },
+        ],
+        loans: [
+          {
+            id: "loan-1", lenderKind: "character", lenderId: "hanno", borrowerAccountId: "marcus-purse",
+            principal: 300, outstanding: 300, interestBps: 800, cadenceSteps: 30,
+            serviceObligationId: "service-1", terms: "Merchant credit against the coming harvest",
+            collateralHoldingId: null, status: "active", openedAtStep: state.elapsedStep,
+          },
+        ],
+      },
+    };
+  };
+
+  it("falls into default once enough payments have been missed, and names the creditor", () => {
+    const state = indebted();
+    const result = tick(state, state.instant.day + 120);
+
+    expect(result.world.material.loans[0]!.status).toBe("defaulted");
+    const fact = result.factProposals.find((proposal) => proposal.kind === "loan_defaulted");
+    expect(fact).toBeDefined();
+    // The lender is a person, so the fact can wake them.
+    expect(fact!.affectedRefs.some((ref) => ref.kind === "character" && ref.id === "hanno")).toBe(true);
+    expect(result.world.material.obligations.find((o) => o.id === "service-1")!.active).toBe(false);
+  });
+
+  it("leaves a debt alone while it is still being paid", () => {
+    const state = indebted();
+    const solvent: WorldState = {
+      ...state,
+      material: { ...state.material, accounts: state.material.accounts.map((account) => ({ ...account, balance: 5_000 })) },
+    };
+    const result = tick(solvent, state.instant.day + 120);
+    expect(result.world.material.loans[0]!.status).toBe("active");
+    expect(result.factProposals.some((proposal) => proposal.kind === "loan_defaulted")).toBe(false);
   });
 });

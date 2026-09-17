@@ -28,7 +28,7 @@ import {
  *    it actually has.
  */
 
-const CAPS = { characters: 12, forces: 10, projects: 8, accounts: 6, stances: 8, facts: 12, events: 8, intents: 8, provinces: 40, foreignForces: 12, foreignFigures: 12, outlooks: 8, institutions: 4, procedures: 6, strainedProvinces: 8, holdings: 6, arrangements: 8 } as const;
+const CAPS = { characters: 12, forces: 10, projects: 8, accounts: 6, stances: 8, facts: 12, events: 8, intents: 8, provinces: 40, foreignForces: 12, foreignFigures: 12, outlooks: 8, institutions: 4, procedures: 6, strainedProvinces: 8, holdings: 6, arrangements: 8, debts: 6, trade: 6 } as const;
 
 export interface SliceEvent {
   readonly kind: string;
@@ -121,6 +121,19 @@ export interface WorldSlice {
    * arrangement no typed schema fits. They were written and never read, so the
    * model could not see what it had itself created a turn earlier.
    */
+  /** VISION §7: what is owed, to whom, and on what terms. */
+  readonly debts: readonly {
+    readonly id: string;
+    readonly outstanding: number;
+    readonly interest: number;
+    readonly perPeriod: number;
+    readonly lender: string;
+    readonly terms: string;
+    readonly status: string;
+    readonly arrears: number;
+  }[];
+  /** Revenue that depends on somebody else, and can therefore be cut. */
+  readonly trade: readonly { readonly id: string; readonly label: string; readonly amount: number; readonly counterparty: string; readonly active: boolean }[];
   readonly arrangements: readonly {
     readonly id: string;
     readonly kind: string;
@@ -335,6 +348,44 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       territoryId: holding.territoryId,
     }));
 
+  const ourAccountIds = new Set(
+    world.material.accounts
+      .filter((account) => (account.owner.kind === "polity" ? ownPolity === null || account.owner.id === ownPolity : ourCharacterIds.has(account.owner.id)))
+      .map((account) => account.id),
+  );
+
+  const debts = world.material.loans
+    .filter((loan) => loan.status !== "repaid" && ourAccountIds.has(loan.borrowerAccountId))
+    .slice(0, CAPS.debts)
+    .map((loan) => {
+      const servicing = loan.serviceObligationId === null
+        ? undefined
+        : world.material.obligations.find((obligation) => obligation.id === loan.serviceObligationId);
+      return {
+        id: loan.id,
+        outstanding: loan.outstanding,
+        interest: Math.round(loan.interestBps / 100),
+        perPeriod: servicing?.amount ?? 0,
+        lender: loan.lenderKind === "foreign" || loan.lenderId === null ? "foreign creditors" : `${name(loan.lenderId)} [${loan.lenderId}]`,
+        terms: loan.terms,
+        status: loan.status,
+        arrears: servicing?.arrears ?? 0,
+      };
+    });
+
+  // Only revenue with somebody on the other end of it: a farm cannot be
+  // blockaded, and listing it here would tell the model nothing it can act on.
+  const trade = world.material.incomeSources
+    .filter((source) => source.counterpartyPolityId !== null && ourAccountIds.has(source.beneficiaryAccountId))
+    .slice(0, CAPS.trade)
+    .map((source) => ({
+      id: source.id,
+      label: source.label,
+      amount: source.amount,
+      counterparty: polityName(source.counterpartyPolityId ?? ""),
+      active: source.active,
+    }));
+
   const arrangements = world.genericEntities
     .filter((entity) => {
       if (entity.ownerRef === null) return true;
@@ -439,6 +490,8 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     institutions,
     council,
     holdings,
+    debts,
+    trade,
     arrangements,
     outlooks,
     projects,
@@ -526,6 +579,15 @@ export function renderWorldSlice(slice: WorldSlice): string {
           `${province.name} [${province.id}] — ${province.manpower} men, food ${province.food}/100, order ${province.stability}/100, war damage ${province.warDamage}/100, taxable ${province.taxCapacity}`),
       ],
   );
+  section(
+    "DEBTS",
+    slice.debts.map((debt) => {
+      const behind = debt.arrears === 0 ? "" : `, ${debt.arrears} in arrears`;
+      return `${debt.outstanding} owed to ${debt.lender} [${debt.id}] at ${debt.interest}% — ${debt.perPeriod} a period${behind}, ${debt.status}. ${debt.terms}`;
+    }),
+  );
+  section("TRADE", slice.trade.map((route) =>
+    `${route.label} [${route.id}] — ${route.amount} a period from ${route.counterparty}${route.active ? "" : ", cut off"}`));
   section(
     "STANDING ARRANGEMENTS",
     slice.arrangements.map((entity) => {

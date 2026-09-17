@@ -157,6 +157,48 @@ export function runDeterministicTick(input: TickInput): TickResult {
 
   if (collected > 0 || paid > 0) notes.push(`Revenue of ${collected} was collected and ${paid} paid out in standing obligations.`);
 
+  /**
+   * Debt that stops being served (VISION §20).
+   *
+   * Servicing itself is already an obligation and needs nothing here. What does
+   * need saying is that a creditor is a person: a state that has missed three
+   * payments has not merely a line in arrears but someone with a claim on it,
+   * and that fact is what wakes them. After enough missed periods the loan is
+   * in default whether or not anybody declared one.
+   */
+  const DEFAULT_AFTER_MISSED_PERIODS = 3;
+  const loans = input.world.material.loans.map((loan) => {
+    if (loan.status !== "active" || loan.serviceObligationId === null) return loan;
+    const servicing = obligations.find((obligation) => obligation.id === loan.serviceObligationId);
+    if (servicing === undefined || servicing.missedPeriods < DEFAULT_AFTER_MISSED_PERIODS) return loan;
+
+    const lender = loan.lenderKind === "foreign" || loan.lenderId === null ? "its creditors" : loan.lenderId;
+    facts.push({
+      localId: nextLocalId("default"),
+      kind: "loan_defaulted",
+      summary: `The debt of ${loan.outstanding} owed on ${loan.terms} has gone unserviced for ${servicing.missedPeriods} periods; ${lender} is no longer being paid.`,
+      affectedRefs: [
+        { kind: "account", id: loan.borrowerAccountId },
+        ...(loan.lenderKind === "character" && loan.lenderId !== null ? [{ kind: "character" as const, id: loan.lenderId }] : []),
+      ],
+      visibility: "polity",
+      discoveryState: "polity",
+      knowableInDays: 0,
+      // A state that stops paying its creditors is the beginning of a crisis,
+      // not an accounting detail.
+      significance: 75,
+    });
+    notes.push(`The loan on ${loan.terms} fell into default.`);
+    return { ...loan, status: "defaulted" as const };
+  });
+
+  const defaultedObligationIds = new Set(
+    loans.filter((loan) => loan.status === "defaulted").map((loan) => loan.serviceObligationId).filter((id): id is string => id !== null),
+  );
+  const servicedObligations = defaultedObligationIds.size === 0
+    ? obligations
+    : obligations.map((obligation) => (defaultedObligationIds.has(obligation.id) ? { ...obligation, active: false } : obligation));
+
   // ── Projects ──────────────────────────────────────────────────────────
   //
   // A milestone whose date has arrived completes, and pays its cost. This is
@@ -251,6 +293,7 @@ export function runDeterministicTick(input: TickInput): TickResult {
       cadenceSteps: cadence,
       nextDueStep: input.toDay + cadence,
       collectionRateBps: 10_000,
+      counterpartyPolityId: null,
       active: true,
     });
     return { entityId: id, summary: `${outcome.label} [${id}] begins returning ${outcome.amount} every ${cadence} days.` };
@@ -376,7 +419,8 @@ export function runDeterministicTick(input: TickInput): TickResult {
         ...input.world.material,
         accounts,
         incomeSources: newIncome.length === 0 ? incomeSources : [...incomeSources, ...newIncome],
-        obligations,
+        obligations: servicedObligations,
+        loans,
         forces: forces.length === 0 ? input.world.material.forces : [...input.world.material.forces, ...forces],
         transactions: transactions.slice(-500),
       },

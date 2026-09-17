@@ -209,3 +209,51 @@ describe("arrangements the world made for itself", () => {
     expect(renderWorldSlice(slice(withLaw(true)))).toContain("repealed");
   });
 });
+
+describe("what the treasury owes and depends on", () => {
+  const borrowed = (): WorldState => {
+    const state = world();
+    // Has to be our own government's debt: another power's books are not ours to read.
+    const roman = state.characters.find((character) => character.alive && character.polityId === "rome")!;
+    const account = state.material.accounts.find((a) => a.owner.kind === "character" && a.owner.id === roman.id)
+      ?? { ...state.material.accounts[0]!, id: "roman-purse", owner: { kind: "character" as const, id: roman.id } };
+    const lender = state.characters.find((character) => character.alive && character.id !== roman.id)!;
+    return {
+      ...state,
+      material: {
+        ...state.material,
+        accounts: state.material.accounts.some((a) => a.id === account.id) ? state.material.accounts : [...state.material.accounts, account],
+        obligations: [
+          ...state.material.obligations,
+          { id: "service-1", kind: "debt_service", label: "Interest", payerAccountId: account.id, amount: 24, cadenceSteps: 30, nextDueStep: 30, priority: 400, arrears: 48, missedPeriods: 2, active: true },
+        ],
+        loans: [
+          { id: "loan-1", lenderKind: "character", lenderId: lender.id, borrowerAccountId: account.id, principal: 300, outstanding: 300, interestBps: 800, cadenceSteps: 30, serviceObligationId: "service-1", terms: "Merchant credit", collateralHoldingId: null, status: "active", openedAtStep: 0 },
+        ],
+        incomeSources: [
+          ...state.material.incomeSources,
+          { id: "sicilian-grain", kind: "trade", label: "Sicilian grain", beneficiaryAccountId: account.id, originKind: "polity", originId: "rome", amount: 44, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 10_000, counterpartyPolityId: "carthage", active: true },
+        ],
+      },
+    };
+  };
+
+  it("names the creditor, the terms and what is already behind", () => {
+    const text = renderWorldSlice(slice(borrowed()));
+    expect(text).toContain("DEBTS");
+    expect(text).toContain("300 owed to");
+    expect(text).toContain("48 in arrears");
+    expect(text).toContain("Merchant credit");
+  });
+
+  it("names who a trade route depends on, so a war can cut it", () => {
+    const text = renderWorldSlice(slice(borrowed()));
+    expect(text).toContain("TRADE");
+    expect(text).toContain("Sicilian grain [sicilian-grain]");
+    expect(text).toContain("from Carthage");
+  });
+
+  it("says nothing about trade for revenue that depends on nobody", () => {
+    expect(renderWorldSlice(slice())).not.toContain("TRADE");
+  });
+});
