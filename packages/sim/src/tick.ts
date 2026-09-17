@@ -165,6 +165,97 @@ export function runDeterministicTick(input: TickInput): TickResult {
   const sponsorAccountId = (sponsor: WorldState["projects"][number]["sponsorEntityRef"]): string | undefined =>
     accounts.find((account) => account.owner.kind === sponsor.kind && account.owner.id === sponsor.id)?.id;
 
+  /** What finished projects produced this tick, folded into the world at the end. */
+  const forces: WorldState["material"]["forces"][number][] = [];
+  const structures: WorldState["structures"][number][] = [];
+  const newIncome: WorldState["material"]["incomeSources"][number][] = [];
+
+  /**
+   * The thing a finished project leaves behind.
+   *
+   * Everything is minted from the same id factory the rest of the burst uses,
+   * so a replay produces the same fleet. A reference that has gone stale since
+   * the project opened -- a commander who has died, a province lost -- produces
+   * nothing rather than an invalid world; the completion fact still stands, and
+   * the record shows an effort that finished into nothing, which is a truer
+   * account than a fleet appearing under a dead man.
+   */
+  const produceOutcome = (project: WorldState["projects"][number]): { entityId: string; summary: string } | null => {
+    const outcome = project.completionOutcome;
+    if (outcome === null || outcome.kind === "none") return null;
+
+    if (outcome.kind === "force") {
+      const provinceId = outcome.provinceId ?? input.world.map.provinces[0]?.id;
+      const commanderId = outcome.commanderCharacterId;
+      const polityId = outcome.polityId;
+      if (provinceId === undefined || commanderId === null || polityId === null) return null;
+      if (!input.world.characters.some((character) => character.id === commanderId && character.alive)) return null;
+      if (!input.world.map.provinces.some((province) => province.id === provinceId)) return null;
+
+      const id = input.ids.next("force");
+      const strength = Math.max(1, outcome.amount);
+      forces.push({
+        id,
+        name: outcome.label,
+        polityId,
+        commanderCharacterId: commanderId,
+        controllerCharacterId: commanderId,
+        locationId: provinceId,
+        positionId: null,
+        authorizedStrength: strength,
+        personnel: [{ categoryId: "infantry", label: "Infantry", fit: strength, unavailable: [] }],
+        moraleBps: 6_000,
+        cohesionBps: 5_000,
+        fatigueBps: 0,
+        provisionStatus: "provisioned",
+        provisionedThroughStep: input.toDay + 30,
+        payObligationId: null,
+        payArrearsPeriods: 0,
+        history: [],
+      });
+      return { entityId: id, summary: `${outcome.label} [${id}] stands ready, ${strength} strong.` };
+    }
+
+    if (outcome.kind === "structure") {
+      const provinceId = outcome.provinceId;
+      if (provinceId === null || !input.world.map.provinces.some((province) => province.id === provinceId)) return null;
+      const id = input.ids.next("structure");
+      structures.push({
+        id,
+        kind: "other",
+        name: outcome.label,
+        provinceId,
+        settlementId: null,
+        ownerPolityId: outcome.polityId,
+        garrisonCapacity: outcome.amount,
+        defensiveEffectsBps: 0,
+        supplyRadius: 0,
+        builtAtStep: input.toDay,
+        provenanceProjectId: project.id,
+      });
+      return { entityId: id, summary: `${outcome.label} [${id}] now stands in ${provinceId}.` };
+    }
+
+    const beneficiaryId = outcome.beneficiaryAccountId;
+    if (beneficiaryId === null || !accounts.some((account) => account.id === beneficiaryId)) return null;
+    const cadence = outcome.cadenceDays ?? 30;
+    const id = input.ids.next("income");
+    newIncome.push({
+      id,
+      kind: "trade",
+      label: outcome.label,
+      beneficiaryAccountId: beneficiaryId,
+      originKind: "polity",
+      originId: beneficiaryId,
+      amount: outcome.amount,
+      cadenceSteps: cadence,
+      nextDueStep: input.toDay + cadence,
+      collectionRateBps: 10_000,
+      active: true,
+    });
+    return { entityId: id, summary: `${outcome.label} [${id}] begins returning ${outcome.amount} every ${cadence} days.` };
+  };
+
   const projects = input.world.projects.map((project) => {
       if (project.status === "completed" || project.status === "cancelled" || project.status === "failed") return project;
 
@@ -177,17 +268,42 @@ export function runDeterministicTick(input: TickInput): TickResult {
         // completes -- the work was done on credit, and the shortfall is the
         // sponsor's problem to answer for.
         const funderId = sponsorAccountId(project.sponsorEntityRef);
-        if (dueMilestone.costAmount > 0 && funderId !== undefined) {
-          credit(funderId, -dueMilestone.costAmount);
-          transactions.push({
-            id: input.ids.next("txn"),
-            atStep: input.toDay,
-            kind: "purchase",
-            amount: dueMilestone.costAmount,
-            sourceAccountId: funderId,
-            cause: { kind: "project_milestone", id: project.id, explanation: dueMilestone.label },
-            visibility: "polity",
-          });
+        const dueAtStep = project.startedAtStep + dueMilestone.requiredAtElapsedOffset;
+        if (dueMilestone.costAmount > 0) {
+          // A sponsor who cannot cover it still gets the work -- but the
+          // shortfall is real and has to be said. Balances floor at zero and a
+          // sponsor with no account at all pays nothing, so without this the
+          // money simply vanished and nobody was answerable for it.
+          const short = funderId === undefined
+            ? dueMilestone.costAmount
+            : Math.max(0, dueMilestone.costAmount - balanceOf(funderId));
+          if (funderId !== undefined) {
+            credit(funderId, -dueMilestone.costAmount);
+            transactions.push({
+              id: input.ids.next("txn"),
+              atStep: dueAtStep,
+              kind: "purchase",
+              amount: dueMilestone.costAmount,
+              sourceAccountId: funderId,
+              cause: { kind: "project_milestone", id: project.id, explanation: dueMilestone.label },
+              visibility: "polity",
+            });
+          }
+          if (short > 0) {
+            facts.push({
+              localId: nextLocalId("shortfall"),
+              kind: "project_shortfall",
+              summary: `${project.label} could not be paid for in full: ${short} of ${dueMilestone.costAmount} was owed and not there.`,
+              affectedRefs: funderId === undefined
+                ? [{ kind: "project", id: project.id }]
+                : [{ kind: "project", id: project.id }, { kind: "account", id: funderId }],
+              visibility: "polity",
+              discoveryState: "polity",
+              significance: 45,
+              knowableInDays: 0,
+            });
+            notes.push(`${project.label} was carried on credit: ${short} could not be found.`);
+          }
         }
         milestones = milestones.map((milestone) =>
           milestone.id === dueMilestone.id ? { ...milestone, status: "completed" as const, completedAtStep: input.toDay } : milestone,
@@ -208,24 +324,36 @@ export function runDeterministicTick(input: TickInput): TickResult {
 
       if (!changed) return project;
       const finished = milestones.every((milestone) => milestone.status !== "pending");
-      if (finished) {
-        facts.push({
-          localId: nextLocalId("project"),
-          kind: "project_completed",
-          summary: `${project.label} is complete.`,
-          affectedRefs: [{ kind: "project", id: project.id }],
-          visibility: "public",
-          discoveryState: "public",
-          knowableInDays: 0,
-          significance: 45,
-        });
-        notes.push(`${project.label} is complete.`);
+      if (!finished) {
+        // Never clear a completion date that was already set: a project that is
+        // finished stays finished.
+        return { ...project, milestones, status: "in_progress" as const, completedAtStep: project.completedAtStep };
       }
+
+      // What the effort was actually for. Until this existed a completed naval
+      // expansion produced no ships -- the project was marked done and the
+      // world was exactly as it had been.
+      const produced = produceOutcome(project);
+      facts.push({
+        localId: nextLocalId("project"),
+        kind: "project_completed",
+        summary: produced === null ? `${project.label} is complete.` : `${project.label} is complete: ${produced.summary}`,
+        affectedRefs: [{ kind: "project", id: project.id }],
+        visibility: "public",
+        discoveryState: "public",
+        knowableInDays: 0,
+        // Something now exists that did not before, which is a different order
+        // of event from a milestone being reached.
+        significance: produced === null ? 45 : 60,
+      });
+      notes.push(produced === null ? `${project.label} is complete.` : `${project.label} is complete: ${produced.summary}`);
+
       return {
         ...project,
         milestones,
-        status: finished ? ("completed" as const) : ("in_progress" as const),
-        completedAtStep: finished ? input.toDay : null,
+        status: "completed" as const,
+        completedAtStep: input.toDay,
+        linkedEntityIds: produced === null ? project.linkedEntityIds : [...project.linkedEntityIds, produced.entityId].slice(0, 20),
       };
   });
 
@@ -240,7 +368,19 @@ export function runDeterministicTick(input: TickInput): TickResult {
    */
   const before = new Map(input.world.material.provinceMaterial.map((material) => [material.provinceId, material]));
   const recovered = advanceProvinceMaterial(
-    { ...input.world, material: { ...input.world.material, accounts, incomeSources, obligations, transactions: transactions.slice(-500) }, projects },
+    {
+      ...input.world,
+      projects,
+      structures: structures.length === 0 ? input.world.structures : [...input.world.structures, ...structures],
+      material: {
+        ...input.world.material,
+        accounts,
+        incomeSources: newIncome.length === 0 ? incomeSources : [...incomeSources, ...newIncome],
+        obligations,
+        forces: forces.length === 0 ? input.world.material.forces : [...input.world.material.forces, ...forces],
+        transactions: transactions.slice(-500),
+      },
+    },
     input.toDay,
     new Set<string>(),
   );
