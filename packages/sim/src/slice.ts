@@ -35,12 +35,20 @@ export interface SliceEvent {
   readonly dueInDays: number;
 }
 
+/** A question the world put to the ruler, and the answer they gave. */
+export interface AnsweredDecision {
+  readonly prompt: string;
+  readonly label: string;
+  readonly summary: string;
+}
+
 export interface WorldSliceInput {
   readonly world: WorldState;
   readonly clock: ScenarioClock;
   readonly actorRef: OrderPartyRef;
   readonly actorPolityId: string | null;
   readonly orderText: string | null;
+  readonly answeredDecision?: AnsweredDecision | undefined;
   readonly facts: readonly Fact[];
   readonly dueEvents: readonly SliceEvent[];
   readonly pendingEvents: readonly SliceEvent[];
@@ -49,11 +57,13 @@ export interface WorldSliceInput {
 export interface WorldSlice {
   readonly date: string;
   readonly order: string | null;
+  readonly answeredDecision: AnsweredDecision | null;
   readonly actor: { readonly id: string; readonly name: string; readonly office: string | null; readonly polityId: string | null };
   readonly economy: readonly { readonly id: string; readonly label: string; readonly balance: number }[];
   readonly monthlyIncome: number;
   readonly monthlyExpenditure: number;
-  readonly military: readonly { readonly id: string; readonly name: string; readonly strength: number; readonly location: string; readonly commander: string }[];
+  readonly military: readonly { readonly id: string; readonly name: string; readonly strength: number; readonly location: string; readonly locationId: string; readonly commander: string }[];
+  readonly provinces: readonly { readonly id: string; readonly name: string; readonly controller: string }[];
   readonly politics: readonly { readonly id: string; readonly name: string; readonly office: string | null; readonly age: number }[];
   readonly diplomacy: readonly { readonly toward: string; readonly trust: number; readonly why: string }[];
   readonly projects: readonly { readonly id: string; readonly label: string; readonly status: string; readonly nextMilestone: string | null }[];
@@ -102,7 +112,20 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       name: force.name,
       strength: force.authorizedStrength,
       location: provinceName(force.locationId),
+      locationId: force.locationId,
       commander: name(force.commanderCharacterId),
+    }));
+
+  // Where the world's own places are, by the id an order must name them by.
+  // Without this the model reads "at Latium" in the military list and writes
+  // "Latium" as though it were a province id.
+  const provinces = world.map.provinces
+    .filter((province) => ownPolity === null || province.controllerPolityId === ownPolity || world.material.forces.some((force) => force.locationId === province.id))
+    .slice(0, 16)
+    .map((province) => ({
+      id: province.id,
+      name: province.name,
+      controller: province.controllerPolityId === null ? "uncontrolled" : polityName(province.controllerPolityId),
     }));
 
   const politics = world.characters
@@ -148,11 +171,13 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   return {
     date: formatWorldDate(world.instant, input.clock),
     order: input.orderText,
+    answeredDecision: input.answeredDecision ?? null,
     actor: { id: input.actorRef.id, name: actor?.name ?? input.actorRef.id, office: actor?.officeId ?? null, polityId: ownPolity },
     economy: accounts,
     monthlyIncome,
     monthlyExpenditure,
     military,
+    provinces,
     politics,
     diplomacy,
     projects,
@@ -174,13 +199,27 @@ export function renderWorldSlice(slice: WorldSlice): string {
 
   lines.push(`CURRENT DATE: ${slice.date}`, "");
   lines.push(`ACTING FOR: ${slice.actor.name}${slice.actor.office === null ? "" : ` (${slice.actor.office})`}, of ${slice.actor.polityId ?? "no polity"}`, "");
+  // An answer is not a fresh order, and saying so matters: the world is
+  // resuming something it had already begun and put to the ruler.
+  if (slice.answeredDecision !== null) {
+    lines.push(
+      "A QUESTION WAS PUT TO THE RULER:",
+      `  ${slice.answeredDecision.prompt}`,
+      "THE RULER'S ANSWER:",
+      `  ${slice.answeredDecision.label} — ${slice.answeredDecision.summary}`,
+      "",
+      "Carry out that answer. Do not ask it again.",
+      "",
+    );
+  }
   if (slice.order !== null) lines.push("PLAYER ORDER:", `  ${slice.order}`, "");
 
   section("TREASURY", [
     ...slice.economy.map((account) => `${account.label} [${account.id}]: ${account.balance}`),
     `Monthly income ~${slice.monthlyIncome}, monthly expenditure ~${slice.monthlyExpenditure}`,
   ]);
-  section("MILITARY", slice.military.map((force) => `${force.name} [${force.id}] — ${force.strength} men at ${force.location}, under ${force.commander}`));
+  section("MILITARY", slice.military.map((force) => `${force.name} [${force.id}] — ${force.strength} men at ${force.location} [${force.locationId}], under ${force.commander}`));
+  section("PLACES", slice.provinces.map((province) => `${province.name} [${province.id}] — held by ${province.controller}`));
   section("PEOPLE", slice.politics.map((person) => `${person.name} [${person.id}]${person.office === null ? "" : `, ${person.office}`}, aged ${person.age}`));
   section("DIPLOMACY", slice.diplomacy.map((stance) => `toward ${stance.toward}: trust ${stance.trust} (${stance.why})`));
   section("ACTIVE PROJECTS", slice.projects.map((project) => `${project.label} [${project.id}] — ${project.status}${project.nextMilestone === null ? "" : `, next: ${project.nextMilestone}`}`));

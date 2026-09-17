@@ -18,7 +18,7 @@ import { runCognition } from "./cognition";
 import { materializeFacts } from "./facts";
 import { orchestrate } from "./orchestrate";
 import { createIdFactory, type SimModelPort } from "./ports";
-import { buildWorldSlice, type SliceEvent } from "./slice";
+import { buildWorldSlice, type AnsweredDecision, type SliceEvent } from "./slice";
 import { runDeterministicTick } from "./tick";
 
 /**
@@ -77,6 +77,8 @@ export interface BurstInput {
   readonly actorRef: OrderPartyRef;
   readonly actorPolityId: string | null;
   readonly orderText: string | null;
+  /** Set when this burst is resuming a decision the world had put to the player. */
+  readonly answeredDecision?: AnsweredDecision | undefined;
   /** History already on record, for the slice and for visibility checks. */
   readonly knownFacts: readonly Fact[];
   /** Everything the queue still owes the world, due or not. */
@@ -139,7 +141,13 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     });
     world = result.world;
     breaches.push(...result.breaches);
-    frictions.push(...proposal.frictions, ...result.rejected.map((rejection) => rejection.reason));
+    // Only what the world could not do. A malformed reference is the engine's
+    // business: handing it to the historian put "no province called Latium
+    // existed" into a Chronicle.
+    frictions.push(
+      ...proposal.frictions,
+      ...result.rejected.filter((rejection) => rejection.kind === "world").map((rejection) => rejection.reason),
+    );
 
     const materialized = materializeFacts({
       proposals: proposal.facts,
@@ -153,19 +161,23 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     for (const [factId, weight] of materialized.significanceByFactId) significanceByFactId.set(factId, weight);
     significance += materialized.significance;
 
-    // A refused delta is still history: the world tried and could not, and the
-    // player deserves to learn that from the Chronicle rather than silence.
+    // A refused delta is still history -- the world tried and could not, and the
+    // player deserves to learn that rather than wonder. But only when the world
+    // was the obstacle: a proposal that named someone who does not exist is the
+    // engine catching a malformed payload, and belongs in the record for
+    // debugging rather than in the ruler's Chronicle.
     for (const rejection of result.rejected) {
+      const isWorldFriction = rejection.kind === "world";
       const friction = materializeFacts({
         proposals: [{
           localId: `friction_${scheduled.length}_${newFacts.length}`,
-          kind: "execution_friction",
+          kind: isWorldFriction ? "execution_friction" : "engine_rejection",
           summary: rejection.reason,
           affectedRefs: [actorRef],
-          visibility: "polity",
-          discoveryState: "polity",
+          visibility: isWorldFriction ? "polity" : "private",
+          discoveryState: isWorldFriction ? "polity" : "private",
           knowableInDays: 0,
-          significance: 5,
+          significance: isWorldFriction ? 5 : 0,
         }],
         now: world.instant,
         atStep: world.elapsedStep,
@@ -173,7 +185,13 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         causalDepth,
         assignedIds: result.assignedIds,
       });
-      newFacts.push(...friction.facts);
+      const seen = isWorldFriction
+        ? friction.facts.map((fact) => ({
+          ...fact,
+          discovery: { ...fact.discovery, discoveredBy: [{ observerRef: actorRef, atInstant: world.instant, via: "told" as const }] },
+        }))
+        : friction.facts;
+      newFacts.push(...seen);
       for (const [factId, weight] of friction.significanceByFactId) significanceByFactId.set(factId, weight);
       significance += friction.significance;
     }
@@ -250,6 +268,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     actorRef: input.actorRef,
     actorPolityId: input.actorPolityId,
     orderText: input.orderText,
+    ...(input.answeredDecision === undefined ? {} : { answeredDecision: input.answeredDecision }),
     facts: input.knownFacts,
     dueEvents: dueNow,
     pendingEvents: upcoming,

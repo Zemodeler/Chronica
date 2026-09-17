@@ -1152,3 +1152,38 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .chat-discover-input:focus { outline: none; border-color: var(--accent); }
 .chat-discover-error { margin: 0; padding: .5rem .7rem; border-radius: .4rem; background: color-mix(in srgb, red 12%, var(--surface)); color: var(--text); font-size: .85rem; border: 1px solid color-mix(in srgb, red 30%, var(--border)); }
 .chat-discover-actions { display: flex; gap: .5rem; justify-content: flex-end; }
+
+/* ── The council: the player's whole interface to the simulation ────────── */
+
+.sim-tab { position: fixed; top: calc(8rem + 44px + 0.75rem); left: 1rem; z-index: 30; padding: 0 0.9rem; height: 44px; border: 2px solid var(--border); border-radius: 22px; background: var(--surface); color: var(--text-title); box-shadow: 0 2px 8px rgb(0 0 0 / 40%); cursor: pointer; font: 600 0.85rem system-ui, sans-serif; }
+.sim-tab:hover { border-color: var(--accent); }
+
+.sim-panel { position: fixed; top: 4.5rem; right: 1rem; z-index: 31; display: flex; flex-direction: column; width: min(30rem, calc(100vw - 2rem)); max-height: calc(100dvh - 6rem); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--text); box-shadow: 0 8px 32px rgb(0 0 0 / 55%); overflow: hidden; }
+.sim-panel__header { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
+.sim-panel__header h2 { margin: 0; font: 700 1rem system-ui, sans-serif; color: var(--text-title); }
+.sim-panel__header button { display: grid; place-items: center; width: 28px; height: 28px; border: none; border-radius: 50%; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.1rem; }
+.sim-panel__header button:hover { background: var(--surface-raised); color: var(--text); }
+
+.sim-panel__chronicle { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem; }
+.sim-panel__chronicle h3 { margin: 0 0 0.6rem; font: 600 0.8rem system-ui, sans-serif; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+.sim-panel__chronicle p { margin: 0 0 0.75rem; line-height: 1.6; }
+.sim-panel__empty { color: var(--text-muted); font-style: italic; }
+
+.sim-panel__decision { padding: 1rem; border-bottom: 1px solid var(--border-subtle); background: var(--surface-raised); }
+.sim-panel__decision h3 { margin: 0 0 0.5rem; font: 700 0.85rem system-ui, sans-serif; color: var(--accent); }
+.sim-panel__decision p { margin: 0 0 0.75rem; line-height: 1.5; }
+.sim-panel__options { display: grid; gap: 0.5rem; }
+.sim-panel__options button { display: grid; gap: 0.2rem; padding: 0.6rem 0.8rem; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--text); cursor: pointer; text-align: left; }
+.sim-panel__options button:hover:not(:disabled) { border-color: var(--accent); }
+.sim-panel__options button:disabled { opacity: 0.5; cursor: progress; }
+.sim-panel__options strong { color: var(--text-title); font-size: 0.9rem; }
+.sim-panel__options span { color: var(--text-muted); font-size: 0.8rem; line-height: 1.4; }
+
+.sim-panel__order { display: grid; gap: 0.5rem; padding: 1rem; border-top: 1px solid var(--border-subtle); flex-shrink: 0; }
+.sim-panel__order label { font: 600 0.75rem system-ui, sans-serif; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+.sim-panel__order textarea { width: 100%; padding: 0.6rem; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-raised); color: var(--text); font: inherit; resize: vertical; }
+.sim-panel__order textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.sim-panel__order button { padding: 0.6rem; border: none; border-radius: var(--radius-card); background: var(--accent); color: var(--surface); cursor: pointer; font: 600 0.9rem system-ui, sans-serif; }
+.sim-panel__order button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.sim-panel__error { margin: 0; padding: 0 1rem 1rem; color: var(--danger, #e06c6c); font-size: 0.85rem; }

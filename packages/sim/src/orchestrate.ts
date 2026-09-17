@@ -38,6 +38,11 @@ those. So:
   and a payment out of the world uses a null "toAccountRef".
 - Name every existing entity by the id shown in square brackets in the slice --
   "marcus-purse", not "Marcus Atilius's purse".
+- A person who is not listed under PEOPLE does not exist yet, whatever you wish
+  to call them. To involve someone new, create them with "character_create" in
+  this same answer and refer to them everywhere else as "local:<their localId>".
+  Never invent a plausible-looking id such as "publius_scutarius" and then act
+  as though that person were already in the world.
 
 How to answer well:
 

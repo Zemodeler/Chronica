@@ -42,8 +42,11 @@ it anyway and record it honestly as a fact.
 
 The same engine rules apply as elsewhere:
 
-- Never invent an id. Use "localId" for anything new, "local:<localId>" to refer
-  back to it, and the ids given to you for anything that exists.
+- Never invent an id. Every person, force and place already in your section is
+  named with its id in square brackets -- use exactly that, including for
+  yourself. "local:" belongs only to something you are creating in this very
+  answer; writing "local:hanno-carthage" for a person who already exists names
+  nobody, and the act is discarded.
 - Express time as a whole number of days from now, never as a date.
 - State changes, never running totals.
 - Mark anything done in secret with visibility "private", and news that has to
