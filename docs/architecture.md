@@ -1,77 +1,118 @@
 # Architecture guide
 
-## Source of truth and authority
+How the system is put together. For the reasoning behind the simulation engine specifically, see
+[SIMULATION-LOOP-V1.md](SIMULATION-LOOP-V1.md) — this is the map, that is the argument.
 
-The committed `WorldState` is canonical. AI is the sole authority for interpreting intent and choosing NPC or political responses, but it is never the authority on what the database says or on bypassing world integrity. However many agents speak during a turn, they share one `GameMasterSession`, and that session — not any agent — is what decides whether a proposed change is lawful. It works on a discardable copy of the world. Workflows are MCP-style tools for interacting with world data: each exposes a capability and input contract, the AI chooses the appropriate tool and supplies its context, and the engine validates parameters, actor, authority, scope, references, and the resulting world before accepting a staged change. A workflow may be built in or defined during a campaign. One transaction commits the final world, factual events, audit information, memory, and Chronicle entries.
+## The shape
 
-This gives each question one owner:
+```
+apps/web            Next.js: pages, API routes, and the services that bind the
+                    simulation to the database, the session, and billing
+packages/sim        the simulation loop. Pure: no database, no network, no Next
+packages/shared     the world's types and rules -- WorldState, facts, authority,
+                    characters, material state, and the AI↔code contract
+packages/db         Drizzle schema, migrations, and queries
+packages/ai         provider adapters and the coin gate
+packages/billing    coin accounting
+```
 
-- The Game Master interprets intent, judges feasibility where the world cannot decide it mechanically, and chooses lawful actions.
-- Workflow code owns preconditions and state changes.
-- The scenario and committed state establish facts, people, places, and resources.
-- The clock and scheduler decide how time is represented and when play should stop.
-- The Chronicle renders facts after resolution; it cannot alter them.
+The dependency rule that matters: **`packages/sim` depends on `packages/shared` only.** Not on
+`@chronica/ai`, which depends on `@chronica/db` — a simulation core that transitively required a
+database could not be unit-tested without one. The loop declares a narrow `SimModelPort` and
+`apps/web` supplies it, wrapped in the coin gate.
 
-No generic state-patch tool is exposed. Unsupported intent is recorded through `request_capability` for developer review, without changing the world. The older runtime-defined-action mechanism remains disabled in normal play; it is not part of the supported action surface.
+## Source of truth
 
-## Turn resolution
+`WorldState` (`packages/shared/src/world/world-state.ts`) is the authoritative world: one validated
+JSON document per game, stored in `game_worlds`. It holds the map, characters, material state
+(accounts, forces, offices, obligations), projects, authority grants, diplomacy, and the character
+simulation's own layers — beliefs, pressures, relationships, commitments.
 
-The resolver prepares the world, runs the agent tool loop, resolves due deterministic procedures, builds facts and Chronicle entries, then commits. Tool calls are bounded so an otherwise successful turn can commit useful work even when a budget is reached.
+Deliberately **not** in it: the fact ledger. What is true and who knows it are different questions,
+and the record must be queryable by time and visibility without loading a world.
 
-A turn resolves through the multi-agent dispatcher: a player-reasoning pass first, then the relevant NPC and star-context actors selected for this decision point, then the intent interpreter, then a closing pass that reads the stage back and submits the report. Every one of them runs against the same `GameMasterSession`, so there is one staged world and one set of validation rules no matter how many agents speak. This is architecture version 2, and what every new campaign is created with.
+## Time
 
-Only the player's own agent and the interpreter change anything. A character who is not the player never calls a workflow: their agent reads, decides, and states what they mean to do through `declare_intent`, and the interpreter afterwards works out which validated actions that intent amounts to. The separation is what lets a character have the player's full reach without being handed the player's tool belt — an actor bounded by which tools it is offered ends up wanting only what the catalogue can express, whereas an actor bounded by authority can want anything and get exactly as much of it as the world allows. An intent nothing lawful satisfies stays uncarried, which is a real outcome and is reported as one rather than quietly becoming a smaller adjacent act.
+`WorldState.instant` (day + minute from the scenario's epoch) is authoritative, and `elapsedStep` is
+maintained as exactly `instant.day` — a schema invariant. A "step" is a day, not a turn. Time
+advances only inside a burst, through `advanceWorldTo`, which refuses to run backwards.
 
-The interpreter is bound by an `interpreter` principal that may act only for characters that actually declared something this turn, checked against the session's own record. It cannot invent an actor, and it cannot end the turn. Intents are declared and interpreted in the reaction path too, on the event queue's own timeline, so a reaction is decided the same way a turn is.
+Scenarios supply a calendar epoch and minimum/maximum span in days. There is no turn counter
+anywhere in the system.
 
-Version 1 — a single centralized Game Master call — is deprecated. It remains only because a story's resolution model must never change mid-play, so campaigns that began under it finish under it. New behavior belongs in the dispatcher's agents, or, when it is a rule rather than a prompt, in the session both paths share.
+## The simulation loop
 
-Read tools expose compact, factual views of the world, characters, forces, provinces, polities, conflicts, history, and actor memory. Built-in workflows expose familiar data interactions; `define_action` lets the AI define a reusable, campaign-local interaction when the catalogue does not fit. System-only workflows, such as deterministic battle resolution, are never offered to the Game Master as tools.
+One player order produces one **burst**. `runSimulationBurst` (`packages/sim/src/burst.ts`):
 
-Each accepted action produces a factual event with its actor, parameters, material consequence, summary, and state deltas. A failed action leaves staged state unchanged and returns the exact rules-backed reason to the caller. Whole-world validation and delta reference checks prevent a workflow from introducing dangling identifiers while still allowing legacy snapshots to load and be repaired.
+1. **Catch up.** `runDeterministicTick` applies everything that fell due since the last order —
+   revenue, wages, project milestones — with no model call.
+2. **Orchestrate.** One model call reads a bounded world slice and the order, and returns a
+   proposal: deltas, facts, delegations, scheduled events.
+3. **Apply.** `applyDeltas` validates and applies it, assigning every id.
+4. **Advance.** The world walks to the next moment that matters, ticking as it goes.
+5. **Route attention.** Deterministic: who could know, would care, and can act — capped at three.
+6. **Cognition.** One batched model call, each actor seeing only what they know.
+7. **Stop.** On a decision, accumulated significance, the budget, or the scenario's maximum span.
 
-A failure caused by how a call was written, rather than by anything in the world, is repaired before it is reported. When an action fails on an id that resolves to nothing, the session looks for what that id could have meant; if the world leaves exactly one candidate of the kind the parameter requires, the call is made again with the real id. The repair is all-or-nothing and never runs on a genuine refusal, so an ambiguous guess fails visibly instead of quietly becoming a different order. Anything still unresolved after that is pushed back to the acting agent twice — once to correct it, once to either define an action for it or report it plainly as not carried out — and then the report stands rather than spending the whole tool budget on one call.
+A Chronicle is then composed from the facts the player could actually have learned.
 
-## Plans, interpretation, and conflicts
+Everything except steps 2, 6 and the Chronicle is deterministic code. That is what holds a normal
+interaction to two-to-four model calls.
 
-`ActionPlan` and `ActionPlanStage` are the common model for player, NPC, and world-originated work. Stages retain their status and fact references. They can wait on dependencies, recur when explicitly scheduled, and reserve named resources. Terminal stages never reopen, and revising a plan never reverses a committed effect.
+## The AI↔code contract
 
-An order's text is immutable evidence of intent. Interpretation records claims separately from stages. A contradicted world premise is refused; a request for clarification does not modify stages. The feasibility service is intentionally advisory: it reports only checks the engine can honestly perform, such as a living actor, known location, resource control, workflow support, and a contradicted premise. It cannot become a second mutation authority.
+`packages/shared/src/sim/` — a closed discriminated union of 14 delta operations, plus the proposal
+shape that both the orchestrator and NPC cognition return. The model never assigns an id (it uses
+`local:` handles the engine resolves), never states a date (offsets in days), and never computes a
+balance.
 
-Conflict handling is deterministic where resource identity is clear. Its precedence is new instruction, revision, existing plan, delegated work, NPC self-direction, then world background. Preemption interrupts or supersedes unfinished work and releases reservations; it leaves completed and failed work intact. Semantic conflict that cannot be grounded in a contended force, office, account, or character remains a Game Master judgment rather than a fabricated rules engine.
+A delta that cannot apply is rejected as *friction* and recorded as a fact; the rest of the batch
+still applies. A delta beyond the actor's authority is applied anyway and recorded as a *breach*.
 
-## Workflows and command rules
+## Persistence
 
-In Chronica, a workflow is an MCP-style tool the AI uses to interact with the world's data. It is not a story script or a fixed player verb: it exposes a capability and input contract, while the AI decides whether calling that capability serves the current situation. Built-in workflows declare their schema, authority, data transformation, and, when appropriate, an estimated duration. When no built-in operation fits, the AI can define a campaign-local workflow as a named, parameterised data capability. Defined workflows persist for that campaign and are audited like built-in ones.
+Six tables, split by lifetime rather than by turn (migration `0034_simulation_loop.sql`):
 
-The catalogue distinguishes:
+| Table | Holds |
+| --- | --- |
+| `game_worlds` | the live world document, one row per game, with a `revision` token |
+| `world_facts` | the append-only record, with visibility, discovery and significance |
+| `scheduled_events` | the future queue |
+| `simulation_bursts` | one run of the loop, for inspection afterwards |
+| `chronicle_checkpoints` | what the player was shown |
+| `player_decisions` | forks needing the player's own authority |
 
-- AI data interactions, which the Game Master may invoke for a living actor.
-- System effects, which only deterministic resolution may invoke.
-- Projections, which derive information and never mutate state.
+`commitBurst` writes all of it in one transaction under one revision bump, behind an advisory lock —
+the conversation path writes world state too, and a slow burst must not interleave with a fast
+conversation.
 
-The same validation protects all data interactions: valid parameters, living actor, permitted authority and scope, resource access, whole-world schema validity, reference integrity, and duplicate protection. Calls should distinguish a meaningful refusal from an idempotent no-op and explain the specific blocking fact. New UI-visible effects should be based on small pure projections of committed state rather than copied state.
+Scenario definitions and their starting worlds live in `scenario_versions`, and those rows are
+**immutable**. Changing a scenario file does nothing to an existing database until a new version is
+published in `ensureBuiltInScenarios`.
 
-## Clock and elastic simulation
+## Characters and conversations
 
-Legacy `elapsedStep` remains supported. `WorldTime` adds authoritative day projection and the database stores nullable day boundaries, stopping facts, and a requested player decision so old turns remain readable. Workflows own duration ranges, with a single shared estimator.
+The character system (`packages/shared/src/characters/`) models people as people: relationships with
+causes, beliefs with provenance, pressures, promises. Conversations run through
+`apps/web/lib/dialogue-service.ts`, propose `CharacterSocialEvent`s, and
+`applyConversationConsequences` applies them immediately and records them in the fact ledger.
 
-`decideElasticStop` currently runs in shadow mode. It records what would stop the simulation according to this priority: mandatory player decision or clarification; an irreversible player-involving event; a watch condition, plan interruption, or scenario threshold after the minimum span; or the maximum unattended span. It does not yet replace the live one-step resolution boundary. Treat the day fields and shadow decision as diagnostic foundations until a deliberate cutover wires plan lifecycle signals and multi-day advancement into the live path.
+A conversation is not a burst: it costs no simulation model call, does not advance the clock, and
+does not wake the world.
 
-## Memory, narration, and persistence
+## Map
 
-Campaign memory folds forward from factual events, retaining recent turns in detail and compacting deep history. Open threads are derived from current state. Chronicle prose is downstream: factual events provide the material result; the turn report may group and frame entries but cannot invent a cause, result, or institutional explanation.
-
-The Chronicle separates an order the world refused from one the engine could not carry out. A refusal is history — someone with standing said no — and is written as such. A guessed id, arguments the call rejected, or an action the registry does not have is not history: the order is recorded as unresolved and still open, never as having found no ears, because nobody in the world ever heard it. Both wordings are executor-derived and exempt from the narrator, so no invented institutional cause can attach to either.
-
-Turn persistence is atomic. Schema evolution is additive where possible, with pure upgraders and compatibility reads for prior snapshots until replay coverage permits removal. Tests focus on replay safety, workflow policy, action plans and conflicts, feasibility, clock projections, scheduling, factual Chronicle construction, and turn persistence.
-
-## Map source assets
-
-The map uses Natural Earth public-domain source material and geoBoundaries gbOpen administrative boundaries. `natural-earth-50m-admin0-countries.geojson` is a global 1:50m country source; `natural-earth-ii-blue-oceans.png` is a label-free equirectangular base image. `europe-north-africa-geojson.ts` normalizes the selected geoBoundaries layers to Chronica province features in WGS84. Germany uses ADM2 districts; other selected countries use ADM1. Preserve geoBoundaries attribution metadata when redistributing, because country licences vary.
-
-`roman-spqr-banner.svg` is by Ssolbergj and used under CC BY 3.0. The other army-standard SVGs are original reconstructions based on attested motifs; they are source assets, not authoritative scenario data. Natural Earth sources: <https://www.naturalearthdata.com/about/terms-of-use/>, <https://github.com/nvkelso/natural-earth-vector>, and <https://www.shadedrelief.com/NE2/>. geoBoundaries metadata: <https://www.geoboundaries.org/api/current/gbOpen/ALL/ADM1/>.
+The province graph inside `WorldState.map` is authoritative for control and adjacency. Rendering
+geometry is separate, immutable GeoJSON referenced by `scenarioVersions.mapAssetId`.
+`apps/web/lib/world-view.ts` projects world state into the overlay the map draws.
 
 ## Development
 
-Use Node.js 22+ and npm 11+. Run `npm run dev` for local development, or use `hosted.sh` on macOS/Linux and `hosted.bat` on Windows. The latter launchers install locked dependencies when needed and start the web application on localhost.
+```bash
+npm run typecheck    # all packages
+npm run test         # all packages
+npm run dev          # the web app
+```
+
+`packages/sim`'s tests drive a scripted model port, never a live adapter — a test that can disagree
+with itself run-to-run is worth nothing as a regression guard.

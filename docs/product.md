@@ -1,57 +1,90 @@
 # Product guide
 
+What the game is, and how it plays today. For where it is going, see
+[VISION.md](VISION.md); for how it is built, see [architecture.md](architecture.md).
+
 ## The game
 
-Chronica is a map-first, single-player historical strategy game experienced through one character. A campaign begins from a curated, validated scenario rather than an AI-generated world. The player can approach people, explore political and military circumstances, and give an order in natural language. The world persists: people remember, form commitments, pursue ambitions, suffer consequences, die, and may be succeeded.
+A single-player historical world. You play one person inside a curated scenario — a Roman consul in
+264 BC, say — and you rule by writing what you want in ordinary language:
 
-The core loop is:
+> Raise two new legions.
 
-1. Read the current world and Chronicle.
-2. Speak with reachable characters to discover information, make promises, or shape relationships.
-3. Give one or more orders, including priorities and conditions.
-4. Let the world resolve through the next meaningful stretch of simulated time.
-5. Read the factual consequences in the Chronicle and decide what to do next.
+There is no menu of verbs and no build queue. The AI decides what your government actually does
+about the order: where recruitment happens, who pays for it, who is put in charge, how long it
+takes, and who else notices. The engine owns the arithmetic, the calendar, and the record, so the
+consequences persist and stay consistent.
 
-Conversation can create knowledge and history, but material commitments become real only through a validated action. An order is evidence of intent, not proof that its assertions are true or that it is possible.
+## The loop
 
-## Player experience and boundaries
+```
+write an order → the world carries it out and time passes → read what happened → write the next one
+```
 
-The game does not restrict a player to a fixed verb menu. A player may ask for a surrender, a march if it is refused, supplies to be taken, and survivors to be recruited if victory allows it. The AI uses workflows—MCP-style tools for interacting with world data—to make those attempts concrete. It can use built-in workflows or define a reusable campaign-local workflow when it needs a new data capability. The engine preserves the hard boundaries: valid entities and references, territory and resource records, and replay safety. Within those boundaries, the Game Master judges human and political outcomes.
+**The world moves only when you send an order.** Between orders it is perfectly still. This is
+deliberate: it is your game, paced by you, and nothing happens behind your back while you are
+reading.
 
-Version 1.0 is deliberately scoped to:
+When you send one, the world advances to the next moment that matters — far enough for word to
+travel and for the people your order touched to answer it, then on to whatever was next on the
+calendar. A single order can therefore carry the world days or months, depending on what is pending.
 
-- Single-player campaigns.
-- Curated historical or fictional scenarios.
-- A persistent character, their contacts, and a living political world.
-- Map, conversations, orders, character and world-status panels, and the Chronicle.
-- Rules-backed military, political, social, and material effects.
+You get back a **Chronicle**: a short historical passage covering what happened since your last
+order. Occasionally, instead, you get a **decision** — a fork that genuinely needs your own
+authority, like a peace offer. Those are meant to be rare.
 
-It does not promise multiplayer, free-form AI world generation, a map-based command UI, or a new planning dashboard. The map remains visible and expressive; it is not a province-management surface.
+## What the AI decides, and what it cannot
 
-## Scenario, map, and people
+The AI has real authority over causality. It reads your intent, invents the officials and
+institutions the situation needs, and creates plausible consequences.
 
-Scenario data establishes the provinces, polities, settlements, forces, characters, offices, resources, and initial conflicts. The map shows where events happen and how war, control, and movement affect the world. It supports geographic focus and force details without becoming an administrative interface.
+It cannot do arithmetic, invent identities, or pick dates. It proposes a change; deterministic code
+validates it, assigns every id, and applies it. So a treasury never drifts, a person the world
+invented never quietly vanishes, and nothing is scheduled into the past.
 
-Characters use one canonical world record. Their public circumstances, relationships, subjective beliefs, pressures, commitments, and memories are related but distinct kinds of state. Dialogue reads that state; it does not maintain a second character store. NPCs can initiate contact when a recorded event warrants it, and newly found scenario-appropriate characters receive stable identities rather than being disposable chat output.
+## Delegation
 
-The opening scenario can be a high-stakes historical decision: investigate a theatre through conversation, give a conditional order, and see genuine military and political consequences rather than a scripted choice. The precise scenario is content, not a product requirement.
+The shorter the order, the more you have delegated.
 
-## Orders and time
+- *Raise two legions* leaves financing and method to your officials.
+- *Raise two legions, but do not borrow money* takes the financing decision back.
 
-Orders become durable plans with stages. A plan can name delegates, constraints, dependencies, recurrence, personal-time use, and a discretionary spending cap. It remains available on later turns until it completes, fails, is abandoned, or is superseded. Newer instructions take priority over incompatible unfinished work, but never undo a completed effect.
+Orders aimed at a person become something that person decides about. They can accept, delay, refuse,
+ignore — or comply with an order you had no right to give, which is recorded as subversion rather
+than obedience. Competence and loyalty therefore matter: two officials given the same instruction
+will not do the same thing with it.
 
-When interpreting an order, the Game Master separates claims from intent. A contradicted world premise cannot be used as the basis of a stage. Materially ambiguous, dangerous, or irreversible instructions may require clarification; clarification never commits stages in the same operation.
+## Authority
 
-The game is moving from fixed turn increments to elapsed in-world days and meaningful stopping points. Day-level fields and an elastic-stop decision already provide diagnostics in shadow mode; the existing live resolution still returns control after one step. That is intentional until the remaining lifecycle and UI integration are ready.
+Acting beyond your authority is not blocked. It is recorded as a breach. A general who marches
+without orders has not done something impossible; he has committed insubordination, and the world
+will remember it. This is what makes coups, embezzlement, and unauthorised wars possible at all.
 
-## Chronicle and memory
+## What you know
 
-The Chronicle is a readable account of neutral facts, not a source of truth. It favours the player's theatre while retaining major distant developments that change their world. Refusals and unsupported attempts use the recorded limitation rather than invented narrative justification.
+The world distinguishes what is true from what you know. A secret arrangement exists the moment it
+happens, but reaches you only if someone tells you, and news takes time to travel. Your Chronicle is
+written strictly from what your government could actually have learned — if a senator is plotting
+against you and nobody has discovered it, the Chronicle will not mention it.
 
-Campaign memory keeps recent turns in detail and compresses older history deterministically. Open wars, battles, commitments, procedures, pressures, operations, and causal threads are derived from committed state, so the world can continue coherently without unbounded prompt growth.
+## Conversations
 
-## Economy and future work
+You can talk to the people your character can reach. Conversations are not a side channel: what you
+are told enters what you know, what you promise becomes an obligation the world will hold you to,
+and either can be the reason someone acts later. A private conversation stays private to the people
+in the room.
 
-Coins fund AI use. Wallets, lots, holds, ledgers, game spending caps, gifts, provider-cost recording, and the payment adapter exist; a purchase flow is not yet a player-facing promise. Any displayed estimate must follow the active rate card.
+## Money and time
 
-Near-term work is to complete the universal plan/time lifecycle, activate elastic time only after shadow data validates it, connect UI to the existing plan model, and broaden carefully reviewed action coverage. Future features such as multiplayer, authored world generation, tactical controls, and richer playable scenes remain product choices, not implied commitments.
+Once something is established — a tax, an army's wages, a construction programme — it runs on
+arithmetic, not judgment. Revenue is collected, wages are paid, and projects reach their milestones
+as the days pass, with no model involved. An army that cannot be paid falls into arrears, and that
+is recorded as the political fact it is.
+
+The AI is involved when circumstances *change* the economy: a new tax, a blockade, a conquest, a
+debt crisis.
+
+## Not in the game yet
+
+Combat resolution, diplomacy as a system, espionage and intrigue, and deep economic modelling.
+The engine they will plug into exists; the systems themselves do not. Multiplayer is out of scope.
