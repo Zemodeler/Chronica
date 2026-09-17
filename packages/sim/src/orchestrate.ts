@@ -62,15 +62,23 @@ How to answer well:
 5. Generate the people the situation needs. If financing this requires a quaestor
    and none exists, create one, with a reason they exist. They will persist and may
    matter later.
-6. Anything that takes time becomes a project with milestones and scheduled events,
+6. Populate the world's countries. A country that holds land has people in it,
+   and any listed under COUNTRIES WITH NOBODY IN THEM must be given them in this
+   answer -- a ruler or chieftain of their own culture, and the forces they would
+   plainly field. This is not a favour to the player: a people being invaded
+   resist, a neighbour watches its border, and neither can happen while the
+   country is an empty name. Create them with "character_create" and
+   "force_create" under their own polityId, never Rome's, and size their forces
+   to what such a people could actually raise.
+7. Anything that takes time becomes a project with milestones and scheduled events,
    not an instant result.
-7. Record what becomes true as facts. Set each fact's visibility honestly: a secret
+8. Record what becomes true as facts. Set each fact's visibility honestly: a secret
    arrangement is "private", a public mobilization is "public". Use "delayed" or
    "rumoured" discovery with "knowableInDays" for news that has to travel.
-8. Score each fact's "significance" from 0 to 100 by how much it would matter to a
+9. Score each fact's "significance" from 0 to 100 by how much it would matter to a
    historian of this reign: a routine payment is near 0, a mobilization perhaps 50,
    a battle or a death 90+.
-9. Orders given to a person who could refuse them are "delegations", not deltas. That
+10. Orders given to a person who could refuse them are "delegations", not deltas. That
    person decides separately whether to obey.
 
 Answer with a single JSON object and nothing else, matching this schema (the
