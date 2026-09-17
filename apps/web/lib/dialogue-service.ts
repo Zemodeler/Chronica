@@ -51,6 +51,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { ChronicaDatabase } from "@chronica/db";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
+import { applyConversationConsequences } from "./conversation-consequences";
 import { headers } from "next/headers";
 import { buildDialogueSystemPrompt, type WorldCharacterRef } from "./dialogue-prompt";
 import { clampRelationshipScore, relationshipLabelForScore, scoreForDeclaredConnection } from "./relationship-score";
@@ -124,12 +125,13 @@ Respond ONLY with a JSON object matching this schema, no other text:
 
 // ── Social event proposal (the chat/simulation boundary) ────────────────────
 //
-// Dialogue never mutates a relationship, and never decides on its own that
-// something consequential happened -- it can only propose a CharacterSocialEvent,
-// which turn resolution later validates against canonical world state and
-// applies (packages/shared/src/characters/apply-social-events.ts). Replaces
-// the old regex-based `detectConsequences` and the ad hoc relationship-score
-// patch that used to live in the knowledge-extraction call below.
+// Dialogue never mutates a relationship directly, and never decides on its own
+// that something consequential happened -- it can only propose a
+// `CharacterSocialEvent`. What changed is when that proposal is honoured:
+// `applyConversationConsequences` now validates and applies it against
+// canonical state as the conversation happens, and records it in the fact
+// ledger. It used to wait for a turn to resolve, which since the turn system
+// was deleted meant waiting forever.
 
 const SOCIAL_EVENT_KIND_VALUES = ["conversation", "promise", "insult", "favour", "deception", "rumour"] as const;
 
@@ -757,13 +759,23 @@ export async function generateDialogueReply(input: DialogueCallInput & { readonl
   const npcMsg = await appendMessage(db, sessionId, npcCharacterId, false, npcBody);
   await touchSession(db, sessionId);
 
-  // Propose social events (the chat/simulation boundary) and update the
-  // per-player conversation memory. Relation deltas are never written here --
-  // only turn resolution applies a proposed event to canonical state.
+  // Propose social events (the chat/simulation boundary), then apply them.
+  // These used to wait for a turn to resolve; with turns gone, a conversation
+  // takes effect as it happens and enters the world's record, so what was said
+  // can be reacted to and reported like anything else.
   const proposedEvents = await proposeAndPersistSocialEvents(
     db, userId, gameId, npcCharacterId, playerCharacterId, sessionId, npcMsg.id, playerMessageBody, npcBody, currentStep,
     npcRef?.personalAccountId ?? null,
   );
+  if (proposedEvents.length > 0) {
+    try {
+      await applyConversationConsequences(db, gameId, proposedEvents);
+    } catch (error) {
+      // A failure here costs the consequences, not the reply the player is
+      // waiting on; the events stay "proposed" and can be applied later.
+      console.warn("[conversation] failed to apply social consequences:", error);
+    }
+  }
   const updatedMemory = buildUpdatedMemory(kb.conversationMemory, playerMessageBody, npcBody, currentStep, proposedEvents.length > 0);
   const relevancyDelta = 5 + (proposedEvents.length > 0 ? 10 : 0) + (opinionScore < 0 ? 15 : 0);
 

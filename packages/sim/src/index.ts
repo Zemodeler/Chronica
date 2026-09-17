@@ -8,3 +8,4 @@ export * from "./orchestrate";
 export * from "./cognition";
 export * from "./burst";
 export * from "./chronicle";
+export * from "./conversation";

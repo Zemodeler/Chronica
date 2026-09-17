@@ -339,11 +339,32 @@ One consequence worth knowing: a definition change does not reach a database by 
 file, because `scenario_versions` rows are immutable by design. The continuous clock and the widened
 office powers each required publishing a **new scenario version** in `ensureBuiltInScenarios`.
 
-## 9. Verification
+## 9. Conversations are part of the record
 
-`packages/sim` has **30 tests**, all driven by a scripted model port — never a live adapter, because
+A conversation is not a side channel. `applyConversationConsequences`
+(`apps/web/lib/conversation-consequences.ts`) closes the gap the wipe left: a proposed
+`CharacterSocialEvent` used to wait for a turn to apply it, and since turns were deleted, nothing
+ever did — every relationship change, belief, pressure and promise from every conversation simply
+never reached canonical state.
+
+Now a conversation takes effect as it happens, through the character system's own
+`applySocialEvents`, and — new — it is recorded in the fact ledger by
+`packages/sim/src/conversation.ts`. What was said becomes history, which means the attention router
+can wake someone because of a promise, and the Chronicle can report a conversation the player
+actually had.
+
+The discovery ledger is what makes this safe. A private conversation's fact is marked discovered by
+the people in the room and nobody else, so `factsVisibleTo` lets the participants act on it while
+the rest of the world cannot see it at all until someone tells them.
+
+Deliberately *not* a burst: a conversation is not an order. It costs no model call here, does not
+advance the clock, and does not wake the world on its own. It records what happened and stops.
+
+## 10. Verification
+
+`packages/sim` has **48 tests**, all driven by a scripted model port — never a live adapter, because
 a test that can disagree with itself run-to-run is worth nothing as a regression guard. Repo-wide:
-445 tests pass, none skipped.
+463 tests pass, none skipped, and the whole repo typechecks.
 
 The end-to-end case is VISION §30's own example. One order — *"Raise two new legions."* — produces,
 in two model calls:
@@ -365,9 +386,19 @@ unauthorized acts applying as recorded breaches, unresolved `local:` handles, da
 every budget cap terminating a burst, a model that answers with prose instead of JSON, and the
 Chronicle never being handed an undiscovered fact.
 
+The attention router has its own suite, because it is the piece that decides what everything else
+costs: a secret nobody discovered wakes no one, a secret shared with someone wakes them, news that
+has not travelled yet wakes no one until it has, a fact past the causal horizon wakes no one, the
+player is never woken, and the same world wakes the same people every time.
+
+Writing those tests found that the focus threshold was set one point above the score of the very
+actor it exists to select — someone who can know, has cause to care, and holds authority — so an
+ordinary public event woke nobody at all. The bar is now that actor's score exactly, and
+`maxFocused` is what bounds the cost.
+
 ---
 
-## 10. What the first live model run changed
+## 11. What the first live model run changed
 
 Scripted tests prove the loop. Only a real model proves the *prompt*, and the first live run against
 `gpt-5.6-luna` found four things no unit test would have:
@@ -401,13 +432,14 @@ effort.
 The loop's own numbers held up: the slice renders at ~165 tokens, the system prompt ~4,600, and a
 good answer arrives in one call with the repair path catching the rest.
 
-## 11. What is deliberately not done
+## 12. What is deliberately not done
 
-- **Conversations do not yet emit facts.** Wiring chat into the loop (so what an NPC tells you enters
-  your knowledge state, and promises become commitments) is the agreed next step; `applySocialEvents`
-  exists and still has no caller.
-- **`social_events` is a contract arm with no applier.** It parses and is rejected harmlessly; it
-  lands with the chat integration above.
+- **`social_events` is a contract arm with no applier.** The delta parses and is accepted, but the
+  orchestrator cannot yet author relationship change directly — only a conversation can, through
+  §9's path. Wiring the delta arm into `applySocialEvents` is the obvious next step.
+- **NPC-initiated contact is gone.** Its only trigger was a Chronicle entry field, so the route that
+  opened those conversations was deleted; `openInitiatedDialogue` survives and needs a new source,
+  most naturally a pressure or an unanswered commitment.
 - **Single-player.** The burst assumes one sovereign. Multiplayer reintroduces exactly the
   turn-synchronization problem §15 exists to avoid, and was scoped out on purpose.
 - **`docs/product.md` and `docs/architecture.md` still describe the deleted Turns/Orders/Chronicle
@@ -418,7 +450,7 @@ good answer arrives in one call with the repair path catching the rest.
 - **The simulation panel appears only after character declaration**, since that is what the game page
   gates `playerCharacterId` on. That is the existing product flow, not a decision taken here.
 
-## 12. The known risk
+## 13. The known risk
 
 **Prompt size, not loop logic.** `buildWorldSlice` is where this design succeeds or fails. The
 orchestrator's system prompt is ~4,600 tokens (mostly the generated JSON schema, identical every call

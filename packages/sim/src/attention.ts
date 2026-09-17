@@ -166,9 +166,17 @@ export function routeAttention(input: AttentionInput): AttentionResult {
   // order -- a replay must select the same people for the same reasons.
   scored.sort((a, b) => b.score - a.score || stableHash([a.characterId]) - stableHash([b.characterId]));
 
-  const focused = scored.filter((actor) => actor.score >= 60).slice(0, input.maxFocused).map((actor) => ({ ...actor, level: "focused" as const }));
+  // The focus bar is set at the score of someone who can know about an event,
+  // has reason to care, and holds the authority to do something about it
+  // (10 + 20 + 25). That is precisely the person worth spending cognition on;
+  // a higher bar meant an ordinary public event woke nobody at all, which made
+  // the whole router moot. `maxFocused` is what actually bounds the cost.
+  const FOCUS_SCORE = 50;
+  const ACTIVE_SCORE = 35;
+
+  const focused = scored.filter((actor) => actor.score >= FOCUS_SCORE).slice(0, input.maxFocused).map((actor) => ({ ...actor, level: "focused" as const }));
   const focusedIds = new Set(focused.map((actor) => actor.characterId));
-  const active = scored.filter((actor) => !focusedIds.has(actor.characterId) && actor.score >= 45).map((actor) => ({ ...actor, level: "active" as const }));
+  const active = scored.filter((actor) => !focusedIds.has(actor.characterId) && actor.score >= ACTIVE_SCORE).map((actor) => ({ ...actor, level: "active" as const }));
 
   return {
     focused,
