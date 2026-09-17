@@ -92,6 +92,11 @@ export interface BurstInput {
 export interface BurstResult {
   readonly world: WorldState;
   readonly newFacts: readonly Fact[];
+  /**
+   * Facts already on record that somebody has now discovered. Not new history:
+   * the same events, with a wider audience, for the caller to write back.
+   */
+  readonly rediscoveredFacts: readonly Fact[];
   /** Fact id → the significance its author assigned it, for storage and pacing. */
   readonly significanceByFactId: ReadonlyMap<string, number>;
   readonly scheduled: readonly ScheduledEventDraft[];
@@ -213,12 +218,54 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       });
     }
 
+    applyDiscoveries(proposal.discoveries, causalDepth);
     world = recordDelegations(world, proposal.delegations, ids, result.assignedIds);
     narrative.push(proposal.narrativeSummary);
   };
 
   const firedEventIds: string[] = [];
   const nowKey = () => world.instant.day * 1440 + world.instant.minute;
+
+  /** Facts already on record whose discovery changed this burst, for the caller to persist. */
+  const rediscovered = new Map<string, Fact>();
+
+  /**
+   * A secret coming to light (VISION §14).
+   *
+   * Nothing new happened -- the fact was always true. What changed is that
+   * somebody now knows it, which is what intelligence work buys. The fact is
+   * amended in place rather than duplicated, because two records of the same
+   * event with different audiences is how a Chronicle ends up reporting a thing
+   * twice.
+   */
+  const applyDiscoveries = (discoveries: Proposal["discoveries"], causalDepth: number): void => {
+    for (const discovery of discoveries) {
+      const known = [...input.knownFacts, ...newFacts, ...rediscovered.values()];
+      const fact = known.find((candidate) => candidate.id === discovery.factId);
+      // A discovery of something that never happened is the engine catching a
+      // malformed payload, not a failed operation the player should hear about.
+      if (fact === undefined) continue;
+
+      const already = fact.discovery.discoveredBy.some(
+        (entry) => entry.observerRef.kind === discovery.observerRef.kind && entry.observerRef.id === discovery.observerRef.id,
+      );
+      if (already) continue;
+
+      const learnedAt = addMinutes(world.instant, discovery.knowableInDays * 1440);
+      const amended: Fact = {
+        ...fact,
+        discovery: {
+          ...fact.discovery,
+          discoveredBy: [...fact.discovery.discoveredBy, { observerRef: discovery.observerRef, atInstant: learnedAt, via: discovery.via }],
+        },
+        causalDepth: Math.max(fact.causalDepth, causalDepth),
+      };
+      rediscovered.set(fact.id, amended);
+
+      const index = newFacts.findIndex((candidate) => candidate.id === fact.id);
+      if (index >= 0) newFacts[index] = amended;
+    }
+  };
 
   /**
    * Everything that fell due on the way here: revenue collected, wages paid,
@@ -407,6 +454,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   return {
     world,
     newFacts,
+    rediscoveredFacts: [...rediscovered.values()],
     significanceByFactId,
     scheduled,
     firedEventIds,

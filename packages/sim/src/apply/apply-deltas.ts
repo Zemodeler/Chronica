@@ -111,6 +111,7 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   generic_entity_update: "propose",
   loan_open: "spend",
   loan_settle: "spend",
+  belief_set: "propose",
   authority_grant_upsert: "appoint",
   order_attempt_decide: "command",
   polity_stance_shift: "negotiate",
@@ -913,6 +914,38 @@ function applyOne(
           ),
         },
       };
+    }
+
+    case "belief_set": {
+      const holderId = required(delta.holderCharacterRef, "The person who is to believe it");
+      if (!world.characters.some((character) => character.id === holderId)) {
+        reject(`No character "${holderId}" exists to believe anything.`, "reference");
+      }
+      const sourceId = delta.sourceCharacterRef === null ? null : required(delta.sourceCharacterRef, "Who they heard it from");
+      if (sourceId !== null && !world.characters.some((character) => character.id === sourceId)) {
+        reject(`No character "${sourceId}" exists to have told them.`, "reference");
+      }
+      const subjectId = delta.subjectRef === null ? null : required(delta.subjectRef, "What it is about");
+
+      // A belief is never checked against reality. That is the whole point of
+      // VISION §14: what a person acts on is what they hold to be true, and a
+      // planted falsehood has to be as storable as an eyewitness account.
+      const belief = {
+        id: context.ids.next("belief"),
+        holderCharacterId: holderId,
+        subjectEntityId: subjectId,
+        claim: delta.claim,
+        kind: delta.kind,
+        sourceCharacterId: sourceId,
+        sourceEventId: null,
+        confidence: delta.confidence,
+        visibility: delta.visibility,
+        learnedAtStep: atStep,
+        expiresAtStep: null,
+        supersedesBeliefIds: [],
+        status: "active" as const,
+      };
+      return { ...world, characterBeliefs: [...world.characterBeliefs, belief] };
     }
 
     case "authority_grant_upsert": {

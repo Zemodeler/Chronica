@@ -14,6 +14,7 @@ import {
   resolveDecision,
   schema,
   startBurst,
+  type BurstFactRow,
   type ChronicaDatabase,
 } from "@chronica/db";
 import { FactSchema, PlayerDecisionSchema, type Fact, type OrderPartyRef } from "@chronica/shared";
@@ -80,6 +81,23 @@ function parseFacts(rows: readonly { fact: unknown }[]): Fact[] {
 export type SimulationOutcome =
   | { readonly status: "ok"; readonly outcome: "continue" | "chronicle" | "player_decision"; readonly title: string; readonly body: string; readonly decision: { readonly prompt: string; readonly options: unknown } | null }
   | { readonly status: "error"; readonly message: string };
+
+/** One fact as the row shape `commitBurst` stores, with its author's significance. */
+function toFactRow(significanceByFactId: ReadonlyMap<string, number>) {
+  return (fact: Fact): BurstFactRow => ({
+    id: fact.id,
+    instantSortKey: fact.time.day * 1440 + fact.time.minute,
+    kind: fact.kind,
+    summary: fact.summary,
+    visibility: fact.visibility,
+    discoveryState: fact.discovery.state,
+    knowableAtSortKey:
+      fact.discovery.knowableAtInstant === null ? null : fact.discovery.knowableAtInstant.day * 1440 + fact.discovery.knowableAtInstant.minute,
+    significance: significanceByFactId.get(fact.id) ?? 0,
+    causalDepth: fact.causalDepth,
+    fact,
+  });
+}
 
 export async function submitOrder(
   gameId: string,
@@ -163,19 +181,10 @@ export async function submitOrder(
         expectedRevision: view.revision,
         world: result.world,
         burstId,
-        facts: result.newFacts.map((fact) => ({
-          id: fact.id,
-          instantSortKey: fact.time.day * 1440 + fact.time.minute,
-          kind: fact.kind,
-          summary: fact.summary,
-          visibility: fact.visibility,
-          discoveryState: fact.discovery.state,
-          knowableAtSortKey:
-            fact.discovery.knowableAtInstant === null ? null : fact.discovery.knowableAtInstant.day * 1440 + fact.discovery.knowableAtInstant.minute,
-          significance: result.significanceByFactId.get(fact.id) ?? 0,
-          causalDepth: fact.causalDepth,
-          fact,
-        })),
+        facts: result.newFacts.map(toFactRow(result.significanceByFactId)),
+        // Amendments to history already written, not additions to it: a secret
+        // that somebody has now found out about.
+        rediscoveredFacts: result.rediscoveredFacts.map(toFactRow(result.significanceByFactId)),
         scheduled: result.scheduled,
         firedEventIds: result.firedEventIds,
         burst: {

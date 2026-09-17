@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldStateSchema, factsVisibleTo, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
+import { FactSchema, ScenarioDefinitionSchema, WorldStateSchema, factsVisibleTo, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
 import { runSimulationBurst, type BurstInput } from "./burst";
 import type { SimModelPort, SimOperation } from "./ports";
 
@@ -163,6 +163,71 @@ describe("a burst answering \"Raise two new legions\"", () => {
     const result = await runSimulationBurst(input(port));
     expect(result.modelCalls).toBeLessThanOrEqual(4);
     expect(result.modelCalls).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("a secret coming to light", () => {
+  /** A fact already on record that nobody outside Carthage has discovered. */
+  const SECRET = FactSchema.parse({
+    id: "fact-carthage-plot",
+    time: { day: 0, minute: 540 },
+    atStep: 0,
+    kind: "secret_arrangement",
+    summary: "Carthage has quietly promised Syracuse the western harbours.",
+    affectedEntities: [{ kind: "polity" as const, id: "carthage" }],
+    resourceChanges: [],
+    visibility: "private" as const,
+    discovery: { state: "private" as const, knowableAtInstant: null, discoveredBy: [] },
+    evidence: null,
+    eligibleReactionScopes: [],
+    sourceEventId: null,
+    sourceActionId: null,
+    causalDepth: 0,
+  });
+
+  const FOUND_OUT = JSON.stringify({
+    ...JSON.parse(RAISE_TWO_LEGIONS),
+    deltas: [],
+    facts: [],
+    delegations: [],
+    schedule: [],
+    discoveries: [{ factId: "fact-carthage-plot", observerRef: { kind: "character", id: "marcus-atilius" }, via: "investigation", knowableInDays: 0 }],
+  });
+
+  it("widens who knows an existing fact rather than writing a second one", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [FOUND_OUT], simulate_cognition: [CARTHAGE_REACTS] });
+    const result = await runSimulationBurst(input(port, { knownFacts: [SECRET] }));
+
+    const amended = result.rediscoveredFacts.find((fact) => fact.id === "fact-carthage-plot");
+    expect(amended).toBeDefined();
+    expect(amended!.discovery.discoveredBy.some((entry) => entry.observerRef.id === "marcus-atilius" && entry.via === "investigation")).toBe(true);
+    // The event did not happen twice.
+    expect(result.newFacts.filter((fact) => fact.kind === "secret_arrangement")).toHaveLength(0);
+    expect(factsVisibleTo([amended!], { kind: "character", id: "marcus-atilius" }, result.world.instant)).toHaveLength(1);
+  });
+
+  it("makes news that has to travel knowable only once it has arrived", async () => {
+    const delayed = JSON.stringify({
+      ...JSON.parse(FOUND_OUT),
+      discoveries: [{ factId: "fact-carthage-plot", observerRef: { kind: "character", id: "marcus-atilius" }, via: "told", knowableInDays: 40 }],
+    });
+    const port = scriptedPort({ simulate_orchestrate: [delayed], simulate_cognition: [CARTHAGE_REACTS] });
+    const result = await runSimulationBurst(input(port, { knownFacts: [SECRET] }));
+
+    const amended = result.rediscoveredFacts.find((fact) => fact.id === "fact-carthage-plot")!;
+    const entry = amended.discovery.discoveredBy[0]!;
+    expect(entry.atInstant.day).toBeGreaterThan(result.world.instant.day - 40);
+    expect(factsVisibleTo([amended], { kind: "character", id: "marcus-atilius" }, { day: 0, minute: 540 })).toHaveLength(0);
+  });
+
+  it("quietly ignores a discovery of something that never happened", async () => {
+    const nonsense = JSON.stringify({
+      ...JSON.parse(FOUND_OUT),
+      discoveries: [{ factId: "fact-that-never-was", observerRef: { kind: "character", id: "marcus-atilius" }, via: "document", knowableInDays: 0 }],
+    });
+    const port = scriptedPort({ simulate_orchestrate: [nonsense], simulate_cognition: [CARTHAGE_REACTS] });
+    const result = await runSimulationBurst(input(port, { knownFacts: [SECRET] }));
+    expect(result.rediscoveredFacts).toHaveLength(0);
   });
 });
 

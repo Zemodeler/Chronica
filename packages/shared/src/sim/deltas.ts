@@ -428,6 +428,30 @@ const LoanSettleSchema = z.object({
   reason: ReasonSchema,
 }).strict();
 
+/**
+ * What somebody takes to be true (VISION §14).
+ *
+ * The world already distinguished objective reality from what each person
+ * believes about it, and nothing could put a belief into anybody's head. So
+ * misinformation, deception and rumour had substrate and no mechanism: a
+ * spymaster could not plant a falsehood, and an investigator could not form a
+ * suspicion. Cognition reads these with their kind and confidence, so something
+ * half-credited moves someone less than something witnessed -- and a planted
+ * claim need not be true to be acted on.
+ */
+const BeliefSetSchema = z.object({
+  op: z.literal("belief_set"),
+  holderCharacterRef: RefSchema,
+  claim: z.string().trim().min(1).max(400),
+  kind: z.enum(["fact", "rumour", "suspicion", "secret"]),
+  confidence: z.number().int().min(0).max(100),
+  subjectRef: RefSchema.nullable().default(null),
+  /** Who they heard it from, where anybody did. */
+  sourceCharacterRef: RefSchema.nullable().default(null),
+  visibility: VisibilitySchema.default("private"),
+  reason: ReasonSchema,
+}).strict();
+
 export const WorldDeltaSchema = z.discriminatedUnion("op", [
   MoneyTransferSchema,
   IncomeSourceUpsertSchema,
@@ -453,6 +477,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   GenericEntityUpdateSchema,
   LoanOpenSchema,
   LoanSettleSchema,
+  BeliefSetSchema,
 ]);
 export type WorldDelta = z.infer<typeof WorldDeltaSchema>;
 export type WorldDeltaOp = WorldDelta["op"];
@@ -483,6 +508,7 @@ export const WORLD_DELTA_OPS = [
   "generic_entity_update",
   "loan_open",
   "loan_settle",
+  "belief_set",
 ] as const satisfies readonly WorldDeltaOp[];
 
 /**
@@ -516,4 +542,5 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   generic_entity_update: "civil",
   loan_open: "fiscal",
   loan_settle: "fiscal",
+  belief_set: "social",
 };
