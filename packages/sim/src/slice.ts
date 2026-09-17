@@ -1,3 +1,4 @@
+import { findPolityGaps } from "./population";
 import {
   currentAgeYears,
   factsKnownTo,
@@ -27,7 +28,7 @@ import {
  *    it actually has.
  */
 
-const CAPS = { characters: 12, forces: 10, projects: 8, accounts: 6, stances: 8, facts: 12, events: 8, intents: 8, provinces: 40 } as const;
+const CAPS = { characters: 12, forces: 10, projects: 8, accounts: 6, stances: 8, facts: 12, events: 8, intents: 8, provinces: 40, foreignForces: 12, foreignFigures: 12 } as const;
 
 export interface SliceEvent {
   readonly kind: string;
@@ -66,6 +67,15 @@ export interface WorldSlice {
   readonly provinces: readonly { readonly id: string; readonly name: string; readonly controller: string }[];
   readonly politics: readonly { readonly id: string; readonly name: string; readonly office: string | null; readonly age: number }[];
   readonly diplomacy: readonly { readonly toward: string; readonly trust: number; readonly why: string }[];
+  /**
+   * The world outside our borders, as far as it is plainly known. Filtering
+   * foreign secrets is right; filtering the existence of the army marching at
+   * us is not, and doing so left the orchestrator inventing placeholders for
+   * enemies it could not see.
+   */
+  readonly foreignPowers: readonly { readonly id: string; readonly name: string; readonly provinces: number; readonly leaders: readonly string[]; readonly forces: readonly string[] }[];
+  /** Countries holding land with nobody to speak or fight for them (VISION §5). */
+  readonly populationGaps: readonly { readonly polityId: string; readonly name: string; readonly needsLeader: boolean; readonly needsForce: boolean; readonly why: string }[];
   readonly projects: readonly { readonly id: string; readonly label: string; readonly status: string; readonly nextMilestone: { readonly id: string; readonly label: string } | null }[];
   readonly intents: readonly { readonly actor: string; readonly action: string; readonly rationale: string }[];
   readonly recentHistory: readonly { readonly summary: string; readonly significance: number }[];
@@ -147,6 +157,27 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     .slice(0, CAPS.stances)
     .map((stance) => ({ toward: polityName(stance.towardPolityId), trust: stance.trustScore, why: stance.lastShiftReason }));
 
+  // Armies in the field and heads of state are not secrets.
+  const foreignPowers = world.map.polities
+    .filter((polity) => polity.id !== ownPolity)
+    .map((polity) => ({
+      id: polity.id,
+      name: polity.name,
+      provinces: world.map.provinces.filter((province) => province.controllerPolityId === polity.id).length,
+      leaders: world.characters
+        .filter((character) => character.alive && character.polityId === polity.id)
+        .slice(0, 4)
+        .map((character) => `${character.name} [${character.id}]${character.officeId === null ? "" : `, ${character.officeId}`}`),
+      forces: world.material.forces
+        .filter((force) => force.polityId === polity.id)
+        .slice(0, 4)
+        .map((force) => `${force.name} [${force.id}] — ${force.authorizedStrength} men at ${provinceName(force.locationId)} [${force.locationId}]`),
+    }))
+    .filter((power) => power.provinces > 0 || power.leaders.length > 0 || power.forces.length > 0)
+    .slice(0, CAPS.foreignFigures);
+
+  const populationGaps = findPolityGaps({ world, ownPolityId: ownPolity, facts: input.facts, limit: 2 });
+
   const projects = world.projects
     .filter((project) => project.status !== "completed" && project.status !== "cancelled")
     .slice(0, CAPS.projects)
@@ -184,6 +215,8 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     monthlyIncome,
     monthlyExpenditure,
     military,
+    foreignPowers,
+    populationGaps,
     provinces,
     politics,
     diplomacy,
@@ -227,6 +260,22 @@ export function renderWorldSlice(slice: WorldSlice): string {
   ]);
   section("MILITARY", slice.military.map((force) => `${force.name} [${force.id}] — ${force.strength} men at ${force.location} [${force.locationId}], under ${force.commander}`));
   section("PLACES", slice.provinces.map((province) => `${province.name} [${province.id}] — held by ${province.controller}`));
+  section("OTHER POWERS", slice.foreignPowers.map((power) => {
+    const people = power.leaders.length === 0 ? "nobody known to lead them" : power.leaders.join("; ");
+    const arms = power.forces.length === 0 ? "no forces known in the field" : power.forces.join("; ");
+    return `${power.name} [${power.id}] — ${power.provinces} province(s). ${people}. ${arms}`;
+  }));
+  if (slice.populationGaps.length > 0) {
+    lines.push(
+      "COUNTRIES WITH NOBODY IN THEM:",
+      ...slice.populationGaps.map((gap) => {
+        const missing = [gap.needsLeader ? "a leader" : null, gap.needsForce ? "forces of their own" : null].filter((part) => part !== null).join(" and ");
+        return `  ${gap.name} [${gap.polityId}] holds land but has ${missing === "" ? "nobody" : `no ${missing}`} — ${gap.why}.`;
+      }),
+      "  Give each of them the people and forces they plainly ought to have, now.",
+      "",
+    );
+  }
   section("PEOPLE", slice.politics.map((person) => `${person.name} [${person.id}]${person.office === null ? "" : `, ${person.office}`}, aged ${person.age}`));
   section("DIPLOMACY", slice.diplomacy.map((stance) => `toward ${stance.toward}: trust ${stance.trust} (${stance.why})`));
   section("ACTIVE PROJECTS", slice.projects.map((project) =>

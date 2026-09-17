@@ -10,3 +10,4 @@ export * from "./burst";
 export * from "./chronicle";
 export * from "./conversation";
 export * from "./initiative";
+export * from "./population";
