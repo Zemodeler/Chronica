@@ -216,7 +216,7 @@ describe("what a finished project leaves behind", () => {
     const commander = state.characters.find((character) => character.alive && character.polityId === "rome")!;
     const province = state.map.provinces[0]!.id;
     const ready = projectWith(
-      { kind: "force", label: "The new fleet", amount: 4_200, provinceId: province, polityId: "rome", commanderCharacterId: commander.id, beneficiaryAccountId: null, cadenceDays: null },
+      { kind: "force", label: "The new fleet", amount: 4_200, provinceId: province, polityId: "rome", commanderCharacterId: commander.id, forceId: null, beneficiaryAccountId: null, cadenceDays: null },
       state,
     );
 
@@ -229,11 +229,27 @@ describe("what a finished project leaves behind", () => {
     expect(result.factProposals.find((fact) => fact.kind === "project_completed")!.summary).toContain("The new fleet");
   });
 
+  it("puts the army where the march was going, rather than completing and moving nobody", () => {
+    // Found live: a forced march ran its milestones, reported itself complete,
+    // and left the field army exactly where it had started.
+    const state = base();
+    const marching = state.material.forces[0]!;
+    const destination = state.map.provinces.find((province) => province.id !== marching.locationId)!.id;
+    const ready = projectWith(
+      { kind: "force_move", label: "Forced march north", amount: 0, provinceId: destination, polityId: null, commanderCharacterId: null, forceId: marching.id, beneficiaryAccountId: null, cadenceDays: null },
+      state,
+    );
+
+    const result = tick(ready, state.instant.day + 10);
+    expect(result.world.material.forces.find((force) => force.id === marching.id)!.locationId).toBe(destination);
+    expect(result.factProposals.find((fact) => fact.kind === "project_completed")!.summary).toContain("arrived");
+  });
+
   it("produces nothing rather than an invalid world when the outcome names a dead man", () => {
     const state = base();
     const province = state.map.provinces[0]!.id;
     const ready = projectWith(
-      { kind: "force", label: "A fleet under a ghost", amount: 900, provinceId: province, polityId: "rome", commanderCharacterId: "nobody-at-all", beneficiaryAccountId: null, cadenceDays: null },
+      { kind: "force", label: "A fleet under a ghost", amount: 900, provinceId: province, polityId: "rome", commanderCharacterId: "nobody-at-all", forceId: null, beneficiaryAccountId: null, cadenceDays: null },
       state,
     );
 
@@ -248,7 +264,7 @@ describe("what a finished project leaves behind", () => {
     const state = base();
     const account = state.material.accounts[0]!.id;
     const ready = projectWith(
-      { kind: "income_source", label: "Harbour dues at Ostia", amount: 45, provinceId: null, polityId: "rome", commanderCharacterId: null, beneficiaryAccountId: account, cadenceDays: 30 },
+      { kind: "income_source", label: "Harbour dues at Ostia", amount: 45, provinceId: null, polityId: "rome", commanderCharacterId: null, forceId: null, beneficiaryAccountId: account, cadenceDays: 30 },
       state,
     );
 

@@ -283,6 +283,8 @@ export function runDeterministicTick(input: TickInput): TickResult {
 
   /** What finished projects produced this tick, folded into the world at the end. */
   const forces: WorldState["material"]["forces"][number][] = [];
+  /** Armies a completed journey put somewhere else. */
+  const movedForces = new Map<string, WorldState["material"]["forces"][number]>();
   const structures: WorldState["structures"][number][] = [];
   const newIncome: WorldState["material"]["incomeSources"][number][] = [];
 
@@ -330,6 +332,20 @@ export function runDeterministicTick(input: TickInput): TickResult {
         history: [],
       });
       return { entityId: id, summary: `${outcome.label} [${id}] stands ready, ${strength} strong.` };
+    }
+
+    if (outcome.kind === "force_move") {
+      // A march is a project because it takes time; what it produces is an army
+      // standing somewhere else. Without this a "forced march" ran its
+      // milestones, reported itself complete, and left the army where it began.
+      const provinceId = outcome.provinceId;
+      const forceId = outcome.forceId;
+      if (provinceId === null || forceId === null) return null;
+      if (!input.world.map.provinces.some((province) => province.id === provinceId)) return null;
+      const marching = movedForces.get(forceId) ?? input.world.material.forces.find((force) => force.id === forceId);
+      if (marching === undefined) return null;
+      movedForces.set(forceId, { ...marching, locationId: provinceId, positionId: null });
+      return { entityId: forceId, summary: `${marching.name} [${forceId}] has arrived in ${provinceId}.` };
     }
 
     if (outcome.kind === "structure") {
@@ -495,7 +511,13 @@ export function runDeterministicTick(input: TickInput): TickResult {
         incomeSources: newIncome.length === 0 ? incomeSources : [...incomeSources, ...newIncome],
         obligations: servicedObligations,
         loans,
-        forces: forces.length === 0 ? unpaidForces : [...unpaidForces, ...forces],
+        forces: [
+          ...unpaidForces.map((force) => {
+            const arrived = movedForces.get(force.id);
+            return arrived === undefined ? force : { ...force, locationId: arrived.locationId, positionId: arrived.positionId };
+          }),
+          ...forces,
+        ],
         transactions: transactions.slice(-500),
       },
     },

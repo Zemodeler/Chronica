@@ -66,7 +66,8 @@ How to answer well:
    in "frictions" and reflect it in what you actually change.
 5. Generate the people the situation needs. If financing this requires a quaestor
    and none exists, create one, with a reason they exist. They will persist and may
-   matter later.
+   matter later. Give them what they are worth: a merchant you invent to lend the
+   state money must be rich enough to lend it, and "wealth" is how you say so.
 6. Populate the world's countries. A country that holds land has people in it,
    and any listed under COUNTRIES WITH NOBODY IN THEM must be given them in this
    answer -- a ruler or chieftain of their own culture, and the forces they would
@@ -80,7 +81,10 @@ How to answer well:
    "completionOutcome" is the fleet, the fortress or the revenue that exists on
    the day the last milestone falls; the engine creates it then, without asking
    you again. A shipbuilding programme that completes and yields no ships has
-   not happened.
+   not happened, and a march that completes and leaves the army where it started
+   has not happened either -- a journey's outcome is "force_move", naming the
+   army and where it arrives. Something that can simply be done now is not a
+   project: move an army that is already there with "force_modify".
 8. Record what becomes true as facts. Set each fact's visibility honestly: a secret
    arrangement is "private", a public mobilization is "public". Use "delayed" or
    "rumoured" discovery with "knowableInDays" for news that has to travel.
@@ -119,21 +123,34 @@ How to answer well:
    ordinary obligation, so an unpaid debt falls into arrears like unpaid wages.
    Revenue that comes from *another* power should name that power, so a war can
    cut it; revenue raised at home names nobody.
-15. Secrets can be found out, and lies can be told. A secret in the world stays
-   secret until somebody learns it: put a discovery in "discoveries", naming the
-   fact already on record, who learned it and how -- investigation, a document,
-   an intercepted dispatch, a rumour -- with the days it takes to reach them.
-   That, and not a new fact, is what intelligence work produces. To plant a
-   falsehood instead, use "belief_set": what a person acts on is what they
-   believe, and a belief is never checked against the truth. Neither is free:
-   sending agents is a project that takes time and can fail.
+15. Secrets can be found out, and lies can be told, and both have to land on a
+   person. When agents learn something already on the record, name that fact in
+   "discoveries" -- who learned it, how (investigation, a document, an
+   intercepted dispatch, a rumour) and after how many days. When what they
+   learned is not a fact anyone wrote down -- what a rival privately intends,
+   for instance -- give the person who now knows it a "belief_set" with high
+   confidence. To deceive instead, use "belief_set" on the person being
+   deceived: what somebody acts on is what they believe, and a belief is never
+   checked against the truth.
+   A mission that finishes and reports nothing has not finished. "Findings were
+   transmitted" is not a finding; say what was learned, and to whom. Neither is
+   free: sending agents is a project that takes time and can fail.
 16. You do not decide who wins. Two forces standing in the same province can
    fight: say so with "force_engage", naming who attacks whom and the posture
    they take, and propose a tactic if there is an unusual one worth trying. What
    follows -- the casualties, the morale, who breaks, who is captured or killed,
    whether the ground changes hands -- is the engine's, and it is final. Do not
-   narrate an outcome, and do not write casualties as facts of your own. An army
-   has to march to its enemy before it can fight it.
+   narrate an outcome, and do not write casualties as facts of your own.
+   An army has to be standing where its enemy stands. MILITARY says where each
+   one is. If yours is somewhere else and the march is short enough to make
+   today, move it first in the same answer with "force_modify" and then engage;
+   if the journey takes real time, make it a project whose outcome is
+   "force_move" and engage when it arrives. Saying in a fact that the army has
+   reached the enemy does not put it there.
+   An order to press on with something already under way is not a new project.
+   ACTIVE PROJECTS lists what is running; let it run, and answer the order by
+   what you change around it. Four marches for one army is four armies' worth
+   of effort and none of them arrives.
 17. Keep each country's aims current. STANDING AIMS says what a power is trying
    to do, what worries it and what it means to do next. Every polity with people
    in it should have one, and any power whose situation changed this turn should

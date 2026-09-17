@@ -39,13 +39,15 @@ export type ProjectMilestone = z.infer<typeof ProjectMilestoneSchema>;
  */
 export const ProjectCompletionOutcomeSchema = z
   .object({
-    kind: z.enum(["force", "structure", "income_source", "none"]),
+    kind: z.enum(["force", "structure", "income_source", "force_move", "none"]),
     label: z.string().trim().min(1).max(160),
     /** Men for a force, garrison capacity for a structure, revenue per period for an income source. */
     amount: z.number().int().nonnegative().max(10_000_000).default(0),
     provinceId: EntityIdSchema.nullable().default(null),
     polityId: EntityIdSchema.nullable().default(null),
     commanderCharacterId: EntityIdSchema.nullable().default(null),
+    /** For "force_move": the army that arrives somewhere when the journey ends. */
+    forceId: EntityIdSchema.nullable().default(null),
     beneficiaryAccountId: EntityIdSchema.nullable().default(null),
     cadenceDays: z.number().int().positive().max(36_600).nullable().default(null),
   })

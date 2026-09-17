@@ -172,6 +172,12 @@ function polityOfScope(scope: AuthorityScope, world: WorldState): string | null 
  * speaking that an act inside another power is somebody else's business.
  */
 function actorIsAnswerableFor(delta: WorldDelta, scope: AuthorityScope, world: WorldState, context: ApplyContext): boolean {
+  // Meaning to do something is not doing it. An intention has no scope of its
+  // own, so it fell back to the whole polity, and an official who merely
+  // resolved to act was recorded as having exceeded his authority over the
+  // republic. Whatever he then actually does is checked on its own terms.
+  if (delta.op === "character_intent_set") return false;
+
   if (context.actsForTheWorld !== true) return true;
 
   // A polity's standing aims are nobody's personal act, whoever is speaking.
@@ -420,6 +426,7 @@ function applyOne(
           provinceId: outcome.provinceId,
           polityId: outcome.polityId,
           commanderCharacterId: outcome.commanderCharacterRef === null ? null : required(outcome.commanderCharacterRef, "The commander this project is to raise a force for"),
+          forceId: outcome.forceRef === null ? null : required(outcome.forceRef, "The force this project is to move"),
           beneficiaryAccountId: outcome.beneficiaryAccountRef === null ? null : required(outcome.beneficiaryAccountRef, "The account this project is to pay into"),
           cadenceDays: outcome.cadenceDays,
         };
@@ -562,6 +569,7 @@ function applyOne(
       if (provinceId === undefined) reject("The world has no province to place a new character in.");
       const id = mint("character", delta.localId);
       const created = createCanonicalNpc(world, {
+        ...(delta.wealth > 0 ? { startingMoney: delta.wealth } : {}),
         characterId: id,
         name: delta.name,
         locationProvinceId: provinceId,
@@ -897,9 +905,12 @@ function applyOne(
         const lenderAccount = world.material.accounts.find(
           (account) => account.owner.kind === delta.lenderKind && account.owner.id === lenderId,
         );
-        if (lenderAccount === undefined) reject(`${lenderId ?? "The lender"} keeps no account to lend from.`, "reference");
+        // Named, not identified: this reaches the player as friction, and
+        // "character-0a73c811 holds 0" tells a ruler nothing about anybody.
+        const lenderName = world.characters.find((character) => character.id === lenderId)?.name ?? lenderId ?? "The lender";
+        if (lenderAccount === undefined) reject(`${lenderName} keeps no account to lend from.`, "reference");
         if (lenderAccount.balance < delta.principal) {
-          reject(`${lenderId ?? "The lender"} holds ${lenderAccount.balance}, which will not cover a loan of ${delta.principal}.`);
+          reject(`${lenderName} holds ${lenderAccount.balance}, which will not cover a loan of ${delta.principal}.`);
         }
         accounts = accounts.map((account) => (account.id === lenderAccount.id ? { ...account, balance: account.balance - delta.principal } : account));
       }

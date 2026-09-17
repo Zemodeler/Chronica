@@ -199,6 +199,7 @@ describe("dynamic world generation", () => {
           age: 38,
           officeLabel: "Military Quaestor",
           traits: ["methodical", "politically cautious"],
+          wealth: 250,
           generatedBecause: "Responsible for financing the current mobilization.",
         },
       ],
@@ -537,6 +538,33 @@ describe("an arrangement the world invented", () => {
 });
 
 describe("borrowing", () => {
+  it("lends from a merchant the world invented for the purpose, if it made him rich enough", () => {
+    // Found live: a merchant generated to lend the state money had an empty
+    // purse, so the loan was refused by the very person invented to make it.
+    const result = applyDeltas(
+      world(),
+      [
+        { op: "character_create", localId: "merchant", name: "Titus Sestius", polityId: "rome", provinceId: null, age: 50, officeLabel: null, traits: [], wealth: 4_000, generatedBecause: "Somebody had to be rich enough to lend." },
+        { op: "loan_open", localId: "merchant_credit", lenderKind: "character", lenderRef: localRef("merchant"), borrowerAccountRef: "marcus-purse", principal: 1_000, interestBps: 900, cadenceDays: 90, terms: "Merchant credit for the legions", collateralHoldingRef: null, reason: "The legions cannot wait for the levy." },
+      ],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    expect(result.world.material.loans).toHaveLength(1);
+    expect(result.world.material.loans[0]!.outstanding).toBe(1_000);
+  });
+
+  it("names the lender when he cannot afford it, rather than printing his id at the ruler", () => {
+    const result = applyDeltas(
+      world(),
+      [{ op: "loan_open", localId: "doomed", lenderKind: "character", lenderRef: "hamilcar", borrowerAccountRef: "marcus-purse", principal: 9_000, interestBps: 900, cadenceDays: 90, terms: "More than he has", collateralHoldingRef: null, reason: "An overreach." }],
+      context(),
+    );
+    expect(result.rejected[0]!.reason).toContain("Hamilcar");
+    expect(result.rejected[0]!.reason).not.toContain("hamilcar-purse");
+  });
+
   const borrowFrom = (lenderId: string | null, principal: number): WorldDelta => ({
     op: "loan_open",
     localId: "merchant_loan",
@@ -708,6 +736,17 @@ describe("battle", () => {
     }
   });
 
+  it("never says a province passed to the people who already held it", () => {
+    // Found live: a beaten defender who kept the ground produced "Boii passed
+    // to Boii" in a Chronicle, which is nonsense and also untrue.
+    const before = facing();
+    const { roman, punic } = sides(before);
+    const result = applyDeltas(before, [give(roman.id, punic.id)], context());
+    for (const fact of result.factProposals) {
+      expect(fact.summary).not.toMatch(/(\b\w+\b) passed to \1\./);
+    }
+  });
+
   it("refuses a battle between armies that are nowhere near each other", () => {
     const before = world();
     const { roman, punic } = sides(before);
@@ -749,6 +788,7 @@ describe("whose act it is", () => {
     age: 44,
     officeLabel: null,
     traits: [],
+    wealth: 0,
     generatedBecause: "A people being invaded has someone to lead it.",
   };
 
@@ -778,6 +818,19 @@ describe("whose act it is", () => {
     );
     expect(result.breaches).toHaveLength(1);
     expect(result.breaches[0]!.reason).toContain("No active grant");
+  });
+
+  it("does not treat meaning to do something as doing it", () => {
+    // Found live: an intention has no scope of its own, so it fell back to the
+    // whole polity and an official who merely resolved to act was recorded as
+    // having exceeded his authority over the republic.
+    const result = applyDeltas(
+      world(),
+      [{ op: "character_intent_set", actorCharacterRef: "hanno", actionType: "prepare", targetRefs: [], rationale: "He means to see how the levy goes.", priority: 40, visibility: "private" }],
+      context({ actorRef: { kind: "character", id: "hanno" } }),
+    );
+    expect(result.applied).toHaveLength(1);
+    expect(result.breaches).toHaveLength(0);
   });
 
   it("treats a country's private aims as nobody's personal act", () => {
