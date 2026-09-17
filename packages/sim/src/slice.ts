@@ -27,7 +27,7 @@ import {
  *    it actually has.
  */
 
-const CAPS = { characters: 12, forces: 10, projects: 8, accounts: 6, stances: 8, facts: 12, events: 8, intents: 8 } as const;
+const CAPS = { characters: 12, forces: 10, projects: 8, accounts: 6, stances: 8, facts: 12, events: 8, intents: 8, provinces: 40 } as const;
 
 export interface SliceEvent {
   readonly kind: string;
@@ -66,7 +66,7 @@ export interface WorldSlice {
   readonly provinces: readonly { readonly id: string; readonly name: string; readonly controller: string }[];
   readonly politics: readonly { readonly id: string; readonly name: string; readonly office: string | null; readonly age: number }[];
   readonly diplomacy: readonly { readonly toward: string; readonly trust: number; readonly why: string }[];
-  readonly projects: readonly { readonly id: string; readonly label: string; readonly status: string; readonly nextMilestone: string | null }[];
+  readonly projects: readonly { readonly id: string; readonly label: string; readonly status: string; readonly nextMilestone: { readonly id: string; readonly label: string } | null }[];
   readonly intents: readonly { readonly actor: string; readonly action: string; readonly rationale: string }[];
   readonly recentHistory: readonly { readonly summary: string; readonly significance: number }[];
   readonly dueEvents: readonly SliceEvent[];
@@ -116,12 +116,16 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       commander: name(force.commanderCharacterId),
     }));
 
-  // Where the world's own places are, by the id an order must name them by.
-  // Without this the model reads "at Latium" in the military list and writes
-  // "Latium" as though it were a province id.
-  const provinces = world.map.provinces
-    .filter((province) => ownPolity === null || province.controllerPolityId === ownPolity || world.material.forces.some((force) => force.locationId === province.id))
-    .slice(0, 16)
+  // Every place in the world, by the id an order must name it by -- not only
+  // the places already ours. An order to invade names somewhere we do not hold,
+  // and a model with no id for it will invent one.
+  const ourProvinceIds = new Set([
+    ...world.map.provinces.filter((province) => province.controllerPolityId === ownPolity).map((province) => province.id),
+    ...world.material.forces.filter((force) => force.polityId === ownPolity).map((force) => force.locationId),
+  ]);
+  const provinces = [...world.map.provinces]
+    .sort((a, b) => Number(ourProvinceIds.has(b.id)) - Number(ourProvinceIds.has(a.id)))
+    .slice(0, CAPS.provinces)
     .map((province) => ({
       id: province.id,
       name: province.name,
@@ -150,7 +154,10 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       id: project.id,
       label: project.label,
       status: project.status,
-      nextMilestone: project.milestones.find((milestone) => milestone.status === "pending")?.label ?? null,
+      nextMilestone: (() => {
+        const pending = project.milestones.find((milestone) => milestone.status === "pending");
+        return pending === undefined ? null : { id: pending.id, label: pending.label };
+      })(),
     }));
 
   const intents = world.characterIntents
@@ -222,7 +229,8 @@ export function renderWorldSlice(slice: WorldSlice): string {
   section("PLACES", slice.provinces.map((province) => `${province.name} [${province.id}] — held by ${province.controller}`));
   section("PEOPLE", slice.politics.map((person) => `${person.name} [${person.id}]${person.office === null ? "" : `, ${person.office}`}, aged ${person.age}`));
   section("DIPLOMACY", slice.diplomacy.map((stance) => `toward ${stance.toward}: trust ${stance.trust} (${stance.why})`));
-  section("ACTIVE PROJECTS", slice.projects.map((project) => `${project.label} [${project.id}] — ${project.status}${project.nextMilestone === null ? "" : `, next: ${project.nextMilestone}`}`));
+  section("ACTIVE PROJECTS", slice.projects.map((project) =>
+    `${project.label} [${project.id}] — ${project.status}${project.nextMilestone === null ? "" : `, next: ${project.nextMilestone.label} [${project.nextMilestone.id}]`}`));
   section("STANDING INTENTIONS", slice.intents.map((intent) => `${intent.actor} means to ${intent.action}: ${intent.rationale}`));
   section("ORDERS AWAITING AN ANSWER", slice.openOrders.map((order) => `${order.id} to ${order.recipient} — ${order.status}`));
   section("RECENT HISTORY (only what is known to this government)", slice.recentHistory.map((entry) => entry.summary));

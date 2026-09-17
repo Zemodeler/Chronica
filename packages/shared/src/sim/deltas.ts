@@ -170,7 +170,8 @@ const SocialEventsSchema = z.object({
   events: z
     .array(
       z.object({
-        participantCharacterRefs: z.array(RefSchema).min(1).max(16),
+        /** Two at least: a social event with one participant is not one, and an encounter with one fails validation. */
+        participantCharacterRefs: z.array(RefSchema).min(2).max(16),
         kind: CharacterSocialEventKindSchema,
         visibility: VisibilitySchema,
         summary: ReasonSchema,
