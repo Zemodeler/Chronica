@@ -251,3 +251,40 @@ describe("diplomacy", () => {
     expect(result.rejected).toHaveLength(1);
   });
 });
+
+describe("what a country is trying to do", () => {
+  const setOutlook = (polityId: string, objective: string, risk: number): WorldDelta => ({
+    op: "polity_outlook_set",
+    polityId,
+    primaryObjective: objective,
+    concerns: [{ label: "Roman expansion", level: "high" }],
+    intentions: ["strengthen Sicily"],
+    riskTolerance: risk,
+    reason: "The situation has moved.",
+  });
+
+  it("records an outlook where the polity had none", () => {
+    const result = applyDeltas(world(), [setOutlook("carthage", "Preserve commercial dominance.", 45)], context());
+    const outlook = result.world.polityOutlooks.find((candidate) => candidate.polityId === "carthage");
+    expect(outlook?.primaryObjective).toBe("Preserve commercial dominance.");
+    expect(outlook?.riskTolerance).toBe(45);
+    expect(outlook?.lastChangeReason).toBe("The situation has moved.");
+  });
+
+  it("replaces the old one rather than keeping both, so the world can say what it wants now", () => {
+    const once = applyDeltas(world(), [setOutlook("carthage", "Preserve commercial dominance.", 45)], context());
+    const twice = applyDeltas(once.world, [setOutlook("carthage", "Break Rome before it reaches Sicily.", 80)], context());
+
+    const held = twice.world.polityOutlooks.filter((candidate) => candidate.polityId === "carthage");
+    expect(held).toHaveLength(1);
+    expect(held[0]!.primaryObjective).toBe("Break Rome before it reaches Sicily.");
+    expect(held[0]!.riskTolerance).toBe(80);
+  });
+
+  it("refuses an outlook for a country that does not exist, and says which", () => {
+    const result = applyDeltas(world(), [setOutlook("atlantis", "Rule the waves.", 50)], context());
+    expect(result.world.polityOutlooks).toHaveLength(0);
+    expect(result.rejected[0]!.reason).toContain('No polity "atlantis"');
+    expect(result.rejected[0]!.kind).toBe("reference");
+  });
+});

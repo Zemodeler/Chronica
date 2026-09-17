@@ -55,3 +55,48 @@ describe("what the player's government can see of the world", () => {
     expect(text.length).toBeLessThan(12_000);
   });
 });
+
+describe("what each country is trying to do", () => {
+  const withOutlooks = (): WorldState => ({
+    ...world(),
+    polityOutlooks: [
+      {
+        polityId: "carthage",
+        primaryObjective: "Preserve western Mediterranean commercial dominance.",
+        concerns: [{ label: "Roman expansion", level: "high" }],
+        intentions: ["strengthen Sicily"],
+        riskTolerance: 45,
+        updatedAtStep: 0,
+        lastChangeReason: "opening position",
+      },
+      {
+        polityId: "rome",
+        primaryObjective: "Secure the peninsula and the routes south.",
+        concerns: [{ label: "an unpaid army", level: "medium" }],
+        intentions: ["settle the Boii question"],
+        riskTolerance: 60,
+        updatedAtStep: 0,
+        lastChangeReason: "opening position",
+      },
+    ],
+  });
+
+  it("shows the orchestrator every power's aims, because it has to drive them", () => {
+    const text = renderWorldSlice(slice(withOutlooks()));
+    expect(text).toContain("STANDING AIMS");
+    expect(text).toContain("Preserve western Mediterranean commercial dominance.");
+    expect(text).toContain("worried about Roman expansion: high");
+    expect(text).toContain("means to strengthen Sicily");
+  });
+
+  it("marks which of them is ours and puts it first", () => {
+    const outlooks = slice(withOutlooks()).outlooks;
+    expect(outlooks[0]!.polityId).toBe("rome");
+    expect(outlooks[0]!.own).toBe(true);
+    expect(outlooks.find((outlook) => outlook.polityId === "carthage")!.own).toBe(false);
+  });
+
+  it("says nothing at all before any country has formed an aim", () => {
+    expect(renderWorldSlice(slice())).not.toContain("STANDING AIMS");
+  });
+});

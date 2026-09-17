@@ -9,7 +9,6 @@ import {
   type ScenarioClock,
   type ScenarioWarfareRules,
   type StopReason,
-  type WorldInstant,
   type WorldState,
 } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
@@ -465,15 +464,6 @@ function recordActiveIntents(world: WorldState, active: readonly RoutedActor[], 
       })),
     ],
   };
-}
-
-/** The earliest scheduled moment worth waking for, or a plain reaction delay. */
-function nextInstant(now: WorldInstant, scheduled: readonly ScheduledEventDraft[], fallbackDays: number): WorldInstant {
-  const nowKey = now.day * 1440 + now.minute;
-  const upcoming = scheduled.map((event) => event.dueInstantSortKey).filter((key) => key > nowKey).sort((a, b) => a - b)[0];
-  const fallbackKey = nowKey + fallbackDays * 1440;
-  const key = upcoming === undefined ? fallbackKey : Math.min(upcoming, fallbackKey);
-  return addMinutes(now, key - nowKey);
 }
 
 /**
