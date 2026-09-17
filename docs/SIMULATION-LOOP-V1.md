@@ -515,7 +515,31 @@ Four defects surfaced that no test would have:
 
 After the fixes, the third order produced no engine rejections at all.
 
-## 15. The known risk
+## 15. The world populates itself
+
+A sparse scenario (VISION §4) names a dozen peoples and gives almost none of them a character. That
+is the intended starting point — but nothing required them ever to be filled in, so they stayed names
+on provinces that could not resist, negotiate or react. An invasion of the Boii found no Boii.
+
+Two things were wrong, compounding:
+
+- **The slice was filtered to the player's own polity on every axis**, so the orchestrator could not
+  see foreign armies, foreign leaders, or even that a country had none. It reached for
+  `generic_entity_create` and produced "Boii lands" — a placeholder for ground it had no id for.
+  Filtering foreign *secrets* is right; filtering the existence of the army marching at you is not.
+- **Nothing asked the world to populate anyone.** `force_create` already takes a `polityId`; the
+  contract could always express "the Boii raise a host under a chieftain". It was never requested.
+
+`population.ts` finds the gaps deterministically and free: countries holding land with no leader or
+no forces, ranked by whether the player is dealing with them now (from recent facts), whether they
+border us, and how much they hold. The slice states the gap plainly — *"COUNTRIES WITH NOBODY IN
+THEM"* — and the orchestrator fills it in the call it was already making. No extra model call, no new
+contract surface.
+
+Bounded to two per burst so a single order is not swamped; a world fills in over a few orders, with
+whoever the player is actually dealing with first.
+
+## 16. The known risk
 
 **Prompt size, not loop logic.** `buildWorldSlice` is where this design succeeds or fails. The
 orchestrator's system prompt is ~4,600 tokens (mostly the generated JSON schema, identical every call
