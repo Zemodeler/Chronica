@@ -26,6 +26,16 @@ export interface AppliedDelta {
 export interface RejectedDelta {
   readonly delta: WorldDelta;
   readonly reason: string;
+  /**
+   * "world" means the world genuinely could not comply -- the treasury was
+   * short, the province was not ours. That is friction the player should hear
+   * about (VISION §8).
+   *
+   * "reference" means the proposal named something that does not exist. That is
+   * the engine catching a malformed payload, and belongs in the record for
+   * debugging rather than in a Chronicle.
+   */
+  readonly kind: "world" | "reference";
 }
 
 /**

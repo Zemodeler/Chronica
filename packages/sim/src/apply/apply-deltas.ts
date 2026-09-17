@@ -41,10 +41,14 @@ import type { ApplyContext, ApplyResult, AppliedDelta, AuthorityBreach, Rejected
  *     than the batch.
  */
 
-class DeltaRejection extends Error {}
+class DeltaRejection extends Error {
+  constructor(message: string, readonly kind: "world" | "reference") {
+    super(message);
+  }
+}
 
-function reject(reason: string): never {
-  throw new DeltaRejection(reason);
+function reject(reason: string, kind: "world" | "reference" = "world"): never {
+  throw new DeltaRejection(reason, kind);
 }
 
 /** Which scope a delta acts over, so authority is judged against the thing itself rather than the whole polity. */
@@ -124,7 +128,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
       current = applyOne(current, delta, context, assignedIds, resolve);
     } catch (error) {
       if (error instanceof DeltaRejection) {
-        rejected.push({ delta, reason: error.message });
+        rejected.push({ delta, reason: error.message, kind: error.kind });
         current = previous;
         continue;
       }
@@ -134,7 +138,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
     const afterViolations = findWorldReferenceViolations(current);
     const introduced = afterViolations.filter((violation) => !violations.has(violation));
     if (introduced.length > 0) {
-      rejected.push({ delta, reason: `Would leave a reference to something that does not exist: ${introduced[0]}.` });
+      rejected.push({ delta, reason: `Would leave a reference to something that does not exist: ${introduced[0]}.`, kind: "reference" });
       current = previous;
       continue;
     }
@@ -153,7 +157,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
       world,
       applied: [],
       breaches: [],
-      rejected: deltas.map((delta) => ({ delta, reason: `The batch would have left the world invalid: ${parsed.error.issues[0]?.message ?? "unknown"}.` })),
+      rejected: deltas.map((delta) => ({ delta, reason: `The batch would have left the world invalid: ${parsed.error.issues[0]?.message ?? "unknown"}.`, kind: "reference" as const })),
       assignedIds: new Map(),
     };
   }
@@ -170,7 +174,7 @@ function applyOne(
 ): WorldState {
   const required = (ref: string, label: string): string => {
     const resolved = resolve(ref);
-    if (resolved === undefined) reject(`${label} refers to "${ref}", which nothing in this batch created.`);
+    if (resolved === undefined) reject(`${label} refers to "${ref}", which nothing in this batch created.`, "reference");
     return resolved;
   };
   const mint = (prefix: string, localId: string | undefined): string => {
@@ -184,13 +188,13 @@ function applyOne(
     case "money_transfer": {
       const fromId = required(delta.fromAccountRef, "The paying account");
       const from = world.material.accounts.find((account) => account.id === fromId);
-      if (from === undefined) reject(`No account "${fromId}" exists to pay from.`);
+      if (from === undefined) reject(`No account "${fromId}" exists to pay from.`, "reference");
       if (from.balance < delta.amount) {
         reject(`Account "${fromId}" holds ${from.balance}, which cannot cover ${delta.amount}.`);
       }
       const toId = delta.toAccountRef === null ? null : required(delta.toAccountRef, "The receiving account");
       if (toId !== null && !world.material.accounts.some((account) => account.id === toId)) {
-        reject(`No account "${toId}" exists to receive payment.`);
+        reject(`No account "${toId}" exists to receive payment.`, "reference");
       }
       const accounts = world.material.accounts.map((account) => {
         if (account.id === fromId) return { ...account, balance: account.balance - delta.amount };
@@ -203,7 +207,7 @@ function applyOne(
     case "income_source_upsert": {
       const beneficiaryId = required(delta.beneficiaryAccountRef, "The receiving account");
       if (!world.material.accounts.some((account) => account.id === beneficiaryId)) {
-        reject(`No account "${beneficiaryId}" exists to receive this income.`);
+        reject(`No account "${beneficiaryId}" exists to receive this income.`, "reference");
       }
       const existingId = delta.incomeSourceRef === null ? null : required(delta.incomeSourceRef, "The income source");
       const base = {
@@ -219,7 +223,7 @@ function applyOne(
         active: delta.active,
       };
       if (existingId !== null) {
-        if (!world.material.incomeSources.some((source) => source.id === existingId)) reject(`No income source "${existingId}" exists to change.`);
+        if (!world.material.incomeSources.some((source) => source.id === existingId)) reject(`No income source "${existingId}" exists to change.`, "reference");
         return {
           ...world,
           material: {
@@ -234,7 +238,7 @@ function applyOne(
 
     case "obligation_upsert": {
       const payerId = required(delta.payerAccountRef, "The paying account");
-      if (!world.material.accounts.some((account) => account.id === payerId)) reject(`No account "${payerId}" exists to carry this obligation.`);
+      if (!world.material.accounts.some((account) => account.id === payerId)) reject(`No account "${payerId}" exists to carry this obligation.`, "reference");
       const recipientId = delta.recipientAccountRef === null ? undefined : required(delta.recipientAccountRef, "The receiving account");
       const base = {
         kind: delta.kind,
@@ -251,7 +255,7 @@ function applyOne(
       };
       const existingId = delta.obligationRef === null ? null : required(delta.obligationRef, "The obligation");
       if (existingId !== null) {
-        if (!world.material.obligations.some((obligation) => obligation.id === existingId)) reject(`No obligation "${existingId}" exists to change.`);
+        if (!world.material.obligations.some((obligation) => obligation.id === existingId)) reject(`No obligation "${existingId}" exists to change.`, "reference");
         return {
           ...world,
           material: {
@@ -268,7 +272,7 @@ function applyOne(
       const id = mint("project", delta.localId);
       const fundingId = delta.fundingAccountRef === null ? null : required(delta.fundingAccountRef, "The funding account");
       if (fundingId !== null && !world.material.accounts.some((account) => account.id === fundingId)) {
-        reject(`No account "${fundingId}" exists to fund this project.`);
+        reject(`No account "${fundingId}" exists to fund this project.`, "reference");
       }
       const milestones = delta.milestones.map((milestone, index) => ({
         id: `${id}-m${index + 1}`,
@@ -302,9 +306,9 @@ function applyOne(
     case "project_milestone_update": {
       const projectId = required(delta.projectRef, "The project");
       const project = world.projects.find((candidate) => candidate.id === projectId);
-      if (project === undefined) reject(`No project "${projectId}" exists.`);
+      if (project === undefined) reject(`No project "${projectId}" exists.`, "reference");
       if (!project.milestones.some((milestone) => milestone.id === delta.milestoneId)) {
-        reject(`Project "${projectId}" has no milestone "${delta.milestoneId}".`);
+        reject(`Project "${projectId}" has no milestone "${delta.milestoneId}".`, "reference");
       }
       const milestones = project.milestones.map((milestone) =>
         milestone.id === delta.milestoneId ? { ...milestone, status: delta.status, completedAtStep: atStep } : milestone,
@@ -317,8 +321,8 @@ function applyOne(
     case "force_create": {
       const commanderId = required(delta.commanderCharacterRef, "The commander");
       const controllerId = required(delta.controllerCharacterRef, "The controller");
-      if (!world.characters.some((character) => character.id === commanderId)) reject(`No character "${commanderId}" exists to command this force.`);
-      if (!world.map.provinces.some((province) => province.id === delta.locationId)) reject(`No province "${delta.locationId}" exists to raise this force in.`);
+      if (!world.characters.some((character) => character.id === commanderId)) reject(`No character "${commanderId}" exists to command this force.`, "reference");
+      if (!world.map.provinces.some((province) => province.id === delta.locationId)) reject(`No province "${delta.locationId}" exists to raise this force in.`, "reference");
       const id = mint("force", delta.localId);
       const force = {
         id,
@@ -345,13 +349,13 @@ function applyOne(
     case "force_modify": {
       const forceId = required(delta.forceRef, "The force");
       const force = world.material.forces.find((candidate) => candidate.id === forceId);
-      if (force === undefined) reject(`No force "${forceId}" exists.`);
+      if (force === undefined) reject(`No force "${forceId}" exists.`, "reference");
       if (delta.locationId !== undefined && !world.map.provinces.some((province) => province.id === delta.locationId)) {
-        reject(`No province "${delta.locationId}" exists to move this force to.`);
+        reject(`No province "${delta.locationId}" exists to move this force to.`, "reference");
       }
       const commanderId = delta.commanderCharacterRef === undefined ? undefined : required(delta.commanderCharacterRef, "The commander");
       if (commanderId !== undefined && !world.characters.some((character) => character.id === commanderId)) {
-        reject(`No character "${commanderId}" exists to take command.`);
+        reject(`No character "${commanderId}" exists to take command.`, "reference");
       }
       const strength = Math.max(0, force.authorizedStrength + (delta.authorizedStrengthDelta ?? 0));
       const updated = {
@@ -387,7 +391,7 @@ function applyOne(
 
     case "character_intent_set": {
       const actorId = required(delta.actorCharacterRef, "The acting character");
-      if (!world.characters.some((character) => character.id === actorId)) reject(`No character "${actorId}" exists to hold this intent.`);
+      if (!world.characters.some((character) => character.id === actorId)) reject(`No character "${actorId}" exists to hold this intent.`, "reference");
       const targetIds = delta.targetRefs.map((ref) => required(ref, "An intent target"));
       const intent = {
         id: context.ids.next("intent"),
@@ -471,7 +475,7 @@ function applyOne(
         succeedsGrantId: null,
       };
       if (existingId !== null) {
-        if (!world.authorityGrants.some((grant) => grant.id === existingId)) reject(`No authority grant "${existingId}" exists to change.`);
+        if (!world.authorityGrants.some((grant) => grant.id === existingId)) reject(`No authority grant "${existingId}" exists to change.`, "reference");
         return { ...world, authorityGrants: world.authorityGrants.map((grant) => (grant.id === existingId ? { ...grant, ...base } : grant)) };
       }
       const id = mint("grant", delta.localId);
@@ -481,7 +485,7 @@ function applyOne(
     case "order_attempt_decide": {
       const attemptId = required(delta.orderAttemptRef, "The order");
       const attempt = world.orderAttempts.find((candidate) => candidate.id === attemptId);
-      if (attempt === undefined) reject(`No order attempt "${attemptId}" exists to answer.`);
+      if (attempt === undefined) reject(`No order attempt "${attemptId}" exists to answer.`, "reference");
       if (attempt.status !== "received" && attempt.status !== "delayed" && attempt.status !== "issued") {
         reject(`Order attempt "${attemptId}" has already been answered (${attempt.status}).`);
       }
@@ -503,7 +507,7 @@ function applyOne(
         const participants = draft.participantCharacterRefs.map((ref, index) => required(ref, `Participant ${index + 1}`));
         for (const participantId of participants) {
           if (!world.characters.some((character) => character.id === participantId)) {
-            reject(`No character "${participantId}" exists to take part in this.`);
+            reject(`No character "${participantId}" exists to take part in this.`, "reference");
           }
         }
         return CharacterSocialEventSchema.parse({

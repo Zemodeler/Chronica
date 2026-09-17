@@ -43,6 +43,12 @@ export interface AccountView {
 export interface GameWorldView {
   readonly gameId: string;
   readonly gameTitle: string;
+  /**
+   * The character this player actually holds in the world, or null if they hold
+   * only a placeholder. Holding one is what makes the player an actor the
+   * simulation can accept orders from.
+   */
+  readonly viewerCharacterId: string | null;
   /** The world's own date, e.g. "1 March 264 BC". Replaces the old turn counter. */
   readonly dateLabel: string;
   readonly provinces: readonly ProvinceView[];
@@ -148,6 +154,7 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
   return {
     gameId: meta.gameId,
     gameTitle: meta.gameTitle,
+    viewerCharacterId: viewer?.id ?? null,
     dateLabel: meta.clock === undefined ? `Day ${world.elapsedStep}` : formatWorldDate(world.instant, meta.clock),
     provinces,
     mapOverlay: projectOverlay(world),

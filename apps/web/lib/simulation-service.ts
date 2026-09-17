@@ -16,10 +16,11 @@ import {
   startBurst,
   type ChronicaDatabase,
 } from "@chronica/db";
-import { FactSchema, type Fact, type OrderPartyRef } from "@chronica/shared";
-import { composeChronicle, runSimulationBurst, type SimModelPort } from "@chronica/sim";
+import { FactSchema, PlayerDecisionSchema, type Fact, type OrderPartyRef } from "@chronica/shared";
+import { composeChronicle, runSimulationBurst, whoSeeksThePlayer, type AnsweredDecision, type SimModelPort } from "@chronica/sim";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { requiredDatabaseUrl } from "./database-url";
+import { openInitiatedDialogue } from "./dialogue-service";
 
 /**
  * Where the pure simulation meets the application.
@@ -80,18 +81,26 @@ export type SimulationOutcome =
   | { readonly status: "ok"; readonly outcome: "continue" | "chronicle" | "player_decision"; readonly title: string; readonly body: string; readonly decision: { readonly prompt: string; readonly options: unknown } | null }
   | { readonly status: "error"; readonly message: string };
 
-export async function submitOrder(gameId: string, orderText: string): Promise<SimulationOutcome> {
+export async function submitOrder(
+  gameId: string,
+  orderText: string,
+  answeredDecision?: AnsweredDecision,
+): Promise<SimulationOutcome> {
   const context = await resolveContext(gameId);
   if (context === null) return { status: "error", message: "You are not playing in this game." };
-  const { db, close, userId, characterId } = context;
+  const { db, close, userId, playerId, characterId } = context;
 
   try {
     const view = await getWorldView(db, gameId);
     if (view === undefined) return { status: "error", message: "This world has no state to act on yet." };
     if (view.scenarioClock === undefined) return { status: "error", message: "This scenario declares no clock." };
 
-    const open = await getOpenDecision(db, gameId);
-    if (open !== undefined) return { status: "error", message: "A decision is waiting on you before the world can move on." };
+    // An answer carries its own decision, and is the one order allowed to run
+    // while one is open -- it is what closes it.
+    if (answeredDecision === undefined) {
+      const open = await getOpenDecision(db, gameId);
+      if (open !== undefined) return { status: "error", message: "A decision is waiting on you before the world can move on." };
+    }
 
     // Offices are scenario data, not world state, and authority derivation needs them.
     const offices = view.scenarioGovernment?.offices ?? [];
@@ -120,6 +129,7 @@ export async function submitOrder(gameId: string, orderText: string): Promise<Si
         actorRef,
         actorPolityId,
         orderText,
+        ...(answeredDecision === undefined ? {} : { answeredDecision }),
         knownFacts: parseFacts(factRows),
         queue: queueRows.map((row) => ({ id: row.id, dueInstantSortKey: row.dueInstantSortKey, kind: row.kind, summary: row.summary })),
         port,
@@ -187,6 +197,17 @@ export async function submitOrder(gameId: string, orderText: string): Promise<Si
       throw error;
     }
 
+    // Now that the world has settled, let anyone with real reason to seek the
+    // ruler out open a conversation. Free, and outside the burst: this reports
+    // on what already happened rather than causing anything.
+    try {
+      for (const initiation of whoSeeksThePlayer({ world: result.world, playerRef: actorRef })) {
+        await openInitiatedDialogue(db, gameId, playerId, initiation.characterId, initiation.openingLine);
+      }
+    } catch (error) {
+      console.warn("[simulation] failed to open an initiated conversation:", error);
+    }
+
     return {
       status: "ok",
       outcome: result.outcome,
@@ -225,14 +246,23 @@ export async function answerDecision(gameId: string, decisionId: string, optionI
   const context = await resolveContext(gameId);
   if (context === null) return { status: "error", message: "You are not playing in this game." };
   const { db, close } = context;
+  let answered: AnsweredDecision;
   try {
     const open = await getOpenDecision(db, gameId);
     if (open === undefined || open.id !== decisionId) return { status: "error", message: "That decision is no longer open." };
+
+    const options = PlayerDecisionSchema.shape.options.safeParse(open.options);
+    const chosen = options.success ? options.data.find((option) => option.id === optionId) : undefined;
+    if (chosen === undefined) return { status: "error", message: "That is not one of the options." };
+
     await resolveDecision(db, decisionId, optionId);
+    // Hand the world the question and the answer, not a sentence about them.
+    // Round-tripping through prose lost the prompt entirely, so the world
+    // resumed a decision without quite knowing what had been asked.
+    answered = { prompt: open.prompt, label: chosen.label, summary: chosen.summary };
   } finally {
     await close();
   }
 
-  // The ruler's answer is itself an order: the world now carries it out.
-  return submitOrder(gameId, `In answer to the question put to you, you have chosen: ${optionId}.`);
+  return submitOrder(gameId, `The ruler has answered: ${answered.label}.`, answered);
 }

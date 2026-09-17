@@ -164,6 +164,43 @@ describe("a burst answering \"Raise two new legions\"", () => {
   });
 });
 
+describe("friction the player hears about", () => {
+  /** An order whose spending the treasury genuinely cannot cover. */
+  const UNAFFORDABLE = JSON.stringify({
+    ...JSON.parse(RAISE_TWO_LEGIONS),
+    deltas: [{ op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: null, amount: 999_999, reason: "An impossible levy." }],
+    facts: [],
+  });
+
+  /** An order naming an official the same answer never created. */
+  const PHANTOM = JSON.stringify({
+    ...JSON.parse(RAISE_TWO_LEGIONS),
+    deltas: [{ op: "character_intent_set", actorCharacterRef: "publius_scutarius", actionType: "prepare", targetRefs: [], rationale: "Preparing the levy.", priority: 50, visibility: "private" }],
+    facts: [],
+  });
+
+  it("tells the player when the world itself could not comply", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [UNAFFORDABLE], simulate_cognition: [JSON.stringify({ actors: [] })] });
+    const result = await runSimulationBurst(input(port));
+
+    const friction = result.newFacts.find((fact) => fact.kind === "execution_friction");
+    expect(friction).toBeDefined();
+    expect(factsVisibleTo([friction!], { kind: "character", id: "marcus-atilius" }, result.world.instant)).toHaveLength(1);
+  });
+
+  it("keeps a malformed proposal out of the ruler's sight", async () => {
+    // "No character publius_scutarius exists" is the engine catching a bad
+    // payload, not a thing that happened in the world.
+    const port = scriptedPort({ simulate_orchestrate: [PHANTOM], simulate_cognition: [JSON.stringify({ actors: [] })] });
+    const result = await runSimulationBurst(input(port));
+
+    const noise = result.newFacts.find((fact) => fact.kind === "engine_rejection");
+    expect(noise).toBeDefined();
+    expect(factsVisibleTo([noise!], { kind: "character", id: "marcus-atilius" }, result.world.instant)).toHaveLength(0);
+    expect(result.newFacts.some((fact) => fact.kind === "execution_friction")).toBe(false);
+  });
+});
+
 describe("information boundaries", () => {
   it("keeps a secret out of the player's view while the world still knows it", async () => {
     const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [CARTHAGE_REACTS] });

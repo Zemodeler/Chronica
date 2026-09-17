@@ -73,7 +73,11 @@ export default async function GamePage({
     };
   }
 
-  const playerCharacterId = knowledgebase?.confirmedByPlayer ? knowledgebase.characterId : undefined;
+  // Chat needs the declared-character knowledgebase to speak in the player's
+  // own voice. Giving orders does not: holding a character in the world is the
+  // whole qualification, so the council is reachable as soon as one is held.
+  const chatCharacterId = knowledgebase?.confirmedByPlayer ? knowledgebase.characterId : undefined;
+  const orderingCharacterId = world.viewerCharacterId ?? undefined;
 
   return (
     <GameShell
@@ -84,7 +88,8 @@ export default async function GamePage({
       initialOverlay={world.mapOverlay}
       baseImageUrl="/maps/natural-earth-ii-blue-oceans.png"
       characterPanel={characterPanel}
-      playerCharacterId={playerCharacterId}
+      playerCharacterId={chatCharacterId}
+      orderingCharacterId={orderingCharacterId}
     />
   );
 }

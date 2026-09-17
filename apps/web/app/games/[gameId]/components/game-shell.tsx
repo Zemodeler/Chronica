@@ -102,7 +102,10 @@ interface GameShellProps {
   readonly baseImageUrl?: string;
   readonly detailImageUrl?: string;
   readonly characterPanel?: CharacterPanelProps | undefined;
+  /** Drives the chat panel: speaking as this character needs their declared knowledgebase. */
   readonly playerCharacterId?: string | undefined;
+  /** Drives the council: giving orders only needs a character held in the world. */
+  readonly orderingCharacterId?: string | undefined;
 }
 
 export function GameShell({
@@ -115,6 +118,7 @@ export function GameShell({
   detailImageUrl,
   characterPanel,
   playerCharacterId,
+  orderingCharacterId,
 }: GameShellProps) {
   const [geoJson, setGeoJson] = useState<GeoJsonMap | undefined>(
     () => initialGeoJson ?? _geoJsonCache.get(gameId),
@@ -498,7 +502,7 @@ export function GameShell({
           onOpenSessionConsumed={() => setOpenChatSessionId(null)}
         />
       )}
-      {playerCharacterId && <SimulationPanel gameId={gameId} />}
+      {orderingCharacterId && <SimulationPanel gameId={gameId} />}
     </>
   );
 }
