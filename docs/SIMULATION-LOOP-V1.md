@@ -111,6 +111,30 @@ runSimulationBurst(input)
 two-to-four calls per interaction achievable: attention routing, arithmetic, authority, id
 assignment, scheduling, information filtering, pressure accumulation and termination are all code.
 
+### Why the world only moves during a burst
+
+Between orders the world is perfectly still. That is the intended game: it is the player's, paced by
+them, and nothing happens behind their back while they read.
+
+This makes the burst responsible for carrying the world far enough to be worth the asking. It takes
+a short first step — so word can travel and the people the order touched can answer — and then jumps
+to whatever is next on the calendar, bounded by the scenario's maximum span. A single order can
+therefore span days or months depending on what is pending, which is what lets a sixty-day levy
+mature rather than creeping forward two days at a time forever.
+
+### The deterministic tick (`tick.ts`)
+
+Everything that happens because time passed and for no other reason: revenue collected, wages paid,
+project milestones reached. VISION §7 is explicit that there is no reason to invoke a model to
+calculate a monthly surplus, and nothing does — a burst spanning sixty days collects two months of
+revenue and pays two months of wages in one pass, free.
+
+What it will not do is decide anything. A treasury that cannot meet the army's wages accrues arrears
+and emits a fact saying so; whether that becomes a mutiny is for an actor to judge. Note the
+asymmetry: revenue arriving as expected emits no fact at all, because a treasury filling on schedule
+is not history and a fact per tax payment would drown every Chronicle in bookkeeping. An unpaid army
+emphatically is.
+
 ### Why `packages/sim` is its own package
 
 The old engine lived in `apps/web/lib/resolution/` and was untestable for exactly that reason. The
@@ -362,9 +386,9 @@ advance the clock, and does not wake the world on its own. It records what happe
 
 ## 10. Verification
 
-`packages/sim` has **48 tests**, all driven by a scripted model port — never a live adapter, because
+`packages/sim` has **64 tests**, all driven by a scripted model port — never a live adapter, because
 a test that can disagree with itself run-to-run is worth nothing as a regression guard. Repo-wide:
-463 tests pass, none skipped, and the whole repo typechecks.
+479 tests pass, none skipped, and the whole repo typechecks.
 
 The end-to-end case is VISION §30's own example. One order — *"Raise two new legions."* — produces,
 in two model calls:
@@ -434,9 +458,6 @@ good answer arrives in one call with the repair path catching the rest.
 
 ## 12. What is deliberately not done
 
-- **`social_events` is a contract arm with no applier.** The delta parses and is accepted, but the
-  orchestrator cannot yet author relationship change directly — only a conversation can, through
-  §9's path. Wiring the delta arm into `applySocialEvents` is the obvious next step.
 - **NPC-initiated contact is gone.** Its only trigger was a Chronicle entry field, so the route that
   opened those conversations was deleted; `openInitiatedDialogue` survives and needs a new source,
   most naturally a pressure or an unanswered commitment.
@@ -450,7 +471,27 @@ good answer arrives in one call with the repair path catching the rest.
 - **The simulation panel appears only after character declaration**, since that is what the game page
   gates `playerCharacterId` on. That is the existing product flow, not a decision taken here.
 
-## 13. The known risk
+## 13. What completing the loop changed
+
+Three holes remained after the first pass, all the same shape: the world recorded intentions it
+never honoured.
+
+- **The queue was write-mostly.** A milestone came due, was mentioned to the orchestrator, and was
+  retired whether or not anything happened. Nothing advanced the project it belonged to, so "raise
+  two legions" scheduled legions that could never arrive. `runDeterministicTick` resolves them.
+- **A burst crept forward two days and stopped**, so a sixty-day levy would have needed thirty
+  orders to mature. It now walks to the next moment that matters.
+- **The attention router's middle tier was computed and discarded.** Actors who cared but did not
+  warrant a model call now record what they mean to do, deterministically and for free.
+- **`social_events` parsed and did nothing**, so the orchestrator could not author relationship
+  change at all. It routes through `applySocialEvents`, the same applier a conversation uses.
+
+Writing the pacing found a mistake in it: significance crossing the threshold was gated behind the
+minimum span, so a world where Rome had just declared war would carry on for another week before
+telling the player. The minimum span exists to avoid waking someone for trivia; it now gates only
+the quiet stop.
+
+## 14. The known risk
 
 **Prompt size, not loop logic.** `buildWorldSlice` is where this design succeeds or fails. The
 orchestrator's system prompt is ~4,600 tokens (mostly the generated JSON schema, identical every call
