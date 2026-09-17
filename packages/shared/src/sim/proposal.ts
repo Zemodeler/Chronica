@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EntityIdSchema } from "../material-state";
 import { FactDiscoveryStateSchema, FactVisibilitySchema } from "../world/facts";
 import { OrderPartyRefSchema } from "../world/party-ref";
 import { LocalIdSchema, RefSchema } from "./refs";
@@ -60,6 +61,28 @@ export const ScheduledEventProposalSchema = z.object({
 });
 export type ScheduledEventProposal = z.infer<typeof ScheduledEventProposalSchema>;
 
+/**
+ * Something already true becoming known to somebody (VISION §14).
+ *
+ * Facts are not part of `WorldState` -- they are their own ledger -- so this
+ * cannot be a delta. It is the payoff of intelligence work: a secret that
+ * existed all along enters an observer's knowledge, and from that moment their
+ * cognition is built on it and their government's Chronicle may mention it.
+ *
+ * `knowableInDays` is the same travel time news always has: an agent in Carthage
+ * learning something is not the same as the Senate hearing it.
+ */
+export const FactDiscoveryProposalSchema = z
+  .object({
+    /** A fact already on the record. Ids come from the history the actor was shown. */
+    factId: EntityIdSchema,
+    observerRef: OrderPartyRefSchema,
+    via: z.enum(["witnessed", "told", "document", "investigation", "rumour"]),
+    knowableInDays: z.number().int().min(0).max(3_660).default(0),
+  })
+  .strict();
+export type FactDiscoveryProposal = z.infer<typeof FactDiscoveryProposalSchema>;
+
 export const ProposalSchema = z
   .object({
     /** What the actor did, in its own words -- the raw material a Chronicle is later written from. */
@@ -71,6 +94,8 @@ export const ProposalSchema = z
     frictions: z.array(z.string().trim().min(1).max(300)).max(8).default([]),
     deltas: z.array(WorldDeltaSchema).max(24).default([]),
     facts: z.array(FactProposalSchema).max(16).default([]),
+    /** Secrets that have come to light, rather than new things that have happened. */
+    discoveries: z.array(FactDiscoveryProposalSchema).max(12).default([]),
     delegations: z.array(DelegationProposalSchema).max(8).default([]),
     schedule: z.array(ScheduledEventProposalSchema).max(12).default([]),
   })

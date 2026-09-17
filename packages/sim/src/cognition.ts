@@ -64,6 +64,10 @@ The same engine rules apply as elsewhere:
 - Mark anything done in secret with visibility "private", and news that has to
   travel with discovery "delayed" or "rumoured" plus "knowableInDays".
 - Score each fact's "significance" from 0 to 100 by how much a historian would care.
+- Someone who sets out to find something out, and succeeds, records it in
+  "discoveries" -- the fact already existed; what changed is that they now know
+  it. Someone who sets out to deceive uses "belief_set" on the person they are
+  deceiving. A belief is never checked against the truth.
 
 Answer with a single JSON object and nothing else, matching this schema:
 

@@ -183,6 +183,12 @@ export interface BurstCommit {
   readonly world: WorldState;
   readonly burstId: string;
   readonly facts: readonly BurstFactRow[];
+  /**
+   * Facts already on record whose discovery widened this burst -- a secret
+   * somebody investigated their way into. Not new history, so they are written
+   * over their existing rows rather than inserted beside them.
+   */
+  readonly rediscoveredFacts?: readonly BurstFactRow[];
   readonly scheduled: readonly BurstEventRow[];
   readonly firedEventIds: readonly string[];
   readonly burst: {

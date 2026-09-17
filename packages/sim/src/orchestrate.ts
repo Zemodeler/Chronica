@@ -111,7 +111,15 @@ How to answer well:
    ordinary obligation, so an unpaid debt falls into arrears like unpaid wages.
    Revenue that comes from another power should name that power, so a war can
    cut it.
-15. Keep each country's aims current. STANDING AIMS says what a power is trying
+15. Secrets can be found out, and lies can be told. A secret in the world stays
+   secret until somebody learns it: put a discovery in "discoveries", naming the
+   fact already on record, who learned it and how -- investigation, a document,
+   an intercepted dispatch, a rumour -- with the days it takes to reach them.
+   That, and not a new fact, is what intelligence work produces. To plant a
+   falsehood instead, use "belief_set": what a person acts on is what they
+   believe, and a belief is never checked against the truth. Neither is free:
+   sending agents is a project that takes time and can fail.
+16. Keep each country's aims current. STANDING AIMS says what a power is trying
    to do, what worries it and what it means to do next. Every polity with people
    in it should have one, and any power whose situation changed this turn should
    have theirs rewritten with "polity_outlook_set" -- a country that watched a

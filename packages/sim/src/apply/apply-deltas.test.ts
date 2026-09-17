@@ -571,3 +571,35 @@ describe("borrowing", () => {
     expect(result.world.material.obligations.find((o) => o.kind === "debt_service")!.active).toBe(false);
   });
 });
+
+describe("what somebody can be made to believe", () => {
+  const plant = (holder: string, claim: string, kind: "fact" | "rumour" | "suspicion" | "secret", confidence: number): WorldDelta => ({
+    op: "belief_set",
+    holderCharacterRef: holder,
+    claim,
+    kind,
+    confidence,
+    subjectRef: null,
+    sourceCharacterRef: null,
+    visibility: "private",
+    reason: "An agent saw to it that he heard this.",
+  });
+
+  it("puts a claim in someone's head without asking whether it is true", () => {
+    const state = world();
+    const target = state.characters.find((character) => character.alive)!.id;
+    const result = applyDeltas(state, [plant(target, "The Carthaginian fleet has already sailed.", "rumour", 55)], context());
+
+    const belief = result.world.characterBeliefs.find((candidate) => candidate.holderCharacterId === target);
+    expect(belief?.claim).toBe("The Carthaginian fleet has already sailed.");
+    expect(belief?.kind).toBe("rumour");
+    expect(belief?.confidence).toBe(55);
+    expect(belief?.status).toBe("active");
+  });
+
+  it("refuses to plant anything in a person who does not exist", () => {
+    const result = applyDeltas(world(), [plant("a-man-who-never-was", "Anything at all.", "fact", 90)], context());
+    expect(result.rejected[0]!.reason).toContain('No character "a-man-who-never-was"');
+    expect(result.rejected[0]!.kind).toBe("reference");
+  });
+});
