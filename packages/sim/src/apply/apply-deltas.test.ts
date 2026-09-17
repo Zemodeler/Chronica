@@ -288,3 +288,151 @@ describe("what a country is trying to do", () => {
     expect(result.rejected[0]!.kind).toBe("reference");
   });
 });
+
+describe("the political price of a measure", () => {
+  it("moves a polity's legitimacy and records why", () => {
+    const before = world();
+    const opening = before.material.polityLegitimacy.find((entry) => entry.polityId === "rome")?.legitimacyBps ?? 5_000;
+    const result = applyDeltas(
+      before,
+      [{ op: "legitimacy_shift", target: "polity", targetId: "rome", legitimacyBpsDelta: -900, institutionalConfidenceBpsDelta: -400, causeLabel: "Doubled the tax on the wealthy", reason: "The measure fell on the people who matter." }],
+      context(),
+    );
+
+    const standing = result.world.material.polityLegitimacy.find((entry) => entry.polityId === "rome");
+    expect(standing).toBeDefined();
+    expect(standing!.causes.some((cause) => cause.label === "Doubled the tax on the wealthy")).toBe(true);
+    expect(standing!.legitimacyBps).toBe(opening - 900);
+  });
+
+  it("never lets legitimacy leave the scale, however hard it is pushed", () => {
+    const collapse: WorldDelta = { op: "legitimacy_shift", target: "polity", targetId: "rome", legitimacyBpsDelta: -10_000, causeLabel: "Catastrophe", reason: "Everything went wrong at once." };
+    const result = applyDeltas(world(), [collapse, collapse], context());
+    const standing = result.world.material.polityLegitimacy.find((entry) => entry.polityId === "rome")!;
+    expect(standing.legitimacyBps).toBe(0);
+  });
+
+  it("refuses to move the standing of a polity that does not exist", () => {
+    const result = applyDeltas(
+      world(),
+      [{ op: "legitimacy_shift", target: "polity", targetId: "atlantis", legitimacyBpsDelta: -100, causeLabel: "A scandal", reason: "Word got out." }],
+      context(),
+    );
+    expect(result.rejected[0]!.reason).toContain('No polity "atlantis"');
+  });
+});
+
+describe("what the country is made of", () => {
+  const province = (): string => world().map.provinces[0]!.id;
+
+  it("draws men out of a province when they are levied", () => {
+    const id = province();
+    const before = applyDeltas(world(), [], context()).world;
+    const start = before.material.provinceMaterial.find((m) => m.provinceId === id);
+    const result = applyDeltas(
+      before,
+      [{ op: "province_material_shift", provinceId: id, availableManpowerDelta: -2_000, stabilityBpsDelta: -500, reason: "Two legions raised here." }],
+      context(),
+    );
+    const after = result.world.material.provinceMaterial.find((m) => m.provinceId === id)!;
+    if (start !== undefined) expect(after.availableManpower).toBe(Math.max(0, start.availableManpower - 2_000));
+    expect(after.lastMaterialUpdateStep).toBe(before.elapsedStep);
+  });
+
+  it("derives a province's material state on first use rather than refusing", () => {
+    const bare: WorldState = { ...world(), material: { ...world().material, provinceMaterial: [] } };
+    const result = applyDeltas(
+      bare,
+      [{ op: "province_material_shift", provinceId: province(), foodSecurityBpsDelta: -3_000, reason: "The harvest failed." }],
+      context(),
+    );
+    expect(result.rejected).toHaveLength(0);
+    expect(result.world.material.provinceMaterial.length).toBeGreaterThan(0);
+  });
+
+  it("refuses to change a place that is not on the map", () => {
+    const result = applyDeltas(
+      world(),
+      [{ op: "province_material_shift", provinceId: "latium", foodSecurityBpsDelta: -100, reason: "A shortage." }],
+      context(),
+    );
+    expect(result.rejected[0]!.reason).toContain('No province "latium"');
+    expect(result.rejected[0]!.kind).toBe("reference");
+  });
+});
+
+describe("a question put to a body", () => {
+  const sponsor = (state: WorldState): string => state.characters.find((character) => character.alive)!.id;
+  const institution = (state: WorldState): string => state.material.institutions[0]!.id;
+
+  const open = (state: WorldState): WorldDelta => ({
+    op: "political_procedure_open",
+    localId: "censure",
+    type: "denunciation",
+    institutionRef: institution(state),
+    sponsorCharacterRef: sponsor(state),
+    subjectKind: "character",
+    subjectRef: sponsor(state),
+    label: "Censure the consul for the tax.",
+    resolutionMechanism: "vote",
+    deadlineInDays: 30,
+    visibility: "polity",
+    reason: "The measure has to answer to the Senate.",
+  });
+
+  it("opens gathering support, with a deadline the engine works out from days", () => {
+    const state = world();
+    const result = applyDeltas(state, [open(state)], context());
+    const opened = result.world.material.politicalProcedures.find((procedure) => procedure.label === "Censure the consul for the tax.");
+    expect(opened).toBeDefined();
+    expect(opened!.stage).toBe("gathering_support");
+    expect(opened!.deadlineStep).toBe(state.elapsedStep + 30);
+    expect(opened!.outcome).toBeNull();
+  });
+
+  it("keeps both sides of a senator who changes his mind, and counts only the later one", () => {
+    const state = world();
+    const opened = applyDeltas(state, [open(state)], context());
+    const procedureId = opened.world.material.politicalProcedures.at(-1)!.id;
+    const supporter = sponsor(state);
+
+    const took = (position: "support" | "oppose"): WorldDelta => ({
+      op: "political_support_set", procedureRef: procedureId, supporterKind: "character", supporterRef: supporter,
+      position, influenceWeight: 40, reasonKind: "ideology", reasonLabel: "He has thought better of it.", visibility: "polity",
+      reason: "His position moved.",
+    });
+
+    const first = applyDeltas(opened.world, [took("support")], context());
+    const second = applyDeltas(first.world, [took("oppose")], context());
+
+    const rows = second.world.material.supportPositions.filter((position) => position.supporterId === supporter);
+    expect(rows).toHaveLength(2);
+    expect(rows.at(-1)!.position).toBe("oppose");
+  });
+
+  it("refuses a vote where there is no body to hold one", () => {
+    const state = world();
+    const result = applyDeltas(
+      state,
+      [{ ...open(state), institutionRef: null } as WorldDelta],
+      context(),
+    );
+    expect(result.rejected[0]!.reason).toContain("can only be put to a vote");
+    expect(result.rejected[0]!.kind).toBe("world");
+  });
+
+  it("settles it once, and refuses to settle it twice", () => {
+    const state = world();
+    const opened = applyDeltas(state, [open(state)], context());
+    const procedureId = opened.world.material.politicalProcedures.at(-1)!.id;
+    const resolve: WorldDelta = { op: "political_procedure_resolve", procedureRef: procedureId, outcome: "failed", outcomeReason: "The chamber would not carry it.", reason: "The vote was held." };
+
+    const once = applyDeltas(opened.world, [resolve], context());
+    const settled = once.world.material.politicalProcedures.find((procedure) => procedure.id === procedureId)!;
+    expect(settled.stage).toBe("resolved");
+    expect(settled.outcome).toBe("failed");
+
+    const twice = applyDeltas(once.world, [resolve], context());
+    expect(twice.rejected[0]!.reason).toContain("already been settled");
+  });
+});
