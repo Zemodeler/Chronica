@@ -148,6 +148,38 @@ export function emitFacts(drafts: readonly FactDraft[], idFactory: () => string 
 }
 
 /**
+ * What an observer knows, including what their own polity knows.
+ *
+ * `factsVisibleTo` below cannot answer this on its own: it has no way to learn
+ * which polity an observer belongs to, so it treats every `polity`-scoped fact
+ * as unknown. That is a safe default for a pure function and a silent disaster
+ * for a caller that forgets to pre-filter -- a government's own dispatches
+ * became invisible to the government that sent them, and Chronicles came back
+ * reading "nothing of note was recorded in this period".
+ *
+ * So this is the function callers should reach for. A `polity` fact is known to
+ * an observer when their own polity, or the observer themselves, is among the
+ * entities it affects.
+ */
+export function factsKnownTo(
+  facts: readonly Fact[],
+  observer: OrderPartyRef,
+  observerPolityId: string | null,
+  atInstant: WorldInstant,
+): Fact[] {
+  const alreadyVisible = new Set<Fact>(factsVisibleTo(facts, observer, atInstant));
+  return facts.filter((fact) => {
+    if (alreadyVisible.has(fact)) return true;
+    if (fact.visibility !== "polity") return false;
+    return fact.affectedEntities.some(
+      (entity) =>
+        (entity.kind === "polity" && observerPolityId !== null && entity.id === observerPolityId) ||
+        (entity.kind === observer.kind && entity.id === observer.id),
+    );
+  });
+}
+
+/**
  * Filters a batch of Facts to those a specific observer may currently treat
  * as known, per Fact.visibility (the existing three-value tag, `visible()`
  * in `gm/read-tools.ts`'s own equivalent for the session-wide case) layered

@@ -1,6 +1,6 @@
 import {
   buildAuthorityIndex,
-  factsVisibleTo,
+  factsKnownTo,
   stableHash,
   type Fact,
   type Office,
@@ -100,7 +100,7 @@ export function routeAttention(input: AttentionInput): AttentionResult {
 
     // Gate 1: could they know? This is the epistemic wall -- a secret nobody
     // has discovered cannot pull anyone into cognition (VISION §14).
-    const knownFacts = factsVisibleTo(triggering, ref, world.instant);
+    const knownFacts = factsKnownTo(triggering, ref, character.polityId, world.instant);
     if (knownFacts.length === 0) {
       dormantCount += 1;
       continue;
