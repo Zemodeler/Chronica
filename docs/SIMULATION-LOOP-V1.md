@@ -38,12 +38,15 @@ arbitrates, assigns every id, and applies it atomically.**
 
 In `packages/shared/src/sim/`:
 
-- `deltas.ts` — `WorldDeltaSchema`, a discriminated union of **14 operations**. The complete set of
-  ways the world can change.
+- `deltas.ts` — `WorldDeltaSchema`, a discriminated union of **26 operations**. The complete set of
+  ways the world can change: money, income, obligations, loans, projects, forces, battle, characters,
+  beliefs, intentions, social events, generic entities, authority grants, order decisions, diplomatic
+  stances, polity outlooks, legitimacy, province material, political procedures, support positions
+  and holdings.
 - `proposal.ts` — what an actor returns: `narrativeSummary`, `frictions`, `deltas`, `facts`,
-  `delegations`, `schedule`. The orchestrator and NPC cognition return the *same* shape, which is how
-  VISION §10's symmetric agency falls out of one contract instead of a parallel NPC system that
-  drifts.
+  `discoveries`, `delegations`, `schedule`. The orchestrator and NPC cognition return the *same*
+  shape, which is how VISION §10's symmetric agency falls out of one contract instead of a parallel
+  NPC system that drifts.
 - `refs.ts` — the `local:` handle scheme.
 
 ### Why a closed union rather than a tool registry
@@ -90,11 +93,29 @@ breach. VISION §12: a general who marches without orders has not performed an i
 committed insubordination. Coups, embezzlement and unauthorised wars are only expressible if
 "unauthorized" is a property of an act rather than a veto.
 
-Two bugs here manufactured *false* insubordination, which is the worst failure available to a system
-whose whole point is that real insubordination means something. A character held no authority over
-their own purse (office grants cover an office's named treasury and nothing else), and unscoped
-deltas were judged against `map.polities[0]` — so a Roman consul was checked against Carthage and
-breached for everything. `deriveOwnerGrants` and an actor-relative scope fallback fixed both.
+**Five** bugs here have manufactured *false* insubordination, which is the worst failure available
+to a system whose whole point is that real insubordination means something. Every one was found by
+playing, not by reading:
+
+1. A character held no authority over their own purse — office grants cover an office's named
+   treasury and nothing else. Fixed by `deriveOwnerGrants`.
+2. Unscoped deltas were judged against `map.polities[0]`, so a Roman consul was checked against
+   Carthage and breached for everything. Fixed by an actor-relative scope fallback.
+3. The orchestrator speaks for the **whole world**, not only for the ruler whose order it is
+   answering: it gives the Boii a chieftain and decides what Carthage privately wants. One tax order
+   produced ten breaches, most of them things the consul had nothing to do with. The exemption
+   follows *who is speaking* — `ApplyContext.actsForTheWorld` — so a person acting through their own
+   cognition still answers for everything, and a Carthaginian moving a Roman legion still breaches,
+   which is the whole of §12.
+4. `checkAuthority` matches scopes exactly unless the caller supplies a containment rule, and nothing
+   ever had. A grant over Rome covered nothing *in* Rome, so a consul with authority over his own
+   republic was insubordinate for putting a motion to its own Senate.
+5. Meaning to do something was treated as doing it. An intention has no scope of its own, so it fell
+   back to the whole polity and an official who merely resolved to act had exceeded his authority.
+
+The recurring shape: authority is about what a person may **cause**, and anything that is not a
+person causing something — the world describing itself, a thought, a country's private aims — must
+not be weighed on that scale.
 
 ---
 
@@ -482,16 +503,115 @@ Rome delivering an ultimatum to Messana through an envoy with no authority to co
 Syracuse and Hanno of Carthage each manoeuvring on their own account, Hanno noting he held no office
 with which to commit Carthage to anything.
 
+### The second pass, played the same way
+
+Every defect the second pass found was found by playing, and none by reading. The pattern held: the
+loop was never wrong; the slice failed to show something, the prompt failed to say something, or
+authority was asked a question it had no business answering.
+
+- A Senate was shown without the blocs inside it, so the model recorded the Senate itself as a
+  supporter — a Senate is a room, not an opinion. When it then named the right blocs, a voting bloc
+  was not accepted as a supporter at all, though the blocs are precisely what decide a motion.
+- Nothing told the model what this world's sums look like, so a tax worth eighty times the whole
+  treasury read as ambition rather than a misread of the units.
+- Revenue was banked from a measure still before a council.
+- A forced march ran its milestones, reported itself complete, and left the army where it began.
+- A merchant generated to lend the state money had an empty purse, so the loan was refused by the
+  very person invented to make it.
+- An intelligence mission finished and reported that findings had been transmitted. What a rival
+  privately intends is not a fact anyone wrote down, so there was nothing to discover.
+
+Afterwards, the same five orders run clean. A tax goes before the Senate with the patrician bloc
+against it and the popular bloc behind it and no revenue banked until it carries; merchant credit
+comes from a creditor the world invented and made rich enough to lend; two legions are raised by
+projects that produce real forces; a forced march puts the army in the Middle Padus and the engine
+resolves the battle there — 490 Roman casualties against 681 Boian, the host broken and streaming
+into Etruria, its chief wounded; and a falsehood about Roman intentions is planted in Hieron's head,
+privately, where his own cognition will read it.
+
 ---
 
-## 13. What is deliberately not done
+## 13. What the world can now do that it could not
 
-- **Combat resolution.** Two sides can now face each other — the Boii field 5,200 men against Rome's
-  4,000 — but nothing resolves a battle between them. `packages/shared/src/warfare/` survived the
-  wipe and has no caller.
-- **Diplomacy, espionage and intrigue as systems.** The delta union is where each plugs in.
-- **Economic depth.** Income, obligations and arrears work; trade, credit and monetary policy do not
-  exist.
+A second pass closed eight gaps between VISION.md and the engine. They shared one shape: in almost
+every case **the data model already existed and was orphaned** — written by nobody, read by nobody,
+reachable by nothing. What was missing was plumbing, so none of it cost a model call. The burst still
+runs on two to four.
+
+**Minds were never shown to their owners.** Every character carried drives, a temperament, a risk
+tolerance, values, taboos, skills, ambitions and directed relations from the start, and cognition
+printed none of it. An NPC was told their office and what they knew, and nothing about who they were,
+which produced uniformly sensible strategists in a world containing timid, greedy and vengeful
+people. Their section now says what they are like, what they want, what they can reach — with the ids
+they would need to reach it — and how they see the people in front of them. Beliefs are filtered to
+the ones still active and carry kind and confidence, so a half-credited rumour no longer moves
+someone like an eyewitness account.
+
+**Countries had no minds at all.** A polity was a name, a capital and a trust score. `polityOutlooks`
+holds §11's standing objective, concerns, intentions and risk tolerance, rewritten as circumstances
+change. It is secret: the orchestrator sees every outlook because it *is* the world and must drive
+Carthage consistently with Carthage's own aims; nobody inside the world sees another power's. That is
+what gives intelligence work a prize.
+
+**A government could not be judged on anything.** §6's "political stability 71/100, senate support
+63/100, 18,400 available manpower" was modelled in full and completely dead — not in the slice, not
+reachable by any delta — so doubling taxes on the wealthy cost a government nothing but a sentence.
+Five slice sections and six deltas reach it now, and the legitimacy and province helpers that had
+been written, tested and never called are called rather than reimplemented. Support positions are
+append-only, so the council's arithmetic takes each supporter's latest position once; summing the
+rows would let one waverer outweigh a chamber.
+
+**Projects produced nothing.** §8's naval expansion could run its milestones, spend its money, reach
+its completion date and yield no ships. `completionWorkflowId` named an execution engine deleted with
+the turn system and `linkedEntityIds` was never written. A project now declares its
+`completionOutcome` when it is invented, and the tick creates the fleet, the fortress, the revenue or
+the army's arrival on the day the last milestone falls. An outcome whose commander has since died
+produces nothing rather than an invalid world.
+
+**Arrangements were write-only.** A law the world invented was recorded and then invisible to the
+model that created it. They are listed, changed through `generic_entity_update`, and kept on the
+books when repealed, because a law's effects and its enemies outlive it.
+
+**There was no such thing as debt.** Every amount is non-negative and the tick floors balances at
+zero, so a treasury simply stopped at nothing and nobody was owed anything — §20's chain from
+merchant credit to political concessions had no mechanism behind it. A loan is a liability record;
+servicing is an ordinary obligation, so arrears, priority and missed periods behave exactly as they
+do for army pay, and a debt crisis is modelled by whatever models an unpaid army. Its priority sits
+below army pay, because a state short of money starves its creditors before its soldiers, and that
+choice is what causes the crisis.
+
+**Nothing could learn a secret or tell a lie.** §14's substrate was all there and no mechanism
+reached it. A proposal carries `discoveries`: a fact already on record becomes known to a named
+observer, after however many days the news takes. The fact is amended in place rather than
+duplicated, because two records of one event with different audiences is how a Chronicle reports a
+thing twice. `belief_set` is the other half — a belief is never checked against reality, so a planted
+falsehood is exactly as storable as an eyewitness account.
+
+**Two armies in the same field could not fight.** A complete, tested, deterministic resolver had sat
+in `packages/shared/src/warfare/` with no callers at all. `force_engage` is the one delta whose
+outcome its author does not decide: the model says who engages whom and how they mean to fight and
+may propose a tactic the engine can refuse; casualties, morale, retreat, capture, death and ground
+are the engine's, seeded from the burst so a replay fights the same battle. A model permitted to
+author its own casualties would win every battle it cared about.
+
+Unpaid wages finally reach the army they pay for, which is what makes the debt crisis a military one.
+
+### The honest limit on §9
+
+A dynamically created mechanic is **persistent, visible, and applied by the model** — not
+deterministically simulated. The engine records the LEX AGRARIA and shows it back; the recruitment
+pool it improves moves because the model moves it. Making the tick interpret arbitrary attributes
+would be a second, weaker way of changing the world beside the delta union, and the union already
+covers anything the model wants to do.
+
+---
+
+## 13a. What is still deliberately not done
+
+- **Sieges and attrition.** Battles resolve; `SiegeOrControlChange` is an output shape, not a system,
+  and there is no starvation clock or blockade.
+- **Trade as geography.** An income source names the power it depends on, so a war can cut it. There
+  are still no routes, no goods, and no prices.
 - **Multiplayer.** The burst assumes one sovereign. Multiplayer reintroduces exactly the
   turn-synchronisation problem §15 exists to avoid.
 - **Games created before this work.** Their state lived in the dropped `world_snapshots`; they were
@@ -502,10 +622,18 @@ with which to commit Carthage to anything.
 ## 14. Known risks
 
 **Prompt size and slice content, not loop logic.** `buildWorldSlice` is where this design succeeds or
-fails. The system prompt is ~4,600 tokens (mostly the generated JSON schema, identical every call and
-therefore cacheable) and the slice is bounded — but whether it carries *the right* bounded subset for
-a given order is the thing most likely to need iteration. Every defect in §12 above was a slice or
+fails. The system prompt is ~8,700 tokens (mostly the generated JSON schema, identical every call and
+therefore cacheable) and the slice is ~1,050 on an opening world — both guarded by assertions in
+`prompt-smoke.test.ts`, on the rule that a section which pushes past the budget gets its cap
+tightened rather than the budget raised. Whether the slice carries *the right* bounded subset for a
+given order remains the thing most likely to need iteration. Every defect in §12 was a slice or
 prompt problem; none was a loop problem.
+
+**Cognition has no repair retry, and a batch answer is all-or-nothing per actor.** A live run
+returned four of six actors as strings rather than objects, and those four reactions were simply
+lost. Orchestration repairs once because a failed orchestration means the player's order goes
+unanswered; a failed cognition only means nobody reacted that iteration. Whether that trade is right
+at six actors, rather than one, is untested.
 
 **Burst duration against request scope.** A burst with a live model can exceed 45 seconds. A client
 that gives up leaves a `simulation_bursts` row at `running` — harmless today, since nothing reads it,
