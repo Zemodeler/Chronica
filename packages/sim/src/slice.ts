@@ -28,7 +28,7 @@ import {
  *    it actually has.
  */
 
-const CAPS = { characters: 12, forces: 10, projects: 8, accounts: 6, stances: 8, facts: 12, events: 8, intents: 8, provinces: 40, foreignForces: 12, foreignFigures: 12, outlooks: 8, institutions: 4, procedures: 6, strainedProvinces: 8, holdings: 6 } as const;
+const CAPS = { characters: 12, forces: 10, projects: 8, accounts: 6, stances: 8, facts: 12, events: 8, intents: 8, provinces: 40, foreignForces: 12, foreignFigures: 12, outlooks: 8, institutions: 4, procedures: 6, strainedProvinces: 8, holdings: 6, arrangements: 8 } as const;
 
 export interface SliceEvent {
   readonly kind: string;
@@ -116,6 +116,19 @@ export interface WorldSlice {
   }[];
   /** Land, and the gap between who owns it and who holds it. */
   readonly holdings: readonly { readonly id: string; readonly title: string; readonly holder: string; readonly control: number; readonly territoryId: string }[];
+  /**
+   * VISION §9's dynamically created mechanics: a law, an institution, an
+   * arrangement no typed schema fits. They were written and never read, so the
+   * model could not see what it had itself created a turn earlier.
+   */
+  readonly arrangements: readonly {
+    readonly id: string;
+    readonly kind: string;
+    readonly label: string;
+    readonly owner: string | null;
+    readonly attributes: readonly string[];
+    readonly retired: boolean;
+  }[];
   readonly outlooks: readonly {
     readonly polityId: string;
     readonly name: string;
@@ -322,6 +335,28 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       territoryId: holding.territoryId,
     }));
 
+  const arrangements = world.genericEntities
+    .filter((entity) => {
+      if (entity.ownerRef === null) return true;
+      if (entity.ownerRef.kind === "polity") return ownPolity === null || entity.ownerRef.id === ownPolity;
+      return ourCharacterIds.has(entity.ownerRef.id);
+    })
+    // A repealed law is still worth a line -- shorter -- because its effects
+    // and its enemies outlive it.
+    .sort((a, b) => Number("retiredAtStep" in a.attributes) - Number("retiredAtStep" in b.attributes))
+    .slice(0, CAPS.arrangements)
+    .map((entity) => ({
+      id: entity.id,
+      kind: entity.kind,
+      label: entity.label,
+      owner: entity.ownerRef === null ? null : entity.ownerRef.kind === "character" ? name(entity.ownerRef.id) : polityName(entity.ownerRef.id),
+      attributes: Object.entries(entity.attributes)
+        .filter(([key]) => key !== "retiredAtStep")
+        .slice(0, 6)
+        .map(([key, value]) => `${key}: ${String(value)}`),
+      retired: "retiredAtStep" in entity.attributes,
+    }));
+
   // Ours first: the order the model reads them in is the order it weighs them.
   const outlooks = [...world.polityOutlooks]
     .sort((a, b) => Number(b.polityId === ownPolity) - Number(a.polityId === ownPolity))
@@ -404,6 +439,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     institutions,
     council,
     holdings,
+    arrangements,
     outlooks,
     projects,
     intents,
@@ -489,6 +525,14 @@ export function renderWorldSlice(slice: WorldSlice): string {
         ...slice.country.strained.map((province) =>
           `${province.name} [${province.id}] — ${province.manpower} men, food ${province.food}/100, order ${province.stability}/100, war damage ${province.warDamage}/100, taxable ${province.taxCapacity}`),
       ],
+  );
+  section(
+    "STANDING ARRANGEMENTS",
+    slice.arrangements.map((entity) => {
+      const owner = entity.owner === null ? "" : `, under ${entity.owner}`;
+      const detail = entity.attributes.length === 0 ? "" : ` — ${entity.attributes.join(", ")}`;
+      return `${entity.label} [${entity.id}] (${entity.kind}${owner})${entity.retired ? ", repealed" : ""}${detail}`;
+    }),
   );
   section("LANDS AND HOLDINGS", slice.holdings.map((holding) =>
     `${holding.title} [${holding.id}] in ${holding.territoryId} — held in law by ${holding.holder}, held in fact ${holding.control}/100`));

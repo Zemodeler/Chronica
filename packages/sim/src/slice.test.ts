@@ -182,3 +182,30 @@ describe("what the government can see of its own standing", () => {
     expect(slice(settled).council).toHaveLength(0);
   });
 });
+
+describe("arrangements the world made for itself", () => {
+  const withLaw = (retired: boolean): WorldState => {
+    const state = world();
+    return {
+      ...state,
+      genericEntities: [
+        {
+          id: "entity-lex", kind: "law", label: "Lex Agraria", ownerRef: { kind: "polity", id: "rome" },
+          attributes: retired ? { eliteLoyalty: -30, retiredAtStep: 12 } : { eliteLoyalty: -30 },
+          linkedEntityIds: [], createdAtStep: 0, provenanceEventIds: [],
+        },
+      ],
+    };
+  };
+
+  it("shows the model what it created a turn ago, with the id it would need to change it", () => {
+    const text = renderWorldSlice(slice(withLaw(false)));
+    expect(text).toContain("STANDING ARRANGEMENTS");
+    expect(text).toContain("Lex Agraria [entity-lex]");
+    expect(text).toContain("eliteLoyalty: -30");
+  });
+
+  it("keeps a repealed law visible, and says it is repealed", () => {
+    expect(renderWorldSlice(slice(withLaw(true)))).toContain("repealed");
+  });
+});

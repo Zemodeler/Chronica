@@ -111,6 +111,26 @@ const ProjectCreateSchema = z.object({
     )
     .min(1)
     .max(20),
+  /**
+   * What exists when the last milestone falls. A naval expansion that completes
+   * and produces no ships has not happened. Omit it only for an effort whose
+   * whole product is that it took place.
+   */
+  completionOutcome: z
+    .object({
+      kind: z.enum(["force", "structure", "income_source", "none"]),
+      label: z.string().trim().min(1).max(160),
+      /** Men for a force, garrison capacity for a structure, revenue per period for an income source. */
+      amount: z.number().int().nonnegative().max(10_000_000).default(0),
+      provinceId: EntityIdSchema.nullable().default(null),
+      polityId: EntityIdSchema.nullable().default(null),
+      commanderCharacterRef: RefSchema.nullable().default(null),
+      beneficiaryAccountRef: RefSchema.nullable().default(null),
+      cadenceDays: z.number().int().positive().max(36_600).nullable().default(null),
+    })
+    .strict()
+    .nullable()
+    .default(null),
   reason: ReasonSchema,
 }).strict();
 
@@ -201,6 +221,24 @@ const GenericEntityCreateSchema = z.object({
   label: z.string().trim().min(1).max(160),
   ownerRef: OrderPartyRefSchema.nullable(),
   attributes: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).default({}),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * VISION §9: an arrangement the world invented goes on mattering.
+ *
+ * A generic entity used to be write-only -- created, never read, never changed.
+ * A law whose recruitment pool is "expected to improve over several years" has
+ * to be able to say how it is going, and to be retired when it is repealed.
+ */
+const GenericEntityUpdateSchema = z.object({
+  op: z.literal("generic_entity_update"),
+  entityRef: RefSchema,
+  label: z.string().trim().min(1).max(160).optional(),
+  /** Merged into what is already there. A null value removes that attribute. */
+  attributes: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).default({}),
+  /** Repealed, dissolved, wound up. The record stays; it simply no longer applies. */
+  retire: z.boolean().default(false),
   reason: ReasonSchema,
 }).strict();
 
@@ -372,6 +410,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   PoliticalSupportSetSchema,
   PoliticalProcedureResolveSchema,
   HoldingTransferSchema,
+  GenericEntityUpdateSchema,
 ]);
 export type WorldDelta = z.infer<typeof WorldDeltaSchema>;
 export type WorldDeltaOp = WorldDelta["op"];
@@ -399,6 +438,7 @@ export const WORLD_DELTA_OPS = [
   "political_support_set",
   "political_procedure_resolve",
   "holding_transfer",
+  "generic_entity_update",
 ] as const satisfies readonly WorldDeltaOp[];
 
 /**
@@ -429,4 +469,5 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   political_support_set: "social",
   political_procedure_resolve: "civil",
   holding_transfer: "judicial",
+  generic_entity_update: "civil",
 };

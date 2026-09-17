@@ -71,7 +71,11 @@ How to answer well:
    "force_create" under their own polityId, never Rome's, and size their forces
    to what such a people could actually raise.
 7. Anything that takes time becomes a project with milestones and scheduled events,
-   not an instant result.
+   not an instant result -- and say what it produces. A project's
+   "completionOutcome" is the fleet, the fortress or the revenue that exists on
+   the day the last milestone falls; the engine creates it then, without asking
+   you again. A shipbuilding programme that completes and yields no ships has
+   not happened.
 8. Record what becomes true as facts. Set each fact's visibility honestly: a secret
    arrangement is "private", a public mobilization is "public". Use "delayed" or
    "rumoured" discovery with "knowableInDays" for news that has to travel.
@@ -93,7 +97,13 @@ How to answer well:
    "political_support_set", and settle it with "political_procedure_resolve" when
    the weight is in and not before. A procedure only goes to a vote where there
    is an institution to hold one.
-13. Keep each country's aims current. STANDING AIMS says what a power is trying
+13. An arrangement you invent goes on existing. A law, a college, a credit
+   office you created with "generic_entity_create" is listed afterwards under
+   STANDING ARRANGEMENTS. The engine records it and nothing more: its effects
+   are yours to carry out. Each period it matters, make the actual change -- the
+   money, the manpower, the support it wins or costs -- and keep its attributes
+   honest with "generic_entity_update", retiring it when it is repealed.
+14. Keep each country's aims current. STANDING AIMS says what a power is trying
    to do, what worries it and what it means to do next. Every polity with people
    in it should have one, and any power whose situation changed this turn should
    have theirs rewritten with "polity_outlook_set" -- a country that watched a

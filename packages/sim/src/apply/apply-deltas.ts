@@ -106,6 +106,7 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   character_intent_set: "propose",
   social_events: "propose",
   generic_entity_create: "propose",
+  generic_entity_update: "propose",
   authority_grant_upsert: "appoint",
   order_attempt_decide: "command",
   polity_stance_shift: "negotiate",
@@ -326,6 +327,22 @@ function applyOne(
 
     case "project_create": {
       const id = mint("project", delta.localId);
+      // Resolved here rather than at completion: the people and accounts an
+      // outcome names exist now, and a reference that has gone stale by the
+      // time the last milestone falls should fail loudly at proposal time.
+      const outcome = delta.completionOutcome;
+      const completionOutcome = outcome === null
+        ? null
+        : {
+          kind: outcome.kind,
+          label: outcome.label,
+          amount: outcome.amount,
+          provinceId: outcome.provinceId,
+          polityId: outcome.polityId,
+          commanderCharacterId: outcome.commanderCharacterRef === null ? null : required(outcome.commanderCharacterRef, "The commander this project is to raise a force for"),
+          beneficiaryAccountId: outcome.beneficiaryAccountRef === null ? null : required(outcome.beneficiaryAccountRef, "The account this project is to pay into"),
+          cadenceDays: outcome.cadenceDays,
+        };
       const fundingId = delta.fundingAccountRef === null ? null : required(delta.fundingAccountRef, "The funding account");
       if (fundingId !== null && !world.material.accounts.some((account) => account.id === fundingId)) {
         reject(`No account "${fundingId}" exists to fund this project.`, "reference");
@@ -336,8 +353,6 @@ function applyOne(
         requiredAtElapsedOffset: milestone.dueInDays,
         costAmount: milestone.costAmount,
         status: "pending" as const,
-        linkedWorkflowId: null,
-        linkedWorkflowParams: {},
         completedAtStep: null,
       }));
       const project = {
@@ -348,8 +363,7 @@ function applyOne(
         status: "in_progress" as const,
         reservationId: null,
         milestones,
-        completionWorkflowId: null,
-        completionWorkflowParams: {},
+        completionOutcome,
         linkedEntityIds: [],
         startedAtStep: atStep,
         targetCompletionStep: atStep + Math.max(...delta.milestones.map((milestone) => milestone.dueInDays)),
@@ -715,6 +729,29 @@ function applyOne(
         provenanceEventIds: [],
       };
       return { ...world, genericEntities: [...world.genericEntities, entity] };
+    }
+
+    case "generic_entity_update": {
+      const entityId = required(delta.entityRef, "The arrangement");
+      const entity = world.genericEntities.find((candidate) => candidate.id === entityId);
+      if (entity === undefined) reject(`No arrangement "${entityId}" exists to change.`, "reference");
+
+      // Merge, never replace: an update that named one attribute would
+      // otherwise quietly erase everything the arrangement already recorded.
+      // A null is the one way to actually take an attribute away.
+      const attributes: Record<string, string | number | boolean | null> = { ...entity.attributes };
+      for (const [key, value] of Object.entries(delta.attributes)) {
+        if (value === null) delete attributes[key];
+        else attributes[key] = value;
+      }
+      if (delta.retire) attributes["retiredAtStep"] = atStep;
+
+      const updated = {
+        ...entity,
+        ...(delta.label === undefined ? {} : { label: delta.label }),
+        attributes,
+      };
+      return { ...world, genericEntities: world.genericEntities.map((candidate) => (candidate.id === entityId ? updated : candidate)) };
     }
 
     case "authority_grant_upsert": {

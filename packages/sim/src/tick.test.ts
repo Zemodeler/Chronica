@@ -111,9 +111,9 @@ describe("projects", () => {
         label: "Two new legions", status: "in_progress", reservationId: null,
         milestones: dueDays.map((due, index) => ({
           id: `m${index + 1}`, label: `Milestone ${index + 1}`, requiredAtElapsedOffset: due,
-          costAmount: 0, status: "pending" as const, linkedWorkflowId: null, linkedWorkflowParams: {}, completedAtStep: null,
+          costAmount: 0, status: "pending" as const, completedAtStep: null,
         })),
-        completionWorkflowId: null, completionWorkflowParams: {}, linkedEntityIds: [],
+        completionOutcome: null, linkedEntityIds: [],
         startedAtStep: 0, targetCompletionStep: Math.max(...dueDays), completedAtStep: null, provenanceEventIds: [],
       }],
       material: { ...world.material, incomeSources: [], obligations: [] },
@@ -186,5 +186,96 @@ describe("provinces over time", () => {
     const opening = runDeterministicTick({ world: base(), toDay: base().instant.day, ids: createIdFactory("t") }).world;
     const later = runDeterministicTick({ world: opening, toDay: opening.instant.day + 30, ids: createIdFactory("t2") });
     expect(later.factProposals.some((fact) => fact.kind === "province_hunger" || fact.kind === "province_unrest")).toBe(false);
+  });
+});
+
+describe("what a finished project leaves behind", () => {
+  const projectWith = (outcome: WorldState["projects"][number]["completionOutcome"], state: WorldState): WorldState => ({
+    ...state,
+    projects: [
+      {
+        id: "naval-expansion",
+        kind: "naval",
+        sponsorEntityRef: { kind: "polity", id: "rome" },
+        label: "Roman naval expansion",
+        status: "in_progress",
+        reservationId: null,
+        milestones: [{ id: "m1", label: "Keels laid", requiredAtElapsedOffset: 5, costAmount: 0, status: "pending", completedAtStep: null }],
+        completionOutcome: outcome,
+        linkedEntityIds: [],
+        startedAtStep: state.elapsedStep,
+        targetCompletionStep: state.elapsedStep + 5,
+        completedAtStep: null,
+        provenanceEventIds: [],
+      },
+    ],
+  });
+
+  it("builds the fleet the project was for, and links it back to the project", () => {
+    const state = base();
+    const commander = state.characters.find((character) => character.alive && character.polityId === "rome")!;
+    const province = state.map.provinces[0]!.id;
+    const ready = projectWith(
+      { kind: "force", label: "The new fleet", amount: 4_200, provinceId: province, polityId: "rome", commanderCharacterId: commander.id, beneficiaryAccountId: null, cadenceDays: null },
+      state,
+    );
+
+    const result = tick(ready, state.instant.day + 10);
+    const fleet = result.world.material.forces.find((force) => force.name === "The new fleet");
+    expect(fleet).toBeDefined();
+    expect(fleet!.personnel.reduce((sum, category) => sum + category.fit, 0)).toBe(4_200);
+    expect(result.world.projects[0]!.status).toBe("completed");
+    expect(result.world.projects[0]!.linkedEntityIds).toContain(fleet!.id);
+    expect(result.factProposals.find((fact) => fact.kind === "project_completed")!.summary).toContain("The new fleet");
+  });
+
+  it("produces nothing rather than an invalid world when the outcome names a dead man", () => {
+    const state = base();
+    const province = state.map.provinces[0]!.id;
+    const ready = projectWith(
+      { kind: "force", label: "A fleet under a ghost", amount: 900, provinceId: province, polityId: "rome", commanderCharacterId: "nobody-at-all", beneficiaryAccountId: null, cadenceDays: null },
+      state,
+    );
+
+    const result = tick(ready, state.instant.day + 10);
+    expect(result.world.material.forces.some((force) => force.name === "A fleet under a ghost")).toBe(false);
+    // The effort still finished, and the record says so.
+    expect(result.world.projects[0]!.status).toBe("completed");
+    expect(result.factProposals.some((fact) => fact.kind === "project_completed")).toBe(true);
+  });
+
+  it("opens the revenue an arrangement was built to collect", () => {
+    const state = base();
+    const account = state.material.accounts[0]!.id;
+    const ready = projectWith(
+      { kind: "income_source", label: "Harbour dues at Ostia", amount: 45, provinceId: null, polityId: "rome", commanderCharacterId: null, beneficiaryAccountId: account, cadenceDays: 30 },
+      state,
+    );
+
+    const result = tick(ready, state.instant.day + 10);
+    const income = result.world.material.incomeSources.find((source) => source.label === "Harbour dues at Ostia");
+    expect(income?.amount).toBe(45);
+    expect(income?.cadenceSteps).toBe(30);
+  });
+
+  it("says so when a milestone was paid for with money that was not there", () => {
+    const state = base();
+    const poor: WorldState = {
+      ...state,
+      material: { ...state.material, accounts: state.material.accounts.map((account) => ({ ...account, balance: 0 })) },
+      projects: [
+        {
+          id: "too-dear", kind: "naval", sponsorEntityRef: { kind: "polity", id: "rome" }, label: "A fleet beyond our means",
+          status: "in_progress", reservationId: null,
+          milestones: [{ id: "m1", label: "Timber bought", requiredAtElapsedOffset: 5, costAmount: 900, status: "pending", completedAtStep: null }],
+          completionOutcome: null, linkedEntityIds: [], startedAtStep: state.elapsedStep,
+          targetCompletionStep: state.elapsedStep + 5, completedAtStep: null, provenanceEventIds: [],
+        },
+      ],
+    };
+
+    const result = tick(poor, state.instant.day + 10);
+    const shortfall = result.factProposals.find((fact) => fact.kind === "project_shortfall");
+    expect(shortfall?.summary).toContain("900");
   });
 });

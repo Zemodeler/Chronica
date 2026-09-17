@@ -90,6 +90,7 @@ describe("engine-assigned ids", () => {
       label: "Two new legions",
       sponsorRef: { kind: "polity", id: "rome" },
       fundingAccountRef: "marcus-purse",
+      completionOutcome: null,
       milestones: [{ label: "Financing committed", dueInDays: 9, costAmount: 0 }, { label: "Recruits assemble", dueInDays: 120, costAmount: 0 }],
       reason: "Recruitment takes months.",
     };
@@ -434,5 +435,66 @@ describe("a question put to a body", () => {
 
     const twice = applyDeltas(once.world, [resolve], context());
     expect(twice.rejected[0]!.reason).toContain("already been settled");
+  });
+});
+
+describe("an arrangement the world invented", () => {
+  const found = (): WorldDelta => ({
+    op: "generic_entity_create",
+    localId: "lex_agraria",
+    kind: "law",
+    label: "Lex Agraria",
+    ownerRef: { kind: "polity", id: "rome" },
+    attributes: { smallholders: "increasing", eliteLoyalty: -12, recruitmentPool: "improving" },
+    reason: "The land question had to be answered.",
+  });
+
+  it("changes only what the update names, and leaves the rest standing", () => {
+    const created = applyDeltas(world(), [found()], context());
+    const id = created.world.genericEntities.at(-1)!.id;
+
+    const result = applyDeltas(
+      created.world,
+      [{ op: "generic_entity_update", entityRef: id, attributes: { eliteLoyalty: -30 }, retire: false, reason: "Opposition hardened over the winter." }],
+      context(),
+    );
+
+    const law = result.world.genericEntities.find((entity) => entity.id === id)!;
+    expect(law.attributes["eliteLoyalty"]).toBe(-30);
+    expect(law.attributes["smallholders"]).toBe("increasing");
+    expect(law.attributes["recruitmentPool"]).toBe("improving");
+  });
+
+  it("takes an attribute away when it is set to nothing", () => {
+    const created = applyDeltas(world(), [found()], context());
+    const id = created.world.genericEntities.at(-1)!.id;
+    const result = applyDeltas(
+      created.world,
+      [{ op: "generic_entity_update", entityRef: id, attributes: { recruitmentPool: null }, retire: false, reason: "The effect never materialized." }],
+      context(),
+    );
+    expect(result.world.genericEntities.find((entity) => entity.id === id)!.attributes).not.toHaveProperty("recruitmentPool");
+  });
+
+  it("keeps a repealed law on the books, marked as repealed", () => {
+    const created = applyDeltas(world(), [found()], context());
+    const id = created.world.genericEntities.at(-1)!.id;
+    const result = applyDeltas(
+      created.world,
+      [{ op: "generic_entity_update", entityRef: id, attributes: {}, retire: true, reason: "Repealed under pressure from the Senate." }],
+      context(),
+    );
+    const law = result.world.genericEntities.find((entity) => entity.id === id)!;
+    expect(law.attributes).toHaveProperty("retiredAtStep");
+    expect(law.label).toBe("Lex Agraria");
+  });
+
+  it("refuses to change an arrangement nobody ever founded", () => {
+    const result = applyDeltas(
+      world(),
+      [{ op: "generic_entity_update", entityRef: "lex-nonexistent", attributes: {}, retire: false, reason: "A tidy-up." }],
+      context(),
+    );
+    expect(result.rejected[0]!.reason).toContain('No arrangement "lex-nonexistent"');
   });
 });
