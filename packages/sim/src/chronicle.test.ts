@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ScenarioClockSchema, emitFacts, type Fact, type FactDraft } from "@chronica/shared";
+import { ScenarioClockSchema, emitFacts, factsKnownTo, type Fact, type FactDraft } from "@chronica/shared";
 import { composeChronicle } from "./chronicle";
 import type { SimModelPort } from "./ports";
 
 const clock = ScenarioClockSchema.parse({ epoch: { year: 264, month: 3, day: 1, era: "BCE" }, minSpanDays: 7, maxSpanDays: 365 });
+
+let factCounter = 0;
 
 function fact(overrides: Partial<FactDraft>): Fact {
   const draft: FactDraft = {
@@ -23,8 +25,7 @@ function fact(overrides: Partial<FactDraft>): Fact {
     causalDepth: 0,
     ...overrides,
   };
-  let counter = 0;
-  return emitFacts([draft], () => `fact-${(counter += 1)}`)[0]!;
+  return emitFacts([draft], () => `fact-${(factCounter += 1)}`)[0]!;
 }
 
 /** Captures what the historian was actually shown. */
@@ -53,6 +54,7 @@ describe("chronicle", () => {
       port,
       clock,
       observer: { kind: "character", id: "marcus-atilius" },
+      observerPolityId: "rome",
       facts,
       from: { day: 0, minute: 0 },
       to: { day: 30, minute: 0 },
@@ -70,6 +72,7 @@ describe("chronicle", () => {
       port: capturingPort(),
       clock,
       observer: { kind: "character", id: "marcus-atilius" },
+      observerPolityId: "rome",
       facts: [fact({})],
       from: { day: 0, minute: 0 },
       to: { day: 31, minute: 0 },
@@ -85,6 +88,7 @@ describe("chronicle", () => {
       port: failing,
       clock,
       observer: { kind: "character", id: "marcus-atilius" },
+      observerPolityId: "rome",
       facts: [fact({ summary: "Rome begins raising two new legions." })],
       from: { day: 0, minute: 0 },
       to: { day: 30, minute: 0 },
@@ -100,6 +104,7 @@ describe("chronicle", () => {
       port,
       clock,
       observer: { kind: "character", id: "marcus-atilius" },
+      observerPolityId: "rome",
       facts: [],
       from: { day: 0, minute: 0 },
       to: { day: 5, minute: 0 },
@@ -108,5 +113,46 @@ describe("chronicle", () => {
     });
     expect(result.calls).toBe(0);
     expect(result.body).toContain("Nothing of note");
+  });
+});
+
+describe("what a government knows of its own business", () => {
+  it("tells the ruler what their own polity did", () => {
+    // Facts scoped to a polity were invisible to everyone, including that
+    // polity, so a government's own dispatches never reached it and whole
+    // periods came back as "nothing of note was recorded".
+    const dispatch = fact({
+      kind: "diplomatic_dispatch",
+      summary: "The consul has sent an envoy to Messana.",
+      visibility: "polity",
+      affectedEntities: [{ kind: "polity", id: "rome" }],
+      discovery: { state: "polity", knowableAtInstant: null, discoveredBy: [] },
+    });
+
+    expect(factsKnownTo([dispatch], { kind: "character", id: "marcus-atilius" }, "rome", { day: 1, minute: 0 })).toHaveLength(1);
+  });
+
+  it("does not tell a foreign ruler the same thing", () => {
+    const dispatch = fact({
+      kind: "diplomatic_dispatch",
+      summary: "The consul has sent an envoy to Messana.",
+      visibility: "polity",
+      affectedEntities: [{ kind: "polity", id: "rome" }],
+      discovery: { state: "polity", knowableAtInstant: null, discoveredBy: [] },
+    });
+
+    expect(factsKnownTo([dispatch], { kind: "character", id: "hanno" }, "carthage", { day: 1, minute: 0 })).toHaveLength(0);
+  });
+
+  it("still keeps a secret from the ruler's own polity", () => {
+    const plot = fact({
+      kind: "conspiracy",
+      summary: "A senator courts the army's officers.",
+      visibility: "private",
+      affectedEntities: [{ kind: "polity", id: "rome" }],
+      discovery: { state: "private", knowableAtInstant: null, discoveredBy: [] },
+    });
+
+    expect(factsKnownTo([plot], { kind: "character", id: "marcus-atilius" }, "rome", { day: 1, minute: 0 })).toHaveLength(0);
   });
 });

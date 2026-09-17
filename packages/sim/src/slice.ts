@@ -1,6 +1,6 @@
 import {
   currentAgeYears,
-  factsVisibleTo,
+  factsKnownTo,
   formatWorldDate,
   type Fact,
   type OrderPartyRef,
@@ -166,7 +166,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     .map((intent) => ({ actor: name(intent.actorCharacterId), action: intent.actionType, rationale: intent.rationale }));
 
   // Only what this actor could actually know.
-  const recentHistory = factsVisibleTo(input.facts, input.actorRef, world.instant)
+  const recentHistory = factsKnownTo(input.facts, input.actorRef, ownPolity, world.instant)
     .slice(-CAPS.facts)
     .map((fact) => ({ summary: fact.summary, significance: 0 }));
 

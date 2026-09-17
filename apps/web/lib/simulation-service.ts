@@ -147,6 +147,7 @@ export async function submitOrder(
           port,
           clock: view.scenarioClock,
           observer: actorRef,
+          observerPolityId: actorPolityId,
           facts: result.newFacts,
           from,
           to: result.world.instant,

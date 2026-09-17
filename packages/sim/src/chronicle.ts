@@ -1,5 +1,5 @@
 import {
-  factsVisibleTo,
+  factsKnownTo,
   formatWorldDate,
   type Fact,
   type OrderPartyRef,
@@ -41,6 +41,8 @@ export interface ChronicleInput {
   readonly port: SimModelPort;
   readonly clock: ScenarioClock;
   readonly observer: OrderPartyRef;
+  /** Their polity, so what their own government did counts as known to them. */
+  readonly observerPolityId: string | null;
   readonly facts: readonly Fact[];
   readonly from: WorldInstant;
   readonly to: WorldInstant;
@@ -58,7 +60,7 @@ export interface ChronicleResult {
 }
 
 export async function composeChronicle(input: ChronicleInput): Promise<ChronicleResult> {
-  const visible = factsVisibleTo(input.facts, input.observer, input.to);
+  const visible = factsKnownTo(input.facts, input.observer, input.observerPolityId, input.to);
   const title = `${formatWorldDate(input.from, input.clock)} – ${formatWorldDate(input.to, input.clock)}`;
   const factIds = visible.map((fact) => fact.id);
 
