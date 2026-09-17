@@ -137,6 +137,31 @@ describe("authority", () => {
     expect(result.breaches).toHaveLength(0);
   });
 
+  it("lets a character spend their own purse without recording a breach", () => {
+    // Found running a live model: office grants cover an office's named
+    // treasury and nothing else, so spending one's own money was reported as
+    // insubordination -- which made every privately funded act look like theft.
+    const result = applyDeltas(
+      world(),
+      [{ op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: null, amount: 100, reason: "Paying recruiters from his own purse." }],
+      context(),
+    );
+    expect(result.breaches).toHaveLength(0);
+    expect(result.applied[0]!.authority.authorized).toBe(true);
+  });
+
+  it("judges an unscoped act in the actor's own polity, not whichever polity happens to be first", () => {
+    // Also found live: the fallback scope read `map.polities[0]`, so a Roman
+    // consul's every unscoped act was checked against Carthage and breached.
+    const result = applyDeltas(
+      world(),
+      [{ op: "character_intent_set", actorCharacterRef: "marcus-atilius", actionType: "prepare", targetRefs: [], rationale: "Preparing the levy.", priority: 50, visibility: "private" }],
+      context(),
+    );
+    expect(result.applied).toHaveLength(1);
+    expect(result.applied[0]!.authority.reason).not.toContain("carthage");
+  });
+
   it("carries out an unauthorized act and records it as a breach rather than refusing it", () => {
     // VISION §12: a general who marches without orders has not performed an
     // invalid action. He has committed insubordination, and the world must be

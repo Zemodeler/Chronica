@@ -103,7 +103,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
     phases: ["contact", "engagement", "cohesion", "withdrawal", "aftermath"], routCohesionBps: 2_000, arrearsMoralePeriods: 1, arrearsDesertionPeriods: 2,
   },
   government: {
-    offices: [{ id: "roman-consul", label: "Roman consul", polityId: "rome", authorisedActionIds: ["force_create", "force_modify", "project_create", "character_intent_set", "polity_stance_shift"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "roman-election", eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-not-disqualified"] }],
+    offices: [{ id: "roman-consul", label: "Roman consul", polityId: "rome", authorisedActionIds: ["force_create", "force_modify", "project_create", "project_milestone_update", "character_create", "authority_grant_upsert", "character_intent_set", "polity_stance_shift", "social_events"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "roman-election", eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-not-disqualified"] }],
     successionRules: [{ id: "roman-election", label: "Election by the Senate", kind: "elective", institutionId: "roman-senate" }], decreeAuthorityCostBps: 500, decreeMinimumPrestigeBps: 2_000,
   },
   dialogue: { roleSlots: [], namePools: { roman: ["Gaius", "Lucius"], carthaginian: ["Hanno", "Hamilcar"], greek: ["Hieron", "Sosistratus"] } },
@@ -116,7 +116,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
 
 const initialWorld: WorldState = WorldStateSchema.parse({
   schemaVersion: 2,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 11, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 13, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   map: {

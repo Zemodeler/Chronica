@@ -1,4 +1,4 @@
-import { and, asc, eq, lte, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, lte, sql } from "drizzle-orm";
 import {
   ScenarioDefinitionSchema,
   WorldStateSchema,
@@ -354,4 +354,97 @@ export async function resolveDecision(db: ChronicaDatabase, decisionId: string, 
 export async function getPrimaryPlayer(db: ChronicaDatabase, gameId: string) {
   const [row] = await db.select().from(players).where(eq(players.gameId, gameId)).limit(1);
   return row;
+}
+
+export interface CreateGameInput {
+  readonly title: string;
+  readonly scenarioId: string;
+  readonly startingSeatCount: number;
+  readonly extraPrincipalsPerPlayer: number;
+  readonly hostUserId: string;
+  readonly coinBudgetMicroUnits: bigint;
+}
+
+export class NotGameHostError extends Error {
+  constructor(readonly gameId: string) {
+    super(`Only the host may end game ${gameId}.`);
+    this.name = "NotGameHostError";
+  }
+}
+
+/**
+ * Creates a game pinned to a public scenario's current version, seats its host,
+ * and gives the world its opening state -- all in one transaction.
+ *
+ * Its predecessor opened turn 0 here and deliberately wrote no world row,
+ * leaving the scenario's `initialWorld` to stand in until the first turn
+ * resolved. With turns gone there is nothing to stand in for it, so the world
+ * is materialized immediately: a game without a world is not playable.
+ */
+export async function createGame(db: ChronicaDatabase, input: CreateGameInput): Promise<string> {
+  return db.transaction(async (tx) => {
+    const [scenario] = await tx
+      .select({ id: scenarios.id, currentVersion: scenarios.currentVersion })
+      .from(scenarios)
+      .innerJoin(scenarioVersions, and(eq(scenarioVersions.scenarioId, scenarios.id), eq(scenarioVersions.version, scenarios.currentVersion)))
+      .where(and(eq(scenarios.id, input.scenarioId), eq(scenarios.visibility, "public"), isNotNull(scenarioVersions.validatedAt)))
+      .limit(1);
+    if (scenario === undefined) throw new Error("That shared world is unavailable.");
+
+    const [version] = await tx
+      .select({ initialWorld: scenarioVersions.initialWorld })
+      .from(scenarioVersions)
+      .where(and(eq(scenarioVersions.scenarioId, scenario.id), eq(scenarioVersions.version, scenario.currentVersion)))
+      .limit(1);
+    if (version === undefined) throw new Error("That shared world has no playable version.");
+    const initialWorld = WorldStateSchema.parse(version.initialWorld);
+
+    const [game] = await tx
+      .insert(games)
+      .values({
+        scenarioId: scenario.id,
+        title: input.title,
+        status: "active",
+        aiProfileVersion: 1,
+        payerUserId: input.hostUserId,
+        creditRateCardVersion: 1,
+        creditBudgetMicrocredits: input.coinBudgetMicroUnits,
+        scenarioVersion: scenario.currentVersion,
+        libraryVersion: 1,
+        startingSeatCount: input.startingSeatCount,
+        extraPrincipalsPerPlayer: input.extraPrincipalsPerPlayer,
+        createdBy: input.hostUserId,
+      })
+      .returning({ id: games.id });
+    if (game === undefined) throw new Error("Failed to create game.");
+
+    await tx.insert(players).values({
+      gameId: game.id,
+      userId: input.hostUserId,
+      characterId: `pending:host:${input.hostUserId}`,
+      status: "active",
+    });
+
+    await tx.insert(gameWorlds).values({
+      gameId: game.id,
+      world: initialWorld,
+      schemaVersion: initialWorld.schemaVersion,
+      revision: 1,
+      stateHash: hashWorld(initialWorld),
+      instantSortKey: instantSortKeyOf(initialWorld),
+    });
+
+    return game.id;
+  });
+}
+
+/** Ends a game at the host's request. With no turn to cancel, this is now immediate. */
+export async function requestGameEnd(db: ChronicaDatabase, gameId: string, hostUserId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [game] = await tx.select({ id: games.id, createdBy: games.createdBy }).from(games).where(eq(games.id, gameId)).for("update").limit(1);
+    if (game === undefined) return;
+    if (game.createdBy !== hostUserId) throw new NotGameHostError(gameId);
+    const now = new Date();
+    await tx.update(games).set({ endRequestedAt: now, endRequestedBy: hostUserId, status: "finished", endedAt: now }).where(eq(games.id, gameId));
+  });
 }

@@ -2,11 +2,8 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { developerGiftList, loadAccountDashboard } from "../../lib/account-service";
-import { isAuthenticationConfigured } from "../../lib/authentication";
-import { gameRepository } from "../../lib/game-repository";
 import { redeemGift } from "../actions";
 import { AccountDashboard, type SerializedGift } from "./account-dialogs";
-import { createDatabase, listInventedWorkflows } from "@chronica/db";
 import { getLocalAiProviderConfiguration } from "@chronica/ai";
 
 export const metadata: Metadata = { title: "Account and coins" };
@@ -15,7 +12,7 @@ export default async function AccountPage({
   searchParams,
 }: Readonly<{ searchParams: Promise<{ gift?: string; checkout?: string; profile?: string; developer?: string; email?: string; aiProvider?: string; status?: string }> }>) {
   const [params, persistedAccount] = await Promise.all([searchParams, loadAccountDashboard(await headers())]);
-  const account = persistedAccount ?? (!isAuthenticationConfigured() && process.env.NODE_ENV !== "production" ? await gameRepository.getAccount() : null);
+  const account = persistedAccount;
   if (account === null) redirect("/login?returnTo=%2Faccount");
 
   const isDev = account.role === "developer" || account.role === "admin";
@@ -30,16 +27,9 @@ export default async function AccountPage({
     redemptionCount: g.redemptionCount,
   }));
 
-  let pendingProposalCount = 0;
-  if (isDev && process.env.DATABASE_URL) {
-    const { db, close } = createDatabase(process.env.DATABASE_URL);
-    try {
-      const workflows = await listInventedWorkflows(db, 50);
-      pendingProposalCount = workflows.length;
-    } catch { /* non-critical */ } finally {
-      await close();
-    }
-  }
+  // The invented-workflow proposal queue went with the workflow-execution
+  // engine; nothing proposes mechanics for review any more.
+  const pendingProposalCount = 0;
 
   return (
     <main id="main-content" className="shell">

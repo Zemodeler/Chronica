@@ -33,29 +33,39 @@ those. So:
   the world slice, exactly as written.
 - Never state an absolute date. Express time as a whole number of days from now.
 - Never compute running totals or balances. State the change; the engine applies it.
+- Every amount is a positive number. Direction is carried by the fields, not the
+  sign: money_transfer moves "amount" from "fromAccountRef" to "toAccountRef",
+  and a payment out of the world uses a null "toAccountRef".
+- Name every existing entity by the id shown in square brackets in the slice --
+  "marcus-purse", not "Marcus Atilius's purse".
 
 How to answer well:
 
 1. Read intent, not syntax. "Raise two legions" is an instruction to a government,
    not a function call. Decide where recruitment happens, who pays for it, who is
    put in charge, and how long it takes.
-2. The shorter the order, the more discretion the ruler has delegated. A bare order
+2. Then actually do it. Describing what will happen is not enough: put the real
+   change in "deltas" -- the money moves, the project opens, the force exists, the
+   official is appointed. An answer with no deltas asserts that the world did not
+   move at all, which is rarely true of an order a government has accepted.
+   Delegating the work does not excuse you from beginning it.
+3. The shorter the order, the more discretion the ruler has delegated. A bare order
    leaves financing and method to officials; a specific one does not.
-3. An order that cannot be met in full is not refused. It is attempted, and it
+4. An order that cannot be met in full is not refused. It is attempted, and it
    produces friction: partial fulfilment, delay, cost, or political damage. Put that
    in "frictions" and reflect it in what you actually change.
-4. Generate the people the situation needs. If financing this requires a quaestor
+5. Generate the people the situation needs. If financing this requires a quaestor
    and none exists, create one, with a reason they exist. They will persist and may
    matter later.
-5. Anything that takes time becomes a project with milestones and scheduled events,
+6. Anything that takes time becomes a project with milestones and scheduled events,
    not an instant result.
-6. Record what becomes true as facts. Set each fact's visibility honestly: a secret
+7. Record what becomes true as facts. Set each fact's visibility honestly: a secret
    arrangement is "private", a public mobilization is "public". Use "delayed" or
    "rumoured" discovery with "knowableInDays" for news that has to travel.
-7. Score each fact's "significance" from 0 to 100 by how much it would matter to a
+8. Score each fact's "significance" from 0 to 100 by how much it would matter to a
    historian of this reign: a routine payment is near 0, a mobilization perhaps 50,
    a battle or a death 90+.
-8. Orders given to a person who could refuse them are "delegations", not deltas. That
+9. Orders given to a person who could refuse them are "delegations", not deltas. That
    person decides separately whether to obey.
 
 Answer with a single JSON object and nothing else, matching this schema (the
@@ -68,6 +78,12 @@ export interface OrchestrateResult {
   readonly calls: number;
   /** Set when the model could not produce a valid proposal even after a repair attempt. */
   readonly parseFailure: string | null;
+  /**
+   * Why the first attempt was rejected, when a repair then succeeded. Kept
+   * because a repair costs a whole extra call: if the same complaint keeps
+   * appearing here, the prompt or the schema is at fault, not the model.
+   */
+  readonly repairedFrom: string | null;
 }
 
 /**
@@ -118,7 +134,7 @@ export async function orchestrate(port: SimModelPort, slice: WorldSlice): Promis
   let failure: string;
   try {
     const first = await attempt(userMessage);
-    if (first.success) return { output: first.data, calls, parseFailure: null };
+    if (first.success) return { output: first.data, calls, parseFailure: null, repairedFrom: null };
     failure = first.error.issues.slice(0, 6).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
@@ -128,12 +144,13 @@ export async function orchestrate(port: SimModelPort, slice: WorldSlice): Promis
   // latency: a model that cannot produce the shape twice will not produce it on
   // the third try either.
   try {
+    const firstFailure = failure;
     const repaired = await attempt(`${userMessage}\n\nYour previous answer was rejected. Fix exactly these problems and answer again with the whole object:\n${failure}`);
-    if (repaired.success) return { output: repaired.data, calls, parseFailure: null };
+    if (repaired.success) return { output: repaired.data, calls, parseFailure: null, repairedFrom: firstFailure };
     failure = repaired.error.issues.slice(0, 6).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
   }
 
-  return { output: inertOutput("The order reached the palace, but no workable instruction came back out of it."), calls, parseFailure: failure };
+  return { output: inertOutput("The order reached the palace, but no workable instruction came back out of it."), calls, parseFailure: failure, repairedFrom: null };
 }

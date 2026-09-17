@@ -13,6 +13,9 @@ export const OrderPartyRefSchema = z
   .object({
     kind: z.enum([
       "character", "faction", "polity", "institution", "force", "province", "settlement", "account", "office", "procedure",
+      // A project is as much a thing an event affects as a force is; without it
+      // the simulation could not say that a fact concerned an ongoing effort.
+      "project",
       "region", "theatre", "world",
     ]),
     id: EntityIdSchema,

@@ -5,7 +5,7 @@ export async function GET(
   { params }: { params: Promise<{ gameId: string }> },
 ) {
   const { gameId } = await params;
-  const world = await gameRepository.getWorld(gameId, false, true);
+  const world = await gameRepository.getWorld(gameId, true);
   if (world === null) {
     return new Response(null, { status: 404 });
   }

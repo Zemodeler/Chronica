@@ -322,7 +322,24 @@ The wipe left most of the substrate. Each survivor carries a vision section:
 
 ---
 
-## 8. Verification
+## 8. The page layer
+
+`apps/web/lib/game-repository.ts` was deleted with the turn system and is rewritten rather than
+restored: the in-memory demo repository is gone, as are every Orders, News and turn method, leaving
+the eleven operations the pages actually call. `world-view.ts` is likewise new — its predecessor
+keyed knowledge labels to a turn index and carried hardcoded scenario overlay tables that papered
+over gaps in the opening state. The replacement reports what `WorldState` contains and nothing else.
+
+Two database functions had to come back with it (`createGame`, `requestGameEnd`), and `createGame`
+now materializes the world immediately: its predecessor opened turn 0 and left the scenario's
+`initialWorld` to stand in until the first turn resolved, and with turns gone there is nothing to
+stand in for it.
+
+One consequence worth knowing: a definition change does not reach a database by editing a scenario
+file, because `scenario_versions` rows are immutable by design. The continuous clock and the widened
+office powers each required publishing a **new scenario version** in `ensureBuiltInScenarios`.
+
+## 9. Verification
 
 `packages/sim` has **30 tests**, all driven by a scripted model port — never a live adapter, because
 a test that can disagree with itself run-to-run is worth nothing as a regression guard. Repo-wide:
@@ -350,13 +367,42 @@ Chronicle never being handed an undiscovered fact.
 
 ---
 
-## 9. What is deliberately not done
+## 10. What the first live model run changed
 
-- **`apps/web` does not fully typecheck.** Nine pages and two routes still import the deleted
-  `apps/web/lib/game-repository.ts`, whose view-model layer (`world-view.ts`, `WorldViewModelSchema`)
-  was also deleted. The loop's own surface — `simulation-service.ts`, the `/simulate` and
-  `/decisions` routes, `simulation-panel.tsx`, `game-shell.tsx` — is clean and compiles; rebuilding
-  the dashboard/worlds/account view models is a separate piece of work.
+Scripted tests prove the loop. Only a real model proves the *prompt*, and the first live run against
+`gpt-5.6-luna` found four things no unit test would have:
+
+1. **The model described the order instead of carrying it out.** It returned intent, delegations and
+   a schedule, and changed nothing — the treasury was untouched. Fixed by an explicit rule: *"Then
+   actually do it… an answer with no deltas asserts that the world did not move at all, which is
+   rarely true of an order a government has accepted."*
+2. **It paid from `"Marcus Atilius's purse"`** — the *label* the slice printed, not the id. The
+   TREASURY section rendered names without ids while every other section showed `[id]`. The slice
+   now prints ids everywhere, and the prompt says to use them.
+3. **A character had no authority over their own money.** Office grants cover an office's named
+   treasury and nothing else, so spending one's own purse was recorded as an authority breach, which
+   made every privately funded act look like embezzlement. `deriveOwnerGrants` now grants fiscal
+   power over an account to the character who owns it. Ownership is not an office, and does not
+   expire.
+4. **Unscoped deltas were judged against the wrong polity.** `scopeOf`'s fallback reached for
+   `map.polities[0]` — Carthage — so a Roman consul's every unscoped act was checked against an enemy
+   state and breached. It now falls back to the actor's own polity.
+
+Both (3) and (4) produced *false insubordination*, which is the worst possible failure for a system
+whose whole point is that real insubordination is meaningful. Each has a regression test naming the
+live run that found it.
+
+Also learned: delegations could name a person the same payload was still creating, and the
+`local:` handle was written into the order attempt verbatim; delegations now resolve through the
+same id map as deltas and drop orders to people who do not exist. And a fact may now name a
+`project` as an affected entity — the ref enum had no way to say that an event concerned an ongoing
+effort.
+
+The loop's own numbers held up: the slice renders at ~165 tokens, the system prompt ~4,600, and a
+good answer arrives in one call with the repair path catching the rest.
+
+## 11. What is deliberately not done
+
 - **Conversations do not yet emit facts.** Wiring chat into the loop (so what an NPC tells you enters
   your knowledge state, and promises become commitments) is the agreed next step; `applySocialEvents`
   exists and still has no caller.
@@ -366,8 +412,13 @@ Chronicle never being handed an undiscovered fact.
   turn-synchronization problem §15 exists to avoid, and was scoped out on purpose.
 - **`docs/product.md` and `docs/architecture.md` still describe the deleted Turns/Orders/Chronicle
   loop.** They are stale and should be rewritten against this document.
+- **Games created before this work cannot be opened.** Their state lived in `world_snapshots`, which
+  migration 0034 dropped; they have no `game_worlds` row and the game page returns 404. Nothing
+  resurrects them, deliberately.
+- **The simulation panel appears only after character declaration**, since that is what the game page
+  gates `playerCharacterId` on. That is the existing product flow, not a decision taken here.
 
-## 10. The known risk
+## 12. The known risk
 
 **Prompt size, not loop logic.** `buildWorldSlice` is where this design succeeds or fails. The
 orchestrator's system prompt is ~4,600 tokens (mostly the generated JSON schema, identical every call

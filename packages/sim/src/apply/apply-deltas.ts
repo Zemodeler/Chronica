@@ -12,6 +12,7 @@ import {
   type AuthorityIndex,
   type AuthorityPower,
   type AuthorityScope,
+  type OrderPartyRef,
   type WorldDelta,
   type WorldState,
 } from "@chronica/shared";
@@ -45,8 +46,15 @@ function reject(reason: string): never {
 }
 
 /** Which scope a delta acts over, so authority is judged against the thing itself rather than the whole polity. */
-function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) => string | undefined): AuthorityScope {
-  const polityFallback: AuthorityScope = { kind: "polity", id: world.map.polities[0]?.id ?? "unknown" };
+function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) => string | undefined, actorRef: OrderPartyRef): AuthorityScope {
+  // Anything without a scope of its own is judged in the actor's own polity.
+  // Reaching for the first polity in the world instead -- as this once did --
+  // judged a Roman consul's every unscoped act against Carthage, and recorded
+  // a breach for each one.
+  const actorPolityId = actorRef.kind === "character"
+    ? world.characters.find((character) => character.id === actorRef.id)?.polityId ?? null
+    : actorRef.kind === "polity" ? actorRef.id : null;
+  const polityFallback: AuthorityScope = { kind: "polity", id: actorPolityId ?? world.map.polities[0]?.id ?? "unknown" };
   switch (delta.op) {
     case "money_transfer":
       return { kind: "account", id: resolve(delta.fromAccountRef) ?? delta.fromAccountRef };
@@ -95,7 +103,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
   let violations = new Set(findWorldReferenceViolations(world));
 
   const authorityIndex: AuthorityIndex = buildAuthorityIndex(
-    { officeSeats: world.material.officeSeats, forces: world.material.forces },
+    { officeSeats: world.material.officeSeats, forces: world.material.forces, accounts: world.material.accounts },
     world.authorityGrants,
     context.offices,
     world.elapsedStep,
@@ -108,7 +116,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
       authority = checkAuthority(authorityIndex, {
         holder: context.actorRef,
         domain: DELTA_AUTHORITY_DOMAIN[delta.op],
-        scope: scopeOf(delta, current, resolve),
+        scope: scopeOf(delta, current, resolve, context.actorRef),
         power: POWER_BY_OP[delta.op],
       });
       current = applyOne(current, delta, context, assignedIds, resolve);

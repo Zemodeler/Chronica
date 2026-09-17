@@ -179,6 +179,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       });
     }
 
+    world = recordDelegations(world, proposal.delegations, ids, result.assignedIds);
     narrative.push(proposal.narrativeSummary);
   };
 
@@ -200,10 +201,6 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   if (orchestration.parseFailure !== null) parseFailures.push(orchestration.parseFailure);
   applyProposal(orchestration.output, input.actorRef, 0);
   if (orchestration.output.playerDecision !== null) playerDecision = orchestration.output.playerDecision;
-
-  // Delegations become order attempts the recipient answers for themselves
-  // (VISION §13) -- not deltas the orchestrator applies on their behalf.
-  world = recordDelegations(world, orchestration.output.delegations, ids);
 
   // ── Reaction iterations ────────────────────────────────────────────────
   let causalDepth = 1;
@@ -250,7 +247,6 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
 
     for (const actor of cognition.output.actors) {
       applyProposal(actor.proposal, actor.actorRef, causalDepth);
-      world = recordDelegations(world, actor.proposal.delegations, ids);
     }
     causalDepth += 1;
 
@@ -298,13 +294,29 @@ function nextInstant(now: WorldInstant, scheduled: readonly ScheduledEventDraft[
   return addMinutes(now, key - nowKey);
 }
 
-function recordDelegations(world: WorldState, delegations: Proposal["delegations"], ids: { next(prefix: string): string }): WorldState {
+/**
+ * Delegations become order attempts the recipient answers for themselves
+ * (VISION §13) -- not deltas the issuer applies on their behalf.
+ */
+function recordDelegations(
+  world: WorldState,
+  delegations: Proposal["delegations"],
+  ids: { next(prefix: string): string },
+  assignedIds: ReadonlyMap<string, string>,
+): WorldState {
   if (delegations.length === 0) return world;
-  const attempts = delegations.map((delegation) => ({
+  const resolveParty = (ref: Proposal["delegations"][number]["issuerRef"]) =>
+    ref.id.startsWith("local:") ? { ...ref, id: assignedIds.get(ref.id.slice("local:".length)) ?? ref.id } : ref;
+
+  const attempts = delegations
+    // An order to someone who does not exist is not an order. This happens when
+    // the model names a person it only planned to create.
+    .filter((delegation) => world.characters.some((character) => character.id === resolveParty(delegation.recipientRef).id))
+    .map((delegation) => ({
     id: ids.next("order"),
     actionId: ids.next("action"),
-    issuerRef: delegation.issuerRef,
-    recipientRef: delegation.recipientRef,
+    issuerRef: resolveParty(delegation.issuerRef),
+    recipientRef: resolveParty(delegation.recipientRef),
     claimedAuthorityGrantId: null,
     // The instruction is snapshotted into the reason so the recipient's own
     // cognition can read what they were actually told.

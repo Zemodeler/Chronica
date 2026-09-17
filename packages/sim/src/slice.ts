@@ -50,7 +50,7 @@ export interface WorldSlice {
   readonly date: string;
   readonly order: string | null;
   readonly actor: { readonly id: string; readonly name: string; readonly office: string | null; readonly polityId: string | null };
-  readonly economy: readonly { readonly label: string; readonly balance: number }[];
+  readonly economy: readonly { readonly id: string; readonly label: string; readonly balance: number }[];
   readonly monthlyIncome: number;
   readonly monthlyExpenditure: number;
   readonly military: readonly { readonly id: string; readonly name: string; readonly strength: number; readonly location: string; readonly commander: string }[];
@@ -80,7 +80,11 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     .filter((account) => account.owner.kind === "polity" || world.characters.some((c) => c.id === account.owner.id && c.polityId === ownPolity))
     .sort((a, b) => b.balance - a.balance)
     .slice(0, CAPS.accounts)
-    .map((account) => ({ label: account.owner.kind === "polity" ? `${polityName(account.owner.id)} treasury` : `${name(account.owner.id)}'s purse`, balance: account.balance }));
+    .map((account) => ({
+      id: account.id,
+      label: account.owner.kind === "polity" ? `${polityName(account.owner.id)} treasury` : `${name(account.owner.id)}'s purse`,
+      balance: account.balance,
+    }));
 
   const perDay = (amount: number, cadenceDays: number) => (cadenceDays <= 0 ? 0 : amount / cadenceDays);
   const monthlyIncome = Math.round(
@@ -173,7 +177,7 @@ export function renderWorldSlice(slice: WorldSlice): string {
   if (slice.order !== null) lines.push("PLAYER ORDER:", `  ${slice.order}`, "");
 
   section("TREASURY", [
-    ...slice.economy.map((account) => `${account.label}: ${account.balance}`),
+    ...slice.economy.map((account) => `${account.label} [${account.id}]: ${account.balance}`),
     `Monthly income ~${slice.monthlyIncome}, monthly expenditure ~${slice.monthlyExpenditure}`,
   ]);
   section("MILITARY", slice.military.map((force) => `${force.name} [${force.id}] — ${force.strength} men at ${force.location}, under ${force.commander}`));

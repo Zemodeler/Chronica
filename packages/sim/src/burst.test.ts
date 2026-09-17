@@ -19,12 +19,12 @@ function scriptedPort(script: Partial<Record<SimOperation, string[]>>): SimModel
   const calls: SimOperation[] = [];
   return {
     calls,
-    async complete(operation) {
+    complete(operation) {
       calls.push(operation);
       const queue = remaining[operation];
       const next = queue?.shift();
-      if (next === undefined) throw new Error(`the script has no further "${operation}" response`);
-      return next;
+      if (next === undefined) return Promise.reject(new Error(`the script has no further "${operation}" response`));
+      return Promise.resolve(next);
     },
   };
 }

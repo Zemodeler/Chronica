@@ -75,7 +75,7 @@ export function routeAttention(input: AttentionInput): AttentionResult {
   if (triggering.length === 0) return { focused: [], active: [], relevantCount: 0, dormantCount: world.characters.length };
 
   const authority = buildAuthorityIndex(
-    { officeSeats: world.material.officeSeats, forces: world.material.forces },
+    { officeSeats: world.material.officeSeats, forces: world.material.forces, accounts: world.material.accounts },
     world.authorityGrants,
     input.offices,
     world.elapsedStep,

@@ -31,9 +31,9 @@ function fact(overrides: Partial<FactDraft>): Fact {
 function capturingPort(): SimModelPort & { lastUserMessage: string } {
   const port = {
     lastUserMessage: "",
-    async complete(_operation: Parameters<SimModelPort["complete"]>[0], _system: string, user: string) {
+    complete(_operation: Parameters<SimModelPort["complete"]>[0], _system: string, user: string) {
       port.lastUserMessage = user;
-      return "In the spring, Rome began to raise new legions.";
+      return Promise.resolve("In the spring, Rome began to raise new legions.");
     },
   };
   return port;
@@ -80,7 +80,7 @@ describe("chronicle", () => {
   });
 
   it("keeps the record when the narration call fails", async () => {
-    const failing: SimModelPort = { async complete() { throw new Error("provider unavailable"); } };
+    const failing: SimModelPort = { complete: () => Promise.reject(new Error("provider unavailable")) };
     const result = await composeChronicle({
       port: failing,
       clock,

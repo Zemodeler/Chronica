@@ -24,7 +24,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
     arrearsDesertionPeriods: 2,
   },
   government: {
-    offices: [{ id: "roman-command", label: "Roman field command", polityId: "rome", authorisedActionIds: ["force_create", "force_modify"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "roman-election", eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-min-prestige-3000", "req-not-disqualified"] }],
+    offices: [{ id: "roman-command", label: "Roman field command", polityId: "rome", authorisedActionIds: ["force_create", "force_modify", "project_create", "project_milestone_update", "character_create", "authority_grant_upsert", "character_intent_set"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "roman-election", eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-min-prestige-3000", "req-not-disqualified"] }],
     successionRules: [{ id: "roman-election", label: "Election by the Senate", kind: "elective", institutionId: "roman-senate" }],
     decreeAuthorityCostBps: 500,
     decreeMinimumPrestigeBps: 2_000,
@@ -63,7 +63,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
 
 const initialWorld: WorldState = WorldStateSchema.parse({
   schemaVersion: 2,
-  pins: { scenarioId: FIRST_PUNIC_WAR_SCENARIO_ID, scenarioVersion: 2, libraryVersion: 1 },
+  pins: { scenarioId: FIRST_PUNIC_WAR_SCENARIO_ID, scenarioVersion: 4, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   map: {
