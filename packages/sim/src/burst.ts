@@ -13,12 +13,13 @@ import {
 } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { AuthorityBreach } from "./apply/context";
-import { routeAttention } from "./attention";
+import { routeAttention, type RoutedActor } from "./attention";
 import { runCognition } from "./cognition";
 import { materializeFacts } from "./facts";
 import { orchestrate } from "./orchestrate";
 import { createIdFactory, type SimModelPort } from "./ports";
 import { buildWorldSlice, type SliceEvent } from "./slice";
+import { runDeterministicTick } from "./tick";
 
 /**
  * One simulation burst: everything that happens between the player pressing
@@ -59,6 +60,14 @@ export interface ScheduledEventDraft {
   readonly causalDepth: number;
 }
 
+/** An event the queue is still holding, as the burst needs to see it. */
+export interface PendingEvent {
+  readonly id: string;
+  readonly dueInstantSortKey: number;
+  readonly kind: string;
+  readonly summary: string;
+}
+
 export interface BurstInput {
   readonly world: WorldState;
   readonly clock: ScenarioClock;
@@ -70,8 +79,8 @@ export interface BurstInput {
   readonly orderText: string | null;
   /** History already on record, for the slice and for visibility checks. */
   readonly knownFacts: readonly Fact[];
-  readonly dueEvents: readonly SliceEvent[];
-  readonly pendingEvents: readonly SliceEvent[];
+  /** Everything the queue still owes the world, due or not. */
+  readonly queue: readonly PendingEvent[];
   readonly port: SimModelPort;
   readonly budget?: SimulationBudget;
 }
@@ -82,6 +91,8 @@ export interface BurstResult {
   /** Fact id → the significance its author assigned it, for storage and pacing. */
   readonly significanceByFactId: ReadonlyMap<string, number>;
   readonly scheduled: readonly ScheduledEventDraft[];
+  /** Queue entries this burst consumed, for the caller to retire. */
+  readonly firedEventIds: readonly string[];
   readonly iterations: number;
   readonly modelCalls: number;
   readonly outcome: "continue" | "chronicle" | "player_decision";
@@ -183,7 +194,56 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     narrative.push(proposal.narrativeSummary);
   };
 
+  const firedEventIds: string[] = [];
+  const nowKey = () => world.instant.day * 1440 + world.instant.minute;
+
+  /**
+   * Everything that fell due on the way here: revenue collected, wages paid,
+   * milestones reached. Deterministic, and therefore free.
+   */
+  const tickTo = (toDay: number): void => {
+    const ticked = runDeterministicTick({ world, toDay, ids });
+    world = ticked.world;
+    if (ticked.factProposals.length > 0) {
+      const materialized = materializeFacts({
+        proposals: ticked.factProposals,
+        now: world.instant,
+        atStep: world.elapsedStep,
+        ids,
+        causalDepth: 0,
+        assignedIds: new Map(),
+      });
+      newFacts.push(...materialized.facts);
+      for (const [factId, weight] of materialized.significanceByFactId) significanceByFactId.set(factId, weight);
+      significance += materialized.significance;
+    }
+    narrative.push(...ticked.notes);
+  };
+
+  /** Retires queue entries whose moment has arrived; the tick above is what actually resolved them. */
+  const fireDueEvents = (): void => {
+    for (const event of input.queue) {
+      if (firedEventIds.includes(event.id)) continue;
+      if (event.dueInstantSortKey <= nowKey()) firedEventIds.push(event.id);
+    }
+  };
+
+  // Catch up before reading the order: anything that came due since the last
+  // one was given happened before the player spoke, and the orchestrator must
+  // see a world that already reflects it.
+  tickTo(world.instant.day);
+  fireDueEvents();
+
   // ── Iteration 0: the player's order ────────────────────────────────────
+  const dueNow: SliceEvent[] = input.queue
+    .filter((event) => event.dueInstantSortKey <= nowKey())
+    .map((event) => ({ kind: event.kind, summary: event.summary, dueInDays: 0 }));
+  const upcoming: SliceEvent[] = input.queue
+    .filter((event) => event.dueInstantSortKey > nowKey())
+    .sort((a, b) => a.dueInstantSortKey - b.dueInstantSortKey)
+    .slice(0, 8)
+    .map((event) => ({ kind: event.kind, summary: event.summary, dueInDays: Math.round((event.dueInstantSortKey - nowKey()) / 1440) }));
+
   const slice = buildWorldSlice({
     world,
     clock: input.clock,
@@ -191,8 +251,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     actorPolityId: input.actorPolityId,
     orderText: input.orderText,
     facts: input.knownFacts,
-    dueEvents: input.dueEvents,
-    pendingEvents: input.pendingEvents,
+    dueEvents: dueNow,
+    pendingEvents: upcoming,
   });
 
   const orchestration = await orchestrate(input.port, slice);
@@ -202,24 +262,43 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   applyProposal(orchestration.output, input.actorRef, 0);
   if (orchestration.output.playerDecision !== null) playerDecision = orchestration.output.playerDecision;
 
-  // ── Reaction iterations ────────────────────────────────────────────────
+  const momentousAlready = significance >= budget.pressureThreshold;
+  if (momentousAlready) stopReason = "threshold_crossed";
+
+  // ── Advancing the world ────────────────────────────────────────────────
+  //
+  // The world moves only while an order is being carried out, so a burst has to
+  // carry it far enough to be worth the asking. It walks to the next moment
+  // that matters -- the next scheduled event, or simply far enough for word to
+  // travel and someone to answer -- ticking the deterministic world as it goes,
+  // and stops at the first of: a decision only the player can make, enough
+  // accumulated history to be worth telling, the budget, or the scenario's own
+  // maximum span.
+  const maxDays = Math.min(budget.maxSimulatedDays, input.clock.maxSpanDays);
   let causalDepth = 1;
-  while (
-    playerDecision === null &&
-    iterations < budget.maxIterations &&
-    modelCalls < budget.maxModelCalls &&
-    significance < budget.pressureThreshold &&
-    causalDepth <= budget.maxCausalDepth
-  ) {
+
+  while (!momentousAlready && playerDecision === null && iterations < budget.maxIterations && modelCalls < budget.maxModelCalls) {
     const elapsedDays = world.instant.day - startDay;
-    if (elapsedDays >= Math.min(budget.maxSimulatedDays, input.clock.maxSpanDays)) {
+    if (elapsedDays >= maxDays) {
       stopReason = "max_span";
       break;
     }
 
-    // Time passes before anyone reacts: word has to reach them. This is also
-    // what lets a "delayed" fact become knowable partway through a burst.
-    world = advanceWorldTo(world, nextInstant(world.instant, scheduled, REACTION_DELAY_DAYS));
+    const nextScheduled = [...input.queue, ...scheduled]
+      .map((event) => event.dueInstantSortKey)
+      .filter((key) => key > nowKey())
+      .sort((a, b) => a - b)[0];
+    // The first step is short, so word can travel and the people the order
+    // touches get their chance to answer it. After that the world jumps to
+    // whatever is next on the calendar -- which is what lets a months-long
+    // recruitment actually mature instead of creeping forward two days an order.
+    const reactionKey = nowKey() + REACTION_DELAY_DAYS * 1440;
+    const ceilingKey = (startDay + maxDays) * 1440 + world.instant.minute;
+    const targetKey = Math.min(iterations === 1 ? reactionKey : nextScheduled ?? reactionKey, ceilingKey);
+
+    world = advanceWorldTo(world, addMinutes(world.instant, Math.max(0, targetKey - nowKey())));
+    tickTo(world.instant.day);
+    fireDueEvents();
 
     const attention = routeAttention({
       world,
@@ -230,28 +309,30 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       maxCausalDepth: budget.maxCausalDepth,
     });
 
-    if (attention.focused.length === 0) {
-      stopReason = "no_due_events";
-      break;
-    }
+    // Actors who care but do not warrant a model call still record what they
+    // mean to do about it, so their intent is visible to the next burst.
+    world = recordActiveIntents(world, attention.active, ids);
 
-    const cognition = await runCognition(input.port, attention.focused, world, input.clock);
-    modelCalls += cognition.calls;
-    iterations += 1;
-    if (cognition.parseFailure !== null) parseFailures.push(cognition.parseFailure);
-
-    if (cognition.output.actors.length === 0) {
-      stopReason = "no_due_events";
-      break;
+    if (attention.focused.length > 0 && causalDepth <= budget.maxCausalDepth) {
+      const cognition = await runCognition(input.port, attention.focused, world, input.clock);
+      modelCalls += cognition.calls;
+      iterations += 1;
+      if (cognition.parseFailure !== null) parseFailures.push(cognition.parseFailure);
+      for (const actor of cognition.output.actors) applyProposal(actor.proposal, actor.actorRef, causalDepth);
+      causalDepth += 1;
+    } else {
+      iterations += 1;
     }
-
-    for (const actor of cognition.output.actors) {
-      applyProposal(actor.proposal, actor.actorRef, causalDepth);
-    }
-    causalDepth += 1;
 
     if (significance >= budget.pressureThreshold) {
       stopReason = "threshold_crossed";
+      break;
+    }
+    const spanned = world.instant.day - startDay;
+    // Nothing left to wake for, and the world has run its minimum span: this is
+    // as far as the order carries.
+    if (nextScheduled === undefined && attention.focused.length === 0 && spanned >= input.clock.minSpanDays) {
+      stopReason = "no_due_events";
       break;
     }
     if (modelCalls >= budget.maxModelCalls || iterations >= budget.maxIterations) {
@@ -272,6 +353,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     newFacts,
     significanceByFactId,
     scheduled,
+    firedEventIds,
     iterations,
     modelCalls,
     outcome,
@@ -282,6 +364,49 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     breaches,
     playerDecision,
     parseFailures,
+  };
+}
+
+/**
+ * Records what the actors who care -- but do not warrant a model call -- mean
+ * to do about it (VISION §19's "active" tier).
+ *
+ * Without this the router's middle tier was computed and thrown away every
+ * burst. An intent is cheap, deterministic, and visible to the next burst's
+ * slice, so a senator who has been quietly alarmed twice is on the record as
+ * such before he ever becomes worth a call of his own.
+ */
+function recordActiveIntents(world: WorldState, active: readonly RoutedActor[], ids: { next(prefix: string): string }): WorldState {
+  const wanting = active.filter(
+    (actor) => !world.characterIntents.some((intent) => intent.actorCharacterId === actor.characterId && intent.status === "proposed"),
+  ).slice(0, 6);
+  if (wanting.length === 0) return world;
+
+  return {
+    ...world,
+    characterIntents: [
+      ...world.characterIntents,
+      ...wanting.map((actor) => ({
+        id: ids.next("intent"),
+        actorCharacterId: actor.characterId,
+        sourceGoalId: null,
+        sourcePlotId: null,
+        sourceCommitmentId: null,
+        actionType: "prepare" as const,
+        targetIds: [],
+        rationale: `Watching events: ${actor.why}.`,
+        prerequisites: [],
+        intendedWorkflowIds: [],
+        priority: Math.min(100, actor.score),
+        status: "proposed" as const,
+        createdAtStep: world.elapsedStep,
+        reviewedAtStep: null,
+        expiresAtStep: null,
+        visibility: "private" as const,
+        sourceEventIds: [],
+        resolutionReason: null,
+      })),
+    ],
   };
 }
 

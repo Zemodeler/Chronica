@@ -9,16 +9,15 @@ import {
   getOpenDecision,
   getWorldView,
   listChronicle,
-  listDueEvents,
+  listPendingEvents,
   listRecentFacts,
-  nextPendingEvent,
   resolveDecision,
   schema,
   startBurst,
   type ChronicaDatabase,
 } from "@chronica/db";
 import { FactSchema, type Fact, type OrderPartyRef } from "@chronica/shared";
-import { composeChronicle, runSimulationBurst, type SimModelPort, type SliceEvent } from "@chronica/sim";
+import { composeChronicle, runSimulationBurst, type SimModelPort } from "@chronica/sim";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { requiredDatabaseUrl } from "./database-url";
 
@@ -97,18 +96,12 @@ export async function submitOrder(gameId: string, orderText: string): Promise<Si
     // Offices are scenario data, not world state, and authority derivation needs them.
     const offices = view.scenarioGovernment?.offices ?? [];
 
-    const nowKey = view.world.instant.day * 1440 + view.world.instant.minute;
-    const [factRows, dueRows, upcoming] = await Promise.all([
+    // The whole pending queue, not just what is due: the burst decides how far
+    // to carry the world, and it needs to see what is waiting ahead to do it.
+    const [factRows, queueRows] = await Promise.all([
       listRecentFacts(db, gameId),
-      listDueEvents(db, gameId, nowKey),
-      nextPendingEvent(db, gameId),
+      listPendingEvents(db, gameId),
     ]);
-
-    const toSliceEvent = (row: { kind: string; summary: string; dueInstantSortKey: number }): SliceEvent => ({
-      kind: row.kind,
-      summary: row.summary,
-      dueInDays: Math.max(0, Math.round((row.dueInstantSortKey - nowKey) / 1440)),
-    });
 
     const actorRef: OrderPartyRef = { kind: "character", id: characterId };
     const actorPolityId = view.world.characters.find((character) => character.id === characterId)?.polityId ?? null;
@@ -128,8 +121,7 @@ export async function submitOrder(gameId: string, orderText: string): Promise<Si
         actorPolityId,
         orderText,
         knownFacts: parseFacts(factRows),
-        dueEvents: dueRows.map(toSliceEvent),
-        pendingEvents: upcoming === undefined ? [] : [toSliceEvent(upcoming)],
+        queue: queueRows.map((row) => ({ id: row.id, dueInstantSortKey: row.dueInstantSortKey, kind: row.kind, summary: row.summary })),
         port,
       });
     } catch (error) {
@@ -172,7 +164,7 @@ export async function submitOrder(gameId: string, orderText: string): Promise<Si
           fact,
         })),
         scheduled: result.scheduled,
-        firedEventIds: dueRows.map((row) => row.id),
+        firedEventIds: result.firedEventIds,
         burst: {
           iterations: result.iterations,
           modelCalls: result.modelCalls + (chronicle?.calls ?? 0),

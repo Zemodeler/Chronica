@@ -3,6 +3,8 @@ import {
   WorldStateSchema,
   buildAuthorityIndex,
   checkAuthority,
+  CharacterSocialEventSchema,
+  applySocialEvents,
   createCanonicalNpc,
   decideOrderAttempt,
   findWorldReferenceViolations,
@@ -492,10 +494,47 @@ function applyOne(
       return { ...world, orderAttempts: world.orderAttempts.map((candidate) => (candidate.id === attemptId ? decided : candidate)) };
     }
 
-    case "social_events":
-      // Applied by the caller through the character system's own
-      // `applySocialEvents`, which needs completed `CharacterSocialEvent`s
-      // rather than the drafts carried here.
-      return world;
+    case "social_events": {
+      // Routed through the character system's own `applySocialEvents` rather
+      // than reimplemented here: relationships, beliefs, pressures and
+      // commitments have one applier, whether the cause was a conversation or
+      // the world at large.
+      const events = delta.events.map((draft) => {
+        const participants = draft.participantCharacterRefs.map((ref, index) => required(ref, `Participant ${index + 1}`));
+        for (const participantId of participants) {
+          if (!world.characters.some((character) => character.id === participantId)) {
+            reject(`No character "${participantId}" exists to take part in this.`);
+          }
+        }
+        return CharacterSocialEventSchema.parse({
+          id: context.ids.next("social"),
+          gameId: context.gameId,
+          sourceTurnId: null,
+          sourceSessionId: null,
+          sourceMessageId: null,
+          participantCharacterIds: participants,
+          kind: draft.kind,
+          visibility: draft.visibility,
+          knownByCharacterIds: participants,
+          relationCauses: [],
+          knowledgeClaims: [],
+          proposedBeliefs: [],
+          pressureChanges: [],
+          commitmentProposal: null,
+          introducedCharacter: null,
+          introducedProfile: null,
+          createdAtStep: atStep,
+          appliedAtStep: null,
+          appliedInTurnId: null,
+          status: "proposed",
+          rejectionReason: null,
+        });
+      });
+
+      const outcome = applySocialEvents(world, events, atStep, context.ids.next("social-batch"));
+      const refused = outcome.rejectedIds[0];
+      if (refused !== undefined) reject(refused.reason);
+      return outcome.world;
+    }
   }
 }

@@ -325,15 +325,20 @@ export async function listDueEvents(db: ChronicaDatabase, gameId: string, atSort
     .limit(limit);
 }
 
-/** The next pending event in the future, so a quiet burst knows where to advance to. */
-export async function nextPendingEvent(db: ChronicaDatabase, gameId: string) {
-  const [row] = await db
+/**
+ * Everything the queue still owes this world, due or not.
+ *
+ * The burst needs the whole queue rather than only what is currently due: it
+ * decides how far to carry the world, and "how far" means "to the next thing
+ * on the calendar".
+ */
+export async function listPendingEvents(db: ChronicaDatabase, gameId: string, limit = 64) {
+  return db
     .select()
     .from(scheduledEvents)
     .where(and(eq(scheduledEvents.gameId, gameId), eq(scheduledEvents.status, "pending")))
     .orderBy(asc(scheduledEvents.dueInstantSortKey))
-    .limit(1);
-  return row;
+    .limit(limit);
 }
 
 export async function listChronicle(db: ChronicaDatabase, gameId: string, limit = 20) {
