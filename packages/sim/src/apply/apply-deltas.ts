@@ -71,6 +71,8 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       return { kind: "account", id: resolve(delta.beneficiaryAccountRef) ?? delta.beneficiaryAccountRef };
     case "obligation_upsert":
       return { kind: "account", id: resolve(delta.payerAccountRef) ?? delta.payerAccountRef };
+    case "loan_open":
+      return { kind: "account", id: resolve(delta.borrowerAccountRef) ?? delta.borrowerAccountRef };
     case "force_create":
       return { kind: "polity", id: delta.polityId };
     case "force_modify":
@@ -107,6 +109,8 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   social_events: "propose",
   generic_entity_create: "propose",
   generic_entity_update: "propose",
+  loan_open: "spend",
+  loan_settle: "spend",
   authority_grant_upsert: "appoint",
   order_attempt_decide: "command",
   polity_stance_shift: "negotiate",
@@ -277,6 +281,7 @@ function applyOne(
         cadenceSteps: delta.cadenceDays,
         nextDueStep: atStep + delta.cadenceDays,
         collectionRateBps: delta.collectionRateBps ?? 10_000,
+        counterpartyPolityId: delta.counterpartyPolityId,
         active: delta.active,
       };
       if (existingId !== null) {
@@ -752,6 +757,162 @@ function applyOne(
         attributes,
       };
       return { ...world, genericEntities: world.genericEntities.map((candidate) => (candidate.id === entityId ? updated : candidate)) };
+    }
+
+    case "loan_open": {
+      const borrowerId = required(delta.borrowerAccountRef, "The borrowing account");
+      const borrower = world.material.accounts.find((account) => account.id === borrowerId);
+      if (borrower === undefined) reject(`No account "${borrowerId}" exists to receive the money.`, "reference");
+
+      const lenderId = delta.lenderRef === null ? null : required(delta.lenderRef, "The lender");
+      if (delta.lenderKind !== "foreign" && lenderId === null) {
+        reject("A loan from someone in this world has to say who they are.");
+      }
+      const collateralId = delta.collateralHoldingRef === null ? null : required(delta.collateralHoldingRef, "The collateral");
+      if (collateralId !== null && !world.material.holdings.some((holding) => holding.id === collateralId)) {
+        reject(`No holding "${collateralId}" exists to pledge against it.`, "reference");
+      }
+
+      // Money from inside the world comes out of someone's own reserves, and
+      // they have to actually have it. Money from outside does not: that is the
+      // whole difference between a merchant of ours and a foreign banker.
+      let accounts = world.material.accounts;
+      if (delta.lenderKind !== "foreign") {
+        const lenderAccount = world.material.accounts.find(
+          (account) => account.owner.kind === delta.lenderKind && account.owner.id === lenderId,
+        );
+        if (lenderAccount === undefined) reject(`${lenderId ?? "The lender"} keeps no account to lend from.`, "reference");
+        if (lenderAccount.balance < delta.principal) {
+          reject(`${lenderId ?? "The lender"} holds ${lenderAccount.balance}, which will not cover a loan of ${delta.principal}.`);
+        }
+        accounts = accounts.map((account) => (account.id === lenderAccount.id ? { ...account, balance: account.balance - delta.principal } : account));
+      }
+      accounts = accounts.map((account) => (account.id === borrowerId ? { ...account, balance: account.balance + delta.principal } : account));
+
+      const loanId = mint("loan", delta.localId);
+      // Servicing goes through an ordinary obligation, so arrears, priority and
+      // missed periods all behave as they do for army pay -- a debt crisis is
+      // already modelled by whatever models an unpaid army.
+      const serviceObligationId = context.ids.next("obligation");
+      const servicing = Math.max(1, Math.round((delta.principal * delta.interestBps) / 10_000));
+      const obligation = {
+        id: serviceObligationId,
+        kind: "debt_service" as const,
+        label: `Interest on ${delta.terms}`.slice(0, 120),
+        payerAccountId: borrowerId,
+        ...(delta.lenderKind === "foreign" ? {} : { recipientAccountId: world.material.accounts.find((account) => account.owner.kind === delta.lenderKind && account.owner.id === lenderId)?.id }),
+        amount: servicing,
+        cadenceSteps: delta.cadenceDays,
+        nextDueStep: atStep + delta.cadenceDays,
+        // Below army pay: a state short of money starves its creditors before
+        // it starves its soldiers, and that choice is what causes the crisis.
+        priority: 400,
+        arrears: 0,
+        missedPeriods: 0,
+        active: true,
+      };
+
+      const loan = {
+        id: loanId,
+        lenderKind: delta.lenderKind,
+        lenderId,
+        borrowerAccountId: borrowerId,
+        principal: delta.principal,
+        outstanding: delta.principal,
+        interestBps: delta.interestBps,
+        cadenceSteps: delta.cadenceDays,
+        serviceObligationId,
+        terms: delta.terms,
+        collateralHoldingId: collateralId,
+        status: "active" as const,
+        openedAtStep: atStep,
+      };
+
+      return {
+        ...world,
+        material: {
+          ...world.material,
+          accounts,
+          obligations: [...world.material.obligations, obligation],
+          loans: [...world.material.loans, loan],
+        },
+      };
+    }
+
+    case "loan_settle": {
+      const loanId = required(delta.loanRef, "The loan");
+      const loan = world.material.loans.find((candidate) => candidate.id === loanId);
+      if (loan === undefined) reject(`No loan "${loanId}" exists to settle.`, "reference");
+      if (loan.status !== "active") reject(`The loan "${loanId}" is already ${loan.status}.`);
+
+      if (delta.action === "renegotiate") {
+        const renegotiated = {
+          ...loan,
+          interestBps: delta.newInterestBps ?? loan.interestBps,
+          cadenceSteps: delta.newCadenceDays ?? loan.cadenceSteps,
+          terms: delta.reason.slice(0, 300),
+        };
+        const servicing = Math.max(1, Math.round((renegotiated.outstanding * renegotiated.interestBps) / 10_000));
+        return {
+          ...world,
+          material: {
+            ...world.material,
+            loans: world.material.loans.map((candidate) => (candidate.id === loanId ? renegotiated : candidate)),
+            obligations: world.material.obligations.map((obligation) =>
+              obligation.id === loan.serviceObligationId
+                ? { ...obligation, amount: servicing, cadenceSteps: renegotiated.cadenceSteps }
+                : obligation,
+            ),
+          },
+        };
+      }
+
+      if (delta.action === "default") {
+        // The debt stops being serviced and stops being paid. What that costs
+        // politically is for the creditor to decide, and they are a person.
+        return {
+          ...world,
+          material: {
+            ...world.material,
+            loans: world.material.loans.map((candidate) => (candidate.id === loanId ? { ...candidate, status: "defaulted" as const } : candidate)),
+            obligations: world.material.obligations.map((obligation) =>
+              obligation.id === loan.serviceObligationId ? { ...obligation, active: false } : obligation,
+            ),
+          },
+        };
+      }
+
+      const paying = Math.min(delta.amount, loan.outstanding);
+      if (paying <= 0) reject("A repayment has to pay something.");
+      const borrower = world.material.accounts.find((account) => account.id === loan.borrowerAccountId);
+      if (borrower === undefined) reject(`No account "${loan.borrowerAccountId}" exists to repay from.`, "reference");
+      if (borrower.balance < paying) reject(`The account holds ${borrower.balance}, which cannot repay ${paying}.`);
+
+      const lenderAccount = loan.lenderKind === "foreign" || loan.lenderId === null
+        ? undefined
+        : world.material.accounts.find((account) => account.owner.kind === loan.lenderKind && account.owner.id === loan.lenderId);
+      const accounts = world.material.accounts.map((account) => {
+        if (account.id === borrower.id) return { ...account, balance: account.balance - paying };
+        if (lenderAccount !== undefined && account.id === lenderAccount.id) return { ...account, balance: account.balance + paying };
+        return account;
+      });
+
+      const outstanding = loan.outstanding - paying;
+      const settled = { ...loan, outstanding, status: outstanding === 0 ? ("repaid" as const) : loan.status };
+      const servicing = Math.max(1, Math.round((outstanding * loan.interestBps) / 10_000));
+      return {
+        ...world,
+        material: {
+          ...world.material,
+          accounts,
+          loans: world.material.loans.map((candidate) => (candidate.id === loanId ? settled : candidate)),
+          obligations: world.material.obligations.map((obligation) =>
+            obligation.id === loan.serviceObligationId
+              ? { ...obligation, amount: servicing, active: outstanding > 0 }
+              : obligation,
+          ),
+        },
+      };
     }
 
     case "authority_grant_upsert": {
