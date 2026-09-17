@@ -63,7 +63,18 @@ export interface WorldSlice {
   readonly economy: readonly { readonly id: string; readonly label: string; readonly balance: number }[];
   readonly monthlyIncome: number;
   readonly monthlyExpenditure: number;
-  readonly military: readonly { readonly id: string; readonly name: string; readonly strength: number; readonly location: string; readonly locationId: string; readonly commander: string }[];
+  readonly military: readonly {
+    readonly id: string;
+    readonly name: string;
+    /** Men actually present. `authorizedStrength` is the paper figure and drifts after a battle. */
+    readonly strength: number;
+    readonly paperStrength: number;
+    readonly morale: number;
+    readonly provisions: string;
+    readonly location: string;
+    readonly locationId: string;
+    readonly commander: string;
+  }[];
   readonly provinces: readonly { readonly id: string; readonly name: string; readonly controller: string }[];
   readonly politics: readonly { readonly id: string; readonly name: string; readonly office: string | null; readonly age: number }[];
   readonly diplomacy: readonly { readonly toward: string; readonly trust: number; readonly why: string }[];
@@ -204,7 +215,13 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     .map((force) => ({
       id: force.id,
       name: force.name,
-      strength: force.authorizedStrength,
+      // The men actually there, not the establishment. The two diverge the
+      // moment a battle is fought, and an order planned on the paper figure is
+      // an order planned on men who are dead.
+      strength: force.personnel.reduce((sum, category) => sum + category.fit, 0),
+      paperStrength: force.authorizedStrength,
+      morale: Math.round(force.moraleBps / 100),
+      provisions: force.provisionStatus,
       location: provinceName(force.locationId),
       locationId: force.locationId,
       commander: name(force.commanderCharacterId),
@@ -436,7 +453,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       forces: world.material.forces
         .filter((force) => force.polityId === polity.id)
         .slice(0, 4)
-        .map((force) => `${force.name} [${force.id}] — ${force.authorizedStrength} men at ${provinceName(force.locationId)} [${force.locationId}]`),
+        .map((force) => `${force.name} [${force.id}] — ${force.personnel.reduce((sum, category) => sum + category.fit, 0)} men at ${provinceName(force.locationId)} [${force.locationId}]`),
     }))
     .filter((power) => power.provinces > 0 || power.leaders.length > 0 || power.forces.length > 0)
     .slice(0, CAPS.foreignFigures);
@@ -532,7 +549,11 @@ export function renderWorldSlice(slice: WorldSlice): string {
     ...slice.economy.map((account) => `${account.label} [${account.id}]: ${account.balance}`),
     `Monthly income ~${slice.monthlyIncome}, monthly expenditure ~${slice.monthlyExpenditure}`,
   ]);
-  section("MILITARY", slice.military.map((force) => `${force.name} [${force.id}] — ${force.strength} men at ${force.location} [${force.locationId}], under ${force.commander}`));
+  section("MILITARY", slice.military.map((force) => {
+    const short = force.strength < force.paperStrength ? ` of ${force.paperStrength} on the books` : "";
+    const fed = force.provisions === "provisioned" ? "" : `, ${force.provisions} of supply`;
+    return `${force.name} [${force.id}] — ${force.strength} men${short} at ${force.location} [${force.locationId}], under ${force.commander}, morale ${force.morale}/100${fed}`;
+  }));
   section("PLACES", slice.provinces.map((province) => `${province.name} [${province.id}] — held by ${province.controller}`));
   section("OTHER POWERS", slice.foreignPowers.map((power) => {
     const people = power.leaders.length === 0 ? "nobody known to lead them" : power.leaders.join("; ");

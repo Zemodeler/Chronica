@@ -21,6 +21,7 @@ import {
   type WorldDelta,
   type WorldState,
 } from "@chronica/shared";
+import { resolveEngagement } from "../battle";
 import type { ApplyContext, ApplyResult, AppliedDelta, AuthorityBreach, RejectedDelta } from "./context";
 
 /**
@@ -77,6 +78,8 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       return { kind: "polity", id: delta.polityId };
     case "force_modify":
       return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
+    case "force_engage":
+      return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
     case "polity_stance_shift":
       return { kind: "polity", id: delta.polityId };
     case "polity_outlook_set":
@@ -112,6 +115,7 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   loan_open: "spend",
   loan_settle: "spend",
   belief_set: "propose",
+  force_engage: "command",
   authority_grant_upsert: "appoint",
   order_attempt_decide: "command",
   polity_stance_shift: "negotiate",
@@ -229,10 +233,8 @@ function applyOne(
   context: ApplyContext,
   assignedIds: Map<string, string>,
   resolve: (ref: string) => string | undefined,
-  // Unused until an act has consequences the model may not author -- battle
-  // casualties are the first. The channel exists here so those arrive as facts
-  // rather than as silent state.
-  _emitFact: (fact: FactProposal) => void,
+  /** For consequences the model is not permitted to author -- battle casualties. */
+  emitFact: (fact: FactProposal) => void,
 ): WorldState {
   const required = (ref: string, label: string): string => {
     const resolved = resolve(ref);
@@ -443,6 +445,44 @@ function applyOne(
         moraleBps: Math.min(10_000, Math.max(0, force.moraleBps + (delta.moraleBpsDelta ?? 0))),
       };
       return { ...world, material: { ...world.material, forces: world.material.forces.map((candidate) => (candidate.id === forceId ? updated : candidate)) } };
+    }
+
+    case "force_engage": {
+      const attackerId = required(delta.forceRef, "The attacking force");
+      const defenderId = required(delta.targetForceRef, "The force being attacked");
+      const attacker = world.material.forces.find((force) => force.id === attackerId);
+      if (attacker === undefined) reject(`No force "${attackerId}" exists to give battle.`, "reference");
+      const defender = world.material.forces.find((force) => force.id === defenderId);
+      if (defender === undefined) reject(`No force "${defenderId}" exists to be given battle.`, "reference");
+
+      if (attacker.id === defender.id) reject("A force cannot give battle to itself.");
+      if (attacker.polityId === defender.polityId) reject(`${attacker.name} and ${defender.name} answer to the same power and will not fight each other.`);
+      // Getting an army to where its enemy stands is movement, and movement is
+      // somebody's decision. A battle is what happens once they are both there.
+      if (attacker.locationId !== defender.locationId) {
+        reject(`${attacker.name} stands in ${attacker.locationId} and ${defender.name} in ${defender.locationId}; they cannot fight until one of them marches.`);
+      }
+      const living = (force: typeof attacker): number => force.personnel.reduce((sum, category) => sum + category.fit, 0);
+      if (living(attacker) === 0 || living(defender) === 0) reject("An army with no men left in it cannot fight.");
+
+      // The engine decides what happens. Everything the model chose -- who, and
+      // how -- is already spent by this point.
+      const battleId = context.ids.next("battle");
+      const engagement = resolveEngagement(
+        {
+          world,
+          attacker,
+          defender,
+          posture: delta.posture,
+          tactic: delta.tactic,
+          warfare: context.warfare,
+          battleId,
+          seed: `${context.gameId}:${battleId}`,
+        },
+        world.material.forces.findIndex((force) => force.id === attackerId),
+      );
+      for (const fact of engagement.facts) emitFact(fact);
+      return engagement.world;
     }
 
     case "character_create": {

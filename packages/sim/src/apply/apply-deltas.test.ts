@@ -603,3 +603,101 @@ describe("what somebody can be made to believe", () => {
     expect(result.rejected[0]!.kind).toBe("reference");
   });
 });
+
+describe("battle", () => {
+  /** Two hostile armies standing on the same ground, which is all a battle needs. */
+  const facing = (state: WorldState = world()): WorldState => {
+    const roman = state.material.forces.find((force) => force.polityId === "rome")!;
+    const punic = state.material.forces.find((force) => force.polityId === "carthage")!;
+    return {
+      ...state,
+      material: {
+        ...state.material,
+        forces: state.material.forces.map((force) => (force.id === punic.id ? { ...force, locationId: roman.locationId } : force)),
+      },
+    };
+  };
+
+  const give = (attackerId: string, defenderId: string): WorldDelta => ({
+    op: "force_engage",
+    forceRef: attackerId,
+    targetForceRef: defenderId,
+    posture: "offer_battle",
+    tactic: null,
+    reason: "They are in front of us and we will not be given a better day.",
+  });
+
+  const sides = (state: WorldState) => ({
+    roman: state.material.forces.find((force) => force.polityId === "rome")!,
+    punic: state.material.forces.find((force) => force.polityId === "carthage")!,
+  });
+
+  it("costs men, and the engine decides how many", () => {
+    const before = facing();
+    const { roman, punic } = sides(before);
+    const men = (state: WorldState, id: string) =>
+      state.material.forces.find((force) => force.id === id)!.personnel.reduce((sum, category) => sum + category.fit, 0);
+
+    const result = applyDeltas(before, [give(roman.id, punic.id)], context());
+    expect(result.rejected).toHaveLength(0);
+    expect(men(result.world, roman.id) + men(result.world, punic.id)).toBeLessThan(men(before, roman.id) + men(before, punic.id));
+  });
+
+  it("puts the battle in the record, publicly, as the historian's own material", () => {
+    const before = facing();
+    const { roman, punic } = sides(before);
+    const result = applyDeltas(before, [give(roman.id, punic.id)], context());
+
+    const battle = result.factProposals.find((fact) => fact.kind === "battle");
+    expect(battle).toBeDefined();
+    expect(battle!.visibility).toBe("public");
+    expect(battle!.significance).toBeGreaterThanOrEqual(75);
+  });
+
+  it("fights the same battle twice from the same burst, so a replay agrees with itself", () => {
+    const before = facing();
+    const { roman, punic } = sides(before);
+    const once = applyDeltas(before, [give(roman.id, punic.id)], context());
+    const twice = applyDeltas(before, [give(roman.id, punic.id)], context());
+    expect(twice.world.material.forces).toEqual(once.world.material.forces);
+  });
+
+  it("keeps the paper strength honest with the men who are left", () => {
+    const before = facing();
+    const { roman, punic } = sides(before);
+    const result = applyDeltas(before, [give(roman.id, punic.id)], context());
+    for (const force of result.world.material.forces) {
+      expect(force.authorizedStrength).toBe(Math.max(1, force.personnel.reduce((sum, category) => sum + category.fit, 0)));
+    }
+  });
+
+  it("refuses a battle between armies that are nowhere near each other", () => {
+    const before = world();
+    const { roman, punic } = sides(before);
+    const result = applyDeltas(before, [give(roman.id, punic.id)], context());
+    expect(result.rejected[0]!.reason).toContain("until one of them marches");
+    expect(result.rejected[0]!.kind).toBe("world");
+  });
+
+  it("refuses a battle between two armies of the same power", () => {
+    const before = facing();
+    const { roman } = sides(before);
+    const twoRoman: WorldState = {
+      ...before,
+      material: {
+        ...before.material,
+        forces: [...before.material.forces, { ...roman, id: "second-legion", name: "The second legion" }],
+      },
+    };
+    const result = applyDeltas(twoRoman, [give(roman.id, "second-legion")], context());
+    expect(result.rejected[0]!.reason).toContain("answer to the same power");
+  });
+
+  it("refuses a battle a force that no longer exists is supposed to fight", () => {
+    const before = facing();
+    const { roman } = sides(before);
+    const result = applyDeltas(before, [give(roman.id, "an-army-of-ghosts")], context());
+    expect(result.rejected[0]!.reason).toContain('No force "an-army-of-ghosts"');
+    expect(result.rejected[0]!.kind).toBe("reference");
+  });
+});

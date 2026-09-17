@@ -3,6 +3,7 @@ import {
   nextDueMilestone,
   type FactProposal,
   type MoneyObligation,
+  type ScenarioWarfareRules,
   type MoneyTransaction,
   type WorldState,
 } from "@chronica/shared";
@@ -32,6 +33,8 @@ const MAX_PERIODS_PER_TICK = 24;
 
 export interface TickInput {
   readonly world: WorldState;
+  /** The scenario's rules of war -- how long unpaid wages take to bite. */
+  readonly warfare?: ScenarioWarfareRules | undefined;
   /** The day the world is advancing to. Everything due at or before it resolves. */
   readonly toDay: number;
   readonly ids: IdFactory;
@@ -198,6 +201,77 @@ export function runDeterministicTick(input: TickInput): TickResult {
   const servicedObligations = defaultedObligationIds.size === 0
     ? obligations
     : obligations.map((obligation) => (defaultedObligationIds.has(obligation.id) ? { ...obligation, active: false } : obligation));
+
+  /**
+   * What unpaid wages do to an army (VISION §6, §7).
+   *
+   * `Force.payArrearsPeriods` was never written and the scenario's own
+   * `arrearsMoralePeriods` / `arrearsDesertionPeriods` were read by nobody, so
+   * a treasury could stop paying its legions indefinitely and the legions never
+   * noticed. Missed periods now reach the force that the obligation pays: first
+   * its morale, then its men.
+   */
+  const MORALE_LOSS_BPS_PER_PERIOD = 800;
+  const DESERTION_RATE_PER_PERIOD = 0.03;
+  const unpaidForces = input.world.material.forces.map((force) => {
+    if (force.payObligationId === null) return force;
+    const paying = obligations.find((obligation) => obligation.id === force.payObligationId);
+    if (paying === undefined || paying.missedPeriods === force.payArrearsPeriods) return force;
+
+    const missed = paying.missedPeriods;
+    const moralePeriods = input.warfare?.arrearsMoralePeriods ?? 1;
+    const desertionPeriods = input.warfare?.arrearsDesertionPeriods ?? 3;
+    if (missed < moralePeriods) return { ...force, payArrearsPeriods: missed };
+
+    const moraleBps = Math.max(0, force.moraleBps - MORALE_LOSS_BPS_PER_PERIOD * (missed - moralePeriods + 1));
+    if (missed < desertionPeriods) {
+      facts.push({
+        localId: nextLocalId("grumbling"),
+        kind: "force_unpaid",
+        summary: `${force.name} has gone ${missed} pay period(s) unpaid, and knows it.`,
+        affectedRefs: [{ kind: "force", id: force.id }],
+        visibility: "polity",
+        discoveryState: "polity",
+        knowableInDays: 0,
+        significance: 40,
+      });
+      return { ...force, payArrearsPeriods: missed, moraleBps };
+    }
+
+    // Men leave. They are gone, not resting -- desertion is permanent.
+    const leaving = Math.round(DESERTION_RATE_PER_PERIOD * (missed - desertionPeriods + 1) * 10_000) / 10_000;
+    let lost = 0;
+    const personnel = force.personnel.map((category) => {
+      const gone = Math.min(category.fit, Math.floor(category.fit * leaving));
+      lost += gone;
+      return { ...category, fit: category.fit - gone };
+    });
+    if (lost === 0) return { ...force, payArrearsPeriods: missed, moraleBps };
+
+    facts.push({
+      localId: nextLocalId("desertion"),
+      kind: "force_desertion",
+      summary: `${lost} men left ${force.name} over ${missed} unpaid pay period(s).`,
+      affectedRefs: [{ kind: "force", id: force.id }],
+      visibility: "polity",
+      discoveryState: "polity",
+      knowableInDays: 0,
+      // Wages in arrears are how armies stop being yours.
+      significance: 70,
+    });
+    notes.push(`${lost} men deserted ${force.name} for want of pay.`);
+    return {
+      ...force,
+      payArrearsPeriods: missed,
+      moraleBps,
+      personnel,
+      authorizedStrength: Math.max(1, personnel.reduce((sum, category) => sum + category.fit, 0)),
+      history: [
+        ...force.history,
+        { id: input.ids.next("personnel"), atStep: input.toDay, kind: "desertion" as const, categoryId: personnel[0]?.categoryId ?? "infantry", count: lost, causeId: force.payObligationId },
+      ].slice(-64),
+    };
+  });
 
   // ── Projects ──────────────────────────────────────────────────────────
   //
@@ -421,7 +495,7 @@ export function runDeterministicTick(input: TickInput): TickResult {
         incomeSources: newIncome.length === 0 ? incomeSources : [...incomeSources, ...newIncome],
         obligations: servicedObligations,
         loans,
-        forces: forces.length === 0 ? input.world.material.forces : [...input.world.material.forces, ...forces],
+        forces: forces.length === 0 ? unpaidForces : [...unpaidForces, ...forces],
         transactions: transactions.slice(-500),
       },
     },
