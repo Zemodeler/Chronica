@@ -6,7 +6,9 @@ import { applyDeltas } from "./apply-deltas";
 import type { ApplyContext } from "./context";
 
 const world = (): WorldState => WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
-const offices: readonly Office[] = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition).government.offices;
+const definition = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition);
+const offices: readonly Office[] = definition.government.offices;
+const warfare = definition.warfare;
 
 /** Marcus holds the Roman command seat, so he is the authorized actor in these fixtures. */
 function context(overrides: Partial<ApplyContext> = {}): ApplyContext {
@@ -14,6 +16,7 @@ function context(overrides: Partial<ApplyContext> = {}): ApplyContext {
     now: { day: 0, minute: 540 },
     actorRef: { kind: "character", id: "marcus-atilius" },
     offices,
+    warfare,
     ids: createIdFactory("test"),
     gameId: "game-1",
     ...overrides,

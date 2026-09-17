@@ -37,6 +37,7 @@ export interface WorldView {
   readonly scenarioClock: ScenarioClock | undefined;
   readonly scenarioGovernment: ScenarioDefinition["government"] | undefined;
   readonly scenarioLife: ScenarioDefinition["life"] | undefined;
+  readonly scenarioWarfare: ScenarioDefinition["warfare"] | undefined;
   readonly scenarioPeriod: string;
 }
 
@@ -106,6 +107,7 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
     scenarioClock: definition.success ? definition.data.clock : undefined,
     scenarioGovernment: definition.success ? definition.data.government : undefined,
     scenarioLife: definition.success ? definition.data.life : undefined,
+    scenarioWarfare: definition.success ? definition.data.warfare : undefined,
     scenarioPeriod: context.period,
   };
 }

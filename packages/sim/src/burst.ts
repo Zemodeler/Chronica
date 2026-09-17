@@ -7,6 +7,7 @@ import {
   type PlayerDecision,
   type Proposal,
   type ScenarioClock,
+  type ScenarioWarfareRules,
   type StopReason,
   type WorldInstant,
   type WorldState,
@@ -72,6 +73,8 @@ export interface BurstInput {
   readonly world: WorldState;
   readonly clock: ScenarioClock;
   readonly offices: readonly Office[];
+  /** The scenario's warfare rules -- battle resolution is judged against them. */
+  readonly warfare: ScenarioWarfareRules;
   readonly burstId: string;
   readonly gameId: string;
   readonly actorRef: OrderPartyRef;
@@ -136,6 +139,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       now: world.instant,
       actorRef,
       offices: input.offices,
+      warfare: input.warfare,
       ids,
       gameId: input.gameId,
     });
@@ -149,8 +153,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       ...result.rejected.filter((rejection) => rejection.kind === "world").map((rejection) => rejection.reason),
     );
 
+    // What the engine itself made true (casualties, seizures) counts as history
+    // exactly as much as what the actor said they were doing.
     const materialized = materializeFacts({
-      proposals: proposal.facts,
+      proposals: [...proposal.facts, ...result.factProposals],
       now: world.instant,
       atStep: world.elapsedStep,
       ids,
@@ -238,12 +244,44 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     narrative.push(...ticked.notes);
   };
 
-  /** Retires queue entries whose moment has arrived; the tick above is what actually resolved them. */
+  /**
+   * Retires queue entries whose moment has arrived.
+   *
+   * Retiring one is not enough. A scheduled event is the world's own promise
+   * that something happens later (VISION §17), and for a long time this method
+   * quietly broke that promise: an event with a kind the tick knows nothing
+   * about was marked fired and vanished, so "SCHEDULED AHEAD" listed things
+   * that could never occur. Every event that comes due now enters the fact
+   * stream, where the attention router and the Chronicle can see it like
+   * anything else.
+   */
   const fireDueEvents = (): void => {
-    for (const event of input.queue) {
-      if (firedEventIds.includes(event.id)) continue;
-      if (event.dueInstantSortKey <= nowKey()) firedEventIds.push(event.id);
-    }
+    const due = input.queue.filter((event) => !firedEventIds.includes(event.id) && event.dueInstantSortKey <= nowKey());
+    if (due.length === 0) return;
+    for (const event of due) firedEventIds.push(event.id);
+
+    const materialized = materializeFacts({
+      proposals: due.map((event, index) => ({
+        localId: `due_${event.id}_${index}`,
+        kind: event.kind,
+        summary: event.summary,
+        affectedRefs: [],
+        visibility: "public" as const,
+        discoveryState: "public" as const,
+        knowableInDays: 0,
+        // The moment a thing was scheduled to happen is worth noting without
+        // being worth interrupting for; what it causes carries its own weight.
+        significance: 35,
+      })),
+      now: world.instant,
+      atStep: world.elapsedStep,
+      ids,
+      causalDepth: 0,
+      assignedIds: new Map(),
+    });
+    newFacts.push(...materialized.facts);
+    for (const [factId, weight] of materialized.significanceByFactId) significanceByFactId.set(factId, weight);
+    significance += materialized.significance;
   };
 
   // Catch up before reading the order: anything that came due since the last
