@@ -157,12 +157,25 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
       world,
       applied: [],
       breaches: [],
-      rejected: deltas.map((delta) => ({ delta, reason: `The batch would have left the world invalid: ${parsed.error.issues[0]?.message ?? "unknown"}.`, kind: "reference" as const })),
+      rejected: deltas.map((delta) => ({
+        delta,
+        // The path matters more than the message: "Too small: expected array to
+        // have >=1 items" names nothing on its own.
+        reason: `The batch would have left the world invalid: ${describeIssue(parsed.error.issues[0])}.`,
+        kind: "reference" as const,
+      })),
       assignedIds: new Map(),
     };
   }
 
   return { world: parsed.data, applied, rejected, breaches, assignedIds };
+}
+
+/** A Zod issue as something a person can act on: where it was, then what was wrong. */
+function describeIssue(issue: { path: PropertyKey[]; message: string } | undefined): string {
+  if (issue === undefined) return "unknown";
+  const where = issue.path.map(String).join(".");
+  return where.length === 0 ? issue.message : `${where}: ${issue.message}`;
 }
 
 function applyOne(
