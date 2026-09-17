@@ -138,7 +138,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   let stopReason: StopReason = "no_due_events";
 
   /** Applies one actor's proposal: deltas, then the facts and events it produced. */
-  const applyProposal = (proposal: Proposal, actorRef: OrderPartyRef, causalDepth: number): void => {
+  const applyProposal = (proposal: Proposal, actorRef: OrderPartyRef, causalDepth: number, actsForTheWorld = false): void => {
     const result = applyDeltas(world, proposal.deltas, {
       now: world.instant,
       actorRef,
@@ -146,6 +146,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       warfare: input.warfare,
       ids,
       gameId: input.gameId,
+      actsForTheWorld,
     });
     world = result.world;
     breaches.push(...result.breaches);
@@ -362,7 +363,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   modelCalls += orchestration.calls;
   iterations += 1;
   if (orchestration.parseFailure !== null) parseFailures.push(orchestration.parseFailure);
-  applyProposal(orchestration.output, input.actorRef, 0);
+  applyProposal(orchestration.output, input.actorRef, 0, true);
   if (orchestration.output.playerDecision !== null) playerDecision = orchestration.output.playerDecision;
 
   const momentousAlready = significance >= budget.pressureThreshold;

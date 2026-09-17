@@ -111,7 +111,15 @@ export interface WorldSlice {
     }[];
   };
   /** Bodies that can decide something, and the terms on which they decide it. */
-  readonly institutions: readonly { readonly id: string; readonly name: string; readonly blocs: number; readonly threshold: number }[];
+  readonly institutions: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly threshold: number;
+    /** Who actually takes sides in it. Without their ids nobody can be recorded as supporting anything. */
+    readonly blocs: readonly { readonly id: string; readonly name: string; readonly weight: number; readonly interest: string }[];
+  }[];
+  /** Factions outside any one body -- the other things that hold a position. */
+  readonly factions: readonly { readonly id: string; readonly name: string; readonly kind: string; readonly members: number }[];
   /** Questions still open before them, with where the weight currently sits. */
   readonly council: readonly {
     readonly id: string;
@@ -313,9 +321,22 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   const institutions = ourInstitutions.slice(0, CAPS.institutions).map((institution) => ({
     id: institution.id,
     name: institution.name,
-    blocs: institution.votingBlocs.length,
     threshold: outOfHundred(institution.passageThresholdBps),
+    // An institution is a room; the blocs are the people in it. Printing the
+    // room alone left the model naming the Senate itself as a supporter, which
+    // is not a thing that can hold an opinion.
+    blocs: institution.votingBlocs.slice(0, 6).map((bloc) => ({ id: bloc.id, name: bloc.name, weight: bloc.weight, interest: bloc.representedInterest })),
   }));
+
+  const factions = world.material.politicalGroups
+    .filter((group) => ownPolity === null || group.polityId === ownPolity)
+    .slice(0, CAPS.institutions)
+    .map((group) => ({
+      id: group.id,
+      name: group.name,
+      kind: group.type,
+      members: world.material.groupMemberships.filter((membership) => membership.groupId === group.id && membership.leftAtStep === null).length,
+    }));
 
   /**
    * Support positions are append-only: someone who changes their mind leaves
@@ -393,7 +414,9 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   // Only revenue with somebody on the other end of it: a farm cannot be
   // blockaded, and listing it here would tell the model nothing it can act on.
   const trade = world.material.incomeSources
-    .filter((source) => source.counterpartyPolityId !== null && ourAccountIds.has(source.beneficiaryAccountId))
+    // Our own polity named as the counterparty means domestic revenue that was
+    // mislabelled; it depends on nobody abroad and cannot be cut by a war.
+    .filter((source) => source.counterpartyPolityId !== null && source.counterpartyPolityId !== ownPolity && ourAccountIds.has(source.beneficiaryAccountId))
     .slice(0, CAPS.trade)
     .map((source) => ({
       id: source.id,
@@ -506,6 +529,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     country,
     institutions,
     council,
+    factions,
     holdings,
     debts,
     trade,
@@ -580,8 +604,15 @@ export function renderWorldSlice(slice: WorldSlice): string {
       return `${entry.name} [${entry.id}]: legitimacy ${entry.legitimacy}/100${confidence}${why}`;
     }),
   );
-  section("INSTITUTIONS", slice.institutions.map((institution) =>
-    `${institution.name} [${institution.id}] — ${institution.blocs} bloc(s), ${institution.threshold}/100 needed to carry a question`));
+  section(
+    "INSTITUTIONS",
+    slice.institutions.flatMap((institution) => [
+      `${institution.name} [${institution.id}] — ${institution.threshold}/100 of the weight needed to carry a question`,
+      ...institution.blocs.map((bloc) => `  ${bloc.name} [${bloc.id}] — weight ${bloc.weight}, speaks for ${bloc.interest}`),
+    ]),
+  );
+  section("FACTIONS", slice.factions.map((faction) =>
+    `${faction.name} [${faction.id}] — ${faction.kind}, ${faction.members} member(s)`));
   section(
     "BEFORE THE COUNCIL",
     slice.council.map((question) => {

@@ -128,6 +128,67 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   holding_transfer: "punish",
 };
 
+/**
+ * Which polity an act falls in, where that can be told.
+ *
+ * Used to decide whether an act is the actor's at all -- not to decide whether
+ * they may do it, which is `checkAuthority`'s business.
+ */
+function polityOfScope(scope: AuthorityScope, world: WorldState): string | null {
+  switch (scope.kind) {
+    case "polity":
+      return scope.id;
+    case "province":
+      return world.map.provinces.find((province) => province.id === scope.id)?.controllerPolityId ?? null;
+    case "force":
+      return world.material.forces.find((force) => force.id === scope.id)?.polityId ?? null;
+    case "institution":
+      return world.material.institutions.find((institution) => institution.id === scope.id)?.polityId ?? null;
+    case "account": {
+      const owner = world.material.accounts.find((account) => account.id === scope.id)?.owner;
+      if (owner === undefined) return null;
+      if (owner.kind === "polity") return owner.id;
+      return world.characters.find((character) => character.id === owner.id)?.polityId ?? null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Whether a delta is the actor overreaching, or simply the world moving.
+ *
+ * The orchestrator speaks for the whole world, not only for the ruler whose
+ * order it is answering: it gives the Boii a chieftain, decides what Carthage
+ * privately wants, and moves a neighbour's army. Judging those against the
+ * Roman consul recorded ten breaches for a single tax order and accused him of
+ * insubordination for things he did not do -- the third time false
+ * insubordination has come out of this check.
+ *
+ * So the exemption follows who is speaking. When a person acts for themselves,
+ * through their own cognition, everything they do is theirs to answer for, and
+ * a Carthaginian who moves a Roman legion has committed exactly the
+ * insubordination VISION §12 is about. It is only when the world itself is
+ * speaking that an act inside another power is somebody else's business.
+ */
+function actorIsAnswerableFor(delta: WorldDelta, scope: AuthorityScope, world: WorldState, context: ApplyContext): boolean {
+  if (context.actsForTheWorld !== true) return true;
+
+  // A polity's standing aims are nobody's personal act, whoever is speaking.
+  if (delta.op === "polity_outlook_set") return false;
+
+  const actorPolityId = context.actorRef.kind === "character"
+    ? world.characters.find((character) => character.id === context.actorRef.id)?.polityId ?? null
+    : context.actorRef.kind === "polity" ? context.actorRef.id : null;
+  if (actorPolityId === null) return true;
+
+  const scopePolityId = polityOfScope(scope, world);
+  // Where the act belongs to nobody in particular, the actor still answers for
+  // it: an unattributable act is exactly where overreach would hide.
+  if (scopePolityId === null) return true;
+  return scopePolityId === actorPolityId;
+}
+
 export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], context: ApplyContext): ApplyResult {
   const assignedIds = new Map<string, string>();
   const applied: AppliedDelta[] = [];
@@ -155,13 +216,24 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
       emitted.push(fact);
     };
     let authority: AuthorityCheckResult;
+    let answerable = true;
     try {
-      authority = checkAuthority(authorityIndex, {
-        holder: context.actorRef,
-        domain: DELTA_AUTHORITY_DOMAIN[delta.op],
-        scope: scopeOf(delta, current, resolve, context.actorRef),
-        power: POWER_BY_OP[delta.op],
-      });
+      const scope = scopeOf(delta, current, resolve, context.actorRef);
+      answerable = actorIsAnswerableFor(delta, scope, current, context);
+      authority = checkAuthority(
+        authorityIndex,
+        {
+          holder: context.actorRef,
+          domain: DELTA_AUTHORITY_DOMAIN[delta.op],
+          scope,
+          power: POWER_BY_OP[delta.op],
+        },
+        // Without this, `checkAuthority` matches scopes only exactly, so a
+        // grant over Rome covered nothing *in* Rome: a consul with authority
+        // over his own republic was recorded as insubordinate for putting a
+        // motion to its own Senate.
+        (granted, wanted) => granted.kind === "polity" && polityOfScope(wanted, current) === granted.id,
+      );
       current = applyOne(current, delta, context, assignedIds, resolve, emitFact);
     } catch (error) {
       if (error instanceof DeltaRejection) {
@@ -183,7 +255,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
 
     applied.push({ delta, authority });
     factProposals.push(...emitted);
-    if (!authority.authorized) breaches.push({ delta, reason: authority.reason });
+    if (answerable && !authority.authorized) breaches.push({ delta, reason: authority.reason });
   }
 
   // One structural check at the end rather than per delta: the per-delta guard
@@ -694,10 +766,13 @@ function applyOne(
         reject(`No open question "${procedureId}" exists to take a side on.`, "reference");
       }
       const supporterId = required(delta.supporterRef, "The supporter");
+      // A voting bloc inside the body hearing the question is as real a
+      // supporter as a faction outside it, and usually the one that decides.
       const supporterExists = delta.supporterKind === "character"
         ? world.characters.some((character) => character.id === supporterId)
-        : world.material.politicalGroups.some((group) => group.id === supporterId);
-      if (!supporterExists) reject(`No ${delta.supporterKind} "${supporterId}" exists to hold a position.`, "reference");
+        : world.material.politicalGroups.some((group) => group.id === supporterId)
+          || world.material.institutions.some((institution) => institution.votingBlocs.some((bloc) => bloc.id === supporterId));
+      if (!supporterExists) reject(`No faction or voting bloc "${supporterId}" exists to hold a position.`, "reference");
 
       // Positions are append-only: someone who changes their mind leaves both
       // rows behind, and the later one is what counts. That is what lets the

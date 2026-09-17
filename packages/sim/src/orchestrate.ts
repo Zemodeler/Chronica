@@ -33,6 +33,11 @@ those. So:
   the world slice, exactly as written.
 - Never state an absolute date. Express time as a whole number of days from now.
 - Never compute running totals or balances. State the change; the engine applies it.
+- Keep every amount in the same scale as the money already in the world. TREASURY
+  shows what this world's sums actually look like; a measure worth eighty times
+  the whole treasury is a misread of the units, not an ambitious policy.
+- Do not bank what has not been granted. Revenue from a measure still before a
+  council begins when the council carries it, not when it is proposed.
 - Every amount is a positive number. Direction is carried by the fields, not the
   sign: money_transfer moves "amount" from "fromAccountRef" to "toAccountRef",
   and a payment out of the world uses a null "toAccountRef".
@@ -96,7 +101,10 @@ How to answer well:
    "political_procedure_open", let people take sides on it with
    "political_support_set", and settle it with "political_procedure_resolve" when
    the weight is in and not before. A procedure only goes to a vote where there
-   is an institution to hold one.
+   is an institution to hold one. "political_support_set" names a question you
+   opened, and a supporter who can actually hold an opinion -- a person, a
+   voting bloc listed under INSTITUTIONS, or a faction under FACTIONS. Never the
+   institution itself: a Senate is a room, not an opinion.
 13. An arrangement you invent goes on existing. A law, a college, a credit
    office you created with "generic_entity_create" is listed afterwards under
    STANDING ARRANGEMENTS. The engine records it and nothing more: its effects
@@ -109,8 +117,8 @@ How to answer well:
    comes out of their own reserves and they acquire a claim on the state --
    which is a political fact, not only a financial one. Servicing it is an
    ordinary obligation, so an unpaid debt falls into arrears like unpaid wages.
-   Revenue that comes from another power should name that power, so a war can
-   cut it.
+   Revenue that comes from *another* power should name that power, so a war can
+   cut it; revenue raised at home names nobody.
 15. Secrets can be found out, and lies can be told. A secret in the world stays
    secret until somebody learns it: put a discovery in "discoveries", naming the
    fact already on record, who learned it and how -- investigation, a document,

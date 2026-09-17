@@ -168,6 +168,16 @@ describe("what the government can see of its own standing", () => {
     expect(renderWorldSlice(slice(withQuestion))).toContain("BEFORE THE COUNCIL");
   });
 
+  it("names the blocs inside a body, because a Senate cannot hold an opinion", () => {
+    // Found live: shown only the institution, the model recorded the Senate
+    // itself as a supporter, and the act was discarded.
+    const text = renderWorldSlice(slice());
+    const institution = world().material.institutions[0];
+    if (institution === undefined || institution.votingBlocs.length === 0) return;
+    expect(text).toContain(`[${institution.id}]`);
+    expect(text).toContain(`[${institution.votingBlocs[0]!.id}]`);
+  });
+
   it("leaves a settled question out entirely", () => {
     const state = world();
     const settled: WorldState = {
