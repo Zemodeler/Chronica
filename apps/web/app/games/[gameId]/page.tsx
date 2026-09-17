@@ -79,8 +79,7 @@ export default async function GamePage({
     <GameShell
       gameId={world.gameId}
       gameTitle={world.gameTitle}
-      phase={world.phase}
-      elapsedStepLabel={world.elapsedStepLabel}
+      elapsedStepLabel={world.dateLabel}
       initialGeoJson={world.mapGeoJson}
       initialOverlay={world.mapOverlay}
       baseImageUrl="/maps/natural-earth-ii-blue-oceans.png"

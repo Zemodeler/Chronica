@@ -212,7 +212,33 @@ export function deriveCommandGrants(forces: MaterialWorldState["forces"], atStep
   return grants;
 }
 
-/** A prebuilt, per-turn lookup over every currently-active grant (office/command derived, plus persisted `WorldState.authorityGrants`). */
+/**
+ * Fiscal authority over one's own money.
+ *
+ * Office grants cover an office's named treasury and nothing else, so without
+ * this a character spending their own purse was recorded as an authority
+ * breach -- which made every privately-funded act look like embezzlement.
+ * Ownership is not an office, and does not expire.
+ */
+export function deriveOwnerGrants(accounts: MaterialWorldState["accounts"], atStep: number): AuthorityGrant[] {
+  return accounts
+    .filter((account) => account.owner.kind === "character" && account.status === "active")
+    .map((account) =>
+      AuthorityGrantSchema.parse({
+        id: `owner:${account.id}`,
+        holder: { kind: "character", id: account.owner.id },
+        source: "custom",
+        sourceRef: account.id,
+        domain: "fiscal",
+        scope: { kind: "account", id: account.id },
+        powers: ["spend", "propose"],
+        standing: "lawful",
+        grantedAtStep: atStep,
+      }),
+    );
+}
+
+/** A prebuilt lookup over every currently-active grant (derived from offices, commands and ownership, plus persisted `WorldState.authorityGrants`). */
 export interface AuthorityIndex {
   readonly grants: readonly AuthorityGrant[];
 }
@@ -224,12 +250,16 @@ export function isActive(grant: AuthorityGrant, atStep: number): boolean {
 }
 
 export function buildAuthorityIndex(
-  material: Pick<MaterialWorldState, "officeSeats" | "forces">,
+  material: Pick<MaterialWorldState, "officeSeats" | "forces"> & Partial<Pick<MaterialWorldState, "accounts">>,
   persistedGrants: readonly AuthorityGrant[] | undefined,
   offices: readonly Office[],
   atStep: number,
 ): AuthorityIndex {
-  const derived = [...deriveOfficeGrants(material.officeSeats, offices, atStep), ...deriveCommandGrants(material.forces, atStep)];
+  const derived = [
+    ...deriveOfficeGrants(material.officeSeats, offices, atStep),
+    ...deriveCommandGrants(material.forces, atStep),
+    ...deriveOwnerGrants(material.accounts ?? [], atStep),
+  ];
   const persisted = (persistedGrants ?? []).filter((grant) => isActive(grant, atStep));
   return { grants: [...derived, ...persisted] };
 }

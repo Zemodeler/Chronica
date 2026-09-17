@@ -94,7 +94,6 @@ export async function createGame(formData: FormData): Promise<never> {
       startingSeatCount: 1,
       extraPrincipalsPerPlayer: 0,
     },
-    newsTimeoutSeconds: 60,
     coinCap: textValue(formData, "coinCap"),
   });
   if (!parsed.success) redirect("/games/new?status=invalid#status");
@@ -108,12 +107,6 @@ export async function createGame(formData: FormData): Promise<never> {
     redirect(`/games/new?scenario=${encodeURIComponent(parsed.data.scenarioId)}&status=unavailable#status`);
   }
   redirect(gamePath(gameId, "?status=created"));
-}
-
-export async function acknowledgeNews(formData: FormData): Promise<never> {
-  const gameId = textValue(formData, "gameId");
-  await gameRepository.acknowledgeNews(gameId);
-  redirect(gamePath(gameId, "?status=ready#status"));
 }
 
 export async function requestGameEnd(formData: FormData): Promise<never> {
@@ -131,9 +124,7 @@ export async function deleteSaveSlot(formData: FormData): Promise<never> {
 
 export async function redeemGift(formData: FormData): Promise<never> {
   const parsed = GiftRedemptionSchema.safeParse({ code: textValue(formData, "code") });
-  const result = parsed.success
-    ? isAuthenticationConfigured() ? await redeemAccountGift(await headers(), parsed.data.code) : await gameRepository.redeemGift(parsed.data.code)
-    : "invalid";
+  const result = parsed.success ? await redeemAccountGift(await headers(), parsed.data.code) : "invalid";
   redirect(`/account?gift=${result}#gift-status`);
 }
 
