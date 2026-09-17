@@ -106,8 +106,7 @@ function input(port: SimModelPort, overrides: Partial<BurstInput> = {}): BurstIn
     actorPolityId: "rome",
     orderText: "Raise two new legions.",
     knownFacts: [],
-    dueEvents: [],
-    pendingEvents: [],
+    queue: [],
     port,
     ...overrides,
   };
@@ -118,7 +117,10 @@ describe("a burst answering \"Raise two new legions\"", () => {
     const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [CARTHAGE_REACTS] });
     const result = await runSimulationBurst(input(port));
 
-    expect(result.world.material.accounts.find((a) => a.id === "marcus-purse")!.balance).toBe(980);
+    // The order's own 220 left the purse, and standing obligations were paid on
+    // top of it as the burst carried the world forward.
+    const purse = result.world.material.accounts.find((a) => a.id === "marcus-purse")!.balance;
+    expect(purse).toBeLessThanOrEqual(1_200 - 220);
     expect(result.world.characters.some((c) => c.name === "Marcus Fabius Varro")).toBe(true);
     expect(result.world.projects).toHaveLength(1);
     expect(result.world.projects[0]!.milestones).toHaveLength(2);
@@ -146,7 +148,8 @@ describe("a burst answering \"Raise two new legions\"", () => {
     const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [CARTHAGE_REACTS] });
     const result = await runSimulationBurst(input(port));
 
-    expect(port.calls).toEqual(["simulate_orchestrate", "simulate_cognition"]);
+    expect(port.calls[0]).toBe("simulate_orchestrate");
+    expect(port.calls).toContain("simulate_cognition");
     const before = world().material.forces.find((f) => f.id === "carthaginian-army")!.authorizedStrength;
     const after = result.world.material.forces.find((f) => f.id === "carthaginian-army")!.authorizedStrength;
     expect(after).toBe(before + 1_500);
@@ -179,16 +182,19 @@ describe("information boundaries", () => {
 
     const mobilization = result.newFacts.find((fact) => fact.kind === "military_mobilization")!;
     expect(mobilization.discovery.knowableAtInstant).not.toBeNull();
-    expect(mobilization.discovery.knowableAtInstant!.day).toBeGreaterThan(result.world.instant.day - 3);
+    // Knowable exactly the one day later the orchestrator asked for, measured
+    // from when it happened rather than from wherever the burst ended.
+    expect(mobilization.discovery.knowableAtInstant!.day).toBe(mobilization.time.day + 1);
   });
 });
 
 describe("budget and termination", () => {
   it("stops rather than looping when nobody further can react", async () => {
     const quiet = JSON.stringify({ actors: [] });
-    const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [quiet] });
+    const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [quiet, quiet, quiet] });
     const result = await runSimulationBurst(input(port));
-    expect(result.stopReason).toBe("no_due_events");
+    expect(result.iterations).toBeLessThanOrEqual(3);
+    expect(result.modelCalls).toBeLessThanOrEqual(4);
   });
 
   it("ends the burst when accumulated significance crosses the threshold", async () => {
@@ -199,7 +205,11 @@ describe("budget and termination", () => {
     const port = scriptedPort({ simulate_orchestrate: [momentous] });
     const result = await runSimulationBurst(input(port));
     expect(result.accumulatedSignificance).toBeGreaterThanOrEqual(100);
+    // Momentous news hands control straight back: the world does not carry on
+    // for another week before telling the player Rome is at war.
     expect(result.iterations).toBe(1);
+    expect(result.stopReason).toBe("threshold_crossed");
+    expect(result.world.instant.day).toBe(world().instant.day);
   });
 
   it("survives a model that answers with nothing usable, and says so as friction", async () => {
@@ -230,5 +240,72 @@ describe("budget and termination", () => {
     expect(result.stopReason).toBe("player_decision");
     expect(result.playerDecision!.options).toHaveLength(2);
     expect(port.calls).toEqual(["simulate_orchestrate"]);
+  });
+});
+
+const QUIET = JSON.stringify({
+  intent: { summary: "Carry on.", domains: [] },
+  narrativeSummary: "The consul lets the levy run its course.",
+  frictions: [], deltas: [], facts: [], delegations: [], schedule: [],
+  cognitionCandidates: [], outcome: "continue", playerDecision: null,
+});
+
+describe("a later order carries the world to what was scheduled", () => {
+  /** The world as the first order left it: a recruitment project mid-flight. */
+  function midRecruitment(): WorldState {
+    const state = world();
+    return {
+      ...state,
+      projects: [{
+        id: "project-1",
+        kind: "recruitment",
+        sponsorEntityRef: { kind: "polity", id: "rome" },
+        label: "Two new legions",
+        status: "in_progress",
+        reservationId: null,
+        milestones: [
+          { id: "m1", label: "Financing committed", requiredAtElapsedOffset: 9, costAmount: 0, status: "pending", linkedWorkflowId: null, linkedWorkflowParams: {}, completedAtStep: null },
+          { id: "m2", label: "First recruits assemble", requiredAtElapsedOffset: 60, costAmount: 0, status: "pending", linkedWorkflowId: null, linkedWorkflowParams: {}, completedAtStep: null },
+        ],
+        completionWorkflowId: null,
+        completionWorkflowParams: {},
+        linkedEntityIds: [],
+        startedAtStep: 0,
+        targetCompletionStep: 60,
+        completedAtStep: null,
+        provenanceEventIds: [],
+      }],
+    };
+  }
+
+  const queue = [{ id: "event-1", dueInstantSortKey: 60 * 1440, kind: "recruitment_milestone", summary: "First recruits assemble." }];
+
+  it("advances time to the scheduled moment instead of creeping forward", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [QUIET], simulate_cognition: [JSON.stringify({ actors: [] })] });
+    const result = await runSimulationBurst(input(port, { world: midRecruitment(), queue, orderText: "Let the levy proceed." }));
+    expect(result.world.instant.day).toBeGreaterThanOrEqual(60);
+  });
+
+  it("completes the recruitment the first order set in motion", async () => {
+    // The whole point of the queue: work that takes months actually finishes.
+    const port = scriptedPort({ simulate_orchestrate: [QUIET], simulate_cognition: [JSON.stringify({ actors: [] })] });
+    const result = await runSimulationBurst(input(port, { world: midRecruitment(), queue, orderText: "Let the levy proceed." }));
+
+    expect(result.world.projects[0]!.status).toBe("completed");
+    expect(result.newFacts.map((fact) => fact.kind)).toContain("project_completed");
+    expect(result.outcome).toBe("chronicle");
+  });
+
+  it("retires the queue entry it consumed", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [QUIET], simulate_cognition: [JSON.stringify({ actors: [] })] });
+    const result = await runSimulationBurst(input(port, { world: midRecruitment(), queue, orderText: "Let the levy proceed." }));
+    expect(result.firedEventIds).toContain("event-1");
+  });
+
+  it("never carries the world past the scenario's maximum span", async () => {
+    const distant = [{ id: "event-far", dueInstantSortKey: 5_000 * 1440, kind: "anniversary", summary: "A distant date." }];
+    const port = scriptedPort({ simulate_orchestrate: [QUIET], simulate_cognition: [JSON.stringify({ actors: [] }), JSON.stringify({ actors: [] }), JSON.stringify({ actors: [] })] });
+    const result = await runSimulationBurst(input(port, { queue: distant, orderText: "Wait." }));
+    expect(result.world.instant.day).toBeLessThanOrEqual(clock.maxSpanDays);
   });
 });
