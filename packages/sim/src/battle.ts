@@ -183,11 +183,17 @@ function factsFor(world: WorldState, result: BattleResult, provinceId: string, i
   }
 
   for (const change of result.siegeAndControlChanges) {
+    const held = world.map.provinces.find((province) => province.id === change.provinceId)?.controllerPolityId ?? null;
     const taken = world.map.polities.find((polity) => polity.id === change.newControllerPolityId);
+    // A beaten defender who keeps the ground has not lost it. Saying "Boii
+    // passed to Boii" reads as nonsense in a Chronicle and is also untrue.
+    const changedHands = change.newControllerPolityId !== held;
     facts.push({
       localId: `ground_${index}_${change.provinceId}`,
-      kind: "province_control_change",
-      summary: `${provinceName} passed to ${taken?.name ?? "no one"}. ${change.explanation}`,
+      kind: changedHands ? "province_control_change" : "province_control_weakened",
+      summary: changedHands
+        ? `${provinceName} passed to ${taken?.name ?? "no one"}. ${change.explanation}`
+        : `${taken?.name ?? "Its holders"} still hold ${provinceName}, but less firmly. ${change.explanation}`,
       affectedRefs: [
         { kind: "province", id: change.provinceId },
         ...(change.newControllerPolityId === null ? [] : [{ kind: "polity" as const, id: change.newControllerPolityId }]),
@@ -195,7 +201,7 @@ function factsFor(world: WorldState, result: BattleResult, provinceId: string, i
       visibility: "public",
       discoveryState: "public",
       knowableInDays: 0,
-      significance: 85,
+      significance: changedHands ? 85 : 45,
     });
   }
 

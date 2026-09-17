@@ -124,13 +124,15 @@ const ProjectCreateSchema = z.object({
    */
   completionOutcome: z
     .object({
-      kind: z.enum(["force", "structure", "income_source", "none"]),
+      kind: z.enum(["force", "structure", "income_source", "force_move", "none"]),
       label: z.string().trim().min(1).max(160),
       /** Men for a force, garrison capacity for a structure, revenue per period for an income source. */
       amount: z.number().int().nonnegative().max(10_000_000).default(0),
       provinceId: EntityIdSchema.nullable().default(null),
       polityId: EntityIdSchema.nullable().default(null),
       commanderCharacterRef: RefSchema.nullable().default(null),
+      /** For "force_move": the army that arrives at "provinceId" when the journey ends. */
+      forceRef: RefSchema.nullable().default(null),
       beneficiaryAccountRef: RefSchema.nullable().default(null),
       cadenceDays: z.number().int().positive().max(36_600).nullable().default(null),
     })
@@ -184,6 +186,14 @@ const CharacterCreateSchema = z.object({
   age: z.number().int().min(0).max(120),
   officeLabel: z.string().trim().max(120).nullable(),
   traits: z.array(z.string().trim().min(1).max(60)).max(8),
+  /**
+   * What they are worth, in their own purse.
+   *
+   * A merchant generated to lend the state money had nothing to lend with, so
+   * the loan was refused by the very person invented to make it. Wealth is part
+   * of who someone is, and the world decides it when it decides they exist.
+   */
+  wealth: MoneyAmountSchema.default(0),
   /** VISION §5 keeps the reason a generated person exists, because it is often why they matter later. */
   generatedBecause: ReasonSchema,
 }).strict();
