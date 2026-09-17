@@ -69,7 +69,11 @@ const IncomeSourceUpsertSchema = z.object({
   amount: MoneyAmountSchema,
   cadenceDays: z.number().int().positive().max(36_600),
   collectionRateBps: BasisPointsSchema.optional(),
-  /** Who pays it, where it comes from abroad -- so a war can cut this particular route. */
+  /**
+   * The *other* power this revenue depends on, so a war can cut this route.
+   * Null for anything raised at home -- a tax on your own citizens depends on
+   * nobody abroad and naming yourself here says nothing.
+   */
   counterpartyPolityId: EntityIdSchema.nullable().default(null),
   active: z.boolean().default(true),
   reason: ReasonSchema,

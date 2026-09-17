@@ -411,6 +411,43 @@ describe("a question put to a body", () => {
     expect(rows.at(-1)!.position).toBe("oppose");
   });
 
+  it("lets a voting bloc take a side, since the blocs are what decide a motion", () => {
+    const state = world();
+    const opened = applyDeltas(state, [open(state)], context());
+    const procedureId = opened.world.material.politicalProcedures.at(-1)!.id;
+    const bloc = state.material.institutions[0]!.votingBlocs[0]!;
+
+    const result = applyDeltas(
+      opened.world,
+      [{
+        op: "political_support_set", procedureRef: procedureId, supporterKind: "group", supporterRef: bloc.id,
+        position: "oppose", influenceWeight: bloc.weight, reasonKind: "material_interest",
+        reasonLabel: "The measure falls on the people they speak for.", visibility: "polity",
+        reason: "The bloc declared against it.",
+      }],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    expect(result.world.material.supportPositions.at(-1)!.supporterId).toBe(bloc.id);
+  });
+
+  it("refuses a side taken by something that cannot hold an opinion", () => {
+    const state = world();
+    const opened = applyDeltas(state, [open(state)], context());
+    const procedureId = opened.world.material.politicalProcedures.at(-1)!.id;
+    const result = applyDeltas(
+      opened.world,
+      [{
+        op: "political_support_set", procedureRef: procedureId, supporterKind: "group", supporterRef: "the-weather",
+        position: "support", influenceWeight: 10, reasonKind: "ideology", reasonLabel: "None.", visibility: "polity",
+        reason: "Nonsense.",
+      }],
+      context(),
+    );
+    expect(result.rejected[0]!.reason).toContain('No faction or voting bloc "the-weather"');
+  });
+
   it("refuses a vote where there is no body to hold one", () => {
     const state = world();
     const result = applyDeltas(
@@ -699,5 +736,56 @@ describe("battle", () => {
     const result = applyDeltas(before, [give(roman.id, "an-army-of-ghosts")], context());
     expect(result.rejected[0]!.reason).toContain('No force "an-army-of-ghosts"');
     expect(result.rejected[0]!.kind).toBe("reference");
+  });
+});
+
+describe("whose act it is", () => {
+  const givingTheBoiiAChief: WorldDelta = {
+    op: "character_create",
+    localId: "boii_chief",
+    name: "Ategnatos",
+    polityId: "carthage",
+    provinceId: null,
+    age: 44,
+    officeLabel: null,
+    traits: [],
+    generatedBecause: "A people being invaded has someone to lead it.",
+  };
+
+  it("does not accuse the ruler of insubordination for what another power does", () => {
+    // Found running a live model: one tax order produced ten breaches, most of
+    // them the world filling in countries the consul had nothing to do with.
+    const result = applyDeltas(world(), [givingTheBoiiAChief], context({ actsForTheWorld: true }));
+    expect(result.applied).toHaveLength(1);
+    expect(result.breaches).toHaveLength(0);
+  });
+
+  it("still holds the ruler to account inside their own polity", () => {
+    const result = applyDeltas(
+      world(),
+      [{ op: "money_transfer", fromAccountRef: "quintus-purse", toAccountRef: null, amount: 100, reason: "Helping himself to a rival's money." }],
+      context({ actsForTheWorld: true }),
+    );
+    expect(result.breaches).toHaveLength(1);
+  });
+
+  it("holds a person to account for reaching into another power, which is the whole of insubordination", () => {
+    const result = applyDeltas(
+      world(),
+      [{ op: "force_modify", forceRef: "legio-i", locationId: "tun-13205935b88806172084765", reason: "Marching a legion that is not his." }],
+      // Hanno acting through his own cognition: nobody is speaking for him.
+      context({ actorRef: { kind: "character", id: "hanno" } }),
+    );
+    expect(result.breaches).toHaveLength(1);
+    expect(result.breaches[0]!.reason).toContain("No active grant");
+  });
+
+  it("treats a country's private aims as nobody's personal act", () => {
+    const result = applyDeltas(
+      world(),
+      [{ op: "polity_outlook_set", polityId: "carthage", primaryObjective: "Keep Sicily.", concerns: [], intentions: [], riskTolerance: 40, reason: "The situation moved." }],
+      context({ actsForTheWorld: true }),
+    );
+    expect(result.breaches).toHaveLength(0);
   });
 });

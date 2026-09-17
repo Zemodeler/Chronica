@@ -23,6 +23,18 @@ export interface ApplyContext {
   readonly warfare: ScenarioWarfareRules;
   readonly ids: IdFactory;
   readonly gameId: string;
+  /**
+   * True when these deltas come from the orchestrator, which speaks for the
+   * whole world and not only for the actor whose order it is answering.
+   *
+   * It matters only for authority. The world giving the Boii a chieftain, or
+   * deciding what Carthage privately wants, is not the Roman consul reaching
+   * beyond his powers -- but a Carthaginian who moves a Roman legion is, and
+   * that case must keep breaching (VISION §12). So the exemption follows who is
+   * speaking, not what is being acted on: when a person acts for themselves,
+   * everything they do is theirs to answer for.
+   */
+  readonly actsForTheWorld?: boolean | undefined;
 }
 
 export interface AppliedDelta {

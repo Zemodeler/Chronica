@@ -992,7 +992,15 @@ export const MaterialWorldStateSchema = z
     state.supportPositions.forEach((position, index) => {
       requireReference(procedureIds.has(position.procedureId), ["supportPositions", index, "procedureId"], "A support position must reference an existing procedure.");
       if (position.supporterKind === "group") {
-        requireReference(groupIds.has(position.supporterId), ["supportPositions", index, "supporterId"], "A group support position must reference an existing political group.");
+        // A body's own voting blocs take sides on its motions exactly as an
+        // outside faction does -- and are usually the ones that decide. Either
+        // is a real supporter; only a name belonging to neither is an error.
+        const isBloc = state.institutions.some((institution) => institution.votingBlocs.some((bloc) => bloc.id === position.supporterId));
+        requireReference(
+          groupIds.has(position.supporterId) || isBloc,
+          ["supportPositions", index, "supporterId"],
+          "A group support position must reference an existing political group or voting bloc.",
+        );
       }
     });
     state.institutionLegitimacy.forEach((entry, index) => {
