@@ -598,9 +598,13 @@ export const PoliticalProcedureOutcomeSchema = z.enum(["passed", "failed", "bloc
 /**
  * A generic, typed political procedure: the legal route through which a
  * sponsor, an institution (where one applies) and eligible participants turn
- * an intent into an authorized workflow invocation. `linkedWorkflowId` +
- * `linkedWorkflowParams` name the single action this procedure may authorize
- * on success -- resolved once, replayed deterministically from stored state.
+ * an intent into a decision.
+ *
+ * It used to name a workflow to invoke on success. That execution engine was
+ * removed with the turn system, and for a while this carried a `linkedWorkflowId`
+ * pointing at nothing, which nothing read. What a procedure actually needs is to
+ * say in words what is being decided -- `label` -- and what happens next is the
+ * business of whoever acts on the outcome.
  */
 export const PoliticalProcedureSchema = z
   .object({
@@ -610,8 +614,8 @@ export const PoliticalProcedureSchema = z
     sponsorCharacterId: EntityIdSchema,
     subjectKind: PoliticalProcedureSubjectKindSchema,
     subjectId: EntityIdSchema.nullable(),
-    linkedWorkflowId: EntityIdSchema,
-    linkedWorkflowParams: z.record(z.string(), z.unknown()).default({}),
+    /** What is being decided, in plain words: "Censure the consul for Drepanum". */
+    label: z.string().trim().min(1).max(200),
     eligibilityRequirementIds: z.array(EntityIdSchema).default([]),
     eligibleParticipantIds: z.array(EntityIdSchema).default([]),
     stage: PoliticalProcedureStageSchema,

@@ -28,7 +28,7 @@ import {
  *    it actually has.
  */
 
-const CAPS = { characters: 12, forces: 10, projects: 8, accounts: 6, stances: 8, facts: 12, events: 8, intents: 8, provinces: 40, foreignForces: 12, foreignFigures: 12, outlooks: 8 } as const;
+const CAPS = { characters: 12, forces: 10, projects: 8, accounts: 6, stances: 8, facts: 12, events: 8, intents: 8, provinces: 40, foreignForces: 12, foreignFigures: 12, outlooks: 8, institutions: 4, procedures: 6, strainedProvinces: 8, holdings: 6 } as const;
 
 export interface SliceEvent {
   readonly kind: string;
@@ -75,6 +75,47 @@ export interface WorldSlice {
    * view -- an NPC's cognition sees only their own government's outlook, and a
    * Chronicle is built from facts, never from here.
    */
+  /** VISION §6: how far this government is still obeyed, and why. */
+  readonly standing: readonly {
+    readonly id: string;
+    readonly kind: "polity" | "institution";
+    readonly name: string;
+    readonly legitimacy: number;
+    readonly confidence: number | null;
+    readonly causes: readonly string[];
+  }[];
+  /** What the country is actually made of -- people, manpower, food, order. */
+  readonly country: {
+    readonly provinces: number;
+    readonly population: number;
+    readonly availableManpower: number;
+    readonly strained: readonly {
+      readonly id: string;
+      readonly name: string;
+      readonly manpower: number;
+      readonly food: number;
+      readonly stability: number;
+      readonly warDamage: number;
+      readonly taxCapacity: number;
+    }[];
+  };
+  /** Bodies that can decide something, and the terms on which they decide it. */
+  readonly institutions: readonly { readonly id: string; readonly name: string; readonly blocs: number; readonly threshold: number }[];
+  /** Questions still open before them, with where the weight currently sits. */
+  readonly council: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly type: string;
+    readonly institution: string | null;
+    readonly sponsor: string;
+    readonly mechanism: string;
+    readonly stage: string;
+    readonly dueInDays: number | null;
+    readonly supportWeight: number;
+    readonly opposeWeight: number;
+  }[];
+  /** Land, and the gap between who owns it and who holds it. */
+  readonly holdings: readonly { readonly id: string; readonly title: string; readonly holder: string; readonly control: number; readonly territoryId: string }[];
   readonly outlooks: readonly {
     readonly polityId: string;
     readonly name: string;
@@ -174,6 +215,113 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     .slice(0, CAPS.stances)
     .map((stance) => ({ toward: polityName(stance.towardPolityId), trust: stance.trustScore, why: stance.lastShiftReason }));
 
+  // Basis points are the engine's unit and a hundredth of a point is not a
+  // political fact; the model reads /100 the way VISION §6 writes it.
+  const outOfHundred = (bps: number): number => Math.round(bps / 100);
+
+  const ourInstitutions = world.material.institutions.filter((institution) => ownPolity === null || institution.polityId === ownPolity);
+  const ourInstitutionIds = new Set(ourInstitutions.map((institution) => institution.id));
+
+  const standing = [
+    ...world.material.polityLegitimacy
+      .filter((entry) => ownPolity === null || entry.polityId === ownPolity)
+      .map((entry) => ({
+        id: entry.polityId,
+        kind: "polity" as const,
+        name: polityName(entry.polityId),
+        legitimacy: outOfHundred(entry.legitimacyBps),
+        confidence: outOfHundred(entry.institutionalConfidenceBps),
+        causes: [...entry.causes].sort((a, b) => Math.abs(b.score) - Math.abs(a.score)).slice(0, 2).map((cause) => cause.label),
+      })),
+    ...world.material.institutionLegitimacy
+      .filter((entry) => ourInstitutionIds.has(entry.institutionId))
+      .map((entry) => ({
+        id: entry.institutionId,
+        kind: "institution" as const,
+        name: ourInstitutions.find((institution) => institution.id === entry.institutionId)?.name ?? entry.institutionId,
+        legitimacy: outOfHundred(entry.legitimacyBps),
+        confidence: null,
+        causes: [...entry.causes].sort((a, b) => Math.abs(b.score) - Math.abs(a.score)).slice(0, 2).map((cause) => cause.label),
+      })),
+  ];
+
+  // Manpower is per-province and there is no polity total, so the total the
+  // model needs to answer "can we raise another legion" has to be summed here.
+  const ourMaterial = world.material.provinceMaterial.filter((material) => ourProvinceIds.has(material.provinceId));
+  const country = {
+    provinces: ourMaterial.length,
+    population: ourMaterial.reduce((sum, material) => sum + material.population, 0),
+    availableManpower: ourMaterial.reduce((sum, material) => sum + material.availableManpower, 0),
+    // The worst-off first: a province at its baseline needs no line of prompt.
+    strained: [...ourMaterial]
+      .sort((a, b) => (a.foodSecurityBps + a.stabilityBps - a.warDamageBps) - (b.foodSecurityBps + b.stabilityBps - b.warDamageBps))
+      .slice(0, CAPS.strainedProvinces)
+      .map((material) => ({
+        id: material.provinceId,
+        name: provinceName(material.provinceId),
+        manpower: material.availableManpower,
+        food: outOfHundred(material.foodSecurityBps),
+        stability: outOfHundred(material.stabilityBps),
+        warDamage: outOfHundred(material.warDamageBps),
+        taxCapacity: material.taxCapacity,
+      })),
+  };
+
+  const institutions = ourInstitutions.slice(0, CAPS.institutions).map((institution) => ({
+    id: institution.id,
+    name: institution.name,
+    blocs: institution.votingBlocs.length,
+    threshold: outOfHundred(institution.passageThresholdBps),
+  }));
+
+  /**
+   * Support positions are append-only: someone who changes their mind leaves
+   * both rows behind. Summing them would count a senator twice and let a
+   * waverer outweigh the whole chamber, so only their latest row counts.
+   */
+  const latestPositions = (procedureId: string) => {
+    const latest = new Map<string, (typeof world.material.supportPositions)[number]>();
+    for (const position of world.material.supportPositions) {
+      if (position.procedureId !== procedureId) continue;
+      const key = `${position.supporterKind}:${position.supporterId}`;
+      const held = latest.get(key);
+      if (held === undefined || position.changedAtStep >= held.changedAtStep) latest.set(key, position);
+    }
+    return [...latest.values()];
+  };
+
+  const council = world.material.politicalProcedures
+    .filter((procedure) => procedure.stage !== "resolved" && procedure.stage !== "withdrawn" && procedure.stage !== "blocked")
+    .filter((procedure) => procedure.institutionId === null || ourInstitutionIds.has(procedure.institutionId))
+    .slice(0, CAPS.procedures)
+    .map((procedure) => {
+      const positions = latestPositions(procedure.id);
+      return {
+        id: procedure.id,
+        label: procedure.label,
+        type: procedure.type,
+        institution: procedure.institutionId === null ? null : ourInstitutions.find((institution) => institution.id === procedure.institutionId)?.name ?? procedure.institutionId,
+        sponsor: name(procedure.sponsorCharacterId),
+        mechanism: procedure.resolutionMechanism,
+        stage: procedure.stage,
+        dueInDays: procedure.deadlineStep === null ? null : procedure.deadlineStep - world.elapsedStep,
+        supportWeight: positions.filter((position) => position.position === "support").reduce((sum, position) => sum + position.influenceWeight, 0),
+        opposeWeight: positions.filter((position) => position.position === "oppose").reduce((sum, position) => sum + position.influenceWeight, 0),
+      };
+    });
+
+  const ourCharacterIds = new Set(world.characters.filter((character) => ownPolity === null || character.polityId === ownPolity).map((character) => character.id));
+  const holdings = world.material.holdings
+    .filter((holding) => ourCharacterIds.has(holding.legalHolderCharacterId) || ourProvinceIds.has(holding.territoryId))
+    .slice(0, CAPS.holdings)
+    .map((holding) => ({
+      id: holding.id,
+      title: holding.title,
+      holder: name(holding.legalHolderCharacterId),
+      control: outOfHundred(holding.physicalControlBps),
+      territoryId: holding.territoryId,
+    }));
+
   // Ours first: the order the model reads them in is the order it weighs them.
   const outlooks = [...world.polityOutlooks]
     .sort((a, b) => Number(b.polityId === ownPolity) - Number(a.polityId === ownPolity))
@@ -251,6 +399,11 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     provinces,
     politics,
     diplomacy,
+    standing,
+    country,
+    institutions,
+    council,
+    holdings,
     outlooks,
     projects,
     intents,
@@ -309,6 +462,36 @@ export function renderWorldSlice(slice: WorldSlice): string {
     );
   }
   section("PEOPLE", slice.politics.map((person) => `${person.name} [${person.id}]${person.office === null ? "" : `, ${person.office}`}, aged ${person.age}`));
+  section(
+    "POLITICAL STANDING",
+    slice.standing.map((entry) => {
+      const confidence = entry.confidence === null ? "" : `, confidence in its institutions ${entry.confidence}/100`;
+      const why = entry.causes.length === 0 ? "" : ` — ${entry.causes.join("; ")}`;
+      return `${entry.name} [${entry.id}]: legitimacy ${entry.legitimacy}/100${confidence}${why}`;
+    }),
+  );
+  section("INSTITUTIONS", slice.institutions.map((institution) =>
+    `${institution.name} [${institution.id}] — ${institution.blocs} bloc(s), ${institution.threshold}/100 needed to carry a question`));
+  section(
+    "BEFORE THE COUNCIL",
+    slice.council.map((question) => {
+      const where = question.institution === null ? "decided by its sponsor" : `before the ${question.institution}`;
+      const when = question.dueInDays === null ? "" : `, due in ${question.dueInDays} days`;
+      return `${question.label} [${question.id}] — ${question.type}, ${where}, raised by ${question.sponsor}${when}. For ${question.supportWeight}, against ${question.opposeWeight}.`;
+    }),
+  );
+  section(
+    "THE COUNTRY",
+    slice.country.provinces === 0
+      ? []
+      : [
+        `${slice.country.provinces} province(s), ${slice.country.population} people, ${slice.country.availableManpower} men available to raise.`,
+        ...slice.country.strained.map((province) =>
+          `${province.name} [${province.id}] — ${province.manpower} men, food ${province.food}/100, order ${province.stability}/100, war damage ${province.warDamage}/100, taxable ${province.taxCapacity}`),
+      ],
+  );
+  section("LANDS AND HOLDINGS", slice.holdings.map((holding) =>
+    `${holding.title} [${holding.id}] in ${holding.territoryId} — held in law by ${holding.holder}, held in fact ${holding.control}/100`));
   section("DIPLOMACY", slice.diplomacy.map((stance) => `toward ${stance.toward}: trust ${stance.trust} (${stance.why})`));
   section(
     "STANDING AIMS",

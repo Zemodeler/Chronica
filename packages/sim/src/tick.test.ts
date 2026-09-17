@@ -153,3 +153,38 @@ describe("projects", () => {
     expect(balance(result.world, "rome-treasury")).toBe(700);
   });
 });
+
+describe("provinces over time", () => {
+  it("gives every province a material state on the first tick, so an order can see the country", () => {
+    const opening = base();
+    expect(opening.material.provinceMaterial).toHaveLength(0);
+
+    const ticked = runDeterministicTick({ world: opening, toDay: opening.instant.day, ids: createIdFactory("t") });
+    expect(ticked.world.material.provinceMaterial).toHaveLength(opening.map.provinces.length);
+    expect(ticked.world.material.provinceMaterial.every((material) => material.availableManpower >= 0)).toBe(true);
+  });
+
+  it("lets a burned province recover rather than staying burned forever", () => {
+    const opening = runDeterministicTick({ world: base(), toDay: base().instant.day, ids: createIdFactory("t") }).world;
+    const target = opening.map.provinces[0]!.id;
+    const damaged: WorldState = {
+      ...opening,
+      material: {
+        ...opening.material,
+        provinceMaterial: opening.material.provinceMaterial.map((material) =>
+          material.provinceId === target ? { ...material, warDamageBps: 6_000, lastMaterialUpdateStep: opening.elapsedStep } : material,
+        ),
+      },
+    };
+
+    const later = runDeterministicTick({ world: damaged, toDay: damaged.instant.day + 120, ids: createIdFactory("t2") }).world;
+    const healed = later.material.provinceMaterial.find((material) => material.provinceId === target)!;
+    expect(healed.warDamageBps).toBeLessThan(6_000);
+  });
+
+  it("says nothing about ordinary recovery, which is not history", () => {
+    const opening = runDeterministicTick({ world: base(), toDay: base().instant.day, ids: createIdFactory("t") }).world;
+    const later = runDeterministicTick({ world: opening, toDay: opening.instant.day + 30, ids: createIdFactory("t2") });
+    expect(later.factProposals.some((fact) => fact.kind === "province_hunger" || fact.kind === "province_unrest")).toBe(false);
+  });
+});

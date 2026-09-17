@@ -1,4 +1,5 @@
 import {
+  advanceProvinceMaterial,
   nextDueMilestone,
   type FactProposal,
   type MoneyObligation,
@@ -228,12 +229,60 @@ export function runDeterministicTick(input: TickInput): TickResult {
       };
   });
 
+  /**
+   * Provinces heal, or fail to.
+   *
+   * War damage decays, displaced people drift home, food security and order
+   * recover toward their baseline -- all of which the material module could
+   * already compute and nothing ever called, so a province burned in one order
+   * stayed burned forever. Nothing here is affected by this tick's own work, so
+   * every province takes the coarse recovery pass.
+   */
+  const before = new Map(input.world.material.provinceMaterial.map((material) => [material.provinceId, material]));
+  const recovered = advanceProvinceMaterial(
+    { ...input.world, material: { ...input.world.material, accounts, incomeSources, obligations, transactions: transactions.slice(-500) }, projects },
+    input.toDay,
+    new Set<string>(),
+  );
+
+  // Recovery itself is not news. A province crossing into real hunger or real
+  // disorder is: it is the kind of thing a government hears about and has to
+  // answer for, and it is where VISION §6's numbers start to bite.
+  const DISTRESS_BPS = 4_000;
+  for (const material of recovered.material.provinceMaterial) {
+    const previous = before.get(material.provinceId);
+    if (previous === undefined) continue;
+    const crossed = (now: number, was: number): boolean => now < DISTRESS_BPS && was >= DISTRESS_BPS;
+    if (crossed(material.foodSecurityBps, previous.foodSecurityBps)) {
+      facts.push({
+        localId: nextLocalId("hunger"),
+        kind: "province_hunger",
+        summary: `Food is running short in ${material.provinceId}.`,
+        affectedRefs: [{ kind: "province", id: material.provinceId }],
+        visibility: "polity",
+        discoveryState: "polity",
+        knowableInDays: 0,
+        significance: 55,
+      });
+      notes.push(`Food is running short in ${material.provinceId}.`);
+    }
+    if (crossed(material.stabilityBps, previous.stabilityBps)) {
+      facts.push({
+        localId: nextLocalId("unrest"),
+        kind: "province_unrest",
+        summary: `Order is breaking down in ${material.provinceId}.`,
+        affectedRefs: [{ kind: "province", id: material.provinceId }],
+        visibility: "polity",
+        discoveryState: "polity",
+        knowableInDays: 0,
+        significance: 60,
+      });
+      notes.push(`Order is breaking down in ${material.provinceId}.`);
+    }
+  }
+
   return {
-    world: {
-      ...input.world,
-      projects,
-      material: { ...input.world.material, accounts, incomeSources, obligations, transactions: transactions.slice(-500) },
-    },
+    world: recovered,
     factProposals: facts,
     notes,
   };

@@ -140,7 +140,7 @@ describe("material state schemas", () => {
   it("rejects a resolved procedure with no recorded outcome", () => {
     const result = PoliticalProcedureSchema.safeParse({
       id: "proc-1", type: "decree", institutionId: null, sponsorCharacterId: "a", subjectKind: "polity", subjectId: "rome",
-      linkedWorkflowId: "add_gold", linkedWorkflowParams: {}, eligibilityRequirementIds: [], eligibleParticipantIds: [],
+      label: "Vote the gold", eligibilityRequirementIds: [], eligibleParticipantIds: [],
       stage: "resolved", resolutionMechanism: "decree_authority", openedAtStep: 0, deadlineStep: null,
       resolvedAtStep: 1, visibility: "public", voteRecordId: null, outcome: null, outcomeReason: null,
       sourceEventIds: [], resultingEventIds: [],
@@ -151,7 +151,7 @@ describe("material state schemas", () => {
   it("rejects a vote-mechanism procedure with no named institution", () => {
     const result = PoliticalProcedureSchema.safeParse({
       id: "proc-1", type: "vote", institutionId: null, sponsorCharacterId: "a", subjectKind: "polity", subjectId: "rome",
-      linkedWorkflowId: "add_gold", linkedWorkflowParams: {}, eligibilityRequirementIds: [], eligibleParticipantIds: [],
+      label: "Vote the gold", eligibilityRequirementIds: [], eligibleParticipantIds: [],
       stage: "proposed", resolutionMechanism: "vote", openedAtStep: 0, deadlineStep: null,
       resolvedAtStep: null, visibility: "public", voteRecordId: null, outcome: null, outcomeReason: null,
       sourceEventIds: [], resultingEventIds: [],
@@ -163,7 +163,7 @@ describe("material state schemas", () => {
     const result = MaterialWorldStateSchema.safeParse({
       ...MINIMAL_MATERIAL,
       politicalProcedures: [
-        { id: "proc-1", type: "decree", institutionId: "missing-institution", sponsorCharacterId: "a", subjectKind: "polity", subjectId: "rome", linkedWorkflowId: "add_gold", linkedWorkflowParams: {}, eligibilityRequirementIds: [], eligibleParticipantIds: [], stage: "proposed", resolutionMechanism: "sponsor_discretion", openedAtStep: 0, deadlineStep: null, resolvedAtStep: null, visibility: "public", voteRecordId: null, outcome: null, outcomeReason: null, sourceEventIds: [], resultingEventIds: [] },
+        { id: "proc-1", type: "decree", institutionId: "missing-institution", sponsorCharacterId: "a", subjectKind: "polity", subjectId: "rome", label: "Vote the gold", eligibilityRequirementIds: [], eligibleParticipantIds: [], stage: "proposed", resolutionMechanism: "sponsor_discretion", openedAtStep: 0, deadlineStep: null, resolvedAtStep: null, visibility: "public", voteRecordId: null, outcome: null, outcomeReason: null, sourceEventIds: [], resultingEventIds: [] },
       ],
     });
     expect(result.success).toBe(false);

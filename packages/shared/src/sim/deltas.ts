@@ -9,7 +9,19 @@ import {
 } from "../authority/vocabulary";
 import { CharacterIntentActionTypeSchema } from "../characters/intents";
 import { CharacterSocialEventKindSchema } from "../characters/social-events";
-import { BasisPointsSchema, EntityIdSchema, MoneyAmountSchema, SignedScoreSchema, VisibilitySchema } from "../material-state";
+import {
+  BasisPointsSchema,
+  EntityIdSchema,
+  MoneyAmountSchema,
+  PoliticalProcedureSubjectKindSchema,
+  PoliticalProcedureTypeSchema,
+  PoliticalResolutionMechanismSchema,
+  SignedScoreSchema,
+  SupportPositionChoiceSchema,
+  SupportPositionKindSchema,
+  SupportReasonKindSchema,
+  VisibilitySchema,
+} from "../material-state";
 import { OrderPartyRefSchema } from "../world/party-ref";
 import { LocalIdSchema, RefSchema } from "./refs";
 
@@ -240,6 +252,104 @@ const PolityOutlookSetSchema = z.object({
   reason: ReasonSchema,
 }).strict();
 
+/**
+ * VISION §6/§7: a measure with a political price has one.
+ *
+ * Legitimacy and institutional confidence were modelled from the start and
+ * nothing could move them, so "double taxes on the wealthy" cost a government
+ * nothing but a sentence. Basis points, because that is the unit the rest of the
+ * political machinery already speaks.
+ */
+const LegitimacyShiftSchema = z.object({
+  op: z.literal("legitimacy_shift"),
+  target: z.enum(["polity", "institution"]),
+  targetId: EntityIdSchema,
+  legitimacyBpsDelta: z.number().int().min(-10_000).max(10_000),
+  /** Only meaningful for a polity: how far the institutions themselves are still trusted. */
+  institutionalConfidenceBpsDelta: z.number().int().min(-10_000).max(10_000).optional(),
+  causeLabel: z.string().trim().min(1).max(160),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * VISION §6: the 18,400 available manpower, and everything else a province
+ * actually consists of. Recruitment draws it down, war damages it, famine and
+ * unrest move it -- all of which the engine could already compute and none of
+ * which anything could ask for.
+ */
+const ProvinceMaterialShiftSchema = z.object({
+  op: z.literal("province_material_shift"),
+  provinceId: EntityIdSchema,
+  availableManpowerDelta: z.number().int().min(-10_000_000).max(10_000_000).optional(),
+  populationDelta: z.number().int().min(-10_000_000).max(10_000_000).optional(),
+  stabilityBpsDelta: z.number().int().min(-10_000).max(10_000).optional(),
+  foodSecurityBpsDelta: z.number().int().min(-10_000).max(10_000).optional(),
+  productiveCapacityBpsDelta: z.number().int().min(-10_000).max(10_000).optional(),
+  warDamageBpsDelta: z.number().int().min(-10_000).max(10_000).optional(),
+  taxCapacityDelta: z.number().int().min(-10_000_000).max(10_000_000).optional(),
+  displacedPopulationDelta: z.number().int().min(-10_000_000).max(10_000_000).optional(),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * VISION §6's "senate support 63/100", as the thing it actually is: a question
+ * put to a body, with people taking sides on it.
+ *
+ * `PoliticalProcedure` deliberately does not assume a legislature -- a decree,
+ * an appointment and a vote are all procedures, differing in how they resolve.
+ */
+const PoliticalProcedureOpenSchema = z.object({
+  op: z.literal("political_procedure_open"),
+  localId: LocalIdSchema,
+  type: PoliticalProcedureTypeSchema,
+  institutionRef: RefSchema.nullable(),
+  sponsorCharacterRef: RefSchema,
+  subjectKind: PoliticalProcedureSubjectKindSchema,
+  subjectRef: RefSchema.nullable(),
+  label: z.string().trim().min(1).max(200),
+  resolutionMechanism: PoliticalResolutionMechanismSchema,
+  deadlineInDays: DayOffsetSchema.nullable().default(null),
+  visibility: VisibilitySchema.default("polity"),
+  reason: ReasonSchema,
+}).strict();
+
+/** Where one person or faction stands on an open question, and why. */
+const PoliticalSupportSetSchema = z.object({
+  op: z.literal("political_support_set"),
+  procedureRef: RefSchema,
+  supporterKind: SupportPositionKindSchema,
+  supporterRef: RefSchema,
+  position: SupportPositionChoiceSchema,
+  influenceWeight: z.number().int().min(0).max(10_000),
+  reasonKind: SupportReasonKindSchema,
+  reasonLabel: z.string().trim().min(1).max(200),
+  visibility: VisibilitySchema.default("polity"),
+  reason: ReasonSchema,
+}).strict();
+
+/** The question is settled, one way or another. */
+const PoliticalProcedureResolveSchema = z.object({
+  op: z.literal("political_procedure_resolve"),
+  procedureRef: RefSchema,
+  outcome: z.enum(["passed", "failed", "blocked", "withdrawn"]),
+  outcomeReason: z.string().trim().min(1).max(400),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * VISION §7's "political seizure of assets", and every quieter transfer of land
+ * besides. A holding carries who legally owns it and how much of it they
+ * actually control, and the gap between the two is most of what makes land
+ * political -- so both are movable here.
+ */
+const HoldingTransferSchema = z.object({
+  op: z.literal("holding_transfer"),
+  holdingRef: RefSchema,
+  toCharacterRef: RefSchema.nullable(),
+  physicalControlBpsDelta: z.number().int().min(-10_000).max(10_000).optional(),
+  reason: ReasonSchema,
+}).strict();
+
 export const WorldDeltaSchema = z.discriminatedUnion("op", [
   MoneyTransferSchema,
   IncomeSourceUpsertSchema,
@@ -256,6 +366,12 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   OrderAttemptDecideSchema,
   PolityStanceShiftSchema,
   PolityOutlookSetSchema,
+  LegitimacyShiftSchema,
+  ProvinceMaterialShiftSchema,
+  PoliticalProcedureOpenSchema,
+  PoliticalSupportSetSchema,
+  PoliticalProcedureResolveSchema,
+  HoldingTransferSchema,
 ]);
 export type WorldDelta = z.infer<typeof WorldDeltaSchema>;
 export type WorldDeltaOp = WorldDelta["op"];
@@ -277,6 +393,12 @@ export const WORLD_DELTA_OPS = [
   "order_attempt_decide",
   "polity_stance_shift",
   "polity_outlook_set",
+  "legitimacy_shift",
+  "province_material_shift",
+  "political_procedure_open",
+  "political_support_set",
+  "political_procedure_resolve",
+  "holding_transfer",
 ] as const satisfies readonly WorldDeltaOp[];
 
 /**
@@ -301,4 +423,10 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   order_attempt_decide: "civil",
   polity_stance_shift: "diplomatic",
   polity_outlook_set: "diplomatic",
+  legitimacy_shift: "civil",
+  province_material_shift: "civil",
+  political_procedure_open: "civil",
+  political_support_set: "social",
+  political_procedure_resolve: "civil",
+  holding_transfer: "judicial",
 };

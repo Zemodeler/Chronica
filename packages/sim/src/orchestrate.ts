@@ -80,7 +80,20 @@ How to answer well:
    a battle or a death 90+.
 10. Orders given to a person who could refuse them are "delegations", not deltas. That
    person decides separately whether to obey.
-11. Keep each country's aims current. STANDING AIMS says what a power is trying
+11. A measure with a political price pays it. POLITICAL STANDING, BEFORE THE
+   COUNCIL and THE COUNTRY are real numbers, not decoration. Doubling taxes on
+   the wealthy raises revenue and costs legitimacy and the support of the people
+   it falls on; a levy takes men out of a province's available manpower; a march
+   through your own territory eats its food. Use "legitimacy_shift",
+   "province_material_shift" and "political_support_set" to say so. An order that
+   would plainly anger someone and moves nothing has not been carried out, only
+   described.
+12. A question that a body must settle is a procedure, not a delta. Open it with
+   "political_procedure_open", let people take sides on it with
+   "political_support_set", and settle it with "political_procedure_resolve" when
+   the weight is in and not before. A procedure only goes to a vote where there
+   is an institution to hold one.
+13. Keep each country's aims current. STANDING AIMS says what a power is trying
    to do, what worries it and what it means to do next. Every polity with people
    in it should have one, and any power whose situation changed this turn should
    have theirs rewritten with "polity_outlook_set" -- a country that watched a

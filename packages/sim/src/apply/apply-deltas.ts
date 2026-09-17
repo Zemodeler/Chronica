@@ -1,5 +1,7 @@
 import {
   DELTA_AUTHORITY_DOMAIN,
+  adjustPolityLegitimacy,
+  ensureProvinceMaterial,
   WorldStateSchema,
   buildAuthorityIndex,
   checkAuthority,
@@ -77,6 +79,14 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       return { kind: "polity", id: delta.polityId };
     case "polity_outlook_set":
       return { kind: "polity", id: delta.polityId };
+    case "legitimacy_shift":
+      return { kind: delta.target === "polity" ? "polity" : "institution", id: delta.targetId };
+    case "province_material_shift":
+      return { kind: "province", id: delta.provinceId };
+    case "political_procedure_open":
+      return delta.institutionRef === null
+        ? polityFallback
+        : { kind: "institution", id: resolve(delta.institutionRef) ?? delta.institutionRef };
     case "character_create":
       return { kind: "polity", id: delta.polityId };
     default:
@@ -100,6 +110,12 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   order_attempt_decide: "command",
   polity_stance_shift: "negotiate",
   polity_outlook_set: "propose",
+  legitimacy_shift: "propose",
+  province_material_shift: "propose",
+  political_procedure_open: "propose",
+  political_support_set: "propose",
+  political_procedure_resolve: "override",
+  holding_transfer: "punish",
 };
 
 export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], context: ApplyContext): ApplyResult {
@@ -182,6 +198,16 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
   }
 
   return { world: parsed.data, applied, rejected, breaches, factProposals, assignedIds };
+}
+
+/** Basis points never leave 0..10 000, and the schema refuses anything that does. */
+function clampBps(value: number): number {
+  return Math.max(0, Math.min(10_000, Math.round(value)));
+}
+
+/** The signed -100..100 score every political cause is weighed on. */
+function clampScore(value: number): number {
+  return Math.max(-100, Math.min(100, Math.round(value)));
 }
 
 /** A Zod issue as something a person can act on: where it was, then what was wrong. */
@@ -492,6 +518,187 @@ function applyOne(
         polityOutlooks: existing
           ? world.polityOutlooks.map((candidate) => (candidate.polityId === delta.polityId ? outlook : candidate))
           : [...world.polityOutlooks, outlook],
+      };
+    }
+
+    case "legitimacy_shift": {
+      if (delta.target === "polity") {
+        if (!world.map.polities.some((polity) => polity.id === delta.targetId)) {
+          reject(`No polity "${delta.targetId}" exists to gain or lose standing.`, "reference");
+        }
+        // The shared helper already creates the record on first use, bounds the
+        // result and records the cause. Reimplementing that here is how the two
+        // would drift apart.
+        const adjusted = adjustPolityLegitimacy(
+          world.material.polityLegitimacy,
+          delta.targetId,
+          delta.legitimacyBpsDelta,
+          delta.causeLabel,
+          context.ids.next("cause"),
+        );
+        const confidenceDelta = delta.institutionalConfidenceBpsDelta ?? 0;
+        const withConfidence = confidenceDelta === 0
+          ? adjusted
+          : adjusted.map((entry) =>
+            entry.polityId === delta.targetId
+              ? { ...entry, institutionalConfidenceBps: clampBps(entry.institutionalConfidenceBps + confidenceDelta) }
+              : entry,
+          );
+        return { ...world, material: { ...world.material, polityLegitimacy: withConfidence } };
+      }
+
+      if (!world.material.institutions.some((institution) => institution.id === delta.targetId)) {
+        reject(`No institution "${delta.targetId}" exists to gain or lose standing.`, "reference");
+      }
+      const cause = { id: context.ids.next("cause"), label: delta.causeLabel, score: clampScore(Math.round(delta.legitimacyBpsDelta / 10)), sourceId: delta.targetId };
+      const existing = world.material.institutionLegitimacy.find((entry) => entry.institutionId === delta.targetId);
+      const institutionLegitimacy = existing === undefined
+        ? [...world.material.institutionLegitimacy, { institutionId: delta.targetId, legitimacyBps: clampBps(5_000 + delta.legitimacyBpsDelta), causes: [cause] }]
+        : world.material.institutionLegitimacy.map((entry) =>
+          entry.institutionId === delta.targetId
+            ? { ...entry, legitimacyBps: clampBps(entry.legitimacyBps + delta.legitimacyBpsDelta), causes: [...entry.causes, cause] }
+            : entry,
+        );
+      return { ...world, material: { ...world.material, institutionLegitimacy } };
+    }
+
+    case "province_material_shift": {
+      if (!world.map.provinces.some((province) => province.id === delta.provinceId)) {
+        reject(`No province "${delta.provinceId}" exists to be changed.`, "reference");
+      }
+      // A province with no material row yet is the ordinary case on an older
+      // world, not an error: derive one from its settlements and then move it.
+      const backfilled = ensureProvinceMaterial(world, atStep);
+      const provinceMaterial = backfilled.material.provinceMaterial.map((material) => {
+        if (material.provinceId !== delta.provinceId) return material;
+        return {
+          ...material,
+          population: Math.max(0, material.population + (delta.populationDelta ?? 0)),
+          availableManpower: Math.max(0, material.availableManpower + (delta.availableManpowerDelta ?? 0)),
+          stabilityBps: clampBps(material.stabilityBps + (delta.stabilityBpsDelta ?? 0)),
+          foodSecurityBps: clampBps(material.foodSecurityBps + (delta.foodSecurityBpsDelta ?? 0)),
+          productiveCapacityBps: clampBps(material.productiveCapacityBps + (delta.productiveCapacityBpsDelta ?? 0)),
+          warDamageBps: clampBps(material.warDamageBps + (delta.warDamageBpsDelta ?? 0)),
+          taxCapacity: Math.max(0, material.taxCapacity + (delta.taxCapacityDelta ?? 0)),
+          displacedPopulation: Math.max(0, material.displacedPopulation + (delta.displacedPopulationDelta ?? 0)),
+          lastMaterialUpdateStep: atStep,
+        };
+      });
+      return { ...backfilled, material: { ...backfilled.material, provinceMaterial } };
+    }
+
+    case "political_procedure_open": {
+      const sponsorId = required(delta.sponsorCharacterRef, "The sponsor");
+      if (!world.characters.some((character) => character.id === sponsorId)) {
+        reject(`No character "${sponsorId}" exists to sponsor this.`, "reference");
+      }
+      const institutionId = delta.institutionRef === null ? null : required(delta.institutionRef, "The institution");
+      if (institutionId !== null && !world.material.institutions.some((institution) => institution.id === institutionId)) {
+        reject(`No institution "${institutionId}" exists to put this before.`, "reference");
+      }
+      // A vote needs a body to hold it. The schema enforces this too; catching
+      // it here means the player hears why rather than losing the whole batch.
+      if (delta.resolutionMechanism === "vote" && institutionId === null) {
+        reject("A question can only be put to a vote before an institution that can hold one.");
+      }
+      const subjectId = delta.subjectRef === null ? null : required(delta.subjectRef, "The subject");
+      const id = mint("procedure", delta.localId);
+      const procedure = {
+        id,
+        type: delta.type,
+        institutionId,
+        sponsorCharacterId: sponsorId,
+        subjectKind: delta.subjectKind,
+        subjectId,
+        label: delta.label,
+        eligibilityRequirementIds: [],
+        eligibleParticipantIds: [],
+        stage: "gathering_support" as const,
+        resolutionMechanism: delta.resolutionMechanism,
+        openedAtStep: atStep,
+        deadlineStep: delta.deadlineInDays === null ? null : atStep + delta.deadlineInDays,
+        resolvedAtStep: null,
+        visibility: delta.visibility,
+        voteRecordId: null,
+        outcome: null,
+        outcomeReason: null,
+        sourceEventIds: [],
+        resultingEventIds: [],
+      };
+      return { ...world, material: { ...world.material, politicalProcedures: [...world.material.politicalProcedures, procedure] } };
+    }
+
+    case "political_support_set": {
+      const procedureId = required(delta.procedureRef, "The question");
+      if (!world.material.politicalProcedures.some((procedure) => procedure.id === procedureId)) {
+        reject(`No open question "${procedureId}" exists to take a side on.`, "reference");
+      }
+      const supporterId = required(delta.supporterRef, "The supporter");
+      const supporterExists = delta.supporterKind === "character"
+        ? world.characters.some((character) => character.id === supporterId)
+        : world.material.politicalGroups.some((group) => group.id === supporterId);
+      if (!supporterExists) reject(`No ${delta.supporterKind} "${supporterId}" exists to hold a position.`, "reference");
+
+      // Positions are append-only: someone who changes their mind leaves both
+      // rows behind, and the later one is what counts. That is what lets the
+      // world say a senator turned, rather than only that he opposes.
+      const position = {
+        id: context.ids.next("support"),
+        procedureId,
+        supporterKind: delta.supporterKind,
+        supporterId,
+        position: delta.position,
+        influenceWeight: delta.influenceWeight,
+        visibility: delta.visibility,
+        reasons: [{ kind: delta.reasonKind, label: delta.reasonLabel, score: delta.position === "support" ? 50 : delta.position === "oppose" ? -50 : 0, sourceId: supporterId }],
+        provenanceEventIds: [],
+        changedAtStep: atStep,
+      };
+      return { ...world, material: { ...world.material, supportPositions: [...world.material.supportPositions, position] } };
+    }
+
+    case "political_procedure_resolve": {
+      const procedureId = required(delta.procedureRef, "The question");
+      const procedure = world.material.politicalProcedures.find((candidate) => candidate.id === procedureId);
+      if (procedure === undefined) reject(`No question "${procedureId}" exists to settle.`, "reference");
+      if (procedure.stage === "resolved" || procedure.stage === "withdrawn" || procedure.stage === "blocked") {
+        reject(`The question "${procedureId}" has already been settled (${procedure.outcome ?? procedure.stage}).`);
+      }
+      // Stage and outcome move together: the schema refuses a resolved
+      // procedure with no outcome, and an unresolved one that has one.
+      const stage = delta.outcome === "withdrawn" ? "withdrawn" as const : delta.outcome === "blocked" ? "blocked" as const : "resolved" as const;
+      const settled = {
+        ...procedure,
+        stage,
+        outcome: delta.outcome,
+        outcomeReason: delta.outcomeReason,
+        resolvedAtStep: atStep,
+      };
+      return {
+        ...world,
+        material: {
+          ...world.material,
+          politicalProcedures: world.material.politicalProcedures.map((candidate) => (candidate.id === procedureId ? settled : candidate)),
+        },
+      };
+    }
+
+    case "holding_transfer": {
+      const holdingId = required(delta.holdingRef, "The holding");
+      const holding = world.material.holdings.find((candidate) => candidate.id === holdingId);
+      if (holding === undefined) reject(`No holding "${holdingId}" exists to change hands.`, "reference");
+      const toId = delta.toCharacterRef === null ? null : required(delta.toCharacterRef, "The new holder");
+      if (toId !== null && !world.characters.some((character) => character.id === toId)) {
+        reject(`No character "${toId}" exists to receive it.`, "reference");
+      }
+      const moved = {
+        ...holding,
+        ...(toId === null ? {} : { legalHolderCharacterId: toId }),
+        physicalControlBps: clampBps(holding.physicalControlBps + (delta.physicalControlBpsDelta ?? 0)),
+      };
+      return {
+        ...world,
+        material: { ...world.material, holdings: world.material.holdings.map((candidate) => (candidate.id === holdingId ? moved : candidate)) },
       };
     }
 
