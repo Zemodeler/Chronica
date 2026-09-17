@@ -1,27 +1,28 @@
 # Simulation Loop v1 — what was built, and why
 
-This describes the engine built to satisfy [`docs/VISION.md`](VISION.md) §33, which named
-**Simulation Loop v1** as the thing to get right before economy, combat, diplomacy or intrigue are
-attempted — so those systems can later plug into one resolution architecture instead of growing
-separate incompatible ones.
+The engine built to satisfy [`docs/VISION.md`](VISION.md) §33, which named **Simulation Loop v1** as
+the thing to get right before economy, combat, diplomacy or intrigue are attempted — so those
+systems plug into one resolution architecture instead of growing separate incompatible ones.
 
-It is written for whoever picks this up next. It explains the reasoning behind each boundary, not
-just the shape, because the shape is recoverable from the code and the reasoning is not.
+Written for whoever picks this up next. It explains the reasoning behind each boundary, not just the
+shape, because the shape is recoverable from the code and the reasoning is not. Where a decision was
+forced by something that went wrong, it says so: several of the sharpest constraints here exist
+because a live model found the soft version of them first.
 
 ---
 
-## 1. The problem this had to solve
+## 1. What this had to solve
 
-The previous commit deleted the entire old engine: Chronicle, Orders, Turns, the multi-agent
-dispatcher, the Game Master tool-loop, and a workflow-execution registry of roughly 97 tools. That
-was deliberate, and it left the repository in a half-state — rich domain types survived, but
-**nothing persisted a world at all**. `getWorldView`, `persistOpeningWorld` and `createGame` had all
-lived in the deleted `queries/turns.ts`, so game creation and the Chat NPC system were both severed
-from their runtime.
+The commit before this work deleted the entire previous engine — Chronicle, Orders, Turns, the
+multi-agent dispatcher, the Game Master tool-loop, and a workflow registry of roughly 97 tools. That
+was deliberate, and it left the repository in a half-state: the domain types survived, but **nothing
+persisted a world at all**. `getWorldView`, `persistOpeningWorld` and `createGame` had all lived in
+the deleted `queries/turns.ts`, so game creation and the Chat NPC system were both severed from
+their runtime.
 
-So this work had two jobs at once: build the loop, and give the world somewhere to live again.
+So this had two jobs at once: build the loop, and give the world somewhere to live again.
 
-The design principle it is built to serve:
+The principle it serves:
 
 > The LLM is sovereign over causality. Software is sovereign over memory, arithmetic, scheduling and
 > consistency.
@@ -30,119 +31,136 @@ Everything below is an attempt to make that sentence load-bearing rather than de
 
 ---
 
-## 2. The central decision: a closed transaction contract
+## 2. The contract
 
 **The model never mutates the world. It proposes a transaction, and deterministic code validates,
 arbitrates, assigns every id, and applies it atomically.**
 
-The contract lives in `packages/shared/src/sim/`:
+In `packages/shared/src/sim/`:
 
-- `deltas.ts` — `WorldDeltaSchema`, a discriminated union of **14 operations**. This is the complete
-  set of ways the world can change.
+- `deltas.ts` — `WorldDeltaSchema`, a discriminated union of **14 operations**. The complete set of
+  ways the world can change.
 - `proposal.ts` — what an actor returns: `narrativeSummary`, `frictions`, `deltas`, `facts`,
-  `delegations`, `schedule`. The orchestrator and NPC cognition return the *same* shape.
-- `refs.ts` — the `local:` reference scheme.
+  `delegations`, `schedule`. The orchestrator and NPC cognition return the *same* shape, which is how
+  VISION §10's symmetric agency falls out of one contract instead of a parallel NPC system that
+  drifts.
+- `refs.ts` — the `local:` handle scheme.
 
 ### Why a closed union rather than a tool registry
 
 The deleted engine gave the model ~97 bespoke workflow tools and still could not keep the books
-straight. The lesson taken here is that a **narrow closed set plus one honest escape hatch beats a
-wide one**, because every arm of a narrow set can actually be validated. The escape hatch is
-`generic_entity_create`, backed by `WorldState.genericEntities` — VISION §9's "dynamically created
-mechanics" works by recording a novel institution as a first-class-but-untyped entity, rather than
-by having pre-authored a mechanic for it.
+straight. The lesson: a **narrow closed set plus one honest escape hatch beats a wide one**, because
+every arm of a narrow set can actually be validated. The escape hatch is `generic_entity_create`,
+backed by `WorldState.genericEntities` — VISION §9's "dynamically created mechanics" works by
+recording a novel institution as a first-class-but-untyped entity rather than pre-authoring a
+mechanic for every idea.
 
 ### Why the model never supplies an id
 
 A model that invents ids will eventually invent one that does not exist, and a hallucinated id that
-reaches storage is indistinguishable from a real one afterwards. So the model gets a scratch
-namespace instead: it declares `localId: "legion_v"` on the delta that creates a thing and writes
-`"local:legion_v"` to refer to it later in the same payload. The engine assigns every real id
-(`force-<burstId>-3`) and resolves the handles. A reference that resolves to nothing is rejected as
-friction, never written.
+reaches storage is indistinguishable from a real one afterwards. So it gets a scratch namespace: it
+declares `localId: "legion_v"` on the delta that creates a thing and writes `"local:legion_v"` to
+refer to it later in the same payload. The engine assigns every real id and resolves the handles; a
+reference that resolves to nothing is rejected.
 
-This is enforced structurally: every delta arm is `.strict()`, so a payload carrying an `id` field
-fails to parse rather than being quietly ignored.
+Enforced structurally — every delta arm is `.strict()`, so a payload carrying an `id` fails to parse
+rather than being quietly ignored.
 
-### Why time is always expressed in days
+### Why time is always days
 
 The model never states a date. It says `dueInDays: 60`. Date arithmetic is the engine's job, and a
 model asked to do it will eventually schedule something into its own past.
 
 ### Why rejection is friction, not failure
 
-VISION §8 is explicit that "build 200 warships in six months" should not return
-`ERROR: insufficient resources`. So `applyDeltas` returns `{ world, applied, rejected, breaches }`:
-a delta that cannot apply is rolled back individually, the rest of the batch still applies, and the
-rejection becomes an `execution_friction` fact the Chronicle can report. An over-ambitious order
-partly succeeds and the player learns why.
+VISION §8 is explicit that "build 200 warships in six months" must not return
+`ERROR: insufficient resources`. `applyDeltas` returns `{ world, applied, rejected, breaches }`: a
+delta that cannot apply is rolled back individually, the rest of the batch still applies, and the
+rejection becomes a fact. An over-ambitious order partly succeeds and the player learns why.
+
+Rejections carry a `kind`. **"world"** means the world genuinely could not comply — the treasury was
+short — and the player should hear about it. **"reference"** means the proposal named something that
+does not exist, which is the engine catching a malformed payload. The distinction exists because
+without it, "no province called Latium existed" appeared in a Chronicle as though it were history.
 
 ### Why lack of authority does not block an act
 
-`applyDeltas` runs `checkAuthority` on every delta — and then **applies it anyway**, recording a
-breach. VISION §12 is the reason: a general who marches without orders has not performed an invalid
-action, he has committed insubordination. Coups, embezzlement, unauthorized wars and illegal seizures
-are only expressible if the engine treats "unauthorized" as a property of an act rather than a veto.
+`applyDeltas` runs `checkAuthority` on every delta and then **applies it anyway**, recording a
+breach. VISION §12: a general who marches without orders has not performed an invalid action, he has
+committed insubordination. Coups, embezzlement and unauthorised wars are only expressible if
+"unauthorized" is a property of an act rather than a veto.
+
+Two bugs here manufactured *false* insubordination, which is the worst failure available to a system
+whose whole point is that real insubordination means something. A character held no authority over
+their own purse (office grants cover an office's named treasury and nothing else), and unscoped
+deltas were judged against `map.polities[0]` — so a Roman consul was checked against Carthage and
+breached for everything. `deriveOwnerGrants` and an actor-relative scope fallback fixed both.
 
 ---
 
 ## 3. The loop
 
-`packages/sim/` is a pure package: it takes a `WorldState` and a model port and returns a committed
-world plus everything it recorded. It touches no database and no Next.js.
+`packages/sim/` is a pure package: `WorldState` plus a model port in, a committed world and
+everything it recorded out. No database, no network, no Next.
 
 ```
-apps/web route ──load──▶ packages/db ──▶ world + known facts + due events
+apps/web route ──load──▶ packages/db ──▶ world + known facts + pending queue
       │
       ▼
 runSimulationBurst(input)
-      1. buildWorldSlice(...)      code    §27 token-budgeted projection
-      2. orchestrate(...)          MODEL   intent, deltas, facts, delegations, schedule
-      3. applyDeltas(...)          code    refs → authority → arithmetic → commit
-      4. routeAttention(...)       code    §18 funnel to ≤3 actors
-      5. runCognition(...)         MODEL   batched, per-actor knowledge only
-      6. (back to 3, causalDepth+1)
-      7. pressure + caps           code    §22 stop evaluation
+   0. runDeterministicTick(...)   code    catch up: revenue, wages, milestones
+   1. buildWorldSlice(...)        code    §27 bounded projection
+   2. orchestrate(...)            MODEL   intent, deltas, facts, delegations, schedule
+   3. applyDeltas(...)            code    refs → authority → arithmetic → commit
+   4. advance + tick              code    walk to the next moment that matters
+   5. routeAttention(...)         code    §18 funnel to ≤3 actors
+   6. runCognition(...)           MODEL   batched, per-actor knowledge only
+   7. pressure + caps             code    §22 stop evaluation
       ▼
- CONTINUE        CHRONICLE ──▶ MODEL (visible facts only)        DECISION ──▶ player
+ CONTINUE       CHRONICLE ──▶ MODEL (knowable facts only)       DECISION ──▶ player
 ```
 
-**Three model calls, everything else deterministic.** That is what makes VISION §29's budget of
-two-to-four calls per interaction achievable: attention routing, arithmetic, authority, id
-assignment, scheduling, information filtering, pressure accumulation and termination are all code.
+**Three model calls, everything else deterministic.** Attention routing, arithmetic, authority, id
+assignment, scheduling, information filtering, pressure and termination are all code — which is what
+makes VISION §29's two-to-four calls per interaction achievable.
 
-### Why the world only moves during a burst
+### Why the world moves only during a burst
 
 Between orders the world is perfectly still. That is the intended game: it is the player's, paced by
 them, and nothing happens behind their back while they read.
 
-This makes the burst responsible for carrying the world far enough to be worth the asking. It takes
-a short first step — so word can travel and the people the order touched can answer — and then jumps
-to whatever is next on the calendar, bounded by the scenario's maximum span. A single order can
-therefore span days or months depending on what is pending, which is what lets a sixty-day levy
-mature rather than creeping forward two days at a time forever.
+This makes the burst responsible for carrying the world far enough to be worth the asking. It takes a
+short first step — so word can travel and the people the order touched can answer — then jumps to
+whatever is next on the calendar, bounded by the scenario's maximum span. One order can span days or
+months depending on what is pending, which is what lets a sixty-day levy mature instead of creeping
+forward two days per order forever.
+
+A burst that ends in a momentous order hands control straight back without advancing at all. The
+minimum span exists to avoid waking the player for trivia; it must not delay news that already
+matters, so it gates only the quiet stop.
 
 ### The deterministic tick (`tick.ts`)
 
 Everything that happens because time passed and for no other reason: revenue collected, wages paid,
-project milestones reached. VISION §7 is explicit that there is no reason to invoke a model to
-calculate a monthly surplus, and nothing does — a burst spanning sixty days collects two months of
-revenue and pays two months of wages in one pass, free.
+project milestones reached. VISION §7 says there is no reason to invoke a model to calculate a
+monthly surplus, and nothing does — a burst spanning sixty days collects two months of revenue and
+pays two months of wages in one free pass.
 
-What it will not do is decide anything. A treasury that cannot meet the army's wages accrues arrears
-and emits a fact saying so; whether that becomes a mutiny is for an actor to judge. Note the
-asymmetry: revenue arriving as expected emits no fact at all, because a treasury filling on schedule
-is not history and a fact per tax payment would drown every Chronicle in bookkeeping. An unpaid army
-emphatically is.
+It decides nothing. A treasury that cannot meet the army's wages accrues arrears and emits a fact;
+whether that becomes a mutiny is for an actor to judge. Note the asymmetry: revenue arriving as
+expected emits **no fact at all**, because a treasury filling on schedule is not history and a fact
+per tax payment would drown every Chronicle in bookkeeping. An unpaid army emphatically is.
+
+Without this the queue was write-mostly — a milestone came due, was mentioned to the orchestrator,
+and was retired whether or not anything happened. "Raise two legions" scheduled legions that could
+never arrive.
 
 ### Why `packages/sim` is its own package
 
 The old engine lived in `apps/web/lib/resolution/` and was untestable for exactly that reason. The
-new one depends on `@chronica/shared` **only** — deliberately not on `@chronica/ai`, because
-`@chronica/ai` depends on `@chronica/db` (its coin gate takes a live database). A simulation core
-that transitively requires a database cannot be unit-tested without one.
-
-So `packages/sim/src/ports.ts` declares the narrow interface it needs:
+new one depends on `@chronica/shared` **only** — deliberately not on `@chronica/ai`, which depends on
+`@chronica/db`. A simulation core that transitively requires a database cannot be unit-tested without
+one. So it declares its own port:
 
 ```ts
 export interface SimModelPort {
@@ -151,192 +169,264 @@ export interface SimModelPort {
 ```
 
 `apps/web/lib/simulation-service.ts` supplies a closure over `callWithCoinGate`; tests supply a
-scripted fake. The whole loop is exercised with no network and no database.
+scripted fake.
 
 ### The slice (`slice.ts`)
 
-`WorldState` is far too large to send. `buildWorldSlice` projects the part that matters, under hard
-caps (12 characters, 10 forces, 8 projects, 12 facts…) so the slice does **not** grow as a campaign
-runs — a slice that grew with the world would make the loop more expensive the longer you play,
-which is exactly backwards.
+`WorldState` is far too large to send. `buildWorldSlice` projects the part that matters under hard
+caps, so the slice does **not** grow as a campaign runs — a slice that grew with the world would make
+the loop more expensive the longer you play, which is exactly backwards.
 
-Its history section is filtered through `factsVisibleTo` for the ordering actor. The orchestrator
-speaks for the player's government, so it must not be handed secrets that government has not
-discovered, or the world starts acting on knowledge nobody in it has.
+Two rules, both learned the hard way:
+
+**Everything it shows, it shows by id.** The model writes back what it reads. When the treasury
+section printed `Marcus Atilius's purse: 980` without an id, the model paid from
+`"Marcus Atilius's purse"`. When PLACES printed province names without ids, it wrote `Latium`. When
+projects showed a milestone label without its id, it guessed. This class of bug recurred three times
+before the rule was stated.
+
+**It must not be filtered to the player's own polity.** It was, on every axis — so an order to invade
+was carried out by a model that could not see the enemy's armies, leaders, or even that they had
+none. Filtering foreign *secrets* is right; filtering the existence of the army marching at you is
+not.
+
+History in the slice is filtered through `factsKnownTo` for the ordering actor, so the orchestrator
+speaks for a government that knows what that government knows — and no more.
 
 ### The attention router (`attention.ts`)
 
-Entirely deterministic, four gates mirroring VISION §18:
+Deterministic, four gates mirroring VISION §18:
 
-1. **Inside the causal horizon and the news has arrived.** A fact past `maxCausalDepth` cannot wake
-   anyone (§21 — otherwise every reaction breeds another forever). A fact whose
-   `discovery.knowableAtInstant` is still in the future cannot either.
-2. **Could they know?** `factsVisibleTo` for that specific character.
+1. **Inside the causal horizon, and the news has arrived.** A fact past `maxCausalDepth` cannot wake
+   anyone (§21 — otherwise every reaction breeds another forever), and neither can one whose
+   `discovery.knowableAtInstant` is still in the future.
+2. **Could they know?** `factsKnownTo` for that character and their polity.
 3. **Would they care?** Direct involvement, their polity, live pressures, open commitments, an
    unanswered order.
-4. **Could they act?** An office, a command, or a standing authority grant.
+4. **Could they act?** An office, a command, or a standing grant.
 
-Top scorers become `focused` (≤3, model cognition); the next tier `active`; the rest dormant.
+Top scorers become `focused` (≤3, model cognition); the next tier `active`, who record what they mean
+to do deterministically and for free — without that the middle tier was computed and discarded every
+burst. Activity level is derived per burst, not stored, because importance here is emergent from what
+a character is currently entangled in.
 
 A router that asked the model "who should react?" would answer "everyone interesting" and defeat its
-own purpose. Activity level is derived per burst rather than stored, because importance here is
-emergent from what a character is currently entangled in.
+own purpose.
 
-#### One correction worth knowing about
-
-`factsVisibleTo` treats every `public` fact as visible the instant it exists. That is right for "is
-this a secret" and wrong for "has word reached Carthage yet". The router therefore applies
-`knowableAtInstant` as a separate gate — that is the mechanism behind §16's travelling news, and it
-is driven by the model marking a fact `delayed`/`rumoured` with `knowableInDays`.
+> The focus threshold is set at the exact score of someone who can know, has cause to care, and holds
+> authority (10 + 20 + 25). Writing the router's tests found it one point above that, so an ordinary
+> public event woke nobody at all and the router was moot. `maxFocused` is what bounds the cost.
 
 ### Cognition (`cognition.ts`)
 
-One batched call covers every focused actor, and each actor's section is built **only** from their
-own knowledge. Handing one model the omniscient world and asking it to play several characters
-produces one narrator wearing masks — precisely what §28 says to avoid — and it leaks: a general who
-has not been told of the treaty starts acting as though he had.
-
-The answer comes back in the same `Proposal` shape the orchestrator uses, so symmetric agency
-(§10) falls out of one contract rather than a parallel NPC system that drifts.
+One batched call covers every focused actor, and each actor's section is built **only** from their own
+knowledge. Handing one model the omniscient world and asking it to play several characters produces
+one narrator wearing masks — precisely what §28 says to avoid — and it leaks: a general who has not
+been told of the treaty starts acting as though he had.
 
 ### Delegation (`burst.ts`)
 
 An instruction aimed at someone who could refuse is **not** a delta. It becomes an `OrderAttempt`,
-and that person decides separately — via the surviving `decideOrderAttempt`, which already forces an
-unauthorized "accept" to be recorded as `subvert`, so an authority breach can never silently acquire
-the standing of a lawful order.
+and that person decides separately — via `decideOrderAttempt`, which already forces an unauthorised
+"accept" to be recorded as `subvert`, so a breach can never silently acquire the standing of a lawful
+order. Delegations resolve through the same id map as deltas, and an order to someone who does not
+exist is not recorded at all.
 
-### Stopping (§21, §22, §23)
+### Stopping
 
 Significance is scored **by the actors, as a field on each fact they emit**, and accumulated by code.
-This is how §22 gets contextual AI judgment of what matters without spending a fourth model call on
-it.
+That is how §22 gets contextual judgment of what matters without a model call of its own.
 
-Hard caps, all in `DEFAULT_BUDGET`: `maxIterations 3`, `maxModelCalls 4`, `maxSimulatedDays 90`,
-`maxCausalDepth 3`, `maxFocusedActors 3`, `pressureThreshold 100`, plus the scenario's own
-`maxSpanDays`. Anything unresolved when a burst stops becomes a scheduled event — stable pending
-state, never dropped.
+`DEFAULT_BUDGET`: `maxIterations 3`, `maxModelCalls 4`, `maxSimulatedDays 90`, `maxCausalDepth 3`,
+`maxFocusedActors 3`, `pressureThreshold 100`, plus the scenario's own `maxSpanDays`. Anything
+unresolved at the stop becomes a scheduled event — stable pending state, never dropped.
 
 ### The Chronicle (`chronicle.ts`)
 
-Written only from `factsVisibleTo(facts, player, now)`. The constraint is enforced by **what the
-historian is handed**, not by an instruction in the prompt: a prompt asking the model not to mention
-secrets would eventually be disobeyed and nobody would notice. The model is only ever shown facts
-that passed the filter, so it cannot leak what it never saw.
+Written only from what the player could know. The constraint is enforced by **what the historian is
+handed**, not by an instruction in the prompt: a prompt asking the model not to mention secrets would
+eventually be disobeyed and nobody would notice.
 
 ---
 
-## 4. The clock was inverted
+## 4. Knowledge, and who has it
 
-Time used to be a turn counter: `elapsedStep` was authoritative, one step meant "a season", and
+VISION §14 asks the world to distinguish what is true from what is known. `Fact` carries a
+`visibility` (`public` / `polity` / `private`) and a per-observer `discovery` ledger with travel time.
+
+`factsVisibleTo` — which survived the wipe — cannot resolve polity membership. Its own comment says
+so and leaves it to the caller. **Every caller forgot.** The result was that the entire `polity` tier
+was invisible to everyone, that polity included: a consul's own diplomatic dispatch never reached the
+consul, the orchestrator could not see its own government's recent history, and nobody could be woken
+by their polity's business. Playing it produced a Chronicle reading *"Nothing of note was recorded in
+this period"* for the burst in which Rome delivered an ultimatum to Messana.
+
+`factsKnownTo` is what callers should have had: public as before, private still only by discovery,
+and polity-scoped facts known to those the polity covers. The Chronicle, the slice and the attention
+router all use it.
+
+One more subtlety: `factsVisibleTo` treats every public fact as visible the instant it exists. That is
+right for "is this a secret" and wrong for "has word reached Carthage yet", so the router applies
+`knowableAtInstant` as a separate gate — that is what carries VISION §16's travelling news.
+
+---
+
+## 5. The world populates itself
+
+A sparse scenario (VISION §4) names a dozen peoples and gives almost none of them a character. That
+is the intended starting point — but nothing ever required them to be filled in, so they stayed names
+on provinces that could not resist, negotiate or react. An invasion of the Boii found no Boii, and
+the orchestrator reached for `generic_entity_create` to produce "Boii lands", a placeholder for
+ground it had no id for.
+
+`population.ts` finds the gaps deterministically and free: countries holding land with no leader or
+no forces, ranked by whether the player is dealing with them now (read from recent facts), whether
+they border us, and how much they hold. The slice states it plainly — *"COUNTRIES WITH NOBODY IN
+THEM"* — and the orchestrator fills it in the call it was already making, through the
+`character_create` and `force_create` it already had. No extra model call, no new contract surface.
+
+Bounded to two per burst so one order is not swamped; a world fills in over a few orders, with
+whoever the player is actually engaged with first.
+
+Played: "Invade the Boii lands" now produces Catamandus of the Boii with a 5,200-strong tribal host —
+outnumbering Rome's field army — along with Bellovesus of the Insubres, Apuanes of the Ligurians and
+Dumnorix of the Veneti, each with forces and a commander that resolves to a real person.
+
+---
+
+## 6. Conversations are part of the record
+
+A proposed `CharacterSocialEvent` used to wait for a turn to apply it. Turns were deleted, so nothing
+ever did: every relationship change, belief, pressure and promise from every conversation reached the
+ledger and stopped there.
+
+`applyConversationConsequences` applies them as the conversation happens, through the character
+system's own `applySocialEvents` — and records the conversation in the fact ledger, which the old
+path never did. What was said is history, so the attention router can wake someone because of a
+promise and the Chronicle can report a conversation the player actually had.
+
+The discovery ledger keeps it honest: a private exchange is marked discovered by the people in the
+room and nobody else, so they can act on it while the rest of the world cannot see it until someone
+tells them.
+
+Deliberately *not* a burst: a conversation is not an order, costs no simulation model call, and does
+not advance the clock or wake the world on its own.
+
+### NPCs who seek the ruler out
+
+NPC-initiated contact previously reached the player through a field on a Chronicle entry. When that
+went, the capability survived with nothing to trigger it. `whoSeeksThePlayer` is the replacement:
+deterministic, free, bounded to two, drawn from what the world already knows — who owes the ruler an
+answer to an order, whose promise has come due, who is in serious trouble in the ruler's own polity.
+The opening line only has to be true; the character's own voice takes over the moment the player
+replies.
+
+---
+
+## 7. Time
+
+Time used to be a turn counter: `elapsedStep` was authoritative, a step meant "a season", and
 `WorldInstant` was a finer clock derived *inside* one turn's resolution window.
 
-VISION §15 removes turns and §16 asks for real timestamps, so the relationship is now reversed:
+VISION §15 removes turns and §16 asks for real timestamps, so the relationship is reversed:
 
 - **`WorldState.instant` (day + minute from the scenario epoch) is authoritative**, and required.
-- **`elapsedStep` is maintained as exactly `instant.day`** — a schema invariant, enforced in
-  `WorldStateSchema`'s `superRefine`, and only ever changed through `advanceWorldTo`, which also
-  refuses to run backwards.
+- **`elapsedStep` is maintained as exactly `instant.day`** — a schema invariant, changed only through
+  `advanceWorldTo`, which refuses to run backwards.
 
-### Why `elapsedStep` was kept rather than deleted
+`elapsedStep` was kept rather than deleted because roughly forty schemas across material state,
+projects, authority and the character system store `*AtStep` fields, and every one stays meaningful
+when a step is a day. What changed is only what a step *means*.
 
-About forty schemas across material state, projects, authority and the character system store
-`*AtStep` fields. Every one of them stays meaningful when a step is a day. What changed is only what
-a step *means* — it is now a date, not a turn. Deleting it would have been a large mechanical
-rewrite with no behavioural gain.
+Consequences: `ScenarioClock` lost `stepLabel`/`stepsPerYear`/`minSpan`/`maxSpan` and gained a
+**required** `epoch` plus `minSpanDays`/`maxSpanDays`; `currentAgeYears` reads days against
+`DAYS_PER_YEAR` instead of taking a scenario's steps-per-year; scenario data was rescaled (a consular
+term of `4` seasons became `365` days). `formatWorldDate` converts an instant to a real date
+("1 March 264 BC") using proleptic Gregorian arithmetic with astronomical year numbering, so deep BCE
+and the BCE→CE boundary are both correct.
 
-Consequences, all applied:
-
-- `ScenarioClock` lost `stepLabel`/`stepLabelPlural`/`stepsPerYear`/`minSpan`/`maxSpan` and gained a
-  **required** `epoch` plus `minSpanDays`/`maxSpanDays`. A world that cannot name its own date
-  cannot produce the timestamps §16 asks for.
-- `currentAgeYears` no longer takes `stepsPerYear`; it reads days directly against
-  `DAYS_PER_YEAR`. Ageing is still fully modelled — VISION §5 and §11 need NPCs who age and die —
-  it just measures days now.
-- Scenario data was rescaled: a consular term of `4` (seasons) became `365`, monthly cadences
-  became `30`, and so on.
-- `formatWorldDate` / `calendarDateOf` convert an instant to a real date ("1 March 264 BC"), using
-  proleptic Gregorian arithmetic with astronomical year numbering so deep BCE and the BCE→CE
-  boundary are both correct.
-
-`WORLD_SCHEMA_VERSION` went to 2. **There was no migration burden** — nothing persisted a world at
-the time — which is exactly why this was the moment to do it.
+`WORLD_SCHEMA_VERSION` went to 2. There was **no migration burden** — nothing persisted a world at the
+time — which is exactly why that was the moment to do it.
 
 ---
 
-## 5. Persistence
+## 8. Persistence
 
-Six tables, in `packages/db/src/schema/simulation.ts`, migration `0034_simulation_loop.sql`. Split by
-lifetime rather than by turn, which is what made the old `turns`/`worldSnapshots` pair impossible to
-advance continuously:
+Six tables, split by lifetime rather than by turn (migration `0034_simulation_loop.sql`):
 
 | Table | Holds |
 | --- | --- |
-| `game_worlds` | The live world document, one row per game, with a `revision` token |
-| `world_facts` | The append-only historical record, with visibility, discovery and significance |
-| `scheduled_events` | The future queue |
-| `simulation_bursts` | One run of the loop, for inspection afterwards |
-| `chronicle_checkpoints` | What the player was actually shown |
-| `player_decisions` | The rare fork needing the ruler's own authority |
+| `game_worlds` | the live world document, one row per game, with a `revision` token |
+| `world_facts` | the append-only record, with visibility, discovery and significance |
+| `scheduled_events` | the future queue |
+| `simulation_bursts` | one run of the loop, for inspection afterwards |
+| `chronicle_checkpoints` | what the player was shown |
+| `player_decisions` | forks needing the player's own authority |
 
 Facts live **outside** the world document on purpose: what is true and who knows it are different
 questions, and the record must be queryable by time and visibility without loading a world.
 
 `commitBurst` writes all of it in one transaction under one revision bump, behind
-`pg_advisory_xact_lock(hashtext(gameId))`. The failure mode worth designing against is a partial
-commit — a world that advanced without its facts, or facts describing a world that was never saved,
-are both unrecoverable by inspection afterwards. The advisory lock matters because the chat path
-writes world state too: a slow burst and a fast conversation must not interleave.
+`pg_advisory_xact_lock`. Partial commits are the failure worth designing against — a world that
+advanced without its facts, or facts describing a world that was never saved, are both unrecoverable
+by inspection. The advisory lock matters because the conversation path writes world state too.
 
-`getWorldView` was deliberately shaped to match its deleted predecessor's return type, so
-`character-service.ts` and `dialogue-service.ts` — severed by the wipe — compile and run again
-unchanged.
+Scenario definitions and their starting worlds live in `scenario_versions`, and **those rows are
+immutable**. Changing a scenario file does nothing to an existing database until a new version is
+published in `ensureBuiltInScenarios` and `currentVersion` is bumped. This has bitten twice.
 
-### Migration 0034 also retires the turn era
-
-The wipe deleted the TypeScript schema but never wrote a migration, so the database still carried
-every old table. `0034` drops `turns`, `orders`, `world_snapshots`, `chronicle_entries`,
-`world_events`, `world_facts`, `turn_news_readiness`, `capability_requests`, `invented_workflows`
-(+uses), `pending_workflow_proposals`, their enums, and the orphaned columns on
-`games`/`players`/`character_claims`/`player_game_ui_state`.
-
-The old `world_facts` in particular **collided by name** with the new fact ledger, which a
-`CREATE TABLE IF NOT EXISTS` would have silently resolved in favour of the old shape. This is
-irreversible and was confirmed before running.
+Migration 0034 also retires the turn era: the previous commit deleted the TypeScript schema but never
+wrote a migration, so the database still carried `turns`, `orders`, `world_snapshots`,
+`chronicle_entries`, `world_events`, `world_facts` (an older, colliding shape) and their enums and
+orphaned columns.
 
 ---
 
-## 6. Authority was un-stubbed
+## 9. Authority was un-stubbed
 
 `officeIdToDomainPowers` had become a stub returning `[]` when the workflow registry it classified
-against was deleted, taking office-derived authority with it (three tests were left `it.skip`'d
-documenting the intent).
+against was deleted, taking office-derived authority with it (three tests were left `it.skip`'d).
 
-Its replacement is the delta union: an office's `authorisedActionIds` are now written in exactly the
+Its replacement is the delta union: an office's `authorisedActionIds` are written in exactly the
 vocabulary the world can be changed in. An office authorising `force_create` holds military command
-power; one authorising `money_transfer` holds fiscal spend power. An id in neither vocabulary confers
-nothing rather than guessing. Fiscal authority stays scoped to the office's own named treasury
-account, so a governor authorised to spend does not thereby reach the national treasury.
+power; one authorising `money_transfer` holds fiscal spend power. Fiscal authority stays scoped to the
+office's own named treasury, so a governor authorised to spend does not reach the national treasury.
+The three skipped tests are live again.
 
-The three skipped tests are **live again**, and the scenarios' offices were rewritten into the new
-vocabulary.
-
-To break the resulting import cycle (deltas are classified *by* domain; offices derive authority
-*from* the delta vocabulary), the authority enums were extracted into a leaf module,
-`packages/shared/src/authority/vocabulary.ts`. The orphaned `buildWorkflowAuthorityGate` — a hook
-for the deleted GM session, with no callers — was removed.
+To break the resulting cycle — deltas are classified *by* domain, offices derive authority *from* the
+delta vocabulary — the authority enums were extracted into `authority/vocabulary.ts`.
 
 ---
 
-## 7. What is reused rather than rebuilt
+## 10. The page layer
 
-The wipe left most of the substrate. Each survivor carries a vision section:
+`game-repository.ts` and `world-view.ts` were deleted with the turn system and are **rewritten rather
+than restored**: the in-memory demo repository is gone, as are every Orders, News and turn method, and
+the old projector's turn-indexed knowledge labels and hardcoded scenario overlay tables. What remains
+reports what `WorldState` actually contains.
+
+`createGame` came back with it, and now materializes the world immediately — its predecessor opened
+turn 0 and let the scenario's `initialWorld` stand in until the first turn resolved, and there is no
+longer a turn to stand in for it.
+
+The council panel (`simulation-panel.tsx`) is the player's whole interface to the simulation: an order
+box, the latest Chronicle, and the occasional decision. Chat needs the declared-character
+knowledgebase to speak in the player's voice; giving orders does not, so the two are gated separately
+— holding a character in the world is the whole qualification.
+
+Answering a decision passes the prompt and the chosen option into the slice **as structure**. It used
+to re-submit the sentence "you have chosen: accept", so the world resumed a decision without knowing
+what had been asked.
+
+---
+
+## 11. What is reused rather than rebuilt
 
 | Survivor | Serves |
 | --- | --- |
 | `world/facts.ts` — `Fact`, `FactDiscovery`, `emitFacts`, `factsVisibleTo` | §14 objective vs. known, §18 signals, §25 chronicle boundaries |
 | `world/instant.ts` — `WorldInstant`, `addMinutes`, `worldInstantToSortKey` | §16 continuous time |
-| `authority/order-attempt.ts` — the issue→decide→carry-out machine | §13 delegation, §12 refusal and subversion |
+| `authority/order-attempt.ts` — issue→decide→carry-out | §13 delegation, §12 refusal and subversion |
 | `authority/authority-grant.ts` — `buildAuthorityIndex`, `checkAuthority` | §12 authority as classification |
 | `world/project.ts` — projects and milestones | §8 ambitious orders persist, §17 scheduling |
 | `material-state.ts` — accounts, obligations, income, forces, office seats | §7 economy |
@@ -346,206 +436,77 @@ The wipe left most of the substrate. Each survivor carries a vision section:
 
 ---
 
-## 8. The page layer
+## 12. Verification
 
-`apps/web/lib/game-repository.ts` was deleted with the turn system and is rewritten rather than
-restored: the in-memory demo repository is gone, as are every Orders, News and turn method, leaving
-the eleven operations the pages actually call. `world-view.ts` is likewise new — its predecessor
-keyed knowledge labels to a turn index and carried hardcoded scenario overlay tables that papered
-over gaps in the opening state. The replacement reports what `WorldState` contains and nothing else.
-
-Two database functions had to come back with it (`createGame`, `requestGameEnd`), and `createGame`
-now materializes the world immediately: its predecessor opened turn 0 and left the scenario's
-`initialWorld` to stand in until the first turn resolved, and with turns gone there is nothing to
-stand in for it.
-
-One consequence worth knowing: a definition change does not reach a database by editing a scenario
-file, because `scenario_versions` rows are immutable by design. The continuous clock and the widened
-office powers each required publishing a **new scenario version** in `ensureBuiltInScenarios`.
-
-## 9. Conversations are part of the record
-
-A conversation is not a side channel. `applyConversationConsequences`
-(`apps/web/lib/conversation-consequences.ts`) closes the gap the wipe left: a proposed
-`CharacterSocialEvent` used to wait for a turn to apply it, and since turns were deleted, nothing
-ever did — every relationship change, belief, pressure and promise from every conversation simply
-never reached canonical state.
-
-Now a conversation takes effect as it happens, through the character system's own
-`applySocialEvents`, and — new — it is recorded in the fact ledger by
-`packages/sim/src/conversation.ts`. What was said becomes history, which means the attention router
-can wake someone because of a promise, and the Chronicle can report a conversation the player
-actually had.
-
-The discovery ledger is what makes this safe. A private conversation's fact is marked discovered by
-the people in the room and nobody else, so `factsVisibleTo` lets the participants act on it while
-the rest of the world cannot see it at all until someone tells them.
-
-Deliberately *not* a burst: a conversation is not an order. It costs no model call here, does not
-advance the clock, and does not wake the world on its own. It records what happened and stops.
-
-## 10. Verification
-
-`packages/sim` has **64 tests**, all driven by a scripted model port — never a live adapter, because
+`packages/sim` has **89 tests**, all driven by a scripted model port — never a live adapter, because
 a test that can disagree with itself run-to-run is worth nothing as a regression guard. Repo-wide:
-479 tests pass, none skipped, and the whole repo typechecks.
+**504 tests**, none skipped, and the whole repo typechecks.
 
-The end-to-end case is VISION §30's own example. One order — *"Raise two new legions."* — produces,
-in two model calls:
+The end-to-end case is VISION §30's own example. One order — *"Raise two new legions"* — produces, in
+two model calls: money leaving the treasury, a persistent NPC generated because the mobilization
+needed a financier, a recruitment `Project` with milestones, a recurring upkeep obligation, scheduled
+milestones, an `OrderAttempt` still awaiting its recipient's answer, a public mobilization fact that
+becomes knowable elsewhere after a day, a private borrowing fact that does not — and Carthage, woken
+by the router, quietly reinforcing Sicily where the player cannot see it.
 
-- 220 talents leaving the treasury;
-- a persistent NPC (Marcus Fabius Varro, Military Quaestor) generated because the mobilization needed
-  a financier;
-- a recruitment `Project` with two milestones;
-- a recurring 31/month army-upkeep obligation;
-- a scheduled milestone 60 days out;
-- an `OrderAttempt` to the treasury official, still awaiting his answer;
-- a public mobilization fact that becomes knowable elsewhere after a day, and a private borrowing
-  fact that does not;
-- Carthage, woken by the router, quietly reinforcing Sicily — and that reinforcement staying
-  invisible to the player.
+Other suites cover: money conservation and over-spending as friction, batch partial application,
+unauthorised acts applying as recorded breaches, unresolved `local:` handles, dangling references,
+every budget cap terminating a burst, a model answering with prose instead of JSON, revenue and
+arrears across a multi-month span, projects completing across orders, the attention router's four
+gates, polity-aware visibility, conversations as private history, and who seeks the ruler out.
 
-Other tests cover: money conservation and over-spending as friction, batch partial application,
-unauthorized acts applying as recorded breaches, unresolved `local:` handles, dangling references,
-every budget cap terminating a burst, a model that answers with prose instead of JSON, and the
-Chronicle never being handed an undiscovered fact.
+### What playing it taught
 
-The attention router has its own suite, because it is the piece that decides what everything else
-costs: a secret nobody discovered wakes no one, a secret shared with someone wakes them, news that
-has not travelled yet wakes no one until it has, a fact past the causal horizon wakes no one, the
-player is never woken, and the same world wakes the same people every time.
+Scripted tests prove the loop. Only playing proves the prompt. Every defect below was found by
+running real orders against a live model, and none would have been caught otherwise:
 
-Writing those tests found that the focus threshold was set one point above the score of the very
-actor it exists to select — someone who can know, has cause to care, and holds authority — so an
-ordinary public event woke nobody at all. The bar is now that actor's score exactly, and
-`maxFocused` is what bounds the cost.
+1. **The model described the order instead of carrying it out** — intent, delegations and a schedule,
+   with the treasury untouched. Fixed by an explicit rule: an answer with no deltas asserts the world
+   did not move, which is rarely true of an order a government has accepted.
+2. **It named things by label rather than id** — the purse, then provinces, then milestones. Three
+   separate occurrences of one rule that had not been stated.
+3. **It named people who did not exist** (`publius_scutarius`), and cognition invented `local:`
+   handles for actors that already existed, itself included.
+4. **A government could not see its own business** — the whole `polity` visibility tier was invisible
+   (§4 above).
+5. **The engine's own complaints reached the historian**, putting "no province called Latium existed"
+   into a Chronicle.
+6. **A one-participant `social_events` delta killed whole batches** — it produced an encounter with
+   one participant, which fails `WorldState` validation, discarding every other delta with it.
+7. **The council had no stylesheet.** The class names existed and nothing matched them.
+
+Played across five orders after the fixes, "Invade the Boii lands" ran a campaign from 1 March to 30
+May 270 BC with no engine rejections at all: a persistent project, a generated officer delegated the
+provisioning, the army advancing into Umbria, the invasion completing through scheduled milestones,
+Rome delivering an ultimatum to Messana through an envoy with no authority to concede — and Hieron of
+Syracuse and Hanno of Carthage each manoeuvring on their own account, Hanno noting he held no office
+with which to commit Carthage to anything.
 
 ---
 
-## 11. What the first live model run changed
+## 13. What is deliberately not done
 
-Scripted tests prove the loop. Only a real model proves the *prompt*, and the first live run against
-`gpt-5.6-luna` found four things no unit test would have:
+- **Combat resolution.** Two sides can now face each other — the Boii field 5,200 men against Rome's
+  4,000 — but nothing resolves a battle between them. `packages/shared/src/warfare/` survived the
+  wipe and has no caller.
+- **Diplomacy, espionage and intrigue as systems.** The delta union is where each plugs in.
+- **Economic depth.** Income, obligations and arrears work; trade, credit and monetary policy do not
+  exist.
+- **Multiplayer.** The burst assumes one sovereign. Multiplayer reintroduces exactly the
+  turn-synchronisation problem §15 exists to avoid.
+- **Games created before this work.** Their state lived in the dropped `world_snapshots`; they were
+  deleted rather than half-resurrected.
 
-1. **The model described the order instead of carrying it out.** It returned intent, delegations and
-   a schedule, and changed nothing — the treasury was untouched. Fixed by an explicit rule: *"Then
-   actually do it… an answer with no deltas asserts that the world did not move at all, which is
-   rarely true of an order a government has accepted."*
-2. **It paid from `"Marcus Atilius's purse"`** — the *label* the slice printed, not the id. The
-   TREASURY section rendered names without ids while every other section showed `[id]`. The slice
-   now prints ids everywhere, and the prompt says to use them.
-3. **A character had no authority over their own money.** Office grants cover an office's named
-   treasury and nothing else, so spending one's own purse was recorded as an authority breach, which
-   made every privately funded act look like embezzlement. `deriveOwnerGrants` now grants fiscal
-   power over an account to the character who owns it. Ownership is not an office, and does not
-   expire.
-4. **Unscoped deltas were judged against the wrong polity.** `scopeOf`'s fallback reached for
-   `map.polities[0]` — Carthage — so a Roman consul's every unscoped act was checked against an enemy
-   state and breached. It now falls back to the actor's own polity.
+---
 
-Both (3) and (4) produced *false insubordination*, which is the worst possible failure for a system
-whose whole point is that real insubordination is meaningful. Each has a regression test naming the
-live run that found it.
+## 14. Known risks
 
-Also learned: delegations could name a person the same payload was still creating, and the
-`local:` handle was written into the order attempt verbatim; delegations now resolve through the
-same id map as deltas and drop orders to people who do not exist. And a fact may now name a
-`project` as an affected entity — the ref enum had no way to say that an event concerned an ongoing
-effort.
+**Prompt size and slice content, not loop logic.** `buildWorldSlice` is where this design succeeds or
+fails. The system prompt is ~4,600 tokens (mostly the generated JSON schema, identical every call and
+therefore cacheable) and the slice is bounded — but whether it carries *the right* bounded subset for
+a given order is the thing most likely to need iteration. Every defect in §12 above was a slice or
+prompt problem; none was a loop problem.
 
-The loop's own numbers held up: the slice renders at ~165 tokens, the system prompt ~4,600, and a
-good answer arrives in one call with the repair path catching the rest.
-
-## 12. What is deliberately not done
-
-- **NPC-initiated contact is gone.** Its only trigger was a Chronicle entry field, so the route that
-  opened those conversations was deleted; `openInitiatedDialogue` survives and needs a new source,
-  most naturally a pressure or an unanswered commitment.
-- **Single-player.** The burst assumes one sovereign. Multiplayer reintroduces exactly the
-  turn-synchronization problem §15 exists to avoid, and was scoped out on purpose.
-- **`docs/product.md` and `docs/architecture.md` still describe the deleted Turns/Orders/Chronicle
-  loop.** They are stale and should be rewritten against this document.
-- **Games created before this work cannot be opened.** Their state lived in `world_snapshots`, which
-  migration 0034 dropped; they have no `game_worlds` row and the game page returns 404. Nothing
-  resurrects them, deliberately.
-- **The simulation panel appears only after character declaration**, since that is what the game page
-  gates `playerCharacterId` on. That is the existing product flow, not a decision taken here.
-
-## 13. What completing the loop changed
-
-Three holes remained after the first pass, all the same shape: the world recorded intentions it
-never honoured.
-
-- **The queue was write-mostly.** A milestone came due, was mentioned to the orchestrator, and was
-  retired whether or not anything happened. Nothing advanced the project it belonged to, so "raise
-  two legions" scheduled legions that could never arrive. `runDeterministicTick` resolves them.
-- **A burst crept forward two days and stopped**, so a sixty-day levy would have needed thirty
-  orders to mature. It now walks to the next moment that matters.
-- **The attention router's middle tier was computed and discarded.** Actors who cared but did not
-  warrant a model call now record what they mean to do, deterministically and for free.
-- **`social_events` parsed and did nothing**, so the orchestrator could not author relationship
-  change at all. It routes through `applySocialEvents`, the same applier a conversation uses.
-
-Writing the pacing found a mistake in it: significance crossing the threshold was gated behind the
-minimum span, so a world where Rome had just declared war would carry on for another week before
-telling the player. The minimum span exists to avoid waking someone for trivia; it now gates only
-the quiet stop.
-
-## 14. What playing it found
-
-"Invade the Boii lands", played through the real app against a live model, carried three orders from
-1 March to 30 May 270 BC: a persistent campaign project, an officer generated and delegated the
-provisioning, the army advanced into Umbria, the invasion completed through scheduled milestones,
-and Hanno investigated Roman intentions on his own account — noting he held no office with which to
-commit Carthage to anything.
-
-Four defects surfaced that no test would have:
-
-1. **The model named people it had not created** (`publius_scutarius`) and **places by label rather
-   than id** (`Latium`) — because the slice printed province names without ids, exactly as the
-   treasury section once did. Every section now prints the id the model must use, and both prompts
-   say a person not listed does not exist.
-2. **Cognition invented `local:` handles for actors that already existed**, including for the actor
-   itself.
-3. **The engine's own complaints reached the historian**, putting "no province called Latium existed"
-   into a Chronicle. Rejections are now classed: the *world* could not comply (friction the player
-   should hear, and discovered by them), or the payload was malformed (private, weightless, kept for
-   debugging). Both the fact and the friction list are filtered.
-4. **The council had no stylesheet.** The class names existed and nothing matched them.
-
-After the fixes, the third order produced no engine rejections at all.
-
-## 15. The world populates itself
-
-A sparse scenario (VISION §4) names a dozen peoples and gives almost none of them a character. That
-is the intended starting point — but nothing required them ever to be filled in, so they stayed names
-on provinces that could not resist, negotiate or react. An invasion of the Boii found no Boii.
-
-Two things were wrong, compounding:
-
-- **The slice was filtered to the player's own polity on every axis**, so the orchestrator could not
-  see foreign armies, foreign leaders, or even that a country had none. It reached for
-  `generic_entity_create` and produced "Boii lands" — a placeholder for ground it had no id for.
-  Filtering foreign *secrets* is right; filtering the existence of the army marching at you is not.
-- **Nothing asked the world to populate anyone.** `force_create` already takes a `polityId`; the
-  contract could always express "the Boii raise a host under a chieftain". It was never requested.
-
-`population.ts` finds the gaps deterministically and free: countries holding land with no leader or
-no forces, ranked by whether the player is dealing with them now (from recent facts), whether they
-border us, and how much they hold. The slice states the gap plainly — *"COUNTRIES WITH NOBODY IN
-THEM"* — and the orchestrator fills it in the call it was already making. No extra model call, no new
-contract surface.
-
-Bounded to two per burst so a single order is not swamped; a world fills in over a few orders, with
-whoever the player is actually dealing with first.
-
-## 16. The known risk
-
-**Prompt size, not loop logic.** `buildWorldSlice` is where this design succeeds or fails. The
-orchestrator's system prompt is ~4,600 tokens (mostly the generated JSON schema, identical every call
-and therefore cacheable), and the slice is bounded — but whether the slice carries *the right* bounded
-subset for a given order is the thing most likely to need iteration once real models run against real
-campaigns.
-
-The secondary risk is burst duration inside a request-scoped API route. `simulation_bursts` exists
-partly so that moving a burst to a background job later is cheap.
+**Burst duration against request scope.** A burst with a live model can exceed 45 seconds. A client
+that gives up leaves a `simulation_bursts` row at `running` — harmless today, since nothing reads it,
+but the row exists partly so that moving bursts to a background job later is cheap.

@@ -90,6 +90,24 @@ Scenario definitions and their starting worlds live in `scenario_versions`, and 
 **immutable**. Changing a scenario file does nothing to an existing database until a new version is
 published in `ensureBuiltInScenarios`.
 
+## A world that fills itself in
+
+A scenario is sparse by design: it names polities and territory and leaves the rest to be generated
+when history requires it (VISION §4, §5). `packages/sim/src/population.ts` finds countries that hold
+land but have no leader or no forces, ranks them by whether the player is dealing with them now,
+whether they border us, and how much they hold, and states the gap in the slice. The orchestrator
+fills it in the call it was already making — no extra model call, no new contract surface.
+
+The slice is therefore **not** filtered to the player's own polity. Foreign secrets are filtered by
+the fact ledger; the existence of a neighbour's army is not a secret.
+
+## Knowledge
+
+`Fact` carries a `visibility` (`public` / `polity` / `private`) and a per-observer discovery ledger
+with travel time. Callers should use **`factsKnownTo`**, not `factsVisibleTo`: the latter cannot
+resolve polity membership and treats every `polity`-scoped fact as unknown, which silently hid a
+government's own dispatches from that government.
+
 ## Characters and conversations
 
 The character system (`packages/shared/src/characters/`) models people as people: relationships with
@@ -99,6 +117,10 @@ causes, beliefs with provenance, pressures, promises. Conversations run through
 
 A conversation is not a burst: it costs no simulation model call, does not advance the clock, and
 does not wake the world.
+
+`whoSeeksThePlayer` (`packages/sim/src/initiative.ts`) is the trigger for NPC-initiated contact —
+deterministic and free, drawn from who owes the ruler an answer, whose promise has come due, and who
+is in serious trouble in the ruler's own polity.
 
 ## Map
 
