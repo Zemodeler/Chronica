@@ -80,6 +80,13 @@ How to answer well:
    a battle or a death 90+.
 10. Orders given to a person who could refuse them are "delegations", not deltas. That
    person decides separately whether to obey.
+11. Keep each country's aims current. STANDING AIMS says what a power is trying
+   to do, what worries it and what it means to do next. Every polity with people
+   in it should have one, and any power whose situation changed this turn should
+   have theirs rewritten with "polity_outlook_set" -- a country that watched a
+   neighbour mobilize and still lists the same concerns has not noticed. These
+   aims are secret: nobody inside the world reads another power's, so write them
+   as that government privately sees things, not as it would say them aloud.
 
 Answer with a single JSON object and nothing else, matching this schema (the
 "deltas" array inside it is the closed set of changes you may make to the world):

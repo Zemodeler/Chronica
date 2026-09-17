@@ -222,6 +222,24 @@ const PolityStanceShiftSchema = z.object({
   reason: ReasonSchema,
 }).strict();
 
+/**
+ * VISION §11: what a polity is trying to do, rewritten as circumstances change.
+ * Upserted by polity -- a country has one outlook at a time, not a history of
+ * them. Secret by construction: see `world/outlook.ts`.
+ */
+const PolityOutlookSetSchema = z.object({
+  op: z.literal("polity_outlook_set"),
+  polityId: EntityIdSchema,
+  primaryObjective: z.string().trim().min(1).max(240),
+  concerns: z
+    .array(z.object({ label: z.string().trim().min(1).max(160), level: z.enum(["low", "medium", "high"]) }).strict())
+    .max(6)
+    .default([]),
+  intentions: z.array(z.string().trim().min(1).max(200)).max(6).default([]),
+  riskTolerance: z.number().int().min(0).max(100),
+  reason: ReasonSchema,
+}).strict();
+
 export const WorldDeltaSchema = z.discriminatedUnion("op", [
   MoneyTransferSchema,
   IncomeSourceUpsertSchema,
@@ -237,6 +255,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   AuthorityGrantUpsertSchema,
   OrderAttemptDecideSchema,
   PolityStanceShiftSchema,
+  PolityOutlookSetSchema,
 ]);
 export type WorldDelta = z.infer<typeof WorldDeltaSchema>;
 export type WorldDeltaOp = WorldDelta["op"];
@@ -257,6 +276,7 @@ export const WORLD_DELTA_OPS = [
   "authority_grant_upsert",
   "order_attempt_decide",
   "polity_stance_shift",
+  "polity_outlook_set",
 ] as const satisfies readonly WorldDeltaOp[];
 
 /**
@@ -280,4 +300,5 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   authority_grant_upsert: "judicial",
   order_attempt_decide: "civil",
   polity_stance_shift: "diplomatic",
+  polity_outlook_set: "diplomatic",
 };

@@ -28,7 +28,7 @@ import {
  *    it actually has.
  */
 
-const CAPS = { characters: 12, forces: 10, projects: 8, accounts: 6, stances: 8, facts: 12, events: 8, intents: 8, provinces: 40, foreignForces: 12, foreignFigures: 12 } as const;
+const CAPS = { characters: 12, forces: 10, projects: 8, accounts: 6, stances: 8, facts: 12, events: 8, intents: 8, provinces: 40, foreignForces: 12, foreignFigures: 12, outlooks: 8 } as const;
 
 export interface SliceEvent {
   readonly kind: string;
@@ -67,6 +67,23 @@ export interface WorldSlice {
   readonly provinces: readonly { readonly id: string; readonly name: string; readonly controller: string }[];
   readonly politics: readonly { readonly id: string; readonly name: string; readonly office: string | null; readonly age: number }[];
   readonly diplomacy: readonly { readonly toward: string; readonly trust: number; readonly why: string }[];
+  /**
+   * What each polity is trying to do (VISION §11), including foreign ones.
+   *
+   * The orchestrator is the world: it has to drive Carthage consistently with
+   * Carthage's own aims, so it is shown them. Nobody inside the world gets this
+   * view -- an NPC's cognition sees only their own government's outlook, and a
+   * Chronicle is built from facts, never from here.
+   */
+  readonly outlooks: readonly {
+    readonly polityId: string;
+    readonly name: string;
+    readonly own: boolean;
+    readonly objective: string;
+    readonly riskTolerance: number;
+    readonly concerns: readonly string[];
+    readonly intentions: readonly string[];
+  }[];
   /**
    * The world outside our borders, as far as it is plainly known. Filtering
    * foreign secrets is right; filtering the existence of the army marching at
@@ -157,6 +174,20 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     .slice(0, CAPS.stances)
     .map((stance) => ({ toward: polityName(stance.towardPolityId), trust: stance.trustScore, why: stance.lastShiftReason }));
 
+  // Ours first: the order the model reads them in is the order it weighs them.
+  const outlooks = [...world.polityOutlooks]
+    .sort((a, b) => Number(b.polityId === ownPolity) - Number(a.polityId === ownPolity))
+    .slice(0, CAPS.outlooks)
+    .map((outlook) => ({
+      polityId: outlook.polityId,
+      name: polityName(outlook.polityId),
+      own: outlook.polityId === ownPolity,
+      objective: outlook.primaryObjective,
+      riskTolerance: outlook.riskTolerance,
+      concerns: outlook.concerns.map((concern) => `${concern.label}: ${concern.level}`),
+      intentions: outlook.intentions,
+    }));
+
   // Armies in the field and heads of state are not secrets.
   const foreignPowers = world.map.polities
     .filter((polity) => polity.id !== ownPolity)
@@ -220,6 +251,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     provinces,
     politics,
     diplomacy,
+    outlooks,
     projects,
     intents,
     recentHistory,
@@ -278,6 +310,14 @@ export function renderWorldSlice(slice: WorldSlice): string {
   }
   section("PEOPLE", slice.politics.map((person) => `${person.name} [${person.id}]${person.office === null ? "" : `, ${person.office}`}, aged ${person.age}`));
   section("DIPLOMACY", slice.diplomacy.map((stance) => `toward ${stance.toward}: trust ${stance.trust} (${stance.why})`));
+  section(
+    "STANDING AIMS",
+    slice.outlooks.flatMap((outlook) => [
+      `${outlook.name} [${outlook.polityId}]${outlook.own ? " (ours)" : ""} — ${outlook.objective}. Will risk ${outlook.riskTolerance}/100.`,
+      ...outlook.concerns.map((concern) => `  worried about ${concern}`),
+      ...outlook.intentions.map((intention) => `  means to ${intention}`),
+    ]),
+  );
   section("ACTIVE PROJECTS", slice.projects.map((project) =>
     `${project.label} [${project.id}] — ${project.status}${project.nextMilestone === null ? "" : `, next: ${project.nextMilestone.label} [${project.nextMilestone.id}]`}`));
   section("STANDING INTENTIONS", slice.intents.map((intent) => `${intent.actor} means to ${intent.action}: ${intent.rationale}`));

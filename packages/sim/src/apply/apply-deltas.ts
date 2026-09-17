@@ -75,6 +75,8 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
     case "polity_stance_shift":
       return { kind: "polity", id: delta.polityId };
+    case "polity_outlook_set":
+      return { kind: "polity", id: delta.polityId };
     case "character_create":
       return { kind: "polity", id: delta.polityId };
     default:
@@ -97,6 +99,7 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   authority_grant_upsert: "appoint",
   order_attempt_decide: "command",
   polity_stance_shift: "negotiate",
+  polity_outlook_set: "propose",
 };
 
 export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], context: ApplyContext): ApplyResult {
@@ -194,7 +197,10 @@ function applyOne(
   context: ApplyContext,
   assignedIds: Map<string, string>,
   resolve: (ref: string) => string | undefined,
-  emitFact: (fact: FactProposal) => void,
+  // Unused until an act has consequences the model may not author -- battle
+  // casualties are the first. The channel exists here so those arrive as facts
+  // rather than as silent state.
+  _emitFact: (fact: FactProposal) => void,
 ): WorldState {
   const required = (ref: string, label: string): string => {
     const resolved = resolve(ref);
@@ -462,6 +468,30 @@ function applyOne(
             ? { ...stance, trustScore: clamp(stance.trustScore + delta.trustDelta), lastShiftReason: delta.reason, lastShiftAtStep: atStep }
             : stance,
         ),
+      };
+    }
+
+    case "polity_outlook_set": {
+      if (!world.map.polities.some((polity) => polity.id === delta.polityId)) {
+        reject(`No polity "${delta.polityId}" exists to hold an outlook.`, "reference");
+      }
+      const outlook = {
+        polityId: delta.polityId,
+        primaryObjective: delta.primaryObjective,
+        concerns: delta.concerns,
+        intentions: delta.intentions,
+        riskTolerance: delta.riskTolerance,
+        updatedAtStep: atStep,
+        lastChangeReason: delta.reason,
+      };
+      // A country holds one outlook at a time. Keeping the old one beside the
+      // new would leave the world unable to say what it currently wants.
+      const existing = world.polityOutlooks.some((candidate) => candidate.polityId === delta.polityId);
+      return {
+        ...world,
+        polityOutlooks: existing
+          ? world.polityOutlooks.map((candidate) => (candidate.polityId === delta.polityId ? outlook : candidate))
+          : [...world.polityOutlooks, outlook],
       };
     }
 

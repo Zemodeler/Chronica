@@ -9,6 +9,7 @@ import { OrderAttemptSchema } from "../authority/order-attempt";
 import { ProjectSchema } from "./project";
 import { StructureSchema } from "./structure";
 import { GenericEntitySchema } from "./generic-entity";
+import { PolityOutlookSchema } from "./outlook";
 import { ProvinceGraphSchema } from "./map";
 import { MapConflictsOverlaySchema } from "./map-presentation";
 import { WorldStorylineSchema } from "./storylines";
@@ -135,6 +136,13 @@ export const WorldStateSchema = z
     structures: z.array(StructureSchema).default([]),
     /** docs/32, Part C.1: the true generic fallback for a genuinely novel composition -- see `world/generic-entity.ts`. */
     genericEntities: z.array(GenericEntitySchema).default([]),
+    /**
+     * VISION §11: what each polity is trying to do -- the state-level
+     * counterpart to `Character.mind`. Ordinary world state, rewritten as
+     * circumstances change, never scenario data. Defaulted so every snapshot
+     * written before this existed still parses.
+     */
+    polityOutlooks: z.array(PolityOutlookSchema).default([]),
   })
   .strict()
   .superRefine((world, context) => {
