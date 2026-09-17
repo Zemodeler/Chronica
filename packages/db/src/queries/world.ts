@@ -294,6 +294,17 @@ export async function failBurst(db: ChronicaDatabase, burstId: string, error: st
   await db.update(simulationBursts).set({ status: "failed", error, endedAt: new Date() }).where(eq(simulationBursts.id, burstId));
 }
 
+/**
+ * Appends facts outside a burst.
+ *
+ * A conversation records history without advancing the clock or committing a
+ * world revision, so it needs a way into the ledger that is not `commitBurst`.
+ */
+export async function insertWorldFacts(db: ChronicaDatabase, gameId: string, facts: readonly BurstFactRow[]): Promise<void> {
+  if (facts.length === 0) return;
+  await db.insert(worldFacts).values(facts.map((fact) => ({ ...fact, gameId, burstId: null }))).onConflictDoNothing();
+}
+
 /** Facts the loop needs in hand: the recent record, newest last. */
 export async function listRecentFacts(db: ChronicaDatabase, gameId: string, limit = 120) {
   return db
