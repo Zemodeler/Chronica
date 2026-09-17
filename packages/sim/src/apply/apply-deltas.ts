@@ -266,7 +266,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
 
   // One structural check at the end rather than per delta: the per-delta guard
   // above already catches the realistic failure, and re-parsing a whole world
-  // fourteen times over is not worth the marginal safety.
+  // once per delta is not worth the marginal safety.
   const parsed = WorldStateSchema.safeParse(current);
   if (!parsed.success) {
     return {
