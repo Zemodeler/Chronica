@@ -491,7 +491,31 @@ minimum span, so a world where Rome had just declared war would carry on for ano
 telling the player. The minimum span exists to avoid waking someone for trivia; it now gates only
 the quiet stop.
 
-## 14. The known risk
+## 14. What playing it found
+
+"Invade the Boii lands", played through the real app against a live model, carried three orders from
+1 March to 30 May 270 BC: a persistent campaign project, an officer generated and delegated the
+provisioning, the army advanced into Umbria, the invasion completed through scheduled milestones,
+and Hanno investigated Roman intentions on his own account — noting he held no office with which to
+commit Carthage to anything.
+
+Four defects surfaced that no test would have:
+
+1. **The model named people it had not created** (`publius_scutarius`) and **places by label rather
+   than id** (`Latium`) — because the slice printed province names without ids, exactly as the
+   treasury section once did. Every section now prints the id the model must use, and both prompts
+   say a person not listed does not exist.
+2. **Cognition invented `local:` handles for actors that already existed**, including for the actor
+   itself.
+3. **The engine's own complaints reached the historian**, putting "no province called Latium existed"
+   into a Chronicle. Rejections are now classed: the *world* could not comply (friction the player
+   should hear, and discovered by them), or the payload was malformed (private, weightless, kept for
+   debugging). Both the fact and the friction list are filtered.
+4. **The council had no stylesheet.** The class names existed and nothing matched them.
+
+After the fixes, the third order produced no engine rejections at all.
+
+## 15. The known risk
 
 **Prompt size, not loop logic.** `buildWorldSlice` is where this design succeeds or fails. The
 orchestrator's system prompt is ~4,600 tokens (mostly the generated JSON schema, identical every call
