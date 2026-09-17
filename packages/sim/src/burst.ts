@@ -272,7 +272,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
    * milestones reached. Deterministic, and therefore free.
    */
   const tickTo = (toDay: number): void => {
-    const ticked = runDeterministicTick({ world, toDay, ids });
+    const ticked = runDeterministicTick({ world, toDay, ids, warfare: input.warfare });
     world = ticked.world;
     if (ticked.factProposals.length > 0) {
       const materialized = materializeFacts({

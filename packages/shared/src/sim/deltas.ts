@@ -452,6 +452,36 @@ const BeliefSetSchema = z.object({
   reason: ReasonSchema,
 }).strict();
 
+/**
+ * Two forces meet (VISION §3, §12).
+ *
+ * The one delta whose outcome its author does not decide. The model says who
+ * engages whom and how they mean to fight; the engine resolves what happens --
+ * casualties, morale, retreat, capture, ground -- from the deterministic
+ * warfare rules. That is the sovereignty split at its sharpest: a model allowed
+ * to author its own casualties would win every battle it cared about.
+ *
+ * A tactic may be *proposed*, and the engine may refuse it. A refusal is a fact
+ * too.
+ */
+const ForceEngageSchema = z.object({
+  op: z.literal("force_engage"),
+  forceRef: RefSchema,
+  targetForceRef: RefSchema,
+  posture: z.enum(["offer_battle", "avoid_battle", "defend", "hold"]),
+  /** An unusual thing to try, within bounds the engine checks. Omit for an ordinary engagement. */
+  tactic: z
+    .object({
+      factor: z.enum(["deployment", "surprise", "effective_strength", "cohesion", "morale", "withdrawal"]),
+      magnitude: z.enum(["minor", "meaningful"]),
+      rationale: z.string().trim().min(1).max(600),
+    })
+    .strict()
+    .nullable()
+    .default(null),
+  reason: ReasonSchema,
+}).strict();
+
 export const WorldDeltaSchema = z.discriminatedUnion("op", [
   MoneyTransferSchema,
   IncomeSourceUpsertSchema,
@@ -478,6 +508,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   LoanOpenSchema,
   LoanSettleSchema,
   BeliefSetSchema,
+  ForceEngageSchema,
 ]);
 export type WorldDelta = z.infer<typeof WorldDeltaSchema>;
 export type WorldDeltaOp = WorldDelta["op"];
@@ -509,6 +540,7 @@ export const WORLD_DELTA_OPS = [
   "loan_open",
   "loan_settle",
   "belief_set",
+  "force_engage",
 ] as const satisfies readonly WorldDeltaOp[];
 
 /**
@@ -543,4 +575,5 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   loan_open: "fiscal",
   loan_settle: "fiscal",
   belief_set: "social",
+  force_engage: "military",
 };

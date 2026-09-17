@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
-import { WorldStateSchema, type WorldState } from "@chronica/shared";
+import { ScenarioDefinitionSchema, WorldStateSchema, type WorldState } from "@chronica/shared";
 import { createIdFactory } from "./ports";
 import { runDeterministicTick } from "./tick";
 
@@ -329,5 +329,65 @@ describe("a debt that stops being paid", () => {
     const result = tick(solvent, state.instant.day + 120);
     expect(result.world.material.loans[0]!.status).toBe("active");
     expect(result.factProposals.some((proposal) => proposal.kind === "loan_defaulted")).toBe(false);
+  });
+});
+
+describe("an army that is not being paid", () => {
+  const unpaid = (missed: number): WorldState => {
+    const state = base();
+    const force = state.material.forces[0]!;
+    return {
+      ...state,
+      material: {
+        ...state.material,
+        accounts: state.material.accounts.map((account) => ({ ...account, balance: 0 })),
+        obligations: [
+          {
+            id: "pay-1", kind: "army_pay", label: `Pay for ${force.name}`, payerAccountId: state.material.accounts[0]!.id,
+            amount: 100, cadenceSteps: 30, nextDueStep: state.elapsedStep + 30, priority: 900,
+            arrears: 0, missedPeriods: missed, active: true,
+          },
+        ],
+        forces: state.material.forces.map((candidate) =>
+          candidate.id === force.id ? { ...candidate, payObligationId: "pay-1", payArrearsPeriods: 0 } : candidate,
+        ),
+      },
+    };
+  };
+
+  // The scenario's own rules, so the thresholds under test are the real ones.
+  const warfare = { ...ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition).warfare, arrearsMoralePeriods: 1, arrearsDesertionPeriods: 3 };
+  const run = (world: WorldState, toDay: number) => runDeterministicTick({ world, toDay, ids: createIdFactory("t"), warfare });
+
+  it("costs an army its morale before it costs the state its men", () => {
+    const state = unpaid(1);
+    const before = state.material.forces[0]!;
+    const result = run(state, state.instant.day + 1);
+    const after = result.world.material.forces.find((force) => force.id === before.id)!;
+
+    expect(after.moraleBps).toBeLessThan(before.moraleBps);
+    expect(after.personnel.reduce((sum, c) => sum + c.fit, 0)).toBe(before.personnel.reduce((sum, c) => sum + c.fit, 0));
+    expect(result.factProposals.some((fact) => fact.kind === "force_unpaid")).toBe(true);
+  });
+
+  it("loses men once the wages have been owed long enough", () => {
+    const state = unpaid(4);
+    const before = state.material.forces[0]!;
+    const result = run(state, state.instant.day + 1);
+    const after = result.world.material.forces.find((force) => force.id === before.id)!;
+
+    expect(after.personnel.reduce((sum, c) => sum + c.fit, 0)).toBeLessThan(before.personnel.reduce((sum, c) => sum + c.fit, 0));
+    expect(after.authorizedStrength).toBe(after.personnel.reduce((sum, c) => sum + c.fit, 0));
+    const desertion = result.factProposals.find((fact) => fact.kind === "force_desertion");
+    expect(desertion?.significance).toBe(70);
+  });
+
+  it("leaves an army that is being paid entirely alone", () => {
+    const state = unpaid(0);
+    const before = state.material.forces[0]!;
+    const result = run(state, state.instant.day + 1);
+    const after = result.world.material.forces.find((force) => force.id === before.id)!;
+    expect(after.moraleBps).toBe(before.moraleBps);
+    expect(result.factProposals.some((fact) => fact.kind === "force_desertion" || fact.kind === "force_unpaid")).toBe(false);
   });
 });
