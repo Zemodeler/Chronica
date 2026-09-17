@@ -1,7 +1,9 @@
 import type {
   AuthorityCheckResult,
+  FactProposal,
   Office,
   OrderPartyRef,
+  ScenarioWarfareRules,
   WorldDelta,
   WorldInstant,
   WorldState,
@@ -14,6 +16,11 @@ export interface ApplyContext {
   readonly actorRef: OrderPartyRef;
   /** Scenario offices -- authority derivation needs them and they are not part of `WorldState`. */
   readonly offices: readonly Office[];
+  /**
+   * The scenario's warfare rules. Like offices, they belong to the scenario
+   * rather than the world, and battle resolution cannot proceed without them.
+   */
+  readonly warfare: ScenarioWarfareRules;
   readonly ids: IdFactory;
   readonly gameId: string;
 }
@@ -56,6 +63,17 @@ export interface ApplyResult {
   readonly applied: readonly AppliedDelta[];
   readonly rejected: readonly RejectedDelta[];
   readonly breaches: readonly AuthorityBreach[];
+  /**
+   * What the engine itself made true while applying the batch.
+   *
+   * Some acts have consequences the model neither wrote nor could write: a
+   * battle produces casualties it is not allowed to author (VISION §3 --
+   * arithmetic is the engine's). Those are emitted here and materialized
+   * alongside the proposal's own facts, so the world hears about them.
+   *
+   * Facts emitted by a delta that is then rejected are discarded with it.
+   */
+  readonly factProposals: readonly FactProposal[];
   /** `localId` → the id the engine assigned, for resolving references in facts and events. */
   readonly assignedIds: ReadonlyMap<string, string>;
 }

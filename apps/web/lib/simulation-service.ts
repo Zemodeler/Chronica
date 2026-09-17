@@ -94,6 +94,7 @@ export async function submitOrder(
     const view = await getWorldView(db, gameId);
     if (view === undefined) return { status: "error", message: "This world has no state to act on yet." };
     if (view.scenarioClock === undefined) return { status: "error", message: "This scenario declares no clock." };
+    if (view.scenarioWarfare === undefined) return { status: "error", message: "This scenario declares no rules of war." };
 
     // An answer carries its own decision, and is the one order allowed to run
     // while one is open -- it is what closes it.
@@ -124,6 +125,7 @@ export async function submitOrder(
         world: view.world,
         clock: view.scenarioClock,
         offices,
+        warfare: view.scenarioWarfare,
         burstId,
         gameId,
         actorRef,

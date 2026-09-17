@@ -7,6 +7,7 @@ import type { SimModelPort, SimOperation } from "./ports";
 const definition = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition);
 const offices: readonly Office[] = definition.government.offices;
 const clock: ScenarioClock = definition.clock;
+const warfare = definition.warfare;
 const world = (): WorldState => WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
 
 /**
@@ -100,6 +101,7 @@ function input(port: SimModelPort, overrides: Partial<BurstInput> = {}): BurstIn
     world: world(),
     clock,
     offices,
+    warfare,
     burstId: "b1",
     gameId: "game-1",
     actorRef: { kind: "character", id: "marcus-atilius" },
@@ -161,6 +163,33 @@ describe("a burst answering \"Raise two new legions\"", () => {
     const result = await runSimulationBurst(input(port));
     expect(result.modelCalls).toBeLessThanOrEqual(4);
     expect(result.modelCalls).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("the future queue", () => {
+  it("turns an event that comes due into a fact rather than retiring it silently", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [CARTHAGE_REACTS] });
+    const result = await runSimulationBurst(
+      input(port, {
+        queue: [{ id: "queued-1", dueInstantSortKey: world().instant.day * 1440, kind: "grain_convoy_arrives", summary: "The Sicilian grain convoy reaches Ostia." }],
+      }),
+    );
+
+    expect(result.firedEventIds).toContain("queued-1");
+    const fired = result.newFacts.find((fact) => fact.kind === "grain_convoy_arrives");
+    expect(fired?.summary).toBe("The Sicilian grain convoy reaches Ostia.");
+  });
+
+  it("fires each due event exactly once, however far the burst carries the world", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [CARTHAGE_REACTS] });
+    const result = await runSimulationBurst(
+      input(port, {
+        queue: [{ id: "queued-1", dueInstantSortKey: world().instant.day * 1440, kind: "grain_convoy_arrives", summary: "The Sicilian grain convoy reaches Ostia." }],
+      }),
+    );
+
+    expect(result.firedEventIds.filter((id) => id === "queued-1")).toHaveLength(1);
+    expect(result.newFacts.filter((fact) => fact.kind === "grain_convoy_arrives")).toHaveLength(1);
   });
 });
 

@@ -14,6 +14,7 @@ import {
   type AuthorityIndex,
   type AuthorityPower,
   type AuthorityScope,
+  type FactProposal,
   type OrderPartyRef,
   type WorldDelta,
   type WorldState,
@@ -103,6 +104,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
   const applied: AppliedDelta[] = [];
   const rejected: RejectedDelta[] = [];
   const breaches: AuthorityBreach[] = [];
+  const factProposals: FactProposal[] = [];
 
   const resolve = (ref: string): string | undefined => resolveRef(ref, assignedIds);
   let current = world;
@@ -117,6 +119,12 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
 
   for (const delta of deltas) {
     const previous = current;
+    // Buffered per delta: a delta that is rolled back must not leave the world
+    // asserting consequences that never happened.
+    const emitted: FactProposal[] = [];
+    const emitFact = (fact: FactProposal): void => {
+      emitted.push(fact);
+    };
     let authority: AuthorityCheckResult;
     try {
       authority = checkAuthority(authorityIndex, {
@@ -125,7 +133,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
         scope: scopeOf(delta, current, resolve, context.actorRef),
         power: POWER_BY_OP[delta.op],
       });
-      current = applyOne(current, delta, context, assignedIds, resolve);
+      current = applyOne(current, delta, context, assignedIds, resolve, emitFact);
     } catch (error) {
       if (error instanceof DeltaRejection) {
         rejected.push({ delta, reason: error.message, kind: error.kind });
@@ -145,6 +153,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
     violations = new Set(afterViolations);
 
     applied.push({ delta, authority });
+    factProposals.push(...emitted);
     if (!authority.authorized) breaches.push({ delta, reason: authority.reason });
   }
 
@@ -164,11 +173,12 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
         reason: `The batch would have left the world invalid: ${describeIssue(parsed.error.issues[0])}.`,
         kind: "reference" as const,
       })),
+      factProposals: [],
       assignedIds: new Map(),
     };
   }
 
-  return { world: parsed.data, applied, rejected, breaches, assignedIds };
+  return { world: parsed.data, applied, rejected, breaches, factProposals, assignedIds };
 }
 
 /** A Zod issue as something a person can act on: where it was, then what was wrong. */
@@ -184,6 +194,7 @@ function applyOne(
   context: ApplyContext,
   assignedIds: Map<string, string>,
   resolve: (ref: string) => string | undefined,
+  emitFact: (fact: FactProposal) => void,
 ): WorldState {
   const required = (ref: string, label: string): string => {
     const resolved = resolve(ref);
