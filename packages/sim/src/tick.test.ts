@@ -332,7 +332,7 @@ describe("a debt that stops being paid", () => {
     const fact = result.factProposals.find((proposal) => proposal.kind === "loan_defaulted");
     expect(fact).toBeDefined();
     // The lender is a person, so the fact can wake them.
-    expect(fact!.affectedRefs.some((ref) => ref.kind === "character" && ref.id === "hanno")).toBe(true);
+    expect((fact!.affectedRefs ?? []).some((ref) => ref.kind === "character" && ref.id === "hanno")).toBe(true);
     expect(result.world.material.obligations.find((o) => o.id === "service-1")!.active).toBe(false);
   });
 
@@ -405,5 +405,35 @@ describe("an army that is not being paid", () => {
     const after = result.world.material.forces.find((force) => force.id === before.id)!;
     expect(after.moraleBps).toBe(before.moraleBps);
     expect(result.factProposals.some((fact) => fact.kind === "force_desertion" || fact.kind === "force_unpaid")).toBe(false);
+  });
+});
+
+describe("a letter nobody answers", () => {
+  const withLetter = (replyDueByStep: number): WorldState => ({
+    ...base(),
+    diplomacy: [{
+      id: "letter-1", kind: "ultimatum", fromPolityId: "carthage", fromCharacterId: "hanno",
+      toPolityId: "rome", toCharacterId: null, subject: "The strait", terms: "Withdraw from Messana.",
+      sentAtStep: 0, replyDueByStep, status: "awaiting_reply", answer: null, answerText: null,
+      answeredAtStep: null, inReplyToMessageId: null, visibility: "polity",
+    }],
+  });
+
+  it("counts silence as an answer once the term runs out", () => {
+    // Refusing by saying nothing is most of how powers actually refuse. Left
+    // unhandled, an ultimatum would sit in the world unanswered forever and
+    // cost the power that ignored it nothing at all.
+    const result = tick(withLetter(10), 12);
+
+    expect(result.world.diplomacy[0]!.status).toBe("answered");
+    expect(result.world.diplomacy[0]!.answer).toBe("ignored");
+    expect(result.factProposals.some((fact) => fact.kind === "diplomatic_silence")).toBe(true);
+    const stance = result.world.polityStances.find((candidate) => candidate.polityId === "carthage" && candidate.towardPolityId === "rome")!;
+    expect(stance.trustScore).toBeLessThan(0);
+  });
+
+  it("leaves a letter alone while its term still has time to run", () => {
+    const result = tick(withLetter(40), 12);
+    expect(result.world.diplomacy[0]!.status).toBe("awaiting_reply");
   });
 });

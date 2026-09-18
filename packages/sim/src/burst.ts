@@ -1,13 +1,17 @@
 import {
   addMinutes,
   advanceWorldTo,
+  ScheduledEventPayloadSchema,
   type Fact,
+  type FactProposalDraft,
   type Office,
   type OrderPartyRef,
   type PlayerDecision,
   type Proposal,
   type ScenarioClock,
+  type ScheduledEventPayload,
   type ScenarioWarfareRules,
+  type TerrainDefinition,
   type StopReason,
   type WatchProposal,
   type WorldState,
@@ -17,6 +21,7 @@ import type { AuthorityBreach } from "./apply/context";
 import { routeAmbientActors, routeAttention, type RoutedActor } from "./attention";
 import { runCognition } from "./cognition";
 import { materializeFacts } from "./facts";
+import { decideNarratorSeed, recordSeedOffered, recordSeedOutcome, seedParticipants, seedWasTaken, type NarratorSeed } from "./narrator";
 import { orchestrate } from "./orchestrate";
 import { createIdFactory, type SimModelPort } from "./ports";
 import type { NarrativeLine } from "./chronicle";
@@ -69,7 +74,7 @@ export interface ScheduledEventDraft {
   readonly dueInstantSortKey: number;
   readonly kind: string;
   readonly summary: string;
-  readonly payload: unknown;
+  readonly payload: ScheduledEventPayload;
   readonly causeFactId: string | null;
   readonly causalDepth: number;
 }
@@ -80,6 +85,8 @@ export interface PendingEvent {
   readonly dueInstantSortKey: number;
   readonly kind: string;
   readonly summary: string;
+  /** As stored; parsed with `ScheduledEventPayloadSchema` when it fires. */
+  readonly payload?: unknown;
 }
 
 export interface BurstInput {
@@ -88,6 +95,8 @@ export interface BurstInput {
   readonly offices: readonly Office[];
   /** The scenario's warfare rules -- battle resolution is judged against them. */
   readonly warfare: ScenarioWarfareRules;
+  /** The scenario's terrains, so an army is held to the crossings the map admits. */
+  readonly terrains?: readonly TerrainDefinition[] | undefined;
   readonly burstId: string;
   readonly gameId: string;
   readonly actorRef: OrderPartyRef;
@@ -101,6 +110,12 @@ export interface BurstInput {
   readonly queue: readonly PendingEvent[];
   readonly port: SimModelPort;
   readonly budget?: SimulationBudget;
+  /**
+   * What stirs this burst, decided in advance. Tests use it to put a known
+   * seed to a scripted orchestrator; play leaves it undefined and the narrator
+   * decides. Null means nothing stirs.
+   */
+  readonly narratorSeed?: NarratorSeed | null | undefined;
 }
 
 export interface BurstResult {
@@ -164,6 +179,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       actorRef,
       offices: input.offices,
       warfare: input.warfare,
+      ...(input.terrains === undefined ? {} : { terrains: input.terrains }),
       ids,
       gameId: input.gameId,
       actsForTheWorld,
@@ -171,10 +187,39 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     world = result.world;
     breaches.push(...result.breaches);
 
+    // A fact that belongs to a secret thread is secret, whatever the model
+    // wrote in its visibility field: the thread's participants are the people
+    // who know it, and nobody else can be. A prompt asking for "private" will
+    // eventually be answered with "polity", and the record is what must hold.
+    const resolveId = (ref: string): string => result.assignedIds.get(ref.replace(/^local:/, "")) ?? ref;
+    const resolveStrict = (ref: string): string | null => (ref.startsWith("local:") ? result.assignedIds.get(ref.slice("local:".length)) ?? null : ref);
+    const keptSecret = proposal.facts.map((fact) => {
+      if (fact.storylineRef === null) return fact;
+      const storyline = world.storylines.find((candidate) => candidate.id === resolveId(fact.storylineRef!));
+      if (storyline === undefined || storyline.visibility !== "private" || fact.visibility === "private") return fact;
+      const participants: OrderPartyRef[] = storyline.participantIds.map((id) => ({ kind: "character" as const, id }));
+      return { ...fact, visibility: "private" as const, discoveryState: "private" as const, knownToRefs: [...fact.knownToRefs, ...participants] };
+    });
+
+    // An act carried out without the authority to carry it out is history too
+    // -- private history, known to the one who did it, which is what an audit
+    // later discovers. Computed and dropped, a breach was insubordination
+    // nobody could ever find out about.
+    const breachFacts: FactProposalDraft[] = result.breaches.map((breach, index) => ({
+      localId: `breach_${newFacts.length}_${index}`,
+      kind: "authority_breach",
+      summary: breach.reason,
+      affectedRefs: [actorRef],
+      visibility: "private",
+      discoveryState: "private",
+      knownToRefs: [actorRef],
+      significance: 25,
+    }));
+
     // What the engine itself made true (casualties, seizures) counts as history
     // exactly as much as what the actor said they were doing.
     const materialized = materializeFacts({
-      proposals: [...proposal.facts, ...result.factProposals],
+      proposals: [...keptSecret, ...result.factProposals, ...breachFacts],
       now: world.instant,
       atStep: world.elapsedStep,
       ids,
@@ -184,6 +229,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     newFacts.push(...materialized.facts);
     for (const [factId, weight] of materialized.significanceByFactId) significanceByFactId.set(factId, weight);
     significance += materialized.significance;
+    world = linkFactsToStorylines(world, materialized.storylineByFactId);
 
     // An account travels with the facts it is an account of, and so does a
     // reported difficulty. Unattached, they went into the Chronicle whoever had
@@ -191,12 +237,23 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // deliberations. Only what the world could not do is worth reporting at all:
     // a malformed reference is the engine's business, and handing it to the
     // historian put "no province called Latium existed" into a Chronicle.
-    const describes = materialized.facts.map((fact) => fact.id);
-    narrative.push({ actorRef, line: proposal.narrativeSummary, factIds: describes });
+    //
+    // The world's own account is not evidence. It describes the order and
+    // the stage-setting and the secret in one breath, and no gate can split a
+    // sentence: given the ruler's ref it reached the record by identity, and
+    // attached to the visible facts it still told the ruler what the Boii had
+    // been given and what a plotter had begun. The facts carry what happened;
+    // the account is kept for inspection and attached to nothing. Reported
+    // difficulties still travel with the visible facts: friction is the
+    // order's own business.
+    const visibleDescribed = materialized.facts.filter((fact) => fact.visibility !== "private").map((fact) => fact.id);
+    const describes = actsForTheWorld ? visibleDescribed : materialized.facts.map((fact) => fact.id);
+    const author = actsForTheWorld ? null : actorRef;
+    narrative.push({ actorRef: author, line: proposal.narrativeSummary, factIds: actsForTheWorld ? [] : describes });
     for (const line of [
       ...proposal.frictions,
       ...result.rejected.filter((rejection) => rejection.kind === "world").map((rejection) => rejection.reason),
-    ]) frictions.push({ actorRef, line, factIds: describes });
+    ]) frictions.push({ actorRef: author, line, factIds: describes });
 
     // A refused delta is still history -- the world tried and could not, and the
     // player deserves to learn that rather than wonder. But only when the world
@@ -215,6 +272,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
           discoveryState: isWorldFriction ? "polity" : "private",
           knowableInDays: 0,
           significance: isWorldFriction ? 5 : 0,
+          knownToRefs: isWorldFriction ? [actorRef] : [],
         }],
         now: world.instant,
         atStep: world.elapsedStep,
@@ -222,13 +280,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         causalDepth,
         assignedIds: result.assignedIds,
       });
-      const seen = isWorldFriction
-        ? friction.facts.map((fact) => ({
-          ...fact,
-          discovery: { ...fact.discovery, discoveredBy: [{ observerRef: actorRef, atInstant: world.instant, via: "told" as const }] },
-        }))
-        : friction.facts;
-      newFacts.push(...seen);
+      newFacts.push(...friction.facts);
       for (const [factId, weight] of friction.significanceByFactId) significanceByFactId.set(factId, weight);
       significance += friction.significance;
     }
@@ -239,7 +291,20 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         dueInstantSortKey: (world.instant.day + event.dueInDays) * 1440 + world.instant.minute,
         kind: event.kind,
         summary: event.summary,
-        payload: { subjectRefs: event.subjectRefs.map((ref) => result.assignedIds.get(ref.replace(/^local:/, "")) ?? ref) },
+        // Everything resolved now, so the day it fires needs no memory of this
+        // batch's handles.
+        // A handle nothing in this batch created resolves to nothing: an event
+        // stored with "local:plague" in it named a thread that never opened.
+        payload: {
+          subjectIds: event.subjectRefs.map(resolveStrict).filter((id): id is string => id !== null),
+          visibility: event.visibility,
+          significance: event.significance,
+          knownTo: event.knownToRefs.flatMap((ref) => {
+            const id = resolveStrict(ref.id);
+            return id === null ? [] : [{ kind: ref.kind, id }];
+          }),
+          storylineId: event.storylineRef === null ? null : resolveStrict(event.storylineRef),
+        },
         causeFactId: event.causeFactLocalId === null ? null : materialized.factIds.get(event.causeFactLocalId) ?? null,
         causalDepth: causalDepth + 1,
       });
@@ -340,19 +405,32 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     if (due.length === 0) return;
     for (const event of due) firedEventIds.push(event.id);
 
+    // An event fires as it was scheduled to be known. It used to fire as public
+    // news naming nobody, whatever it was: a secret's next step became an
+    // announcement, and the router had nothing to route on.
     const materialized = materializeFacts({
-      proposals: due.map((event, index) => ({
-        localId: `due_${event.id}_${index}`,
-        kind: event.kind,
-        summary: event.summary,
-        affectedRefs: [],
-        visibility: "public" as const,
-        discoveryState: "public" as const,
-        knowableInDays: 0,
-        // The moment a thing was scheduled to happen is worth noting without
-        // being worth interrupting for; what it causes carries its own weight.
-        significance: 35,
-      })),
+      proposals: due.map((event, index) => {
+        const payload = ScheduledEventPayloadSchema.safeParse(event.payload ?? {});
+        const details = payload.success ? payload.data : ScheduledEventPayloadSchema.parse({});
+        return {
+          localId: `due_${event.id}_${index}`,
+          kind: event.kind,
+          summary: event.summary,
+          affectedRefs: details.subjectIds.flatMap((id) => {
+            const ref = inferPartyRef(world, id);
+            return ref === null ? [] : [ref];
+          }),
+          visibility: details.visibility,
+          discoveryState: details.visibility,
+          knowableInDays: 0,
+          knownToRefs: details.knownTo,
+          storylineRef: details.storylineId,
+          // Its author's weighting, or the default: the moment a thing was
+          // scheduled to happen is worth noting without being worth interrupting
+          // for, and what it causes carries its own weight.
+          significance: details.significance,
+        };
+      }),
       now: world.instant,
       atStep: world.elapsedStep,
       ids,
@@ -362,6 +440,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     newFacts.push(...materialized.facts);
     for (const [factId, weight] of materialized.significanceByFactId) significanceByFactId.set(factId, weight);
     significance += materialized.significance;
+    world = linkFactsToStorylines(world, materialized.storylineByFactId);
   };
 
   // Catch up before reading the order: anything that came due since the last
@@ -371,14 +450,34 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   fireDueEvents();
 
   // ── Iteration 0: the player's order ────────────────────────────────────
+  const threadOf = (event: PendingEvent): string | undefined => {
+    const payload = ScheduledEventPayloadSchema.safeParse(event.payload ?? {});
+    const storylineId = payload.success ? payload.data.storylineId : null;
+    const storyline = storylineId === null ? undefined : world.storylines.find((candidate) => candidate.id === storylineId);
+    return storyline === undefined ? undefined : `${storyline.title} [${storyline.id}]`;
+  };
   const dueNow: SliceEvent[] = input.queue
     .filter((event) => event.dueInstantSortKey <= nowKey())
-    .map((event) => ({ kind: event.kind, summary: event.summary, dueInDays: 0 }));
+    .map((event) => ({ kind: event.kind, summary: event.summary, dueInDays: 0, thread: threadOf(event) }));
   const upcoming: SliceEvent[] = input.queue
     .filter((event) => event.dueInstantSortKey > nowKey())
     .sort((a, b) => a.dueInstantSortKey - b.dueInstantSortKey)
     .slice(0, 8)
-    .map((event) => ({ kind: event.kind, summary: event.summary, dueInDays: Math.round((event.dueInstantSortKey - nowKey()) / 1440) }));
+    .map((event) => ({ kind: event.kind, summary: event.summary, dueInDays: Math.round((event.dueInstantSortKey - nowKey()) / 1440), thread: threadOf(event) }));
+
+  // The world makes trouble of its own (VISION §32). Decided here, once, so a
+  // burst carries at most one seed, and before the orchestrator so it can be
+  // carried out in the call the order was already paying for.
+  const seed: NarratorSeed | null = input.narratorSeed === undefined
+    ? decideNarratorSeed({
+      world,
+      gameId: input.gameId,
+      ownPolityId: input.actorPolityId,
+      playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
+      facts: [...input.knownFacts, ...newFacts],
+    })
+    : input.narratorSeed;
+  if (seed !== null) world = recordSeedOffered(world, seed);
 
   const slice = buildWorldSlice({
     world,
@@ -390,14 +489,25 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     facts: input.knownFacts,
     dueEvents: dueNow,
     pendingEvents: upcoming,
+    narratorSeed: seed,
   });
 
   const orchestration = await orchestrate(input.port, slice);
   modelCalls += orchestration.calls;
   iterations += 1;
   if (orchestration.parseFailure !== null) parseFailures.push(orchestration.parseFailure);
+  const factsBefore = newFacts.length;
   applyProposal(orchestration.output, input.actorRef, 0, true);
   if (orchestration.output.playerDecision !== null) playerDecision = orchestration.output.playerDecision;
+
+  // Whether the seed was taken up decides the ledger, and who it landed on
+  // decides who is asked first what they do about it.
+  let priorityCharacterIds: string[] = [];
+  if (seed !== null) {
+    const taken = seedWasTaken(world, newFacts.slice(factsBefore), seed);
+    world = recordSeedOutcome(world, seed, taken);
+    if (taken) priorityCharacterIds = seedParticipants(world, seed).filter((id) => input.actorRef.kind !== "character" || id !== input.actorRef.id);
+  }
 
   // An open-ended order says what would end it. The world then carries on until
   // that happens rather than until this burst runs out of things to do.
@@ -485,6 +595,9 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       offices: input.offices,
       excludeCharacterIds: [...playerCharacterIds, ...attention.focused.map((actor) => actor.characterId)],
       max: budget.maxAmbientActors,
+      // The first round only: whoever the narrator just handed a problem to is
+      // asked what they do about it before the rotation has its say.
+      priorityCharacterIds: hops === 1 ? priorityCharacterIds : [],
     });
 
     const cast = [...attention.focused, ...ambient];
@@ -586,6 +699,32 @@ function recordActiveIntents(world: WorldState, active: readonly RoutedActor[], 
         resolutionReason: null,
       })),
     ],
+  };
+}
+
+/** A stored id, as a party the facts can name -- or null when nothing in the world answers to it any more. */
+function inferPartyRef(world: WorldState, id: string): OrderPartyRef | null {
+  if (world.characters.some((character) => character.id === id)) return { kind: "character", id };
+  if (world.material.forces.some((force) => force.id === id)) return { kind: "force", id };
+  if (world.map.provinces.some((province) => province.id === id)) return { kind: "province", id };
+  if (world.map.polities.some((polity) => polity.id === id)) return { kind: "polity", id };
+  if (world.projects.some((project) => project.id === id)) return { kind: "project", id };
+  if (world.material.institutions.some((institution) => institution.id === id)) return { kind: "institution", id };
+  if (world.material.accounts.some((account) => account.id === id)) return { kind: "account", id };
+  return null;
+}
+
+/** A fact that says which thread it belongs to is written into that thread, most recent last. */
+function linkFactsToStorylines(world: WorldState, storylineByFactId: ReadonlyMap<string, string>): WorldState {
+  if (storylineByFactId.size === 0) return world;
+  const byStoryline = new Map<string, string[]>();
+  for (const [factId, storylineId] of storylineByFactId) byStoryline.set(storylineId, [...(byStoryline.get(storylineId) ?? []), factId]);
+  return {
+    ...world,
+    storylines: world.storylines.map((storyline) => {
+      const added = byStoryline.get(storyline.id);
+      return added === undefined ? storyline : { ...storyline, causalFactIds: [...storyline.causalFactIds, ...added].slice(-16) };
+    }),
   };
 }
 

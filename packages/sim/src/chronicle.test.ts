@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ScenarioClockSchema, emitFacts, factsKnownTo, type Fact, type FactDraft } from "@chronica/shared";
+import { ScenarioClockSchema, emitFacts, factsKnownTo, type Fact, type FactDraft, type WorldStoryline } from "@chronica/shared";
 import { composeChronicle } from "./chronicle";
 import type { SimModelPort } from "./ports";
 
@@ -258,5 +258,31 @@ describe("what a government knows of its own business", () => {
     });
 
     expect(factsKnownTo([plot], { kind: "character", id: "marcus-atilius" }, "rome", { day: 1, minute: 0 })).toHaveLength(0);
+  });
+});
+
+describe("a passage that continues a longer matter", () => {
+  const storyline: WorldStoryline = {
+    id: "plague-1", title: "The Sickness in Latium", participantIds: ["quintus-fabius", "marcus-atilius"], provinceId: "latium", phase: "escalating",
+    stakes: "Whether Rome can feed itself through the summer.", history: [], nextDevelopment: "The sickness spreads or burns out.",
+    visibility: "public", origin: "world", openedByRef: null, openedAtStep: 0, updatedAtStep: 0, closedAtStep: null, causalFactIds: [], seedKey: "seed-1",
+  };
+  const facts = [fact({ summary: "The sickness reaches the Aventine.", affectedEntities: [{ kind: "province", id: "latium" }, { kind: "character", id: "quintus-fabius" }] })];
+  const compose = (port: SimModelPort, storylines: WorldStoryline[]) =>
+    composeChronicle({
+      port, clock, observer: { kind: "character", id: "marcus-atilius" }, observerPolityId: "rome", facts,
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [], storylines,
+    });
+
+  it("tells the historian which matter a thread belongs to when the observer may know of it", async () => {
+    const port = capturingPort();
+    await compose(port, [storyline]);
+    expect(port.lastUserMessage).toContain('Part of a longer matter: "The Sickness in Latium" (escalating)');
+  });
+
+  it("says nothing of a secret matter the observer is not part of", async () => {
+    const port = capturingPort();
+    await compose(port, [{ ...storyline, visibility: "private", participantIds: ["quintus-fabius", "hanno"] }]);
+    expect(port.lastUserMessage).not.toContain("Part of a longer matter");
   });
 });

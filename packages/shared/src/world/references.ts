@@ -35,7 +35,7 @@ export function findWorldReferenceViolations(world: WorldState): string[] {
     if (!accountIds.has(character.personalAccountId)) violations.push(`Character ${character.id} references a missing account.`);
     if (character.heirCharacterId !== null && !characterIds.has(character.heirCharacterId)) violations.push(`Character ${character.id} references a missing heir.`);
   }
-  for (const storyline of world.storylines ?? []) {
+  for (const storyline of world.storylines) {
     if (storyline.provinceId !== null && !provinceIds.has(storyline.provinceId)) violations.push(`Storyline ${storyline.id} references a missing province.`);
     if (storyline.participantIds.some((id) => !characterIds.has(id))) violations.push(`Storyline ${storyline.id} references a missing participant.`);
   }

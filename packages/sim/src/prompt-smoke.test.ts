@@ -15,9 +15,13 @@ describe("orchestrator prompt", () => {
     // iteration, so a schema that balloons is a per-call tax forever. The
     // ceiling moves only when a genuinely new capability is added to the
     // contract -- the watch predicate union, which buys an order that runs to
-    // its own completion instead of four orders that each advance two days.
+    // its own completion instead of four orders that each advance two days;
+    // then storylines and pressures, which buy a world that starts things of
+    // its own and follows them; then the world outside the player's army --
+    // letters between powers, war and treaty as things the world holds rather
+    // than infers, and a map an army has to actually cross.
     console.log("system prompt chars:", ORCHESTRATOR_SYSTEM_PROMPT.length, "~tokens:", Math.round(ORCHESTRATOR_SYSTEM_PROMPT.length / 4));
-    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(42_000);
+    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(54_000);
   });
 });
 

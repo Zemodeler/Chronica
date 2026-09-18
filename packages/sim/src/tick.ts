@@ -1,13 +1,21 @@
 import {
   advanceProvinceMaterial,
+  applyDiplomaticAnswerToStance,
+  atWar,
+  expireDatedAgreements,
+  isNavalForce,
   nextDueMilestone,
-  type FactProposal,
+  type FactProposalDraft,
   type MoneyObligation,
   type ScenarioWarfareRules,
   type MoneyTransaction,
   type WorldState,
 } from "@chronica/shared";
+import { projectConflicts } from "./conflicts";
 import type { IdFactory } from "./ports";
+
+/** The world with its conflict overlay brought back in step with it. */
+const projectConflictsInto = (world: WorldState): WorldState => ({ ...world, conflicts: projectConflicts(world) });
 
 /**
  * Everything that happens because time passed, and for no other reason.
@@ -43,13 +51,16 @@ export interface TickInput {
 export interface TickResult {
   readonly world: WorldState;
   /** What the passage of time made true, ready to be materialized like any other fact. */
-  readonly factProposals: readonly FactProposal[];
+  readonly factProposals: readonly FactProposalDraft[];
   /** Plain lines for the Chronicle, which would otherwise never hear about routine upkeep. */
   readonly notes: readonly string[];
 }
 
+/** Days without a development before the world stops following a thread. */
+const STORYLINE_IDLE_DAYS = 180;
+
 export function runDeterministicTick(input: TickInput): TickResult {
-  const facts: FactProposal[] = [];
+  const facts: FactProposalDraft[] = [];
   const notes: string[] = [];
   let accounts = input.world.material.accounts;
   const transactions: MoneyTransaction[] = [...input.world.material.transactions];
@@ -66,8 +77,55 @@ export function runDeterministicTick(input: TickInput): TickResult {
   // Collected silently. A treasury that fills as expected is not history, and
   // a fact per tax payment would drown every Chronicle in bookkeeping.
   let collected = 0;
+  /**
+   * A war cuts what it is a war with.
+   *
+   * Income sources have carried a `counterpartyPolityId` from the beginning --
+   * "revenue that comes from another power should name that power, so a war can
+   * cut it" -- and nothing ever cut one, because until agreements existed there
+   * was no way to ask whether two powers were at war. Sicilian grain went on
+   * arriving in Rome throughout a Sicilian war.
+   */
+  const ownerPolityOf = (accountId: string): string | null => {
+    const owner = input.world.material.accounts.find((account) => account.id === accountId)?.owner;
+    if (owner === undefined) return null;
+    if (owner.kind === "polity") return owner.id;
+    return input.world.characters.find((character) => character.id === owner.id)?.polityId ?? null;
+  };
+  const severed = (source: { readonly counterpartyPolityId: string | null; readonly beneficiaryAccountId: string }): boolean => {
+    if (source.counterpartyPolityId === null) return false;
+    const ours = ownerPolityOf(source.beneficiaryAccountId);
+    return ours !== null && atWar(input.world.polityAgreements, ours, source.counterpartyPolityId);
+  };
+
+  /**
+   * Powers whose sea trade is shut in by somebody else's fleet.
+   *
+   * A blockade is where a navy pays for itself politically: enemy ships sitting
+   * off a port stop the trade that comes through it, without anybody ordering
+   * anything each month. It requires a war -- a fleet at anchor in peacetime is
+   * a visit.
+   */
+  const blockaded = new Set<string>();
+  for (const province of input.world.map.provinces) {
+    const controller = province.controllerPolityId;
+    if (controller === null || !province.settlements.some((settlement) => settlement.kind === "port")) continue;
+    const besiegers = input.world.material.forces.filter(
+      (force) => force.locationId === province.id && force.polityId !== controller && isNavalForce(force, input.warfare) && atWar(input.world.polityAgreements, force.polityId, controller),
+    );
+    if (besiegers.length > 0) blockaded.add(controller);
+  }
+  const blockadedTrade = (source: { readonly kind: string; readonly beneficiaryAccountId: string }): boolean => {
+    if (source.kind !== "trade") return false;
+    const ours = ownerPolityOf(source.beneficiaryAccountId);
+    return ours !== null && blockaded.has(ours);
+  };
+
   const incomeSources = input.world.material.incomeSources.map((source) => {
     if (!source.active) return source;
+    // Cut, not cancelled: the route is still there, and peace -- or the fleet
+    // sailing away -- restores it.
+    if (severed(source) || blockadedTrade(source)) return source;
     let due = source.nextDueStep;
     let periods = 0;
     while (due <= input.toDay && periods < MAX_PERIODS_PER_TICK) {
@@ -561,8 +619,69 @@ export function runDeterministicTick(input: TickInput): TickResult {
     }
   }
 
+  // A thread nobody has touched for half a year has run its course. Closing
+  // it is bookkeeping, not history: no fact, a note only.
+  const stale = recovered.storylines.filter((storyline) => storyline.phase !== "closed" && input.toDay - storyline.updatedAtStep >= STORYLINE_IDLE_DAYS);
+  const storylines = stale.length === 0
+    ? recovered.storylines
+    : recovered.storylines.map((storyline) =>
+      stale.includes(storyline) ? { ...storyline, phase: "closed" as const, closedAtStep: input.toDay, updatedAtStep: input.toDay } : storyline,
+    );
+  for (const storyline of stale) notes.push(`The matter of ${storyline.title} has gone quiet.`);
+
+  /**
+   * Letters whose term has run out.
+   *
+   * Silence is an answer, and the harshest one the trust table holds. Without
+   * this a power could put an ultimatum to another and simply never hear back:
+   * the letter would sit in the world forever, and refusing by saying nothing
+   * -- which is most of how powers actually refuse -- would cost nothing.
+   */
+  let polityStances = recovered.polityStances;
+  const polityName = (id: string): string => recovered.map.polities.find((polity) => polity.id === id)?.name ?? id;
+  const diplomacy = recovered.diplomacy.map((message) => {
+    if (message.status !== "awaiting_reply" || message.replyDueByStep === null || message.replyDueByStep > input.toDay) return message;
+    const ignored = { ...message, status: "answered" as const, answer: "ignored" as const, answerText: "No answer came.", answeredAtStep: input.toDay };
+    polityStances = [...applyDiplomaticAnswerToStance(polityStances, ignored, input.toDay)];
+    facts.push({
+      localId: nextLocalId("letter"),
+      kind: "diplomatic_silence",
+      summary: `${polityName(message.toPolityId)} let the term on "${message.subject}" run out without answering ${polityName(message.fromPolityId)}.`,
+      affectedRefs: [{ kind: "polity", id: message.fromPolityId }, { kind: "polity", id: message.toPolityId }],
+      visibility: "polity",
+      discoveryState: "polity",
+      knowableInDays: 0,
+      significance: 35,
+    });
+    notes.push(`No answer came to ${polityName(message.fromPolityId)}'s letter on ${message.subject}.`);
+    return ignored;
+  });
+
+  // A truce with a term ends the day its term does, whether or not anybody
+  // remembers it. One that ends only when somebody says so is a peace.
+  const polityAgreements = expireDatedAgreements(recovered.polityAgreements, input.toDay);
+  for (const agreement of polityAgreements) {
+    const before = recovered.polityAgreements.find((candidate) => candidate.id === agreement.id);
+    if (before?.status === "active" && agreement.status === "ended") {
+      facts.push({
+        localId: nextLocalId("agreement"),
+        kind: "agreement_lapsed",
+        summary: `The ${agreement.kind} between ${polityName(agreement.polityId)} and ${polityName(agreement.otherPolityId)} has run out.`,
+        affectedRefs: [{ kind: "polity", id: agreement.polityId }, { kind: "polity", id: agreement.otherPolityId }],
+        visibility: "public",
+        discoveryState: "public",
+        knowableInDays: 0,
+        significance: 55,
+      });
+    }
+  }
+
   return {
-    world: recovered,
+    // The map's picture of the fighting, recomputed from the world that is:
+    // wars from the agreements that are the wars, sieges from the projects
+    // prosecuting them. Battles are left alone -- they are moments, and the
+    // engagement that caused one records it.
+    world: projectConflictsInto({ ...recovered, storylines, diplomacy, polityStances, polityAgreements }),
     factProposals: facts,
     notes,
   };

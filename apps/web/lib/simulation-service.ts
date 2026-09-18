@@ -150,6 +150,7 @@ export async function submitOrder(
         clock: view.scenarioClock,
         offices,
         warfare: view.scenarioWarfare,
+        ...(view.scenarioMap === undefined ? {} : { terrains: view.scenarioMap.terrains }),
         burstId,
         gameId,
         actorRef,
@@ -157,7 +158,7 @@ export async function submitOrder(
         orderText,
         ...(answeredDecision === undefined ? {} : { answeredDecision }),
         knownFacts: parseFacts(factRows),
-        queue: queueRows.map((row) => ({ id: row.id, dueInstantSortKey: row.dueInstantSortKey, kind: row.kind, summary: row.summary })),
+        queue: queueRows.map((row) => ({ id: row.id, dueInstantSortKey: row.dueInstantSortKey, kind: row.kind, summary: row.summary, payload: row.payload })),
         port,
       });
     } catch (error) {
@@ -180,6 +181,8 @@ export async function submitOrder(
           narrative: result.narrative,
           frictions: result.frictions,
           significanceByFactId: result.significanceByFactId,
+          storylines: result.world.storylines,
+          polityOfCharacter: (id) => result.world.characters.find((character) => character.id === id)?.polityId ?? null,
         });
 
     try {

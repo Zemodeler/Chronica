@@ -6,6 +6,7 @@ import {
   type OrderPartyRef,
   type ScenarioClock,
   type WorldInstant,
+  type WorldStoryline,
 } from "@chronica/shared";
 import { extractJson } from "./json";
 import type { SimModelPort } from "./ports";
@@ -56,7 +57,8 @@ passage of one or two paragraphs, under its own title.
 
 A title names the matter in a few words, as a chapter heading would: "The March
 into Boii Country", "Carthage Watches the Strait", "The Grain Levy Refused". It is
-never a date, never a summary of the whole period, and never a sentence.
+never a date, never a summary of the whole period, and never a sentence. A thread
+marked as part of a longer matter may keep that matter's name as its title.
 
 Keep the threads apart. A passage may name only what appears in its own thread: if
 Carthage is not in thread 2, thread 2 does not mention Carthage.
@@ -123,6 +125,10 @@ export interface ChronicleInput {
   readonly frictions: readonly NarrativeLine[];
   /** Fact id → its author's weight, for ordering threads by what mattered most. */
   readonly significanceByFactId?: ReadonlyMap<string, number>;
+  /** The threads the world is following, so a passage that continues one can say so. */
+  readonly storylines?: readonly WorldStoryline[];
+  /** Whose government a character belongs to, for deciding whether a polity-scoped thread is the observer's to know. */
+  readonly polityOfCharacter?: (characterId: string) => string | null;
 }
 
 export interface ChronicleEntry {
@@ -145,6 +151,31 @@ interface Thread {
   readonly facts: readonly Fact[];
   readonly narrative: readonly string[];
   readonly frictions: readonly string[];
+  /** The longer matter this continues, when the observer may know of one. */
+  readonly matter: string | null;
+}
+
+/**
+ * Which storyline a thread continues, if the observer could know of it.
+ *
+ * Matched by overlap in who and where, not by the engine's own links: two of a
+ * storyline's people or its province named in the thread is the same matter.
+ * A private storyline is known to its participants alone; a polity-scoped one
+ * to a government whose own people are in it.
+ */
+function matterOf(facts: readonly Fact[], storylines: readonly WorldStoryline[], observer: OrderPartyRef, observerPolityId: string | null, polityOf: (characterId: string) => string | null): string | null {
+  const named = new Set(facts.flatMap((fact) => fact.affectedEntities.map((entity) => entity.id)));
+  for (const storyline of storylines) {
+    if (storyline.phase === "closed") continue;
+    const knowable =
+      storyline.visibility === "public"
+      || (storyline.visibility === "polity" && storyline.participantIds.some((id) => observerPolityId !== null && polityOf(id) === observerPolityId))
+      || (observer.kind === "character" && storyline.participantIds.includes(observer.id));
+    if (!knowable) continue;
+    const overlap = storyline.participantIds.filter((id) => named.has(id)).length + (storyline.provinceId !== null && named.has(storyline.provinceId) ? 1 : 0);
+    if (overlap >= 2) return `"${storyline.title}" (${storyline.phase})`;
+  }
+  return null;
 }
 
 const keyOf = (ref: OrderPartyRef): string => `${ref.kind}:${ref.id}`;
@@ -227,7 +258,9 @@ function subjectsOf(facts: readonly Fact[]): OrderPartyRef[] {
 }
 
 function renderThread(thread: Thread, index: number): string {
-  const lines = [`THREAD ${index + 1}`, "Known to have happened:", ...thread.facts.map((fact) => `- ${readable(fact.summary)}`)];
+  const lines = [`THREAD ${index + 1}`];
+  if (thread.matter !== null) lines.push(`Part of a longer matter: ${thread.matter}.`);
+  lines.push("Known to have happened:", ...thread.facts.map((fact) => `- ${readable(fact.summary)}`));
   if (thread.narrative.length > 0) lines.push("Accounts given at the time:", ...thread.narrative.map((line) => `- ${readable(line)}`));
   if (thread.frictions.length > 0) lines.push("Difficulties reported:", ...thread.frictions.map((line) => `- ${readable(line)}`));
   return lines.join("\n");
@@ -261,6 +294,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   // record is allowed to be brief about minor matters, not silent.
   const kept = ranked.length <= MAX_ENTRIES ? ranked : [...ranked.slice(0, MAX_ENTRIES - 1), ranked.slice(MAX_ENTRIES - 1).flat()];
 
+  const polityOf = (characterId: string): string | null => input.polityOfCharacter?.(characterId) ?? null;
   const threads: Thread[] = kept.map((facts) => {
     const ids = new Set(facts.map((fact) => fact.id));
     const belongs = (line: NarrativeLine): boolean => line.factIds.some((factId) => ids.has(factId));
@@ -268,6 +302,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
       facts,
       narrative: narrative.filter(belongs).map((line) => line.line),
       frictions: frictions.filter(belongs).map((line) => line.line),
+      matter: matterOf(facts, input.storylines ?? [], input.observer, input.observerPolityId, polityOf),
     };
   });
 

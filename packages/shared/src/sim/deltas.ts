@@ -8,6 +8,7 @@ import {
   type AuthorityDomain,
 } from "../authority/vocabulary";
 import { CharacterIntentActionTypeSchema } from "../characters/intents";
+import { CharacterPressureKindSchema } from "../characters/pressures";
 import { CharacterSocialEventKindSchema } from "../characters/social-events";
 import {
   BasisPointsSchema,
@@ -22,7 +23,10 @@ import {
   SupportReasonKindSchema,
   VisibilitySchema,
 } from "../material-state";
+import { PolityAgreementKindSchema } from "../world/agreements";
+import { DiplomaticAnswerSchema, DiplomaticMessageKindSchema } from "../world/diplomacy";
 import { OrderPartyRefSchema } from "../world/party-ref";
+import { StorylinePhaseSchema } from "../world/storylines";
 import { LocalIdSchema, RefSchema } from "./refs";
 
 /**
@@ -496,6 +500,147 @@ const ForceEngageSchema = z.object({
   reason: ReasonSchema,
 }).strict();
 
+/**
+ * A thread of history the world will follow (VISION §5, §20).
+ *
+ * The narrator seeds one; a crisis the scenario authored is one; an NPC's own
+ * plot may become one. All are advanced by `storyline_advance` and shown back
+ * to whoever is in them. A private storyline is the world's bookkeeping of a
+ * secret: the orchestrator sees it because it is the world, its participants
+ * see it because they are in it, and nobody else does.
+ */
+const StorylineOpenSchema = z.object({
+  op: z.literal("storyline_open"),
+  localId: LocalIdSchema,
+  /** The handle shown under THE WORLD STIRS, when this answers a seed. Null when the world opened it on its own account. */
+  seedKey: z.string().trim().min(1).max(80).nullable().default(null),
+  title: z.string().trim().min(1).max(160),
+  /** The people in it. A plague has none yet, and its province is enough. */
+  participantRefs: z.array(RefSchema).max(16).default([]),
+  provinceId: EntityIdSchema.nullable().default(null),
+  phase: StorylinePhaseSchema.exclude(["closed"]).default("brewing"),
+  stakes: z.string().trim().min(1).max(320),
+  nextDevelopment: z.string().trim().min(1).max(320),
+  visibility: VisibilitySchema.default("public"),
+  reason: ReasonSchema,
+}).strict();
+
+const StorylineAdvanceSchema = z.object({
+  op: z.literal("storyline_advance"),
+  storylineRef: RefSchema,
+  /** What just happened in it, appended to its history. */
+  development: z.string().trim().min(1).max(480),
+  /** "closed" ends it; a closed thread is never advanced again. */
+  phase: StorylinePhaseSchema.optional(),
+  nextDevelopment: z.string().trim().min(1).max(320).optional(),
+  stakes: z.string().trim().min(1).max(320).optional(),
+  addParticipantRefs: z.array(RefSchema).max(8).default([]),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * A circumstance bearing on one person: a debt come due, an illness, a rival
+ * at their back. Its own arm rather than a field on `social_events`, because
+ * a social event needs two people and a debt has only one. `create` puts a
+ * pressure on them; `refresh` adds `intensity` to the strongest active one of
+ * that kind, creating it if there is none; `resolve` lifts the strongest one.
+ */
+const CharacterPressureSetSchema = z.object({
+  op: z.literal("character_pressure_set"),
+  characterRef: RefSchema,
+  action: z.enum(["create", "refresh", "resolve"]),
+  kind: CharacterPressureKindSchema,
+  intensity: z.number().int().min(0).max(100).default(50),
+  label: z.string().trim().min(1).max(200),
+  reviewInDays: z.number().int().positive().max(365).default(30),
+  expiresInDays: z.number().int().positive().max(3_660).nullable().default(null),
+  visibility: VisibilitySchema.default("private"),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * One power writing to another (VISION §24).
+ *
+ * `world/diplomacy.ts` described a letter years ago and nothing could make one,
+ * so an order to propose an alliance became a project, a generic entity, or a
+ * sentence in a fact -- and the king it was addressed to never had to answer.
+ * A letter is a durable object: it is sent, it stands unanswered, and somebody
+ * must eventually reply to it.
+ *
+ * A power always speaks through a person, so the sender is named twice: the
+ * polity whose word this is, and the character who gave it. That is what lets a
+ * senator's private correspondence with a foreign power be a breach rather than
+ * an impossibility.
+ */
+const DiplomaticMessageSendSchema = z.object({
+  op: z.literal("diplomatic_message_send"),
+  localId: LocalIdSchema,
+  kind: DiplomaticMessageKindSchema,
+  fromPolityId: EntityIdSchema,
+  fromCharacterRef: RefSchema,
+  toPolityId: EntityIdSchema,
+  /** A named recipient where there is one; null addresses the power at large. */
+  toCharacterRef: RefSchema.nullable().default(null),
+  subject: z.string().trim().min(1).max(240),
+  /** What is actually being proposed, demanded or asked. */
+  terms: z.string().trim().min(1).max(1_200),
+  /** How long the sender is willing to wait. Null when they set no term. */
+  replyWithinDays: z.number().int().positive().max(3_660).nullable().default(null),
+  /** Set when this is itself the answer to an earlier letter. */
+  inReplyToRef: RefSchema.nullable().default(null),
+  visibility: VisibilitySchema.default("polity"),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * Answering one.
+ *
+ * Sending says nothing about the reply: the answer is the recipient's own
+ * decision, taken with their own interests in view, which is why it is usually
+ * proposed by that person's cognition rather than by the world. Answering moves
+ * the sender's trust in the recipient by how their approach was received --
+ * silence hardest of all.
+ */
+/**
+ * What two powers now have standing between them: a war begun, a peace made,
+ * an alliance sworn, tribute agreed.
+ *
+ * Its own arm rather than a stance shift, because how much Rome trusts Carthage
+ * and whether Rome is at war with Carthage are different facts that change for
+ * different reasons -- and only one of them can be answered by a number.
+ */
+const AgreementOpenSchema = z.object({
+  op: z.literal("agreement_open"),
+  localId: LocalIdSchema,
+  kind: PolityAgreementKindSchema,
+  /** For tribute, the order is the terms: the tributary pays the other. */
+  polityId: EntityIdSchema,
+  otherPolityId: EntityIdSchema,
+  terms: z.string().trim().min(1).max(600),
+  /** A truce with a term ends by itself. Null runs until somebody ends it. */
+  forDays: z.number().int().positive().max(36_600).nullable().default(null),
+  /** The letter that produced it, where one did. */
+  sourceMessageRef: RefSchema.nullable().default(null),
+  visibility: VisibilitySchema.default("public"),
+  reason: ReasonSchema,
+}).strict();
+
+/** Ending one: a peace signed, a truce broken, an alliance renounced. */
+const AgreementCloseSchema = z.object({
+  op: z.literal("agreement_close"),
+  agreementRef: RefSchema,
+  reason: ReasonSchema,
+}).strict();
+
+const DiplomaticMessageAnswerSchema = z.object({
+  op: z.literal("diplomatic_message_answer"),
+  messageRef: RefSchema,
+  answer: DiplomaticAnswerSchema,
+  /** The recipient's own words, and the reason it went the way it did. */
+  answerText: z.string().trim().min(1).max(1_200),
+  reason: ReasonSchema,
+}).strict();
+
 export const WorldDeltaSchema = z.discriminatedUnion("op", [
   MoneyTransferSchema,
   IncomeSourceUpsertSchema,
@@ -523,6 +668,13 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   LoanSettleSchema,
   BeliefSetSchema,
   ForceEngageSchema,
+  StorylineOpenSchema,
+  StorylineAdvanceSchema,
+  CharacterPressureSetSchema,
+  DiplomaticMessageSendSchema,
+  DiplomaticMessageAnswerSchema,
+  AgreementOpenSchema,
+  AgreementCloseSchema,
 ]);
 export type WorldDelta = z.infer<typeof WorldDeltaSchema>;
 export type WorldDeltaOp = WorldDelta["op"];
@@ -555,6 +707,13 @@ export const WORLD_DELTA_OPS = [
   "loan_settle",
   "belief_set",
   "force_engage",
+  "storyline_open",
+  "storyline_advance",
+  "character_pressure_set",
+  "diplomatic_message_send",
+  "diplomatic_message_answer",
+  "agreement_open",
+  "agreement_close",
 ] as const satisfies readonly WorldDeltaOp[];
 
 /**
@@ -590,4 +749,11 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   loan_settle: "fiscal",
   belief_set: "social",
   force_engage: "military",
+  storyline_open: "civil",
+  storyline_advance: "civil",
+  character_pressure_set: "social",
+  diplomatic_message_send: "diplomatic",
+  diplomatic_message_answer: "diplomatic",
+  agreement_open: "diplomatic",
+  agreement_close: "diplomatic",
 };

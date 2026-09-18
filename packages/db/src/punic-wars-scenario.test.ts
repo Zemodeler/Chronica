@@ -11,7 +11,22 @@ describe("Punic Wars built-in scenario", () => {
 
   it("keeps the four key actors and their historical capitals in authoritative state", () => {
     expect(punicWarsScenario.initialWorld.map.polities.filter((polity) => ["rome", "carthage", "syracuse", "mamertines"].includes(polity.id))).toHaveLength(4);
-    expect(punicWarsScenario.initialWorld.material.forces).toHaveLength(4);
+    // Four armies, and the ships that decide who can cross to Sicily at all.
+    const forces = punicWarsScenario.initialWorld.material.forces;
+    expect(forces.filter((force) => force.personnel.every((category) => category.categoryId === "infantry"))).toHaveLength(4);
+    expect(forces.filter((force) => force.personnel.some((category) => category.categoryId === "warship"))).toHaveLength(3);
+  });
+
+  it("makes Sicily an island", () => {
+    // Authored as land edges because nothing could tell the difference, so a
+    // legion walked to Sicily and a naval war needed no ships.
+    const crossing = (from: string, to: string): string | undefined =>
+      punicWarsScenario.initialWorld.map.edges.find(
+        (edge) => (edge.from === from && edge.to === to) || (edge.from === to && edge.to === from),
+      )?.crossing;
+
+    expect(crossing("punic-italy-bruttian-highlands", "ita-72843720b81376294924159-sicily-northeast")).toBe("strait");
+    expect(crossing("tun-13205935b88806172084765", "ita-72843720b81376294924159-sicily-west")).toBe("sea_lane");
   });
 
   it("uses direct Roman control for its Italian client territories", () => {

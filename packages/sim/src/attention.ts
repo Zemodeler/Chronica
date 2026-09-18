@@ -1,6 +1,7 @@
 import {
   buildAuthorityIndex,
   factsKnownTo,
+  openStorylines,
   stableHash,
   type Fact,
   type Office,
@@ -148,6 +149,18 @@ export function routeAttention(input: AttentionInput): AttentionResult {
       score += 35;
       reasons.push("owes an answer to an order");
     }
+    // A letter put to them, or to their government, and not yet answered. After
+    // an unanswered order this is the likeliest reason in the world to want to
+    // act -- and an unanswered letter is itself an answer, so leaving them
+    // dormant decides the matter by silence.
+    if (world.diplomacy.some(
+      (message) =>
+        message.status === "awaiting_reply" &&
+        (message.toCharacterId === character.id || (message.toCharacterId === null && character.polityId !== null && message.toPolityId === character.polityId)),
+    )) {
+      score += 30;
+      reasons.push("owes an answer to a letter");
+    }
 
     // Gate 3: could they do anything about it? Someone with no office, no
     // command and no standing grant may care deeply and still not be a
@@ -207,6 +220,12 @@ export interface AmbientInput {
   readonly max: number;
   /** How many of their own facts to carry into the prompt. */
   readonly maxFactsEach?: number;
+  /**
+   * Someone who must be asked this round whatever their score: the person the
+   * narrator has just handed a problem to. One slot, so the seed actually moves
+   * in the burst that planted it rather than waiting on the rotation.
+   */
+  readonly priorityCharacterIds?: readonly string[];
 }
 
 /**
@@ -236,7 +255,13 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
   );
   const holdsAuthority = new Set(authority.grants.map((grant) => grant.holder.id));
   const commanders = new Set(world.material.forces.map((force) => force.commanderCharacterId));
-  const storylineParticipants = new Set((world.storylines ?? []).flatMap((storyline) => storyline.participantIds));
+  // The most recently moved thread each person is in, so the reason they are
+  // asked says what is actually pending rather than that something is.
+  const threadOf = new Map<string, WorldState["storylines"][number]>();
+  for (const storyline of openStorylines(world.storylines).sort((a, b) => a.updatedAtStep - b.updatedAtStep)) {
+    for (const participantId of storyline.participantIds) threadOf.set(participantId, storyline);
+  }
+  const priority = new Set(input.priorityCharacterIds ?? []);
   const polityHasAims = new Set(
     world.polityOutlooks.filter((outlook) => outlook.intentions.length > 0 || outlook.concerns.length > 0).map((outlook) => outlook.polityId),
   );
@@ -265,10 +290,20 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
       score += Math.min(24, 8 * commitments.length);
       reasons.push("has a promise still to keep");
     }
-    if (storylineParticipants.has(character.id)) {
-      score += 12;
-      reasons.push("is caught up in something already under way");
+    const thread = threadOf.get(character.id);
+    if (thread !== undefined) {
+      score += thread.phase === "escalating" || thread.phase === "crisis" ? 20 : 12;
+      reasons.push(`is caught up in ${thread.title}: ${thread.nextDevelopment}`);
     }
+    if (world.diplomacy.some(
+      (message) =>
+        message.status === "awaiting_reply" &&
+        (message.toCharacterId === character.id || (message.toCharacterId === null && character.polityId !== null && message.toPolityId === character.polityId)),
+    )) {
+      score += 28;
+      reasons.push("has a letter to answer");
+    }
+    if (priority.has(character.id)) reasons.unshift("something has just come to them");
     if (character.polityId !== null && polityHasAims.has(character.polityId)) {
       score += 15;
       reasons.push("their government is pursuing something");
@@ -292,5 +327,7 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
   }
 
   scored.sort((a, b) => b.score - a.score || stableHash([a.characterId]) - stableHash([b.characterId]));
-  return scored.slice(0, input.max);
+  const reserved = scored.filter((actor) => priority.has(actor.characterId)).slice(0, 1);
+  const rest = scored.filter((actor) => !reserved.includes(actor)).slice(0, Math.max(0, input.max - reserved.length));
+  return [...reserved, ...rest];
 }

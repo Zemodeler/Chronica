@@ -36,8 +36,21 @@ export const FactProposalSchema = z.object({
   discoveryState: FactDiscoveryStateSchema,
   knowableInDays: z.number().int().min(0).max(3_660).default(0),
   significance: z.number().int().min(0).max(100),
+  /**
+   * Who knows this the moment it happens -- the people in the room.
+   *
+   * A private fact was born known to nobody, its own author included, so a
+   * plotter could not know their own plot and was never woken by it. This is
+   * the discovery ledger's first entry, written with the fact rather than by a
+   * later `discoveries` item that could not name a fact still unassigned.
+   */
+  knownToRefs: z.array(OrderPartyRefSchema).max(16).default([]),
+  /** The thread this belongs to, when it belongs to one: an existing storyline id or a "local:" handle opened in this answer. */
+  storylineRef: RefSchema.nullable().default(null),
 });
 export type FactProposal = z.infer<typeof FactProposalSchema>;
+/** The same, before defaults: what the engine itself writes when it records a consequence the model did not author. */
+export type FactProposalDraft = z.input<typeof FactProposalSchema>;
 
 /** VISION §13: an instruction aimed at someone who gets to decide about it. */
 export const DelegationProposalSchema = z.object({
@@ -59,8 +72,34 @@ export const ScheduledEventProposalSchema = z.object({
   summary: SummarySchema,
   subjectRefs: z.array(RefSchema).max(8).default([]),
   causeFactLocalId: LocalIdSchema.nullable().default(null),
+  /**
+   * How the event will be known when it falls due. Everything scheduled used
+   * to fire as public news naming nobody, which made a secret's next step a
+   * public announcement and gave the router nothing to route on.
+   */
+  visibility: FactVisibilitySchema.default("public"),
+  significance: z.number().int().min(0).max(100).default(35),
+  knownToRefs: z.array(OrderPartyRefSchema).max(8).default([]),
+  storylineRef: RefSchema.nullable().default(null),
 });
 export type ScheduledEventProposal = z.infer<typeof ScheduledEventProposalSchema>;
+
+/**
+ * What the queue stores alongside a scheduled event, with every handle already
+ * resolved to a real id. Every field defaults, so an event written before this
+ * existed still fires -- as public news, weight 35, naming nobody, which is
+ * exactly what it would have done.
+ */
+export const ScheduledEventPayloadSchema = z
+  .object({
+    subjectIds: z.array(EntityIdSchema).max(8).default([]),
+    visibility: FactVisibilitySchema.default("public"),
+    significance: z.number().int().min(0).max(100).default(35),
+    knownTo: z.array(OrderPartyRefSchema).max(8).default([]),
+    storylineId: EntityIdSchema.nullable().default(null),
+  })
+  .loose();
+export type ScheduledEventPayload = z.infer<typeof ScheduledEventPayloadSchema>;
 
 /**
  * Something already true becoming known to somebody (VISION §14).

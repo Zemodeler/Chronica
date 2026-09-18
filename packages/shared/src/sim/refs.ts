@@ -22,7 +22,10 @@ export const LocalIdSchema = z
   .trim()
   .min(1)
   .max(60)
-  .regex(/^[a-z0-9_]+$/, "A localId is lowercase letters, digits and underscores.");
+  // Hyphens too: every id the model reads in the slice is hyphenated, so it
+  // writes "clepsina-continues-march" and lost whole cognition batches to a
+  // rule that gained nothing.
+  .regex(/^[a-z0-9_-]+$/, "A localId is lowercase letters, digits, underscores and hyphens.");
 
 /** Either an existing world entity id, or `local:<localId>` minted in this same payload. */
 export const RefSchema = z.string().trim().min(1).max(130);

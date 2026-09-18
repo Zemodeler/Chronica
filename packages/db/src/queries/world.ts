@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, lte, sql } from "drizzle-orm";
 import {
   ScenarioDefinitionSchema,
   WorldStateSchema,
@@ -38,6 +38,8 @@ export interface WorldView {
   readonly scenarioGovernment: ScenarioDefinition["government"] | undefined;
   readonly scenarioLife: ScenarioDefinition["life"] | undefined;
   readonly scenarioWarfare: ScenarioDefinition["warfare"] | undefined;
+  /** The scenario's map rules, so movement can be held to the crossings it admits. */
+  readonly scenarioMap: ScenarioDefinition["map"] | undefined;
   readonly scenarioPeriod: string;
 }
 
@@ -108,6 +110,7 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
     scenarioGovernment: definition.success ? definition.data.government : undefined,
     scenarioLife: definition.success ? definition.data.life : undefined,
     scenarioWarfare: definition.success ? definition.data.warfare : undefined,
+    scenarioMap: definition.success ? definition.data.map : undefined,
     scenarioPeriod: context.period,
   };
 }
@@ -323,14 +326,21 @@ export async function insertWorldFacts(db: ChronicaDatabase, gameId: string, fac
   await db.insert(worldFacts).values(facts.map((fact) => ({ ...fact, gameId, burstId: null }))).onConflictDoNothing();
 }
 
-/** Facts the loop needs in hand: the recent record, newest last. */
+/**
+ * Facts the loop needs in hand: the recent record, newest last.
+ *
+ * Newest, not oldest: ordered ascending under a limit, this handed a long
+ * game its first hundred and twenty facts and called them recent, so nothing
+ * the router or the narrator read from the window was current.
+ */
 export async function listRecentFacts(db: ChronicaDatabase, gameId: string, limit = 120) {
-  return db
+  const rows = await db
     .select()
     .from(worldFacts)
     .where(eq(worldFacts.gameId, gameId))
-    .orderBy(asc(worldFacts.instantSortKey))
+    .orderBy(desc(worldFacts.instantSortKey))
     .limit(limit);
+  return rows.reverse();
 }
 
 /** Everything the queue owes the world at or before `atSortKey` (VISION §17). */

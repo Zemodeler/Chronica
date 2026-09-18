@@ -36,6 +36,21 @@ export const TroopCategoryDefinitionSchema = z
     steadinessBps: BasisPointsSchema,
     /** Mobility, used for pursuit and withdrawal. */
     mobilityBps: BasisPointsSchema,
+    /**
+     * Whether this category fights and travels on water.
+     *
+     * Scenario data rather than a hardcoded unit list, for the same reason the
+     * rest of this file is: a period with triremes and one with galleons should
+     * not need different game code, and a period with neither should not carry
+     * a naval system it never uses. Optional, so every scenario written before
+     * ships existed still parses -- and its armies stay armies.
+     */
+    naval: z.boolean().default(false),
+    /**
+     * Men this category can carry across water, per head of its own. An army
+     * crossing a strait needs hulls to do it in, and this is how many.
+     */
+    transportPerHead: z.number().int().min(0).max(1_000).default(0),
   })
   .strict();
 export type TroopCategoryDefinition = z.infer<typeof TroopCategoryDefinitionSchema>;

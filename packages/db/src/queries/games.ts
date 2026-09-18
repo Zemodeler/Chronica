@@ -67,7 +67,11 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     // -- the thing a consul most obviously does -- was recorded as
     // insubordination.
     await tx.insert(scenarioVersions).values({ scenarioId: FIRST_PUNIC_WAR_SCENARIO_ID, version: 6, mapAssetId: FIRST_PUNIC_WAR_MAP_ASSET_ID, definition: firstPunicWarScenario.definition, initialWorld: firstPunicWarScenario.initialWorld, schemaVersion: 2, origin: "built-in", validatedAt: new Date(), notes: "Widens both offices to the powers a head of state actually exercises: putting questions to the council, moving the polity's own standing and provinces, founding arrangements, and giving battle." }).onConflictDoNothing();
-    await tx.update(scenarios).set({ title: "The Numidian Decision", period: "264 BCE · First Punic War", currentVersion: 6, updatedAt: new Date() }).where(eq(scenarios.id, FIRST_PUNIC_WAR_SCENARIO_ID));
+    // Version 7: world schema 3. Storylines shed the fields of a deleted
+    // director architecture and the narrator's ledger arrives -- see
+    // `WORLD_SCHEMA_VERSION`.
+    await tx.insert(scenarioVersions).values({ scenarioId: FIRST_PUNIC_WAR_SCENARIO_ID, version: 7, mapAssetId: FIRST_PUNIC_WAR_MAP_ASSET_ID, definition: firstPunicWarScenario.definition, initialWorld: firstPunicWarScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "World schema 3: storylines with provenance and a closed phase vocabulary, and the narrator's ledger." }).onConflictDoNothing();
+    await tx.update(scenarios).set({ title: "The Numidian Decision", period: "264 BCE · First Punic War", currentVersion: 7, updatedAt: new Date() }).where(eq(scenarios.id, FIRST_PUNIC_WAR_SCENARIO_ID));
     await tx.insert(scenarioMapAssets).values({
       id: PUNIC_WARS_MAP_ASSET_ID,
       ownerId: CHRONICA_SYSTEM_USER_ID,
@@ -148,7 +152,21 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     // Illyrians, Thracians, the Greek leagues, Macedon, Epirus, the Numidian
     // and Mauretanian kingdoms.
     await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 17, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 2, origin: "built-in", validatedAt: new Date(), notes: "Makes the whole drawn map authoritative: all 779 controlled provinces, their borders and the 126 peoples who hold them become real world state instead of an overlay painted over ground the simulation had no record of." }).onConflictDoNothing();
-    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 17, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
+    // Version 18: world schema 3, as the First Punic War's version 7. The world
+    // now makes trouble of its own: storylines the narrator seeds and the
+    // orchestrator advances, with a ledger so the pacing replays.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 18, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "World schema 3: storylines with provenance and a closed phase vocabulary, and the narrator's ledger, so the world away from the player can start things of its own." }).onConflictDoNothing();
+    // Version 19 gives the world outside the player's own army the things it
+    // was missing: letters between powers, war and peace as state rather than a
+    // trust score, a map an army has to actually cross, and ships -- without
+    // which Sicily was another province of Italy and a naval war could be
+    // fought by walking.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 19, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Makes the straits water and gives the powers fleets, so crossing to Sicily needs ships; adds the naval troop category the period actually fought with." }).onConflictDoNothing();
+    // Version 20 seats the other powers' heads. Hieron negotiating for Syracuse
+    // and Hanno for Carthage were recorded as insubordinate, because neither
+    // held an office and authority derives from offices.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 20, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Gives Syracuse, the Mamertines and Carthage's command in Sicily offices and seats them, so a foreign head of state acting for his own power is not recorded as a breach." }).onConflictDoNothing();
+    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 20, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
   });
 }
 

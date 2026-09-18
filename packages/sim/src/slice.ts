@@ -1,8 +1,10 @@
 import { findPolityGaps } from "./population";
+import type { NarratorSeed } from "./narrator";
 import {
   currentAgeYears,
   factsKnownTo,
   formatWorldDate,
+  openStorylines,
   type Fact,
   type OrderPartyRef,
   type ScenarioClock,
@@ -28,12 +30,14 @@ import {
  *    it actually has.
  */
 
-const CAPS = { characters: 12, forces: 10, projects: 8, accounts: 6, stances: 8, facts: 12, events: 8, intents: 8, provinces: 40, foreignForces: 12, foreignFigures: 12, outlooks: 8, institutions: 4, procedures: 6, strainedProvinces: 8, holdings: 6, arrangements: 8, debts: 6, trade: 6 } as const;
+const CAPS = { characters: 12, forces: 10, projects: 8, accounts: 6, stances: 8, facts: 12, events: 8, intents: 8, provinces: 40, foreignForces: 12, foreignFigures: 12, outlooks: 8, institutions: 4, procedures: 6, strainedProvinces: 8, holdings: 6, arrangements: 8, debts: 6, trade: 6, storylines: 6, letters: 6, agreements: 8 } as const;
 
 export interface SliceEvent {
   readonly kind: string;
   readonly summary: string;
   readonly dueInDays: number;
+  /** The thread it belongs to, as "Title [id]", so the orchestrator advances the right one. */
+  readonly thread?: string | undefined;
 }
 
 /** A question the world put to the ruler, and the answer they gave. */
@@ -53,6 +57,8 @@ export interface WorldSliceInput {
   readonly facts: readonly Fact[];
   readonly dueEvents: readonly SliceEvent[];
   readonly pendingEvents: readonly SliceEvent[];
+  /** What the narrator has decided stirs this burst, if anything. */
+  readonly narratorSeed?: NarratorSeed | null | undefined;
 }
 
 export interface WorldSlice {
@@ -78,6 +84,26 @@ export interface WorldSlice {
   readonly provinces: readonly { readonly id: string; readonly name: string; readonly controller: string }[];
   readonly politics: readonly { readonly id: string; readonly name: string; readonly office: string | null; readonly age: number }[];
   readonly diplomacy: readonly { readonly toward: string; readonly trust: number; readonly why: string }[];
+  /** What the powers have standing between them: war, peace, alliance, tribute (VISION §27's active wars). */
+  readonly agreements: readonly {
+    readonly id: string;
+    readonly kind: string;
+    readonly ours: boolean;
+    readonly between: string;
+    readonly terms: string;
+    readonly endsInDays: number | null;
+  }[];
+  /** Letters sent and not yet answered, in either direction (VISION §27's diplomatic commitments). */
+  readonly letters: readonly {
+    readonly id: string;
+    readonly kind: string;
+    readonly ours: boolean;
+    readonly from: string;
+    readonly to: string;
+    readonly subject: string;
+    readonly terms: string;
+    readonly dueInDays: number | null;
+  }[];
   /**
    * What each polity is trying to do (VISION §11), including foreign ones.
    *
@@ -178,13 +204,31 @@ export interface WorldSlice {
    */
   readonly foreignPowers: readonly { readonly id: string; readonly name: string; readonly provinces: number; readonly leaders: readonly string[]; readonly forces: readonly string[] }[];
   /** Countries holding land with nobody to speak or fight for them (VISION §5). */
-  readonly populationGaps: readonly { readonly polityId: string; readonly name: string; readonly needsLeader: boolean; readonly needsForce: boolean; readonly why: string }[];
+  readonly populationGaps: readonly { readonly polityId: string; readonly name: string; readonly needsLeader: boolean; readonly needsForce: boolean; readonly provinceIds: readonly string[]; readonly why: string }[];
   readonly projects: readonly { readonly id: string; readonly label: string; readonly status: string; readonly nextMilestone: { readonly id: string; readonly label: string } | null }[];
   readonly intents: readonly { readonly actor: string; readonly action: string; readonly rationale: string }[];
-  readonly recentHistory: readonly { readonly summary: string; readonly significance: number }[];
+  /** Ids are printed: a discovery has to name the fact it uncovered, and nothing else ever showed one. */
+  readonly recentHistory: readonly { readonly id: string; readonly summary: string; readonly significance: number }[];
   readonly dueEvents: readonly SliceEvent[];
   readonly pendingEvents: readonly SliceEvent[];
   readonly openOrders: readonly { readonly id: string; readonly recipient: string; readonly status: string }[];
+  /**
+   * The threads the world is following (VISION §20). The orchestrator sees all
+   * of them, secret ones included, for the same reason it sees every power's
+   * outlook: it is the world, and must keep a plot consistent with itself.
+   */
+  readonly threads: readonly {
+    readonly id: string;
+    readonly title: string;
+    readonly phase: string;
+    readonly participants: readonly string[];
+    readonly province: string | null;
+    readonly stakes: string;
+    readonly next: string;
+    readonly factIds: readonly string[];
+    readonly secret: boolean;
+  }[];
+  readonly seed: NarratorSeed | null;
 }
 
 export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
@@ -266,7 +310,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   // names outright. The order is matched by id rather than by name because an
   // id is what the model has to give back.
   const inPlay = new Set<string>([
-    ...(world.storylines ?? []).flatMap((storyline) => (storyline.provinceId === null ? [] : [storyline.provinceId])),
+    ...openStorylines(world.storylines).flatMap((storyline) => (storyline.provinceId === null ? [] : [storyline.provinceId])),
     ...world.characters.filter((character) => character.alive && character.polityId === ownPolity).map((character) => character.locationProvinceId),
   ].filter((id): id is string => typeof id === "string"));
   // A battle records who is fighting, not where; the ground is wherever the
@@ -317,6 +361,40 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     .filter((stance) => ownPolity === null || stance.polityId === ownPolity)
     .slice(0, CAPS.stances)
     .map((stance) => ({ toward: polityName(stance.towardPolityId), trust: stance.trustScore, why: stance.lastShiftReason }));
+
+  // What this world's powers have standing between them. §27 asks the slice to
+  // carry active wars; before agreements existed the answer to "are we at war?"
+  // was a trust score and a guess.
+  const agreements = world.polityAgreements
+    .filter((agreement) => agreement.status === "active")
+    .filter((agreement) => agreement.visibility === "public" || ownPolity === null || agreement.polityId === ownPolity || agreement.otherPolityId === ownPolity)
+    .slice(-CAPS.agreements)
+    .map((agreement) => ({
+      id: agreement.id,
+      kind: agreement.kind,
+      ours: agreement.polityId === ownPolity || agreement.otherPolityId === ownPolity,
+      between: `${polityName(agreement.polityId)} and ${polityName(agreement.otherPolityId)}`,
+      terms: agreement.terms,
+      endsInDays: agreement.untilStep === null ? null : agreement.untilStep - world.elapsedStep,
+    }));
+
+  // Letters this government is party to and has not finished with: what it is
+  // waiting on, and what is waiting on it. A letter nobody is shown is a letter
+  // nobody answers, which is how the last one sat in the world unread.
+  const letters = world.diplomacy
+    .filter((message) => message.status === "awaiting_reply")
+    .filter((message) => ownPolity === null || message.fromPolityId === ownPolity || message.toPolityId === ownPolity)
+    .slice(-CAPS.letters)
+    .map((message) => ({
+      id: message.id,
+      kind: message.kind,
+      ours: message.fromPolityId === ownPolity,
+      from: polityName(message.fromPolityId),
+      to: polityName(message.toPolityId),
+      subject: message.subject,
+      terms: message.terms,
+      dueInDays: message.replyDueByStep === null ? null : message.replyDueByStep - world.elapsedStep,
+    }));
 
   // Basis points are the engine's unit and a hundredth of a point is not a
   // political fact; the model reads /100 the way VISION §6 writes it.
@@ -584,7 +662,29 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   // Only what this actor could actually know.
   const recentHistory = factsKnownTo(input.facts, input.actorRef, ownPolity, world.instant)
     .slice(-CAPS.facts)
-    .map((fact) => ({ summary: fact.summary, significance: 0 }));
+    .map((fact) => ({ id: fact.id, summary: fact.summary, significance: 0 }));
+
+  // Ours first, then the most recently moved: the order the model reads them
+  // in is the order it weighs them.
+  const threads = openStorylines(world.storylines)
+    .sort((a, b) => {
+      const ours = (storyline: typeof a): number =>
+        Number(storyline.participantIds.some((id) => world.characters.find((character) => character.id === id)?.polityId === ownPolity)
+          || (storyline.provinceId !== null && world.map.provinces.find((province) => province.id === storyline.provinceId)?.controllerPolityId === ownPolity));
+      return ours(b) - ours(a) || b.updatedAtStep - a.updatedAtStep || a.id.localeCompare(b.id);
+    })
+    .slice(0, CAPS.storylines)
+    .map((storyline) => ({
+      id: storyline.id,
+      title: storyline.title,
+      phase: storyline.phase,
+      participants: storyline.participantIds.slice(0, 4).map((id) => `${name(id)} [${id}]`),
+      province: storyline.provinceId === null ? null : `${provinceName(storyline.provinceId)} [${storyline.provinceId}]`,
+      stakes: storyline.stakes,
+      next: storyline.nextDevelopment,
+      factIds: storyline.causalFactIds.slice(-3),
+      secret: storyline.visibility === "private",
+    }));
 
   const openOrders = world.orderAttempts
     .filter((attempt) => attempt.status === "issued" || attempt.status === "received" || attempt.status === "delayed" || attempt.status === "accepted")
@@ -605,6 +705,8 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     provinces,
     politics,
     diplomacy,
+    agreements,
+    letters,
     standing,
     country,
     institutions,
@@ -621,6 +723,8 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     dueEvents: input.dueEvents.slice(0, CAPS.events),
     pendingEvents: input.pendingEvents.slice(0, CAPS.events),
     openOrders,
+    threads,
+    seed: input.narratorSeed ?? null,
   };
 }
 
@@ -669,9 +773,28 @@ export function renderWorldSlice(slice: WorldSlice): string {
       "COUNTRIES WITH NOBODY IN THEM:",
       ...slice.populationGaps.map((gap) => {
         const missing = [gap.needsLeader ? "a leader" : null, gap.needsForce ? "forces of their own" : null].filter((part) => part !== null).join(" and ");
-        return `  ${gap.name} [${gap.polityId}] holds land but has ${missing === "" ? "nobody" : `no ${missing}`} — ${gap.why}.`;
+        const land = gap.provinceIds.length === 0 ? "" : ` Their land: ${gap.provinceIds.map((id) => `[${id}]`).join(" ")}.`;
+        return `  ${gap.name} [${gap.polityId}] holds land but has ${missing === "" ? "nobody" : `no ${missing}`} — ${gap.why}.${land}`;
       }),
       "  Give each of them the people and forces they plainly ought to have, now.",
+      "",
+    );
+  }
+  // A directive, like the one above, not data: the world is being told that
+  // something happens, beside the order and not because of it. The model is
+  // shown the scale and the target and never the reason it was chosen.
+  if (slice.seed !== null) {
+    const seed = slice.seed;
+    lines.push(
+      `THE WORLD STIRS (seed ${seed.key}):`,
+      `  ${seed.why}`,
+      `  ${seed.brief}`,
+      `  Scale: ${seed.severity}.`,
+      ...(seed.repeated ? ["  This was asked before and did not happen. It happens now."] : []),
+      "  This is the world moving on its own. It is not the ruler's order and not the ruler's doing; nobody in the government asked for it, and it is attributed to nobody in it. Answer PLAYER ORDER first and in full. Then, in the same answer, make this happen too, under its own facts" + (seed.oneShot ? "" : ` and its own thread, opened with "storyline_open" carrying seedKey "${seed.key}"`) + ".",
+      ...(seed.secret
+        ? [`  It is a secret. Every fact of it is "private" with "knownToRefs" naming only those in it; its thread is "private"; nothing of it appears in narrativeSummary, frictions or a playerDecision.`]
+        : ["  It is news: record it as a fact with the visibility the world would actually give it, and score it honestly."]),
       "",
     );
   }
@@ -731,6 +854,14 @@ export function renderWorldSlice(slice: WorldSlice): string {
   section("LANDS AND HOLDINGS", slice.holdings.map((holding) =>
     `${holding.title} [${holding.id}] in ${holding.territoryId} — held in law by ${holding.holder}, held in fact ${holding.control}/100`));
   section("DIPLOMACY", slice.diplomacy.map((stance) => `toward ${stance.toward}: trust ${stance.trust} (${stance.why})`));
+  section("WHERE THE POWERS STAND", slice.agreements.map((agreement) => {
+    const term = agreement.endsInDays === null ? "" : `, for another ${agreement.endsInDays} day(s)`;
+    return `[${agreement.id}] ${agreement.kind}${agreement.ours ? " (ours)" : ""}: ${agreement.between} — ${agreement.terms}${term}`;
+  }));
+  section("LETTERS AWAITING AN ANSWER", slice.letters.map((letter) => {
+    const due = letter.dueInDays === null ? "no term set" : letter.dueInDays < 0 ? `overdue by ${-letter.dueInDays} day(s)` : `answer wanted within ${letter.dueInDays} day(s)`;
+    return `[${letter.id}] ${letter.kind} ${letter.ours ? `we sent to ${letter.to}` : `${letter.from} sent us`} — ${letter.subject}: ${letter.terms} (${due})`;
+  }));
   section(
     "STANDING AIMS",
     slice.outlooks.flatMap((outlook) => [
@@ -742,10 +873,17 @@ export function renderWorldSlice(slice: WorldSlice): string {
   section("ACTIVE PROJECTS", slice.projects.map((project) =>
     `${project.label} [${project.id}] — ${project.status}${project.nextMilestone === null ? "" : `, next: ${project.nextMilestone.label} [${project.nextMilestone.id}]`}`));
   section("STANDING INTENTIONS", slice.intents.map((intent) => `${intent.actor} means to ${intent.action}: ${intent.rationale}`));
+  section("OPEN THREADS", slice.threads.map((thread) => {
+    const where = thread.province === null ? "" : `, in ${thread.province}`;
+    const facts = thread.factIds.length === 0 ? "" : ` Facts: ${thread.factIds.map((id) => `[${id}]`).join(" ")}.`;
+    const secret = thread.secret ? " (secret — known to its participants alone)" : "";
+    return `${thread.title} [${thread.id}] — ${thread.phase}. With: ${thread.participants.join("; ")}${where}. At stake: ${thread.stakes} Next: ${thread.next}${facts}${secret}`;
+  }));
   section("ORDERS AWAITING AN ANSWER", slice.openOrders.map((order) => `${order.id} to ${order.recipient} — ${order.status}`));
-  section("RECENT HISTORY (only what is known to this government)", slice.recentHistory.map((entry) => entry.summary));
-  section("DUE NOW", slice.dueEvents.map((event) => `${event.kind}: ${event.summary}`));
-  section("SCHEDULED AHEAD", slice.pendingEvents.map((event) => `in ${event.dueInDays} days — ${event.kind}: ${event.summary}`));
+  section("RECENT HISTORY (only what is known to this government)", slice.recentHistory.map((entry) => `${entry.summary} [${entry.id}]`));
+  const threadOf = (event: SliceEvent): string => (event.thread === undefined ? "" : ` (thread: ${event.thread})`);
+  section("DUE NOW", slice.dueEvents.map((event) => `${event.kind}: ${event.summary}${threadOf(event)}`));
+  section("SCHEDULED AHEAD", slice.pendingEvents.map((event) => `in ${event.dueInDays} days — ${event.kind}: ${event.summary}${threadOf(event)}`));
 
   return lines.join("\n").trim();
 }

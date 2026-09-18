@@ -4,7 +4,7 @@ import {
   type BattlePosture,
   type BattleResult,
   type Character,
-  type FactProposal,
+  type FactProposalDraft,
   type Force,
   type ScenarioWarfareRules,
   type TacticalModifierProposal,
@@ -43,7 +43,7 @@ export interface EngagementInput {
 
 export interface EngagementResult {
   readonly world: WorldState;
-  readonly facts: readonly FactProposal[];
+  readonly facts: readonly FactProposalDraft[];
 }
 
 /** Every province sharing an edge with this one, in a stable order. */
@@ -146,10 +146,10 @@ function applyResult(world: WorldState, result: BattleResult, atStep: number): W
 }
 
 /** What a battle leaves in the record. A battle is never a secret. */
-function factsFor(world: WorldState, result: BattleResult, provinceId: string, index: number): FactProposal[] {
+function factsFor(world: WorldState, result: BattleResult, provinceId: string, index: number): FactProposalDraft[] {
   const names = new Map(world.material.forces.map((force) => [force.id, force.name]));
   const provinceName = world.map.provinces.find((province) => province.id === provinceId)?.name ?? provinceId;
-  const facts: FactProposal[] = [
+  const facts: FactProposalDraft[] = [
     {
       localId: `battle_${index}`,
       kind: "battle",

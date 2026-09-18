@@ -1,9 +1,10 @@
 import type {
   AuthorityCheckResult,
-  FactProposal,
+  FactProposalDraft,
   Office,
   OrderPartyRef,
   ScenarioWarfareRules,
+  TerrainDefinition,
   WorldDelta,
   WorldInstant,
   WorldState,
@@ -21,6 +22,13 @@ export interface ApplyContext {
    * rather than the world, and battle resolution cannot proceed without them.
    */
   readonly warfare: ScenarioWarfareRules;
+  /**
+   * The scenario's terrains, so movement can ask what a crossing admits. Also
+   * scenario data rather than world state. Optional: a caller that omits them
+   * gets adjacency enforced and crossing types unjudged, which is the right
+   * behaviour for a scenario that declares no terrain rules at all.
+   */
+  readonly terrains?: readonly TerrainDefinition[] | undefined;
   readonly ids: IdFactory;
   readonly gameId: string;
   /**
@@ -85,7 +93,7 @@ export interface ApplyResult {
    *
    * Facts emitted by a delta that is then rejected are discarded with it.
    */
-  readonly factProposals: readonly FactProposal[];
+  readonly factProposals: readonly FactProposalDraft[];
   /** `localId` → the id the engine assigned, for resolving references in facts and events. */
   readonly assignedIds: ReadonlyMap<string, string>;
 }

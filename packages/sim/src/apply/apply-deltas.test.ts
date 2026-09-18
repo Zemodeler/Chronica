@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstPunicWarScenario } from "@chronica/db";
+import { firstPunicWarScenario, punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, localRef, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
 import { createIdFactory } from "../ports";
 import { applyDeltas } from "./apply-deltas";
@@ -173,7 +173,7 @@ describe("authority", () => {
     const before = world();
     const result = applyDeltas(
       before,
-      [{ op: "force_modify", forceRef: "legio-i", locationId: "tun-13205935b88806172084765", reason: "Marching without authority." }],
+      [{ op: "force_modify", forceRef: "legio-i", locationId: "ita-72843720b81376294924159-sicily-southeast", reason: "Marching without authority." }],
       context({ actorRef: { kind: "character", id: "hanno" } }),
     );
 
@@ -181,7 +181,7 @@ describe("authority", () => {
     expect(result.applied).toHaveLength(1);
     expect(result.breaches).toHaveLength(1);
     expect(result.breaches[0]!.reason).toContain("No active grant");
-    expect(result.world.material.forces.find((f) => f.id === "legio-i")!.locationId).toBe("tun-13205935b88806172084765");
+    expect(result.world.material.forces.find((f) => f.id === "legio-i")!.locationId).toBe("ita-72843720b81376294924159-sicily-southeast");
   });
 });
 
@@ -812,7 +812,7 @@ describe("whose act it is", () => {
   it("holds a person to account for reaching into another power, which is the whole of insubordination", () => {
     const result = applyDeltas(
       world(),
-      [{ op: "force_modify", forceRef: "legio-i", locationId: "tun-13205935b88806172084765", reason: "Marching a legion that is not his." }],
+      [{ op: "force_modify", forceRef: "legio-i", locationId: "ita-72843720b81376294924159-sicily-southeast", reason: "Marching a legion that is not his." }],
       // Hanno acting through his own cognition: nobody is speaking for him.
       context({ actorRef: { kind: "character", id: "hanno" } }),
     );
@@ -840,5 +840,367 @@ describe("whose act it is", () => {
       context({ actsForTheWorld: true }),
     );
     expect(result.breaches).toHaveLength(0);
+  });
+});
+
+describe("threads of history", () => {
+  const open: WorldDelta = {
+    op: "storyline_open", localId: "plot", seedKey: "seed-1", title: "The Quaestor's Silence",
+    participantRefs: ["quintus-fabius"], provinceId: null, phase: "brewing",
+    stakes: "Whether the consul's rival can gather the Senate against him unnoticed.",
+    nextDevelopment: "Fabius sounds out the patrician bloc.", visibility: "private", reason: "The world stirs.",
+  };
+
+  it("opens a thread with an engine id, its participants resolved, and the world as its author", () => {
+    const result = applyDeltas(world(), [open], context({ actsForTheWorld: true }));
+    expect(result.rejected).toHaveLength(0);
+    const storyline = result.world.storylines[0]!;
+    expect(storyline.id).toBe(result.assignedIds.get("plot"));
+    expect(storyline.origin).toBe("world");
+    expect(storyline.seedKey).toBe("seed-1");
+    expect(storyline.participantIds).toEqual(["quintus-fabius"]);
+  });
+
+  it("drops a country, a force or a movement named among the participants and keeps the thread", () => {
+    const result = applyDeltas(world(), [
+      { op: "generic_entity_create", localId: "cult", kind: "faction", label: "The Etrurian Renewal", ownerRef: null, attributes: {}, reason: "A movement." },
+      { ...open, participantRefs: ["rome", "legio-i", "local:cult", "quintus-fabius"] },
+    ], context({ actsForTheWorld: true }));
+    expect(result.rejected).toHaveLength(0);
+    expect(result.world.storylines[0]!.participantIds).toEqual(["quintus-fabius"]);
+  });
+
+  it("opens a thread with no people in it, on a province alone", () => {
+    const result = applyDeltas(world(), [{ ...open, participantRefs: [], provinceId: "ita-local-23120603B86473916475875" }], context({ actsForTheWorld: true }));
+    expect(result.rejected).toHaveLength(0);
+    expect(result.world.storylines[0]!.participantIds).toEqual([]);
+  });
+
+  it("refuses a thread naming a participant who does not exist", () => {
+    const result = applyDeltas(world(), [{ ...open, participantRefs: ["nobody"] }], context());
+    expect(result.rejected[0]!.kind).toBe("reference");
+  });
+
+  it("advances a thread and closes it, and never advances it again", () => {
+    const opened = applyDeltas(world(), [open], context());
+    const id = opened.assignedIds.get("plot")!;
+    const advanced = applyDeltas(opened.world, [
+      { op: "storyline_advance", storylineRef: id, development: "Fabius wins over two senators.", phase: "escalating", nextDevelopment: "A motion is drafted.", addParticipantRefs: [], reason: "It moves." },
+      { op: "storyline_advance", storylineRef: id, development: "The plot collapses.", phase: "closed", addParticipantRefs: [], reason: "It ends." },
+      { op: "storyline_advance", storylineRef: id, development: "Nothing more.", addParticipantRefs: [], reason: "Too late." },
+    ], context());
+    const storyline = advanced.world.storylines[0]!;
+    expect(storyline.history).toEqual(["Fabius wins over two senators.", "The plot collapses."]);
+    expect(storyline.phase).toBe("closed");
+    expect(storyline.closedAtStep).toBe(0);
+    expect(advanced.rejected).toHaveLength(1);
+    expect(advanced.rejected[0]!.kind).toBe("world");
+  });
+
+  it("records no breach for the world's bookkeeping, even inside the ruler's own polity", () => {
+    // A thread and a circumstance are powers no office holds. Judged against
+    // the consul's office they would have been the sixth false insubordination.
+    const result = applyDeltas(world(), [
+      open,
+      { op: "character_pressure_set", characterRef: "quintus-fabius", action: "create", kind: "political_danger", intensity: 60, label: "Afraid of being found out.", reviewInDays: 30, expiresInDays: null, visibility: "private", reason: "The plot weighs on him." },
+    ], context({ actsForTheWorld: true }));
+    expect(result.breaches).toHaveLength(0);
+    expect(result.applied).toHaveLength(2);
+  });
+});
+
+describe("pressures on a person", () => {
+  const create: WorldDelta = { op: "character_pressure_set", characterRef: "quintus-fabius", action: "create", kind: "debt", intensity: 55, label: "A loan called in.", reviewInDays: 20, expiresInDays: 200, visibility: "polity", reason: "Money." };
+
+  it("creates, refreshes and resolves a pressure of one kind", () => {
+    const created = applyDeltas(world(), [create], context());
+    const pressure = created.world.characterPressures.find((candidate) => candidate.characterId === "quintus-fabius" && candidate.kind === "debt")!;
+    expect(pressure.intensity).toBe(55);
+    expect(pressure.expiresAtStep).toBe(200);
+
+    const refreshed = applyDeltas(created.world, [{ ...create, action: "refresh", intensity: 20 }], context());
+    expect(refreshed.world.characterPressures.filter((candidate) => candidate.kind === "debt" && candidate.status === "active")).toHaveLength(1);
+    expect(refreshed.world.characterPressures.find((candidate) => candidate.id === pressure.id)!.intensity).toBe(75);
+
+    const resolved = applyDeltas(refreshed.world, [{ ...create, action: "resolve" }], context());
+    expect(resolved.world.characterPressures.find((candidate) => candidate.id === pressure.id)!.status).toBe("resolved");
+  });
+
+  it("creates on refresh when there is nothing to refresh, and refuses to lift what is not there", () => {
+    const refreshed = applyDeltas(world(), [{ ...create, action: "refresh" }], context());
+    expect(refreshed.world.characterPressures.some((candidate) => candidate.kind === "debt")).toBe(true);
+    const lifted = applyDeltas(world(), [{ ...create, action: "resolve" }], context());
+    expect(lifted.rejected[0]!.kind).toBe("world");
+  });
+});
+
+describe("letters between powers", () => {
+  const send = (overrides: Partial<Extract<WorldDelta, { op: "diplomatic_message_send" }>> = {}): WorldDelta => ({
+    op: "diplomatic_message_send",
+    localId: "letter",
+    kind: "alliance_offer",
+    fromPolityId: "rome",
+    fromCharacterRef: "marcus-atilius",
+    toPolityId: "syracuse",
+    toCharacterRef: null,
+    subject: "An understanding over the strait",
+    terms: "Rome offers Syracuse an alliance against any power that closes the strait.",
+    replyWithinDays: 30,
+    inReplyToRef: null,
+    visibility: "polity",
+    reason: "The strait cannot be held alone.",
+    ...overrides,
+  });
+
+  it("puts a letter in the world that somebody has to answer", () => {
+    const result = applyDeltas(world(), [send()], context());
+
+    expect(result.rejected).toHaveLength(0);
+    const letter = result.world.diplomacy[0]!;
+    expect(letter.status).toBe("awaiting_reply");
+    expect(letter.toPolityId).toBe("syracuse");
+    // Days in, a step out: the model never states a date.
+    expect(letter.replyDueByStep).toBe(result.world.elapsedStep + 30);
+  });
+
+  it("moves the sender's trust by how the answer came back", () => {
+    const sent = applyDeltas(world(), [send()], context());
+    const letterId = sent.world.diplomacy[0]!.id;
+    const answered = applyDeltas(
+      sent.world,
+      [{ op: "diplomatic_message_answer", messageRef: letterId, answer: "refused", answerText: "Syracuse will not bind itself to Rome.", reason: "It would cost more than it buys." }],
+      context({ actorRef: { kind: "character", id: "hieron" } }),
+    );
+
+    expect(answered.rejected).toHaveLength(0);
+    expect(answered.world.diplomacy[0]!.status).toBe("answered");
+    const stance = answered.world.polityStances.find((candidate) => candidate.polityId === "rome" && candidate.towardPolityId === "syracuse")!;
+    expect(stance.trustScore).toBeLessThan(0);
+  });
+
+  it("refuses to answer the same letter twice", () => {
+    const sent = applyDeltas(world(), [send()], context());
+    const letterId = sent.world.diplomacy[0]!.id;
+    const answer: WorldDelta = { op: "diplomatic_message_answer", messageRef: letterId, answer: "accepted", answerText: "Agreed.", reason: "It suits us." };
+    const once = applyDeltas(sent.world, [answer], context());
+    const twice = applyDeltas(once.world, [answer], context());
+
+    expect(twice.rejected).toHaveLength(1);
+    expect(twice.rejected[0]!.kind).toBe("world");
+  });
+
+  it("records a senator writing to a foreign power in Rome's name as a breach", () => {
+    // Not an impossibility -- private correspondence with a foreign power is
+    // exactly the kind of act VISION §12 exists to make expressible.
+    const result = applyDeltas(world(), [send({ fromCharacterRef: "quintus-fabius" })], context({ actorRef: { kind: "character", id: "quintus-fabius" } }));
+
+    expect(result.rejected).toHaveLength(0);
+    expect(result.breaches.length).toBeGreaterThan(0);
+    expect(result.world.diplomacy).toHaveLength(1);
+  });
+
+  it("will not carry a letter to a power that does not exist", () => {
+    const result = applyDeltas(world(), [send({ toPolityId: "atlantis" })], context());
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.kind).toBe("reference");
+  });
+});
+
+describe("what the powers have standing between them", () => {
+  const declare = (kind: "war" | "peace", overrides: Partial<Extract<WorldDelta, { op: "agreement_open" }>> = {}): WorldDelta => ({
+    op: "agreement_open",
+    localId: `${kind}-1`,
+    kind,
+    polityId: "rome",
+    otherPolityId: "carthage",
+    terms: kind === "war" ? "Over the strait and the cities on it." : "Both withdraw behind the strait.",
+    forDays: null,
+    sourceMessageRef: null,
+    visibility: "public",
+    reason: "The Senate has resolved it.",
+    ...overrides,
+  });
+
+  it("holds a war as a fact about two powers rather than a number", () => {
+    const result = applyDeltas(world(), [declare("war")], context());
+    expect(result.rejected).toHaveLength(0);
+    expect(result.world.polityAgreements[0]!.kind).toBe("war");
+  });
+
+  it("makes peace close the war it ends, in one act", () => {
+    const atWarNow = applyDeltas(world(), [declare("war")], context());
+    const settled = applyDeltas(atWarNow.world, [declare("peace")], context());
+
+    expect(settled.rejected).toHaveLength(0);
+    const war = settled.world.polityAgreements.find((agreement) => agreement.kind === "war")!;
+    expect(war.status).toBe("ended");
+    expect(settled.world.polityAgreements.find((agreement) => agreement.kind === "peace")!.status).toBe("active");
+  });
+
+  it("will not let two powers stand in the same agreement twice", () => {
+    const once = applyDeltas(world(), [declare("war")], context());
+    const twice = applyDeltas(once.world, [declare("war", { localId: "war-2" })], context());
+    expect(twice.rejected).toHaveLength(1);
+  });
+
+  it("refuses a battle between powers at peace until somebody breaks it", () => {
+    // How most wars start, but not something the world should slide into
+    // without anybody having decided it.
+    const state = world();
+    const roman = state.material.forces.find((force) => force.polityId === "rome")!;
+    const facing: WorldState = {
+      ...state,
+      material: {
+        ...state.material,
+        forces: state.material.forces.map((force) => (force.polityId === "carthage" ? { ...force, locationId: roman.locationId } : force)),
+      },
+    };
+    const atPeace = applyDeltas(facing, [declare("peace")], context());
+    const engage: WorldDelta = { op: "force_engage", forceRef: "legio-i", targetForceRef: "carthaginian-army", posture: "offer_battle", tactic: null, reason: "Force the issue." };
+    const refused = applyDeltas(atPeace.world, [engage], context());
+
+    expect(refused.rejected.some((rejection) => rejection.reason.includes("stand in peace"))).toBe(true);
+    const war = applyDeltas(refused.world, [declare("war", { localId: "war-2" }), engage], context());
+    expect(war.rejected).toHaveLength(0);
+  });
+});
+
+describe("getting an army from here to there", () => {
+  const march = (to: string): WorldDelta => ({ op: "force_modify", forceRef: "legio-i", locationId: to, reason: "March." });
+  const terrains = definition.map.terrains;
+
+  it("lets an army step to ground it borders", () => {
+    const result = applyDeltas(world(), [march("ita-72843720b81376294924159-sicily-southeast")], context({ terrains }));
+    expect(result.rejected).toHaveLength(0);
+    expect(result.world.material.forces.find((force) => force.id === "legio-i")!.locationId).toBe("ita-72843720b81376294924159-sicily-southeast");
+  });
+
+  it("refuses a march across the map, and says how far it actually is", () => {
+    // The map graph has been specified from the beginning and nothing read it,
+    // so a legion could be in Sicily in one delta and Africa in the next.
+    const result = applyDeltas(world(), [march("tun-13205935b88806172084765")], context({ terrains }));
+
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.kind).toBe("world");
+    // This fixture's Africa has no edges at all, so the honest answer is that
+    // no road leads there -- not a distance.
+    expect(result.rejected[0]!.reason).toContain("cannot reach");
+    expect(result.rejected[0]!.reason).toContain("force_move");
+    expect(result.world.material.forces.find((force) => force.id === "legio-i")!.locationId).toBe(world().material.forces.find((force) => force.id === "legio-i")!.locationId);
+  });
+
+  it("still refuses a province that does not exist, as a reference fault", () => {
+    const result = applyDeltas(world(), [march("atlantis")], context({ terrains }));
+    expect(result.rejected[0]!.kind).toBe("reference");
+  });
+
+  it("holds a force to the crossings both sides of the edge admit", () => {
+    // An edge is legal only where the terrain on both ends admits its crossing.
+    // Declaring the Roman province land-only closes the strait to it.
+    const state = world();
+    const landlocked = definition.map.terrains.map((terrain) => ({ ...terrain, allowedCrossings: ["pass" as const] }));
+    const result = applyDeltas(state, [march("ita-72843720b81376294924159-sicily-southeast")], context({ terrains: landlocked }));
+
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.reason).toContain("crossing");
+  });
+});
+
+describe("crossing water", () => {
+  // The Punic Wars scenario is the one with a strait in it.
+  const punicWorld = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
+  const punicDefinition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
+  const punicContext = (overrides: Partial<ApplyContext> = {}): ApplyContext => ({
+    now: { day: 0, minute: 540 },
+    actorRef: { kind: "character", id: "gaius-genucius" },
+    offices: punicDefinition.government.offices,
+    warfare: punicDefinition.warfare,
+    terrains: punicDefinition.map.terrains,
+    ids: createIdFactory("sea"),
+    gameId: "game-sea",
+    ...overrides,
+  });
+
+  /** The consular army standing on the Italian shore of the strait. */
+  const atTheStrait = (state: WorldState = punicWorld()): WorldState => ({
+    ...state,
+    material: {
+      ...state.material,
+      forces: state.material.forces.map((force) =>
+        force.id === "roman-field-army" ? { ...force, locationId: "punic-italy-bruttian-highlands" } : force),
+    },
+  });
+
+  const cross: WorldDelta = {
+    op: "force_modify",
+    forceRef: "roman-field-army",
+    locationId: "ita-72843720b81376294924159-sicily-northeast",
+    reason: "Cross to Messana.",
+  };
+
+  it("refuses to walk an army across the strait", () => {
+    // Authored as a land edge because nothing could tell the difference, which
+    // is how a naval war came to be fightable on foot.
+    const withoutHulls: WorldState = (() => {
+      const state = atTheStrait();
+      return { ...state, material: { ...state.material, forces: state.material.forces.filter((force) => force.id !== "allied-greek-hulls") } };
+    })();
+    const result = applyDeltas(withoutHulls, [cross], punicContext());
+
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.reason).toContain("without ships");
+  });
+
+  it("carries the army over when there are hulls to carry it, and the ships go too", () => {
+    const state = atTheStrait();
+    const carried: WorldState = {
+      ...state,
+      material: {
+        ...state.material,
+        // Enough hulls for the men aboard: 18 ships at thirty men each.
+        forces: state.material.forces.map((force) =>
+          force.id === "roman-field-army" ? { ...force, personnel: [{ categoryId: "infantry", label: "Legionaries", fit: 500, unavailable: [] }] } : force),
+      },
+    };
+    const result = applyDeltas(carried, [cross], punicContext());
+
+    expect(result.rejected).toHaveLength(0);
+    const force = (id: string) => result.world.material.forces.find((candidate) => candidate.id === id)!;
+    expect(force("roman-field-army").locationId).toBe("ita-72843720b81376294924159-sicily-northeast");
+    // A fleet that ferries an army and stays behind has not sailed anywhere.
+    expect(force("allied-greek-hulls").locationId).toBe("ita-72843720b81376294924159-sicily-northeast");
+  });
+
+  it("lets a fleet cross on its own account", () => {
+    const result = applyDeltas(
+      punicWorld(),
+      [{ op: "force_modify", forceRef: "carthaginian-fleet", locationId: "tun-13205935b88806172084765", reason: "Home to Carthage." }],
+      punicContext({ actorRef: { kind: "character", id: "hannibal-gisco" } }),
+    );
+    expect(result.rejected).toHaveLength(0);
+  });
+
+  it("will not have ships and an army give battle to each other", () => {
+    const state = punicWorld();
+    const facing: WorldState = {
+      ...state,
+      material: {
+        ...state.material,
+        forces: state.material.forces.map((force) =>
+          force.id === "carthaginian-fleet" ? { ...force, locationId: "punic-italy-latium" } : force),
+      },
+      polityAgreements: [{
+        id: "war-1", kind: "war", polityId: "rome", otherPolityId: "carthage", terms: "Open war.",
+        sinceStep: 0, untilStep: null, sourceMessageId: null, status: "active", endedAtStep: null, endedReason: null, visibility: "public",
+      }],
+    };
+    const result = applyDeltas(
+      facing,
+      [{ op: "force_engage", forceRef: "roman-field-army", targetForceRef: "carthaginian-fleet", posture: "offer_battle", tactic: null, reason: "Drive them off." }],
+      punicContext(),
+    );
+
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.reason).toContain("same element");
   });
 });

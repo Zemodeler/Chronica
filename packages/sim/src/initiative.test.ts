@@ -98,3 +98,17 @@ describe("who seeks the ruler out", () => {
     expect(seekers(mild)).toHaveLength(0);
   });
 });
+
+describe("what stays hidden", () => {
+  it("never sends someone whose heavy pressure is a secret", () => {
+    // A planted fear of being found out at 80/100 used to walk up to the ruler
+    // and confess itself as an opening line.
+    const world = base();
+    const pressure = (visibility: "private" | "polity") => ({
+      id: `p-${visibility}`, characterId: "quintus-fabius", kind: "political_danger" as const, intensity: 80,
+      label: "Afraid the consul suspects him.", sourceEventId: null, createdAtStep: 0, reviewAtStep: 30, expiresAtStep: null, visibility, status: "active" as const,
+    });
+    expect(seekers({ ...world, characterPressures: [pressure("private")] })).toHaveLength(0);
+    expect(seekers({ ...world, characterPressures: [pressure("polity")] }).map((entry) => entry.characterId)).toContain("quintus-fabius");
+  });
+});

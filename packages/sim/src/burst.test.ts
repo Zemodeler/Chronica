@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
-import { FactSchema, ScenarioDefinitionSchema, WorldStateSchema, factsVisibleTo, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
+import { FactSchema, ScenarioDefinitionSchema, WorldStateSchema, factsKnownTo, factsVisibleTo, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
 import { DEFAULT_BUDGET, runSimulationBurst, type BurstInput } from "./burst";
+import { composeChronicle } from "./chronicle";
 import type { SimModelPort, SimOperation } from "./ports";
 
 const definition = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition);
@@ -403,7 +404,7 @@ describe("budget and termination", () => {
       ...JSON.parse(RAISE_TWO_LEGIONS),
       deltas: [],
       schedule: [],
-      watch: { label: "Wake me when Carthage's army reaches the north-east.", predicate: { kind: "force_enters_province", provinceId: "ita-72843720b81376294924159-sicily-northeast", polityId: "carthage" } },
+      watch: { label: "Wake me when Carthage's army moves up the north coast.", predicate: { kind: "force_enters_province", provinceId: "ita-72843720b81376294924159-sicily-northwest", polityId: "carthage" } },
     });
     const march = JSON.stringify({
       actors: [{
@@ -412,7 +413,8 @@ describe("budget and termination", () => {
         proposal: {
           narrativeSummary: "The army crosses into Sicily.",
           frictions: [],
-          deltas: [{ op: "force_modify", forceRef: "carthaginian-army", locationId: "ita-72843720b81376294924159-sicily-northeast", reason: "The crossing is made." }],
+          // One province, because an army may only step to ground it borders.
+          deltas: [{ op: "force_modify", forceRef: "carthaginian-army", locationId: "ita-72843720b81376294924159-sicily-northwest", reason: "The march up the coast." }],
           facts: [],
           delegations: [],
           schedule: [],
@@ -524,5 +526,199 @@ describe("a later order carries the world to what was scheduled", () => {
     const port = scriptedPort({ simulate_orchestrate: [QUIET], simulate_cognition: [JSON.stringify({ actors: [] }), JSON.stringify({ actors: [] }), JSON.stringify({ actors: [] })] });
     const result = await runSimulationBurst(input(port, { queue: distant, orderText: "Wait." }));
     expect(result.world.instant.day).toBeLessThanOrEqual(clock.maxSpanDays);
+  });
+});
+
+/** A port that also keeps what it was shown, so a test can read the prompts. */
+function capturingScriptedPort(script: Partial<Record<SimOperation, string[]>>): SimModelPort & { calls: SimOperation[]; shown: Partial<Record<SimOperation, string[]>> } {
+  const remaining: Partial<Record<SimOperation, string[]>> = structuredClone(script);
+  const calls: SimOperation[] = [];
+  const shown: Partial<Record<SimOperation, string[]>> = {};
+  return {
+    calls,
+    shown,
+    complete(operation, _system, user) {
+      calls.push(operation);
+      (shown[operation] ??= []).push(user);
+      const next = remaining[operation]?.shift();
+      if (next === undefined) return Promise.reject(new Error(`the script has no further "${operation}" response`));
+      return Promise.resolve(next);
+    },
+  };
+}
+
+const PLOT_SEED = {
+  key: "seed-plot", kind: "person_problem" as const, archetype: "conspiracy", severity: "serious" as const, secret: true, oneShot: false, repeated: false,
+  target: { provinceId: null, provinceName: null, polityId: "rome", polityName: "Roman Republic", characterId: "quintus-fabius", characterName: "Quintus Fabius" },
+  inPlayerRealm: true, why: "The world has been quiet at home.", brief: "Quintus Fabius [quintus-fabius] has begun something against the government he serves.",
+};
+
+const FABIUS = { kind: "character" as const, id: "quintus-fabius" };
+
+/** The order carried out, and beside it a conspiracy the model wrongly marks "polity" and then describes in its summary. */
+const ORDER_AND_PLOT = JSON.stringify({
+  intent: { summary: "Inspect the legion.", domains: ["military"] },
+  narrativeSummary: "The consul inspects his legion. Meanwhile Fabius gathers his friends against him.",
+  frictions: [],
+  deltas: [
+    { op: "force_modify", forceRef: "legio-i", moraleBpsDelta: 200, reason: "The consul's inspection lifts spirits." },
+    { op: "storyline_open", localId: "plot", seedKey: "seed-plot", title: "The Quaestor's Silence", participantRefs: ["quintus-fabius"], provinceId: null, phase: "brewing", stakes: "Whether the Senate can be turned against the consul unnoticed.", nextDevelopment: "Fabius sounds out the patrician bloc.", visibility: "private", reason: "The world stirs." },
+    { op: "character_pressure_set", characterRef: "quintus-fabius", action: "create", kind: "political_danger", intensity: 80, label: "Afraid the consul suspects him.", reviewInDays: 30, expiresInDays: null, visibility: "private", reason: "A plotter's fear." },
+    { op: "character_intent_set", actorCharacterRef: "quintus-fabius", actionType: "seek_support", targetRefs: [], rationale: "Gather senators against the consul.", priority: 70, visibility: "private" },
+  ],
+  facts: [
+    { localId: "inspection", kind: "inspection", summary: "The consul inspects the first legion.", affectedRefs: [{ kind: "force", id: "legio-i" }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 10 },
+    { localId: "plot_fact", kind: "conspiracy_begun", summary: "Quintus Fabius begins quietly gathering senators against the consul.", affectedRefs: [FABIUS], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 40, knownToRefs: [FABIUS], storylineRef: "local:plot" },
+  ],
+  delegations: [],
+  schedule: [
+    { kind: "plot_strike", dueInDays: 20, summary: "Fabius's friends move a motion of censure.", subjectRefs: ["quintus-fabius"], causeFactLocalId: "plot_fact", visibility: "private", significance: 60, knownToRefs: [FABIUS], storylineRef: "local:plot" },
+  ],
+  cognitionCandidates: [], outcome: "chronicle", playerDecision: null,
+});
+
+/** Fabius, asked what he does about it, oversteps -- and only he knows. */
+const FABIUS_ACTS = JSON.stringify({
+  actors: [{
+    actorRef: FABIUS,
+    reasoning: "The legion's discontent is a lever.",
+    proposal: {
+      narrativeSummary: "Fabius spreads discontent among the legion's officers.",
+      frictions: [],
+      deltas: [{ op: "force_modify", forceRef: "legio-i", moraleBpsDelta: -300, reason: "Whispers among the officers." }],
+      facts: [{ localId: "whispers", kind: "sedition", summary: "Fabius's agents whisper against the consul in the camp.", affectedRefs: [FABIUS], visibility: "private", discoveryState: "private", knowableInDays: 0, significance: 35, knownToRefs: [FABIUS] }],
+      delegations: [], schedule: [],
+    },
+  }],
+});
+
+describe("the world stirs: a secret plot", () => {
+  const NOBODY = JSON.stringify({ actors: [] });
+  const run = async () => {
+    const port = capturingScriptedPort({ simulate_orchestrate: [ORDER_AND_PLOT], simulate_cognition: [FABIUS_ACTS, NOBODY, NOBODY, NOBODY] });
+    const result = await runSimulationBurst(input(port, { orderText: "Inspect the legion.", narratorSeed: PLOT_SEED }));
+    return { port, result };
+  };
+  const player = { kind: "character" as const, id: "marcus-atilius" };
+
+  it("puts the seed to the orchestrator, and records that it was taken up", async () => {
+    const { port, result } = await run();
+    expect(port.shown.simulate_orchestrate![0]).toContain("THE WORLD STIRS (seed seed-plot)");
+    const thread = result.world.storylines.find((storyline) => storyline.seedKey === "seed-plot")!;
+    expect(thread.origin).toBe("world");
+    expect(thread.visibility).toBe("private");
+    expect(result.world.narrator).toEqual({ lastSeedDay: 0, seedCount: 1, lastSeedKey: "seed-plot", consumed: true });
+    expect(result.world.characterPressures.some((pressure) => pressure.characterId === "quintus-fabius" && pressure.visibility === "private")).toBe(true);
+  });
+
+  it("keeps a secret thread's fact secret whatever the model wrote, and known to its plotter", async () => {
+    const { result } = await run();
+    const plot = result.newFacts.find((fact) => fact.kind === "conspiracy_begun")!;
+    expect(plot.visibility).toBe("private");
+    expect(plot.discovery.discoveredBy.map((entry) => entry.observerRef.id)).toContain("quintus-fabius");
+    expect(result.world.storylines.find((storyline) => storyline.seedKey === "seed-plot")!.causalFactIds).toContain(plot.id);
+  });
+
+  it("asks the plotter first what he does about it, showing him the thread", async () => {
+    const { port } = await run();
+    const first = port.shown.simulate_cognition![0]!;
+    expect(first).toContain("## Quintus Fabius [quintus-fabius]");
+    expect(first).toContain("Caught up in:");
+    expect(first).toContain("The Quaestor's Silence");
+    expect(first).toContain("They mean to:");
+  });
+
+  it("records the plotter's overreach as a breach only he knows of", async () => {
+    const { result } = await run();
+    expect(result.breaches.length).toBeGreaterThan(0);
+    const breach = result.newFacts.find((fact) => fact.kind === "authority_breach")!;
+    expect(breach.visibility).toBe("private");
+    expect(breach.discovery.discoveredBy.map((entry) => entry.observerRef.id)).toEqual(["quintus-fabius"]);
+  });
+
+  it("fires the plot's next step as a private event naming its subject", async () => {
+    const { result } = await run();
+    const draft = result.scheduled.find((event) => event.kind === "plot_strike")!;
+    expect(draft.payload.visibility).toBe("private");
+    expect(draft.payload.storylineId).toBe(result.world.storylines.find((storyline) => storyline.seedKey === "seed-plot")!.id);
+    const strike = result.newFacts.find((fact) => fact.kind === "plot_strike");
+    expect(strike).toBeDefined();
+    expect(strike!.visibility).toBe("private");
+    expect(strike!.affectedEntities).toEqual([FABIUS]);
+    expect(strike!.discovery.discoveredBy.map((entry) => entry.observerRef.id)).toEqual(["quintus-fabius"]);
+  });
+
+  it("lets nothing of it reach the ruler's record", async () => {
+    const { result } = await run();
+    const known = factsKnownTo(result.newFacts, player, "rome", result.world.instant).map((fact) => fact.kind);
+    expect(known).toContain("inspection");
+    for (const kind of ["conspiracy_begun", "sedition", "authority_breach", "plot_strike"]) expect(known).not.toContain(kind);
+
+    // The plotter's own account travels with his private facts and is not
+    // his ruler's to read; the thread's title is known to its participants
+    // alone. The orchestrator's summary is the one thing code cannot gate --
+    // it describes the visible order too -- which is what rule 20 is for.
+    const historian = capturingScriptedPort({ compose_chronicle: [JSON.stringify({ entries: [] })] });
+    await composeChronicle({
+      port: historian, clock, observer: player, observerPolityId: "rome", facts: result.newFacts, from: { day: 0, minute: 0 }, to: result.world.instant,
+      narrative: result.narrative, frictions: result.frictions, significanceByFactId: result.significanceByFactId, storylines: result.world.storylines,
+    });
+    const shown = historian.shown.compose_chronicle![0]!;
+    expect(shown).toContain("inspects the first legion");
+    expect(shown).not.toContain("spreads discontent");
+    expect(shown).not.toContain("whisper");
+    expect(shown).not.toContain("censure");
+    expect(shown).not.toContain("Quaestor");
+    expect(result.narrative.find((line) => line.line.includes("gathers his friends"))!.actorRef).toBeNull();
+  });
+
+  it("does not stir again until the cadence has run", async () => {
+    const { result } = await run();
+    // Ten days after the seed, not ninety: the ledger says the world stirred
+    // on day 0, and a month has not passed.
+    const soon: WorldState = { ...result.world, instant: { day: 10, minute: 0 }, elapsedStep: 10 };
+    const port = capturingScriptedPort({ simulate_orchestrate: [QUIET], simulate_cognition: [NOBODY, NOBODY, NOBODY, NOBODY] });
+    await runSimulationBurst(input(port, { world: soon, knownFacts: result.newFacts, orderText: "Wait." }));
+    expect(port.shown.simulate_orchestrate![0]).not.toContain("THE WORLD STIRS");
+  });
+});
+
+describe("the world stirs: a plague in the open", () => {
+  const LATIUM = "ita-local-23120603B86473916475875";
+  const SEED = {
+    ...PLOT_SEED, key: "seed-plague", kind: "world_event" as const, archetype: "plague", secret: false,
+    target: { provinceId: LATIUM, provinceName: "Latium", polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null },
+    brief: `Sickness has come to Latium [${LATIUM}].`,
+  };
+  const PLAGUE = JSON.stringify({
+    intent: { summary: "Wait.", domains: [] },
+    narrativeSummary: "The consul waits on events. Sickness spreads through Latium.",
+    frictions: [],
+    deltas: [
+      { op: "province_material_shift", provinceId: LATIUM, foodSecurityBpsDelta: -1800, stabilityBpsDelta: -1200, reason: "An epidemic." },
+      { op: "storyline_open", localId: "plague", seedKey: "seed-plague", title: "The Sickness in Latium", participantRefs: ["quintus-fabius"], provinceId: LATIUM, phase: "escalating", stakes: "Whether Rome can feed itself through the summer.", nextDevelopment: "The sickness spreads or burns out.", visibility: "public", reason: "The world stirs." },
+    ],
+    facts: [{ localId: "outbreak", kind: "plague_outbreak", summary: "Sickness breaks out in Latium and the markets empty.", affectedRefs: [{ kind: "province", id: LATIUM }, { kind: "polity", id: "rome" }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 60, storylineRef: "local:plague" }],
+    delegations: [],
+    schedule: [{ kind: "plague_wave", dueInDays: 20, summary: "The sickness reaches the Aventine.", subjectRefs: [LATIUM], causeFactLocalId: "outbreak", visibility: "public", significance: 55, knownToRefs: [], storylineRef: "local:plague" }],
+    cognitionCandidates: [], outcome: "chronicle", playerDecision: null,
+  });
+
+  it("changes the province, opens a public thread, and carries its next wave into the same thread", async () => {
+    const NOBODY = JSON.stringify({ actors: [] });
+    const port = capturingScriptedPort({ simulate_orchestrate: [PLAGUE], simulate_cognition: [NOBODY, NOBODY, NOBODY, NOBODY] });
+    const result = await runSimulationBurst(input(port, { orderText: "Wait.", narratorSeed: SEED }));
+
+    const thread = result.world.storylines.find((storyline) => storyline.seedKey === "seed-plague")!;
+    expect(thread.visibility).toBe("public");
+    const wave = result.newFacts.find((fact) => fact.kind === "plague_wave")!;
+    expect(wave.visibility).toBe("public");
+    expect(wave.affectedEntities).toEqual([{ kind: "province", id: LATIUM }]);
+    expect(thread.causalFactIds).toContain(wave.id);
+    expect(result.world.material.provinceMaterial.find((material) => material.provinceId === LATIUM)!.foodSecurityBps).toBeLessThan(10_000);
+
+    const known = factsKnownTo(result.newFacts, { kind: "character", id: "marcus-atilius" }, "rome", result.world.instant).map((fact) => fact.kind);
+    expect(known).toContain("plague_outbreak");
+    expect(known).toContain("plague_wave");
   });
 });

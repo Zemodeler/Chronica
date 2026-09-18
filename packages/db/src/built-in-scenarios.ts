@@ -62,8 +62,8 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
 });
 
 const initialWorld: WorldState = WorldStateSchema.parse({
-  schemaVersion: 2,
-  pins: { scenarioId: FIRST_PUNIC_WAR_SCENARIO_ID, scenarioVersion: 4, libraryVersion: 1 },
+  schemaVersion: 3,
+  pins: { scenarioId: FIRST_PUNIC_WAR_SCENARIO_ID, scenarioVersion: 7, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   map: {

@@ -3,7 +3,8 @@ import {
   emitFacts,
   type Fact,
   type FactDraft,
-  type FactProposal,
+  type FactProposalDraft,
+  type OrderPartyRef,
   type WorldInstant,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
@@ -20,7 +21,7 @@ import type { IdFactory } from "./ports";
  */
 
 export interface MaterializeFactsInput {
-  readonly proposals: readonly FactProposal[];
+  readonly proposals: readonly FactProposalDraft[];
   readonly now: WorldInstant;
   readonly atStep: number;
   readonly ids: IdFactory;
@@ -41,10 +42,15 @@ export interface MaterializedFacts {
    */
   readonly significanceByFactId: ReadonlyMap<string, number>;
   readonly significance: number;
+  /** Fact id → the storyline it belongs to (resolved), for the caller to link the thread. */
+  readonly storylineByFactId: ReadonlyMap<string, string>;
 }
 
 export function materializeFacts(input: MaterializeFactsInput): MaterializedFacts {
   const factIds = new Map<string, string>();
+
+  const resolveId = (id: string): string => input.assignedIds.get(id.replace(/^local:/, "")) ?? id;
+  const resolveParty = (ref: OrderPartyRef): OrderPartyRef => ({ kind: ref.kind, id: resolveId(ref.id) });
 
   const drafts: FactDraft[] = input.proposals.map((proposal) => {
     const timed = proposal.discoveryState === "delayed" || proposal.discoveryState === "rumoured" || proposal.discoveryState === "intercepted";
@@ -53,17 +59,17 @@ export function materializeFacts(input: MaterializeFactsInput): MaterializedFact
       atStep: input.atStep,
       kind: proposal.kind,
       summary: proposal.summary,
-      affectedEntities: proposal.affectedRefs.map((ref) => ({
-        kind: ref.kind,
-        id: input.assignedIds.get(ref.id.replace(/^local:/, "")) ?? ref.id,
-      })),
+      affectedEntities: (proposal.affectedRefs ?? []).map(resolveParty),
       resourceChanges: [],
       authorityChange: undefined,
       visibility: proposal.visibility,
       discovery: {
         state: proposal.discoveryState,
-        knowableAtInstant: timed ? addMinutes(input.now, proposal.knowableInDays * 1440) : null,
-        discoveredBy: [],
+        knowableAtInstant: timed ? addMinutes(input.now, (proposal.knowableInDays ?? 0) * 1440) : null,
+        // The people in the room know it the moment it happens. Without this a
+        // private fact was known to nobody, its author included, so a plotter
+        // could never be woken by their own plot.
+        discoveredBy: (proposal.knownToRefs ?? []).map((ref) => ({ observerRef: resolveParty(ref), atInstant: input.now, via: "witnessed" as const })),
       },
       evidence: null,
       eligibleReactionScopes: [],
@@ -75,13 +81,15 @@ export function materializeFacts(input: MaterializeFactsInput): MaterializedFact
 
   const facts = emitFacts(drafts, () => input.ids.next("fact"));
   const significanceByFactId = new Map<string, number>();
+  const storylineByFactId = new Map<string, string>();
   facts.forEach((fact, index) => {
     const proposal = input.proposals[index];
     if (proposal === undefined) return;
     factIds.set(proposal.localId, fact.id);
     significanceByFactId.set(fact.id, proposal.significance);
+    if (proposal.storylineRef !== null && proposal.storylineRef !== undefined) storylineByFactId.set(fact.id, resolveId(proposal.storylineRef));
   });
 
   const significance = input.proposals.reduce((sum, proposal) => sum + proposal.significance, 0);
-  return { facts, factIds, significanceByFactId, significance };
+  return { facts, factIds, significanceByFactId, significance, storylineByFactId };
 }
