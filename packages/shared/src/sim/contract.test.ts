@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DELTA_AUTHORITY_DOMAIN, WORLD_DELTA_OPS, WorldDeltaSchema } from "./deltas";
+import { DOMAIN_POWER_BY_ACTION } from "../authority/authority-grant";
 import { OrchestratorOutputSchema } from "./proposal";
 import { localRef, resolveRef } from "./refs";
 
@@ -86,9 +87,29 @@ describe("local reference resolution", () => {
   });
 });
 
+describe("local handles", () => {
+  it("accepts the hyphenated handles the model writes", () => {
+    const parsed = WorldDeltaSchema.safeParse({ op: "character_intent_set", actorCharacterRef: "local:clepsina-continues-march", actionType: "prepare", rationale: "On the road." });
+    expect(parsed.success).toBe(true);
+  });
+});
+
 describe("authority domain map", () => {
   it("classifies every delta op", () => {
     for (const op of WORLD_DELTA_OPS) expect(DELTA_AUTHORITY_DOMAIN[op]).toBeDefined();
     expect(Object.keys(DELTA_AUTHORITY_DOMAIN).sort()).toEqual([...WORLD_DELTA_OPS].sort());
+  });
+
+  it("gives every op an office can list a power to derive from it", () => {
+    // Offices derive their authority from the ops they list, through this
+    // second map. An op missing here derived nothing, so the first person to
+    // use it lawfully -- a consul resolving a Senate procedure -- was recorded
+    // as insubordinate. Fiscal ops are scoped to a named treasury instead.
+    const ops = new Set<string>(WORLD_DELTA_OPS);
+    for (const key of Object.keys(DOMAIN_POWER_BY_ACTION)) expect(ops.has(key), key).toBe(true);
+    for (const op of WORLD_DELTA_OPS) {
+      if (DELTA_AUTHORITY_DOMAIN[op] === "fiscal") continue;
+      expect(DOMAIN_POWER_BY_ACTION[op], op).toBeDefined();
+    }
   });
 });

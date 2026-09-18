@@ -71,6 +71,9 @@ export function whoSeeksThePlayer(input: InitiativeInput): ContactInitiation[] {
   // people manage their own difficulties, as they should.
   for (const pressure of world.characterPressures) {
     if (pressure.status !== "active" || pressure.intensity < 70) continue;
+    // A private pressure is one they are hiding. Whatever its weight, a man
+    // afraid of being found out does not walk up to the ruler and say so.
+    if (pressure.visibility === "private") continue;
     const character = world.characters.find((candidate) => candidate.id === pressure.characterId);
     if (character === undefined) continue;
     const player = world.characters.find((candidate) => candidate.id === playerId);

@@ -16,6 +16,8 @@ export const OrderPartyRefSchema = z
       // A project is as much a thing an event affects as a force is; without it
       // the simulation could not say that a fact concerned an ongoing effort.
       "project",
+      /** A thread of history is a thing a fact can be about, now that the world follows them. */
+      "storyline",
       "region", "theatre", "world",
     ]),
     id: EntityIdSchema,

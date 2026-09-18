@@ -1,6 +1,9 @@
 # Plan: diplomacy, war, movement, the map's conflicts, and the sea
 
-**Status:** proposed, 2026-09-18. Nothing here is built.
+**Status:** executed, 2026-09-18, on branch `narrator-seeds`. All five stages are built and
+covered by tests. Where the implementation departed from the proposal below, the proposal is left
+as written and the difference is noted in the stage it belongs to — the reasoning is what this
+document is for.
 
 Five gaps found by auditing [`docs/VISION.md`](../VISION.md) against the code after Simulation
 Loop v1 and the living-world work. They are one plan rather than five because they share a spine:
@@ -82,6 +85,11 @@ and the decision's options are accept / refuse / counter.
 
 ### How it is proved
 
+**As built.** Both arms landed as proposed. Silence is handled in the deterministic tick rather
+than as a scheduled event: a letter whose term runs out is answered `ignored` by the passage of
+time itself, which costs nothing and cannot be forgotten. Unanswered letters also score in both
+routers — a reaction for the person they were put to, and standing business for the ambient cast.
+
 - A letter sent, unanswered at its deadline, produces the "ignored" fact and the trust shift.
 - A recipient in cognition answers a message the orchestrator never saw the terms of.
 - An ultimatum addressed to the player stops the burst with `player_decision`.
@@ -135,6 +143,13 @@ the diplomacy section's substance.
 
 ### How it is proved
 
+**As built.** `polityAgreements` on `WorldState`, with `agreement_open` / `agreement_close` and
+the helpers `atWar`, `enemiesOf`, `agreementsBetween`. Opening an agreement closes what it
+contradicts, so accepting terms is one act. Two consequences are wired: war cuts income sources
+naming the enemy as counterparty, and two powers at peace cannot give battle until somebody
+declares the war. The Senate-procedure requirement is *not* built — the machinery exists and the
+scenario has nowhere to declare the requirement yet, so it stays a scenario-data question.
+
 - Accepting a peace offer closes the war, opens the peace, and restores a cut trade route.
 - A consul who declares war without the Senate is applied and breached.
 - A war between two other powers appears in the player's slice.
@@ -181,6 +196,13 @@ the map than walking an army there.
 
 ### How it is proved
 
+**As built.** `world/movement.ts` holds `canMoveTo`, `hopsBetween` and `crossingAdmitted`;
+`force_modify` refuses anything further than one bordering province and says how far it actually
+is. Terrains reach the engine through `ApplyContext.terrains`, passed from the scenario definition
+by the simulation service, and are optional: a scenario declaring no terrain rules gets adjacency
+enforced and crossings unjudged. Three existing tests had fixtures that marched armies across the
+map; they were fixed rather than the rule weakened.
+
 - A force ordered three provinces away moves one province and opens a project for the rest.
 - A land force ordered across a sea lane is refused with a reason, not silently teleported.
 - A replayed burst produces the same arrival day.
@@ -213,6 +235,12 @@ happened.
 the writing side has to be correct rather than careful.
 
 ### How it is proved
+
+**As built, differently.** Rather than maintaining the overlay by hand, `sim/conflicts.ts`
+derives it: wars from the agreements that *are* the wars, sieges from the projects prosecuting
+them, recomputed every tick. There is one source of truth for each and no parallel bookkeeping to
+drift. Battles are the exception — a battle is a moment rather than a condition, so the engagement
+records it and the list is bounded to the last six.
 
 - A battle resolved in a province appears in the overlay and is gone a week later.
 - A siege project's life and the overlay's siege entry begin and end together.
@@ -252,6 +280,15 @@ that already exists for exactly this.
 Rome and two for Carthage, and mark the strait crossings the map already has. No map redraw.
 
 ### How it is proved
+
+**As built.** A troop category may declare itself `naval` and carry `transportPerHead`; a force
+is naval if it has hulls in it. `warfare/sea.ts` answers what is naval, what it can carry, and
+which fleet could carry a given army. An army at a water crossing needs a fleet of its own power
+standing with it, and **the fleet crosses with it** — a fleet that ferries an army and stays
+behind has not sailed. Ships and armies cannot give battle to each other. Blockade is in the tick:
+enemy ships on a port province of a power you are at war with shut that power's sea trade.
+Scenario version 19 makes the Messana strait a `strait` and the Africa passage a `sea_lane`, and
+gives Carthage, Syracuse and Rome their hulls — Rome deliberately the fewest.
 
 - A legion ordered to Sicily without transports is refused, with the reason.
 - The same legion with a fleet in the province crosses, and the fleet is where it left it.

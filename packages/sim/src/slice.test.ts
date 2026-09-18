@@ -269,3 +269,59 @@ describe("what the treasury owes and depends on", () => {
     expect(renderWorldSlice(slice())).not.toContain("TRADE");
   });
 });
+
+describe("what the world is following, and what stirs", () => {
+  it("lists open threads by id with their stakes, and marks a secret one", () => {
+    const state = world();
+    const secret = { ...state.storylines[0]!, id: "plot", title: "A Quiet Conspiracy", visibility: "private" as const };
+    const text = renderWorldSlice(slice({ ...state, storylines: [...state.storylines, secret] }));
+    expect(text).toContain("OPEN THREADS");
+    expect(text).toContain("The Messana Crisis [mamertine-syracusan-crisis]");
+    expect(text).toContain("A Quiet Conspiracy [plot]");
+    expect(text).toContain("(secret — known to its participants alone)");
+  });
+
+  it("leaves a closed thread out", () => {
+    const state = world();
+    const text = renderWorldSlice(slice({ ...state, storylines: state.storylines.map((storyline) => ({ ...storyline, phase: "closed" as const })) }));
+    expect(text).not.toContain("OPEN THREADS");
+  });
+
+  it("renders the narrator's directive only when there is one, naming its target by id", () => {
+    const state = world();
+    const quiet = renderWorldSlice(slice(state));
+    expect(quiet).not.toContain("THE WORLD STIRS");
+    const stirred = renderWorldSlice(
+      buildWorldSlice({
+        world: state, clock, actorRef: { kind: "character", id: state.characters[0]!.id }, actorPolityId: "rome",
+        orderText: "Invade the Boii lands", facts: [], dueEvents: [], pendingEvents: [],
+        narratorSeed: {
+          key: "seed-abc", kind: "world_event", archetype: "plague", severity: "serious", secret: false, oneShot: false, repeated: false,
+          target: { provinceId: "punic-italy-latium", provinceName: "Latium", polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null },
+          inPlayerRealm: true, why: "The world has been quiet at home for a while.", brief: "Sickness has come to Latium [punic-italy-latium].",
+        },
+      }),
+    );
+    expect(stirred).toContain("THE WORLD STIRS (seed seed-abc)");
+    expect(stirred).toContain("Latium [punic-italy-latium]");
+    expect(stirred).toContain('carrying seedKey "seed-abc"');
+    expect(stirred).toContain("It is news");
+  });
+
+  it("prints each known fact with its id, so a discovery can name it", () => {
+    const state = world();
+    const text = renderWorldSlice(
+      buildWorldSlice({
+        world: state, clock, actorRef: { kind: "character", id: state.characters[0]!.id }, actorPolityId: "rome", orderText: "Wait.",
+        facts: [{
+          id: "fact-known", time: { day: 0, minute: 0 }, atStep: 0, kind: "event", summary: "Rome hears of the Boii.", affectedEntities: [], resourceChanges: [],
+          authorityChange: undefined, visibility: "public", discovery: { state: "public", knowableAtInstant: null, discoveredBy: [] }, evidence: null,
+          eligibleReactionScopes: [], sourceEventId: null, sourceActionId: null, causalDepth: 0,
+        }],
+        dueEvents: [], pendingEvents: [{ kind: "wave", summary: "The sickness spreads.", dueInDays: 20, thread: "The Plague [plague-1]" }],
+      }),
+    );
+    expect(text).toContain("Rome hears of the Boii. [fact-known]");
+    expect(text).toContain("(thread: The Plague [plague-1])");
+  });
+});

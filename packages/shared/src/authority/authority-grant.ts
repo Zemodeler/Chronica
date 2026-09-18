@@ -89,7 +89,7 @@ export type AuthorityGrant = z.infer<typeof AuthorityGrantSchema>;
  * military command power, one authorising `money_transfer` holds fiscal spend
  * power, and an id in neither vocabulary confers nothing rather than guessing.
  */
-const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = {
+export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = {
   force_create: "command",
   force_modify: "command",
   money_transfer: "spend",
@@ -104,6 +104,27 @@ const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = {
   generic_entity_create: "propose",
   character_intent_set: "propose",
   social_events: "propose",
+  storyline_open: "propose",
+  storyline_advance: "propose",
+  character_pressure_set: "propose",
+  // The rest of the union. An op an office listed but this map lacked derived
+  // no power at all, so a consul resolving a Senate procedure his office
+  // plainly authorised was recorded as overreach -- the same power names the
+  // engine checks against, in `apply-deltas.ts`'s POWER_BY_OP.
+  generic_entity_update: "propose",
+  belief_set: "propose",
+  force_engage: "command",
+  polity_outlook_set: "propose",
+  legitimacy_shift: "propose",
+  province_material_shift: "propose",
+  political_procedure_open: "propose",
+  political_support_set: "propose",
+  political_procedure_resolve: "override",
+  holding_transfer: "punish",
+  diplomatic_message_send: "negotiate",
+  diplomatic_message_answer: "negotiate",
+  agreement_open: "negotiate",
+  agreement_close: "negotiate",
 };
 
 function officeIdToDomainPowers(office: Office): { readonly domain: AuthorityDomain; readonly powers: readonly AuthorityPower[] }[] {

@@ -36,6 +36,8 @@ export interface PolityGap {
   readonly provinceCount: number;
   readonly needsLeader: boolean;
   readonly needsForce: boolean;
+  /** Where to raise them: a few of the provinces they hold, by id. Without these the model raised forces in "numidian-kingdoms". */
+  readonly provinceIds: readonly string[];
   /** Why this one, in words the prompt can use. */
   readonly why: string;
 }
@@ -127,6 +129,7 @@ export function findPolityGaps(input: PopulationInput): PolityGap[] {
         polityId: polity.id,
         name: polity.name,
         provinceCount,
+        provinceIds: world.map.provinces.filter((province) => province.controllerPolityId === polity.id).slice(0, 3).map((province) => province.id),
         needsLeader,
         needsForce,
         why: reasons.length === 0 ? "they hold territory and nobody speaks for them" : reasons.join(", "),

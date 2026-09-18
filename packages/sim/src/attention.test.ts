@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, emitFacts, type Fact, type FactDraft, type Office, type WorldState } from "@chronica/shared";
-import { routeAttention } from "./attention";
+import { routeAmbientActors, routeAttention } from "./attention";
 
 const offices: readonly Office[] = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition).government.offices;
 const world = (): WorldState => WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
@@ -144,5 +144,45 @@ describe("why an actor is woken", () => {
     const first = route(facts).focused.map((actor) => actor.characterId);
     const second = route(facts).focused.map((actor) => actor.characterId);
     expect(first).toEqual(second);
+  });
+});
+
+describe("the world elsewhere", () => {
+  const ambient = (state: WorldState, priority: readonly string[] = []) =>
+    routeAmbientActors({ world: state, facts: [], offices, excludeCharacterIds: ["marcus-atilius"], max: 2, priorityCharacterIds: priority });
+
+  it("keeps one slot for whoever the narrator has just handed a problem to", () => {
+    // Marcus the Younger holds no office and no command, so the rotation would
+    // never reach him. The seed landed on him, so he is asked this round.
+    const cast = ambient(world(), ["marcus-atilius-minor"]);
+    expect(cast.map((actor) => actor.characterId)).toContain("marcus-atilius-minor");
+    expect(cast).toHaveLength(2);
+    expect(cast[0]!.why).toContain("something has just come to them");
+  });
+
+  it("tells a participant what their thread is waiting on, and weighs a crisis more than a rumour", () => {
+    const state = world();
+    const thread = {
+      id: "t1", title: "The Quaestor's Silence", participantIds: ["quintus-fabius"], provinceId: null, phase: "crisis" as const,
+      stakes: "Everything.", history: [], nextDevelopment: "Fabius must choose a side tonight.", visibility: "public" as const,
+      origin: "world" as const, openedByRef: null, openedAtStep: 0, updatedAtStep: 0, closedAtStep: null, causalFactIds: [], seedKey: null,
+    };
+    const inCrisis = ambient({ ...state, storylines: [thread] });
+    const fabius = inCrisis.find((actor) => actor.characterId === "quintus-fabius")!;
+    expect(fabius.why).toContain("Fabius must choose a side tonight");
+    const brewing = ambient({ ...state, storylines: [{ ...thread, phase: "brewing" }] });
+    expect(fabius.score).toBeGreaterThan(brewing.find((actor) => actor.characterId === "quintus-fabius")!.score);
+  });
+
+  it("ignores a thread that is closed", () => {
+    const state = world();
+    const closed = ambient({
+      ...state,
+      storylines: [{
+        id: "t1", title: "Over", participantIds: ["quintus-fabius"], provinceId: null, phase: "closed", stakes: "Nothing now.", history: [],
+        nextDevelopment: "Nothing.", visibility: "public", origin: "world", openedByRef: null, openedAtStep: 0, updatedAtStep: 0, closedAtStep: 0, causalFactIds: [], seedKey: null,
+      }],
+    });
+    expect(closed.find((actor) => actor.characterId === "quintus-fabius")?.why ?? "").not.toContain("Over");
   });
 });

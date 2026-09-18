@@ -67,6 +67,8 @@ const DEFAULT_CATEGORY: TroopCategoryDefinition = {
   combatWeightBps: 10_000,
   steadinessBps: 7_000,
   mobilityBps: 5_000,
+  naval: false,
+  transportPerHead: 0,
 };
 
 function categoryDefinition(rules: ScenarioWarfareRules | undefined, categoryId: string): TroopCategoryDefinition {

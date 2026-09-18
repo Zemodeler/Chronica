@@ -1,6 +1,13 @@
 import {
   DELTA_AUTHORITY_DOMAIN,
   adjustPolityLegitimacy,
+  agreementsBetween,
+  applyDiplomaticAnswerToStance,
+  canMoveTo,
+  fitStrengthOf,
+  isNavalForce,
+  isWaterCrossing,
+  transportFor,
   ensureProvinceMaterial,
   WorldStateSchema,
   buildAuthorityIndex,
@@ -8,15 +15,19 @@ import {
   CharacterSocialEventSchema,
   applySocialEvents,
   createCanonicalNpc,
+  createPressure,
   decideOrderAttempt,
   findWorldReferenceViolations,
+  openStorylines,
   receiveOrderAttempt,
+  refreshPressure,
+  resolvePressure,
   resolveRef,
   type AuthorityCheckResult,
   type AuthorityIndex,
   type AuthorityPower,
   type AuthorityScope,
-  type FactProposal,
+  type FactProposalDraft,
   type OrderPartyRef,
   type WorldDelta,
   type WorldState,
@@ -82,6 +93,13 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
     case "polity_stance_shift":
       return { kind: "polity", id: delta.polityId };
+    // Writing in a power's name is that power's act. A senator who writes to
+    // Carthage over Rome's name is scoped to Rome and breaches for it, which is
+    // exactly what private correspondence with a foreign power should be.
+    case "diplomatic_message_send":
+      return { kind: "polity", id: delta.fromPolityId };
+    case "agreement_open":
+      return { kind: "polity", id: delta.polityId };
     case "polity_outlook_set":
       return { kind: "polity", id: delta.polityId };
     case "legitimacy_shift":
@@ -98,6 +116,23 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       return polityFallback;
   }
 }
+
+/** The pressure helpers hand back the two collections they touch; the world takes them. */
+function withPressures(world: WorldState, next: { readonly characters: readonly WorldState["characters"][number][]; readonly characterPressures: readonly WorldState["characterPressures"][number][] }): WorldState {
+  return { ...world, characters: [...next.characters], characterPressures: [...next.characterPressures] };
+}
+
+/** How many threads the world follows at once before it must close one. */
+const MAX_OPEN_STORYLINES = 12;
+
+/**
+ * How many battles the map shows at once.
+ *
+ * A battle is a moment, not a condition: what the overlay is for is showing
+ * where fighting is happening now, and an unbounded list would end a campaign
+ * drawing every engagement of the whole war on top of each other.
+ */
+const MAX_SHOWN_BATTLES = 6;
 
 const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   money_transfer: "spend",
@@ -126,6 +161,13 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   political_support_set: "propose",
   political_procedure_resolve: "override",
   holding_transfer: "punish",
+  storyline_open: "propose",
+  storyline_advance: "propose",
+  character_pressure_set: "propose",
+  diplomatic_message_send: "negotiate",
+  diplomatic_message_answer: "negotiate",
+  agreement_open: "negotiate",
+  agreement_close: "negotiate",
 };
 
 /**
@@ -177,6 +219,12 @@ function actorIsAnswerableFor(delta: WorldDelta, scope: AuthorityScope, world: W
   // resolved to act was recorded as having exceeded his authority over the
   // republic. Whatever he then actually does is checked on its own terms.
   if (delta.op === "character_intent_set") return false;
+  // A thread of history is the world's bookkeeping, and a circumstance that
+  // befalls someone is nobody's act. Neither is a power an office could hold,
+  // so judging them against one would make the first seed to land at home an
+  // act of insubordination by the ruler -- the sixth time this check would
+  // have manufactured it.
+  if (delta.op === "storyline_open" || delta.op === "storyline_advance" || delta.op === "character_pressure_set") return false;
 
   if (context.actsForTheWorld !== true) return true;
 
@@ -200,7 +248,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
   const applied: AppliedDelta[] = [];
   const rejected: RejectedDelta[] = [];
   const breaches: AuthorityBreach[] = [];
-  const factProposals: FactProposal[] = [];
+  const factProposals: FactProposalDraft[] = [];
 
   const resolve = (ref: string): string | undefined => resolveRef(ref, assignedIds);
   let current = world;
@@ -217,8 +265,8 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
     const previous = current;
     // Buffered per delta: a delta that is rolled back must not leave the world
     // asserting consequences that never happened.
-    const emitted: FactProposal[] = [];
-    const emitFact = (fact: FactProposal): void => {
+    const emitted: FactProposalDraft[] = [];
+    const emitFact = (fact: FactProposalDraft): void => {
       emitted.push(fact);
     };
     let authority: AuthorityCheckResult;
@@ -312,7 +360,7 @@ function applyOne(
   assignedIds: Map<string, string>,
   resolve: (ref: string) => string | undefined,
   /** For consequences the model is not permitted to author -- battle casualties. */
-  emitFact: (fact: FactProposal) => void,
+  emitFact: (fact: FactProposalDraft) => void,
 ): WorldState {
   const required = (ref: string, label: string): string => {
     const resolved = resolve(ref);
@@ -510,6 +558,34 @@ function applyOne(
       if (delta.locationId !== undefined && !world.map.provinces.some((province) => province.id === delta.locationId)) {
         reject(`No province "${delta.locationId}" exists to move this force to.`, "reference");
       }
+      // An army has to cross the ground between here and there. The map has
+      // always said what that ground is; nothing ever asked it, so a legion
+      // could be in Latium in one delta and Carthage in the next.
+      let escort: typeof force | null = null;
+      if (delta.locationId !== undefined && delta.locationId !== force.locationId) {
+        const verdict = canMoveTo(world, force.locationId, delta.locationId, context.terrains ?? []);
+        if (verdict.allowed && isWaterCrossing(verdict.edge.crossing) && !isNavalForce(force, context.warfare)) {
+          // An army crossing water needs hulls to cross it in. This is the rule
+          // that makes Sicily an island rather than another province of Italy.
+          escort = transportFor(force, world.material.forces, context.warfare);
+          if (escort === null) {
+            reject(
+              `${force.name} cannot make the ${verdict.edge.crossing} crossing without ships: no fleet of its own power stands with it that could carry ${fitStrengthOf(force)} men.`,
+            );
+          }
+        }
+        if (!verdict.allowed) {
+          const provinceName = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
+          if (verdict.refusal.kind === "crossing_not_admitted") {
+            reject(`${force.name} cannot make the ${verdict.refusal.crossing} crossing from ${provinceName(force.locationId)} to ${provinceName(delta.locationId)}.`);
+          }
+          const hops = verdict.refusal.kind === "not_adjacent" ? verdict.refusal.hops : null;
+          const distance = hops === null ? "no road at all leads there" : `it is ${hops} province(s) away`;
+          reject(
+            `${force.name} stands in ${provinceName(force.locationId)} and cannot reach ${provinceName(delta.locationId)} in one move: ${distance}. March it to a neighbouring province, or make the journey a project whose outcome is "force_move".`,
+          );
+        }
+      }
       const commanderId = delta.commanderCharacterRef === undefined ? undefined : required(delta.commanderCharacterRef, "The commander");
       if (commanderId !== undefined && !world.characters.some((character) => character.id === commanderId)) {
         reject(`No character "${commanderId}" exists to take command.`, "reference");
@@ -523,7 +599,20 @@ function applyOne(
         authorizedStrength: Math.max(1, strength),
         moraleBps: Math.min(10_000, Math.max(0, force.moraleBps + (delta.moraleBpsDelta ?? 0))),
       };
-      return { ...world, material: { ...world.material, forces: world.material.forces.map((candidate) => (candidate.id === forceId ? updated : candidate)) } };
+      // The ships go where the army they carried went. A fleet that ferries an
+      // army and stays behind has not sailed anywhere.
+      const escortId = escort?.id ?? null;
+      return {
+        ...world,
+        material: {
+          ...world.material,
+          forces: world.material.forces.map((candidate) => {
+            if (candidate.id === forceId) return updated;
+            if (escortId !== null && candidate.id === escortId && delta.locationId !== undefined) return { ...candidate, locationId: delta.locationId };
+            return candidate;
+          }),
+        },
+      };
     }
 
     case "force_engage": {
@@ -543,6 +632,22 @@ function applyOne(
       }
       const living = (force: typeof attacker): number => force.personnel.reduce((sum, category) => sum + category.fit, 0);
       if (living(attacker) === 0 || living(defender) === 0) reject("An army with no men left in it cannot fight.");
+      // Ships and armies do not fight each other. A fleet standing off a coast
+      // blockades it; a legion on the shore cannot board it, and it cannot
+      // storm the legion.
+      if (isNavalForce(attacker, context.warfare) !== isNavalForce(defender, context.warfare)) {
+        reject(`${attacker.name} and ${defender.name} do not fight on the same element; ships blockade a coast, they do not give battle to an army on it.`);
+      }
+      // Attacking a power you are at peace with is a thing armies do -- it is
+      // how most wars start -- but it is not an ordinary battle, and the world
+      // must not slide into war without anybody having decided to. The attack
+      // is refused until the peace is broken or a war declared, which are both
+      // single deltas and both leave a record of who chose it.
+      const standing = agreementsBetween(world.polityAgreements, attacker.polityId, defender.polityId);
+      const peaceBetween = standing.find((agreement) => agreement.kind === "peace" || agreement.kind === "truce" || agreement.kind === "alliance" || agreement.kind === "non_aggression");
+      if (peaceBetween !== undefined && !standing.some((agreement) => agreement.kind === "war")) {
+        reject(`${attacker.polityId} and ${defender.polityId} stand in ${peaceBetween.kind}; break it or declare war before giving battle.`);
+      }
 
       // The engine decides what happens. Everything the model chose -- who, and
       // how -- is already spent by this point.
@@ -561,7 +666,19 @@ function applyOne(
         world.material.forces.findIndex((force) => force.id === attackerId),
       );
       for (const fact of engagement.facts) emitFact(fact);
-      return engagement.world;
+      // The map has read `conflicts` from the beginning and nothing ever wrote
+      // it, so a battle was fought, a province changed hands, and the map where
+      // it happened showed nothing at all.
+      return {
+        ...engagement.world,
+        conflicts: {
+          ...engagement.world.conflicts,
+          battles: [
+            ...engagement.world.conflicts.battles.filter((battle) => battle.battleId !== battleId),
+            { battleId, participantForceIds: [attacker.id, defender.id], attackerForceIds: [attacker.id] },
+          ].slice(-MAX_SHOWN_BATTLES),
+        },
+      };
     }
 
     case "character_create": {
@@ -1039,6 +1156,246 @@ function applyOne(
               : obligation,
           ),
         },
+      };
+    }
+
+    case "storyline_open": {
+      // A country, a faction or a province named as a participant is the model
+      // saying what the matter is about, not naming a person. Dropped rather
+      // than refused: refusing threw away a whole plague because "rome" was
+      // listed among the sick, and a cult because its movement was. A name
+      // that is nothing in the world at all is still a malformed payload.
+      const isThing = (id: string): boolean =>
+        world.map.polities.some((polity) => polity.id === id)
+        || world.map.provinces.some((province) => province.id === id)
+        || world.genericEntities.some((entity) => entity.id === id)
+        || world.material.forces.some((force) => force.id === id)
+        || world.material.institutions.some((institution) => institution.id === id);
+      const participantIds = delta.participantRefs
+        .map((ref) => required(ref, "A storyline participant"))
+        .filter((participantId) => !isThing(participantId));
+      for (const participantId of participantIds) {
+        if (!world.characters.some((character) => character.id === participantId)) reject(`No character "${participantId}" exists to take part in this.`, "reference");
+      }
+      if (delta.provinceId !== null && !world.map.provinces.some((province) => province.id === delta.provinceId)) {
+        reject(`No province "${delta.provinceId}" exists for this to happen in.`, "reference");
+      }
+      // Bounded, or a world that opens a thread for every incident drowns the
+      // slice in them. The cap is generous; the narrator stops seeding well
+      // before it and the prompt asks for threads to be closed.
+      if (openStorylines(world.storylines).length >= MAX_OPEN_STORYLINES) {
+        reject(`The world is already following ${MAX_OPEN_STORYLINES} threads; close one before opening another.`);
+      }
+      const id = mint("storyline", delta.localId);
+      return {
+        ...world,
+        storylines: [
+          ...world.storylines,
+          {
+            id,
+            title: delta.title,
+            participantIds: [...new Set(participantIds)],
+            provinceId: delta.provinceId,
+            phase: delta.phase,
+            stakes: delta.stakes,
+            history: [],
+            nextDevelopment: delta.nextDevelopment,
+            visibility: delta.visibility,
+            origin: context.actsForTheWorld === true ? ("world" as const) : ("character" as const),
+            openedByRef: context.actorRef,
+            openedAtStep: atStep,
+            updatedAtStep: atStep,
+            closedAtStep: null,
+            causalFactIds: [],
+            seedKey: delta.seedKey,
+          },
+        ],
+      };
+    }
+
+    case "storyline_advance": {
+      const storylineId = required(delta.storylineRef, "The storyline");
+      const storyline = world.storylines.find((candidate) => candidate.id === storylineId);
+      if (storyline === undefined) reject(`No storyline "${storylineId}" exists to advance.`, "reference");
+      if (storyline.phase === "closed") reject(`"${storyline.title}" is over; a closed thread is not advanced.`);
+      const added = delta.addParticipantRefs.map((ref) => required(ref, "A new participant"));
+      for (const participantId of added) {
+        if (!world.characters.some((character) => character.id === participantId)) reject(`No character "${participantId}" exists to join this.`, "reference");
+      }
+      const phase = delta.phase ?? storyline.phase;
+      return {
+        ...world,
+        storylines: world.storylines.map((candidate) =>
+          candidate.id !== storylineId
+            ? candidate
+            : {
+              ...candidate,
+              phase,
+              history: [...candidate.history, delta.development].slice(-24),
+              nextDevelopment: delta.nextDevelopment ?? candidate.nextDevelopment,
+              stakes: delta.stakes ?? candidate.stakes,
+              participantIds: [...new Set([...candidate.participantIds, ...added])].slice(0, 16),
+              updatedAtStep: atStep,
+              closedAtStep: phase === "closed" ? atStep : candidate.closedAtStep,
+            },
+        ),
+      };
+    }
+
+    case "character_pressure_set": {
+      const characterId = required(delta.characterRef, "The person under pressure");
+      if (!world.characters.some((character) => character.id === characterId)) reject(`No character "${characterId}" exists to be under pressure.`, "reference");
+      const strongest = world.characterPressures
+        .filter((pressure) => pressure.characterId === characterId && pressure.kind === delta.kind && pressure.status === "active")
+        .sort((a, b) => b.intensity - a.intensity || a.id.localeCompare(b.id))[0];
+      if (delta.action === "resolve") {
+        if (strongest === undefined) reject(`${characterId} is under no ${delta.kind} pressure to lift.`);
+        return withPressures(world, resolvePressure(world, strongest.id));
+      }
+      if (delta.action === "refresh" && strongest !== undefined) {
+        return withPressures(world, refreshPressure(world, strongest.id, atStep, delta.intensity, delta.reviewInDays));
+      }
+      return withPressures(world, createPressure(world, {
+          id: context.ids.next("pressure"),
+          characterId,
+          kind: delta.kind,
+          intensity: delta.intensity,
+          label: delta.label,
+          sourceEventId: null,
+          atStep,
+          reviewInSteps: delta.reviewInDays,
+          expiresInSteps: delta.expiresInDays,
+          visibility: delta.visibility,
+        }));
+    }
+
+    case "diplomatic_message_send": {
+      const senderId = required(delta.fromCharacterRef, "Whoever is writing");
+      if (!world.characters.some((character) => character.id === senderId)) {
+        reject(`No character "${senderId}" exists to send this.`, "reference");
+      }
+      const known = new Set(world.map.polities.map((polity) => polity.id));
+      if (!known.has(delta.fromPolityId) || !known.has(delta.toPolityId)) {
+        reject("A letter must be between two powers that exist.", "reference");
+      }
+      if (delta.fromPolityId === delta.toPolityId) reject("A power does not write to itself.");
+      const recipientId = delta.toCharacterRef === null ? null : required(delta.toCharacterRef, "The named recipient");
+      if (recipientId !== null && !world.characters.some((character) => character.id === recipientId)) {
+        reject(`No character "${recipientId}" exists to receive this.`, "reference");
+      }
+      const inReplyToId = delta.inReplyToRef === null ? null : required(delta.inReplyToRef, "The letter this answers");
+      if (inReplyToId !== null && !world.diplomacy.some((message) => message.id === inReplyToId)) {
+        reject(`No letter "${inReplyToId}" exists to be answering.`, "reference");
+      }
+      return {
+        ...world,
+        diplomacy: [
+          ...world.diplomacy,
+          {
+            id: mint("message", delta.localId),
+            kind: delta.kind,
+            fromPolityId: delta.fromPolityId,
+            fromCharacterId: senderId,
+            toPolityId: delta.toPolityId,
+            toCharacterId: recipientId,
+            subject: delta.subject,
+            terms: delta.terms,
+            sentAtStep: atStep,
+            replyDueByStep: delta.replyWithinDays === null ? null : atStep + delta.replyWithinDays,
+            status: "awaiting_reply" as const,
+            answer: null,
+            answerText: null,
+            answeredAtStep: null,
+            inReplyToMessageId: inReplyToId,
+            visibility: delta.visibility,
+          },
+        ],
+      };
+    }
+
+    case "diplomatic_message_answer": {
+      const messageId = required(delta.messageRef, "The letter being answered");
+      const message = world.diplomacy.find((candidate) => candidate.id === messageId);
+      if (message === undefined) reject(`No letter "${messageId}" exists to answer.`, "reference");
+      // Answering twice is not a second answer; it is the engine being asked to
+      // rewrite a reply already sent and read.
+      if (message !== undefined && message.status === "answered") {
+        reject(`"${message.subject}" has already been answered.`);
+      }
+      const answered = { ...message!, status: "answered" as const, answer: delta.answer, answerText: delta.answerText, answeredAtStep: atStep };
+      return {
+        ...world,
+        diplomacy: world.diplomacy.map((candidate) => (candidate.id === messageId ? answered : candidate)),
+        // How an approach was received is what moves the sender's opinion of
+        // the power that received it -- silence hardest of all.
+        polityStances: [...applyDiplomaticAnswerToStance(world.polityStances, answered, atStep)],
+      };
+    }
+
+    case "agreement_open": {
+      const known = new Set(world.map.polities.map((polity) => polity.id));
+      if (!known.has(delta.polityId) || !known.has(delta.otherPolityId)) {
+        reject("An agreement must be between two powers that exist.", "reference");
+      }
+      if (delta.polityId === delta.otherPolityId) reject("A power holds no agreement with itself.");
+      const sourceMessageId = delta.sourceMessageRef === null ? null : required(delta.sourceMessageRef, "The letter this came from");
+      if (sourceMessageId !== null && !world.diplomacy.some((message) => message.id === sourceMessageId)) {
+        reject(`No letter "${sourceMessageId}" exists for this to come from.`, "reference");
+      }
+      // The same thing twice is not two agreements. Peace declared while peace
+      // already stands is a restatement, and a second war is still one war.
+      if (agreementsBetween(world.polityAgreements, delta.polityId, delta.otherPolityId).some((agreement) => agreement.kind === delta.kind)) {
+        reject(`${delta.polityId} and ${delta.otherPolityId} already stand in ${delta.kind}.`);
+      }
+      // War and peace cannot both be true. Opening one closes the others, which
+      // is what makes "accept the peace" a single act rather than a checklist.
+      const opposed: Record<string, readonly string[]> = {
+        war: ["peace", "truce", "alliance", "non_aggression"],
+        peace: ["war"],
+        truce: ["war"],
+        alliance: ["war"],
+        non_aggression: ["war"],
+      };
+      const closes = new Set(opposed[delta.kind] ?? []);
+      return {
+        ...world,
+        polityAgreements: [
+          ...world.polityAgreements.map((agreement) =>
+            agreement.status === "active" &&
+            closes.has(agreement.kind) &&
+            ((agreement.polityId === delta.polityId && agreement.otherPolityId === delta.otherPolityId) ||
+              (agreement.polityId === delta.otherPolityId && agreement.otherPolityId === delta.polityId))
+              ? { ...agreement, status: "ended" as const, endedAtStep: atStep, endedReason: delta.reason }
+              : agreement,
+          ),
+          {
+            id: mint("agreement", delta.localId),
+            kind: delta.kind,
+            polityId: delta.polityId,
+            otherPolityId: delta.otherPolityId,
+            terms: delta.terms,
+            sinceStep: atStep,
+            untilStep: delta.forDays === null ? null : atStep + delta.forDays,
+            sourceMessageId,
+            status: "active" as const,
+            endedAtStep: null,
+            endedReason: null,
+            visibility: delta.visibility,
+          },
+        ],
+      };
+    }
+
+    case "agreement_close": {
+      const agreementId = required(delta.agreementRef, "The agreement being ended");
+      const agreement = world.polityAgreements.find((candidate) => candidate.id === agreementId);
+      if (agreement === undefined) reject(`No agreement "${agreementId}" exists to end.`, "reference");
+      if (agreement!.status === "ended") reject("That agreement has already ended.");
+      return {
+        ...world,
+        polityAgreements: world.polityAgreements.map((candidate) =>
+          candidate.id === agreementId ? { ...candidate, status: "ended" as const, endedAtStep: atStep, endedReason: delta.reason } : candidate,
+        ),
       };
     }
 

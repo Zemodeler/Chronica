@@ -99,13 +99,30 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
     provinceCount: { min: 779, max: 779 },
   },
   warfare: {
-    troopCategories: [{ id: "infantry", label: "Infantry", combatWeightBps: 10_000, steadinessBps: 7_000, mobilityBps: 5_000 }],
+    troopCategories: [
+      { id: "infantry", label: "Infantry", combatWeightBps: 10_000, steadinessBps: 7_000, mobilityBps: 5_000 },
+      // A quinquereme is a fighting ship and a transport at once, which is what
+      // the whole war turned on: whoever held the sea decided who could cross.
+      { id: "warship", label: "Warships", combatWeightBps: 9_000, steadinessBps: 6_000, mobilityBps: 8_000, naval: true, transportPerHead: 30 },
+    ],
     routineTactics: [{ id: "hold-ground", label: "Hold prepared ground", factor: "cohesion", phases: ["engagement"], modifierBps: 500 }],
     phases: ["contact", "engagement", "cohesion", "withdrawal", "aftermath"], routCohesionBps: 2_000, arrearsMoralePeriods: 1, arrearsDesertionPeriods: 2,
   },
   government: {
-    offices: [{ id: "roman-consul", label: "Roman consul", polityId: "rome", authorisedActionIds: ["force_create", "force_modify", "project_create", "project_milestone_update", "character_create", "authority_grant_upsert", "character_intent_set", "polity_stance_shift", "social_events", "political_procedure_open", "political_procedure_resolve", "political_support_set", "legitimacy_shift", "province_material_shift", "generic_entity_create", "generic_entity_update", "force_engage", "belief_set"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "roman-election", eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-not-disqualified"] }],
-    successionRules: [{ id: "roman-election", label: "Election by the Senate", kind: "elective", institutionId: "roman-senate" }], decreeAuthorityCostBps: 500, decreeMinimumPrestigeBps: 2_000,
+    offices: [{ id: "roman-consul", label: "Roman consul", polityId: "rome", authorisedActionIds: ["force_create", "force_modify", "project_create", "project_milestone_update", "character_create", "authority_grant_upsert", "character_intent_set", "polity_stance_shift", "social_events", "political_procedure_open", "political_procedure_resolve", "political_support_set", "legitimacy_shift", "province_material_shift", "generic_entity_create", "generic_entity_update", "force_engage", "belief_set"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "roman-election", eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-not-disqualified"] },
+      // The other powers' heads. Without an office a king of Syracuse
+      // negotiating for Syracuse was recorded as insubordinate, which made
+      // every foreign government's ordinary business a breach.
+      { id: "syracusan-king", label: "King of Syracuse", polityId: "syracuse", authorisedActionIds: ["force_create", "force_modify", "project_create", "project_milestone_update", "character_create", "authority_grant_upsert", "character_intent_set", "polity_stance_shift", "social_events", "political_procedure_open", "political_procedure_resolve", "political_support_set", "legitimacy_shift", "province_material_shift", "generic_entity_create", "generic_entity_update", "force_engage", "belief_set"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "syracusan-succession", eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
+      { id: "mamertine-leader", label: "Leader of the Mamertines", polityId: "mamertines", authorisedActionIds: ["force_create", "force_modify", "project_create", "project_milestone_update", "character_create", "authority_grant_upsert", "character_intent_set", "polity_stance_shift", "social_events", "political_procedure_open", "political_procedure_resolve", "political_support_set", "legitimacy_shift", "province_material_shift", "generic_entity_create", "generic_entity_update", "force_engage", "belief_set"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "mamertine-acclamation", eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
+      { id: "carthaginian-strategos", label: "Carthaginian commander in Sicily", polityId: "carthage", authorisedActionIds: ["force_create", "force_modify", "project_create", "project_milestone_update", "character_create", "authority_grant_upsert", "character_intent_set", "polity_stance_shift", "social_events", "political_procedure_open", "political_procedure_resolve", "political_support_set", "legitimacy_shift", "province_material_shift", "generic_entity_create", "generic_entity_update", "force_engage", "belief_set"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "carthaginian-appointment", eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
+    ],
+    successionRules: [
+      { id: "roman-election", label: "Election by the Senate", kind: "elective", institutionId: "roman-senate" },
+      { id: "syracusan-succession", label: "Hereditary kingship", kind: "primogeniture", institutionId: null },
+      { id: "mamertine-acclamation", label: "Acclamation by the soldiery", kind: "elective", institutionId: null },
+      { id: "carthaginian-appointment", label: "Appointment by the Council of Carthage", kind: "appointment", institutionId: null },
+    ], decreeAuthorityCostBps: 500, decreeMinimumPrestigeBps: 2_000,
   },
   dialogue: { roleSlots: [], namePools: { roman: ["Gaius", "Lucius"], carthaginian: ["Hanno", "Hamilcar"], greek: ["Hieron", "Sosistratus"] } },
   continuity: { startingSeatCount: 1, extraPrincipalsPerPlayer: 1 },
@@ -176,13 +193,25 @@ const handAuthoredEdges = [
   ["punic-italy-campanian-plain", "punic-italy-lucanian-uplands"],
   ["punic-italy-apulian-coast", "punic-italy-lucanian-uplands"],
   ["punic-italy-lucanian-uplands", "punic-italy-bruttian-highlands"],
-  ["punic-italy-bruttian-highlands", "ita-72843720b81376294924159-sicily-northeast"],
-  ["tun-13205935b88806172084765", "ita-72843720b81376294924159-sicily-west"],
+  ["punic-italy-lucanian-uplands", "punic-italy-bruttian-highlands"],
   ["ita-72843720b81376294924159-sicily-west", "ita-72843720b81376294924159-sicily-northwest"],
   ["ita-72843720b81376294924159-sicily-northwest", "ita-72843720b81376294924159-sicily-central"],
   ["ita-72843720b81376294924159-sicily-central", "ita-72843720b81376294924159-sicily-southeast"],
   ["ita-72843720b81376294924159-sicily-southeast", "ita-72843720b81376294924159-sicily-northeast"],
 ].map(([from, to]) => ({ from: from!, to: to!, crossing: "land" as const, distance: 1 }));
+
+/**
+ * The two crossings that are water, and always were.
+ *
+ * The strait at Messana and the passage from Sicily to Africa were authored as
+ * land edges because nothing in the engine could tell the difference, so a
+ * legion walked to Sicily and the First Punic War could be fought without a
+ * ship. They are what makes Sicily an island.
+ */
+const handAuthoredWaterEdges = [
+  { from: "punic-italy-bruttian-highlands", to: "ita-72843720b81376294924159-sicily-northeast", crossing: "strait" as const, distance: 1 },
+  { from: "tun-13205935b88806172084765", to: "ita-72843720b81376294924159-sicily-west", crossing: "sea_lane" as const, distance: 2 },
+];
 
 const edgeKey = (from: string, to: string): string => [from, to].sort().join("|");
 
@@ -195,13 +224,13 @@ const edgeKey = (from: string, to: string): string => [from, to].sort().join("|"
  * dropping the crossing or maintaining the same fact in two places.
  */
 const waterCrossingProvinceIds = new Set(
-  PUNIC_WARS_GRAPH_EDGES.filter((edge) => edge.crossing !== "land").flatMap((edge) => [edge.from, edge.to]),
+  [...PUNIC_WARS_GRAPH_EDGES, ...handAuthoredWaterEdges].filter((edge) => edge.crossing !== "land").flatMap((edge) => [edge.from, edge.to]),
 );
 const authoredProvinces = handAuthoredProvinces.map((province) =>
   waterCrossingProvinceIds.has(province.id) && province.terrainId !== "coastal-plain"
     ? { ...province, terrainId: "coastal-plain" }
     : province);
-const authoredEdges = handAuthoredEdges;
+const authoredEdges = [...handAuthoredEdges, ...handAuthoredWaterEdges];
 const authoredProvinceIds = new Set(authoredProvinces.map((province) => province.id));
 const authoredEdgeKeys = new Set(authoredEdges.map((edge) => edgeKey(edge.from, edge.to)));
 const authoredPolityIds = new Set<string>(["rome", "carthage", "syracuse", "mamertines", ...italianPolities.map(([id]) => id)]);
@@ -217,8 +246,8 @@ for (const settlement of PUNIC_WARS_GRAPH_SETTLEMENTS) {
 }
 
 const initialWorld: WorldState = WorldStateSchema.parse({
-  schemaVersion: 2,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 17, libraryVersion: 1 },
+  schemaVersion: 3,
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 20, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   map: {
@@ -271,16 +300,16 @@ const initialWorld: WorldState = WorldStateSchema.parse({
     // name on the map: an active goal and plot (character-sim phase 3) give
     // Hanno explicit scenario relevance from the opening turn, and the
     // pressure names why it is on his mind now rather than as flavor text.
-    { id: "hanno-carthage", name: "Hanno of Carthage", cultureId: "carthaginian", faithId: null, dynastyId: null, locationProvinceId: "tun-13205935b88806172084765", polityId: "carthage", ageYearsAtStart: 48, officeId: null, personalAccountId: "hanno-purse", skills: { martial: 55, intrigue: 65, learning: 50, piety: 50, stewardship: 70, diplomacy: 65, body: 55, subSkills: {} }, traits: ["ambitious", "deceitful"], mind: { drives: { security: 55, status: 65, wealth: 60, family: 40, faith: 35, duty: 45, revenge: 30 }, temperament: { boldness: 55, caution: 50, honesty: 35, sociability: 55, discipline: 45, cruelty: 40 }, riskTolerance: 55, values: [], taboos: [], currentPressures: ["hanno-pressure-messana"] }, healthBps: 8_500, prestigeBps: 7_500, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null },
+    { id: "hanno-carthage", name: "Hanno of Carthage", cultureId: "carthaginian", faithId: null, dynastyId: null, locationProvinceId: "tun-13205935b88806172084765", polityId: "carthage", ageYearsAtStart: 48, officeId: "carthaginian-strategos", personalAccountId: "hanno-purse", skills: { martial: 55, intrigue: 65, learning: 50, piety: 50, stewardship: 70, diplomacy: 65, body: 55, subSkills: {} }, traits: ["ambitious", "deceitful"], mind: { drives: { security: 55, status: 65, wealth: 60, family: 40, faith: 35, duty: 45, revenge: 30 }, temperament: { boldness: 55, caution: 50, honesty: 35, sociability: 55, discipline: 45, cruelty: 40 }, riskTolerance: 55, values: [], taboos: [], currentPressures: ["hanno-pressure-messana"] }, healthBps: 8_500, prestigeBps: 7_500, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null },
     // A cautious, status-conscious ruler measuring every move against the Mamertine threat -- an authored
     // mind and relationship state (character-sim phase 2), demonstrating the fields without hardcoding
     // engine behavior to them: the simulation still reads Hieron II through the same canonical schema
     // every other character uses.
-    { id: "hieron-ii", name: "Hieron II", cultureId: "greek", faithId: null, dynastyId: null, locationProvinceId: "ita-72843720b81376294924159-sicily-southeast", polityId: "syracuse", ageYearsAtStart: 38, officeId: null, personalAccountId: "hieron-purse", skills: { martial: 70, intrigue: 55, learning: 60, piety: 55, stewardship: 60, diplomacy: 65, body: 65, subSkills: {} }, traits: ["cautious", "dutiful"], mind: { drives: { security: 65, status: 70, wealth: 50, family: 50, faith: 45, duty: 70, revenge: 30 }, temperament: { boldness: 35, caution: 75, honesty: 55, sociability: 55, discipline: 65, cruelty: 30 }, riskTolerance: 30, values: ["dutiful"], taboos: ["deceitful"], currentPressures: ["mamertine-pressure-hieron"] }, healthBps: 9_000, prestigeBps: 7_500, relations: [{ subjectCharacterId: "mamertine-spokesman", causes: [{ id: "hieron-mamertine-rivalry", label: "The Mamertines seized Messana from Syracuse by treachery.", score: -18, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null, dimensions: { trust: -25, fear: 10, respect: -5 } }] }], ambitions: [{ id: "secure-sicily", label: "Secure Syracuse against the Mamertines", kind: "peace", targetId: "mamertines", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
+    { id: "hieron-ii", name: "Hieron II", cultureId: "greek", faithId: null, dynastyId: null, locationProvinceId: "ita-72843720b81376294924159-sicily-southeast", polityId: "syracuse", ageYearsAtStart: 38, officeId: "syracusan-king", personalAccountId: "hieron-purse", skills: { martial: 70, intrigue: 55, learning: 60, piety: 55, stewardship: 60, diplomacy: 65, body: 65, subSkills: {} }, traits: ["cautious", "dutiful"], mind: { drives: { security: 65, status: 70, wealth: 50, family: 50, faith: 45, duty: 70, revenge: 30 }, temperament: { boldness: 35, caution: 75, honesty: 55, sociability: 55, discipline: 65, cruelty: 30 }, riskTolerance: 30, values: ["dutiful"], taboos: ["deceitful"], currentPressures: ["mamertine-pressure-hieron"] }, healthBps: 9_000, prestigeBps: 7_500, relations: [{ subjectCharacterId: "mamertine-spokesman", causes: [{ id: "hieron-mamertine-rivalry", label: "The Mamertines seized Messana from Syracuse by treachery.", score: -18, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null, dimensions: { trust: -25, fear: 10, respect: -5 } }] }], ambitions: [{ id: "secure-sicily", label: "Secure Syracuse against the Mamertines", kind: "peace", targetId: "mamertines", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
     // A bold, embattled spokesman under active military pressure -- distinct temperament and drives
     // from Hieron II despite a similar martial skill, so their dialogue and any future decisions read
     // as different people under different pressure, not palette-swapped stat blocks.
-    { id: "mamertine-spokesman", name: "Mamertine spokesman", cultureId: "italic", faithId: null, dynastyId: null, locationProvinceId: "ita-72843720b81376294924159-sicily-northeast", polityId: "mamertines", ageYearsAtStart: 35, officeId: null, personalAccountId: "mamertine-purse", skills: { martial: 60, intrigue: 45, learning: 35, piety: 45, stewardship: 45, diplomacy: 50, body: 70, subSkills: {} }, traits: ["bold", "vengeful"], mind: { drives: { security: 70, status: 45, wealth: 40, family: 55, faith: 40, duty: 55, revenge: 55 }, temperament: { boldness: 70, caution: 30, honesty: 50, sociability: 45, discipline: 40, cruelty: 45 }, riskTolerance: 70, values: [], taboos: [], currentPressures: ["mamertine-pressure-spokesman"] }, healthBps: 8_500, prestigeBps: 5_500, relations: [{ subjectCharacterId: "hieron-ii", causes: [{ id: "mamertine-hieron-fear", label: "Syracusan forces press their border at Messana.", score: -12, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null, dimensions: { fear: 30, trust: -10 } }] }], ambitions: [{ id: "hold-messana", label: "Hold Messana", kind: "restoration", targetId: "settlement-messana", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
+    { id: "mamertine-spokesman", name: "Mamertine spokesman", cultureId: "italic", faithId: null, dynastyId: null, locationProvinceId: "ita-72843720b81376294924159-sicily-northeast", polityId: "mamertines", ageYearsAtStart: 35, officeId: "mamertine-leader", personalAccountId: "mamertine-purse", skills: { martial: 60, intrigue: 45, learning: 35, piety: 45, stewardship: 45, diplomacy: 50, body: 70, subSkills: {} }, traits: ["bold", "vengeful"], mind: { drives: { security: 70, status: 45, wealth: 40, family: 55, faith: 40, duty: 55, revenge: 55 }, temperament: { boldness: 70, caution: 30, honesty: 50, sociability: 45, discipline: 40, cruelty: 45 }, riskTolerance: 70, values: [], taboos: [], currentPressures: ["mamertine-pressure-spokesman"] }, healthBps: 8_500, prestigeBps: 5_500, relations: [{ subjectCharacterId: "hieron-ii", causes: [{ id: "mamertine-hieron-fear", label: "Syracusan forces press their border at Messana.", score: -12, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null, dimensions: { fear: 30, trust: -10 } }] }], ambitions: [{ id: "hold-messana", label: "Hold Messana", kind: "restoration", targetId: "settlement-messana", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
     // The men who actually held Rome, Syracuse and Carthage in 270 BCE, so the
     // opening world is a political situation rather than one consul and three
     // placeholders. Each is here because the year gives them something to be
@@ -379,9 +408,18 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       // themselves consul has nowhere to sit if the college is modelled as a
       // single seat, and starts the game holding no office at all.
       { id: "roman-consul:seat:1", officeId: "roman-consul", seatIndex: 1, holderCharacterId: null, status: "vacant", vacancyCause: "never_filled", termStartedAtStep: null, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-not-disqualified"] },
+      { id: "syracusan-king:seat:0", officeId: "syracusan-king", seatIndex: 0, holderCharacterId: "hieron-ii", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
+      { id: "mamertine-leader:seat:0", officeId: "mamertine-leader", seatIndex: 0, holderCharacterId: "mamertine-spokesman", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
+      { id: "carthaginian-strategos:seat:0", officeId: "carthaginian-strategos", seatIndex: 0, holderCharacterId: "hanno-carthage", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
     ],
     forces: [
       { id: "roman-field-army", name: "Roman field army", polityId: "rome", commanderCharacterId: "gaius-genucius", controllerCharacterId: "gaius-genucius", locationId: "punic-italy-latium", authorizedStrength: 4_000, personnel: [{ categoryId: "infantry", label: "Legionaries", fit: 3_500, unavailable: [] }], moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: null, payArrearsPeriods: 0, history: [] },
+      // Carthage is a sea power and Rome in 270 BCE is not: the Republic has a
+      // handful of allied hulls and no fleet of its own, which is exactly the
+      // asymmetry the First Punic War was fought to overturn.
+      { id: "carthaginian-fleet", name: "Carthaginian fleet", polityId: "carthage", commanderCharacterId: "hannibal-gisco", controllerCharacterId: "hannibal-gisco", locationId: "ita-72843720b81376294924159-sicily-west", authorizedStrength: 120, personnel: [{ categoryId: "warship", label: "Quinqueremes", fit: 110, unavailable: [] }], moraleBps: 8_000, cohesionBps: 7_500, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: null, payArrearsPeriods: 0, history: [] },
+      { id: "syracusan-squadron", name: "Syracusan squadron", polityId: "syracuse", commanderCharacterId: "leptines-syracuse", controllerCharacterId: "leptines-syracuse", locationId: "ita-72843720b81376294924159-sicily-southeast", authorizedStrength: 40, personnel: [{ categoryId: "warship", label: "Triremes", fit: 35, unavailable: [] }], moraleBps: 7_500, cohesionBps: 7_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: null, payArrearsPeriods: 0, history: [] },
+      { id: "allied-greek-hulls", name: "Allied Greek hulls", polityId: "rome", commanderCharacterId: "gaius-genucius", controllerCharacterId: "gaius-genucius", locationId: "punic-italy-bruttian-highlands", authorizedStrength: 20, personnel: [{ categoryId: "warship", label: "Allied transports", fit: 18, unavailable: [] }], moraleBps: 6_500, cohesionBps: 6_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: null, payArrearsPeriods: 0, history: [] },
       { id: "carthaginian-garrison", name: "Carthaginian field force", polityId: "carthage", commanderCharacterId: "hanno-carthage", controllerCharacterId: "hanno-carthage", locationId: "tun-13205935b88806172084765", authorizedStrength: 3_500, personnel: [{ categoryId: "infantry", label: "Infantry", fit: 3_000, unavailable: [] }], moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: null, payArrearsPeriods: 0, history: [] },
       { id: "syracusan-army", name: "Syracusan army", polityId: "syracuse", commanderCharacterId: "hieron-ii", controllerCharacterId: "hieron-ii", locationId: "ita-72843720b81376294924159-sicily-southeast", authorizedStrength: 3_000, personnel: [{ categoryId: "infantry", label: "Hoplites", fit: 2_600, unavailable: [] }], moraleBps: 7_500, cohesionBps: 7_500, fatigueBps: 1_000, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: null, payArrearsPeriods: 0, history: [] },
       { id: "mamertine-garrison", name: "Mamertine garrison", polityId: "mamertines", commanderCharacterId: "mamertine-spokesman", controllerCharacterId: "mamertine-spokesman", locationId: "ita-72843720b81376294924159-sicily-northeast", authorizedStrength: 1_600, personnel: [{ categoryId: "infantry", label: "Mercenaries", fit: 1_400, unavailable: [] }], moraleBps: 7_000, cohesionBps: 7_000, fatigueBps: 1_000, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: null, payArrearsPeriods: 0, history: [] },

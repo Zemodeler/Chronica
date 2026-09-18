@@ -4,6 +4,7 @@ import {
   TRAIT_REGISTRY,
   deriveRelationDimension,
   formatWorldDate,
+  openStorylines,
   outlookFor,
   queryBeliefs,
   relationshipLabelFor,
@@ -71,19 +72,37 @@ The same engine rules apply as elsewhere:
 - Express time as a whole number of days from now, never as a date.
 - State changes, never running totals.
 - Mark anything done in secret with visibility "private", and news that has to
-  travel with discovery "delayed" or "rumoured" plus "knowableInDays".
+  travel with discovery "delayed" or "rumoured" plus "knowableInDays". A private
+  fact lists in "knownToRefs" exactly who knows it -- yourself and whoever was
+  there.
+- A matter under "Caught up in" is theirs to move, and moving it is a real
+  answer: record the step as a fact with its "storylineRef", and advance the
+  thread with "storyline_advance".
 - Score each fact's "significance" from 0 to 100 by how much a historian would care.
 - Someone who sets out to find something out, and succeeds, records it in
   "discoveries" -- the fact already existed; what changed is that they now know
   it. Someone who sets out to deceive uses "belief_set" on the person they are
   deceiving. A belief is never checked against the truth.
-- An army can only fight what it is standing next to. To attack, move it to the
-  enemy's province with "force_modify" first and engage in the same answer, or
-  -- if the march takes real time -- open a project whose outcome is
-  "force_move" and let it arrive. "force_engage" across two provinces is
-  refused, and the attack simply does not happen.
+- An army can only fight what it is standing next to, and can only move to
+  ground it borders. To attack, step it into the enemy's province with
+  "force_modify" and engage in the same answer; if the enemy is further off,
+  open a project whose outcome is "force_move" and let it arrive. A move across
+  the map and an engagement between two provinces are both refused, and the
+  attack simply does not happen.
+- Two powers at peace do not fight. Declaring the war is a decision somebody
+  takes, with "agreement_open"; an engagement without it is refused.
+- Water is crossed in ships. An army at a strait needs a fleet of its own power
+  standing with it, and the fleet crosses with it. Ships and armies do not give
+  battle to each other.
 - You do not decide who wins. Propose the engagement; the casualties, the rout
   and the ground are the engine's, and final.
+- A letter put to them is theirs to answer: "diplomatic_message_answer", naming
+  the letter, accepting, refusing or countering it, and saying why in their own
+  words. Answer it as the person who received it, weighing what it would cost
+  them -- not as the power that sent it would like. To counter, answer
+  "countered" and send a letter back with "diplomatic_message_send" in the same
+  breath, naming the original in "inReplyToRef". They may also write first, to
+  anyone they have reason to.
 
 Answer with a single JSON object and nothing else, matching this schema:
 
@@ -102,7 +121,7 @@ export interface CognitionResult {
  * several people at once, so a section that grows by ten lines grows the call by
  * thirty, and a prompt nobody can hold in view is worse than a thin one.
  */
-const ACTOR_CAPS = { beliefs: 8, pressures: 6, commitments: 6, relations: 6, ambitions: 4, arrangements: 3, drives: 3, skills: 3 } as const;
+const ACTOR_CAPS = { beliefs: 8, pressures: 6, commitments: 6, relations: 6, ambitions: 4, arrangements: 3, drives: 3, skills: 3, storylines: 2, intents: 3 } as const;
 
 /** Scores at the ends of the scale say something; a 50 says nothing worth a line. */
 const NOTABLE_HIGH = 65;
@@ -308,6 +327,25 @@ function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock
     .slice(0, ACTOR_CAPS.pressures);
   if (pressures.length > 0) lines.push("Under pressure:", ...pressures.map((pressure) => `  - ${pressure.kind} (${pressure.intensity}/100): ${pressure.label}`));
 
+  // The threads they are in, with what is at stake and what comes next. They
+  // used to learn of these only as a reason string -- "is caught up in
+  // something already under way" -- which told them nothing they could act on.
+  const threads = openStorylines(world.storylines)
+    .filter((storyline) => storyline.participantIds.includes(actor.characterId))
+    .sort((a, b) => b.updatedAtStep - a.updatedAtStep)
+    .slice(0, ACTOR_CAPS.storylines);
+  if (threads.length > 0) {
+    lines.push("Caught up in:", ...threads.map((storyline) => {
+      const lately = storyline.history.length === 0 ? "" : ` Lately: ${storyline.history[storyline.history.length - 1]}`;
+      return `  - ${storyline.title} [${storyline.id}] — ${storyline.phase}. At stake: ${storyline.stakes}${lately} What comes next: ${storyline.nextDevelopment}`;
+    }));
+  }
+
+  const intents = world.characterIntents
+    .filter((intent) => intent.actorCharacterId === actor.characterId && (intent.status === "proposed" || intent.status === "prepared"))
+    .slice(-ACTOR_CAPS.intents);
+  if (intents.length > 0) lines.push("They mean to:", ...intents.map((intent) => `  - ${intent.actionType}: ${intent.rationale}`));
+
   const commitments = world.commitments
     .filter((commitment) => commitment.promisorCharacterId === actor.characterId && commitment.status === "pending")
     .slice(0, ACTOR_CAPS.commitments);
@@ -324,7 +362,23 @@ function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock
     lines.push("Orders awaiting their answer:", ...owed.map((attempt) => `  - [${attempt.id}] from ${name(attempt.issuerRef.id)} — lawful: ${attempt.authorityCheck.authorized}`));
   }
 
-  lines.push("What they know of recent events:", ...actor.knownFacts.map((fact) => `  - ${fact.summary}`));
+  // Letters put to them or to their government, unanswered. The answer is
+  // theirs: a power's reply should come from the person who has to give it,
+  // with their own temperament and their own fears, not from the world.
+  const polityName = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
+  const letters = world.diplomacy.filter(
+    (message) =>
+      message.status === "awaiting_reply" &&
+      (message.toCharacterId === actor.characterId || (message.toCharacterId === null && character?.polityId != null && message.toPolityId === character.polityId)),
+  );
+  if (letters.length > 0) {
+    lines.push(
+      "Letters awaiting their answer:",
+      ...letters.map((message) => `  - [${message.id}] ${message.kind} from ${polityName(message.fromPolityId)}, by ${name(message.fromCharacterId)} — ${message.subject}: ${message.terms}`),
+    );
+  }
+
+  lines.push("What they know of recent events:", ...actor.knownFacts.map((fact) => `  - ${fact.summary} [${fact.id}]`));
   lines.push(`Today is ${formatWorldDate(world.instant, clock)}.`);
   return lines.join("\n");
 }

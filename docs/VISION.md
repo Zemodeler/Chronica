@@ -1570,6 +1570,18 @@ presses a siege, never does anything a Chronicle could report. A share of every
 burst belongs to people pursuing their own standing business, chosen without
 reference to what the player just did.
 
+**Provision (2026-09-18).** The world does not only fill in where the player
+looks; it also makes trouble where nobody is looking. A deterministic narrator
+reads the ruler's comfort — treasury, arrears, legitimacy, order, the war — and,
+on a cadence replayable from the game's own clock, hands the orchestrator one
+seed: a problem for a person, a thing that befalls the world, or a new actor.
+Code chooses where, what kind, how severe and whether it is secret; the model,
+in the call it was already making, decides what it actually is. Comfortable
+reigns get more and worse; a collapsing one is left to collapse. A seed may land
+in the ruler's own realm, and a secret one is known only to its plotters until
+discovery, betrayal or the strike. What can grow becomes a tracked thread with
+phases, and the Chronicle is silent about it until it is known.
+
 ### Historical continuity
 
 The world should remember consequences, relationships, promises, debts,

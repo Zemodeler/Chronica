@@ -20,8 +20,8 @@ import { CommitmentSchema } from "../characters/commitments";
 import { CharacterIntentSchema } from "../characters/intents";
 import { FamilyLinkSchema, HouseholdSchema, LifeContractSchema } from "../characters/family";
 import { LegacyCauseSchema } from "../continuity/continuity";
+import { PolityAgreementSchema } from "./agreements";
 import { DiplomaticMessageSchema, PolityStanceSchema } from "./diplomacy";
-import { WorldDevelopmentSchema } from "./developments";
 
 /**
  * Bumped when an old snapshot needs upgrading on load.
@@ -29,8 +29,32 @@ import { WorldDevelopmentSchema } from "./developments";
  * docs/03-data-model.md: because snapshots are versioned documents, a schema
  * change does not require rewriting history -- bump this and teach the reader
  * to upgrade old documents.
+ *
+ * 3: storylines lost the fields of a deleted director architecture and gained
+ *    provenance; the narrator's ledger arrived; `worldDevelopments`, which
+ *    nothing ever read, was dropped. No upgrader: worlds written at 2 were
+ *    playtests, and are recreated rather than carried.
  */
-export const WORLD_SCHEMA_VERSION = 2;
+export const WORLD_SCHEMA_VERSION = 3;
+
+/**
+ * What the narrator has done so far, so pacing is replayable from the document
+ * alone rather than from a window of recent facts that can scroll.
+ */
+export const NarratorLedgerSchema = z
+  .object({
+    /** Day of the last seed offered, or null before the first. */
+    lastSeedDay: ElapsedStepSchema.nullable(),
+    /** How many seeds have been offered; part of every seed's hash, so no two are alike. */
+    seedCount: z.number().int().min(0),
+    lastSeedKey: z.string().trim().min(1).max(80).nullable(),
+    /** Whether the orchestrator took the last seed up. An ignored seed is offered once more, then dropped. */
+    consumed: z.boolean(),
+  })
+  .strict();
+export type NarratorLedger = z.infer<typeof NarratorLedgerSchema>;
+
+export const EMPTY_NARRATOR_LEDGER: NarratorLedger = { lastSeedDay: null, seedCount: 0, lastSeedKey: null, consumed: true };
 
 /**
  * The authoritative world: one immutable document per turn, hashed to
@@ -62,8 +86,6 @@ export const WorldStateSchema = z
      * event queue orders them by `worldInstantToSortKey`.
      */
     instant: WorldInstantSchema,
-    /** Optional for existing snapshots; the scheduler materializes it on first use. */
-    worldDevelopments: z.array(WorldDevelopmentSchema).optional(),
     /**
      * The province graph is the map (ADR-0015). Detail tiers live on the
      * provinces because they are state the simulation mutates deterministically,
@@ -80,8 +102,10 @@ export const WorldStateSchema = z
      */
     continuity: z.array(CharacterContinuitySchema),
     encounters: z.array(EncounterMemorySchema),
-    /** Active 1.0 world threads. Optional keeps archived snapshots readable. */
-    storylines: z.array(WorldStorylineSchema).optional(),
+    /** Threads of history the world is following -- see `world/storylines.ts`. */
+    storylines: z.array(WorldStorylineSchema).default([]),
+    /** The narrator's own bookkeeping -- see `NarratorLedgerSchema`. */
+    narrator: NarratorLedgerSchema.default(EMPTY_NARRATOR_LEDGER),
     /** Current authoritative combat, siege, and war state for map projection. */
     conflicts: MapConflictsOverlaySchema.default({ battles: [], sieges: [], wars: [] }),
     material: MaterialWorldStateSchema,
@@ -120,6 +144,13 @@ export const WorldStateSchema = z
      * Defaulted so every snapshot written before this existed still parses.
      */
     polityStances: z.array(PolityStanceSchema).default([]),
+    /**
+     * What two powers have standing between them: war, truce, peace, alliance,
+     * tribute. A stance is how much one power trusts another and moves
+     * constantly; this is what they have agreed and changes only when somebody
+     * changes it. Defaulted so every snapshot written before it still parses.
+     */
+    polityAgreements: z.array(PolityAgreementSchema).default([]),
     /**
      * docs/32 Phase 7: persisted `AuthorityGrant`s from sources with no other
      * live-state projection (delegation/custom/conquest/emergency/explicit

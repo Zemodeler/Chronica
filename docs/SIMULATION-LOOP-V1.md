@@ -38,11 +38,11 @@ arbitrates, assigns every id, and applies it atomically.**
 
 In `packages/shared/src/sim/`:
 
-- `deltas.ts` — `WorldDeltaSchema`, a discriminated union of **26 operations**. The complete set of
+- `deltas.ts` — `WorldDeltaSchema`, a discriminated union of **29 operations**. The complete set of
   ways the world can change: money, income, obligations, loans, projects, forces, battle, characters,
-  beliefs, intentions, social events, generic entities, authority grants, order decisions, diplomatic
-  stances, polity outlooks, legitimacy, province material, political procedures, support positions
-  and holdings.
+  beliefs, intentions, pressures, social events, generic entities, authority grants, order decisions,
+  diplomatic stances, polity outlooks, legitimacy, province material, political procedures, support
+  positions, holdings, and the threads of history the world follows.
 - `proposal.ts` — what an actor returns: `narrativeSummary`, `frictions`, `deltas`, `facts`,
   `discoveries`, `delegations`, `schedule`. The orchestrator and NPC cognition return the *same*
   shape, which is how VISION §10's symmetric agency falls out of one contract instead of a parallel
@@ -376,6 +376,97 @@ Dumnorix of the Veneti, each with forces and a commander that resolves to a real
 
 ---
 
+## 5a. The world makes trouble
+
+The world elsewhere moved, once `routeAmbientActors` existed — but only through people, and only
+with what they already had. Nothing ever *started* anything. No plague fell on a quiet province, no
+governor began skimming, no pretender appeared; the six pressures the scenario authored were the
+whole of the drama the player had not caused. `WorldStoryline` had been modelled for exactly this —
+phase, stakes, a next development — and was written by nobody, shown to no model, and worth twelve
+points of ambient score.
+
+`narrator.ts` is the other half of §32's "a world that moves on its own", built on the same pattern
+as `population.ts` and for the same reason: **code decides that and where, the model decides what,
+in the call it was already making.** Once per burst, before the orchestrator, it reads the ruler's
+comfort — treasury runway, arrears, legitimacy, provincial order, the war and how it goes — and
+decides by `stableHash` over the game and the seed's ordinal whether something stirs, of what kind
+(a problem handed to a person, a thing that befalls the world, a new actor), where, how badly, and
+whether in secret. The slice states it as a directive — *"THE WORLD STIRS"* — naming the target by id
+and the exact deltas that would make it real, and orchestrator rule 19 makes it an obligation of the
+same answer. No extra model call.
+
+It is a dramatic director, and honest about it. A comfortable reign gets seeds more often and worse;
+a collapsing one is left to collapse. The model is never told this: it sees a scale and a target,
+never a motive, so there is nothing a Chronicle could expose. Trouble lands at home more often when
+things are easy, but never only at home — a bonus for the ruler's own realm turned out to outscore
+every quiet province abroad, so the split is rolled outright.
+
+**What had to change for a seed to be real.** Almost all of it was epistemics, and all of it was
+found by tracing a secret through the loop rather than by playing:
+
+- Nothing could hand anyone a problem. `social_events` demands two participants and a debt has one,
+  and its pressure changes were hardcoded empty. `character_pressure_set` is the arm for a
+  circumstance that befalls one person.
+- A private fact was born known to nobody, its author included, so a plotter could never be woken by
+  their own plot. `knownToRefs` on a fact proposal is the discovery ledger's first entry, written
+  with the fact — a later `discoveries` item could not have named a fact still unassigned.
+- The orchestrator's `narrativeSummary` reached the Chronicle by *identity*: it was applied under the
+  ruler's ref, and an account by the observer was always publishable. Attached to the visible facts
+  instead, it still told the ruler what the Boii had been given and what a plotter had begun, because
+  one sentence describes the order and the secret together and no gate splits a sentence. The world's
+  own account is now kept for inspection and attached to nothing: the facts carry what happened, and
+  the actors' own accounts still travel with theirs.
+- Every scheduled event fired as public news naming nobody, so a secret's next step was an
+  announcement and the router had nothing to route on. The queue's payload now carries visibility,
+  weight, who knows, its subjects and its thread.
+- A breach was computed and dropped at the app boundary. It is now a private fact known to the one
+  who committed it — which is what an audit later discovers.
+- A pressure at seventy walked up to the ruler and confessed itself, whatever its visibility.
+
+The three bookkeeping arms — `storyline_open`, `storyline_advance`, `character_pressure_set` — are
+exempt from authority outright. A thread is the world's record and a circumstance is nobody's act;
+judged against the consul's office they would have been the sixth false insubordination, on the
+first seed to land at home.
+
+**The ledger lives in the world document**, not in the fact window: `listRecentFacts` had ordered
+ascending under a limit, so a long game was handed its oldest hundred and twenty facts and called
+them recent. That is fixed, but pacing must not depend on a window at all. A seed ignored by the
+model is offered once more under the same key, then dropped; one taken up is done.
+
+Storylines are now shown to the orchestrator (*"OPEN THREADS"*, secret ones included, for the reason
+it sees every power's outlook), to their participants in cognition (*"Caught up in"*, with stakes and
+what comes next), weighted by phase in the ambient router — whose reason string now says what is
+pending rather than that something is — and hinted to the historian as part of a longer matter when
+the observer could know of it. A thread untouched for half a year closes in the tick. The scenario's
+two frozen storylines are real threads again.
+
+**Played** (four orders, 198 days, live model, through `scripts/narrator-play.mts`): three seeds. A
+minor outbreak in the Marsian highlands on day 18 — province shifted, public fact, a reassessment
+scheduled and fired. A grave rivalry against Manius Curius Dentatus on day 108 — the orchestrator
+invented Marcus Fulvius Luscus, opened the thread under the seed key, planted a 90-point pressure,
+and Fulvius then privately recruited supporters in cognition, known to himself alone. A serious
+prophetic movement in Etruria on day 198, secret, its fact known only to the prophet and the movement.
+Every defect was, once again, the model naming something the engine had not said it could:
+
+- It listed `rome`, a province and the movement itself among a thread's *participants*, and the
+  whole `storyline_open` was refused — which threw away the plague's thread. Things that exist but
+  are not people are now dropped from the participant list; a name that is nothing is still refused.
+- It wrote hyphenated local handles (`clepsina-continues-march`), because every id it reads is
+  hyphenated, and lost every cognition batch of the first two orders to a rule that bought nothing.
+  Hyphens are allowed.
+- It named a fact's subject as `{"kind": "storyline"}`, which the party-ref vocabulary lacked.
+- A scheduled event carried `"local:marsi_outbreak"` as its thread when that thread never opened.
+  A handle nothing in the batch created now resolves to null, never to itself.
+
+Also visible once breaches were facts: Hieron of Syracuse and Hanno of Carthage were recorded as
+breaching when they negotiated for their own powers, because the scenario gave neither an office and
+authority derives from offices. Scenario version 20 seats the King of Syracuse, the Leader of the
+Mamertines and Carthage's commander in Sicily. And COUNTRIES WITH NOBODY IN THEM now names the land
+each country holds, because told only that the Numidians had no army the model raised one in a
+province called "numidian-kingdoms".
+
+---
+
 ## 6. Conversations are part of the record
 
 A proposed `CharacterSocialEvent` used to wait for a turn to apply it. Turns were deleted, so nothing
@@ -676,7 +767,13 @@ covers anything the model wants to do.
 - **Multiplayer.** The burst assumes one sovereign. Multiplayer reintroduces exactly the
   turn-synchronisation problem §15 exists to avoid.
 - **Games created before this work.** Their state lived in the dropped `world_snapshots`; they were
-  deleted rather than half-resurrected.
+  deleted rather than half-resurrected. Worlds written at schema version 2 are likewise not carried
+  to 3: they were playtests, and are recreated.
+- **A death the world decides.** No delta sets `alive: false`, so the narrator never seeds a sudden
+  death; a `character_death` arm is the follow-up.
+- **Pirates and pretenders as their own power.** A new actor is filed under the polity whose land
+  they rise in, because `force_create` needs a polity that exists. A `polity_create` arm would let
+  them be a power of their own.
 
 ---
 
@@ -695,6 +792,13 @@ returned four of six actors as strings rather than objects, and those four react
 lost. Orchestration repairs once because a failed orchestration means the player's order goes
 unanswered; a failed cognition only means nobody reacted that iteration. Whether that trade is right
 at six actors, rather than one, is untested.
+
+**A seed the model narrates rather than carries out.** The narrator's pacing is unaffected — the
+ledger records the offer either way, and an ignored seed is re-offered once — but the incident is
+lost. Rule 19 states it as an obligation of the answer; whether a live model honours it is, like
+every prompt question here, only provable by play. The system prompt ceiling moved from 42,000 to
+48,000 characters for the three new arms, under the test's own rule that it moves for a genuinely new
+capability and for nothing else.
 
 **Burst duration against request scope.** A burst with a live model can exceed 45 seconds. A client
 that gives up leaves a `simulation_bursts` row at `running` — harmless today, since nothing reads it,
