@@ -12,9 +12,12 @@ describe("orchestrator prompt", () => {
 
   it("stays small enough to send on every call", () => {
     // Roughly 4 characters per token. The system prompt is sent every burst
-    // iteration, so a schema that balloons is a per-call tax forever.
+    // iteration, so a schema that balloons is a per-call tax forever. The
+    // ceiling moves only when a genuinely new capability is added to the
+    // contract -- the watch predicate union, which buys an order that runs to
+    // its own completion instead of four orders that each advance two days.
     console.log("system prompt chars:", ORCHESTRATOR_SYSTEM_PROMPT.length, "~tokens:", Math.round(ORCHESTRATOR_SYSTEM_PROMPT.length / 4));
-    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(40_000);
+    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(42_000);
   });
 });
 

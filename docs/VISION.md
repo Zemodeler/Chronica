@@ -1044,6 +1044,24 @@ Checkpoint / Chronicle
 Hard safeguards may still enforce sensible minimum/maximum simulation
 horizons.
 
+> **Provision (2026-09-18, from play).** Accumulated significance no longer
+> *ends* a burst. Measuring it that way conflated two different questions --
+> "has enough happened to be worth telling?" and "does this need the player?"
+> -- and answering both with one threshold made every piece of news an
+> interruption. A campaign that should have been one order took six, and four
+> of those orders asked the player nothing. Worse, the player's own order was
+> weighed on the same scale, so any forceful order crossed the threshold on
+> the day it was given and the world never moved at all; the only way to
+> advance the calendar was to order something unimportant.
+>
+> Significance is still assessed by the actors, still accumulated by code, and
+> still decides whether there is a Chronicle to write and which threads of it
+> matter most. What it no longer does is hand back control. A burst ends when
+> it needs the player, when a reaction cannot be paid for, when the calendar
+> holds nothing more to wake for, or at the maximum span. **What is merely
+> interesting earns an entry in the Chronicle; only what is actionable earns
+> the player's attention.**
+
 ------------------------------------------------------------------------
 
 ## 23. Three Simulation Outcomes
@@ -1086,6 +1104,18 @@ Examples:
 -   other major strategic forks.
 
 This is different from an ordinary Chronicle.
+
+> **Provision (2026-09-18).** Outcome B is no longer reached by crossing a
+> significance threshold -- see the provision under §22. A burst that ends for
+> any reason other than a player decision produces a Chronicle of whatever
+> happened on the way, and that Chronicle is now **several entries, one per
+> thread of events**, rather than one passage covering a span. A span that held
+> a war and an embassy is two entries with two titles, not one paragraph break.
+>
+> An order that is not finished when it is given may also name what would
+> finish it -- a **watch condition** -- and the burst runs until that holds
+> rather than stopping at the first quiet moment. "Wake me when the army
+> reaches Boii country" is a sentence the engine can act on.
 
 ------------------------------------------------------------------------
 
@@ -1271,6 +1301,19 @@ A possible normal flow:
 2.  batched important NPC cognition;
 3.  consequence/state validation;
 4.  Chronicle or player-facing output if required.
+
+> **Provision (2026-09-18).** The working ceiling is **six**: orchestration,
+> up to four rounds of batched cognition, and the Chronicle. A quiet order
+> still costs three or four. The extra rounds are not spent on the player's
+> own business -- they are what the rest of the world costs. A burst's later
+> rounds happen after the calendar has jumped, which is the only point at
+> which a foreign king has anything to do worth recording; asked two days
+> after the order, he correctly answers that nothing has changed yet.
+>
+> The people elsewhere ride along in the cognition call the reactors were
+> already making, so a living world is paid for in prompt tokens rather than
+> in calls. Raising the number of them costs almost nothing; raising the
+> number of rounds is what costs money.
 
 Exceptionally consequential situations may justify additional calls:
 
@@ -1517,6 +1560,15 @@ Use AI where judgment is valuable and code where exactness is valuable.
 ### Fast simulation
 
 Do not wake every NPC or invoke the LLM for every monthly calculation.
+
+### A world that moves on its own
+
+Attention routing answers "who reacts to this?" It must not also be the only
+way anyone acts, or the world outside the player's business is dormant by
+construction: a country with nobody attending to it never negotiates, never
+presses a siege, never does anything a Chronicle could report. A share of every
+burst belongs to people pursuing their own standing business, chosen without
+reference to what the player just did.
 
 ### Historical continuity
 

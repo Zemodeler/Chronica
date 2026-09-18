@@ -79,7 +79,13 @@ function parseFacts(rows: readonly { fact: unknown }[]): Fact[] {
 }
 
 export type SimulationOutcome =
-  | { readonly status: "ok"; readonly outcome: "continue" | "chronicle" | "player_decision"; readonly title: string; readonly body: string; readonly decision: { readonly prompt: string; readonly options: unknown } | null }
+  | {
+    readonly status: "ok";
+    readonly outcome: "continue" | "chronicle" | "player_decision";
+    /** One per thread of events the burst recorded, in reading order. */
+    readonly entries: readonly { readonly title: string; readonly body: string }[];
+    readonly decision: { readonly prompt: string; readonly options: unknown } | null;
+  }
   | { readonly status: "error"; readonly message: string };
 
 /** One fact as the row shape `commitBurst` stores, with its author's significance. */
@@ -173,6 +179,7 @@ export async function submitOrder(
           to: result.world.instant,
           narrative: result.narrative,
           frictions: result.frictions,
+          significanceByFactId: result.significanceByFactId,
         });
 
     try {
@@ -194,9 +201,18 @@ export async function submitOrder(
           stopReason: result.stopReason,
           accumulatedSignificance: result.accumulatedSignificance,
         },
-        ...(chronicle === null
+        ...(chronicle === null || chronicle.entries.length === 0
           ? {}
-          : { checkpoint: { title: chronicle.title, body: chronicle.body, factIds: chronicle.factIds, fromInstantSortKey: from.day * 1440 + from.minute } }),
+          : {
+            checkpoints: chronicle.entries.map((entry) => ({
+              title: entry.title,
+              body: entry.body,
+              factIds: entry.factIds,
+              subjects: entry.subjects,
+              fromInstantSortKey: entry.fromInstantSortKey,
+              toInstantSortKey: entry.toInstantSortKey,
+            })),
+          }),
         ...(result.playerDecision === null
           ? {}
           : { decision: { prompt: result.playerDecision.prompt, options: result.playerDecision.options } }),
@@ -223,8 +239,7 @@ export async function submitOrder(
     return {
       status: "ok",
       outcome: result.outcome,
-      title: chronicle?.title ?? "The world continues",
-      body: chronicle?.body ?? result.narrative.join("\n\n"),
+      entries: chronicle?.entries.map((entry) => ({ title: entry.title, body: entry.body })) ?? [],
       decision: result.playerDecision === null ? null : { prompt: result.playerDecision.prompt, options: result.playerDecision.options },
     };
   } finally {
@@ -246,7 +261,15 @@ export async function getGameView(gameId: string) {
     return {
       gameTitle: view.gameTitle,
       instant: view.world.instant,
-      chronicle: chronicle.map((entry) => ({ id: entry.id, title: entry.title, body: entry.body })),
+      // Entries carry the burst that wrote them: several threads of one span are
+      // one report to read together, not a queue of unrelated passages.
+      chronicle: chronicle.map((entry) => ({
+        id: entry.id,
+        burstId: entry.burstId,
+        title: entry.title,
+        body: entry.body,
+        subjects: entry.subjects,
+      })),
       decision: decision === undefined ? null : { id: decision.id, prompt: decision.prompt, options: decision.options },
     };
   } finally {

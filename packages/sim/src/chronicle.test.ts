@@ -28,13 +28,16 @@ function fact(overrides: Partial<FactDraft>): Fact {
   return emitFacts([draft], () => `fact-${(factCounter += 1)}`)[0]!;
 }
 
-/** Captures what the historian was actually shown. */
+/** Captures what the historian was actually shown, and writes every thread it was given. */
 function capturingPort(): SimModelPort & { lastUserMessage: string } {
   const port = {
     lastUserMessage: "",
     complete(_operation: Parameters<SimModelPort["complete"]>[0], _system: string, user: string) {
       port.lastUserMessage = user;
-      return Promise.resolve("In the spring, Rome began to raise new legions.");
+      const threads = [...user.matchAll(/^THREAD (\d+)$/gm)].map((match) => Number(match[1]));
+      return Promise.resolve(JSON.stringify({
+        entries: threads.map((thread) => ({ thread, title: `Thread ${thread}`, body: "In the spring, Rome began to raise new legions." })),
+      }));
     },
   };
   return port;
@@ -64,10 +67,10 @@ describe("chronicle", () => {
 
     expect(port.lastUserMessage).toContain("raising two new legions");
     expect(port.lastUserMessage).not.toContain("courting the army's officers");
-    expect(result.factIds).toHaveLength(1);
+    expect(result.entries.flatMap((entry) => entry.factIds)).toHaveLength(1);
   });
 
-  it("titles the passage with the period it covers", async () => {
+  it("gives each entry a title of its own rather than the dates it covers", async () => {
     const result = await composeChronicle({
       port: capturingPort(),
       clock,
@@ -79,7 +82,108 @@ describe("chronicle", () => {
       narrative: [],
       frictions: [],
     });
-    expect(result.title).toBe("1 March 264 BC – 1 April 264 BC");
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]!.title).toBe("Thread 1");
+    expect(result.entries[0]!.title).not.toContain("264 BC");
+  });
+
+  it("writes one entry per matter, and keeps them apart", async () => {
+    // A burst covers a span, not a subject. A Roman march on the Boii and a
+    // Carthaginian deliberation about Messana are not one passage.
+    const port = capturingPort();
+    const result = await composeChronicle({
+      port,
+      clock,
+      observer: { kind: "character", id: "marcus-atilius" },
+      observerPolityId: "rome",
+      facts: [
+        fact({ summary: "The legions march north into Boii country.", affectedEntities: [{ kind: "polity", id: "rome" }, { kind: "polity", id: "boii" }] }),
+        fact({ summary: "Carthage weighs the strait at Messana.", affectedEntities: [{ kind: "polity", id: "carthage" }] }),
+      ],
+      from: { day: 0, minute: 0 },
+      to: { day: 30, minute: 0 },
+      narrative: [],
+      frictions: [],
+    });
+
+    expect(result.entries).toHaveLength(2);
+    const [own, elsewhere] = result.entries;
+    expect(own!.factIds).toHaveLength(1);
+    expect(own!.subjects.map((subject) => subject.id)).toContain("boii");
+    expect(elsewhere!.subjects.map((subject) => subject.id)).toEqual(["carthage"]);
+    // Each thread is rendered on its own, so neither can borrow the other's news.
+    expect(port.lastUserMessage).toContain("THREAD 1");
+    expect(port.lastUserMessage).toContain("THREAD 2");
+  });
+
+  it("tells one war once, however many sides it has", async () => {
+    // The Boii defending their strongholds and Rome storming them are the same
+    // matter. Grouping only by "does it name Rome" split a single campaign into
+    // an entry per participant, and the record read as four accounts of one war.
+    const result = await composeChronicle({
+      port: capturingPort(),
+      clock,
+      observer: { kind: "character", id: "marcus-atilius" },
+      observerPolityId: "rome",
+      facts: [
+        fact({ summary: "The legions storm the first stronghold.", affectedEntities: [{ kind: "polity", id: "rome" }, { kind: "polity", id: "boii" }] }),
+        fact({ summary: "Brennos withdraws the host along the retreat route.", affectedEntities: [{ kind: "polity", id: "boii" }] }),
+        fact({ summary: "Carthage weighs the strait at Messana.", affectedEntities: [{ kind: "polity", id: "carthage" }] }),
+      ],
+      from: { day: 0, minute: 0 },
+      to: { day: 30, minute: 0 },
+      narrative: [],
+      frictions: [],
+    });
+
+    expect(result.entries).toHaveLength(2);
+    expect(result.entries[0]!.factIds).toHaveLength(2);
+    expect(result.entries[1]!.subjects.map((subject) => subject.id)).toEqual(["carthage"]);
+  });
+
+  it("withholds an account of something the observer never learned", async () => {
+    // The facts were always filtered; the accounts beside them were not, and a
+    // Roman consul read a Carthaginian's private deliberations in his own record.
+    const port = capturingPort();
+    const secret = fact({
+      summary: "Carthage weighs the strait at Messana.",
+      affectedEntities: [{ kind: "polity", id: "carthage" }],
+      visibility: "private",
+      discovery: { state: "private", knowableAtInstant: null, discoveredBy: [] },
+    });
+    await composeChronicle({
+      port,
+      clock,
+      observer: { kind: "character", id: "marcus-atilius" },
+      observerPolityId: "rome",
+      facts: [fact({ summary: "The legions march north." , affectedEntities: [{ kind: "polity", id: "rome" }] }), secret],
+      from: { day: 0, minute: 0 },
+      to: { day: 30, minute: 0 },
+      narrative: [
+        { actorRef: { kind: "character", id: "hanno" }, line: "Hanno quietly investigated whether Rome had left the strait open.", factIds: [secret.id] },
+      ],
+      frictions: [],
+    });
+
+    expect(port.lastUserMessage).not.toContain("Hanno quietly investigated");
+  });
+
+  it("strips the engine's own handles out of what the historian reads", async () => {
+    const port = capturingPort();
+    await composeChronicle({
+      port,
+      clock,
+      observer: { kind: "character", id: "marcus-atilius" },
+      observerPolityId: "rome",
+      facts: [fact({ summary: "Two new legions [project-3] stand ready, 8000 strong." })],
+      from: { day: 0, minute: 0 },
+      to: { day: 30, minute: 0 },
+      narrative: [],
+      frictions: [],
+    });
+
+    expect(port.lastUserMessage).toContain("Two new legions stand ready");
+    expect(port.lastUserMessage).not.toContain("project-3");
   });
 
   it("keeps the record when the narration call fails", async () => {
@@ -95,10 +199,10 @@ describe("chronicle", () => {
       narrative: [],
       frictions: [],
     });
-    expect(result.body).toContain("raising two new legions");
+    expect(result.entries[0]!.body).toContain("raising two new legions");
   });
 
-  it("says plainly that nothing happened rather than inventing a period", async () => {
+  it("records nothing at all rather than inventing a period", async () => {
     const port = capturingPort();
     const result = await composeChronicle({
       port,
@@ -112,7 +216,7 @@ describe("chronicle", () => {
       frictions: [],
     });
     expect(result.calls).toBe(0);
-    expect(result.body).toContain("Nothing of note");
+    expect(result.entries).toEqual([]);
   });
 });
 

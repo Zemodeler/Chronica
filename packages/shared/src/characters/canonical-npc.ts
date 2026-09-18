@@ -1,5 +1,6 @@
 import type { Character, CharacterSkills } from "./character";
 import { deriveDefaultMind } from "./mind";
+import { stableHash } from "../determinism";
 import { openCharacterAccount } from "../material/character-accounts";
 import type { WorldState } from "../world/world-state";
 
@@ -92,7 +93,11 @@ export function linkCanonicalCharacters(
         relations: [...character.relations, {
           subjectCharacterId: targetCharacterId,
           causes: [{
-            id: `relation-${subjectCharacterId}-${targetCharacterId}`,
+            // Two character ids do not fit in one entity id: an NPC id already
+            // carries a name and the player's uuid, so the pair overran the
+            // 120-character ceiling and the saved world would no longer parse.
+            // A digest of the ordered pair stays deterministic and directed.
+            id: `relation-${stableHash([subjectCharacterId, targetCharacterId]).toString(36)}`,
             label,
             score: Math.max(-100, Math.min(100, Math.round(score))),
             occurredAtStep: atStep,

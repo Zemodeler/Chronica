@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import { FactSchema, ScenarioDefinitionSchema, WorldStateSchema, factsVisibleTo, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
-import { runSimulationBurst, type BurstInput } from "./burst";
+import { DEFAULT_BUDGET, runSimulationBurst, type BurstInput } from "./burst";
 import type { SimModelPort, SimOperation } from "./ports";
 
 const definition = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition);
@@ -143,7 +143,7 @@ describe("a burst answering \"Raise two new legions\"", () => {
   it("carries the order's friction through to the record rather than swallowing it", async () => {
     const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [CARTHAGE_REACTS] });
     const result = await runSimulationBurst(input(port));
-    expect(result.frictions.join(" ")).toContain("Treasury reserves cover only part");
+    expect(result.frictions.map((friction) => friction.line).join(" ")).toContain("Treasury reserves cover only part");
   });
 
   it("lets Carthage react to the mobilization, in its own iteration", async () => {
@@ -216,7 +216,9 @@ describe("a secret coming to light", () => {
 
     const amended = result.rediscoveredFacts.find((fact) => fact.id === "fact-carthage-plot")!;
     const entry = amended.discovery.discoveredBy[0]!;
-    expect(entry.atInstant.day).toBeGreaterThan(result.world.instant.day - 40);
+    // Forty days after the thing happened, not forty days after wherever the
+            // burst happened to stop.
+    expect(entry.atInstant.day).toBe(40);
     expect(factsVisibleTo([amended], { kind: "character", id: "marcus-atilius" }, { day: 0, minute: 540 })).toHaveLength(0);
   });
 
@@ -324,23 +326,104 @@ describe("budget and termination", () => {
     const quiet = JSON.stringify({ actors: [] });
     const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [quiet, quiet, quiet] });
     const result = await runSimulationBurst(input(port));
-    expect(result.iterations).toBeLessThanOrEqual(3);
-    expect(result.modelCalls).toBeLessThanOrEqual(4);
+    expect(result.iterations).toBeLessThanOrEqual(DEFAULT_BUDGET.maxIterations);
+    expect(result.modelCalls).toBeLessThanOrEqual(DEFAULT_BUDGET.maxModelCalls);
   });
 
-  it("ends the burst when accumulated significance crosses the threshold", async () => {
-    const momentous = JSON.stringify({
+  it("does not hand control back merely because something momentous happened", async () => {
+    // Weight used to end a burst, so any news at all was an interruption: a
+    // campaign that should have been one order took six, four of which asked
+    // the player nothing. What is interesting earns a Chronicle entry; only
+    // what is actionable earns the player's attention.
+    const momentousOrder = JSON.stringify({
       ...JSON.parse(RAISE_TWO_LEGIONS),
       facts: [{ localId: "war", kind: "war_declared", summary: "Rome declares war on Carthage.", affectedRefs: [], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 100 }],
     });
-    const port = scriptedPort({ simulate_orchestrate: [momentous] });
+    const quiet = JSON.stringify({ actors: [] });
+    const port = scriptedPort({ simulate_orchestrate: [momentousOrder], simulate_cognition: [quiet, quiet, quiet] });
     const result = await runSimulationBurst(input(port));
+
     expect(result.accumulatedSignificance).toBeGreaterThanOrEqual(100);
-    // Momentous news hands control straight back: the world does not carry on
-    // for another week before telling the player Rome is at war.
-    expect(result.iterations).toBe(1);
-    expect(result.stopReason).toBe("threshold_crossed");
-    expect(result.world.instant.day).toBe(world().instant.day);
+    expect(result.world.instant.day).toBeGreaterThan(world().instant.day);
+    expect(["no_due_events", "max_span", "budget_exhausted"]).toContain(result.stopReason);
+  });
+
+  it("stops when somebody wants to answer and the calls are spent", async () => {
+    const reacting = Array.from({ length: 6 }, () => CARTHAGE_REACTS);
+    const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: reacting });
+    // An explicit, tiny budget: the point is what happens when the calls run
+    // out while somebody still has something to say, not what the current
+    // default happens to be.
+    const result = await runSimulationBurst(input(port, { budget: { ...DEFAULT_BUDGET, maxIterations: 2, maxModelCalls: 2 } }));
+
+    expect(result.stopReason).toBe("budget_exhausted");
+    expect(result.modelCalls).toBeLessThanOrEqual(2);
+  });
+
+  it("walks quiet time for free rather than spending the budget on it", async () => {
+    // A hop nobody answers is arithmetic, not a model call. Charging one made a
+    // 45-day march cost four orders to cross.
+    const quiet = JSON.stringify({ actors: [] });
+    const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [quiet, quiet, quiet] });
+    // An arrival two months out, and nothing at all before it.
+    const queue = [{ id: "arrival", dueInstantSortKey: (world().instant.day + 60) * 1440, kind: "campaign_arrival", summary: "The army reaches Boii country." }];
+    const result = await runSimulationBurst(input(port, { queue }));
+
+    expect(result.world.instant.day - world().instant.day).toBeGreaterThanOrEqual(60);
+    expect(result.firedEventIds).toContain("arrival");
+  });
+
+  it("lets the world elsewhere move even when nobody is reacting to the player", async () => {
+    // The router is purely reactive, so anyone with no connection to the order
+    // stayed dormant: Syracuse never moved on Messana and every Chronicle was
+    // one thread about the player. The ambient cast rides along in the call the
+    // reactors were already making.
+    const quiet = JSON.stringify({ actors: [] });
+    const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [quiet, quiet, quiet] });
+    const seen: string[] = [];
+    const watching: SimModelPort = {
+      complete(operation, system, user) {
+        if (operation === "simulate_cognition") seen.push(user);
+        return port.complete(operation, system, user);
+      },
+    };
+    await runSimulationBurst(input(watching));
+
+    // Somebody is in the batch on their own account rather than as a reaction,
+    // and is told so: asked to react to news nobody brought them, the world
+    // elsewhere sensibly answers that it will do nothing.
+    expect(seen.join("\n")).toContain("Nobody has brought them news");
+  });
+
+  it("carries an open-ended order to the thing it was waiting for", async () => {
+    // "Wake me when the army reaches Boii country" was prose the world could not
+    // act on: one order, one budget, and a long march had to be re-authorised
+    // every couple of days to cross.
+    const marchOrder = JSON.stringify({
+      ...JSON.parse(RAISE_TWO_LEGIONS),
+      deltas: [],
+      schedule: [],
+      watch: { label: "Wake me when Carthage's army reaches the north-east.", predicate: { kind: "force_enters_province", provinceId: "ita-72843720b81376294924159-sicily-northeast", polityId: "carthage" } },
+    });
+    const march = JSON.stringify({
+      actors: [{
+        actorRef: { kind: "character", id: "hanno" },
+        reasoning: "The army moves.",
+        proposal: {
+          narrativeSummary: "The army crosses into Sicily.",
+          frictions: [],
+          deltas: [{ op: "force_modify", forceRef: "carthaginian-army", locationId: "ita-72843720b81376294924159-sicily-northeast", reason: "The crossing is made." }],
+          facts: [],
+          delegations: [],
+          schedule: [],
+        },
+      }],
+    });
+    const quiet = JSON.stringify({ actors: [] });
+    const port = scriptedPort({ simulate_orchestrate: [marchOrder], simulate_cognition: [march, quiet, quiet] });
+    const result = await runSimulationBurst(input(port));
+
+    expect(result.stopReason).toBe("watch_condition");
   });
 
   it("survives a model that answers with nothing usable, and says so as friction", async () => {
@@ -348,7 +431,11 @@ describe("budget and termination", () => {
     const result = await runSimulationBurst(input(port));
 
     expect(result.parseFailures.length).toBeGreaterThan(0);
-    expect(result.world.material.accounts).toEqual(world().material.accounts);
+    // Nothing the model could have made exists. The world's own clock still
+    // runs -- wages fall due while the order is being read -- so the test is
+    // that no proposal was applied, not that no money moved.
+    expect(result.world.characters).toHaveLength(world().characters.length);
+    expect(result.world.projects).toHaveLength(0);
     expect(result.outcome).toBe("continue");
   });
 

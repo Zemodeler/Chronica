@@ -2,6 +2,7 @@ import { z } from "zod";
 import { EntityIdSchema } from "../material-state";
 import { FactDiscoveryStateSchema, FactVisibilitySchema } from "../world/facts";
 import { OrderPartyRefSchema } from "../world/party-ref";
+import { WatchPredicateSchema } from "../world/watch";
 import { LocalIdSchema, RefSchema } from "./refs";
 import { WorldDeltaSchema } from "./deltas";
 
@@ -119,6 +120,29 @@ export const PlayerDecisionSchema = z
   .strict();
 export type PlayerDecision = z.infer<typeof PlayerDecisionSchema>;
 
+/**
+ * What the ruler is waiting for (VISION §17, §23's `watch_condition`).
+ *
+ * "Wake me when the army reaches Boii country" used to be prose the world could
+ * not act on: every order was one burst with one budget, so a forty-five-day
+ * march had to be re-authorised four times to cross. A watch says the order is
+ * open-ended and names what ends it, so the burst runs on until it happens.
+ *
+ * The predicate is `world/watch.ts`'s closed union, not free text, for the three
+ * reasons that module gives: it must be free to evaluate, it must be
+ * deterministic on replay, and it must only read state the ruler could learn
+ * about. The model supplies the judgment of *what* to wait for; the id is the
+ * engine's, like every other id.
+ */
+export const WatchProposalSchema = z
+  .object({
+    /** Plain language, shown back to the ruler. Never parsed. */
+    label: z.string().trim().min(1).max(200),
+    predicate: WatchPredicateSchema,
+  })
+  .strict();
+export type WatchProposal = z.infer<typeof WatchProposalSchema>;
+
 export const OrchestratorOutputSchema = ProposalSchema.extend({
   /** VISION §30 step 1: what the engine understood the player to want. */
   intent: z
@@ -145,6 +169,11 @@ export const OrchestratorOutputSchema = ProposalSchema.extend({
   /** VISION §23's three outcomes. Also advisory -- pressure and budget decide. */
   outcome: z.enum(["continue", "chronicle", "player_decision"]),
   playerDecision: PlayerDecisionSchema.nullable().default(null),
+  /**
+   * Set only when the order is open-ended: it says carry on until this happens.
+   * Null for an order that is finished the moment it is given.
+   */
+  watch: WatchProposalSchema.nullable().default(null),
 }).strict();
 export type OrchestratorOutput = z.infer<typeof OrchestratorOutputSchema>;
 

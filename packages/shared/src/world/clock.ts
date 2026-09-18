@@ -69,16 +69,20 @@ export type WorldPins = z.infer<typeof WorldPinsSchema>;
 
 /**
  * Why a simulation burst stopped (VISION §23's three outcomes, with the reason
- * preserved). `player_decision` and `incoming_message` interrupt; `salient_event`,
- * `threshold_crossed`, `max_span` and `budget_exhausted` produce a Chronicle;
- * `no_due_events` at low pressure continues silently.
+ * preserved). `player_decision` and `incoming_message` interrupt; the rest are
+ * the world running out of room -- the calendar, the budget, or anything left
+ * to wake for -- and produce a Chronicle of whatever happened on the way.
+ *
+ * There is deliberately no "enough has happened" reason. Accumulated weight
+ * used to end a burst, which made every piece of news an interruption and cost
+ * a campaign six orders where it needed one. Weight earns a Chronicle entry; it
+ * does not earn the player's attention.
  */
 export const StopReasonSchema = z.enum([
   "player_decision",
   "clarification_required",
   "salient_event",
   "watch_condition",
-  "threshold_crossed",
   "action_completed",
   "scheduled_life_event",
   "incoming_message",

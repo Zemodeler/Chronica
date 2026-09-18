@@ -136,7 +136,7 @@ runSimulationBurst(input)
    4. advance + tick              code    walk to the next moment that matters
    5. routeAttention(...)         code    §18 funnel to ≤3 actors
    6. runCognition(...)           MODEL   batched, per-actor knowledge only
-   7. pressure + caps             code    §22 stop evaluation
+   7. stop evaluation             code    §22: does this need the player?
       ▼
  CONTINUE       CHRONICLE ──▶ MODEL (knowable facts only)       DECISION ──▶ player
 ```
@@ -255,18 +255,79 @@ exist is not recorded at all.
 
 ### Stopping
 
-Significance is scored **by the actors, as a field on each fact they emit**, and accumulated by code.
-That is how §22 gets contextual judgment of what matters without a model call of its own.
+A burst stops when it needs the player — not when something worth telling has happened. Those were
+once the same test: significance accumulated past a threshold and the burst ended, so a won battle,
+an ally mobilizing, any news at all handed control back. Playing it, a campaign that should have been
+one order took six, and four of them asked the player nothing. Worse, the player's *own order* was
+weighed the same way, so a forceful order crossed the threshold on the day it was given and the world
+never moved at all; the only way to advance the calendar was to say something unimportant.
 
-`DEFAULT_BUDGET`: `maxIterations 3`, `maxModelCalls 4`, `maxSimulatedDays 90`, `maxCausalDepth 3`,
-`maxFocusedActors 3`, `pressureThreshold 100`, plus the scenario's own `maxSpanDays`. Anything
-unresolved at the stop becomes a scheduled event — stable pending state, never dropped.
+Interesting and actionable are different things. What is merely interesting earns a Chronicle entry —
+and the Chronicle now tells several threads of a span at once, so nothing is lost by carrying on.
+The stops are: a decision only the player can make, somebody wanting to answer with no model call
+left to pay for it, the calendar holding nothing more to wake for, or the scenario's maximum span.
+
+Time is walked in **hops**, and a hop nobody answers costs nothing but arithmetic. Only a cognition
+call spends the budget. That is what lets one order carry a forty-five-day march to its arrival
+instead of creeping forward two days at a time.
+
+An order that is not finished when it is given says what would finish it. The orchestrator sets a
+**watch** — `world/watch.ts`'s closed predicate union, which had been defined for years with nothing
+reading it — and the burst runs until that predicate holds (`watch_condition`) rather than stopping
+at the first quiet moment. Evaluating one is free and deterministic (`sim/watch.ts`), which is the
+whole reason the language is a union and not a sentence: a watch tested by a model would be charged
+for on every hop of every span.
+
+### The world elsewhere
+
+`routeAttention` is purely reactive — it needs a triggering fact, and an actor who can see it — so
+anybody with no connection to the player's order scored nothing and stayed dormant. Syracuse never
+moved on Messana, Carthage negotiated with no one, and every Chronicle was a single thread about the
+player, because the player was the only person in the world doing anything.
+
+`routeAmbientActors` is the other half: a small rotating cast chosen from their **own** standing
+business — an office to run, a promise outstanding, a pressure on them, a storyline they are in, a
+government with stated intentions. Cognition is batched, so they ride along in the call the reactors
+were already making: a living world costs prompt tokens, not model calls.
+
+They must be told which they are. A person handed a cognition section and asked what they make of
+the news, when nobody has brought them any, sensibly answers "nothing" — so `RoutedActor.impetus`
+distinguishes a reaction from someone's own business, and the prompt says plainly that a month of
+their own is not nothing.
+
+Significance is still scored **by the actors, as a field on each fact they emit**, and accumulated by
+code: it decides whether there is a Chronicle to write and orders the threads within it.
+
+`DEFAULT_BUDGET`: `maxIterations 4`, `maxModelCalls 6`, `maxSimulatedDays 90`, `maxCausalDepth 3`,
+`maxFocusedActors 3`, `maxAmbientActors 3`, `maxHops 64`, plus the scenario's own `maxSpanDays`.
+Anything unresolved at the stop becomes a scheduled event — stable pending state, never dropped.
+
+The numbers that matter for how alive the world feels are `maxIterations` and `maxModelCalls`: they
+decide how many rounds the world gets per order, and therefore how many times the people elsewhere
+are asked what they are doing. Four and six buys a round after the calendar has jumped, which is when
+a foreign king has anything worth recording; three and four only ever asked him two days after the
+order, when the honest answer was that nothing had changed yet.
 
 ### The Chronicle (`chronicle.ts`)
 
 Written only from what the player could know. The constraint is enforced by **what the historian is
 handed**, not by an instruction in the prompt: a prompt asking the model not to mention secrets would
 eventually be disobeyed and nobody would notice.
+
+The same gate covers the actors' accounts. Facts were filtered from the start; the narrative lines
+beside them were not, and every NPC's account of its own reasoning went into the player's record — a
+Roman consul read that a Carthaginian admiral "quietly investigated whether the Roman campaign created
+an opening". An account now travels with the facts it describes and is published only if one of them
+is.
+
+A burst covers a span, not a subject, so the visible facts are **split into threads** — connected
+components over the people, armies and countries they name — and each thread becomes its own entry
+with its own model-written title. One model call writes them all. Splitting is deterministic code:
+the war the player is fighting is one entry however many sides it has, and a Carthaginian
+deliberation nobody else is part of is its own. What the historian is shown is stripped of the
+engine's handles first, and the prompt forbids the register that produced "the Boii now possessed
+recognized war-chiefs" and "took no consequential action": no non-events, no administrative
+vocabulary.
 
 ---
 

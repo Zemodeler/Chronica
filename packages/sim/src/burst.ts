@@ -9,17 +9,20 @@ import {
   type ScenarioClock,
   type ScenarioWarfareRules,
   type StopReason,
+  type WatchProposal,
   type WorldState,
 } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { AuthorityBreach } from "./apply/context";
-import { routeAttention, type RoutedActor } from "./attention";
+import { routeAmbientActors, routeAttention, type RoutedActor } from "./attention";
 import { runCognition } from "./cognition";
 import { materializeFacts } from "./facts";
 import { orchestrate } from "./orchestrate";
 import { createIdFactory, type SimModelPort } from "./ports";
+import type { NarrativeLine } from "./chronicle";
 import { buildWorldSlice, type AnsweredDecision, type SliceEvent } from "./slice";
 import { runDeterministicTick } from "./tick";
+import { isWatchSatisfied } from "./watch";
 
 /**
  * One simulation burst: everything that happens between the player pressing
@@ -38,16 +41,27 @@ export interface SimulationBudget {
   readonly maxSimulatedDays: number;
   readonly maxCausalDepth: number;
   readonly maxFocusedActors: number;
-  readonly pressureThreshold: number;
+  /**
+   * How many people getting on with their own business ride along in the
+   * batched cognition call. They cost prompt tokens, never an extra call.
+   */
+  readonly maxAmbientActors: number;
+  /** A guard on the walk itself. Hops are deterministic and cost nothing. */
+  readonly maxHops: number;
 }
 
 export const DEFAULT_BUDGET: SimulationBudget = {
-  maxIterations: 3,
-  maxModelCalls: 4,
+  // Four rounds rather than three, six calls rather than four. The third round
+  // is what the world away from the player actually costs: its people get a
+  // look after the calendar has jumped, not only two days after the order,
+  // which is when a foreign king has anything to do that is worth recording.
+  maxIterations: 4,
+  maxModelCalls: 6,
   maxSimulatedDays: 90,
   maxCausalDepth: 3,
   maxFocusedActors: 3,
-  pressureThreshold: 100,
+  maxAmbientActors: 3,
+  maxHops: 64,
 };
 
 export interface ScheduledEventDraft {
@@ -107,9 +121,13 @@ export interface BurstResult {
   readonly outcome: "continue" | "chronicle" | "player_decision";
   readonly stopReason: StopReason;
   readonly accumulatedSignificance: number;
-  /** What happened, in the actors' own words -- the Chronicle's raw material. */
-  readonly narrative: readonly string[];
-  readonly frictions: readonly string[];
+  /**
+   * What happened, in the actors' own words -- the Chronicle's raw material.
+   * Each line names who gave the account and which facts it is an account of,
+   * so the Chronicle can withhold one the player could not have heard.
+   */
+  readonly narrative: readonly NarrativeLine[];
+  readonly frictions: readonly NarrativeLine[];
   readonly breaches: readonly AuthorityBreach[];
   readonly playerDecision: PlayerDecision | null;
   readonly parseFailures: readonly string[];
@@ -130,12 +148,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const newFacts: Fact[] = [];
   const significanceByFactId = new Map<string, number>();
   const scheduled: ScheduledEventDraft[] = [];
-  const narrative: string[] = [];
-  const frictions: string[] = [];
+  const narrative: NarrativeLine[] = [];
+  const frictions: NarrativeLine[] = [];
   const breaches: AuthorityBreach[] = [];
   const parseFailures: string[] = [];
   let playerDecision: PlayerDecision | null = null;
   let stopReason: StopReason = "no_due_events";
+  /** What the ruler is waiting for, when the order was an open-ended one. */
+  let watch: WatchProposal | null = null;
 
   /** Applies one actor's proposal: deltas, then the facts and events it produced. */
   const applyProposal = (proposal: Proposal, actorRef: OrderPartyRef, causalDepth: number, actsForTheWorld = false): void => {
@@ -150,13 +170,6 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     });
     world = result.world;
     breaches.push(...result.breaches);
-    // Only what the world could not do. A malformed reference is the engine's
-    // business: handing it to the historian put "no province called Latium
-    // existed" into a Chronicle.
-    frictions.push(
-      ...proposal.frictions,
-      ...result.rejected.filter((rejection) => rejection.kind === "world").map((rejection) => rejection.reason),
-    );
 
     // What the engine itself made true (casualties, seizures) counts as history
     // exactly as much as what the actor said they were doing.
@@ -171,6 +184,19 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     newFacts.push(...materialized.facts);
     for (const [factId, weight] of materialized.significanceByFactId) significanceByFactId.set(factId, weight);
     significance += materialized.significance;
+
+    // An account travels with the facts it is an account of, and so does a
+    // reported difficulty. Unattached, they went into the Chronicle whoever had
+    // said them -- which is how a Roman consul read a Carthaginian's private
+    // deliberations. Only what the world could not do is worth reporting at all:
+    // a malformed reference is the engine's business, and handing it to the
+    // historian put "no province called Latium existed" into a Chronicle.
+    const describes = materialized.facts.map((fact) => fact.id);
+    narrative.push({ actorRef, line: proposal.narrativeSummary, factIds: describes });
+    for (const line of [
+      ...proposal.frictions,
+      ...result.rejected.filter((rejection) => rejection.kind === "world").map((rejection) => rejection.reason),
+    ]) frictions.push({ actorRef, line, factIds: describes });
 
     // A refused delta is still history -- the world tried and could not, and the
     // player deserves to learn that rather than wonder. But only when the world
@@ -221,7 +247,6 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
 
     applyDiscoveries(proposal.discoveries, causalDepth);
     world = recordDelegations(world, proposal.delegations, ids, result.assignedIds);
-    narrative.push(proposal.narrativeSummary);
   };
 
   const firedEventIds: string[] = [];
@@ -275,6 +300,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const tickTo = (toDay: number): void => {
     const ticked = runDeterministicTick({ world, toDay, ids, warfare: input.warfare });
     world = ticked.world;
+    let describes: string[] = [];
     if (ticked.factProposals.length > 0) {
       const materialized = materializeFacts({
         proposals: ticked.factProposals,
@@ -287,8 +313,11 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       newFacts.push(...materialized.facts);
       for (const [factId, weight] of materialized.significanceByFactId) significanceByFactId.set(factId, weight);
       significance += materialized.significance;
+      describes = materialized.facts.map((fact) => fact.id);
     }
-    narrative.push(...ticked.notes);
+    // Nobody's account: the world's own. It reaches the record only through the
+    // facts it describes, the same as everything else.
+    for (const note of ticked.notes) narrative.push({ actorRef: null, line: note, factIds: describes });
   };
 
   /**
@@ -303,7 +332,11 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
    * anything else.
    */
   const fireDueEvents = (): void => {
-    const due = input.queue.filter((event) => !firedEventIds.includes(event.id) && event.dueInstantSortKey <= nowKey());
+    // Including what this burst scheduled a moment ago. An order that sets a
+    // march in motion and then walks the world to its arrival must see the
+    // arrival happen; before, only events inherited from earlier bursts could
+    // fire, so the burst arrived on the day and nothing occurred.
+    const due = [...input.queue, ...scheduled].filter((event) => !firedEventIds.includes(event.id) && event.dueInstantSortKey <= nowKey());
     if (due.length === 0) return;
     for (const event of due) firedEventIds.push(event.id);
 
@@ -366,27 +399,46 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   applyProposal(orchestration.output, input.actorRef, 0, true);
   if (orchestration.output.playerDecision !== null) playerDecision = orchestration.output.playerDecision;
 
-  const momentousAlready = significance >= budget.pressureThreshold;
-  if (momentousAlready) stopReason = "threshold_crossed";
+  // An open-ended order says what would end it. The world then carries on until
+  // that happens rather than until this burst runs out of things to do.
+  watch = orchestration.output.watch;
 
   // ── Advancing the world ────────────────────────────────────────────────
   //
   // The world moves only while an order is being carried out, so a burst has to
   // carry it far enough to be worth the asking. It walks to the next moment
   // that matters -- the next scheduled event, or simply far enough for word to
-  // travel and someone to answer -- ticking the deterministic world as it goes,
-  // and stops at the first of: a decision only the player can make, enough
-  // accumulated history to be worth telling, the budget, or the scenario's own
-  // maximum span.
+  // travel and someone to answer -- ticking the deterministic world as it goes.
+  //
+  // It stops when it needs the player, and not merely when something worth
+  // telling has happened. Those used to be the same test: weight accumulated
+  // past a threshold ended the burst, so a won battle, an ally mobilizing, any
+  // news at all handed control back. A campaign that should have been one order
+  // took six, and four of them asked the player nothing. Interesting and
+  // actionable are different things -- what is merely interesting belongs in the
+  // Chronicle, which now tells several threads of it at once, and the world
+  // carries on until it genuinely wants an answer.
+  //
+  // So the stops are: a decision only the player can make, a reaction the call
+  // budget cannot pay for, the calendar running out of anything to wake for, or
+  // the scenario's own maximum span.
   const maxDays = Math.min(budget.maxSimulatedDays, input.clock.maxSpanDays);
   let causalDepth = 1;
+  let hops = 0;
 
-  while (!momentousAlready && playerDecision === null && iterations < budget.maxIterations && modelCalls < budget.maxModelCalls) {
+  while (playerDecision === null) {
     const elapsedDays = world.instant.day - startDay;
     if (elapsedDays >= maxDays) {
       stopReason = "max_span";
       break;
     }
+    // Time is walked in hops, and a hop that nobody answers costs nothing but
+    // arithmetic. The cap is a guard against a pathological queue, not a budget.
+    if (hops >= budget.maxHops) {
+      stopReason = "budget_exhausted";
+      break;
+    }
+    hops += 1;
 
     const nextScheduled = [...input.queue, ...scheduled]
       .map((event) => event.dueInstantSortKey)
@@ -398,17 +450,18 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // recruitment actually mature instead of creeping forward two days an order.
     const reactionKey = nowKey() + REACTION_DELAY_DAYS * 1440;
     const ceilingKey = (startDay + maxDays) * 1440 + world.instant.minute;
-    const targetKey = Math.min(iterations === 1 ? reactionKey : nextScheduled ?? reactionKey, ceilingKey);
+    const targetKey = Math.min(hops === 1 ? reactionKey : nextScheduled ?? reactionKey, ceilingKey);
 
     world = advanceWorldTo(world, addMinutes(world.instant, Math.max(0, targetKey - nowKey())));
     tickTo(world.instant.day);
     fireDueEvents();
 
+    const playerCharacterIds = input.actorRef.kind === "character" ? [input.actorRef.id] : [];
     const attention = routeAttention({
       world,
       facts: [...input.knownFacts, ...newFacts],
       offices: input.offices,
-      excludeCharacterIds: input.actorRef.kind === "character" ? [input.actorRef.id] : [],
+      excludeCharacterIds: playerCharacterIds,
       maxFocused: budget.maxFocusedActors,
       maxCausalDepth: budget.maxCausalDepth,
     });
@@ -417,30 +470,51 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // mean to do about it, so their intent is visible to the next burst.
     world = recordActiveIntents(world, attention.active, ids);
 
-    if (attention.focused.length > 0 && causalDepth <= budget.maxCausalDepth) {
-      const cognition = await runCognition(input.port, attention.focused, world, input.clock);
+    // The world elsewhere moves too: people with their own business, chosen
+    // without reference to anything the player did. They ride along in the
+    // batched call the reactors were already making, so a living world costs
+    // prompt tokens rather than model calls.
+    //
+    // Every round they can be afforded, not once per burst. Given one look two
+    // days after the order, a foreign king sensibly answers that nothing has
+    // changed yet; it is after the world jumps a month to the next thing on the
+    // calendar that his own business has somewhere to go.
+    const ambient = routeAmbientActors({
+      world,
+      facts: [...input.knownFacts, ...newFacts],
+      offices: input.offices,
+      excludeCharacterIds: [...playerCharacterIds, ...attention.focused.map((actor) => actor.characterId)],
+      max: budget.maxAmbientActors,
+    });
+
+    const cast = [...attention.focused, ...ambient];
+    const wantsAnswering = cast.length > 0 && causalDepth <= budget.maxCausalDepth;
+    if (wantsAnswering) {
+      // Somebody has something to say and there is nothing left to pay them
+      // with. Stopping here is honest; carrying on would silence them.
+      if (modelCalls >= budget.maxModelCalls || iterations >= budget.maxIterations) {
+        stopReason = "budget_exhausted";
+        break;
+      }
+      const cognition = await runCognition(input.port, cast, world, input.clock);
       modelCalls += cognition.calls;
       iterations += 1;
       if (cognition.parseFailure !== null) parseFailures.push(cognition.parseFailure);
       for (const actor of cognition.output.actors) applyProposal(actor.proposal, actor.actorRef, causalDepth);
       causalDepth += 1;
-    } else {
-      iterations += 1;
     }
 
-    if (significance >= budget.pressureThreshold) {
-      stopReason = "threshold_crossed";
-      break;
-    }
     const spanned = world.instant.day - startDay;
-    // Nothing left to wake for, and the world has run its minimum span: this is
-    // as far as the order carries.
-    if (nextScheduled === undefined && attention.focused.length === 0 && spanned >= input.clock.minSpanDays) {
-      stopReason = "no_due_events";
+    if (watch !== null && isWatchSatisfied(watch.predicate, input.world, world)) {
+      stopReason = "watch_condition";
       break;
     }
-    if (modelCalls >= budget.maxModelCalls || iterations >= budget.maxIterations) {
-      stopReason = "budget_exhausted";
+    // Nothing left to wake for, and the world has run its minimum span: this is
+    // as far as the order carries. An order still waiting on something keeps
+    // going regardless -- that is what asking to be woken on arrival means, and
+    // the maximum span is what bounds the waiting.
+    if (watch === null && nextScheduled === undefined && cast.length === 0 && spanned >= input.clock.minSpanDays) {
+      stopReason = "no_due_events";
       break;
     }
   }
