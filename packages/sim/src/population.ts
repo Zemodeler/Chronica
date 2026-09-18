@@ -19,6 +19,17 @@ import type { Fact, WorldState } from "@chronica/shared";
  * into needs one now, and the large neighbours need one soon.
  */
 
+/**
+ * How much ground a country must hold before the world owes it a leader without
+ * the player having gone anywhere near it. Set where the Punic Wars map's real
+ * powers sit: seventeen countries clear it, and the sixty-odd single-province
+ * peoples do not.
+ */
+const MAJOR_POWER_PROVINCES = 12;
+
+/** Ceiling on what sheer size contributes, kept below the smallest relevance bonus. */
+const MAX_SIZE_SCORE = 100;
+
 export interface PolityGap {
   readonly polityId: string;
   readonly name: string;
@@ -73,22 +84,39 @@ export function findPolityGaps(input: PopulationInput): PolityGap[] {
     const provinceCount = provincesBy.get(polity.id) ?? 0;
     if (provinceCount === 0) continue;
 
+    // Contact, or consequence. The map holds over a hundred countries, and
+    // inventing a chieftain for each would spend the world's attention on
+    // people nobody will ever meet -- and keep spending it, burst after burst,
+    // until the roster was full. A country earns its people when the player can
+    // reach it, when history has already named it, or when it is large enough
+    // that the powers of the age would have to reckon with it. The rest stay
+    // names on the map until play arrives, which is the moment this same check
+    // starts returning them.
+    const major = provinceCount >= MAJOR_POWER_PROVINCES || polity.capitalSettlementId !== null;
+    if (!involved.has(polity.id) && !neighbours.has(polity.id) && !major) continue;
+
     const needsLeader = !world.characters.some((character) => character.polityId === polity.id && character.alive);
     const needsForce = !world.material.forces.some((force) => force.polityId === polity.id);
     if (!needsLeader && !needsForce) continue;
 
+    // Relevance first, size only to break ties between equals. These were once
+    // small bonuses added to the province count, which worked while no country
+    // held more than a dozen provinces; on the whole map a quiet people holding
+    // sixty-four of them outranked the country the player was invading. Size is
+    // now bounded well below the smallest relevance bonus, so it can order the
+    // shortlist but never choose it.
     const reasons: string[] = [];
-    let score = provinceCount;
+    let score = Math.min(provinceCount, MAX_SIZE_SCORE);
     if (involved.has(polity.id)) {
-      score += 10;
+      score += 1_000;
       reasons.push("the player is dealing with them now");
     }
     if (neighbours.has(polity.id)) {
-      score += 4;
+      score += 400;
       reasons.push("they border us");
     }
     if (polity.capitalSettlementId !== null) {
-      score += 2;
+      score += 200;
       reasons.push("they hold a named capital");
     }
     if (provinceCount > 1) reasons.push(`they hold ${provinceCount} provinces`);

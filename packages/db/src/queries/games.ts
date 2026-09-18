@@ -136,7 +136,19 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     // government is pursuing privately, and Rome's own unfinished war at
     // Rhegium -- the material the ambient cast reasons from.
     await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 16, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 2, origin: "built-in", validatedAt: new Date(), notes: "Adds the historical cast of 270 BCE (Dentatus, Ogulnius, Vibellius at Rhegium, Leptines of Syracuse, Hannibal Gisco), every power's standing aims, and the Rhegium storyline, so the world away from the player has people and purposes of its own." }).onConflictDoNothing();
-    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 16, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
+    // Version 17 makes the whole drawn map authoritative. The scenario had
+    // written down twenty provinces and ten polities -- Italy, Sicily and the
+    // Carthaginian heartland -- while the map drew the western Mediterranean
+    // entire, and everything outside those twenty was an overlay painted over
+    // ground the simulation had no record of. When that overlay stopped being
+    // merged into the view, the rest of the world simply went blank, because
+    // there had never been anything behind it. All 779 provinces the map gives
+    // a controller are now real state, with derived terrain, 2,227 borders, and
+    // the 126 peoples who hold them: the Gauls, Iberians, Britons, Germans,
+    // Illyrians, Thracians, the Greek leagues, Macedon, Epirus, the Numidian
+    // and Mauretanian kingdoms.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 17, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 2, origin: "built-in", validatedAt: new Date(), notes: "Makes the whole drawn map authoritative: all 779 controlled provinces, their borders and the 126 peoples who hold them become real world state instead of an overlay painted over ground the simulation had no record of." }).onConflictDoNothing();
+    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 17, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
   });
 }
 
