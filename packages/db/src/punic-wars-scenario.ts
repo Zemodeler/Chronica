@@ -1,4 +1,5 @@
 import { ScenarioDefinitionSchema, WorldStateSchema, type ScenarioDefinition, type Settlement, type WorldState } from "@chronica/shared";
+import { PUNIC_WARS_GRAPH_EDGES, PUNIC_WARS_GRAPH_POLITIES, PUNIC_WARS_GRAPH_PROVINCES, PUNIC_WARS_GRAPH_SETTLEMENTS } from "./punic-wars-map-graph";
 
 export const PUNIC_WARS_SCENARIO_ID = "00000000-0000-4000-8000-000000000102";
 export const PUNIC_WARS_SLUG = "punic-wars";
@@ -95,7 +96,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
       { id: "mountain-pass", label: "Mountain passes", allowedCrossings: ["pass"], water: false },
       { id: "desert-steppe", label: "Desert and steppe", allowedCrossings: ["land"], water: false },
     ],
-    provinceCount: { min: 19, max: 19 },
+    provinceCount: { min: 779, max: 779 },
   },
   warfare: {
     troopCategories: [{ id: "infantry", label: "Infantry", combatWeightBps: 10_000, steadinessBps: 7_000, mobilityBps: 5_000 }],
@@ -114,9 +115,110 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
   ],
 });
 
+/**
+ * The places this scenario is actually about, authored rather than derived:
+ * their settlements, their operational positions, and control set deliberately.
+ * The rest of the map comes from the generated graph, and these win wherever
+ * the two describe the same province.
+ */
+const handAuthoredProvinces = [
+  ...italy.map(([id, name, controllerPolityId]) => ({ id, name, formerNames: [], terrainId: id === "punic-italy-latium" || id === "punic-italy-campanian-plain" ? "coastal-plain" : "hills", settlements: visibleSettlementsByProvince[id] ?? [], controllerPolityId, controlFirmnessBps: controllerPolityId === "rome" ? 9_000 : 7_000, tier: "far" as const })),
+  { id: "tun-13205935b88806172084765", name: "Carthaginian heartland", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["tun-13205935b88806172084765"]!, controllerPolityId: "carthage", controlFirmnessBps: 9_000, tier: "far" },
+  { id: "ita-72843720b81376294924159-sicily-west", name: "Lilybaeum and western Sicily", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-west"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_500, tier: "focus" },
+  { id: "ita-72843720b81376294924159-sicily-northwest", name: "Panormus and the north-west", formerNames: [], terrainId: "hills", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-northwest"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_000, tier: "focus" },
+  { id: "ita-72843720b81376294924159-sicily-central", name: "Agrigentum and the south-west", formerNames: [], terrainId: "hills", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-central"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_000, tier: "focus" },
+  { id: "ita-72843720b81376294924159-sicily-southeast", name: "Syracuse and the south-east", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-southeast"]!, controllerPolityId: "syracuse", controlFirmnessBps: 8_500, tier: "focus" },
+  {
+    id: "ita-72843720b81376294924159-sicily-northeast",
+    name: "Messana and the strait",
+    formerNames: [],
+    terrainId: "coastal-plain",
+    settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-northeast"]!,
+    // Mount Etna is an operational destination inside this coarse province;
+    // it is not a separate province that an army can be teleported to.
+    positions: [
+      { id: "position-mount-etna", provinceId: "ita-72843720b81376294924159-sicily-northeast", label: "Mount Etna", type: "pass", combatModifierBps: 700, capacity: 3 },
+      { id: "position-messana-strait", provinceId: "ita-72843720b81376294924159-sicily-northeast", label: "Messana strait", type: "coast", combatModifierBps: 0, capacity: null },
+    ],
+    controllerPolityId: "mamertines",
+    controlFirmnessBps: 7_500,
+    tier: "focus",
+  },
+];
+
+/**
+ * Italy north-to-south, with the Messana strait and the Carthage-Sicily
+ * crossing closing the loop to Africa. These stay hand-written because they
+ * are the routes the opening is fought over, and because "land" is used for
+ * the two water crossings deliberately: the provinces either side are
+ * authored as "hills", which admits no strait, and the campaign has always
+ * treated both as ordinary marches.
+ */
+const handAuthoredEdges = [
+  ["punic-italy-ligurian-coast", "punic-italy-insubrian-plain"],
+  ["punic-italy-ligurian-coast", "punic-italy-etrurian-uplands"],
+  ["punic-italy-insubrian-plain", "punic-italy-middle-padus"],
+  ["punic-italy-insubrian-plain", "punic-italy-venetian-lagoon"],
+  ["punic-italy-middle-padus", "punic-italy-venetian-lagoon"],
+  ["punic-italy-middle-padus", "punic-italy-etrurian-uplands"],
+  ["punic-italy-etrurian-uplands", "punic-italy-umbrian-valleys"],
+  ["punic-italy-etrurian-uplands", "punic-italy-latium"],
+  ["punic-italy-umbrian-valleys", "punic-italy-picenum-coast"],
+  ["punic-italy-umbrian-valleys", "punic-italy-latium"],
+  ["punic-italy-umbrian-valleys", "punic-italy-marsian-highlands"],
+  ["punic-italy-picenum-coast", "punic-italy-marsian-highlands"],
+  ["punic-italy-latium", "punic-italy-marsian-highlands"],
+  ["punic-italy-latium", "punic-italy-campanian-plain"],
+  ["punic-italy-marsian-highlands", "punic-italy-samnium"],
+  ["punic-italy-samnium", "punic-italy-campanian-plain"],
+  ["punic-italy-samnium", "punic-italy-apulian-coast"],
+  ["punic-italy-samnium", "punic-italy-lucanian-uplands"],
+  ["punic-italy-campanian-plain", "punic-italy-lucanian-uplands"],
+  ["punic-italy-apulian-coast", "punic-italy-lucanian-uplands"],
+  ["punic-italy-lucanian-uplands", "punic-italy-bruttian-highlands"],
+  ["punic-italy-bruttian-highlands", "ita-72843720b81376294924159-sicily-northeast"],
+  ["tun-13205935b88806172084765", "ita-72843720b81376294924159-sicily-west"],
+  ["ita-72843720b81376294924159-sicily-west", "ita-72843720b81376294924159-sicily-northwest"],
+  ["ita-72843720b81376294924159-sicily-northwest", "ita-72843720b81376294924159-sicily-central"],
+  ["ita-72843720b81376294924159-sicily-central", "ita-72843720b81376294924159-sicily-southeast"],
+  ["ita-72843720b81376294924159-sicily-southeast", "ita-72843720b81376294924159-sicily-northeast"],
+].map(([from, to]) => ({ from: from!, to: to!, crossing: "land" as const, distance: 1 }));
+
+const edgeKey = (from: string, to: string): string => [from, to].sort().join("|");
+
+/**
+ * A crossing is legal only where the terrain on *both* sides admits it
+ * (`packages/shared/src/world/map.ts`). The derived graph reaches Corsica from
+ * Etruria by strait, and Etruria was authored as "hills", which admits neither
+ * strait nor sea lane. Any authored province the graph gives a water crossing
+ * is therefore recorded as the coastal plain it evidently is, rather than
+ * dropping the crossing or maintaining the same fact in two places.
+ */
+const waterCrossingProvinceIds = new Set(
+  PUNIC_WARS_GRAPH_EDGES.filter((edge) => edge.crossing !== "land").flatMap((edge) => [edge.from, edge.to]),
+);
+const authoredProvinces = handAuthoredProvinces.map((province) =>
+  waterCrossingProvinceIds.has(province.id) && province.terrainId !== "coastal-plain"
+    ? { ...province, terrainId: "coastal-plain" }
+    : province);
+const authoredEdges = handAuthoredEdges;
+const authoredProvinceIds = new Set(authoredProvinces.map((province) => province.id));
+const authoredEdgeKeys = new Set(authoredEdges.map((edge) => edgeKey(edge.from, edge.to)));
+const authoredPolityIds = new Set<string>(["rome", "carthage", "syracuse", "mamertines", ...italianPolities.map(([id]) => id)]);
+
+const graphSettlementsByProvince = new Map<string, { id: string; name: string; kind: string; provinceId: string; controllerPolityId: string; size: number; fortificationLevel: number }[]>();
+for (const settlement of PUNIC_WARS_GRAPH_SETTLEMENTS) {
+  // Authored provinces bring their own settlements; taking the graph's copy too
+  // would duplicate an id, which the province graph refuses outright.
+  if (authoredProvinceIds.has(settlement.provinceId)) continue;
+  const existing = graphSettlementsByProvince.get(settlement.provinceId);
+  if (existing === undefined) graphSettlementsByProvince.set(settlement.provinceId, [{ ...settlement }]);
+  else existing.push({ ...settlement });
+}
+
 const initialWorld: WorldState = WorldStateSchema.parse({
   schemaVersion: 2,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 16, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 17, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   map: {
@@ -126,70 +228,42 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { id: "syracuse", name: "Kingdom of Syracuse", capitalSettlementId: "settlement-syracuse" },
       { id: "mamertines", name: "Mamertines of Messana", capitalSettlementId: "settlement-messana" },
       ...italianPolities.map(([id, name]) => ({ id, name, capitalSettlementId: null })),
+      // Everyone else who holds ground on this map: the Gaulish and Iberian
+      // peoples, the Britons, the Germanic and Illyrian and Thracian
+      // communities, the Greek leagues and cities, Macedon, Epirus, the
+      // Numidian and Mauretanian kingdoms. They were drawn for as long as the
+      // map has existed; until now none of them was written down, so nothing in
+      // the simulation could see, name, or answer them.
+      ...PUNIC_WARS_GRAPH_POLITIES
+        .filter((polity) => !authoredPolityIds.has(polity.polityId))
+        .map((polity) => ({ id: polity.polityId, name: polity.name, capitalSettlementId: polity.capitalSettlementId })),
     ],
     politicalRelations: [],
     provinces: [
-      ...italy.map(([id, name, controllerPolityId]) => ({ id, name, formerNames: [], terrainId: id === "punic-italy-latium" || id === "punic-italy-campanian-plain" ? "coastal-plain" : "hills", settlements: visibleSettlementsByProvince[id] ?? [], controllerPolityId, controlFirmnessBps: controllerPolityId === "rome" ? 9_000 : 7_000, tier: "far" as const })),
-      { id: "tun-13205935b88806172084765", name: "Carthaginian heartland", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["tun-13205935b88806172084765"]!, controllerPolityId: "carthage", controlFirmnessBps: 9_000, tier: "far" },
-      { id: "ita-72843720b81376294924159-sicily-west", name: "Lilybaeum and western Sicily", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-west"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_500, tier: "focus" },
-      { id: "ita-72843720b81376294924159-sicily-northwest", name: "Panormus and the north-west", formerNames: [], terrainId: "hills", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-northwest"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_000, tier: "focus" },
-      { id: "ita-72843720b81376294924159-sicily-central", name: "Agrigentum and the south-west", formerNames: [], terrainId: "hills", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-central"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_000, tier: "focus" },
-      { id: "ita-72843720b81376294924159-sicily-southeast", name: "Syracuse and the south-east", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-southeast"]!, controllerPolityId: "syracuse", controlFirmnessBps: 8_500, tier: "focus" },
-      {
-        id: "ita-72843720b81376294924159-sicily-northeast",
-        name: "Messana and the strait",
-        formerNames: [],
-        terrainId: "coastal-plain",
-        settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-northeast"]!,
-        // Mount Etna is an operational destination inside this coarse province;
-        // it is not a separate province that an army can be teleported to.
-        positions: [
-          { id: "position-mount-etna", provinceId: "ita-72843720b81376294924159-sicily-northeast", label: "Mount Etna", type: "pass", combatModifierBps: 700, capacity: 3 },
-          { id: "position-messana-strait", provinceId: "ita-72843720b81376294924159-sicily-northeast", label: "Messana strait", type: "coast", combatModifierBps: 0, capacity: null },
-        ],
-        controllerPolityId: "mamertines",
-        controlFirmnessBps: 7_500,
-        tier: "focus",
-      },
+      ...authoredProvinces,
+      // The rest of the drawn world, exactly as the map already shows it. See
+      // `authoredProvinces` above for why these two lists exist separately.
+      ...PUNIC_WARS_GRAPH_PROVINCES
+        .filter((province) => !authoredProvinceIds.has(province.id))
+        .map((province) => ({
+          id: province.id,
+          name: province.name,
+          formerNames: [],
+          terrainId: province.terrainId,
+          // Exactly the settlements the map draws here -- no more, no fewer. A
+          // drawn settlement missing from the world is visible and clickable
+          // and impossible to besiege, and an undrawn one invented here would
+          // be a city in Pannonia no polygon ever claimed.
+          settlements: graphSettlementsByProvince.get(province.id) ?? [],
+          controllerPolityId: province.controllerPolityId,
+          controlFirmnessBps: province.controlFirmnessBps,
+          tier: "far" as const,
+        })),
     ],
-    // Real Italian geography, chained north-to-south with a Messana-strait and
-    // a Carthage-Sicily crossing closing the loop to Africa. "land" is used
-    // throughout, including the two water crossings, because a legal edge
-    // needs its crossing type admitted by BOTH sides' terrain
-    // (packages/shared/src/world/map.ts) and most of these provinces are
-    // "hills" (land + pass only, no strait/sea_lane) -- this graph exists so
-    // adjacency-based systems (the Reaction Director's "nearby entities who
-    // might react", near/far/coarse event scoping) have something to read at
-    // all, not to model precise naval logistics.
     edges: [
-      ["punic-italy-ligurian-coast", "punic-italy-insubrian-plain"],
-      ["punic-italy-ligurian-coast", "punic-italy-etrurian-uplands"],
-      ["punic-italy-insubrian-plain", "punic-italy-middle-padus"],
-      ["punic-italy-insubrian-plain", "punic-italy-venetian-lagoon"],
-      ["punic-italy-middle-padus", "punic-italy-venetian-lagoon"],
-      ["punic-italy-middle-padus", "punic-italy-etrurian-uplands"],
-      ["punic-italy-etrurian-uplands", "punic-italy-umbrian-valleys"],
-      ["punic-italy-etrurian-uplands", "punic-italy-latium"],
-      ["punic-italy-umbrian-valleys", "punic-italy-picenum-coast"],
-      ["punic-italy-umbrian-valleys", "punic-italy-latium"],
-      ["punic-italy-umbrian-valleys", "punic-italy-marsian-highlands"],
-      ["punic-italy-picenum-coast", "punic-italy-marsian-highlands"],
-      ["punic-italy-latium", "punic-italy-marsian-highlands"],
-      ["punic-italy-latium", "punic-italy-campanian-plain"],
-      ["punic-italy-marsian-highlands", "punic-italy-samnium"],
-      ["punic-italy-samnium", "punic-italy-campanian-plain"],
-      ["punic-italy-samnium", "punic-italy-apulian-coast"],
-      ["punic-italy-samnium", "punic-italy-lucanian-uplands"],
-      ["punic-italy-campanian-plain", "punic-italy-lucanian-uplands"],
-      ["punic-italy-apulian-coast", "punic-italy-lucanian-uplands"],
-      ["punic-italy-lucanian-uplands", "punic-italy-bruttian-highlands"],
-      ["punic-italy-bruttian-highlands", "ita-72843720b81376294924159-sicily-northeast"],
-      ["tun-13205935b88806172084765", "ita-72843720b81376294924159-sicily-west"],
-      ["ita-72843720b81376294924159-sicily-west", "ita-72843720b81376294924159-sicily-northwest"],
-      ["ita-72843720b81376294924159-sicily-northwest", "ita-72843720b81376294924159-sicily-central"],
-      ["ita-72843720b81376294924159-sicily-central", "ita-72843720b81376294924159-sicily-southeast"],
-      ["ita-72843720b81376294924159-sicily-southeast", "ita-72843720b81376294924159-sicily-northeast"],
-    ].map(([from, to]) => ({ from, to, crossing: "land" as const, distance: 1 })),
+      ...authoredEdges,
+      ...PUNIC_WARS_GRAPH_EDGES.filter((edge) => !authoredEdgeKeys.has(edgeKey(edge.from, edge.to))),
+    ],
   },
   characters: [
     { id: "gaius-genucius", name: "Gaius Genucius Clepsina", cultureId: "roman", faithId: null, dynastyId: null, locationProvinceId: "punic-italy-latium", polityId: "rome", ageYearsAtStart: 45, officeId: "roman-consul", personalAccountId: "gaius-purse", skills: { martial: 65, intrigue: 40, learning: 50, piety: 45, stewardship: 55, diplomacy: 60, body: 65, subSkills: {} }, traits: ["dutiful", "disciplined"], healthBps: 9_000, prestigeBps: 7_000, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null },

@@ -28,6 +28,7 @@ function actorFor(world: WorldState, characterId: string): RoutedActor {
     characterId,
     name: character.name,
     level: "focused",
+    impetus: "reaction",
     score: 60,
     knownFacts: [],
     why: "directly affected",

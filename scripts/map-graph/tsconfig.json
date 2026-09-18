@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "paths": { "server-only": ["scripts/map-graph/server-only-stub.ts"] }
+  }
+}

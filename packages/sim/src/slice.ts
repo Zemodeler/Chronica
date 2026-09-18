@@ -189,9 +189,15 @@ export interface WorldSlice {
 
 export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   const { world } = input;
-  const name = (id: string): string => world.characters.find((character) => character.id === id)?.name ?? id;
-  const provinceName = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
-  const polityName = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
+  // Indexed rather than scanned. These are called from inside loops over
+  // forces, provinces and powers, and the map is now the whole drawn world
+  // rather than the twenty provinces it held when they were written.
+  const characterNames = new Map(world.characters.map((character) => [character.id, character.name]));
+  const provinceNames = new Map(world.map.provinces.map((province) => [province.id, province.name]));
+  const polityNames = new Map(world.map.polities.map((polity) => [polity.id, polity.name]));
+  const name = (id: string): string => characterNames.get(id) ?? id;
+  const provinceName = (id: string): string => provinceNames.get(id) ?? id;
+  const polityName = (id: string): string => polityNames.get(id) ?? id;
 
   const actor = world.characters.find((character) => character.id === input.actorRef.id);
   const ownPolity = input.actorPolityId;
@@ -235,15 +241,61 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       commander: name(force.commanderCharacterId),
     }));
 
-  // Every place in the world, by the id an order must name it by -- not only
-  // the places already ours. An order to invade names somewhere we do not hold,
-  // and a model with no id for it will invent one.
+  // Every place the order might need to name, by the id it must name it by --
+  // not only the places already ours. An order to invade names somewhere we do
+  // not hold, and a model with no id for it will invent one.
+  //
+  // Which places those are has to be chosen, not taken off the top of the list.
+  // The world holds hundreds of provinces and the cap admits a few dozen, so an
+  // arbitrary slice would hand the model our own ground plus whatever sorted
+  // first -- and leave it inventing ids for the province it was actually asked
+  // about. Three tiers earn a place: where we are, where we could go or what
+  // the moment is about, and then the rest in a stable order.
   const ourProvinceIds = new Set([
     ...world.map.provinces.filter((province) => province.controllerPolityId === ownPolity).map((province) => province.id),
     ...world.material.forces.filter((force) => force.polityId === ownPolity).map((force) => force.locationId),
   ]);
+
+  const bordering = new Set<string>();
+  for (const edge of world.map.edges) {
+    if (ourProvinceIds.has(edge.from) && !ourProvinceIds.has(edge.to)) bordering.add(edge.to);
+    if (ourProvinceIds.has(edge.to) && !ourProvinceIds.has(edge.from)) bordering.add(edge.from);
+  }
+
+  // Anywhere the world is currently doing something, and anywhere the order
+  // names outright. The order is matched by id rather than by name because an
+  // id is what the model has to give back.
+  const inPlay = new Set<string>([
+    ...(world.storylines ?? []).flatMap((storyline) => (storyline.provinceId === null ? [] : [storyline.provinceId])),
+    ...world.characters.filter((character) => character.alive && character.polityId === ownPolity).map((character) => character.locationProvinceId),
+  ].filter((id): id is string => typeof id === "string"));
+  // A battle records who is fighting, not where; the ground is wherever the
+  // forces in it are standing. A siege records the settlement, and the province
+  // is the one holding it.
+  const forceLocation = new Map(world.material.forces.map((force) => [force.id, force.locationId]));
+  for (const battle of world.conflicts.battles) {
+    for (const forceId of battle.participantForceIds) {
+      const provinceId = forceLocation.get(forceId);
+      if (provinceId !== undefined) inPlay.add(provinceId);
+    }
+  }
+  const settlementProvince = new Map(world.map.provinces.flatMap((province) => province.settlements.map((settlement) => [settlement.id, province.id] as const)));
+  for (const siege of world.conflicts.sieges) {
+    const provinceId = settlementProvince.get(siege.settlementId);
+    if (provinceId !== undefined) inPlay.add(provinceId);
+  }
+  if (input.orderText !== null) {
+    for (const province of world.map.provinces) {
+      if (input.orderText.includes(province.id)) inPlay.add(province.id);
+    }
+  }
+
+  const rank = (province: { id: string }): number => {
+    if (ourProvinceIds.has(province.id) || inPlay.has(province.id)) return 0;
+    return bordering.has(province.id) ? 1 : 2;
+  };
   const provinces = [...world.map.provinces]
-    .sort((a, b) => Number(ourProvinceIds.has(b.id)) - Number(ourProvinceIds.has(a.id)))
+    .sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id))
     .slice(0, CAPS.provinces)
     .map((province) => ({
       id: province.id,
@@ -463,12 +515,35 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     }));
 
   // Armies in the field and heads of state are not secrets.
+  // Who else is on the board, nearest business first. The world holds over a
+  // hundred powers and the cap admits a dozen, so the dozen are chosen the same
+  // way the provinces were: the ones we share a border with, then the ones we
+  // are already entangled with, then the large. Taking the first twelve in
+  // array order would introduce the player to the Caledonians and never mention
+  // Carthage.
+  const provinceCountByPolity = new Map<string, number>();
+  for (const province of world.map.provinces) {
+    if (province.controllerPolityId === null) continue;
+    provinceCountByPolity.set(province.controllerPolityId, (provinceCountByPolity.get(province.controllerPolityId) ?? 0) + 1);
+  }
+  const controllerOf = new Map(world.map.provinces.map((province) => [province.id, province.controllerPolityId]));
+  const neighbouringPolities = new Set<string>();
+  for (const id of bordering) {
+    const controller = controllerOf.get(id);
+    if (controller !== null && controller !== undefined && controller !== ownPolity) neighbouringPolities.add(controller);
+  }
+  const entangled = new Set<string>([
+    ...world.conflicts.wars.flatMap((war) => [war.polityAId, war.polityBId]),
+    ...world.polityStances.filter((stance) => stance.polityId === ownPolity).map((stance) => stance.towardPolityId),
+    ...world.polityStances.filter((stance) => stance.towardPolityId === ownPolity).map((stance) => stance.polityId),
+  ].filter((id) => id !== ownPolity));
+
   const foreignPowers = world.map.polities
     .filter((polity) => polity.id !== ownPolity)
     .map((polity) => ({
       id: polity.id,
       name: polity.name,
-      provinces: world.map.provinces.filter((province) => province.controllerPolityId === polity.id).length,
+      provinces: provinceCountByPolity.get(polity.id) ?? 0,
       leaders: world.characters
         .filter((character) => character.alive && character.polityId === polity.id)
         .slice(0, 4)
@@ -479,6 +554,11 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
         .map((force) => `${force.name} [${force.id}] — ${force.personnel.reduce((sum, category) => sum + category.fit, 0)} men at ${provinceName(force.locationId)} [${force.locationId}]`),
     }))
     .filter((power) => power.provinces > 0 || power.leaders.length > 0 || power.forces.length > 0)
+    .sort((a, b) => {
+      const weight = (power: { id: string }): number =>
+        (neighbouringPolities.has(power.id) ? 0 : entangled.has(power.id) ? 1 : 2);
+      return weight(a) - weight(b) || b.provinces - a.provinces || a.id.localeCompare(b.id);
+    })
     .slice(0, CAPS.foreignFigures);
 
   const populationGaps = findPolityGaps({ world, ownPolityId: ownPolity, facts: input.facts, limit: 2 });

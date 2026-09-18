@@ -98,8 +98,19 @@ land but have no leader or no forces, ranks them by whether the player is dealin
 whether they border us, and how much they hold, and states the gap in the slice. The orchestrator
 fills it in the call it was already making — no extra model call, no new contract surface.
 
+Relevance decides *which* countries, and size only orders equals. On a map of 126 peoples a quiet
+people holding sixty-four provinces would otherwise outrank the country the player is actually
+invading. A country also has to be in contact before the world owes it anyone: reachable across a
+border, already named in the facts, or large enough that the powers of the age would reckon with it.
+The rest stay names on the map until play arrives — which is the moment the same check starts
+returning them.
+
 The slice is therefore **not** filtered to the player's own polity. Foreign secrets are filtered by
-the fact ledger; the existence of a neighbour's army is not a secret.
+the fact ledger; the existence of a neighbour's army is not a secret. But it *is* chosen: every list
+has a hard cap, and once the world outgrew those caps the choice stopped being free. Provinces are
+ranked by where we are, where we could march next, and what the order names outright — the failure
+mode being a model handed thirty arbitrary provinces and left inventing an id for the one it was
+asked about.
 
 ## Knowledge
 
@@ -127,6 +138,39 @@ is in serious trouble in the ruler's own polity.
 The province graph inside `WorldState.map` is authoritative for control and adjacency. Rendering
 geometry is separate, immutable GeoJSON referenced by `scenarioVersions.mapAssetId`.
 `apps/web/lib/world-view.ts` projects world state into the overlay the map draws.
+
+That projection reports what the world contains and nothing else, which means the world has to
+contain everything the map shows. For a long time it did not: the Punic Wars scenario wrote down
+twenty provinces and ten polities while the map drew the western Mediterranean entire, and the
+difference was made up by a hardcoded overlay table merged in at render time. When that table stopped
+being merged, the rest of the map went blank — there had never been anything behind it.
+
+The whole drawn world is now authored state: 779 provinces, 2,227 borders and the 126 peoples who
+hold them. Province names, terrain and adjacency are derived from the rendered geometry itself by
+`scripts/map-graph/build-punic-map-graph.ts` (`npm run maps:graph`) and checked in as
+`packages/db/src/punic-wars-map-graph.ts`. It is a build step because deriving adjacency walks 110k
+polygon vertices, and because a graph this size should be reviewable as data rather than recomputed
+per process. `packages/db/src/punic-wars-scenario.ts` merges it under the hand-authored core — Italy,
+Sicily and Carthage keep their settlements, garrison positions and deliberately-set control.
+
+Two things about that graph are worth knowing. Borders are matched by proximity, not by exact shared
+vertices: the map is stitched from several source datasets that trace the same real borders with
+different vertices, and exact matching found borders only within each dataset — which split the
+continent and left Sicily looking for a sea crossing to Britain. And the fifteen landmasses that
+remain are joined by a minimum spanning tree of their shortest crossings, so every crossing is real
+geography (Dover, Gibraltar, Bonifacio) rather than an artefact of iteration order.
+
+The invariants that make "authoritative" mean something are asserted in
+`packages/db/src/punic-wars-scenario.test.ts`, because nothing enforces them at runtime:
+`ProvinceGraphSchema` validates ids and settlements but never edges or terrain, so a scenario could
+otherwise ship a border to a province that does not exist, or a sea lane out of a landlocked upland,
+and the first sign of it would be an army that cannot move.
+
+Carrying the whole map costs about **1.3 ms of CPU per burst** (`JSON.stringify` 0.27 → 1.45 ms,
+`WorldStateSchema.parse` 5.67 → 5.76 ms) on a 472 KB world — against several model calls taking
+seconds. What a map this size actually threatens is not speed but honesty: see the slice and
+population notes above, both of which had to start *choosing* once the world stopped being small
+enough to send whole.
 
 ## Development
 
