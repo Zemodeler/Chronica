@@ -128,7 +128,15 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 14, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 2, origin: "built-in", validatedAt: new Date(), notes: "Replaces each political procedure's dead workflow reference with a plain label saying what is being decided." }).onConflictDoNothing();
     // Version 15: same office widening as the First Punic War's version 6.
     await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 15, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 2, origin: "built-in", validatedAt: new Date(), notes: "Widens both offices to the powers a head of state actually exercises: putting questions to the council, moving the polity's own standing and provinces, founding arrangements, and giving battle." }).onConflictDoNothing();
-    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 15, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
+    // Version 16 gives the world people of its own. The scenario named four
+    // characters, so everyone outside the player's business was a country with
+    // nobody in it: Syracuse never moved on Messana and Carthage negotiated
+    // with no one, because there was nobody there to do it. This adds the men
+    // who actually held these places in 270 BCE, the standing aims each
+    // government is pursuing privately, and Rome's own unfinished war at
+    // Rhegium -- the material the ambient cast reasons from.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 16, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 2, origin: "built-in", validatedAt: new Date(), notes: "Adds the historical cast of 270 BCE (Dentatus, Ogulnius, Vibellius at Rhegium, Leptines of Syracuse, Hannibal Gisco), every power's standing aims, and the Rhegium storyline, so the world away from the player has people and purposes of its own." }).onConflictDoNothing();
+    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 16, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
   });
 }
 

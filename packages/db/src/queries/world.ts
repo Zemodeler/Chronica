@@ -198,12 +198,20 @@ export interface BurstCommit {
     readonly stopReason: string;
     readonly accumulatedSignificance: number;
   };
-  readonly checkpoint?: {
+  /**
+   * The Chronicle this burst produced: one entry per thread of events, in the
+   * order they should be read. A burst covers a span, not a subject, so a span
+   * that held a war and an embassy records two entries, not one passage about
+   * both.
+   */
+  readonly checkpoints?: readonly {
     readonly title: string;
     readonly body: string;
     readonly factIds: readonly string[];
+    readonly subjects: readonly unknown[];
     readonly fromInstantSortKey: number;
-  };
+    readonly toInstantSortKey: number;
+  }[];
   readonly decision?: {
     readonly prompt: string;
     readonly options: unknown;
@@ -261,17 +269,19 @@ export async function commitBurst(db: ChronicaDatabase, commit: BurstCommit): Pr
       .set({ ...commit.burst, status: "committed", endedAt: new Date() })
       .where(eq(simulationBursts.id, commit.burstId));
 
-    if (commit.checkpoint !== undefined) {
-      await tx.insert(chronicleCheckpoints).values({
+    if (commit.checkpoints !== undefined && commit.checkpoints.length > 0) {
+      await tx.insert(chronicleCheckpoints).values(commit.checkpoints.map((entry, ordinal) => ({
         gameId: commit.gameId,
         burstId: commit.burstId,
-        fromInstantSortKey: commit.checkpoint.fromInstantSortKey,
-        toInstantSortKey: instantSortKeyOf(commit.world),
-        title: commit.checkpoint.title,
-        body: commit.checkpoint.body,
-        factIds: commit.checkpoint.factIds,
+        ordinal,
+        fromInstantSortKey: entry.fromInstantSortKey,
+        toInstantSortKey: entry.toInstantSortKey,
+        title: entry.title,
+        body: entry.body,
+        factIds: entry.factIds,
+        subjects: entry.subjects,
         stopReason: commit.burst.stopReason,
-      });
+      })));
     }
 
     if (commit.decision !== undefined) {
@@ -354,7 +364,7 @@ export async function listChronicle(db: ChronicaDatabase, gameId: string, limit 
     .select()
     .from(chronicleCheckpoints)
     .where(eq(chronicleCheckpoints.gameId, gameId))
-    .orderBy(asc(chronicleCheckpoints.toInstantSortKey))
+    .orderBy(asc(chronicleCheckpoints.toInstantSortKey), asc(chronicleCheckpoints.ordinal))
     .limit(limit);
 }
 

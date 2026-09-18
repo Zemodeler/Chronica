@@ -97,7 +97,9 @@ describe("what each country is trying to do", () => {
   });
 
   it("says nothing at all before any country has formed an aim", () => {
-    expect(renderWorldSlice(slice())).not.toContain("STANDING AIMS");
+    // The scenario now opens with every power's aims already written, so an
+    // empty world has to be built deliberately to test the empty case.
+    expect(renderWorldSlice(slice({ ...world(), polityOutlooks: [] }))).not.toContain("STANDING AIMS");
   });
 });
 

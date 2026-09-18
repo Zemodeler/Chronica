@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { OrchestratorOutputSchema, type OrchestratorOutput } from "@chronica/shared";
+import { extractJson } from "./json";
 import type { SimModelPort } from "./ports";
 import { renderWorldSlice, type WorldSlice } from "./slice";
 
@@ -75,7 +76,10 @@ How to answer well:
    resist, a neighbour watches its border, and neither can happen while the
    country is an empty name. Create them with "character_create" and
    "force_create" under their own polityId, never Rome's, and size their forces
-   to what such a people could actually raise.
+   to what such a people could actually raise. These people were always there,
+   so filling them in is stage-setting, not news: it gets no "facts" entry. "The
+   Boii now possess a recognized war-chief" is the scaffolding talking. What he
+   does about the invasion is the event.
 7. Anything that takes time becomes a project with milestones and scheduled events,
    not an instant result -- and say what it produces. A project's
    "completionOutcome" is the fleet, the fortress or the revenue that exists on
@@ -158,6 +162,10 @@ How to answer well:
    neighbour mobilize and still lists the same concerns has not noticed. These
    aims are secret: nobody inside the world reads another power's, so write them
    as that government privately sees things, not as it would say them aloud.
+18. An order not finished when it is given says what would finish it. "Wake me
+   when the army reaches Boii country" sets "watch" to that condition, and the
+   world carries on by itself until it happens rather than asking again in two
+   days. Null when the order is complete in itself.
 
 Answer with a single JSON object and nothing else, matching this schema (the
 "deltas" array inside it is the closed set of changes you may make to the world):
@@ -198,19 +206,6 @@ function inertOutput(reason: string): OrchestratorOutput {
   });
 }
 
-function extractJson(content: string): unknown {
-  const trimmed = content.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    // A model that wrapped its answer in prose or a code fence still gave a
-    // usable object; take the outermost braces rather than failing the burst.
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-    if (start === -1 || end <= start) throw new Error("no JSON object in the response");
-    return JSON.parse(trimmed.slice(start, end + 1));
-  }
-}
 
 export async function orchestrate(port: SimModelPort, slice: WorldSlice): Promise<OrchestrateResult> {
   const userMessage = renderWorldSlice(slice);

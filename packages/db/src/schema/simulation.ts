@@ -107,13 +107,17 @@ export const chronicleCheckpoints = pgTable("chronicle_checkpoints", {
   burstId: uuid("burst_id").references(() => simulationBursts.id, { onDelete: "set null" }),
   fromInstantSortKey: bigint("from_instant_sort_key", { mode: "number" }).notNull(),
   toInstantSortKey: bigint("to_instant_sort_key", { mode: "number" }).notNull(),
+  /** Where this entry sits among the entries one burst produced. */
+  ordinal: integer("ordinal").notNull().default(0),
   title: text("title").notNull(),
   body: text("body").notNull(),
   factIds: jsonb("fact_ids").notNull().$type<unknown>().default(sql`'[]'::jsonb`),
+  /** Who and what the entry is about, so the record can be read by subject. */
+  subjects: jsonb("subjects").notNull().$type<unknown>().default(sql`'[]'::jsonb`),
   stopReason: text("stop_reason").notNull(),
   readAt: timestamp("read_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [index("chronicle_checkpoints_game_idx").on(table.gameId, table.toInstantSortKey)]);
+}, (table) => [index("chronicle_checkpoints_game_idx").on(table.gameId, table.toInstantSortKey, table.ordinal)]);
 
 /** VISION §23 outcome C: the rare development that genuinely needs the player's own authority. */
 export const playerDecisions = pgTable("player_decisions", {

@@ -51,7 +51,7 @@ describe("calendar conversion", () => {
 
 describe("StopReasonSchema", () => {
   it("covers every way a burst can end", () => {
-    for (const reason of ["player_decision", "salient_event", "threshold_crossed", "no_due_events", "budget_exhausted", "max_span"]) {
+    for (const reason of ["player_decision", "salient_event", "watch_condition", "no_due_events", "budget_exhausted", "max_span"]) {
       expect(StopReasonSchema.safeParse(reason).success).toBe(true);
     }
   });

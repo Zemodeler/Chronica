@@ -15,6 +15,8 @@ import { useCallback, useEffect, useState } from "react";
 
 interface ChronicleEntry {
   readonly id: string;
+  /** The burst that wrote it: one order's answer may run to several entries. */
+  readonly burstId: string | null;
   readonly title: string;
   readonly body: string;
 }
@@ -94,7 +96,12 @@ export function SimulationPanel({ gameId }: { readonly gameId: string }) {
     }
   }, [gameId, refresh]);
 
-  const latest = view.chronicle[view.chronicle.length - 1];
+  // Everything the last order produced, not merely its final passage: a span
+  // that held a war and an embassy is two entries, and both are the answer.
+  const last = view.chronicle[view.chronicle.length - 1];
+  const latest = last === undefined
+    ? []
+    : view.chronicle.filter((entry) => (entry.burstId === null ? entry.id === last.id : entry.burstId === last.burstId));
 
   if (!open) {
     return (
@@ -127,13 +134,15 @@ export function SimulationPanel({ gameId }: { readonly gameId: string }) {
       )}
 
       <section className="sim-panel__chronicle">
-        {latest === undefined ? (
+        {latest.length === 0 ? (
           <p className="sim-panel__empty">Nothing has been recorded yet. Give an order and the world will answer.</p>
         ) : (
-          <article>
-            <h3>{latest.title}</h3>
-            {latest.body.split("\n\n").map((paragraph, index) => <p key={index}>{paragraph}</p>)}
-          </article>
+          latest.map((entry) => (
+            <article key={entry.id}>
+              <h3>{entry.title}</h3>
+              {entry.body.split("\n\n").map((paragraph, index) => <p key={index}>{paragraph}</p>)}
+            </article>
+          ))
         )}
       </section>
 

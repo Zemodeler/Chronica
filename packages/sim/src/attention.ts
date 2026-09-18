@@ -27,11 +27,22 @@ import {
 
 export type ActivityLevel = "dormant" | "relevant" | "active" | "focused";
 
+/**
+ * Why this person is being thought for.
+ *
+ * A reactor has just heard something and is answering it; someone on their own
+ * business has not, and was chosen because they have something of their own
+ * under way. Cognition must be told which, or the world elsewhere is asked to
+ * react to news it never received and sensibly answers that it will do nothing.
+ */
+export type Impetus = "reaction" | "own_business";
+
 export interface RoutedActor {
   readonly ref: OrderPartyRef;
   readonly characterId: string;
   readonly name: string;
   readonly level: ActivityLevel;
+  readonly impetus: Impetus;
   readonly score: number;
   /** The facts this actor can actually see -- what their cognition prompt is built from. */
   readonly knownFacts: readonly Fact[];
@@ -156,6 +167,7 @@ export function routeAttention(input: AttentionInput): AttentionResult {
       characterId: character.id,
       name: character.name,
       level: "relevant",
+      impetus: "reaction",
       score,
       knownFacts,
       why: reasons.join(", "),
@@ -184,4 +196,101 @@ export function routeAttention(input: AttentionInput): AttentionResult {
     relevantCount: scored.length - focused.length - active.length,
     dormantCount,
   };
+}
+
+export interface AmbientInput {
+  readonly world: WorldState;
+  /** Recent history, for the context an ambient actor reasons from. */
+  readonly facts: readonly Fact[];
+  readonly offices: readonly Office[];
+  readonly excludeCharacterIds: readonly string[];
+  readonly max: number;
+  /** How many of their own facts to carry into the prompt. */
+  readonly maxFactsEach?: number;
+}
+
+/**
+ * Who is getting on with their own business, whatever the player just did.
+ *
+ * `routeAttention` is purely reactive: gate 0 needs a triggering fact and gate 1
+ * needs the actor to know it, so anyone with no connection to the player's order
+ * scores nothing and stays dormant. That is correct for reactions and fatal as
+ * the whole of the world's agency -- it meant Syracuse never moved on Messana,
+ * Carthage never negotiated with anyone, and every Chronicle was one thread
+ * about the player because the player was the only person doing anything.
+ *
+ * This is the other half: a small, rotating cast chosen from their *own*
+ * standing business -- an office to run, a promise outstanding, a pressure on
+ * them, a storyline they are part of, a government with stated intentions.
+ * It costs no extra model call. Cognition is batched, so these people ride
+ * along in the call the reactors were already making; only the prompt grows.
+ */
+export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
+  const { world } = input;
+  const excluded = new Set(input.excludeCharacterIds);
+  const authority = buildAuthorityIndex(
+    { officeSeats: world.material.officeSeats, forces: world.material.forces, accounts: world.material.accounts },
+    world.authorityGrants,
+    input.offices,
+    world.elapsedStep,
+  );
+  const holdsAuthority = new Set(authority.grants.map((grant) => grant.holder.id));
+  const commanders = new Set(world.material.forces.map((force) => force.commanderCharacterId));
+  const storylineParticipants = new Set((world.storylines ?? []).flatMap((storyline) => storyline.participantIds));
+  const polityHasAims = new Set(
+    world.polityOutlooks.filter((outlook) => outlook.intentions.length > 0 || outlook.concerns.length > 0).map((outlook) => outlook.polityId),
+  );
+
+  const scored: RoutedActor[] = [];
+  for (const character of world.characters) {
+    if (!character.alive || excluded.has(character.id)) continue;
+
+    const reasons: string[] = [];
+    let score = 0;
+    if (holdsAuthority.has(character.id) || character.officeId !== null || commanders.has(character.id)) {
+      score += 25;
+      reasons.push("has a command or an office to run");
+    }
+    const pressures = world.characterPressures.filter((pressure) => pressure.characterId === character.id && pressure.status === "active");
+    if (pressures.length > 0) {
+      score += Math.min(30, 10 * pressures.length);
+      reasons.push(pressures[0]!.label);
+    }
+    const commitments = world.commitments.filter(
+      (commitment) =>
+        (commitment.status === "pending" || commitment.status === "prepared" || commitment.status === "deferred") &&
+        commitment.promisorCharacterId === character.id,
+    );
+    if (commitments.length > 0) {
+      score += Math.min(24, 8 * commitments.length);
+      reasons.push("has a promise still to keep");
+    }
+    if (storylineParticipants.has(character.id)) {
+      score += 12;
+      reasons.push("is caught up in something already under way");
+    }
+    if (character.polityId !== null && polityHasAims.has(character.polityId)) {
+      score += 15;
+      reasons.push("their government is pursuing something");
+    }
+    if (score === 0) continue;
+
+    // Rotation, so the world elsewhere is not the same two people every time.
+    // Bucketed by week and stable within it: a replay picks the same cast.
+    score += stableHash([character.id, String(Math.floor(world.instant.day / 7))]) % 12;
+
+    scored.push({
+      ref: { kind: "character", id: character.id },
+      characterId: character.id,
+      name: character.name,
+      level: "focused",
+      impetus: "own_business",
+      score,
+      knownFacts: factsKnownTo(input.facts, { kind: "character", id: character.id }, character.polityId, world.instant).slice(-(input.maxFactsEach ?? 6)),
+      why: reasons.join(", "),
+    });
+  }
+
+  scored.sort((a, b) => b.score - a.score || stableHash([a.characterId]) - stableHash([b.characterId]));
+  return scored.slice(0, input.max);
 }

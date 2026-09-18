@@ -13,6 +13,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { RoutedActor } from "./attention";
+import { extractJson } from "./json";
 import type { SimModelPort } from "./ports";
 
 /**
@@ -46,6 +47,14 @@ For each person, decide what they actually do now — if anything. Most people, 
 of the time, do nothing of consequence, and answering "nothing" is a real answer:
 return them with an empty "deltas" list and say why in "reasoning".
 
+That is the answer for someone reacting to news. It is rarely the answer for
+someone whose section says nobody has brought them news: they are in the batch
+because they have a war to press, a promise to keep, a city to hold or a rival to
+manage, and a month of their own is not nothing. Move their business on by a step
+they could actually take from where they stand, and record it as a fact so the
+world can see it happened. They are not waiting for the ruler; they do not know
+what the ruler is doing.
+
 Someone may act within their authority, beyond it, or against it. A general may
 march without orders; an official may quietly divert funds; a senator may begin
 opposing the very policy they were told to support. None of these are invalid. They
@@ -68,6 +77,13 @@ The same engine rules apply as elsewhere:
   "discoveries" -- the fact already existed; what changed is that they now know
   it. Someone who sets out to deceive uses "belief_set" on the person they are
   deceiving. A belief is never checked against the truth.
+- An army can only fight what it is standing next to. To attack, move it to the
+  enemy's province with "force_modify" first and engage in the same answer, or
+  -- if the march takes real time -- open a project whose outcome is
+  "force_move" and let it arrive. "force_engage" across two provinces is
+  refused, and the attack simply does not happen.
+- You do not decide who wins. Propose the engagement; the casualties, the rout
+  and the ground are the engine's, and final.
 
 Answer with a single JSON object and nothing else, matching this schema:
 
@@ -272,7 +288,11 @@ function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock
       );
     }
   }
-  lines.push(`Why they are paying attention: ${actor.why}.`);
+  lines.push(
+    actor.impetus === "own_business"
+      ? `Nobody has brought them news. They are here because of their own affairs: ${actor.why}. What do they do about them now?`
+      : `Why they are paying attention: ${actor.why}.`,
+  );
 
   // Active beliefs only: a superseded belief is what they used to think, and
   // acting on it puts words in the mouth of someone who has already changed
@@ -309,17 +329,6 @@ function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock
   return lines.join("\n");
 }
 
-function extractJson(content: string): unknown {
-  const trimmed = content.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-    if (start === -1 || end <= start) throw new Error("no JSON object in the response");
-    return JSON.parse(trimmed.slice(start, end + 1));
-  }
-}
 
 const EMPTY: CognitionOutput = { actors: [] };
 
