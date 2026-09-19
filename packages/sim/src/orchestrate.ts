@@ -162,6 +162,17 @@ How to answer well:
    ACTIVE PROJECTS lists what is running; let it run, and answer the order by
    what you change around it. Four marches for one army is four armies' worth
    of effort and none of them arrives.
+   Ground taken is said with "province_control_set". A power may only take a
+   province it has an army standing in, or one next to ground it already holds
+   -- a sea lane counts, which is how an island is taken and why the far side of
+   the world is not. Ground just taken is held loosely: give it a low
+   "firmnessBps", and expect the people in it to make that everyone's problem.
+   A rising that holds ground is a country. "polity_create" founds it, taking
+   named provinces from the power it breaks from, and the war between them opens
+   itself. Use it for a rebellion that has taken towns, a province that has
+   seceded, a warlord with a harbour of his own -- not for riots, not for a
+   claimant who wants the throne that already exists, and never to file raiders
+   under a country of their own before they hold any.
 17. Keep each country's aims current. STANDING AIMS says what a power is trying
    to do, what worries it and what it means to do next. Every polity with people
    in it should have one, and any power whose situation changed this turn should

@@ -4,6 +4,7 @@ import {
   agreementsBetween,
   applyDiplomaticAnswerToStance,
   canMoveTo,
+  crossingAdmitted,
   fitStrengthOf,
   isNavalForce,
   isWaterCrossing,
@@ -106,6 +107,8 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       return { kind: delta.target === "polity" ? "polity" : "institution", id: delta.targetId };
     case "province_material_shift":
       return { kind: "province", id: delta.provinceId };
+    case "province_control_set":
+      return { kind: "province", id: delta.provinceId };
     case "political_procedure_open":
       return delta.institutionRef === null
         ? polityFallback
@@ -168,6 +171,8 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   diplomatic_message_answer: "negotiate",
   agreement_open: "negotiate",
   agreement_close: "negotiate",
+  province_control_set: "command",
+  polity_create: "override",
 };
 
 /**
@@ -225,6 +230,12 @@ function actorIsAnswerableFor(delta: WorldDelta, scope: AuthorityScope, world: W
   // act of insubordination by the ruler -- the sixth time this check would
   // have manufactured it.
   if (delta.op === "storyline_open" || delta.op === "storyline_advance" || delta.op === "character_pressure_set") return false;
+  // A country coming apart is not an act of office. Scoped to the power it
+  // breaks from -- which for a rising is usually the ruler's own -- it would
+  // have recorded the ruler as personally insubordinate for a rebellion in his
+  // own provinces, which is the seventh way this check has found to manufacture
+  // insubordination out of the world simply moving.
+  if (delta.op === "polity_create") return false;
 
   if (context.actsForTheWorld !== true) return true;
 
@@ -1406,6 +1417,114 @@ function applyOne(
         polityAgreements: world.polityAgreements.map((candidate) =>
           candidate.id === agreementId ? { ...candidate, status: "ended" as const, endedAtStep: atStep, endedReason: delta.reason } : candidate,
         ),
+      };
+    }
+
+    case "province_control_set": {
+      const province = world.map.provinces.find((candidate) => candidate.id === delta.provinceId);
+      if (province === undefined) reject(`No province "${delta.provinceId}" exists to change hands.`, "reference");
+      const takerId = required(delta.toPolityRef, "The power taking the province");
+      if (!world.map.polities.some((polity) => polity.id === takerId)) reject(`No power "${takerId}" exists to hold a province.`, "reference");
+      if (province.controllerPolityId === takerId) reject(`${province.name} is already held by ${takerId}.`);
+
+      // Reach, not land contiguity. An army standing in the province has taken
+      // it; otherwise the taker must already hold ground next to it across a
+      // crossing the map admits -- which is how Sicily is taken from Italy and
+      // why Gaul is not taken from Latium.
+      const standing = world.material.forces.some((force) => force.polityId === takerId && force.locationId === province.id);
+      const held = new Set(world.map.provinces.filter((candidate) => candidate.controllerPolityId === takerId).map((candidate) => candidate.id));
+      const nextToHeldGround = world.map.edges.some((edge) => {
+        const touches = edge.from === province.id ? edge.to : edge.to === province.id ? edge.from : null;
+        return touches !== null && held.has(touches) && crossingAdmitted(world, edge, context.terrains ?? []);
+      });
+      if (!standing && !nextToHeldGround) {
+        reject(`${takerId} has no army in ${province.name} and holds no ground next to it, so it cannot take the province.`);
+      }
+
+      return {
+        ...world,
+        map: {
+          ...world.map,
+          provinces: world.map.provinces.map((candidate) =>
+            candidate.id === province.id
+              ? { ...candidate, controllerPolityId: takerId, controlFirmnessBps: delta.firmnessBps }
+              : candidate),
+        },
+      };
+    }
+
+    case "polity_create": {
+      const id = mint("polity", delta.localId);
+      if (world.map.polities.some((polity) => polity.name.toLowerCase() === delta.name.toLowerCase())) {
+        reject(`A power called "${delta.name}" already exists.`);
+      }
+      const parentId = delta.breaksFromPolityId;
+      if (parentId !== null && !world.map.polities.some((polity) => polity.id === parentId)) {
+        reject(`No power "${parentId}" exists to break away from.`, "reference");
+      }
+
+      const taken = delta.provinceIds.map((provinceId) => {
+        const province = world.map.provinces.find((candidate) => candidate.id === provinceId);
+        if (province === undefined) reject(`No province "${provinceId}" exists for the new power to hold.`, "reference");
+        if (parentId !== null && province.controllerPolityId !== parentId) {
+          reject(`${province.name} is not held by ${parentId}, so it cannot break away with them.`);
+        }
+        return province;
+      });
+
+      // A rebellion is a piece of a country coming away, not a scatter of
+      // unconnected towns. Every province past the first has to touch one of
+      // the others across a crossing the map admits.
+      const wanted = new Set(taken.map((province) => province.id));
+      const reached = new Set([taken[0]!.id]);
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const edge of world.map.edges) {
+          if (!wanted.has(edge.from) || !wanted.has(edge.to)) continue;
+          if (reached.has(edge.from) === reached.has(edge.to)) continue;
+          if (!crossingAdmitted(world, edge, context.terrains ?? [])) continue;
+          reached.add(edge.from);
+          reached.add(edge.to);
+          grew = true;
+        }
+      }
+      if (reached.size !== wanted.size) reject(`The ground ${delta.name} claims does not hang together.`);
+
+      const capitalSettlementId = delta.capitalSettlementId !== null
+        && taken.some((province) => province.settlements.some((settlement) => settlement.id === delta.capitalSettlementId))
+        ? delta.capitalSettlementId
+        : taken.flatMap((province) => province.settlements)[0]?.id ?? null;
+
+      // At war with what it left. A secession nobody contests is an
+      // administrative reform, and the Chronicle has no use for one.
+      const war = parentId === null ? [] : [{
+        id: context.ids.next("agreement"),
+        kind: "war" as const,
+        polityId: parentId,
+        otherPolityId: id,
+        terms: delta.reason,
+        sinceStep: atStep,
+        untilStep: null,
+        sourceMessageId: null,
+        status: "active" as const,
+        endedAtStep: null,
+        endedReason: null,
+        visibility: "public" as const,
+      }];
+
+      return {
+        ...world,
+        map: {
+          ...world.map,
+          polities: [...world.map.polities, { id, name: delta.name, capitalSettlementId }],
+          provinces: world.map.provinces.map((province) =>
+            wanted.has(province.id)
+              // Ground held by a rising is held loosely, whoever ends up with it.
+              ? { ...province, controllerPolityId: id, controlFirmnessBps: 2_000 }
+              : province),
+        },
+        polityAgreements: [...world.polityAgreements, ...war],
       };
     }
 

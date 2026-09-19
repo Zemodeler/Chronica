@@ -241,7 +241,10 @@ describe("what a finished project leaves behind", () => {
     // and left the field army exactly where it had started.
     const state = base();
     const marching = state.material.forces[0]!;
-    const destination = state.map.provinces.find((province) => province.id !== marching.locationId)!.id;
+    // Somewhere the map actually joins to: a march is allowed to cross several
+    // provinces, not to arrive somewhere there is no way to.
+    const edge = state.map.edges.find((candidate) => candidate.from === marching.locationId || candidate.to === marching.locationId)!;
+    const destination = edge.from === marching.locationId ? edge.to : edge.from;
     const ready = projectWith(
       { kind: "force_move", label: "Forced march north", amount: 0, provinceId: destination, polityId: null, commanderCharacterId: null, forceId: marching.id, beneficiaryAccountId: null, cadenceDays: null, agreementKind: null, withPolityId: null },
       state,
@@ -250,6 +253,30 @@ describe("what a finished project leaves behind", () => {
     const result = tick(ready, state.instant.day + 10);
     expect(result.world.material.forces.find((force) => force.id === marching.id)!.locationId).toBe(destination);
     expect(result.factProposals.find((fact) => fact.kind === "project_completed")!.summary).toContain("arrived");
+  });
+
+  it("does not land an army somewhere the map offers no way to", () => {
+    // `force_modify` was made to respect the map; a scheduled march was the way
+    // around it, and put an army anywhere on the map in a single step.
+    const state = base();
+    const marching = state.material.forces[0]!;
+    const reachable = new Set([marching.locationId]);
+    for (let pass = 0; pass < 20; pass += 1) {
+      for (const edge of state.map.edges) {
+        if (reachable.has(edge.from)) reachable.add(edge.to);
+        if (reachable.has(edge.to)) reachable.add(edge.from);
+      }
+    }
+    const marooned = state.map.provinces.find((province) => !reachable.has(province.id));
+    if (marooned === undefined) return; // A fully connected map has nowhere to test this.
+
+    const ready = projectWith(
+      { kind: "force_move", label: "A march to nowhere", amount: 0, provinceId: marooned.id, polityId: null, commanderCharacterId: null, forceId: marching.id, beneficiaryAccountId: null, cadenceDays: null, agreementKind: null, withPolityId: null },
+      state,
+    );
+    const result = tick(ready, state.instant.day + 10);
+    expect(result.world.material.forces.find((force) => force.id === marching.id)!.locationId).toBe(marching.locationId);
+    expect(result.factProposals.find((fact) => fact.kind === "project_completed")!.summary).toContain("produced nothing");
   });
 
   it("produces nothing rather than an invalid world when the outcome names a dead man", () => {

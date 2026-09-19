@@ -91,6 +91,12 @@ The same engine rules apply as elsewhere:
   attack simply does not happen.
 - Two powers at peace do not fight. Declaring the war is a decision somebody
   takes, with "agreement_open"; an engagement without it is refused.
+- Ground taken is said with "province_control_set", and only for a province you
+  have an army standing in or one next to ground your power already holds.
+- Someone who raises a province against its ruler and holds it has founded a
+  country: "polity_create", taking the ground from the power it breaks from.
+  Riots are not a country, and neither is a claimant who wants the throne that
+  already exists.
 - Water is crossed in ships. An army at a strait needs a fleet of its own power
   standing with it, and the fleet crosses with it. Ships and armies do not give
   battle to each other.
