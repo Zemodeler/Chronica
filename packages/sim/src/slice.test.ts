@@ -398,3 +398,114 @@ describe("who the world is told it is speaking for", () => {
     expect(permitted(citizen)).not.toContain("military matters");
   });
 });
+
+describe("what a person's station lets them read", () => {
+  function privateCitizen(state: WorldState, polityId: string): string | null {
+    const seated = new Set(state.material.officeSeats.filter((seat) => seat.status === "held").map((seat) => seat.holderCharacterId));
+    const commanders = new Set(state.material.forces.flatMap((force) => [force.commanderCharacterId, force.controllerCharacterId]));
+    return state.characters.find(
+      (character) => character.alive && character.polityId === polityId && character.officeId === null && !seated.has(character.id) && !commanders.has(character.id),
+    )?.id ?? null;
+  }
+  const seatedId = (state: WorldState): string | null =>
+    state.material.officeSeats.find((seat) => seat.status === "held" && seat.holderCharacterId !== null)?.holderCharacterId ?? null;
+
+  const build = (state: WorldState, characterId: string) =>
+    buildWorldSlice({
+      world: state, clock, offices, actorRef: { kind: "character", id: characterId }, actorPolityId: "rome",
+      orderText: "What is happening?", facts: [], dueEvents: [], pendingEvents: [],
+    });
+
+  it("gives a private citizen materially less of the world than the man who governs it", () => {
+    // The measurement this whole branch exists for: the two used to differ by
+    // one line out of a hundred and forty-three.
+    const state = world();
+    const consulId = seatedId(state);
+    const citizenId = privateCitizen(state, "rome");
+    if (consulId === null || citizenId === null) return;
+
+    const consul = renderWorldSlice(build(state, consulId));
+    const citizen = renderWorldSlice(build(state, citizenId));
+    expect(citizen.length).toBeLessThan(consul.length * 0.95);
+  });
+
+  it("keeps a commander's own army whole and bands every other", () => {
+    const base = world();
+    const force = base.material.forces.find((candidate) => candidate.polityId === "rome");
+    if (force === undefined) return;
+
+    // A legate, not a consul: someone whose command is a force and not a
+    // republic. Where the two are the same man he sees everything, correctly.
+    const commanderId = force.commanderCharacterId;
+    const state: WorldState = {
+      ...base,
+      characters: base.characters.map((character) => (character.id === commanderId ? { ...character, officeId: null } : character)),
+      material: {
+        ...base.material,
+        officeSeats: base.material.officeSeats.filter((seat) => seat.holderCharacterId !== commanderId),
+        forces: base.material.forces.map((candidate) =>
+          candidate.id === force.id || (candidate.commanderCharacterId !== commanderId && candidate.controllerCharacterId !== commanderId)
+            ? candidate
+            : { ...candidate, commanderCharacterId: base.characters.find((c) => c.id !== commanderId && c.alive)!.id }),
+      },
+    };
+    const other = state.material.forces.find(
+      (candidate) => candidate.polityId === "rome" && candidate.id !== force.id
+        && candidate.commanderCharacterId !== commanderId && candidate.controllerCharacterId !== commanderId,
+    );
+    if (other === undefined) return;
+
+    const slice = build(state, commanderId);
+    const mine = slice.military.find((entry) => entry.id === force.id)!;
+    const theirs = slice.military.find((entry) => entry.id === other.id)!;
+    expect(mine.banded).toBe(false);
+    expect(mine.morale).not.toBeNull();
+    // Another man's legion keeps its name, its id and its place -- and loses
+    // the readings only its own commander has.
+    expect(theirs.banded).toBe(true);
+    expect(theirs.morale).toBeNull();
+    expect(theirs.provisions).toBeNull();
+    expect(theirs.paperStrength).toBeNull();
+  });
+
+  it("never drops a thing an order might have to name", () => {
+    // The invariant that stops false insubordination: narrow the readings,
+    // never the roster. Take an id away and the orchestrator invents a
+    // placeholder for it, the act is discarded, and it reads as overreach.
+    const state = world();
+    const consulId = seatedId(state);
+    const citizenId = privateCitizen(state, "rome");
+    if (consulId === null || citizenId === null) return;
+
+    const consul = build(state, consulId);
+    const citizen = build(state, citizenId);
+    expect(citizen.military.map((force) => force.id).sort()).toEqual(consul.military.map((force) => force.id).sort());
+    expect(citizen.provinces.map((province) => province.id).sort()).toEqual(consul.provinces.map((province) => province.id).sort());
+    expect(citizen.politics.map((person) => person.id).sort()).toEqual(consul.politics.map((person) => person.id).sort());
+    expect(citizen.institutions.map((institution) => institution.id).sort()).toEqual(consul.institutions.map((institution) => institution.id).sort());
+  });
+
+  it("shows a private citizen the question before the council, and not how the room is leaning", () => {
+    const state = world();
+    const citizenId = privateCitizen(state, "rome");
+    if (citizenId === null || state.material.politicalProcedures.length === 0) return;
+    const slice = build(state, citizenId);
+    for (const question of slice.council) {
+      expect(question.label.length).toBeGreaterThan(0);
+      expect(question.supportWeight).toBeNull();
+    }
+    for (const institution of slice.institutions) expect(institution.blocs).toEqual([]);
+  });
+
+  it("keeps the world's own half, and says plainly that the reader has not been told it", () => {
+    // Foreign aims and secret threads cannot be filtered away -- the
+    // orchestrator is the world and must move Carthage coherently. They are
+    // labelled instead.
+    const state = world();
+    const citizenId = privateCitizen(state, "rome");
+    if (citizenId === null) return;
+    const text = renderWorldSlice(build(state, citizenId));
+    expect(text).toContain("THE WORLD ITSELF");
+    expect(text).toContain("have been told none of what");
+  });
+});
