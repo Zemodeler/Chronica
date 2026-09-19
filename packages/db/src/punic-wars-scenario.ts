@@ -63,6 +63,9 @@ const visibleSettlementsByProvince: Readonly<Record<string, readonly Settlement[
     { id: "settlement-naples", name: "Naples", kind: "city", provinceId: "punic-italy-campanian-plain", controllerPolityId: "rome", size: 60, fortificationLevel: 3 },
     { id: "settlement-capua", name: "Capua", kind: "city", provinceId: "punic-italy-campanian-plain", controllerPolityId: "rome", size: 65, fortificationLevel: 4 },
   ],
+  "punic-italy-bruttian-highlands": [
+    { id: "settlement-rhegium", name: "Rhegium", kind: "port", provinceId: "punic-italy-bruttian-highlands", controllerPolityId: "rhegium-campanians", size: 40, fortificationLevel: 3 },
+  ],
   "punic-italy-apulian-coast": [
     { id: "settlement-tarentum", name: "Tarentum", kind: "port", provinceId: "punic-italy-apulian-coast", controllerPolityId: "rome", size: 60, fortificationLevel: 4 },
   ],
@@ -247,7 +250,7 @@ for (const settlement of PUNIC_WARS_GRAPH_SETTLEMENTS) {
 
 const initialWorld: WorldState = WorldStateSchema.parse({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 20, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 21, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   map: {
@@ -256,6 +259,13 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { id: "carthage", name: "Carthage", capitalSettlementId: "settlement-carthage" },
       { id: "syracuse", name: "Kingdom of Syracuse", capitalSettlementId: "settlement-syracuse" },
       { id: "mamertines", name: "Mamertines of Messana", capitalSettlementId: "settlement-messana" },
+      // The Campanian legion sent to garrison Rhegium killed the citizens and
+      // kept the city -- the same thing the Mamertines did at Messana, in the
+      // same decade. Filing them under Rome made the Republic unable to attack
+      // them at all: two forces of one power will not fight each other, so the
+      // assault on Rhegium was refused by the engine and the siege could never
+      // end. They are what they actually were: a power holding a city.
+      { id: "rhegium-campanians", name: "Campanian legion of Rhegium", capitalSettlementId: "settlement-rhegium" },
       ...italianPolities.map(([id, name]) => ({ id, name, capitalSettlementId: null })),
       // Everyone else who holds ground on this map: the Gaulish and Iberian
       // peoples, the Britons, the Germanic and Illyrian and Thracian
@@ -323,7 +333,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
     // Rome's other war of 270, and the one its own historians were least proud
     // of: a Campanian legion sent to garrison Rhegium killed the citizens and
     // kept the city. Vibellius holds it still, and the Republic means to end it.
-    { id: "decius-vibellius", name: "Decius Vibellius", cultureId: "italic", faithId: null, dynastyId: null, locationProvinceId: "punic-italy-bruttian-highlands", polityId: "rome", ageYearsAtStart: 41, officeId: null, personalAccountId: "vibellius-purse", skills: { martial: 65, intrigue: 60, learning: 30, piety: 30, stewardship: 40, diplomacy: 35, body: 65, subSkills: {} }, traits: ["bold", "vengeful"], mind: { drives: { security: 80, status: 55, wealth: 65, family: 35, faith: 25, duty: 20, revenge: 50 }, temperament: { boldness: 75, caution: 35, honesty: 25, sociability: 40, discipline: 35, cruelty: 70 }, riskTolerance: 75, values: [], taboos: [], currentPressures: ["vibellius-pressure-siege"] }, healthBps: 8_000, prestigeBps: 3_000, relations: [], ambitions: [{ id: "keep-rhegium", label: "Keep Rhegium and his men's necks", kind: "restoration", targetId: "punic-italy-bruttian-highlands", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
+    { id: "decius-vibellius", name: "Decius Vibellius", cultureId: "italic", faithId: null, dynastyId: null, locationProvinceId: "punic-italy-bruttian-highlands", polityId: "rhegium-campanians", ageYearsAtStart: 41, officeId: null, personalAccountId: "vibellius-purse", skills: { martial: 65, intrigue: 60, learning: 30, piety: 30, stewardship: 40, diplomacy: 35, body: 65, subSkills: {} }, traits: ["bold", "vengeful"], mind: { drives: { security: 80, status: 55, wealth: 65, family: 35, faith: 25, duty: 20, revenge: 50 }, temperament: { boldness: 75, caution: 35, honesty: 25, sociability: 40, discipline: 35, cruelty: 70 }, riskTolerance: 75, values: [], taboos: [], currentPressures: ["vibellius-pressure-siege"] }, healthBps: 8_000, prestigeBps: 3_000, relations: [], ambitions: [{ id: "keep-rhegium", label: "Keep Rhegium and his men's necks", kind: "restoration", targetId: "punic-italy-bruttian-highlands", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
     // Syracuse is a court, not one king: Leptines is the aristocrat whose
     // daughter Hieron married, and the reason the city accepted him at all.
     { id: "leptines-syracuse", name: "Leptines of Syracuse", cultureId: "greek", faithId: null, dynastyId: null, locationProvinceId: "ita-72843720b81376294924159-sicily-southeast", polityId: "syracuse", ageYearsAtStart: 58, officeId: null, personalAccountId: "leptines-purse", skills: { martial: 50, intrigue: 60, learning: 65, piety: 55, stewardship: 70, diplomacy: 75, body: 45, subSkills: {} }, traits: ["cautious", "methodical"], mind: { drives: { security: 70, status: 60, wealth: 55, family: 75, faith: 45, duty: 60, revenge: 20 }, temperament: { boldness: 35, caution: 75, honesty: 60, sociability: 70, discipline: 65, cruelty: 20 }, riskTolerance: 30, values: [], taboos: [], currentPressures: [] }, healthBps: 7_500, prestigeBps: 7_000, relations: [{ subjectCharacterId: "hieron-ii", causes: [{ id: "leptines-hieron-kin", label: "Hieron married his daughter, and rules with his house behind him.", score: 35, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null, dimensions: { trust: 40, affection: 30, respect: 35 } }] }], ambitions: [{ id: "keep-the-house", label: "Keep his house at the centre of Syracuse", kind: "office", targetId: "syracuse", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
@@ -337,6 +347,23 @@ const initialWorld: WorldState = WorldStateSchema.parse({
   // has its own stake in whether Messana falls to Syracuse or holds.
   storylines: [{ id: "rhegium-recovery", title: "Rhegium and the Campanian Legion", participantIds: ["gaius-genucius", "decius-vibellius", "manius-curius"], provinceId: "punic-italy-bruttian-highlands", phase: "escalating", stakes: "Rome must retake a city its own garrison murdered and kept, in front of every ally watching how the Republic treats a broken oath.", history: ["The Campanian legion sent to hold Rhegium killed its citizens and took the city for itself.", "The Senate has resolved that the matter be ended."], nextDevelopment: "The consular army turns south, or the Senate finds someone else to send.", visibility: "public", updatedAtStep: 0 }, { id: "mamertine-syracusan-crisis", title: "The Messana Crisis", participantIds: ["hieron-ii", "mamertine-spokesman", "hanno-carthage"], provinceId: "ita-72843720b81376294924159-sicily-northeast", phase: "escalating", stakes: "Syracuse seeks to contain the Mamertines without drawing Rome and Carthage into a wider war.", history: ["Hieron II's forces pressure the Mamertines around the Strait of Messana.", "Carthage watches the strait for any opening or threat to its own position in Sicily."], nextDevelopment: "Envoys may seek outside support if the local balance collapses.", visibility: "public", updatedAtStep: 0 }],
   conflicts: { battles: [], sieges: [], wars: [] },
+  // Rome is already at war with the men holding Rhegium: the Senate has
+  // resolved the matter be ended, and the army is marching. Saying so in state
+  // is what lets the assault happen at all.
+  polityAgreements: [{
+    id: "war-rome-rhegium",
+    kind: "war",
+    polityId: "rome",
+    otherPolityId: "rhegium-campanians",
+    terms: "Rome means to retake Rhegium from the garrison that seized it and killed its citizens.",
+    sinceStep: 0,
+    untilStep: null,
+    sourceMessageId: null,
+    status: "active",
+    endedAtStep: null,
+    endedReason: null,
+    visibility: "public",
+  }],
   // What each power privately means to do. Secret by design -- nobody inside
   // the world reads another's -- and the reason anyone away from the player's
   // business has something to pursue at all.
@@ -345,6 +372,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
     { polityId: "carthage", primaryObjective: "Keep western Sicily and the sea lanes to it, without a war against Rome.", concerns: [{ label: "Syracuse growing strong at Messana", level: "high" }, { label: "Roman power reaching the strait", level: "medium" }, { label: "the cost of mercenaries", level: "medium" }], intentions: ["watch the strait and answer whoever moves first", "hold Lilybaeum, Panormus and Agrigentum whatever happens east of them", "buy friends among the Sicilian cities rather than garrison them"], riskTolerance: 45, updatedAtStep: 0, lastChangeReason: "The opening situation of 270 BCE." },
     { polityId: "syracuse", primaryObjective: "Master all Greek Sicily, beginning with the Mamertines at Messana.", concerns: [{ label: "the Mamertines raiding Syracusan territory", level: "high" }, { label: "Carthage intervening if Messana falls", level: "high" }, { label: "Rome taking an interest in Sicily", level: "medium" }], intentions: ["press the Mamertines hard enough to take Messana", "keep Carthage neutral while it is done", "give Rome no reason to cross"], riskTolerance: 40, updatedAtStep: 0, lastChangeReason: "The opening situation of 270 BCE." },
     { polityId: "mamertines", primaryObjective: "Hold Messana, by whoever's help can be got.", concerns: [{ label: "the Syracusan army at the border", level: "high" }, { label: "no ally of their own", level: "high" }], intentions: ["seek a protector before Syracuse closes on the city", "raid for what the city needs while the roads are open"], riskTolerance: 75, updatedAtStep: 0, lastChangeReason: "The opening situation of 270 BCE." },
+    { polityId: "rhegium-campanians", primaryObjective: "Keep Rhegium, and keep their necks.", concerns: [{ label: "a consular army marching south", level: "high" }, { label: "nobody in Italy will shelter them", level: "high" }], intentions: ["hold the walls and make the siege cost more than the city is worth", "look for any power that would rather Rome did not hold the strait"], riskTolerance: 80, updatedAtStep: 0, lastChangeReason: "The opening situation of 270 BCE." },
     { polityId: "boii", primaryObjective: "Keep the Padus plain out of Roman hands.", concerns: [{ label: "Roman colonies creeping north", level: "high" }, { label: "quarrels with the Insubres", level: "low" }], intentions: ["watch the passes into Etruria", "make common cause with the Insubres and Ligurians if Rome marches"], riskTolerance: 60, updatedAtStep: 0, lastChangeReason: "The opening situation of 270 BCE." },
   ],
   characterPressures: [
@@ -417,6 +445,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       // Carthage is a sea power and Rome in 270 BCE is not: the Republic has a
       // handful of allied hulls and no fleet of its own, which is exactly the
       // asymmetry the First Punic War was fought to overturn.
+      { id: "campanian-legion", name: "Campanian legion of Rhegium", polityId: "rhegium-campanians", commanderCharacterId: "decius-vibellius", controllerCharacterId: "decius-vibellius", locationId: "punic-italy-bruttian-highlands", authorizedStrength: 4_000, personnel: [{ categoryId: "infantry", label: "Campanian mercenaries", fit: 3_600, unavailable: [] }], moraleBps: 6_500, cohesionBps: 7_000, fatigueBps: 1_000, provisionStatus: "shortage", provisionedThroughStep: 120, payObligationId: null, payArrearsPeriods: 0, history: [] },
       { id: "carthaginian-fleet", name: "Carthaginian fleet", polityId: "carthage", commanderCharacterId: "hannibal-gisco", controllerCharacterId: "hannibal-gisco", locationId: "ita-72843720b81376294924159-sicily-west", authorizedStrength: 120, personnel: [{ categoryId: "warship", label: "Quinqueremes", fit: 110, unavailable: [] }], moraleBps: 8_000, cohesionBps: 7_500, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: null, payArrearsPeriods: 0, history: [] },
       { id: "syracusan-squadron", name: "Syracusan squadron", polityId: "syracuse", commanderCharacterId: "leptines-syracuse", controllerCharacterId: "leptines-syracuse", locationId: "ita-72843720b81376294924159-sicily-southeast", authorizedStrength: 40, personnel: [{ categoryId: "warship", label: "Triremes", fit: 35, unavailable: [] }], moraleBps: 7_500, cohesionBps: 7_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: null, payArrearsPeriods: 0, history: [] },
       { id: "allied-greek-hulls", name: "Allied Greek hulls", polityId: "rome", commanderCharacterId: "gaius-genucius", controllerCharacterId: "gaius-genucius", locationId: "punic-italy-bruttian-highlands", authorizedStrength: 20, personnel: [{ categoryId: "warship", label: "Allied transports", fit: 18, unavailable: [] }], moraleBps: 6_500, cohesionBps: 6_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: null, payArrearsPeriods: 0, history: [] },

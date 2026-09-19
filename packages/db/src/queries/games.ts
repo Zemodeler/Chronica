@@ -166,7 +166,14 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     // and Hanno for Carthage were recorded as insubordinate, because neither
     // held an office and authority derives from offices.
     await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 20, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Gives Syracuse, the Mamertines and Carthage's command in Sicily offices and seats them, so a foreign head of state acting for his own power is not recorded as a breach." }).onConflictDoNothing();
-    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 20, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
+    // Version 21: the Campanian legion holding Rhegium becomes the power it
+    // actually was. Filed under Rome, it could not be attacked at all -- two
+    // forces of one power will not fight each other -- so the siege ran to the
+    // assault and the engine refused it. It now holds Rhegium as its own
+    // polity, with its own army, its own aims, and Rome's war against it
+    // already on the books.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 21, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Makes the Campanian legion at Rhegium its own power with its own army and aims, and records Rome's war against it, so the siege the scenario is about can actually be fought." }).onConflictDoNothing();
+    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 21, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
   });
 }
 

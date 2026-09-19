@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PolityAgreementKindSchema } from "./agreements";
 import { ElapsedStepSchema, EntityIdSchema, MoneyAmountSchema } from "../material-state";
 import { OrderPartyRefSchema } from "./party-ref";
 
@@ -39,7 +40,7 @@ export type ProjectMilestone = z.infer<typeof ProjectMilestoneSchema>;
  */
 export const ProjectCompletionOutcomeSchema = z
   .object({
-    kind: z.enum(["force", "structure", "income_source", "force_move", "none"]),
+    kind: z.enum(["force", "structure", "income_source", "force_move", "agreement", "transfer", "none"]),
     label: z.string().trim().min(1).max(160),
     /** Men for a force, garrison capacity for a structure, revenue per period for an income source. */
     amount: z.number().int().nonnegative().max(10_000_000).default(0),
@@ -50,6 +51,9 @@ export const ProjectCompletionOutcomeSchema = z
     forceId: EntityIdSchema.nullable().default(null),
     beneficiaryAccountId: EntityIdSchema.nullable().default(null),
     cadenceDays: z.number().int().positive().max(36_600).nullable().default(null),
+    /** For "agreement": what the two powers end up standing in, and with whom. */
+    agreementKind: PolityAgreementKindSchema.nullable().default(null),
+    withPolityId: EntityIdSchema.nullable().default(null),
   })
   .strict();
 export type ProjectCompletionOutcome = z.infer<typeof ProjectCompletionOutcomeSchema>;

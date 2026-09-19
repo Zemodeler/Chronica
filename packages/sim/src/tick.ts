@@ -1,6 +1,7 @@
 import {
   advanceProvinceMaterial,
   applyDiplomaticAnswerToStance,
+  agreementsBetween,
   atWar,
   expireDatedAgreements,
   isNavalForce,
@@ -356,6 +357,11 @@ export function runDeterministicTick(input: TickInput): TickResult {
    * the record shows an effort that finished into nothing, which is a truer
    * account than a fleet appearing under a dead man.
    */
+  /** Agreements the tick itself opens, when a project's whole product is one. */
+  let agreements = input.world.polityAgreements;
+  const between = (agreement: { readonly polityId: string; readonly otherPolityId: string }, a: string, b: string): boolean =>
+    (agreement.polityId === a && agreement.otherPolityId === b) || (agreement.polityId === b && agreement.otherPolityId === a);
+
   const produceOutcome = (project: WorldState["projects"][number]): { entityId: string; summary: string } | null => {
     const outcome = project.completionOutcome;
     if (outcome === null || outcome.kind === "none") return null;
@@ -424,6 +430,76 @@ export function runDeterministicTick(input: TickInput): TickResult {
         provenanceProjectId: project.id,
       });
       return { entityId: id, summary: `${outcome.label} [${id}] now stands in ${provinceId}.` };
+    }
+
+    if (outcome.kind === "agreement") {
+      // An embassy that arrives, is heard and produces nothing has not
+      // happened. "A protector for Messana was secured" with nobody named as
+      // the protector was a project reporting itself complete and leaving the
+      // world exactly as it was.
+      const withPolityId = outcome.withPolityId;
+      const sponsorPolityId = project.sponsorEntityRef.kind === "polity"
+        ? project.sponsorEntityRef.id
+        : input.world.characters.find((character) => character.id === project.sponsorEntityRef.id)?.polityId ?? null;
+      if (withPolityId === null || sponsorPolityId === null || outcome.agreementKind === null) return null;
+      if (withPolityId === sponsorPolityId) return null;
+      const known = new Set(input.world.map.polities.map((polity) => polity.id));
+      if (!known.has(withPolityId) || !known.has(sponsorPolityId)) return null;
+      if (agreementsBetween(agreements, sponsorPolityId, withPolityId).some((agreement) => agreement.kind === outcome.agreementKind)) return null;
+      const id = input.ids.next("agreement");
+      agreements = [
+        ...agreements.map((agreement) =>
+          agreement.status === "active" && agreement.kind === "war" && between(agreement, sponsorPolityId, withPolityId) && outcome.agreementKind !== "war"
+            ? { ...agreement, status: "ended" as const, endedAtStep: input.toDay, endedReason: outcome.label }
+            : agreement),
+        {
+          id,
+          kind: outcome.agreementKind,
+          polityId: sponsorPolityId,
+          otherPolityId: withPolityId,
+          terms: outcome.label,
+          sinceStep: input.toDay,
+          untilStep: null,
+          sourceMessageId: null,
+          status: "active" as const,
+          endedAtStep: null,
+          endedReason: null,
+          visibility: "public" as const,
+        },
+      ];
+      return { entityId: id, summary: `${sponsorPolityId} and ${withPolityId} now stand in ${outcome.agreementKind}: ${outcome.label}.` };
+    }
+
+    if (outcome.kind === "transfer") {
+      // What a subsidy actually is: money reaching somebody, once, when the
+      // arrangement is finished. Without it, "silver and supplies for the
+      // protected ally" had nowhere to land but a project that produced
+      // nothing and an ally the record never named.
+      const toAccountId = outcome.beneficiaryAccountId;
+      const fromAccountId = sponsorAccountId(project.sponsorEntityRef) ?? null;
+      if (toAccountId === null || !accounts.some((account) => account.id === toAccountId)) return null;
+      const available = fromAccountId === null ? outcome.amount : balanceOf(fromAccountId);
+      const handed = Math.min(outcome.amount, available);
+      if (handed <= 0) return null;
+      if (fromAccountId !== null) credit(fromAccountId, -handed);
+      credit(toAccountId, handed);
+      transactions.push({
+        id: input.ids.next("txn"),
+        atStep: input.toDay,
+        kind: "transfer",
+        amount: handed,
+        ...(fromAccountId === null ? {} : { sourceAccountId: fromAccountId }),
+        destinationAccountId: toAccountId,
+        cause: { kind: "project_milestone", id: project.id, explanation: outcome.label },
+        visibility: "polity",
+      });
+      const shortfall = outcome.amount - handed;
+      return {
+        entityId: toAccountId,
+        summary: shortfall > 0
+          ? `${handed} of the promised ${outcome.amount} reaches ${toAccountId}; ${shortfall} could not be found.`
+          : `${handed} passes to ${toAccountId}.`,
+      };
     }
 
     const beneficiaryId = outcome.beneficiaryAccountId;
@@ -525,18 +601,34 @@ export function runDeterministicTick(input: TickInput): TickResult {
       // expansion produced no ships -- the project was marked done and the
       // world was exactly as it had been.
       const produced = produceOutcome(project);
-      facts.push({
-        localId: nextLocalId("project"),
-        kind: "project_completed",
-        summary: produced === null ? `${project.label} is complete.` : `${project.label} is complete: ${produced.summary}`,
-        affectedRefs: [{ kind: "project", id: project.id }],
-        visibility: "public",
-        discoveryState: "public",
-        knowableInDays: 0,
-        // Something now exists that did not before, which is a different order
-        // of event from a milestone being reached.
-        significance: produced === null ? 45 : 60,
-      });
+      // An effort that declared no product makes no news of finishing.
+      //
+      // "The scheme for providing silver and supplies to the protected ally was
+      // completed" -- with no ally named, no silver moved and nothing in the
+      // world changed -- was a project whose whole content was drafting a plan,
+      // reported to the ruler as an event. A completion is history when
+      // something exists afterwards that did not before; otherwise it is the
+      // clerk's ledger, and the Chronicle is not a ledger. The project still
+      // completes; it simply does not announce itself.
+      const declaredNothing = project.completionOutcome === null || project.completionOutcome.kind === "none";
+      if (!declaredNothing) {
+        facts.push({
+          localId: nextLocalId("project"),
+          kind: "project_completed",
+          summary: produced === null
+            // Declared a product and could not deliver it: worth knowing, and
+            // not the same as having promised nothing.
+            ? `${project.label} is complete, but produced nothing it was meant to.`
+            : `${project.label} is complete: ${produced.summary}`,
+          affectedRefs: [{ kind: "project", id: project.id }],
+          visibility: "public",
+          discoveryState: "public",
+          knowableInDays: 0,
+          // Something now exists that did not before, which is a different order
+          // of event from a milestone being reached.
+          significance: produced === null ? 45 : 60,
+        });
+      }
       notes.push(produced === null ? `${project.label} is complete.` : `${project.label} is complete: ${produced.summary}`);
 
       return {
@@ -659,7 +751,7 @@ export function runDeterministicTick(input: TickInput): TickResult {
 
   // A truce with a term ends the day its term does, whether or not anybody
   // remembers it. One that ends only when somebody says so is a peace.
-  const polityAgreements = expireDatedAgreements(recovered.polityAgreements, input.toDay);
+  const polityAgreements = expireDatedAgreements(agreements, input.toDay);
   for (const agreement of polityAgreements) {
     const before = recovered.polityAgreements.find((candidate) => candidate.id === agreement.id);
     if (before?.status === "active" && agreement.status === "ended") {

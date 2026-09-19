@@ -11,9 +11,11 @@ describe("Punic Wars built-in scenario", () => {
 
   it("keeps the four key actors and their historical capitals in authoritative state", () => {
     expect(punicWarsScenario.initialWorld.map.polities.filter((polity) => ["rome", "carthage", "syracuse", "mamertines"].includes(polity.id))).toHaveLength(4);
-    // Four armies, and the ships that decide who can cross to Sicily at all.
+    // Five armies -- the four powers' own, and the Campanian legion holding
+    // Rhegium against the Republic -- plus the ships that decide who can cross
+    // to Sicily at all.
     const forces = punicWarsScenario.initialWorld.material.forces;
-    expect(forces.filter((force) => force.personnel.every((category) => category.categoryId === "infantry"))).toHaveLength(4);
+    expect(forces.filter((force) => force.personnel.every((category) => category.categoryId === "infantry"))).toHaveLength(5);
     expect(forces.filter((force) => force.personnel.some((category) => category.categoryId === "warship"))).toHaveLength(3);
   });
 
@@ -95,6 +97,10 @@ describe("the Punic Wars map as authoritative world state", () => {
 
   it("gives every polity that holds ground somewhere to hold", () => {
     const held = new Set(provinces.map((province) => province.controllerPolityId));
+    // A city counts. The Campanian legion holds Rhegium inside a province Rome
+    // otherwise controls, which is precisely what it did -- and what the
+    // Mamertines did at Messana.
+    for (const province of provinces) for (const settlement of province.settlements) held.add(settlement.controllerPolityId);
     // Two polities are declared without territory on purpose: Etruria passed to
     // Rome and the Cenomani province was merged away, but both peoples remain
     // nameable. Every other polity must actually hold something, or it is a

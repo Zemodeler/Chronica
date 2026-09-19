@@ -477,7 +477,17 @@ function applyOne(
           forceId: outcome.forceRef === null ? null : required(outcome.forceRef, "The force this project is to move"),
           beneficiaryAccountId: outcome.beneficiaryAccountRef === null ? null : required(outcome.beneficiaryAccountRef, "The account this project is to pay into"),
           cadenceDays: outcome.cadenceDays,
+          agreementKind: outcome.agreementKind,
+          withPolityId: outcome.withPolityId,
         };
+      // An embassy whose whole point is an understanding must name the power it
+      // is with, or it completes and the world is exactly as it was.
+      if (outcome !== null && outcome.kind === "agreement" && (outcome.agreementKind === null || outcome.withPolityId === null)) {
+        reject("A project that is to end in an agreement must say what the agreement is and which power it is with.");
+      }
+      if (outcome !== null && outcome.withPolityId !== null && !world.map.polities.some((polity) => polity.id === outcome.withPolityId)) {
+        reject(`No power "${outcome.withPolityId}" exists to come to terms with.`, "reference");
+      }
       const fundingId = delta.fundingAccountRef === null ? null : required(delta.fundingAccountRef, "The funding account");
       if (fundingId !== null && !world.material.accounts.some((account) => account.id === fundingId)) {
         reject(`No account "${fundingId}" exists to fund this project.`, "reference");
@@ -1322,7 +1332,7 @@ function applyOne(
       if (message !== undefined && message.status === "answered") {
         reject(`"${message.subject}" has already been answered.`);
       }
-      const answered = { ...message!, status: "answered" as const, answer: delta.answer, answerText: delta.answerText, answeredAtStep: atStep };
+      const answered = { ...message, status: "answered" as const, answer: delta.answer, answerText: delta.answerText, answeredAtStep: atStep };
       return {
         ...world,
         diplomacy: world.diplomacy.map((candidate) => (candidate.id === messageId ? answered : candidate)),
@@ -1390,7 +1400,7 @@ function applyOne(
       const agreementId = required(delta.agreementRef, "The agreement being ended");
       const agreement = world.polityAgreements.find((candidate) => candidate.id === agreementId);
       if (agreement === undefined) reject(`No agreement "${agreementId}" exists to end.`, "reference");
-      if (agreement!.status === "ended") reject("That agreement has already ended.");
+      if (agreement.status === "ended") reject("That agreement has already ended.");
       return {
         ...world,
         polityAgreements: world.polityAgreements.map((candidate) =>
