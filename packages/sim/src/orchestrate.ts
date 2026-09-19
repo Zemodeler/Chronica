@@ -106,6 +106,13 @@ How to answer well:
    arrangement is "private", a public mobilization is "public". Use "delayed" or
    "rumoured" discovery with "knowableInDays" for news that has to travel. A
    "private" fact also lists who knows it, in "knownToRefs".
+   A fact is something that happened. It is not a condition that obtains, and
+   not something that is expected. "The army is holding the province rather than
+   advancing" is a posture; "someone is expected to answer" is a diary entry;
+   "the review is under way" is a project reporting its own existence. None of
+   them happened. Where the true answer is that nothing did, write no fact --
+   silence in the record is not a gap to be filled. The thing a person chose,
+   the thing they said, the thing that arrived: those are facts.
 9. Score each fact's "significance" from 0 to 100 by how much it would matter to a
    historian of this reign: a routine payment is near 0, a mobilization perhaps 50,
    a battle or a death 90+.

@@ -512,3 +512,42 @@ describe("a project that produces nothing", () => {
     expect(result.factProposals.find((proposal) => proposal.kind === "project_completed")!.summary).toContain("produced nothing it was meant to");
   });
 });
+
+describe("a letter nobody answered", () => {
+  it("records the silence as the refusal it is, not as a date that passed", () => {
+    // "Roman Republic Lets the Term on Messanan Protection Expire" was a real
+    // headline, over a passage that said at length that nothing had happened.
+    // Refusing by saying nothing is a refusal, and a chronicler can write one.
+    const state = base();
+    const [from, to] = state.map.polities;
+    if (from === undefined || to === undefined) return;
+    const waiting: WorldState = {
+      ...state,
+      diplomacy: [{
+        id: "letter-1",
+        fromPolityId: from.id,
+        toPolityId: to.id,
+        fromCharacterId: null,
+        toCharacterId: null,
+        subject: "Renewed protection and aid for Messana",
+        body: "Rome asks whether the old protection stands.",
+        sentAtStep: state.instant.day,
+        replyDueByStep: state.instant.day + 5,
+        status: "awaiting_reply",
+        answer: null,
+        answerText: null,
+        answeredAtStep: null,
+        inReplyToId: null,
+        visibility: "polity",
+      }],
+    };
+
+    const result = tick(waiting, state.instant.day + 10);
+    const silence = result.factProposals.find((fact) => fact.kind === "diplomatic_silence")!;
+    expect(silence).toBeDefined();
+    expect(silence.summary).toContain("refused");
+    expect(silence.summary).not.toContain("run out");
+    // A refusal is worth as much as any other answer.
+    expect(silence.significance).toBeGreaterThanOrEqual(45);
+  });
+});
