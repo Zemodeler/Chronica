@@ -17,8 +17,8 @@ import {
   type BurstFactRow,
   type ChronicaDatabase,
 } from "@chronica/db";
-import { FactSchema, PlayerDecisionSchema, type Fact, type OrderPartyRef } from "@chronica/shared";
-import { composeChronicle, runSimulationBurst, whoSeeksThePlayer, type AnsweredDecision, type SimModelPort } from "@chronica/sim";
+import { FactSchema, PlayerDecisionSchema, diffWorlds, formatWorldDate, type Fact, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
+import { closeTheBooks, composeChronicle, runSimulationBurst, whoSeeksThePlayer, type AnsweredDecision, type ChronicleEntry, type SimModelPort } from "@chronica/sim";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { requiredDatabaseUrl } from "./database-url";
 import { openInitiatedDialogue } from "./dialogue-service";
@@ -167,23 +167,35 @@ export async function submitOrder(
       throw error;
     }
 
-    const chronicle =
-      result.outcome === "continue"
-        ? null
-        : await composeChronicle({
-          port,
-          clock: view.scenarioClock,
-          observer: actorRef,
-          observerPolityId: actorPolityId,
-          facts: result.newFacts,
-          from,
-          to: result.world.instant,
-          narrative: result.narrative,
-          frictions: result.frictions,
-          significanceByFactId: result.significanceByFactId,
-          storylines: result.world.storylines,
-          polityOfCharacter: (id) => result.world.characters.find((character) => character.id === id)?.polityId ?? null,
-        });
+    // The Chronicle is no longer conditional on the burst having ended in a
+    // particular way. A record that exists because an order finished is a
+    // receipt; this one is written whenever a matter reached a moment worth
+    // recording, the player's own among them, and costs nothing when no matter
+    // did. What still gates it is weight, inside `composeChronicle`.
+    const chronicle = await composeChronicle({
+      port,
+      clock: view.scenarioClock,
+      observer: actorRef,
+      observerPolityId: actorPolityId,
+      facts: result.newFacts,
+      from,
+      to: result.world.instant,
+      narrative: result.narrative,
+      frictions: result.frictions,
+      utterances: result.utterances,
+      significanceByFactId: result.significanceByFactId,
+      storylines: result.world.storylines,
+      polityOfCharacter: (id) => result.world.characters.find((character) => character.id === id)?.polityId ?? null,
+      ownEntityIds: ownSideOf(result.world, actorRef.id, actorPolityId),
+      changes: diffWorlds(view.world, result.world),
+    });
+
+    // And the books close because the calendar turned, not because anybody
+    // asked. No model call, no historian, no judgment -- arithmetic.
+    const entries: ChronicleEntry[] = [
+      ...chronicle.entries,
+      ...closeTheBooks({ world: result.world, clock: view.scenarioClock, from, to: result.world.instant, polityId: actorPolityId }),
+    ].sort((a, b) => a.toInstantSortKey - b.toInstantSortKey);
 
     try {
       await commitBurst(db, {
@@ -199,19 +211,23 @@ export async function submitOrder(
         firedEventIds: result.firedEventIds,
         burst: {
           iterations: result.iterations,
-          modelCalls: result.modelCalls + (chronicle?.calls ?? 0),
+          modelCalls: result.modelCalls + chronicle.calls,
           outcome: result.outcome,
           stopReason: result.stopReason,
           accumulatedSignificance: result.accumulatedSignificance,
         },
-        ...(chronicle === null || chronicle.entries.length === 0
+        ...(entries.length === 0
           ? {}
           : {
-            checkpoints: chronicle.entries.map((entry) => ({
+            checkpoints: entries.map((entry) => ({
+              kind: entry.kind,
               title: entry.title,
               body: entry.body,
               factIds: entry.factIds,
               subjects: entry.subjects,
+              tags: entry.tags,
+              changes: entry.changes,
+              quote: entry.quote,
               fromInstantSortKey: entry.fromInstantSortKey,
               toInstantSortKey: entry.toInstantSortKey,
             })),
@@ -242,12 +258,36 @@ export async function submitOrder(
     return {
       status: "ok",
       outcome: result.outcome,
-      entries: chronicle?.entries.map((entry) => ({ title: entry.title, body: entry.body })) ?? [],
+      entries: entries.map((entry) => ({ title: entry.title, body: entry.body })),
       decision: result.playerDecision === null ? null : { prompt: result.playerDecision.prompt, options: result.playerDecision.options },
     };
   } finally {
     await close();
   }
+}
+
+/**
+ * Everything the player's own side answers for.
+ *
+ * The Chronicle's middle tier turns on it: a secret touching any of this stays
+ * dark, because a plot against the ruler is not colour, while a secret touching
+ * none of it may reach them as distant news. Read from the world after the
+ * burst, so a province taken this very span counts as theirs.
+ */
+function ownSideOf(world: WorldState, characterId: string, polityId: string | null): Set<string> {
+  const own = new Set<string>([characterId]);
+  if (polityId === null) return own;
+  own.add(polityId);
+  for (const character of world.characters) if (character.polityId === polityId) own.add(character.id);
+  for (const province of world.map.provinces) if (province.controllerPolityId === polityId) own.add(province.id);
+  for (const force of world.material.forces) if (force.polityId === polityId) own.add(force.id);
+  return own;
+}
+
+/** A stored sort key, as the date a reader sees at the head of an entry. */
+function dateLabel(sortKey: number, clock: ScenarioClock | undefined): string | null {
+  if (clock === undefined) return null;
+  return formatWorldDate({ day: Math.floor(sortKey / 1440), minute: sortKey % 1440 }, clock);
 }
 
 export async function getGameView(gameId: string) {
@@ -264,14 +304,25 @@ export async function getGameView(gameId: string) {
     return {
       gameTitle: view.gameTitle,
       instant: view.world.instant,
-      // Entries carry the burst that wrote them: several threads of one span are
-      // one report to read together, not a queue of unrelated passages.
+      // The whole record, oldest first -- not the last report. A chronicle you
+      // cannot turn back through is a notification.
+      //
+      // Entries still carry the burst that wrote them, because several threads
+      // of one span are one report to read together.
       chronicle: chronicle.map((entry) => ({
         id: entry.id,
         burstId: entry.burstId,
+        kind: entry.kind === "recorded" ? "recorded" : "narrated",
+        // The day the matter entered the record, which is what a chronicle is
+        // indexed by. Formatted here because the scenario's calendar lives with
+        // the world and has no business being shipped to the browser.
+        date: dateLabel(entry.toInstantSortKey, view.scenarioClock),
         title: entry.title,
         body: entry.body,
         subjects: entry.subjects,
+        tags: entry.tags,
+        changes: entry.changes,
+        quote: entry.quote,
       })),
       decision: decision === undefined ? null : { id: decision.id, prompt: decision.prompt, options: decision.options },
     };

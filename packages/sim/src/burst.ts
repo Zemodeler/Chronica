@@ -24,7 +24,7 @@ import { materializeFacts } from "./facts";
 import { decideNarratorSeed, recordSeedOffered, recordSeedOutcome, seedParticipants, seedWasTaken, type NarratorSeed } from "./narrator";
 import { orchestrate } from "./orchestrate";
 import { createIdFactory, type SimModelPort } from "./ports";
-import type { NarrativeLine } from "./chronicle";
+import type { NarrativeLine, UtteranceLine } from "./chronicle";
 import { buildWorldSlice, type AnsweredDecision, type SliceEvent } from "./slice";
 import { runDeterministicTick } from "./tick";
 import { isWatchSatisfied } from "./watch";
@@ -143,6 +143,12 @@ export interface BurstResult {
    */
   readonly narrative: readonly NarrativeLine[];
   readonly frictions: readonly NarrativeLine[];
+  /**
+   * What people actually said, for the one line of somebody's own voice the
+   * Chronicle is allowed to print. Only people: the orchestrator speaks for the
+   * world, and the world has no mouth.
+   */
+  readonly utterances: readonly UtteranceLine[];
   readonly breaches: readonly AuthorityBreach[];
   readonly playerDecision: PlayerDecision | null;
   readonly parseFailures: readonly string[];
@@ -165,6 +171,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const scheduled: ScheduledEventDraft[] = [];
   const narrative: NarrativeLine[] = [];
   const frictions: NarrativeLine[] = [];
+  const utterances: UtteranceLine[] = [];
   const breaches: AuthorityBreach[] = [];
   const parseFailures: string[] = [];
   let playerDecision: PlayerDecision | null = null;
@@ -250,6 +257,19 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const describes = actsForTheWorld ? visibleDescribed : materialized.facts.map((fact) => fact.id);
     const author = actsForTheWorld ? null : actorRef;
     narrative.push({ actorRef: author, line: proposal.narrativeSummary, factIds: actsForTheWorld ? [] : describes });
+    // A quotation has to have been said by somebody. The orchestrator answers
+    // for the whole world in one breath -- for Rome and for the Boii chieftain
+    // and for the weather -- so anything it "said" is attributable to no one,
+    // and a record that prints it is inventing a speaker.
+    if (proposal.utterance !== null && !actsForTheWorld && actorRef.kind === "character") {
+      utterances.push({
+        actorRef,
+        speaker: world.characters.find((character) => character.id === actorRef.id)?.name ?? actorRef.id,
+        line: proposal.utterance.line,
+        occasion: proposal.utterance.occasion,
+        factIds: describes,
+      });
+    }
     for (const line of [
       ...proposal.frictions,
       ...result.rejected.filter((rejection) => rejection.kind === "world").map((rejection) => rejection.reason),
@@ -658,6 +678,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     accumulatedSignificance: significance,
     narrative,
     frictions,
+    utterances,
     breaches,
     playerDecision,
     parseFailures,

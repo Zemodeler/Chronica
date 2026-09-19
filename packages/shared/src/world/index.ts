@@ -19,5 +19,6 @@ export * from "./references";
 export * from "./region-control";
 export * from "./scope";
 export * from "./world-state";
+export * from "./changes";
 export * from "./watch";
 export * from "./scenario";

@@ -286,3 +286,159 @@ describe("a passage that continues a longer matter", () => {
     expect(port.lastUserMessage).not.toContain("Part of a longer matter");
   });
 });
+
+describe("the world elsewhere", () => {
+  const OBSERVER = { kind: "character" as const, id: "marcus-atilius" };
+  const ROMAN_SIDE = new Set(["marcus-atilius", "rome", "quintus-fabius", "latium"]);
+  const secret = (overrides: Partial<Parameters<typeof fact>[0]> = {}) =>
+    fact({
+      kind: "assassination",
+      summary: "Agathocles of Syracuse is poisoned at a banquet by his own nephew.",
+      affectedEntities: [{ kind: "polity", id: "syracuse" }],
+      visibility: "private",
+      discovery: { state: "private", knowableAtInstant: null, discoveredBy: [] },
+      ...overrides,
+    });
+
+  const compose = (port: SimModelPort, facts: Fact[], extra: Partial<Parameters<typeof composeChronicle>[0]> = {}) =>
+    composeChronicle({
+      port, clock, observer: OBSERVER, observerPolityId: "rome", facts,
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+      ownEntityIds: ROMAN_SIDE,
+      significanceByFactId: new Map(facts.map((candidate) => [candidate.id, 70])),
+      ...extra,
+    });
+
+  it("lets weighty news of somewhere else reach the court, marked as hearsay", async () => {
+    // A record that is correct and parochial is a record of a dead world. What
+    // happens in Syracuse cannot be acted on from Rome, so knowing it costs
+    // nothing and not knowing it costs the whole feeling of a world.
+    const port = capturingPort();
+    const result = await compose(port, [secret()]);
+    expect(port.lastUserMessage).toContain("news reaching the court");
+    expect(port.lastUserMessage).toContain("Reported to have happened:");
+    expect(port.lastUserMessage).toContain("poisoned at a banquet");
+    expect(result.entries).toHaveLength(1);
+  });
+
+  it("keeps a secret that touches the reader's own side, however weighty", async () => {
+    const port = capturingPort();
+    const plot = secret({
+      kind: "conspiracy_begun",
+      summary: "Quintus Fabius begins quietly gathering senators against the consul.",
+      affectedEntities: [{ kind: "character", id: "quintus-fabius" }],
+    });
+    const result = await compose(port, [plot]);
+    expect(result.entries).toHaveLength(0);
+  });
+
+  it("carries no distant news at all when nobody said where the reader's reach ends", async () => {
+    // The strict answer, not a guess: a wrong guess here publishes a plot
+    // against the reader as local colour.
+    const port = capturingPort();
+    const result = await compose(port, [secret()], { ownEntityIds: undefined });
+    expect(result.entries).toHaveLength(0);
+  });
+
+  it("does not carry foreign trivia, only what would travel", async () => {
+    const port = capturingPort();
+    const gossip = secret({ summary: "A Syracusan magistrate loses a lawsuit over a vineyard." });
+    const result = await compose(port, [gossip], { significanceByFactId: new Map([[gossip.id, 10]]) });
+    expect(result.entries).toHaveLength(0);
+  });
+
+  it("waits for word to arrive when the news has a road to travel", async () => {
+    const port = capturingPort();
+    const slow = secret({ discovery: { state: "rumoured", knowableAtInstant: { day: 90, minute: 0 }, discoveredBy: [] } });
+    expect((await compose(port, [slow])).entries).toHaveLength(0);
+    expect((await compose(port, [slow], { to: { day: 120, minute: 0 } })).entries).toHaveLength(1);
+  });
+
+  it("does not hand the court an actor's own account of something it merely heard about", async () => {
+    // The court learned that Agathocles was killed. It did not learn what his
+    // nephew was thinking, and an account is the one thing hearsay never brings.
+    const port = capturingPort();
+    const distant = secret();
+    await compose(port, [distant], {
+      narrative: [{ actorRef: { kind: "character", id: "archagathus" }, line: "Archagathus judged the moment had come to take the tyranny.", factIds: [distant.id] }],
+    });
+    expect(port.lastUserMessage).not.toContain("take the tyranny");
+  });
+});
+
+describe("the bar an entry has to clear", () => {
+  const OBSERVER = { kind: "character" as const, id: "marcus-atilius" };
+  const compose = (port: SimModelPort, facts: Fact[], weights: ReadonlyMap<string, number>) =>
+    composeChronicle({
+      port, clock, observer: OBSERVER, observerPolityId: "rome", facts,
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+      significanceByFactId: weights,
+    });
+
+  it("leaves a slight matter elsewhere unwritten", async () => {
+    const own = fact({ summary: "The legions march north.", affectedEntities: [{ kind: "polity", id: "rome" }] });
+    const slight = fact({ summary: "A Boii headman repairs his hall.", affectedEntities: [{ kind: "polity", id: "boii" }] });
+    const result = await compose(capturingPort(), [own, slight], new Map([[own.id, 70], [slight.id, 5]]));
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]!.subjects.map((subject) => subject.id)).toContain("rome");
+  });
+
+  it("always answers the reader's own order, however small the outcome", async () => {
+    // An order that produced little still has to be answered, or the player
+    // gave an order and heard nothing back.
+    const own = fact({ summary: "The quaestor finds the money, slowly.", affectedEntities: [{ kind: "polity", id: "rome" }] });
+    const result = await compose(capturingPort(), [own], new Map([[own.id, 3]]));
+    expect(result.entries).toHaveLength(1);
+  });
+});
+
+describe("what an entry carries beside the prose", () => {
+  const OBSERVER = { kind: "character" as const, id: "marcus-atilius" };
+  const compose = (port: SimModelPort, facts: Fact[], extra: Partial<Parameters<typeof composeChronicle>[0]> = {}) =>
+    composeChronicle({
+      port, clock, observer: OBSERVER, observerPolityId: "rome", facts,
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [], ...extra,
+    });
+
+  it("lists only the changes its own facts name", async () => {
+    // The change block is the one place a leak would be invisible: the prose is
+    // carefully gated and a row of chips beside it is not, unless it is.
+    const own = fact({ summary: "Vatluna falls.", affectedEntities: [{ kind: "province", id: "vatluna" }, { kind: "polity", id: "rome" }] });
+    const result = await compose(capturingPort(), [own], {
+      changes: [
+        { kind: "province", id: "vatluna", label: "Vatluna", detail: "passes from Etruria to Rome" },
+        { kind: "force", id: "secret-fleet", label: "Punic Fleet", detail: "raised at Carthage" },
+      ],
+    });
+    expect(result.entries[0]!.changes.map((change) => change.id)).toEqual(["vatluna"]);
+  });
+
+  it("shows three subjects at most, the reader's own government last", async () => {
+    const own = fact({
+      summary: "Rome storms the Etruscan towns.",
+      affectedEntities: [
+        { kind: "polity", id: "rome" }, { kind: "polity", id: "etruria" },
+        { kind: "province", id: "vatluna" }, { kind: "province", id: "rusellae" }, { kind: "character", id: "corvus" },
+      ],
+    });
+    const result = await compose(capturingPort(), [own]);
+    expect(result.entries[0]!.subjects.length).toBeGreaterThan(3);
+    expect(result.entries[0]!.tags).toHaveLength(3);
+    expect(result.entries[0]!.tags.map((tag) => tag.id)).not.toContain("rome");
+  });
+
+  it("prints one quotation per report, on the matter that earned it", async () => {
+    const heavy = fact({ summary: "Sutrium falls to Corvus.", affectedEntities: [{ kind: "polity", id: "rome" }] });
+    const light = fact({ summary: "The Boii burn a farmstead.", affectedEntities: [{ kind: "polity", id: "boii" }] });
+    const result = await compose(capturingPort(), [heavy, light], {
+      significanceByFactId: new Map([[heavy.id, 90], [light.id, 60]]),
+      utterances: [
+        { actorRef: { kind: "character", id: "corvus" }, speaker: "Marcus Valerius Corvus", line: "The walls were old and the men behind them older.", occasion: "on taking Sutrium", factIds: [heavy.id] },
+        { actorRef: { kind: "character", id: "boiorix" }, speaker: "Boiorix", line: "Let them count the barns.", occasion: "on the raid", factIds: [light.id] },
+      ],
+    });
+    const quoted = result.entries.filter((entry) => entry.quote !== null);
+    expect(quoted).toHaveLength(1);
+    expect(quoted[0]!.quote!.speaker).toBe("Marcus Valerius Corvus");
+  });
+});

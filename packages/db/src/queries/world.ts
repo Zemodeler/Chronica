@@ -208,10 +208,14 @@ export interface BurstCommit {
    * both.
    */
   readonly checkpoints?: readonly {
+    readonly kind: "narrated" | "recorded";
     readonly title: string;
     readonly body: string;
     readonly factIds: readonly string[];
     readonly subjects: readonly unknown[];
+    readonly tags: readonly unknown[];
+    readonly changes: readonly unknown[];
+    readonly quote: unknown;
     readonly fromInstantSortKey: number;
     readonly toInstantSortKey: number;
   }[];
@@ -279,10 +283,14 @@ export async function commitBurst(db: ChronicaDatabase, commit: BurstCommit): Pr
         ordinal,
         fromInstantSortKey: entry.fromInstantSortKey,
         toInstantSortKey: entry.toInstantSortKey,
+        kind: entry.kind,
         title: entry.title,
         body: entry.body,
         factIds: entry.factIds,
         subjects: entry.subjects,
+        tags: entry.tags,
+        changes: entry.changes,
+        quote: entry.quote ?? null,
         stopReason: commit.burst.stopReason,
       })));
     }

@@ -730,3 +730,45 @@ describe("the world stirs: a plague in the open", () => {
     expect(known).toContain("plague_wave");
   });
 });
+
+describe("what a person said", () => {
+  const SPEAKS = JSON.stringify({
+    actors: [
+      {
+        actorRef: { kind: "character", id: "hanno" },
+        reasoning: "Rome is arming; the west of the island must be held.",
+        proposal: {
+          narrativeSummary: "Carthage quietly reinforces its position in western Sicily.",
+          utterance: { line: "Let them count our ships when they are already in the strait.", occasion: "to the Council of Elders" },
+          frictions: [],
+          deltas: [],
+          facts: [
+            { localId: "reinforcement", kind: "military_reinforcement", summary: "Carthage reinforces western Sicily.", affectedRefs: [{ kind: "polity", id: "carthage" }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 60 },
+          ],
+          delegations: [],
+          schedule: [],
+        },
+      },
+    ],
+  });
+
+  it("carries a person's own words out of the burst, with the facts they belong to", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [SPEAKS, SPEAKS, SPEAKS, SPEAKS] });
+    const result = await runSimulationBurst(input(port));
+    const spoken = result.utterances.find((utterance) => utterance.line.includes("count our ships"));
+    expect(spoken).toBeDefined();
+    expect(spoken!.speaker).toBe("Hanno");
+    expect(spoken!.occasion).toBe("to the Council of Elders");
+    expect(spoken!.factIds.length).toBeGreaterThan(0);
+  });
+
+  it("attributes nothing to the orchestrator, which speaks for everyone and so for no one", async () => {
+    // The world's own answer covers Rome, the Boii chieftain and the weather in
+    // one breath. A quotation drawn from it would have an invented speaker.
+    const speaking = JSON.parse(RAISE_TWO_LEGIONS) as Record<string, unknown>;
+    speaking.utterance = { line: "Rome will have her legions.", occasion: "in the Senate" };
+    const port = scriptedPort({ simulate_orchestrate: [JSON.stringify(speaking)], simulate_cognition: [CARTHAGE_REACTS, CARTHAGE_REACTS, CARTHAGE_REACTS, CARTHAGE_REACTS] });
+    const result = await runSimulationBurst(input(port));
+    expect(result.utterances.map((utterance) => utterance.line)).not.toContain("Rome will have her legions.");
+  });
+});

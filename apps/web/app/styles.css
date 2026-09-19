@@ -1164,10 +1164,57 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .sim-panel__header button { display: grid; place-items: center; width: 28px; height: 28px; border: none; border-radius: 50%; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.1rem; }
 .sim-panel__header button:hover { background: var(--surface-raised); color: var(--text); }
 
-.sim-panel__chronicle { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem; }
-.sim-panel__chronicle h3 { margin: 0 0 0.6rem; font: 600 0.8rem system-ui, sans-serif; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
-.sim-panel__chronicle p { margin: 0 0 0.75rem; line-height: 1.6; }
+.sim-tabs { position: fixed; top: calc(8rem + 44px + 0.75rem); left: 1rem; z-index: 30; display: flex; gap: 0.5rem; }
+.sim-tabs .sim-tab { position: static; }
+.sim-panel__header-actions { display: flex; align-items: center; gap: 0.4rem; }
+.sim-panel__header-actions button:first-child { width: auto; padding: 0 0.7rem; height: 28px; border: 1px solid var(--border); border-radius: 14px; font: 600 0.75rem system-ui, sans-serif; }
+
+.sim-panel__report { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem; }
+.sim-panel__report h3 { margin: 0 0 0.6rem; font: 600 0.8rem system-ui, sans-serif; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+.sim-panel__headlines { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.6rem; }
+.sim-panel__headlines li { display: grid; gap: 0.15rem; }
+.sim-panel__headlines span { font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+.sim-panel__headlines button { padding: 0; border: none; background: none; color: var(--text-title); font: 700 0.95rem/1.35 system-ui, sans-serif; text-align: left; cursor: pointer; }
+.sim-panel__headlines button:hover { color: var(--accent); }
 .sim-panel__empty { color: var(--text-muted); font-style: italic; }
+
+/* ── The chronicle: the record, as something to read ─────────────────────── */
+
+.chronicle-panel { position: fixed; top: 4.5rem; right: 1rem; z-index: 31; display: flex; flex-direction: column; width: min(38rem, calc(100vw - 2rem)); max-height: calc(100dvh - 6rem); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--text); box-shadow: 0 8px 32px rgb(0 0 0 / 55%); overflow: hidden; }
+.chronicle-panel__header { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
+.chronicle-panel__header h2 { margin: 0; font: 700 1rem system-ui, sans-serif; color: var(--text-title); }
+.chronicle-panel__header button { display: grid; place-items: center; width: 28px; height: 28px; border: none; border-radius: 50%; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.1rem; }
+.chronicle-panel__header button:hover { background: var(--surface-raised); color: var(--text); }
+.chronicle-panel__filter { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 1rem; border-bottom: 1px solid var(--border-subtle); background: var(--surface-raised); font-size: 0.8rem; color: var(--text-muted); }
+.chronicle-panel__filter button { border: 1px solid var(--border); border-radius: 12px; padding: 0.15rem 0.6rem; background: transparent; color: var(--text); font: 600 0.72rem system-ui, sans-serif; cursor: pointer; }
+.chronicle-panel__scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0.5rem 1rem 1rem; }
+.chronicle-panel__empty { color: var(--text-muted); font-style: italic; }
+
+.chronicle-entry { padding: 1rem 0; border-bottom: 1px solid var(--border-subtle); }
+.chronicle-entry:last-child { border-bottom: none; }
+.chronicle-entry__date { margin: 0 0 0.35rem; font: 600 0.72rem system-ui, sans-serif; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.chronicle-entry__tags { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0 0 0.4rem; padding: 0; list-style: none; }
+.chronicle-entry__tags button { border: 1px solid var(--border); border-radius: 11px; padding: 0.1rem 0.55rem; background: transparent; color: var(--text-muted); font: 600 0.7rem system-ui, sans-serif; cursor: pointer; }
+.chronicle-entry__tags button:hover { border-color: var(--accent); color: var(--accent); }
+.chronicle-entry h3 { margin: 0 0 0.6rem; font: 700 1.05rem/1.3 Georgia, "Times New Roman", serif; color: var(--text-title); }
+.chronicle-entry p { margin: 0 0 0.7rem; line-height: 1.65; }
+
+.chronicle-entry__quote { margin: 0.9rem 0 0.3rem; padding-left: 0.9rem; border-left: 2px solid var(--accent); }
+.chronicle-entry__quote blockquote { margin: 0; font: italic 0.95rem/1.55 Georgia, "Times New Roman", serif; color: var(--text-title); }
+.chronicle-entry__quote figcaption { margin-top: 0.3rem; font-size: 0.78rem; color: var(--text-muted); }
+
+.chronicle-entry__changes { margin-top: 0.9rem; padding: 0.6rem 0.8rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--surface-raised); }
+.chronicle-entry__changes h4 { margin: 0 0 0.45rem; font: 600 0.72rem system-ui, sans-serif; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); }
+.chronicle-entry__changes ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.25rem; }
+.chronicle-entry__changes li { display: flex; flex-wrap: wrap; gap: 0.4rem; font-size: 0.82rem; }
+.chronicle-entry__changes strong { color: var(--text-title); }
+.chronicle-entry__changes span { color: var(--text-muted); }
+
+.chronicle-entry__ledger { margin: 0; display: grid; gap: 0.2rem; }
+.chronicle-entry__ledger-row { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: 0.2rem 0; border-bottom: 1px dotted var(--border-subtle); }
+.chronicle-entry__ledger-row.is-detail { padding-left: 1rem; border-bottom: none; font-size: 0.82rem; color: var(--text-muted); }
+.chronicle-entry__ledger-row dt { margin: 0; }
+.chronicle-entry__ledger-row dd { margin: 0; font-variant-numeric: tabular-nums; color: var(--text-title); }
 
 .sim-panel__decision { padding: 1rem; border-bottom: 1px solid var(--border-subtle); background: var(--surface-raised); }
 .sim-panel__decision h3 { margin: 0 0 0.5rem; font: 700 0.85rem system-ui, sans-serif; color: var(--accent); }

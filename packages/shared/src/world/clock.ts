@@ -151,6 +151,29 @@ export function calendarDateOf(instant: WorldInstant, clock: ScenarioClock): Cal
   return { ...fromAstronomicalYear(civil.year), month: civil.month, day: civil.day };
 }
 
+/**
+ * The day number a calendar date falls on -- `calendarDateOf` run backwards.
+ *
+ * The Chronicle needs it to find where a year began, so a year's books can be
+ * closed over exactly the days that belong to them. Negative when the date
+ * precedes the scenario's epoch, which is a legitimate answer: a scenario
+ * beginning in March has a first year that started before day zero.
+ */
+export function dayOfCalendarDate(date: CalendarDate, clock: ScenarioClock): number {
+  const epochDays = daysFromCivil(toAstronomicalYear(clock.epoch.year, clock.epoch.era), clock.epoch.month, clock.epoch.day);
+  return daysFromCivil(toAstronomicalYear(date.year, date.era), date.month, date.day) - epochDays;
+}
+
+/** Years count down before the epoch and up after it; this is the axis that always increases. */
+export function astronomicalYearOf(date: CalendarDate): number {
+  return toAstronomicalYear(date.year, date.era);
+}
+
+/** The reverse, for naming a year the arithmetic produced. */
+export function calendarYearOf(astronomical: number): { readonly year: number; readonly era: "BCE" | "CE" } {
+  return fromAstronomicalYear(astronomical);
+}
+
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"] as const;
 
 /** "1 March 264 BC" -- what a prompt, a Chronicle heading, or the UI shows. */
