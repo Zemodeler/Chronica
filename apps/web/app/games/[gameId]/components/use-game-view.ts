@@ -17,6 +17,13 @@ export interface PartyRef {
   readonly id: string;
 }
 
+/** A subject printed on the entry's face, already named by the server. */
+export interface EntryTag {
+  readonly kind: string;
+  readonly id: string;
+  readonly label: string;
+}
+
 export interface MapChange {
   readonly kind: string;
   readonly id: string;
@@ -40,7 +47,7 @@ export interface ChronicleEntry {
   readonly title: string;
   readonly body: string;
   readonly subjects: readonly PartyRef[];
-  readonly tags: readonly PartyRef[];
+  readonly tags: readonly EntryTag[];
   readonly changes: readonly MapChange[];
   readonly quote: EntryQuote | null;
 }

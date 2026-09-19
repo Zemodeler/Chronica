@@ -212,6 +212,13 @@ export interface EntryQuote {
   readonly occasion: string;
 }
 
+/** A subject printed on the entry's face, carrying the name a reader knows it by. */
+export interface EntryTag {
+  readonly kind: string;
+  readonly id: string;
+  readonly label: string;
+}
+
 export interface ChronicleInput {
   readonly port: SimModelPort;
   readonly clock: ScenarioClock;
@@ -232,6 +239,8 @@ export interface ChronicleInput {
   readonly storylines?: readonly WorldStoryline[];
   /** Whose government a character belongs to, for deciding whether a polity-scoped thread is the observer's to know. */
   readonly polityOfCharacter?: (characterId: string) => string | null;
+  /** What a subject is called, for the tags a reader sees. Unnamed subjects fall back to their id. */
+  readonly nameOf?: (ref: OrderPartyRef) => string | null;
   /**
    * Everything the observer's own side answers for: their polity, its people,
    * its provinces, themselves. A secret touching any of it stays dark; a secret
@@ -258,8 +267,8 @@ export interface ChronicleEntry {
   readonly factIds: readonly string[];
   /** Who and what the entry is about, so the record can be read by subject. */
   readonly subjects: readonly OrderPartyRef[];
-  /** The few of those worth showing on the entry's face. */
-  readonly tags: readonly OrderPartyRef[];
+  /** The few of those worth showing on the entry's face, already named. */
+  readonly tags: readonly EntryTag[];
   /** What moved on the map, among the things this entry is about. */
   readonly changes: readonly WorldChange[];
   readonly quote: EntryQuote | null;
@@ -430,31 +439,52 @@ function subjectsOf(facts: readonly Fact[]): OrderPartyRef[] {
     .slice(0, 8);
 }
 
-/** How prominently a kind of subject identifies a matter, lowest first. */
-const TAG_RANK: Record<string, number> = { polity: 0, province: 1, character: 2, force: 3 };
+/**
+ * How prominently a kind of subject identifies a matter, lowest first.
+ *
+ * Kinds absent from this table are not tagged at all. A procedure id, an
+ * account, a project -- these are the engine's own handles for its own
+ * bookkeeping, and a reader offered "62af32f4" as a way into the record learns
+ * that the row is not for them. They stay among the subjects, which is what the
+ * record is actually searched by.
+ */
+const TAG_RANK: Readonly<Record<string, number>> = { polity: 0, province: 1, character: 2, institution: 3, force: 4 };
 
 /**
  * The few subjects worth printing on the entry's face.
  *
- * Every subject is kept on the record, because that is what the record is
- * searched by; showing all eight taught the reader to skip the row. So the ones
- * shown are those that most identify the matter: the powers involved, then
- * where, then who -- ranked by how often the thread's own facts name them. The
- * observer's own government goes last among equals; they know who they are.
+ * Every subject is kept on the record; showing all eight taught the reader to
+ * skip the row. So the ones shown are those that most identify the matter: the
+ * powers involved, then where, then who. Ranked by kind before frequency --
+ * ranking by frequency first put an army and a senate motion on an entry whose
+ * headline was about the Senate, because the motion happened to be named twice.
+ * The observer's own government goes last among equals; they know who they are.
  */
-function tagsOf(facts: readonly Fact[], subjects: readonly OrderPartyRef[], observerPolityId: string | null): OrderPartyRef[] {
+function tagsOf(
+  facts: readonly Fact[],
+  subjects: readonly OrderPartyRef[],
+  observerPolityId: string | null,
+  nameOf: (ref: OrderPartyRef) => string | null,
+): EntryTag[] {
   const mentions = new Map<string, number>();
   for (const fact of facts) {
     for (const entity of fact.affectedEntities) mentions.set(keyOf(entity), (mentions.get(keyOf(entity)) ?? 0) + 1);
   }
   const own = (ref: OrderPartyRef): number => (ref.kind === "polity" && ref.id === observerPolityId ? 1 : 0);
   return [...subjects]
+    .filter((ref) => TAG_RANK[ref.kind] !== undefined)
+    // A handle the engine never resolved names nothing. It reached the record
+    // through a fact that referred to something its own batch did not create.
+    .filter((ref) => !ref.id.startsWith("local:"))
     .sort((a, b) =>
       own(a) - own(b)
-      || (mentions.get(keyOf(b)) ?? 0) - (mentions.get(keyOf(a)) ?? 0)
       || (TAG_RANK[a.kind] ?? 9) - (TAG_RANK[b.kind] ?? 9)
+      || (mentions.get(keyOf(b)) ?? 0) - (mentions.get(keyOf(a)) ?? 0)
       || a.id.localeCompare(b.id))
-    .slice(0, MAX_TAGS);
+    .slice(0, MAX_TAGS)
+    // Named here rather than in the browser. An id is the engine's handle: the
+    // reader was being offered "force-e98084fc-...-4" as a way into the record.
+    .map((ref) => ({ kind: ref.kind, id: ref.id, label: nameOf(ref) ?? ref.id }));
 }
 
 function renderThread(thread: Thread, index: number): string {
@@ -547,7 +577,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
       body,
       factIds: thread.facts.map((fact) => fact.id),
       subjects,
-      tags: tagsOf(thread.facts, subjects, input.observerPolityId),
+      tags: tagsOf(thread.facts, subjects, input.observerPolityId, (ref) => input.nameOf?.(ref) ?? null),
       // A change the entry's own facts do not name is a change the reader was
       // never told about. Gating here is what keeps the change list from being
       // the leak the prose is so carefully prevented from being.

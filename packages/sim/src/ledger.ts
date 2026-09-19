@@ -144,7 +144,7 @@ export function closeTheBooks(input: LedgerInput): ChronicleEntry[] {
       ].join("\n"),
       factIds: [],
       subjects: [{ kind: "polity" as const, id: polity.id }],
-      tags: [{ kind: "polity" as const, id: polity.id }],
+      tags: [{ kind: "polity" as const, id: polity.id, label: polity.name }],
       changes: [],
       quote: null,
       fromInstantSortKey: sortKeyOf({ day: firstDay, minute: 0 }),
