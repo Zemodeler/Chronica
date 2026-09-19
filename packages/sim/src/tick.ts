@@ -744,12 +744,17 @@ export function runDeterministicTick(input: TickInput): TickResult {
     facts.push({
       localId: nextLocalId("letter"),
       kind: "diplomatic_silence",
-      summary: `${polityName(message.toPolityId)} let the term on "${message.subject}" run out without answering ${polityName(message.fromPolityId)}.`,
+      // Written as the act it is, not as the deadline that revealed it. "Let
+      // the term run out" is a clerk noticing a date; a chronicler cannot make
+      // an event of it, and tried -- an entry headlined "Roman Republic Lets
+      // the Term on Messanan Protection Expire" said nothing had happened, at
+      // length. Refusing by saying nothing is a refusal, and worth as much.
+      summary: `${polityName(message.toPolityId)} refused ${polityName(message.fromPolityId)} by silence on "${message.subject}", sending no answer at all.`,
       affectedRefs: [{ kind: "polity", id: message.fromPolityId }, { kind: "polity", id: message.toPolityId }],
       visibility: "polity",
       discoveryState: "polity",
       knowableInDays: 0,
-      significance: 35,
+      significance: 45,
     });
     notes.push(`No answer came to ${polityName(message.fromPolityId)}'s letter on ${message.subject}.`);
     return ignored;

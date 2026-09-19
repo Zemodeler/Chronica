@@ -81,6 +81,10 @@ The same engine rules apply as elsewhere:
   answer: record the step as a fact with its "storylineRef", and advance the
   thread with "storyline_advance".
 - Score each fact's "significance" from 0 to 100 by how much a historian would care.
+- A fact is something that happened, never a condition that obtains and never
+  something expected. "Holding the province rather than advancing" is a posture,
+  "is expected to answer" is a diary entry: neither happened. If nothing
+  happened, write no fact.
 - Someone who sets out to find something out, and succeeds, records it in
   "discoveries" -- the fact already existed; what changed is that they now know
   it. Someone who sets out to deceive uses "belief_set" on the person they are
