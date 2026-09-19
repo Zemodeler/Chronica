@@ -51,7 +51,7 @@ describe("a person's station", () => {
     expect(station.seats).toEqual([]);
     expect(station.forceIds.size).toBe(0);
     expect(holdsPolityStanding(station)).toBe(false);
-    for (const domain of ["fiscal", "military", "political", "diplomatic", "judicial", "social"] as const) {
+    for (const domain of ["fiscal", "military", "civil", "diplomatic", "judicial", "religious", "social"] as const) {
       expect(speaksForPolity(station, domain), domain).toBe(false);
     }
     // Ownership is not an office, so his own money is still his.

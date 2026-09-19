@@ -5,6 +5,9 @@ import {
   applyDiplomaticAnswerToStance,
   canMoveTo,
   crossingAdmitted,
+  findOfficeSeatForRole,
+  seatCharacterInOffice,
+  vacateOfficesOf,
   fitStrengthOf,
   isNavalForce,
   isWaterCrossing,
@@ -720,7 +723,15 @@ function applyOne(
       const withTraits = created.world.characters.map((character) =>
         character.id === id ? { ...character, traits: delta.traits.slice(0, 8) } : character,
       );
-      return { ...created.world, characters: withTraits };
+      // The world says what it made this person: "Military Quaestor", "chief of
+      // the Boii". That was parsed and thrown on the floor -- every generated
+      // official came out holding no office, which is how the world's own
+      // invented magistrates could never do anything a magistrate does.
+      const withOffice = { ...created.world, characters: withTraits };
+      if (delta.officeLabel === null) return withOffice;
+      const matched = findOfficeSeatForRole(withOffice, { offices: context.offices }, delta.polityId, delta.officeLabel);
+      if (matched === undefined) return withOffice;
+      return seatCharacterInOffice(withOffice, id, matched, atStep);
     }
 
     case "character_intent_set": {
@@ -955,13 +966,34 @@ function applyOne(
         outcomeReason: delta.outcomeReason,
         resolvedAtStep: atStep,
       };
-      return {
+      const resolved: WorldState = {
         ...world,
         material: {
           ...world.material,
           politicalProcedures: world.material.politicalProcedures.map((candidate) => (candidate.id === procedureId ? settled : candidate)),
         },
       };
+      // A question about who holds an office has to move the office. This
+      // settled the procedure's own row and touched no seat, so an appointment
+      // that passed a vote changed nothing whatever: the man was appointed in
+      // the record and held nothing in the world.
+      if (delta.outcome !== "passed" || procedure.subjectId === null) return resolved;
+      if (procedure.type === "removal") {
+        const holder = procedure.subjectKind === "character"
+          ? procedure.subjectId
+          : resolved.material.officeSeats.find((seat) => seat.id === procedure.subjectId)?.holderCharacterId ?? null;
+        return holder === null ? resolved : vacateOfficesOf(resolved, holder, "removal", atStep);
+      }
+      if (procedure.type === "appointment" || procedure.type === "command_assignment") {
+        if (procedure.subjectKind !== "character") return resolved;
+        const appointed = resolved.characters.find((character) => character.id === procedure.subjectId);
+        if (appointed === undefined || !appointed.alive) return resolved;
+        // The office is named by the question itself -- "Elect a consul for the
+        // year" -- which is the same match declaration already uses.
+        const matched = findOfficeSeatForRole(resolved, { offices: context.offices }, appointed.polityId, procedure.label);
+        return matched === undefined ? resolved : seatCharacterInOffice(resolved, appointed.id, matched, atStep);
+      }
+      return resolved;
     }
 
     case "holding_transfer": {
