@@ -70,8 +70,14 @@ import type { SimModelPort } from "./ports";
  * exception -- an order must always be answered, however small its outcome.
  */
 
-/** How many entries one report may carry. Past this the lightest threads go unwritten. */
-const MAX_ENTRIES = 6;
+/**
+ * How many entries one report may carry.
+ *
+ * A reign that had a busy month should read like one. Six was chosen when a
+ * single entry swallowed the reader's whole side of the world; now that each
+ * matter stands on its own, six is a ceiling an ordinary month hits.
+ */
+const MAX_ENTRIES = 10;
 
 /**
  * What a thread must weigh before it is written up at all.
@@ -81,13 +87,13 @@ const MAX_ENTRIES = 6;
  * -- a city taken, a commander killed, an alliance struck -- score well above
  * this. Recruitment proceeding on schedule does not.
  */
-export const DEFAULT_ENTRY_THRESHOLD = 55;
+export const DEFAULT_ENTRY_THRESHOLD = 45;
 
 /** And what a *foreign secret* must weigh before word of it travels at all. */
-const DISTANT_NEWS_THRESHOLD = 45;
+const DISTANT_NEWS_THRESHOLD = 40;
 
 /** How many threads of distant news one report may carry. The court is not a newspaper. */
-const MAX_REPORTED_THREADS = 2;
+const MAX_REPORTED_THREADS = 3;
 
 /** How many subjects an entry shows on its face. The rest stay on the record, unshown. */
 const MAX_TAGS = 3;
@@ -114,7 +120,8 @@ of the whole period, and never a bare noun phrase like "The March North".
 
 THE PASSAGE
 
-Ninety to two hundred words. Past tense, third person, one or two paragraphs.
+A hundred to two hundred and forty words. Past tense, third person, one or two
+paragraphs.
 
 Name people in full at first mention, with rank or office -- "Military Tribune
 Gaius Julius Antuvi", not "the tribune". Afterwards one name will do.
@@ -126,9 +133,25 @@ Put what people argued into indirect speech -- "Antuvi argued that the two
 garrisons together could force a battle; the legate answered that stripping both
 would leave the frontier open" -- rather than inventing dialogue for them.
 
-You may end a passage with one sentence saying where the matter now stands: "The
-frontier remained tense but static." "The war would continue." One such
-sentence, about that thread alone, and never a prediction.
+ONE MATTER TO A PASSAGE
+
+A thread is one matter, and a passage tells that one. A rising in Campania is not
+part of an embassy to Syracuse however heavily it weighs on the men who sent it:
+if it is not in this thread, it does not appear here. Some other passage has it,
+or the record will come to it later.
+
+The exception is a thread marked as part of a longer matter. That matter may be
+named, because the record has already told it.
+
+SAY IT ONCE
+
+Every sentence carries something the ones before it did not.
+
+Do not end with a sentence that restates the passage. Do not tell the reader
+where the matter now stands, what it means, what it threatens, or what it makes
+more urgent. Do not sum up, and do not count up ("the two decisions", "both
+measures"). A passage stops when the last thing that happened has been written
+down, and not one sentence later.
 
 WHAT COUNTS AS AN EVENT
 
@@ -157,10 +180,16 @@ if Carthage is not in thread 2, thread 2 does not mention Carthage.
 
 VOICE
 
-Write as a historian, not as a machine. Never use the vocabulary of
-administration: no "project", "milestone", "status", "state", "recognized",
-"possessed", "authorized strength", "field force", "consequential action",
-"supply position". Name the people, the places and the deeds instead.
+Write as a chronicler, not as a clerk. Reach for the concrete: the pass they
+crossed, the season they crossed it in, what the men carried, what it cost, what
+was said when it was done. One hard detail is worth three sentences about
+consequence.
+
+Never use the vocabulary of administration. Not "project", "milestone",
+"status", "state", "recognized", "possessed", "authorized strength", "field
+force", "consequential action", "supply position", "the two decisions", "adding
+weight to", "the precise manner", "still required arrangement", "sought to
+govern". Name the people, the places and the deeds instead.
 
 Do not address the reader, do not use headings or lists, and do not offer advice
 on what should be done next. You are recording what happened, not advising a
@@ -290,6 +319,8 @@ interface Thread {
   /** True when nothing in it was witnessed: the court has this at second hand. */
   readonly reported: boolean;
   readonly weight: number;
+  /** The reign's own business, which is told whatever it weighs. */
+  readonly ours: boolean;
 }
 
 /**
@@ -370,7 +401,7 @@ function selectFacts(
 
 /**
  * Splits facts into threads: a matter is everything that hangs together by who
- * and what it touches, and the observer's own thread is the matter they are in.
+ * and what it touches.
  *
  * Connected, not merely shared. Grouping only facts that name the observer put
  * the Boii's defence of their own strongholds in a different entry from the
@@ -378,13 +409,25 @@ function selectFacts(
  * Boii and the Roman facts named Rome. Following the links instead keeps a war
  * whole while leaving a Carthaginian deliberation nobody else is part of exactly
  * where it belongs: on its own.
+ *
+ * Two things are deliberately not allowed to connect anything.
+ *
+ * The reader's own power is the first. Everything their government does names
+ * it, so it links every Roman matter to every other: an embassy to Syracuse and
+ * a rising in Campania came back as one passage that told the rising for the
+ * first time inside a paragraph about the embassy, because both facts said
+ * "Rome". A power that appears in all of a reign's business cannot be what
+ * distinguishes one piece of it from another. A *foreign* power still connects
+ * freely -- "Boii" appears in the war with the Boii and nowhere else, which is
+ * exactly what makes it a matter.
+ *
+ * And nothing the observer is named in is forced together any more. That rule
+ * was written so a ruler would not read two chapters about one war; what it
+ * actually did was fuse every separate thing their reign was doing into a single
+ * entry, which is the same failure one level up.
  */
-function splitIntoThreads(
-  facts: readonly Fact[],
-  observer: OrderPartyRef,
-  observerPolityId: string | null,
-): Fact[][] {
-  const ownKeys = new Set([keyOf(observer), ...(observerPolityId === null ? [] : [`polity:${observerPolityId}`])]);
+function splitIntoThreads(facts: readonly Fact[], observerPolityId: string | null): Fact[][] {
+  const hubKey = observerPolityId === null ? null : `polity:${observerPolityId}`;
 
   const parent = new Map<number, number>();
   const find = (index: number): number => {
@@ -399,23 +442,21 @@ function splitIntoThreads(
 
   facts.forEach((_, index) => parent.set(index, index));
   const firstSeenBySubject = new Map<string, number>();
-  const ownIndices: number[] = [];
+  const nameless: number[] = [];
   facts.forEach((fact, index) => {
-    // A fact naming nobody is nobody else's: it came out of answering this
-    // ruler's order. Left to find its own thread it shares a subject with
-    // nothing, and one pursuit fragmented into an entry per sentence.
-    if (fact.affectedEntities.length === 0) ownIndices.push(index);
+    // A fact naming nobody came out of answering the ruler's order and has no
+    // subject to find its thread by. Left alone each one became an entry of its
+    // own, and a single pursuit fragmented into an entry per sentence.
+    if (fact.affectedEntities.length === 0) nameless.push(index);
     for (const entity of fact.affectedEntities) {
       const subject = keyOf(entity);
-      if (ownKeys.has(subject)) ownIndices.push(index);
+      if (subject === hubKey) continue;
       const seen = firstSeenBySubject.get(subject);
       if (seen === undefined) firstSeenBySubject.set(subject, index);
       else union(seen, index);
     }
   });
-  // Everything the observer is named in is one matter, however many ways it
-  // reaches them: a ruler does not read two chapters about one war.
-  for (const index of ownIndices) union(ownIndices[0]!, index);
+  for (const index of nameless) union(nameless[0]!, index);
 
   const components = new Map<number, Fact[]>();
   facts.forEach((fact, index) => {
@@ -424,10 +465,7 @@ function splitIntoThreads(
     if (bucket === undefined) components.set(root, [fact]);
     else bucket.push(fact);
   });
-
-  const ownRoot = ownIndices.length === 0 ? undefined : find(ownIndices[0]!);
-  const own = ownRoot === undefined ? [] : [components.get(ownRoot)!];
-  return [...own, ...[...components.entries()].filter(([root]) => root !== ownRoot).map(([, bucket]) => bucket)];
+  return [...components.values()];
 }
 
 /** Everything the entry is about, deterministically ordered. */
@@ -529,8 +567,34 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   const frictions = input.frictions.filter(firsthand);
   const utterances = (input.utterances ?? []).filter((line) => publishable(line) && witnessed(line));
 
-  const grouped = splitIntoThreads(visible, input.observer, input.observerPolityId);
+  const grouped = splitIntoThreads(visible, input.observerPolityId);
   const polityOf = (characterId: string): string | null => input.polityOfCharacter?.(characterId) ?? null;
+
+  /**
+   * Whether this is the reign's own business, which is always told.
+   *
+   * The reader's power is useless for *grouping* -- it appears in everything --
+   * and exactly right for this. A matter their own side is named in gets an
+   * entry whatever it weighs, because an order must be answered and because a
+   * ruler is entitled to the whole of his own reign. The bar exists for the
+   * world elsewhere, which is where a chronicle of everything stops being read.
+   *
+   * "Their own side" is `ownEntityIds` -- the same set the secrecy rule uses,
+   * and deliberately the same one. Testing only for the polity ref judged a
+   * consul's inspection of his own first legion to be foreign news, because the
+   * fact named the legion and not the republic, and culled it at weight ten.
+   *
+   * Told nothing about where that side ends, nothing is foreign and the bar does
+   * not apply. The strict answer belongs to the secrecy rule, where a wrong
+   * guess leaks; here a wrong guess silently drops the answer to an order, and
+   * the safe direction is the other way.
+   */
+  const ownKeys = new Set([keyOf(input.observer), ...(input.observerPolityId === null ? [] : [`polity:${input.observerPolityId}`])]);
+  const isOurs = (facts: readonly Fact[]): boolean =>
+    input.ownEntityIds === undefined
+    || facts.some((fact) =>
+      fact.affectedEntities.length === 0
+      || fact.affectedEntities.some((entity) => ownKeys.has(keyOf(entity)) || input.ownEntityIds!.has(entity.id)));
 
   const built: Thread[] = grouped.map((facts) => {
     const ids = new Set(facts.map((fact) => fact.id));
@@ -544,23 +608,18 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
       // makes the matter the court's own.
       reported: facts.every((fact) => reportedIds.has(fact.id)),
       weight: facts.reduce((sum, fact) => sum + weightOf(fact), 0),
+      ours: isOurs(facts),
     };
   });
 
-  // The observer's own matter is always written up: an order that produced a
-  // small outcome still has to be answered, or the player gave an order and
-  // heard nothing back. Everything else earns its place.
-  const [own, ...others] = built;
-  const ownThreads = own === undefined ? [] : [own];
-  const seen = others.filter((thread) => !thread.reported && thread.weight >= threshold);
-  const hearsay = others.filter((thread) => thread.reported && thread.weight >= threshold);
-
   const byWeight = (a: Thread, b: Thread): number =>
     b.weight - a.weight || sortKeyOf(a.facts[0]!.time) - sortKeyOf(b.facts[0]!.time) || a.facts[0]!.id.localeCompare(b.facts[0]!.id);
-  seen.sort(byWeight);
-  hearsay.sort(byWeight);
 
-  const threads = [...ownThreads, ...seen, ...hearsay.slice(0, MAX_REPORTED_THREADS)].slice(0, MAX_ENTRIES);
+  const ours = built.filter((thread) => thread.ours).sort(byWeight);
+  const seen = built.filter((thread) => !thread.ours && !thread.reported && thread.weight >= threshold).sort(byWeight);
+  const hearsay = built.filter((thread) => !thread.ours && thread.reported && thread.weight >= threshold).sort(byWeight);
+
+  const threads = [...ours, ...seen, ...hearsay.slice(0, MAX_REPORTED_THREADS)].slice(0, MAX_ENTRIES);
   if (threads.length === 0) return { entries: [], calls: 0 };
 
   const period = `${formatWorldDate(input.from, input.clock)} – ${formatWorldDate(input.to, input.clock)}`;

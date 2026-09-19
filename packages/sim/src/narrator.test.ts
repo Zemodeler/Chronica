@@ -88,7 +88,7 @@ describe("deciding what stirs", () => {
     const world = later(large(), 40);
     const crowded: WorldState = {
       ...world,
-      storylines: Array.from({ length: 8 }, (_, index) => ({
+      storylines: Array.from({ length: 12 }, (_, index) => ({
         ...world.storylines[0]!,
         id: `thread-${index}`,
         title: `Thread ${index}`,

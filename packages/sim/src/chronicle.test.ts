@@ -373,11 +373,14 @@ describe("the world elsewhere", () => {
 
 describe("the bar an entry has to clear", () => {
   const OBSERVER = { kind: "character" as const, id: "marcus-atilius" };
+  // The bar only means something once the reader's side has been named: with no
+  // "elsewhere" there is nothing for it to cull.
   const compose = (port: SimModelPort, facts: Fact[], weights: ReadonlyMap<string, number>) =>
     composeChronicle({
       port, clock, observer: OBSERVER, observerPolityId: "rome", facts,
       from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
       significanceByFactId: weights,
+      ownEntityIds: new Set(["marcus-atilius", "rome"]),
     });
 
   it("leaves a slight matter elsewhere unwritten", async () => {
@@ -462,5 +465,61 @@ describe("what an entry carries beside the prose", () => {
     const quoted = result.entries.filter((entry) => entry.quote !== null);
     expect(quoted).toHaveLength(1);
     expect(quoted[0]!.quote!.speaker).toBe("Marcus Valerius Corvus");
+  });
+});
+
+describe("what makes two things one matter", () => {
+  const OBSERVER = { kind: "character" as const, id: "marcus-atilius" };
+  const compose = (facts: Fact[]) =>
+    composeChronicle({
+      port: capturingPort(), clock, observer: OBSERVER, observerPolityId: "rome", facts,
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+      ownEntityIds: new Set(["marcus-atilius", "rome"]),
+      significanceByFactId: new Map(facts.map((fact) => [fact.id, 60])),
+    });
+
+  it("does not make an embassy and a rebellion one matter because both name Rome", async () => {
+    // The report that prompted this told the Campanian rising for the first
+    // time, in the second half of a paragraph about an overture to Syracuse,
+    // because the two facts shared the word "Rome" and nothing else.
+    const embassy = fact({
+      summary: "Publius Valerius Falto carries an overture to Syracuse.",
+      affectedEntities: [{ kind: "polity", id: "rome" }, { kind: "polity", id: "syracuse" }, { kind: "character", id: "falto" }],
+    });
+    const rising = fact({
+      summary: "Campania rises under Decimus Vibius Virius.",
+      affectedEntities: [{ kind: "polity", id: "rome" }, { kind: "character", id: "virius" }, { kind: "province", id: "campania" }],
+    });
+
+    const result = await compose([embassy, rising]);
+    expect(result.entries).toHaveLength(2);
+    const bySubject = result.entries.map((entry) => entry.subjects.map((subject) => subject.id));
+    expect(bySubject.some((subjects) => subjects.includes("syracuse") && !subjects.includes("campania"))).toBe(true);
+    expect(bySubject.some((subjects) => subjects.includes("campania") && !subjects.includes("syracuse"))).toBe(true);
+  });
+
+  it("still tells one war once, because a foreign power is a matter and your own is not", async () => {
+    const storming = fact({ summary: "The legions storm the stronghold.", affectedEntities: [{ kind: "polity", id: "rome" }, { kind: "polity", id: "boii" }] });
+    const withdrawal = fact({ summary: "Brennos withdraws the host.", affectedEntities: [{ kind: "polity", id: "boii" }] });
+    const result = await compose([storming, withdrawal]);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]!.factIds).toHaveLength(2);
+  });
+
+  it("gives the reign's own separate affairs an entry each, whatever they weigh", async () => {
+    // The old rule fused everything naming the ruler's side into one passage,
+    // so a reign doing four things read as one thing.
+    const facts = [
+      fact({ summary: "The garrison at Rhegium is reinforced.", affectedEntities: [{ kind: "province", id: "rhegium" }] }),
+      fact({ summary: "The Senate rewards the loyal cohort.", affectedEntities: [{ kind: "institution", id: "roman-senate" }] }),
+      fact({ summary: "An envoy departs for Syracuse.", affectedEntities: [{ kind: "character", id: "falto" }, { kind: "polity", id: "syracuse" }] }),
+    ];
+    const result = await composeChronicle({
+      port: capturingPort(), clock, observer: OBSERVER, observerPolityId: "rome", facts,
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+      ownEntityIds: new Set(["marcus-atilius", "rome", "rhegium", "roman-senate", "falto"]),
+      significanceByFactId: new Map(facts.map((candidate) => [candidate.id, 5])),
+    });
+    expect(result.entries).toHaveLength(3);
   });
 });

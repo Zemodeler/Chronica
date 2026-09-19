@@ -101,7 +101,7 @@ function landsAtHome(comfort: number, gameId: string, seedCount: number): boolea
   return stableChoice([gameId, "narrator", "home", seedCount], 12) < twelfths;
 }
 /** Past this many open threads the world stops starting new ones; past half of it, only incidents that run their course. */
-const THREAD_CEILING = 8;
+const THREAD_CEILING = 12;
 
 /**
  * How comfortable the ruler is, from what the world actually holds.
@@ -212,9 +212,17 @@ const ARCHETYPES: readonly Archetype[] = [
 
 // ── The decision ─────────────────────────────────────────────────────────────
 
-/** Days since the last seed before another may be offered. Comfortable reigns wait less. */
+/**
+ * Days since the last seed before another may be offered. Comfortable reigns
+ * wait less.
+ *
+ * Was 45 down to 18. At that cadence a burst of ninety days carried one or two
+ * stirrings, and the record of a season came back as the ruler's own business
+ * and almost nothing else -- a world that moves on its own has to move often
+ * enough to be noticed doing it.
+ */
 function cadenceDays(comfort: number, gameId: string, seedCount: number): number {
-  return Math.round(lerp(45, 18, comfort)) + (stableHash([gameId, "narrator", "cadence", seedCount]) % 10);
+  return Math.round(lerp(28, 11, comfort)) + (stableHash([gameId, "narrator", "cadence", seedCount]) % 8);
 }
 
 function chooseSeverity(comfort: number, gameId: string, seedCount: number): SeedSeverity {

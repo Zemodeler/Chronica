@@ -254,7 +254,10 @@ export const CognitionOutputSchema = z
           proposal: ProposalSchema,
         }),
       )
-      .max(6)
+      // The cap the router's own budget is allowed to fill. It was six, which
+      // the default budget hit exactly, so raising the cast without raising this
+      // would have silently discarded whoever came last.
+      .max(12)
       .default([]),
   })
   .strict();
