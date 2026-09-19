@@ -1,12 +1,16 @@
 import { findPolityGaps } from "./population";
 import type { NarratorSeed } from "./narrator";
+import { renderCharacterPortrait } from "./cognition";
 import {
+  buildStation,
   currentAgeYears,
+  describeAuthority,
   factsKnownTo,
   cohesionInWords,
   formatWorldDate,
   openStorylines,
   type Fact,
+  type Office,
   type OrderPartyRef,
   type ScenarioClock,
   type WorldState,
@@ -51,6 +55,16 @@ export interface AnsweredDecision {
 export interface WorldSliceInput {
   readonly world: WorldState;
   readonly clock: ScenarioClock;
+  /**
+   * The scenario's offices, so the acting person's station can be read.
+   *
+   * Required rather than defaulted: a call site that forgot it would silently
+   * show a consul the world a private citizen sees, and then answer his order
+   * as though he held nothing -- an invisible demotion, and exactly the shape
+   * of bug this codebase keeps paying for. A compile error makes every caller
+   * decide.
+   */
+  readonly offices: readonly Office[];
   readonly actorRef: OrderPartyRef;
   readonly actorPolityId: string | null;
   readonly orderText: string | null;
@@ -66,7 +80,20 @@ export interface WorldSlice {
   readonly date: string;
   readonly order: string | null;
   readonly answeredDecision: AnsweredDecision | null;
-  readonly actor: { readonly id: string; readonly name: string; readonly office: string | null; readonly polityId: string | null };
+  readonly actor: {
+    readonly id: string;
+    readonly name: string;
+    /** The id, because a delta must name it. */
+    readonly office: string | null;
+    /** And the label, because "roman-consul" is not a thing a person is called. */
+    readonly officeLabel: string | null;
+    readonly polityId: string | null;
+    readonly polityName: string | null;
+    /** The same section cognition builds for an NPC. */
+    readonly portrait: string;
+    /** What their grants actually permit, in words. */
+    readonly permitted: readonly string[];
+  };
   readonly economy: readonly { readonly id: string; readonly label: string; readonly balance: number }[];
   readonly monthlyIncome: number;
   readonly monthlyExpenditure: number;
@@ -699,7 +726,21 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     date: formatWorldDate(world.instant, input.clock),
     order: input.orderText,
     answeredDecision: input.answeredDecision ?? null,
-    actor: { id: input.actorRef.id, name: actor?.name ?? input.actorRef.id, office: actor?.officeId ?? null, polityId: ownPolity },
+    actor: {
+      id: input.actorRef.id,
+      name: actor?.name ?? input.actorRef.id,
+      office: actor?.officeId ?? null,
+      officeLabel: input.offices.find((office) => office.id === actor?.officeId)?.label ?? null,
+      polityId: ownPolity,
+      polityName: ownPolity === null ? null : polityName(ownPolity),
+      // The world knew a minor Carthaginian admiral's temperament, drives and
+      // fears, and knew of the person whose order it was answering only a name
+      // and an opaque office id.
+      portrait: actor === undefined
+        ? ""
+        : renderCharacterPortrait(input.actorRef.id, actor.name, world, input.clock, { others: [] }),
+      permitted: actor === undefined ? [] : describeAuthority(buildStation({ world, characterId: input.actorRef.id, offices: input.offices }), world),
+    },
     economy: accounts,
     monthlyIncome,
     monthlyExpenditure,
@@ -741,7 +782,23 @@ export function renderWorldSlice(slice: WorldSlice): string {
   };
 
   lines.push(`CURRENT DATE: ${slice.date}`, "");
-  lines.push(`ACTING FOR: ${slice.actor.name}${slice.actor.office === null ? "" : ` (${slice.actor.office})`}, of ${slice.actor.polityId ?? "no polity"}`, "");
+  lines.push(
+    `ACTING FOR: ${slice.actor.name} [${slice.actor.id}]${slice.actor.officeLabel === null ? "" : `, ${slice.actor.officeLabel}`}, of ${slice.actor.polityName ?? slice.actor.polityId ?? "no polity"}`,
+    "",
+  );
+  if (slice.actor.portrait.length > 0) lines.push(slice.actor.portrait, "");
+  lines.push(
+    "WHAT THIS PERSON MAY DO:",
+    ...(slice.actor.permitted.length === 0
+      ? ["  Nothing but dispose of what is their own."]
+      : slice.actor.permitted.map((line) => `  - ${line}`)),
+    // Printed for everyone, a consul included: made conditional on low station,
+    // its presence would itself tell the model which ones are weak.
+    "  Nothing beyond this is theirs to command. Somebody they instruct outside it is",
+    "  being asked a favour, not given an order, and may refuse -- say so honestly if",
+    "  they do.",
+    "",
+  );
   // An answer is not a fresh order, and saying so matters: the world is
   // resuming something it had already begun and put to the ruler.
   if (slice.answeredDecision !== null) {

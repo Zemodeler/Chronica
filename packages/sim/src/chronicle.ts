@@ -130,15 +130,26 @@ of the whole period, and never a bare noun phrase like "The March North".
 
 THE PASSAGE
 
-A hundred and sixty to three hundred and twenty words, in two paragraphs.
-Past tense, third person.
+Past tense, third person. A thread holding more than one thing that happened
+runs to at least a hundred and eighty words, and may run to three hundred and
+twenty. A thread holding a single small fact may be shorter, but rarely under
+eighty.
 
-Length is the common failure: passages come back at half this and read as
-minutes of a meeting. Room is what lets a passage carry the things that make it
-worth reading -- who was in the room, what it cost, what was said when it was
-done, the detail a reader remembers the year by. Use it. A thread with genuinely
-one thing in it may run short, but a thread with three people and a decision in
-it should not.
+The way to fill that room is more of what happened, and never more ways of
+saying it. Who was there, what it cost, how long it took, what they argued,
+what they carried, what they found when they arrived, who was left behind, what
+was said when it was done. You have been given the facts of the matter and the
+accounts people gave of it -- work through them rather than summarising them.
+An event told in one sentence and then explained in three has been told once and
+padded twice.
+
+Three things are padding, and all three are worse than being brief. Do not
+restate a paragraph you have already written. Do not reach into another thread
+for more to say. And never write about the record itself -- not "was recorded
+as", not "the matter stood in the review as", not "was thus recorded not as a
+delay but as a destruction", not "his name was attached to the offer". The
+record is what you are writing; a chronicler who describes his own filing has
+stopped writing history.
 
 Name people in full at first mention, with rank or office -- "Military Tribune
 Gaius Julius Antuvi", not "the tribune". Afterwards one name will do.

@@ -301,10 +301,42 @@ function describeRelations(character: Character, world: WorldState, others: read
 }
 
 /** One actor's section: their situation, as they alone understand it. */
-function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock, others: readonly string[]): string {
-  const character = world.characters.find((candidate) => candidate.id === actor.characterId);
+/**
+ * Everything a prompt says about one person.
+ *
+ * Split out of `renderActor` so the world slice can show the *player* the same
+ * way cognition shows everyone else. The slice used to carry
+ * `{id, name, office, polityId}` and nothing more -- so the world reasoned in
+ * detail about a minor Carthaginian admiral and knew nothing whatever about the
+ * person whose order it was answering.
+ *
+ * Reused rather than reimplemented, deliberately: two portraits written twice
+ * drift, and the one that drifts is always the player's, because the player is
+ * the one nobody is testing the prompt for.
+ */
+export interface PortraitOptions {
+  /** What they know. The slice carries its own RECENT HISTORY, so it omits this. */
+  readonly knownFacts?: readonly { readonly id: string; readonly summary: string }[] | undefined;
+  /** Why they are being asked. The player is not being asked anything. */
+  readonly impetus?: { readonly why: string; readonly ownBusiness: boolean } | undefined;
+  /** Other people in view, for the relations block. */
+  readonly others?: readonly string[] | undefined;
+  /** Appended before the closing line -- where "what this person may do" goes. */
+  readonly extra?: readonly string[] | undefined;
+  /** The slice prints the date once, at its head. */
+  readonly closeWithDate?: boolean | undefined;
+}
+
+export function renderCharacterPortrait(
+  characterId: string,
+  displayName: string,
+  world: WorldState,
+  clock: ScenarioClock,
+  options: PortraitOptions = {},
+): string {
+  const character = world.characters.find((candidate) => candidate.id === characterId);
   const name = (id: string): string => world.characters.find((candidate) => candidate.id === id)?.name ?? id;
-  const lines: string[] = [`## ${actor.name} [${actor.characterId}]`];
+  const lines: string[] = [`## ${displayName} [${characterId}]`];
 
   if (character !== undefined) {
     lines.push(`Office: ${character.officeId ?? "none"}. Polity: ${character.polityId ?? "none"}.`);
@@ -336,23 +368,25 @@ function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock
       );
     }
   }
-  lines.push(
-    actor.impetus === "own_business"
-      ? `Nobody has brought them news. They are here because of their own affairs: ${actor.why}. What do they do about them now?`
-      : `Why they are paying attention: ${actor.why}.`,
-  );
+  if (options.impetus !== undefined) {
+    lines.push(
+      options.impetus.ownBusiness
+        ? `Nobody has brought them news. They are here because of their own affairs: ${options.impetus.why}. What do they do about them now?`
+        : `Why they are paying attention: ${options.impetus.why}.`,
+    );
+  }
 
   // Active beliefs only: a superseded belief is what they used to think, and
   // acting on it puts words in the mouth of someone who has already changed
   // their mind. Kind and confidence are printed because a rumour they half
   // credit should not move them like something they witnessed.
-  const beliefs = queryBeliefs(world, actor.characterId).slice(0, ACTOR_CAPS.beliefs);
+  const beliefs = queryBeliefs(world, characterId).slice(0, ACTOR_CAPS.beliefs);
   if (beliefs.length > 0) {
     lines.push("They believe:", ...beliefs.map((belief) => `  - ${belief.claim} (${belief.kind}, ${belief.confidence}/100 sure)`));
   }
 
   const pressures = world.characterPressures
-    .filter((pressure) => pressure.characterId === actor.characterId && pressure.status === "active")
+    .filter((pressure) => pressure.characterId === characterId && pressure.status === "active")
     .slice(0, ACTOR_CAPS.pressures);
   if (pressures.length > 0) lines.push("Under pressure:", ...pressures.map((pressure) => `  - ${pressure.kind} (${pressure.intensity}/100): ${pressure.label}`));
 
@@ -360,7 +394,7 @@ function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock
   // used to learn of these only as a reason string -- "is caught up in
   // something already under way" -- which told them nothing they could act on.
   const threads = openStorylines(world.storylines)
-    .filter((storyline) => storyline.participantIds.includes(actor.characterId))
+    .filter((storyline) => storyline.participantIds.includes(characterId))
     .sort((a, b) => b.updatedAtStep - a.updatedAtStep)
     .slice(0, ACTOR_CAPS.storylines);
   if (threads.length > 0) {
@@ -371,21 +405,21 @@ function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock
   }
 
   const intents = world.characterIntents
-    .filter((intent) => intent.actorCharacterId === actor.characterId && (intent.status === "proposed" || intent.status === "prepared"))
+    .filter((intent) => intent.actorCharacterId === characterId && (intent.status === "proposed" || intent.status === "prepared"))
     .slice(-ACTOR_CAPS.intents);
   if (intents.length > 0) lines.push("They mean to:", ...intents.map((intent) => `  - ${intent.actionType}: ${intent.rationale}`));
 
   const commitments = world.commitments
-    .filter((commitment) => commitment.promisorCharacterId === actor.characterId && commitment.status === "pending")
+    .filter((commitment) => commitment.promisorCharacterId === characterId && commitment.status === "pending")
     .slice(0, ACTOR_CAPS.commitments);
   if (commitments.length > 0) {
     lines.push("They have promised:", ...commitments.map((commitment) => `  - to ${name(commitment.beneficiaryCharacterId)}: ${commitment.description}`));
   }
 
-  if (character !== undefined) lines.push(...describeRelations(character, world, others, name));
+  if (character !== undefined) lines.push(...describeRelations(character, world, options.others ?? [], name));
 
   const owed = world.orderAttempts.filter(
-    (attempt) => attempt.recipientRef.id === actor.characterId && (attempt.status === "issued" || attempt.status === "received" || attempt.status === "delayed"),
+    (attempt) => attempt.recipientRef.id === characterId && (attempt.status === "issued" || attempt.status === "received" || attempt.status === "delayed"),
   );
   if (owed.length > 0) {
     lines.push("Orders awaiting their answer:", ...owed.map((attempt) => `  - [${attempt.id}] from ${name(attempt.issuerRef.id)} — lawful: ${attempt.authorityCheck.authorized}`));
@@ -398,7 +432,7 @@ function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock
   const letters = world.diplomacy.filter(
     (message) =>
       message.status === "awaiting_reply" &&
-      (message.toCharacterId === actor.characterId || (message.toCharacterId === null && character?.polityId != null && message.toPolityId === character.polityId)),
+      (message.toCharacterId === characterId || (message.toCharacterId === null && character?.polityId != null && message.toPolityId === character.polityId)),
   );
   if (letters.length > 0) {
     lines.push(
@@ -407,9 +441,22 @@ function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock
     );
   }
 
-  lines.push("What they know of recent events:", ...actor.knownFacts.map((fact) => `  - ${fact.summary} [${fact.id}]`));
-  lines.push(`Today is ${formatWorldDate(world.instant, clock)}.`);
+  if (options.knownFacts !== undefined) {
+    lines.push("What they know of recent events:", ...options.knownFacts.map((fact) => `  - ${fact.summary} [${fact.id}]`));
+  }
+  if (options.extra !== undefined && options.extra.length > 0) lines.push(...options.extra);
+  if (options.closeWithDate === true) lines.push(`Today is ${formatWorldDate(world.instant, clock)}.`);
   return lines.join("\n");
+}
+
+/** One person's section of the batched cognition call. Byte-identical to what it always was. */
+function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock, others: readonly string[]): string {
+  return renderCharacterPortrait(actor.characterId, actor.name, world, clock, {
+    knownFacts: actor.knownFacts,
+    impetus: { why: actor.why, ownBusiness: actor.impetus === "own_business" },
+    others,
+    closeWithDate: true,
+  });
 }
 
 
