@@ -56,7 +56,7 @@ const GENERIC_ROLE_WORDS = new Set([
  */
 export function findOfficeSeatForRole(
   world: WorldState,
-  scenarioGovernment: ScenarioGovernmentRules | undefined,
+  scenarioGovernment: { readonly offices: readonly Office[] } | undefined,
   polityId: string | null,
   role: string,
 ): { readonly office: Office; readonly vacantSeatId: string | null } | undefined {

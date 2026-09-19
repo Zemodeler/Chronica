@@ -1,4 +1,5 @@
 import {
+  vacateOfficesOf,
   resolveBattle,
   summarizeBattleResult,
   type BattlePosture,
@@ -135,6 +136,7 @@ function applyResult(world: WorldState, result: BattleResult, atStep: number): W
     if (change === undefined || change.outcome !== "killed") return character;
     return { ...character, alive: false, diedAtStep: atStep };
   });
+  const killed = result.commanderChanges.filter((change) => change.outcome === "killed").map((change) => change.characterId);
 
   const provinces = world.map.provinces.map((province) => {
     const change = result.siegeAndControlChanges.find((candidate) => candidate.provinceId === province.id);
@@ -142,7 +144,13 @@ function applyResult(world: WorldState, result: BattleResult, atStep: number): W
     return { ...province, controllerPolityId: change.newControllerPolityId };
   });
 
-  return { ...world, characters, map: { ...world.map, provinces }, material: { ...world.material, forces } };
+  // A seat is not held by a corpse. `vacateOfficeSeatsFor` has existed since the
+  // character system was written and has never been called from anywhere, so a
+  // consul killed in the field went on holding the consulship -- and went on
+  // conferring its authority, since office grants are derived from the seat.
+  let next: WorldState = { ...world, characters, map: { ...world.map, provinces }, material: { ...world.material, forces } };
+  for (const characterId of killed) next = vacateOfficesOf(next, characterId, "death", atStep);
+  return next;
 }
 
 /** What a battle leaves in the record. A battle is never a secret. */

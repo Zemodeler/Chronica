@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario, punicWarsScenario } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldStateSchema, localRef, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
+import { ScenarioDefinitionSchema, WorldStateSchema, buildAuthorityIndex, localRef, vacateOfficesOf, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
 import { createIdFactory } from "../ports";
 import { applyDeltas } from "./apply-deltas";
 import type { ApplyContext } from "./context";
@@ -1401,5 +1401,67 @@ describe("how tightly a power is held together", () => {
     const created = result.world.map.polities.find((polity) => polity.name === "The Latin Revolt")!;
     const rome = before.map.polities.find((polity) => polity.id === "rome")!;
     expect(created.cohesionBps).toBeLessThan(rome.cohesionBps);
+  });
+});
+
+describe("offices that actually move", () => {
+  it("seats a person the world creates into the office it says it made them", () => {
+    // The label was parsed and thrown on the floor, so every magistrate the
+    // world invented held no office and could do nothing a magistrate does.
+    const before = world();
+    const office = offices.find((candidate) => candidate.polityId === "rome");
+    if (office === undefined) return;
+    const filled = before.material.officeSeats.filter((seat) => seat.officeId === office.id && seat.status === "held").length;
+
+    const result = applyDeltas(
+      before,
+      [{
+        op: "character_create", localId: "quaestor", name: "Marcus Fabius Varro", polityId: "rome", provinceId: null,
+        age: 38, officeLabel: office.label, traits: [], wealth: 0, generatedBecause: "Responsible for financing the mobilization.",
+      }],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    const created = result.world.characters.find((character) => character.name === "Marcus Fabius Varro");
+    expect(created).toBeDefined();
+    const seats = result.world.material.officeSeats.filter((seat) => seat.officeId === office.id && seat.status === "held");
+    // Either they took a vacancy or the office gained its first seat; either
+    // way somebody now holds it who did not before.
+    expect(seats.length).toBeGreaterThanOrEqual(filled);
+    if (created!.officeId !== null) {
+      expect(created!.officeId).toBe(office.id);
+      expect(seats.some((seat) => seat.holderCharacterId === created!.id)).toBe(true);
+    }
+  });
+
+  it("leaves a created person without an office when the label names none", () => {
+    const before = world();
+    const result = applyDeltas(
+      before,
+      [{
+        op: "character_create", localId: "trader", name: "Titus of Ostia", polityId: "rome", provinceId: null,
+        age: 40, officeLabel: "grain factor", traits: [], wealth: 300, generatedBecause: "Lends the state money.",
+      }],
+      context(),
+    );
+    expect(result.world.characters.find((character) => character.name === "Titus of Ostia")!.officeId).toBeNull();
+  });
+
+  it("empties a dead commander's seat, and stops it conferring his authority", () => {
+    // `vacateOfficeSeatsFor` has existed since the character system was written
+    // and had never been called: a consul killed in the field went on holding
+    // the consulship, and office grants are derived from the seat.
+    const before = world();
+    const seat = before.material.officeSeats.find((candidate) => candidate.status === "held" && candidate.holderCharacterId !== null);
+    if (seat === undefined) return;
+    const holderId = seat.holderCharacterId!;
+
+    const after = vacateOfficesOf(before, holderId, "death", 10);
+    expect(after.material.officeSeats.find((candidate) => candidate.id === seat.id)!.holderCharacterId).toBeNull();
+    // And the mirror on the character, which the material-only function cannot reach.
+    expect(after.characters.find((character) => character.id === holderId)!.officeId).toBeNull();
+    const index = buildAuthorityIndex(after.material, after.authorityGrants, offices, 10);
+    expect(index.grants.some((grant) => grant.holder.id === holderId && grant.source === "office")).toBe(false);
   });
 });
