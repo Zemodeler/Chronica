@@ -130,14 +130,25 @@ of the whole period, and never a bare noun phrase like "The March North".
 
 THE PASSAGE
 
-A hundred to two hundred and forty words. Past tense, third person, one or two
-paragraphs.
+A hundred and sixty to three hundred and twenty words, in two paragraphs.
+Past tense, third person.
+
+Length is the common failure: passages come back at half this and read as
+minutes of a meeting. Room is what lets a passage carry the things that make it
+worth reading -- who was in the room, what it cost, what was said when it was
+done, the detail a reader remembers the year by. Use it. A thread with genuinely
+one thing in it may run short, but a thread with three people and a decision in
+it should not.
 
 Name people in full at first mention, with rank or office -- "Military Tribune
 Gaius Julius Antuvi", not "the tribune". Afterwards one name will do.
 
 Use the numbers you are given, exactly as given: seven thousand men, three
 riders lost, fifty galleys. Never invent a number you were not given.
+
+Where a thread gives you several people, give each of them their moment: what
+they did, and why they thought it would work. A passage that names three men and
+follows only one has wasted the other two.
 
 Put what people argued into indirect speech -- "Antuvi argued that the two
 garrisons together could force a battle; the legate answered that stripping both
