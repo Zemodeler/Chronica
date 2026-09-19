@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { ChronicleEntry, GameViewController, PartyRef } from "./use-game-view";
+import type { ChronicleEntry, EntryTag, GameViewController } from "./use-game-view";
 
 /**
  * The record, as something to read rather than something to be notified of.
@@ -25,13 +25,7 @@ const KIND_LABEL: Readonly<Record<string, string>> = {
   force: "army",
 };
 
-const tagKey = (tag: PartyRef): string => `${tag.kind}:${tag.id}`;
-
-/** An id is the engine's handle; a reader wants the last readable part of it. */
-function tagLabel(tag: PartyRef): string {
-  const tail = tag.id.split(/[:/]/).pop() ?? tag.id;
-  return tail.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
+const tagKey = (tag: { readonly kind: string; readonly id: string }): string => `${tag.kind}:${tag.id}`;
 
 function LedgerBody({ body }: { readonly body: string }) {
   const rows = body.split("\n").map((line) => {
@@ -54,7 +48,7 @@ function LedgerBody({ body }: { readonly body: string }) {
   );
 }
 
-function Entry({ entry, onTag }: { readonly entry: ChronicleEntry; readonly onTag: (tag: PartyRef) => void }) {
+function Entry({ entry, onTag }: { readonly entry: ChronicleEntry; readonly onTag: (tag: EntryTag) => void }) {
   return (
     <article className="chronicle-entry">
       <header>
@@ -64,7 +58,7 @@ function Entry({ entry, onTag }: { readonly entry: ChronicleEntry; readonly onTa
             {entry.tags.map((tag) => (
               <li key={tagKey(tag)}>
                 <button type="button" onClick={() => onTag(tag)} title={`Everything touching this ${KIND_LABEL[tag.kind] ?? tag.kind}`}>
-                  {tagLabel(tag)}
+                  {tag.label}
                 </button>
               </li>
             ))}
@@ -102,7 +96,7 @@ function Entry({ entry, onTag }: { readonly entry: ChronicleEntry; readonly onTa
 }
 
 export function ChroniclePanel({ controller, onClose }: { readonly controller: GameViewController; readonly onClose: () => void }) {
-  const [filter, setFilter] = useState<PartyRef | null>(null);
+  const [filter, setFilter] = useState<EntryTag | null>(null);
 
   // Newest first: a reader opening the record wants where it has got to, and
   // can turn back from there.
@@ -122,7 +116,7 @@ export function ChroniclePanel({ controller, onClose }: { readonly controller: G
 
       {filter !== null && (
         <div className="chronicle-panel__filter">
-          <span>{`Everything touching ${tagLabel(filter)}`}</span>
+          <span>{`Everything touching ${filter.label}`}</span>
           <button type="button" onClick={() => setFilter(null)}>Show all</button>
         </div>
       )}

@@ -377,13 +377,24 @@ export async function listPendingEvents(db: ChronicaDatabase, gameId: string, li
     .limit(limit);
 }
 
-export async function listChronicle(db: ChronicaDatabase, gameId: string, limit = 20) {
-  return db
+/**
+ * The most recent stretch of the record, oldest first.
+ *
+ * Ordered *descending* and reversed, rather than taken from the front. Taking
+ * the first twenty ascending returned the twenty oldest entries and silently
+ * dropped everything after them, so a reign past its twentieth entry stopped
+ * showing the player anything new -- the Chronicle went quiet while the world
+ * carried on being written into it, and the Council's "since your last order"
+ * was a year stale.
+ */
+export async function listChronicle(db: ChronicaDatabase, gameId: string, limit = 200) {
+  const newestFirst = await db
     .select()
     .from(chronicleCheckpoints)
     .where(eq(chronicleCheckpoints.gameId, gameId))
-    .orderBy(asc(chronicleCheckpoints.toInstantSortKey), asc(chronicleCheckpoints.ordinal))
+    .orderBy(desc(chronicleCheckpoints.toInstantSortKey), desc(chronicleCheckpoints.ordinal))
     .limit(limit);
+  return newestFirst.reverse();
 }
 
 export async function getOpenDecision(db: ChronicaDatabase, gameId: string) {

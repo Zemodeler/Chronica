@@ -336,7 +336,12 @@ describe("the world elsewhere", () => {
     // The strict answer, not a guess: a wrong guess here publishes a plot
     // against the reader as local colour.
     const port = capturingPort();
-    const result = await compose(port, [secret()], { ownEntityIds: undefined });
+    const facts = [secret()];
+    const result = await composeChronicle({
+      port, clock, observer: OBSERVER, observerPolityId: "rome", facts,
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+      significanceByFactId: new Map(facts.map((candidate) => [candidate.id, 70])),
+    });
     expect(result.entries).toHaveLength(0);
   });
 
@@ -413,7 +418,7 @@ describe("what an entry carries beside the prose", () => {
     expect(result.entries[0]!.changes.map((change) => change.id)).toEqual(["vatluna"]);
   });
 
-  it("shows three subjects at most, the reader's own government last", async () => {
+  it("shows three subjects at most, the reader's own government last, under the names they are known by", async () => {
     const own = fact({
       summary: "Rome storms the Etruscan towns.",
       affectedEntities: [
@@ -421,10 +426,27 @@ describe("what an entry carries beside the prose", () => {
         { kind: "province", id: "vatluna" }, { kind: "province", id: "rusellae" }, { kind: "character", id: "corvus" },
       ],
     });
-    const result = await compose(capturingPort(), [own]);
+    const names: Record<string, string> = { etruria: "Etruscan Confederation", vatluna: "Vatluna", rusellae: "Rusellae" };
+    const result = await compose(capturingPort(), [own], { nameOf: (ref) => names[ref.id] ?? null });
     expect(result.entries[0]!.subjects.length).toBeGreaterThan(3);
     expect(result.entries[0]!.tags).toHaveLength(3);
     expect(result.entries[0]!.tags.map((tag) => tag.id)).not.toContain("rome");
+    // An id is the engine's handle. The reader was being offered
+    // "force-e98084fc-0494-4fab-ad92-7c3473be9afe-4" as a way into the record.
+    expect(result.entries[0]!.tags.map((tag) => tag.label)).toContain("Etruscan Confederation");
+  });
+
+  it("does not tag the engine's own bookkeeping, or a handle that resolved to nothing", async () => {
+    const own = fact({
+      summary: "The Senate opens a motion to reward the cohort.",
+      affectedEntities: [
+        { kind: "procedure", id: "procedure-62af32f4-4cf3-417e-9b0f-f67345bbce84-1" },
+        { kind: "force", id: "local:campanian_rebel_host" },
+        { kind: "institution", id: "roman-senate" },
+      ],
+    });
+    const result = await compose(capturingPort(), [own], { nameOf: () => "Roman Senate" });
+    expect(result.entries[0]!.tags.map((tag) => tag.id)).toEqual(["roman-senate"]);
   });
 
   it("prints one quotation per report, on the matter that earned it", async () => {

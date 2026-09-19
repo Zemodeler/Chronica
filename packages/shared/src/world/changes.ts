@@ -100,6 +100,21 @@ export function diffWorlds(before: WorldState, after: WorldState): WorldChange[]
         detail: lost > 0 ? `down ${round(lost)} to ${round(strengthOf(force))} men` : `up ${round(-lost)} to ${round(strengthOf(force))} men`,
       });
     }
+    // Reinforcement is an order for more men before it is more men. A garrison
+    // strengthened by three hundred moved only its authorized strength, so the
+    // entry that announced the reinforcement carried no change at all -- the
+    // one row a reader would actually have wanted from it.
+    const authorized = force.authorizedStrength - was.authorizedStrength;
+    if (Math.abs(authorized) >= STRENGTH_NOTICE) {
+      changes.push({
+        kind: "force",
+        id: force.id,
+        label: force.name,
+        detail: authorized > 0
+          ? `called up to ${round(force.authorizedStrength)} men, ${round(authorized)} more than before`
+          : `cut to ${round(force.authorizedStrength)} men`,
+      });
+    }
     if (was.polityId !== force.polityId) {
       changes.push({ kind: "force", id: force.id, label: force.name, detail: `now answers to ${polityName(force.polityId)}` });
     }

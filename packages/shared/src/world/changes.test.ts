@@ -57,3 +57,30 @@ describe("what changed on the map", () => {
     expect(detailFor(diffWorlds(before, after), character.id)).toBe("dies");
   });
 });
+
+describe("an army that was only ordered bigger", () => {
+  it("records a reinforcement, which moves authorized strength before it moves men", () => {
+    // A garrison strengthened by three hundred produced no change row at all,
+    // because the men had been called up and had not yet arrived.
+    const before = base();
+    const force = before.material.forces[0]!;
+    const after: WorldState = {
+      ...before,
+      material: {
+        ...before.material,
+        forces: [{ ...force, authorizedStrength: force.authorizedStrength + 300 }, ...before.material.forces.slice(1)],
+      },
+    };
+    expect(detailFor(diffWorlds(before, after), force.id)).toContain("300 more than before");
+  });
+
+  it("ignores an adjustment too small for anyone to notice", () => {
+    const before = base();
+    const force = before.material.forces[0]!;
+    const after: WorldState = {
+      ...before,
+      material: { ...before.material, forces: [{ ...force, authorizedStrength: force.authorizedStrength + 20 }, ...before.material.forces.slice(1)] },
+    };
+    expect(diffWorlds(before, after)).toEqual([]);
+  });
+});

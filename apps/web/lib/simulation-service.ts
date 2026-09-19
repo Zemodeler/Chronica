@@ -186,6 +186,7 @@ export async function submitOrder(
       significanceByFactId: result.significanceByFactId,
       storylines: result.world.storylines,
       polityOfCharacter: (id) => result.world.characters.find((character) => character.id === id)?.polityId ?? null,
+      nameOf: (ref) => nameOfSubject(result.world, ref),
       ownEntityIds: ownSideOf(result.world, actorRef.id, actorPolityId),
       changes: diffWorlds(view.world, result.world),
     });
@@ -274,6 +275,37 @@ export async function submitOrder(
  * none of it may reach them as distant news. Read from the world after the
  * burst, so a province taken this very span counts as theirs.
  */
+/**
+ * What a subject is called, so a tag reads "Roman Senate" rather than
+ * "institution-62af32f4-4cf3-417e-9b0f-f67345bbce84".
+ *
+ * The Chronicle works in refs because refs are what facts carry and what the
+ * record is searched by. Names live in the world, which the composer has no
+ * business holding, so the lookup comes in from here.
+ */
+function nameOfSubject(world: WorldState, ref: OrderPartyRef): string | null {
+  switch (ref.kind) {
+    case "polity": return world.map.polities.find((polity) => polity.id === ref.id)?.name ?? null;
+    case "province": return world.map.provinces.find((province) => province.id === ref.id)?.name ?? null;
+    case "character": return world.characters.find((character) => character.id === ref.id)?.name ?? null;
+    case "force": return world.material.forces.find((force) => force.id === ref.id)?.name ?? null;
+    case "institution": return world.material.institutions.find((institution) => institution.id === ref.id)?.name ?? null;
+    default: return null;
+  }
+}
+
+/** Stored tags, with any missing label filled in from the world. */
+function namedTags(world: WorldState, stored: unknown): { kind: string; id: string; label: string }[] {
+  if (!Array.isArray(stored)) return [];
+  return stored.flatMap((tag) => {
+    if (typeof tag !== "object" || tag === null) return [];
+    const { kind, id, label } = tag as { kind?: unknown; id?: unknown; label?: unknown };
+    if (typeof kind !== "string" || typeof id !== "string") return [];
+    if (typeof label === "string" && label.length > 0) return [{ kind, id, label }];
+    return [{ kind, id, label: nameOfSubject(world, { kind, id } as OrderPartyRef) ?? id }];
+  });
+}
+
 function ownSideOf(world: WorldState, characterId: string, polityId: string | null): Set<string> {
   const own = new Set<string>([characterId]);
   if (polityId === null) return own;
@@ -320,7 +352,10 @@ export async function getGameView(gameId: string) {
         title: entry.title,
         body: entry.body,
         subjects: entry.subjects,
-        tags: entry.tags,
+        // Entries written before tags carried their own label still hold bare
+        // refs. Naming them on the way out repairs the old record rather than
+        // leaving two rows of engine handles in it forever.
+        tags: namedTags(view.world, entry.tags),
         changes: entry.changes,
         quote: entry.quote,
       })),
