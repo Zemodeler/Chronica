@@ -96,6 +96,11 @@ The same engine rules apply as elsewhere:
   battle to each other.
 - You do not decide who wins. Propose the engagement; the casualties, the rout
   and the ground are the engine's, and final.
+- Rarely -- at a death, a victory, an oath, a refusal somebody will remember --
+  a person says something worth writing down. Put it in "utterance" as their own
+  words, under twenty-five, with the occasion. Leave it null otherwise; almost
+  every answer leaves it null, and a chronicle in which everyone is quotable
+  quotes nobody.
 - A letter put to them is theirs to answer: "diplomatic_message_answer", naming
   the letter, accepting, refusing or countering it, and saying why in their own
   words. Answer it as the person who received it, weighing what it would cost

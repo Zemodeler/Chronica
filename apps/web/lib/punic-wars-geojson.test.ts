@@ -80,6 +80,6 @@ describe("Punic Wars historical GeoJSON", () => {
     const settlements = punicWarsGeoJson.features.filter((feature) => feature.properties.kind === "settlement");
     expect(settlements.filter((feature) => feature.properties.kind === "settlement" && feature.properties.type === "capital").map((feature) => feature.properties.name)).toEqual(expect.arrayContaining(["Rome", "Carthage", "Syracuse", "Messana", "Pella", "Athens"]));
     expect(settlements.filter((feature) => feature.properties.kind === "settlement" && feature.properties.type === "fort").length).toBeGreaterThanOrEqual(6);
-    expect(settlements.some((feature) => feature.id === "settlement-rhegium" || feature.properties.name === "Rhegium")).toBe(false);
+    expect(settlements.some((feature) => feature.id === "settlement-rhegium" || feature.properties.name === "Rhegium")).toBe(true);
   });
 });

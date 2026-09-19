@@ -5,6 +5,7 @@ import {
   type Fact,
   type OrderPartyRef,
   type ScenarioClock,
+  type WorldChange,
   type WorldInstant,
   type WorldStoryline,
 } from "@chronica/shared";
@@ -15,36 +16,84 @@ import type { SimModelPort } from "./ports";
  * The Chronicle (VISION §25).
  *
  * A historical reconstruction of what happened since the last checkpoint --
- * and, crucially, only of what the player's government could actually have
+ * and, mostly, only of what the player's government could actually have
  * learned. The engine knows the senator is plotting; the Chronicle must not say
  * so until someone discovers it.
  *
  * That constraint is enforced here rather than asked for in the prompt. The
- * model is only ever handed facts that passed `factsVisibleTo`, so it cannot
- * leak what it was never shown -- a prompt instruction not to mention secrets
- * would eventually be disobeyed, and nobody would notice.
+ * model is only ever handed facts that passed the gate below, so it cannot leak
+ * what it was never shown -- a prompt instruction not to mention secrets would
+ * eventually be disobeyed, and nobody would notice.
  *
- * The same gate now covers the actors' own accounts. Facts were filtered from
- * the start; the narrative lines beside them were not, and every NPC's account
- * of its own reasoning went straight into the player's record. A Roman consul
- * read that a Carthaginian admiral "quietly investigated whether the Roman
- * campaign created an opening" -- true, secret, and none of his business. An
- * account now travels with the facts it describes and is shown only if one of
- * them is.
+ * The same gate covers the actors' own accounts. Facts were filtered from the
+ * start; the narrative lines beside them were not, and every NPC's account of
+ * its own reasoning went straight into the player's record. A Roman consul read
+ * that a Carthaginian admiral "quietly investigated whether the Roman campaign
+ * created an opening" -- true, secret, and none of his business. An account now
+ * travels with the facts it describes and is shown only if one of them is.
+ *
+ * ## Three tiers, not two
+ *
+ * Strict visibility alone produced a record that was correct and parochial. A
+ * ruler read about his own frontier and nothing else, because the only way for
+ * Syracuse to reach him was for somebody to carry it there, and nobody ever
+ * did. A world that is alive is a world where things happen elsewhere and you
+ * hear about them.
+ *
+ * So the test is no longer *who knows this* but *could the reader act on it*:
+ *
+ * - Facts the observer has actually discovered are theirs, as before.
+ * - A secret that touches them or their government stays dark. That is the
+ *   whole point of the epistemic layer: a plot against the ruler is not
+ *   colour.
+ * - A weighty secret that touches neither -- an assassination in Syracuse, a
+ *   plague in somebody else's province -- publishes as *news reaching the
+ *   court*, second-hand and marked as such, because knowing it changes
+ *   nothing they can do and not knowing it makes the world feel empty.
  *
  * ## Threads
  *
  * A burst covers a span, not a subject. Fusing everything that happened in that
  * span into one passage produced entries where a Roman march on the Boii and a
  * Carthaginian deliberation about Messana shared a paragraph break and nothing
- * else. So the visible facts are split into threads -- one per matter, by who
- * and what they touch -- and each thread becomes its own entry with its own
- * title. The split is deterministic and made here in code; the model is only
- * asked for the prose.
+ * else. So the facts are split into threads -- one per matter, by who and what
+ * they touch -- and each thread becomes its own entry with its own headline.
+ * The split is deterministic and made here in code; the model is only asked for
+ * the prose.
+ *
+ * ## The bar
+ *
+ * A thread earns an entry by weight, not by having occurred. Everything that
+ * happened is still on the record as facts; the Chronicle is the part of it
+ * worth reading, and a chronicle that reports the collection of a routine tax
+ * teaches the player to stop reading it. The observer's own matter is the one
+ * exception -- an order must always be answered, however small its outcome.
  */
 
-/** How many entries one burst may produce before the remainder is grouped. */
-const MAX_ENTRIES = 4;
+/** How many entries one report may carry. Past this the lightest threads go unwritten. */
+const MAX_ENTRIES = 6;
+
+/**
+ * What a thread must weigh before it is written up at all.
+ *
+ * Deliberately high. Significance is the acting party's own judgment of what it
+ * just did, on a hundred-point scale, and the things worth a chronicler's ink
+ * -- a city taken, a commander killed, an alliance struck -- score well above
+ * this. Recruitment proceeding on schedule does not.
+ */
+export const DEFAULT_ENTRY_THRESHOLD = 55;
+
+/** And what a *foreign secret* must weigh before word of it travels at all. */
+const DISTANT_NEWS_THRESHOLD = 45;
+
+/** How many threads of distant news one report may carry. The court is not a newspaper. */
+const MAX_REPORTED_THREADS = 2;
+
+/** How many subjects an entry shows on its face. The rest stay on the record, unshown. */
+const MAX_TAGS = 3;
+
+/** Bookkeeping the historian must never see, whoever it happened to. */
+const NEVER_PUBLISHED = new Set(["engine_rejection"]);
 
 /** Ids are for the engine. A summary carrying one must not reach the prose. */
 const ID_IN_BRACKETS = /\s*\[[A-Za-z0-9][A-Za-z0-9._:-]*\]/g;
@@ -52,34 +101,70 @@ const ID_IN_BRACKETS = /\s*\[[A-Za-z0-9][A-Za-z0-9._:-]*\]/g;
 export const CHRONICLE_SYSTEM_PROMPT = `You are a historian writing the record of a reign, from surviving documents.
 
 You will be given a date range and one or more numbered THREADS. A thread is a
-single matter -- one war, one embassy, one quarrel -- and each gets its own short
-passage of one or two paragraphs, under its own title.
+single matter -- one war, one embassy, one quarrel -- and each gets its own
+passage under its own headline.
 
-A title names the matter in a few words, as a chapter heading would: "The March
-into Boii Country", "Carthage Watches the Strait", "The Grain Levy Refused". It is
-never a date, never a summary of the whole period, and never a sentence. A thread
-marked as part of a longer matter may keep that matter's name as its title.
+THE HEADLINE
 
-Keep the threads apart. A passage may name only what appears in its own thread: if
-Carthage is not in thread 2, thread 2 does not mention Carthage.
+A headline says who did what, the way a chronicler's index entry does: "Legate
+Refuses Antuvi Leave to Cross into Samnium", "Etruscan Envoys Sue for Peace
+After Sutrium", "Agathocles of Syracuse Assassinated". Name a person or a body,
+and name the deed. Capitalise it as a title. It is never a date, never a summary
+of the whole period, and never a bare noun phrase like "The March North".
 
-Write only from what you are given. You have no other sources: if something is not
-listed, it is not known to have happened, and you must not imply it, foreshadow it,
-or hint that anything is being concealed. Absence of evidence is not something the
-passage should gesture at.
+THE PASSAGE
 
-Record what happened. Never write that something did not happen, that someone took
-no action, that a thing could not yet happen, or that something was merely
-scheduled, planned or prepared for -- those are not events, and a chronicle of them
-reads like a clerk's ledger.
+Ninety to two hundred words. Past tense, third person, one or two paragraphs.
 
-Write as a historian, not as a machine. Never use the vocabulary of administration:
-no "project", "milestone", "status", "state", "recognized", "possessed",
-"authorized strength", "field force", "consequential action", "supply position".
-Name the people, the places and the deeds instead.
+Name people in full at first mention, with rank or office -- "Military Tribune
+Gaius Julius Antuvi", not "the tribune". Afterwards one name will do.
 
-Do not address the reader, do not use headings or lists, and do not offer advice on
-what should be done next. You are recording what happened, not advising a ruler.
+Use the numbers you are given, exactly as given: seven thousand men, three
+riders lost, fifty galleys. Never invent a number you were not given.
+
+Put what people argued into indirect speech -- "Antuvi argued that the two
+garrisons together could force a battle; the legate answered that stripping both
+would leave the frontier open" -- rather than inventing dialogue for them.
+
+You may end a passage with one sentence saying where the matter now stands: "The
+frontier remained tense but static." "The war would continue." One such
+sentence, about that thread alone, and never a prediction.
+
+WHAT COUNTS AS AN EVENT
+
+A person choosing something is an event, even when nothing moved. A legate
+refusing a request, a council failing to agree, a fleet putting to sea for a
+shore it has not yet reached -- these happened, and they belong in the record.
+
+An absence is not an event. Never write that nothing of note occurred, that
+someone took no action, that a thing could not yet happen, or that a sum was
+unchanged. Where a thread holds only such non-events, write about the decision
+inside it instead.
+
+WHAT YOU MAY DRAW ON
+
+Write only from what you are given. You have no other sources: if something is
+not listed, it is not known to have happened, and you must not imply it,
+foreshadow it, or hint that anything is being concealed. Absence of evidence is
+not something the passage should gesture at.
+
+A thread marked as news reaching the court is second-hand. Write it as the court
+learned it -- "word came from Syracuse that", "merchants out of Massalia
+reported" -- and do not give it the certainty of something witnessed.
+
+Keep the threads apart. A passage may name only what appears in its own thread:
+if Carthage is not in thread 2, thread 2 does not mention Carthage.
+
+VOICE
+
+Write as a historian, not as a machine. Never use the vocabulary of
+administration: no "project", "milestone", "status", "state", "recognized",
+"possessed", "authorized strength", "field force", "consequential action",
+"supply position". Name the people, the places and the deeds instead.
+
+Do not address the reader, do not use headings or lists, and do not offer advice
+on what should be done next. You are recording what happened, not advising a
+ruler.
 
 Answer with JSON and nothing else:
 {"entries":[{"thread":1,"title":"...","body":"..."}]}`;
@@ -111,6 +196,22 @@ export interface NarrativeLine {
   readonly factIds: readonly string[];
 }
 
+/** Something a person said, gated by the same rule and printed beside the prose. */
+export interface UtteranceLine {
+  readonly actorRef: OrderPartyRef;
+  /** Their name as the record should print it. */
+  readonly speaker: string;
+  readonly line: string;
+  readonly occasion: string;
+  readonly factIds: readonly string[];
+}
+
+export interface EntryQuote {
+  readonly line: string;
+  readonly speaker: string;
+  readonly occasion: string;
+}
+
 export interface ChronicleInput {
   readonly port: SimModelPort;
   readonly clock: ScenarioClock;
@@ -123,21 +224,45 @@ export interface ChronicleInput {
   /** What the actors said they were doing, for colour the bare facts lack. */
   readonly narrative: readonly NarrativeLine[];
   readonly frictions: readonly NarrativeLine[];
-  /** Fact id → its author's weight, for ordering threads by what mattered most. */
+  /** What people actually said. At most one reaches the record. */
+  readonly utterances?: readonly UtteranceLine[];
+  /** Fact id → its author's weight, for ordering threads and for the bar. */
   readonly significanceByFactId?: ReadonlyMap<string, number>;
   /** The threads the world is following, so a passage that continues one can say so. */
   readonly storylines?: readonly WorldStoryline[];
   /** Whose government a character belongs to, for deciding whether a polity-scoped thread is the observer's to know. */
   readonly polityOfCharacter?: (characterId: string) => string | null;
+  /**
+   * Everything the observer's own side answers for: their polity, its people,
+   * its provinces, themselves. A secret touching any of it stays dark; a secret
+   * touching none of it may travel as distant news.
+   *
+   * Left out, no distant news travels at all. The engine cannot tell near from
+   * far without being told where the observer's reach ends, and a wrong guess
+   * here publishes a plot against the reader as local colour -- so the absence
+   * of the answer is treated as the strict answer rather than as licence.
+   */
+  readonly ownEntityIds?: ReadonlySet<string>;
+  /** What moved on the map while this was happening, for the change list. */
+  readonly changes?: readonly WorldChange[];
+  /** What a thread must weigh to be written up. */
+  readonly entryThreshold?: number;
 }
 
 export interface ChronicleEntry {
+  /** "narrated" is written by a historian; "recorded" is struck from the books. */
+  readonly kind: "narrated" | "recorded";
   readonly title: string;
   readonly body: string;
   /** Exactly the facts this entry was allowed to draw on. */
   readonly factIds: readonly string[];
   /** Who and what the entry is about, so the record can be read by subject. */
   readonly subjects: readonly OrderPartyRef[];
+  /** The few of those worth showing on the entry's face. */
+  readonly tags: readonly OrderPartyRef[];
+  /** What moved on the map, among the things this entry is about. */
+  readonly changes: readonly WorldChange[];
+  readonly quote: EntryQuote | null;
   readonly fromInstantSortKey: number;
   readonly toInstantSortKey: number;
 }
@@ -153,6 +278,9 @@ interface Thread {
   readonly frictions: readonly string[];
   /** The longer matter this continues, when the observer may know of one. */
   readonly matter: string | null;
+  /** True when nothing in it was witnessed: the court has this at second hand. */
+  readonly reported: boolean;
+  readonly weight: number;
 }
 
 /**
@@ -184,6 +312,51 @@ const sortKeyOf = (instant: WorldInstant): number => instant.day * 1440 + instan
 /** Strips the engine's own handles out of a line written for a person to read. */
 function readable(line: string): string {
   return line.replace(ID_IN_BRACKETS, "").replace(/\s{2,}/g, " ").trim();
+}
+
+/**
+ * Everything the record may draw on, and which of it is only hearsay.
+ *
+ * The first tier is what the observer has genuinely learned. The second is the
+ * world elsewhere: a secret that weighs enough to travel and touches nothing
+ * the observer's side answers for. Bookkeeping never publishes at all, and news
+ * that has not had time to arrive waits until it has.
+ */
+function selectFacts(
+  facts: readonly Fact[],
+  observer: OrderPartyRef,
+  observerPolityId: string | null,
+  ownEntityIds: ReadonlySet<string> | null,
+  to: WorldInstant,
+  weightOf: (fact: Fact) => number,
+): { readonly fact: Fact; readonly reported: boolean }[] {
+  const known = new Set(factsKnownTo(facts, observer, observerPolityId, to));
+  const toKey = sortKeyOf(to);
+  const selected: { fact: Fact; reported: boolean }[] = [];
+
+  for (const fact of facts) {
+    if (NEVER_PUBLISHED.has(fact.kind)) continue;
+    if (known.has(fact)) {
+      selected.push({ fact, reported: false });
+      continue;
+    }
+    // Nobody told the engine where this observer's reach ends, so nothing can
+    // be judged far enough away to be harmless.
+    if (ownEntityIds === null) continue;
+    // Nobody's business but the engine's: a fact naming no one came out of
+    // answering somebody's order, and cannot be judged near or far.
+    if (fact.affectedEntities.length === 0) continue;
+    // Ours, and hidden. This is the line the whole epistemic layer exists to
+    // hold: a plot against the ruler does not become colour by being interesting.
+    if (fact.affectedEntities.some((entity) => ownEntityIds.has(entity.id))) continue;
+    if (weightOf(fact) < DISTANT_NEWS_THRESHOLD) continue;
+    // Word has to get here. A fact with a travel time keeps it.
+    const knowableAt = fact.discovery.knowableAtInstant;
+    if (knowableAt !== null && sortKeyOf(knowableAt) > toKey) continue;
+    selected.push({ fact, reported: true });
+  }
+
+  return selected;
 }
 
 /**
@@ -257,65 +430,129 @@ function subjectsOf(facts: readonly Fact[]): OrderPartyRef[] {
     .slice(0, 8);
 }
 
+/** How prominently a kind of subject identifies a matter, lowest first. */
+const TAG_RANK: Record<string, number> = { polity: 0, province: 1, character: 2, force: 3 };
+
+/**
+ * The few subjects worth printing on the entry's face.
+ *
+ * Every subject is kept on the record, because that is what the record is
+ * searched by; showing all eight taught the reader to skip the row. So the ones
+ * shown are those that most identify the matter: the powers involved, then
+ * where, then who -- ranked by how often the thread's own facts name them. The
+ * observer's own government goes last among equals; they know who they are.
+ */
+function tagsOf(facts: readonly Fact[], subjects: readonly OrderPartyRef[], observerPolityId: string | null): OrderPartyRef[] {
+  const mentions = new Map<string, number>();
+  for (const fact of facts) {
+    for (const entity of fact.affectedEntities) mentions.set(keyOf(entity), (mentions.get(keyOf(entity)) ?? 0) + 1);
+  }
+  const own = (ref: OrderPartyRef): number => (ref.kind === "polity" && ref.id === observerPolityId ? 1 : 0);
+  return [...subjects]
+    .sort((a, b) =>
+      own(a) - own(b)
+      || (mentions.get(keyOf(b)) ?? 0) - (mentions.get(keyOf(a)) ?? 0)
+      || (TAG_RANK[a.kind] ?? 9) - (TAG_RANK[b.kind] ?? 9)
+      || a.id.localeCompare(b.id))
+    .slice(0, MAX_TAGS);
+}
+
 function renderThread(thread: Thread, index: number): string {
-  const lines = [`THREAD ${index + 1}`];
+  const lines = [`THREAD ${index + 1}${thread.reported ? " (news reaching the court; nobody here witnessed it)" : ""}`];
   if (thread.matter !== null) lines.push(`Part of a longer matter: ${thread.matter}.`);
-  lines.push("Known to have happened:", ...thread.facts.map((fact) => `- ${readable(fact.summary)}`));
+  lines.push(
+    thread.reported ? "Reported to have happened:" : "Known to have happened:",
+    ...thread.facts.map((fact) => `- ${readable(fact.summary)}`),
+  );
   if (thread.narrative.length > 0) lines.push("Accounts given at the time:", ...thread.narrative.map((line) => `- ${readable(line)}`));
   if (thread.frictions.length > 0) lines.push("Difficulties reported:", ...thread.frictions.map((line) => `- ${readable(line)}`));
   return lines.join("\n");
 }
 
 export async function composeChronicle(input: ChronicleInput): Promise<ChronicleResult> {
-  const visible = factsKnownTo(input.facts, input.observer, input.observerPolityId, input.to);
-  if (visible.length === 0) return { entries: [], calls: 0 };
+  const threshold = input.entryThreshold ?? DEFAULT_ENTRY_THRESHOLD;
+  // An unweighted fact cannot be ruled out: where no weight was recorded, the
+  // bar is treated as met rather than as failed.
+  const weightOf = (fact: Fact): number => input.significanceByFactId?.get(fact.id) ?? threshold;
+  const selected = selectFacts(input.facts, input.observer, input.observerPolityId, input.ownEntityIds ?? null, input.to, weightOf);
+  if (selected.length === 0) return { entries: [], calls: 0 };
 
+  const visible = selected.map((entry) => entry.fact);
+  const reportedIds = new Set(selected.filter((entry) => entry.reported).map((entry) => entry.fact.id));
   const visibleFactIds = new Set(visible.map((fact) => fact.id));
   const observerKey = keyOf(input.observer);
   /** An account is publishable when the observer can see what it is an account of. */
-  const publishable = (line: NarrativeLine): boolean =>
+  const publishable = (line: { readonly actorRef: OrderPartyRef | null; readonly factIds: readonly string[] }): boolean =>
     line.factIds.some((factId) => visibleFactIds.has(factId)) || (line.actorRef !== null && keyOf(line.actorRef) === observerKey);
-  const narrative = input.narrative.filter(publishable);
-  const frictions = input.frictions.filter(publishable);
+  /**
+   * Second-hand news arrives as news and nothing more. What reached the court
+   * is that Agathocles was killed at a banquet -- not his nephew's own account
+   * of why he did it, which nobody in this court has ever heard. So an account,
+   * a reported difficulty and a quotation all need a *witnessed* fact to hang
+   * on, where the bare summary only needs a published one.
+   */
+  const witnessed = (line: { readonly factIds: readonly string[] }): boolean =>
+    line.factIds.some((factId) => visibleFactIds.has(factId) && !reportedIds.has(factId));
+  const firsthand = (line: { readonly actorRef: OrderPartyRef | null; readonly factIds: readonly string[] }): boolean =>
+    witnessed(line) || (line.actorRef !== null && keyOf(line.actorRef) === observerKey);
+  const narrative = input.narrative.filter(firsthand);
+  const frictions = input.frictions.filter(firsthand);
+  const utterances = (input.utterances ?? []).filter((line) => publishable(line) && witnessed(line));
 
-  const weightOf = (fact: Fact): number => input.significanceByFactId?.get(fact.id) ?? 1;
   const grouped = splitIntoThreads(visible, input.observer, input.observerPolityId);
-  // The observer's own thread stays first; the rest are ranked by what actually
-  // mattered, so the entry that gets dropped into the grouped tail is the least
-  // important one rather than whichever the map happened to yield last.
-  const [own, ...others] = grouped;
-  const ownThreads = own === undefined ? [] : [own];
-  others.sort((a, b) => {
-    const weight = b.reduce((sum, fact) => sum + weightOf(fact), 0) - a.reduce((sum, fact) => sum + weightOf(fact), 0);
-    return weight !== 0 ? weight : sortKeyOf(a[0]!.time) - sortKeyOf(b[0]!.time) || a[0]!.id.localeCompare(b[0]!.id);
-  });
-  const ranked = [...ownThreads, ...others];
-  // Everything past the cap becomes one last entry rather than vanishing: the
-  // record is allowed to be brief about minor matters, not silent.
-  const kept = ranked.length <= MAX_ENTRIES ? ranked : [...ranked.slice(0, MAX_ENTRIES - 1), ranked.slice(MAX_ENTRIES - 1).flat()];
-
   const polityOf = (characterId: string): string | null => input.polityOfCharacter?.(characterId) ?? null;
-  const threads: Thread[] = kept.map((facts) => {
+
+  const built: Thread[] = grouped.map((facts) => {
     const ids = new Set(facts.map((fact) => fact.id));
-    const belongs = (line: NarrativeLine): boolean => line.factIds.some((factId) => ids.has(factId));
+    const belongs = (line: { readonly factIds: readonly string[] }): boolean => line.factIds.some((factId) => ids.has(factId));
     return {
       facts,
       narrative: narrative.filter(belongs).map((line) => line.line),
       frictions: frictions.filter(belongs).map((line) => line.line),
       matter: matterOf(facts, input.storylines ?? [], input.observer, input.observerPolityId, polityOf),
+      // A thread is hearsay only when every fact in it is. One witnessed fact
+      // makes the matter the court's own.
+      reported: facts.every((fact) => reportedIds.has(fact.id)),
+      weight: facts.reduce((sum, fact) => sum + weightOf(fact), 0),
     };
   });
+
+  // The observer's own matter is always written up: an order that produced a
+  // small outcome still has to be answered, or the player gave an order and
+  // heard nothing back. Everything else earns its place.
+  const [own, ...others] = built;
+  const ownThreads = own === undefined ? [] : [own];
+  const seen = others.filter((thread) => !thread.reported && thread.weight >= threshold);
+  const hearsay = others.filter((thread) => thread.reported && thread.weight >= threshold);
+
+  const byWeight = (a: Thread, b: Thread): number =>
+    b.weight - a.weight || sortKeyOf(a.facts[0]!.time) - sortKeyOf(b.facts[0]!.time) || a.facts[0]!.id.localeCompare(b.facts[0]!.id);
+  seen.sort(byWeight);
+  hearsay.sort(byWeight);
+
+  const threads = [...ownThreads, ...seen, ...hearsay.slice(0, MAX_REPORTED_THREADS)].slice(0, MAX_ENTRIES);
+  if (threads.length === 0) return { entries: [], calls: 0 };
 
   const period = `${formatWorldDate(input.from, input.clock)} – ${formatWorldDate(input.to, input.clock)}`;
   const userMessage = [`Period: ${period}.`, "", ...threads.map((thread, index) => renderThread(thread, index))].join("\n\n");
 
+  const changes = input.changes ?? [];
   const entryOf = (thread: Thread, title: string, body: string): ChronicleEntry => {
     const keys = thread.facts.map((fact) => sortKeyOf(fact.time));
+    const subjects = subjectsOf(thread.facts);
+    const named = new Set(thread.facts.flatMap((fact) => fact.affectedEntities.map((entity) => entity.id)));
     return {
+      kind: "narrated",
       title,
       body,
       factIds: thread.facts.map((fact) => fact.id),
-      subjects: subjectsOf(thread.facts),
+      subjects,
+      tags: tagsOf(thread.facts, subjects, input.observerPolityId),
+      // A change the entry's own facts do not name is a change the reader was
+      // never told about. Gating here is what keeps the change list from being
+      // the leak the prose is so carefully prevented from being.
+      changes: changes.filter((change) => named.has(change.id)),
+      quote: null,
       fromInstantSortKey: Math.min(...keys, sortKeyOf(input.to)),
       toInstantSortKey: Math.max(...keys, sortKeyOf(input.from)),
     };
@@ -323,8 +560,9 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
 
   // A failed narration must not cost the player the record itself: fall back to
   // the plain facts, under the period as a title, rather than losing the span.
+  const withQuote = (entries: readonly ChronicleEntry[]): ChronicleEntry[] => attachQuote(entries, utterances, threads);
   const fallback = (): ChronicleResult => ({
-    entries: threads.map((thread) => entryOf(thread, period, thread.facts.map((fact) => readable(fact.summary)).join("\n\n"))),
+    entries: withQuote(threads.map((thread) => entryOf(thread, period, thread.facts.map((fact) => readable(fact.summary)).join("\n\n")))),
     calls: 1,
   });
 
@@ -337,8 +575,42 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
       const written = parsed.data.entries.find((entry) => entry.thread === index + 1);
       return written === undefined ? [] : [entryOf(thread, written.title, written.body.trim())];
     });
-    return entries.length === 0 ? fallback() : { entries, calls: 1 };
+    return entries.length === 0 ? fallback() : { entries: withQuote(entries), calls: 1 };
   } catch {
     return fallback();
   }
+}
+
+/**
+ * At most one quotation per report, on the entry that earned it.
+ *
+ * Rarity is the whole effect. Two epigrams in twelve entries reads as a
+ * chronicler preserving what was worth preserving; one per entry reads as a
+ * feature. So the heaviest matter with something said in it gets the line, and
+ * nothing else does.
+ */
+function attachQuote(
+  entries: readonly ChronicleEntry[],
+  utterances: readonly UtteranceLine[],
+  threads: readonly Thread[],
+): ChronicleEntry[] {
+  if (utterances.length === 0 || entries.length === 0) return [...entries];
+
+  let best: { index: number; weight: number; utterance: UtteranceLine } | null = null;
+  entries.forEach((entry, index) => {
+    const ids = new Set(entry.factIds);
+    const spoken = utterances
+      .filter((utterance) => utterance.factIds.some((factId) => ids.has(factId)))
+      .sort((a, b) => a.actorRef.id.localeCompare(b.actorRef.id))[0];
+    if (spoken === undefined) return;
+    const weight = threads[index]?.weight ?? 0;
+    if (best === null || weight > best.weight) best = { index, weight, utterance: spoken };
+  });
+  if (best === null) return [...entries];
+
+  const chosen: { index: number; utterance: UtteranceLine } = best;
+  return entries.map((entry, index) =>
+    index === chosen.index
+      ? { ...entry, quote: { line: chosen.utterance.line, speaker: chosen.utterance.speaker, occasion: chosen.utterance.occasion } }
+      : entry);
 }

@@ -160,14 +160,17 @@ describe("Punic Wars opening political map", () => {
     expect(PUNIC_WARS_CONTROL_MANIFEST.filter((record) => record.provinceId.startsWith("punic-britain-")).every((record) => record.confidence === "cautious")).toBe(true);
   });
 
-  it("assigns terrain by local geography and omits the Rhegium city marker", () => {
+  it("assigns terrain by local geography and marks Rhegium, which the Campanians hold", () => {
     const overlay = punicWarsOpeningOverlay(0);
     const terrain = new Map(overlay.provinces.map((province) => [province.provinceId, province.terrainId]));
     expect(terrain.get("lby-10800210b2800497533490")).toBe("desert-steppe");
     expect(terrain.get("punic-gaul-puy-de-dome")).toBe("hills-uplands");
     expect(terrain.get("punic-germania-erzgebirge")).toBe("mountain-pass");
     expect(terrain.get("punic-germania-cimbri")).toBe("coastal-plain");
-    expect(overlay.settlements.some((settlement) => settlement.settlementId === "settlement-rhegium" || settlement.name === "Rhegium")).toBe(false);
+    // Rhegium is a place the Republic can march on now that the Campanian
+    // mutineers hold it as their own power, so the map has to show it: a
+    // besiegeable town nobody can see is a town nobody will besiege.
+    expect(overlay.settlements.some((settlement) => settlement.settlementId === "settlement-rhegium" || settlement.name === "Rhegium")).toBe(true);
   });
 
   it("gives every reformed French, Iberian, Italian, Balkan, British, Greek, and Romanian territory one opening controller", () => {

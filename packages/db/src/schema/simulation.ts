@@ -109,11 +109,19 @@ export const chronicleCheckpoints = pgTable("chronicle_checkpoints", {
   toInstantSortKey: bigint("to_instant_sort_key", { mode: "number" }).notNull(),
   /** Where this entry sits among the entries one burst produced. */
   ordinal: integer("ordinal").notNull().default(0),
+  /** "narrated" was written by a historian; "recorded" was struck from the books. */
+  kind: text("kind").notNull().default("narrated"),
   title: text("title").notNull(),
   body: text("body").notNull(),
   factIds: jsonb("fact_ids").notNull().$type<unknown>().default(sql`'[]'::jsonb`),
   /** Who and what the entry is about, so the record can be read by subject. */
   subjects: jsonb("subjects").notNull().$type<unknown>().default(sql`'[]'::jsonb`),
+  /** The few of those worth printing on the entry's face. */
+  tags: jsonb("tags").notNull().$type<unknown>().default(sql`'[]'::jsonb`),
+  /** What moved on the map, among the things this entry is about. */
+  changes: jsonb("changes").notNull().$type<unknown>().default(sql`'[]'::jsonb`),
+  /** The one line of somebody's own voice, where the report had one. */
+  quote: jsonb("quote").$type<unknown>(),
   stopReason: text("stop_reason").notNull(),
   readAt: timestamp("read_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

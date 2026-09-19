@@ -601,6 +601,7 @@ const PUNIC_WARS_SETTLEMENTS: readonly HistoricalSettlement[] = [
   { id: "settlement-capua", name: "Capua", provinceId: "punic-italy-campanian-plain", type: "city", coordinate: [14.17, 41.03] },
   { id: "settlement-bovianum", name: "Bovianum", provinceId: "punic-italy-samnium", type: "fort", coordinate: [14.48, 41.56] },
   { id: "settlement-tarentum", name: "Tarentum", provinceId: "punic-italy-apulian-coast", type: "port", coordinate: [17.23, 40.47] },
+  { id: "settlement-rhegium", name: "Rhegium", provinceId: "punic-italy-bruttian-highlands", type: "port", coordinate: [15.65, 38.11] },
   { id: "settlement-massalia", name: "Massalia", provinceId: "punic-gaul-bouches-du-rhone", type: "port", coordinate: [5.37, 43.30] },
   { id: "settlement-bibracte", name: "Bibracte", provinceId: "punic-gaul-saone-et-loire", type: "fort", coordinate: [4.03, 46.92] },
   { id: "settlement-gergovia", name: "Gergovia", provinceId: "punic-gaul-puy-de-dome", type: "fort", coordinate: [3.13, 45.72] },
