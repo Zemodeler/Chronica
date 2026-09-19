@@ -523,3 +523,30 @@ describe("what makes two things one matter", () => {
     expect(result.entries).toHaveLength(3);
   });
 });
+
+describe("the engine's own bookkeeping", () => {
+  it("never shows the historian a breach, whoever committed it", async () => {
+    // "Fiscal Record Grants No Spending Power to the Declared Character" was a
+    // real headline, on a real entry, written from an audit line about grants
+    // and account ids. While one entry held the reader's whole side of the
+    // world it sank without trace; told matter by matter, it surfaced.
+    const port = capturingPort();
+    const breach = fact({
+      kind: "authority_breach",
+      summary: 'No active grant gave "declared-a4810007" the power to spend from account "gaius-purse".',
+      affectedEntities: [{ kind: "character", id: "marcus-atilius" }],
+      visibility: "private",
+      discovery: { state: "private", knowableAtInstant: null, discoveredBy: [{ observerRef: { kind: "character", id: "marcus-atilius" }, atInstant: { day: 0, minute: 0 }, via: "witnessed" }] },
+    });
+    const real = fact({ summary: "The consul marches for Campania.", affectedEntities: [{ kind: "polity", id: "rome" }] });
+
+    const result = await composeChronicle({
+      port, clock, observer: { kind: "character", id: "marcus-atilius" }, observerPolityId: "rome", facts: [breach, real],
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+    });
+
+    expect(port.lastUserMessage).not.toContain("gaius-purse");
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]!.factIds).toEqual([real.id]);
+  });
+});
