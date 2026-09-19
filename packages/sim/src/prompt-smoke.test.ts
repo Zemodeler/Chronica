@@ -19,9 +19,12 @@ describe("orchestrator prompt", () => {
     // then storylines and pressures, which buy a world that starts things of
     // its own and follows them; then the world outside the player's army --
     // letters between powers, war and treaty as things the world holds rather
-    // than infers, and a map an army has to actually cross.
+    // than infers, and a map an army has to actually cross; and now conquest
+    // itself, which no arm expressed at all -- a province could not change
+    // hands and a rising could not become a country, so a war could be fought
+    // for a generation and leave the map exactly as it began.
     console.log("system prompt chars:", ORCHESTRATOR_SYSTEM_PROMPT.length, "~tokens:", Math.round(ORCHESTRATOR_SYSTEM_PROMPT.length / 4));
-    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(54_000);
+    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(56_000);
   });
 });
 

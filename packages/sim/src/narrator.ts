@@ -198,14 +198,25 @@ const ARCHETYPES: readonly Archetype[] = [
   { kind: "world_event", name: "grain_fleet_lost", weight: 8, oneShot: true, secretTwelfths: 0,
     brief: (t, s) => `A storm off ${place(t)} has taken ${magnitude(s, "a few grain ships", "the season's grain convoy", "the grain fleet and the ships that guarded it")}. Move what it changes now -- "province_material_shift" on the province that was fed by it, "income_source_upsert" to cut a route that no longer arrives, "money_transfer" for cargo lost -- and record it as a public fact.` },
   { kind: "world_event", name: "revolt", weight: 8, oneShot: false, secretTwelfths: 0,
-    brief: (t, s) => `${place(t)} has risen against ${power(t)}: ${magnitude(s, "riots in the towns", "an armed rising with a leader", "open rebellion holding the countryside")}. Create the leader with "character_create" under the province's own people, a "force_create" if they are armed, shift the province with "province_material_shift", and record the rising as a public fact naming the province and its power.` },
+    brief: (t, s) => `${place(t)} has risen against ${power(t)}: ${magnitude(s, "riots in the towns", "an armed rising with a leader", "open rebellion holding the countryside")}. ${
+      s === "minor"
+        // Riots are not a country. A rising only becomes a power when it holds
+        // ground, and a rising that holds ground must hold it as itself: filed
+        // under the government being rebelled against, it had nobody to fight.
+        ? `Create the leader with "character_create" under the province's own people, shift the province with "province_material_shift", and record the rising as a public fact naming the province and its power.`
+        : `They hold ground, so they are a power: create them with "polity_create", breaking from ${power(t)} and taking ${place(t)}, and give them their leader with "character_create" under the new power and a "force_create" if they are armed. The war with ${power(t)} opens itself. Record the rising as a public fact naming the province and both powers.`
+    }` },
   { kind: "world_event", name: "omen", weight: 6, oneShot: true, secretTwelfths: 0,
     brief: (t, s) => `An omen has been seen at ${place(t)}: ${magnitude(s, "a sign the priests argue over", "a portent the whole city has heard of", "a prodigy that has the people in the temples")}. Decide what was seen and how it is read. Record it as a public fact; move whoever reads it with "belief_set", and the province's temper with "province_material_shift" if the city is shaken.` },
 
   { kind: "new_actor", name: "pirate_band", weight: 8, oneShot: false, secretTwelfths: 0,
-    brief: (t, s) => `A pirate squadron has appeared off ${place(t)}: ${magnitude(s, "a few hulls preying on coasters", "a fleet strong enough to close the strait", "a pirate king with a harbour of his own")}. Create their captain with "character_create" and their ships with "force_create" under ${power(t)} (the engine has no polity of their own yet), record their arrival as a public fact, and give them a "character_intent_set". Their arrival is news; their existence is not, and gets no fact of its own.` },
+    brief: (t, s) => `A pirate squadron has appeared off ${place(t)}: ${magnitude(s, "a few hulls preying on coasters", "a fleet strong enough to close the strait", "a pirate king with a harbour of his own")}. ${
+      s === "grave"
+        ? `A pirate king with a harbour is a power: create them with "polity_create" taking ${place(t)} from ${power(t)}, with their captain under it.`
+        : `Create their captain with "character_create" and their ships with "force_create" under ${power(t)} -- raiders who hold no ground are not a country.`
+    } Record their arrival as a public fact, and give them a "character_intent_set". Their arrival is news; their existence is not, and gets no fact of its own.` },
   { kind: "new_actor", name: "pretender", weight: 6, oneShot: false, secretTwelfths: 7,
-    brief: (t, s) => `A claimant has appeared in ${place(t)}: ${magnitude(s, "an exile with a grievance and a few followers", "a pretender with money behind him", "a rival for the rule of the whole power")}. Create them with "character_create" under ${power(t)}, record their appearance as a fact, and plant what they mean to do with "character_intent_set". Their arrival is news; their existence is not.` },
+    brief: (t, s) => `A claimant has appeared in ${place(t)}: ${magnitude(s, "an exile with a grievance and a few followers", "a pretender with money behind him", "a rival for the rule of the whole power")}. Create them with "character_create" under ${power(t)} -- a claimant wants the power that exists, not a new one, so do not found a country for them -- record their appearance as a fact, and plant what they mean to do with "character_intent_set". Their arrival is news; their existence is not.` },
   { kind: "new_actor", name: "cult", weight: 6, oneShot: false, secretTwelfths: 7,
     brief: (t, s) => `A prophet is drawing crowds in ${place(t)}: ${magnitude(s, "a preacher the magistrates are watching", "a movement with followers in every town", "a faith that answers to nobody but its leader")}. Create the leader with "character_create" under ${power(t)} and the movement with "generic_entity_create" (kind "faction"), record the stir as a fact, and plant what they mean to do with "character_intent_set".` },
 ];

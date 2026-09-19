@@ -123,6 +123,11 @@ export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = 
   holding_transfer: "punish",
   diplomatic_message_send: "negotiate",
   diplomatic_message_answer: "negotiate",
+  // Taking ground is a command. Founding a power is not an office's to do at
+  // all, and an office that listed it would derive nothing -- so it derives the
+  // highest power there is, and an office that has not been given it breaches.
+  province_control_set: "command",
+  polity_create: "override",
   agreement_open: "negotiate",
   agreement_close: "negotiate",
 };

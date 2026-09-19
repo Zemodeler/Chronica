@@ -4,6 +4,7 @@ import {
   agreementsBetween,
   atWar,
   expireDatedAgreements,
+  hopsBetween,
   isNavalForce,
   nextDueMilestone,
   type FactProposalDraft,
@@ -408,6 +409,11 @@ export function runDeterministicTick(input: TickInput): TickResult {
       if (!input.world.map.provinces.some((province) => province.id === provinceId)) return null;
       const marching = movedForces.get(forceId) ?? input.world.material.forces.find((force) => force.id === forceId);
       if (marching === undefined) return null;
+      // `force_modify` has been made to respect the map; this was the way
+      // around it. A march is allowed to cross several provinces -- that is what
+      // makes it a project -- but there has to be a way across them, or a
+      // scheduled march put an army anywhere on the map in one step.
+      if (hopsBetween(input.world, marching.locationId, provinceId) === null) return null;
       movedForces.set(forceId, { ...marching, locationId: provinceId, positionId: null });
       return { entityId: forceId, summary: `${marching.name} [${forceId}] has arrived in ${provinceId}.` };
     }

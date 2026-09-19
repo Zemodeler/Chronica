@@ -534,6 +534,64 @@ const StorylineOpenSchema = z.object({
   reason: ReasonSchema,
 }).strict();
 
+
+/**
+ * A province changing hands (Pax-Historia-style contiguity, refined).
+ *
+ * Nothing in this engine has ever transferred a province. The battle resolver's
+ * only control change reduces the defender's *firmness* and hands the province
+ * straight back to whoever already held it, so a war could be fought for a
+ * generation and the map would end exactly as it began. Conquest was prose.
+ *
+ * The rule the engine checks is reach, not land contiguity. "A polity cannot
+ * own a region not adjacent to one of its own" is the blunt version, and taken
+ * literally it forbids Rome holding Sicily -- which is the entire scenario. So
+ * a taker needs either an army standing in the province, or a province of their
+ * own next to it across a crossing the map admits. A sea lane is a crossing;
+ * that is exactly how an island is taken, and exactly why the far side of the
+ * world is not.
+ *
+ * Control taken is not control held. The province arrives at low firmness, and
+ * the people in it are free to make that everyone's problem.
+ */
+const ProvinceControlSetSchema = z.object({
+  op: z.literal("province_control_set"),
+  provinceId: EntityIdSchema,
+  /** Who holds it now. A polity that exists, or one created in this same answer. */
+  toPolityRef: RefSchema,
+  /** How firmly, in basis points. Low for ground just taken; high for a province ceded by treaty. */
+  firmnessBps: z.number().int().min(0).max(10_000).default(2_500),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * A new power on the map (VISION §9's dynamically created mechanics, applied to
+ * the largest thing there is).
+ *
+ * Deferred when the narrator was built, and its absence shaped everything
+ * around it: a rising is seeded, a leader is created, an army is raised -- and
+ * all of it is filed under the very government being rebelled against, because
+ * there was nowhere else to put it. A pretender was a Roman. Pirates answered
+ * to the province they preyed on.
+ *
+ * The provinces it takes must be held by the power it breaks from and must hang
+ * together: a rebellion is a piece of a country coming away, not a scatter of
+ * unconnected towns. And it starts at war with the power it left, because a
+ * secession nobody contests is an administrative reform.
+ */
+const PolityCreateSchema = z.object({
+  op: z.literal("polity_create"),
+  localId: LocalIdSchema,
+  name: z.string().trim().min(1).max(120),
+  /** The power it is breaking from, when it is breaking from one. Null for a power that was always there. */
+  breaksFromPolityId: EntityIdSchema.nullable().default(null),
+  /** What it holds at birth. Each must be controlled by `breaksFromPolityId` and connected to the rest. */
+  provinceIds: z.array(EntityIdSchema).min(1).max(12),
+  capitalSettlementId: EntityIdSchema.nullable().default(null),
+  /** Why it exists, in the record's words. */
+  reason: ReasonSchema,
+}).strict();
+
 const StorylineAdvanceSchema = z.object({
   op: z.literal("storyline_advance"),
   storylineRef: RefSchema,
@@ -684,6 +742,8 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   DiplomaticMessageAnswerSchema,
   AgreementOpenSchema,
   AgreementCloseSchema,
+  ProvinceControlSetSchema,
+  PolityCreateSchema,
 ]);
 export type WorldDelta = z.infer<typeof WorldDeltaSchema>;
 export type WorldDeltaOp = WorldDelta["op"];
@@ -723,6 +783,8 @@ export const WORLD_DELTA_OPS = [
   "diplomatic_message_answer",
   "agreement_open",
   "agreement_close",
+  "province_control_set",
+  "polity_create",
 ] as const satisfies readonly WorldDeltaOp[];
 
 /**
@@ -765,4 +827,7 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   diplomatic_message_answer: "diplomatic",
   agreement_open: "diplomatic",
   agreement_close: "diplomatic",
+  // Taking ground is a military act; founding a power is not anyone's office.
+  province_control_set: "military",
+  polity_create: "civil",
 };

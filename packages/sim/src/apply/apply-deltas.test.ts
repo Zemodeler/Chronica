@@ -1204,3 +1204,155 @@ describe("crossing water", () => {
     expect(result.rejected[0]!.reason).toContain("same element");
   });
 });
+
+describe("ground changing hands", () => {
+  /** A province held by someone, and one of its neighbours. */
+  function frontier(state: WorldState): { held: string; next: string; holder: string } | null {
+    for (const edge of state.map.edges) {
+      const from = state.map.provinces.find((province) => province.id === edge.from);
+      const to = state.map.provinces.find((province) => province.id === edge.to);
+      if (from === undefined || to === undefined) continue;
+      if (from.controllerPolityId === null || from.controllerPolityId === to.controllerPolityId) continue;
+      return { held: from.id, next: to.id, holder: from.controllerPolityId };
+    }
+    return null;
+  }
+
+  it("lets a power take ground next to ground it already holds", () => {
+    const before = world();
+    const border = frontier(before);
+    if (border === null) return;
+    const result = applyDeltas(
+      before,
+      [{ op: "province_control_set", provinceId: border.next, toPolityRef: border.holder, firmnessBps: 2_000, reason: "Taken in the campaign." }],
+      context(),
+    );
+    expect(result.rejected).toHaveLength(0);
+    const taken = result.world.map.provinces.find((province) => province.id === border.next)!;
+    expect(taken.controllerPolityId).toBe(border.holder);
+    // Control taken is not control held.
+    expect(taken.controlFirmnessBps).toBe(2_000);
+  });
+
+  it("refuses ground on the far side of the world as friction, not as an error", () => {
+    // "A polity cannot own a region not adjacent to its own" is the blunt rule,
+    // and taken literally it forbids Rome holding Sicily. The test is reach:
+    // an army standing there, or ground of your own next to it.
+    const before = world();
+    const roman = new Set(before.map.provinces.filter((province) => province.controllerPolityId === "rome").map((province) => province.id));
+    const neighbours = new Set(
+      before.map.edges.flatMap((edge) => (roman.has(edge.from) ? [edge.to] : roman.has(edge.to) ? [edge.from] : [])),
+    );
+    const distant = before.map.provinces.find(
+      (province) => !roman.has(province.id) && !neighbours.has(province.id) && !before.material.forces.some((force) => force.polityId === "rome" && force.locationId === province.id),
+    );
+    if (distant === undefined) return;
+
+    const result = applyDeltas(
+      before,
+      [{ op: "province_control_set", provinceId: distant.id, toPolityRef: "rome", firmnessBps: 5_000, reason: "Annexed." }],
+      context(),
+    );
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.kind).toBe("world");
+    expect(result.world.map.provinces.find((province) => province.id === distant.id)!.controllerPolityId).toBe(distant.controllerPolityId);
+  });
+
+  it("lets an army standing on the ground take it, wherever the ground is", () => {
+    const before = world();
+    const force = before.material.forces[0]!;
+    const province = before.map.provinces.find((candidate) => candidate.id === force.locationId)!;
+    if (province.controllerPolityId === force.polityId) return;
+    const result = applyDeltas(
+      before,
+      [{ op: "province_control_set", provinceId: province.id, toPolityRef: force.polityId, firmnessBps: 1_500, reason: "The army holds the ground." }],
+      context(),
+    );
+    expect(result.rejected).toHaveLength(0);
+    expect(result.world.map.provinces.find((candidate) => candidate.id === province.id)!.controllerPolityId).toBe(force.polityId);
+  });
+});
+
+describe("a new power on the map", () => {
+  const romanProvinces = (state: WorldState) => state.map.provinces.filter((province) => province.controllerPolityId === "rome");
+
+  it("gives a rising its own country, its own ground, and a war with what it left", () => {
+    const before = world();
+    const breaking = romanProvinces(before)[0];
+    if (breaking === undefined) return;
+
+    const result = applyDeltas(
+      before,
+      [{
+        op: "polity_create",
+        localId: "rebels",
+        name: "Campanian Liberation Host",
+        breaksFromPolityId: "rome",
+        provinceIds: [breaking.id],
+        capitalSettlementId: null,
+        reason: "The Campanians rise.",
+      }],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    const created = result.world.map.polities.find((polity) => polity.name === "Campanian Liberation Host")!;
+    expect(created).toBeDefined();
+    // No land is left unowned: the ground goes with them, held loosely.
+    const ground = result.world.map.provinces.find((province) => province.id === breaking.id)!;
+    expect(ground.controllerPolityId).toBe(created.id);
+    expect(ground.controlFirmnessBps).toBeLessThan(before.map.provinces.find((province) => province.id === breaking.id)!.controlFirmnessBps + 1);
+    // A secession nobody contests is an administrative reform.
+    expect(result.world.polityAgreements.some(
+      (agreement) => agreement.kind === "war" && agreement.status === "active"
+        && ((agreement.polityId === "rome" && agreement.otherPolityId === created.id) || (agreement.polityId === created.id && agreement.otherPolityId === "rome")),
+    )).toBe(true);
+  });
+
+  it("refuses ground the power it breaks from does not hold", () => {
+    const before = world();
+    const foreign = before.map.provinces.find((province) => province.controllerPolityId !== null && province.controllerPolityId !== "rome");
+    if (foreign === undefined) return;
+    const result = applyDeltas(
+      before,
+      [{ op: "polity_create", localId: "rebels", name: "The Free Cities", breaksFromPolityId: "rome", provinceIds: [foreign.id], capitalSettlementId: null, reason: "A rising." }],
+      context(),
+    );
+    expect(result.rejected).toHaveLength(1);
+    expect(result.world.map.polities.some((polity) => polity.name === "The Free Cities")).toBe(false);
+  });
+
+  it("refuses a country made of unconnected scraps", () => {
+    // A rebellion is a piece of a country coming away, not a scatter of towns.
+    const before = world();
+    const roman = romanProvinces(before);
+    if (roman.length < 2) return;
+    const first = roman[0]!;
+    const apart = roman.find((province) => !before.map.edges.some(
+      (edge) => (edge.from === first.id && edge.to === province.id) || (edge.to === first.id && edge.from === province.id),
+    ) && province.id !== first.id);
+    if (apart === undefined) return;
+
+    const result = applyDeltas(
+      before,
+      [{ op: "polity_create", localId: "rebels", name: "The Scattered League", breaksFromPolityId: "rome", provinceIds: [first.id, apart.id], capitalSettlementId: null, reason: "A rising." }],
+      context(),
+    );
+    expect(result.rejected).toHaveLength(1);
+    expect(result.world.map.polities.some((polity) => polity.name === "The Scattered League")).toBe(false);
+  });
+
+  it("does not record a country coming apart as the ruler's own insubordination", () => {
+    // The seventh way this check has found to manufacture insubordination out
+    // of the world simply moving.
+    const before = world();
+    const breaking = romanProvinces(before)[0];
+    if (breaking === undefined) return;
+    const result = applyDeltas(
+      before,
+      [{ op: "polity_create", localId: "rebels", name: "Campanian Liberation Host", breaksFromPolityId: "rome", provinceIds: [breaking.id], capitalSettlementId: null, reason: "The Campanians rise." }],
+      context({ actsForTheWorld: true }),
+    );
+    expect(result.breaches).toHaveLength(0);
+  });
+});
