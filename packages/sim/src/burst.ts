@@ -516,6 +516,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const slice = buildWorldSlice({
     world,
     clock: input.clock,
+    offices: input.offices,
     actorRef: input.actorRef,
     actorPolityId: input.actorPolityId,
     orderText: input.orderText,

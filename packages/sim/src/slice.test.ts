@@ -3,13 +3,16 @@ import { punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, type ScenarioClock, type WorldState } from "@chronica/shared";
 import { buildWorldSlice, renderWorldSlice } from "./slice";
 
-const clock: ScenarioClock = ScenarioDefinitionSchema.parse(punicWarsScenario.definition).clock;
+const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
+const clock: ScenarioClock = definition.clock;
+const offices = definition.government.offices;
 const world = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
 
 const slice = (state: WorldState = world()) =>
   buildWorldSlice({
     world: state,
     clock,
+    offices,
     actorRef: { kind: "character", id: state.characters[0]!.id },
     actorPolityId: "rome",
     orderText: "Invade the Boii lands",
@@ -52,7 +55,13 @@ describe("what the player's government can see of the world", () => {
     const text = renderWorldSlice(slice());
     // Roughly four characters to the token: the slice must not grow into the
     // thing that makes every order expensive.
-    expect(text.length).toBeLessThan(12_000);
+    //
+    // Moved 12k -> 13k for the acting person's own portrait: the world knew a
+    // minor Carthaginian admiral's temperament, drives and fears, and knew of
+    // the person whose order it was answering only a name and an opaque office
+    // id. This should come back down once the sections are read by station --
+    // a private citizen's slice ought to be markedly shorter than today's.
+    expect(text.length).toBeLessThan(13_000);
   });
 });
 
@@ -293,7 +302,7 @@ describe("what the world is following, and what stirs", () => {
     expect(quiet).not.toContain("THE WORLD STIRS");
     const stirred = renderWorldSlice(
       buildWorldSlice({
-        world: state, clock, actorRef: { kind: "character", id: state.characters[0]!.id }, actorPolityId: "rome",
+        world: state, clock, offices, actorRef: { kind: "character", id: state.characters[0]!.id }, actorPolityId: "rome",
         orderText: "Invade the Boii lands", facts: [], dueEvents: [], pendingEvents: [],
         narratorSeed: {
           key: "seed-abc", kind: "world_event", archetype: "plague", severity: "serious", secret: false, oneShot: false, repeated: false, pressureId: null,
@@ -312,7 +321,7 @@ describe("what the world is following, and what stirs", () => {
     const state = world();
     const text = renderWorldSlice(
       buildWorldSlice({
-        world: state, clock, actorRef: { kind: "character", id: state.characters[0]!.id }, actorPolityId: "rome", orderText: "Wait.",
+        world: state, clock, offices, actorRef: { kind: "character", id: state.characters[0]!.id }, actorPolityId: "rome", orderText: "Wait.",
         facts: [{
           id: "fact-known", time: { day: 0, minute: 0 }, atStep: 0, kind: "event", summary: "Rome hears of the Boii.", affectedEntities: [], resourceChanges: [],
           authorityChange: undefined, visibility: "public", discovery: { state: "public", knowableAtInstant: null, discoveredBy: [] }, evidence: null,
@@ -323,5 +332,69 @@ describe("what the world is following, and what stirs", () => {
     );
     expect(text).toContain("Rome hears of the Boii. [fact-known]");
     expect(text).toContain("(thread: The Plague [plague-1])");
+  });
+});
+
+describe("who the world is told it is speaking for", () => {
+  /** Somebody of the same polity holding no office and no command. */
+  function privateCitizen(state: WorldState, polityId: string): string | null {
+    const seated = new Set(state.material.officeSeats.filter((seat) => seat.status === "held").map((seat) => seat.holderCharacterId));
+    const commanders = new Set(state.material.forces.flatMap((force) => [force.commanderCharacterId, force.controllerCharacterId]));
+    return state.characters.find(
+      (character) => character.alive && character.polityId === polityId && character.officeId === null && !seated.has(character.id) && !commanders.has(character.id),
+    )?.id ?? null;
+  }
+
+  const forCharacter = (state: WorldState, characterId: string) =>
+    renderWorldSlice(buildWorldSlice({
+      world: state, clock, offices, actorRef: { kind: "character", id: characterId }, actorPolityId: "rome",
+      orderText: "What is happening?", facts: [], dueEvents: [], pendingEvents: [],
+    }));
+
+  it("names the office a person holds, rather than handing over its id", () => {
+    const state = world();
+    const seat = state.material.officeSeats.find((candidate) => candidate.status === "held" && candidate.holderCharacterId !== null);
+    if (seat === undefined) return;
+    const office = offices.find((candidate) => candidate.id === seat.officeId);
+    if (office === undefined) return;
+
+    const text = forCharacter(state, seat.holderCharacterId!);
+    // "roman-consul" is not a thing a person is called.
+    expect(text).toContain(office.label);
+  });
+
+  it("tells the world what the person it is speaking for is like", () => {
+    // The world knew a minor Carthaginian admiral's temperament, drives and
+    // fears, and knew of the person whose order it was answering only a name.
+    const state = world();
+    const commander = state.material.forces[0]!.commanderCharacterId;
+    const text = forCharacter(state, commander);
+    expect(text).toContain(`## ${state.characters.find((c) => c.id === commander)!.name}`);
+    expect(text).toContain("WHAT THIS PERSON MAY DO:");
+  });
+
+  it("tells it what they may do, and that people outside it may refuse", () => {
+    const state = world();
+    const force = state.material.forces[0]!;
+    const text = forCharacter(state, force.commanderCharacterId);
+    expect(text).toContain(force.name);
+    expect(text).toContain("may refuse");
+  });
+
+  it("does not tell it a private citizen commands anything", () => {
+    const state = world();
+    const citizenId = privateCitizen(state, "rome");
+    if (citizenId === null) return;
+
+    const citizen = forCharacter(state, citizenId);
+    const consulSeat = state.material.officeSeats.find((seat) => seat.status === "held" && seat.holderCharacterId !== null);
+    if (consulSeat === null || consulSeat === undefined) return;
+    const consul = forCharacter(state, consulSeat.holderCharacterId!);
+
+    const permitted = (text: string): string =>
+      text.slice(text.indexOf("WHAT THIS PERSON MAY DO:"), text.indexOf("Nothing beyond this is theirs"));
+    // The consul's permissions run over his republic; the citizen's over his purse.
+    expect(permitted(consul).length).toBeGreaterThan(permitted(citizen).length);
+    expect(permitted(citizen)).not.toContain("military matters");
   });
 });

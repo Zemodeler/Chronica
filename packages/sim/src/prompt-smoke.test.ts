@@ -30,12 +30,15 @@ describe("orchestrator prompt", () => {
 
 describe("the world slice", () => {
   it("stays small enough to send with every order", () => {
-    const clock = ScenarioDefinitionSchema.parse(punicWarsScenario.definition).clock;
+    const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
+    const clock = definition.clock;
+    const offices = definition.government.offices;
     const world: WorldState = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
     const text = renderWorldSlice(
       buildWorldSlice({
         world,
         clock,
+        offices,
         actorRef: { kind: "character", id: world.characters[0]!.id },
         actorPolityId: "rome",
         orderText: "Invade the Boii lands",
