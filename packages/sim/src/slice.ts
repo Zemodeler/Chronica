@@ -3,6 +3,7 @@ import type { NarratorSeed } from "./narrator";
 import {
   currentAgeYears,
   factsKnownTo,
+  cohesionInWords,
   formatWorldDate,
   openStorylines,
   type Fact,
@@ -202,7 +203,7 @@ export interface WorldSlice {
    * us is not, and doing so left the orchestrator inventing placeholders for
    * enemies it could not see.
    */
-  readonly foreignPowers: readonly { readonly id: string; readonly name: string; readonly provinces: number; readonly leaders: readonly string[]; readonly forces: readonly string[] }[];
+  readonly foreignPowers: readonly { readonly id: string; readonly name: string; readonly provinces: number; readonly cohesion: string; readonly leaders: readonly string[]; readonly forces: readonly string[] }[];
   /** Countries holding land with nobody to speak or fight for them (VISION §5). */
   readonly populationGaps: readonly { readonly polityId: string; readonly name: string; readonly needsLeader: boolean; readonly needsForce: boolean; readonly provinceIds: readonly string[]; readonly why: string }[];
   readonly projects: readonly { readonly id: string; readonly label: string; readonly status: string; readonly nextMilestone: { readonly id: string; readonly label: string } | null }[];
@@ -622,6 +623,9 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       id: polity.id,
       name: polity.name,
       provinces: provinceCountByPolity.get(polity.id) ?? 0,
+      // Whether there is anybody who can answer for the whole of it. An
+      // agreement struck with one Boii chieftain binds the chieftain.
+      cohesion: cohesionInWords(polity.cohesionBps),
       leaders: world.characters
         .filter((character) => character.alive && character.polityId === polity.id)
         .slice(0, 4)
@@ -766,7 +770,7 @@ export function renderWorldSlice(slice: WorldSlice): string {
   section("OTHER POWERS", slice.foreignPowers.map((power) => {
     const people = power.leaders.length === 0 ? "nobody known to lead them" : power.leaders.join("; ");
     const arms = power.forces.length === 0 ? "no forces known in the field" : power.forces.join("; ");
-    return `${power.name} [${power.id}] — ${power.provinces} province(s). ${people}. ${arms}`;
+    return `${power.name} [${power.id}] — ${power.provinces} province(s), ${power.cohesion}. ${people}. ${arms}`;
   }));
   if (slice.populationGaps.length > 0) {
     lines.push(

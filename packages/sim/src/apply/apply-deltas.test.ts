@@ -1356,3 +1356,50 @@ describe("a new power on the map", () => {
     expect(result.breaches).toHaveLength(0);
   });
 });
+
+describe("how tightly a power is held together", () => {
+  it("never lets ground taken from a loose people be held firmly", () => {
+    // "Tribes fiercely resist being conquered", as the number the rest of the
+    // engine already reads. A conqueror who beats the Boii has beaten the Boii
+    // he met; the rest of them do not know they are conquered.
+    const before = world();
+    const loose: WorldState = {
+      ...before,
+      map: {
+        ...before.map,
+        polities: before.map.polities.map((polity) => (polity.id === "carthage" ? { ...polity, cohesionBps: 2_500 } : polity)),
+      },
+    };
+    const punic = loose.map.provinces.find((province) => province.controllerPolityId === "carthage");
+    if (punic === undefined) return;
+    const force = loose.material.forces.find((candidate) => candidate.polityId !== "carthage");
+    if (force === undefined) return;
+    const withArmy: WorldState = {
+      ...loose,
+      material: { ...loose.material, forces: loose.material.forces.map((candidate) => (candidate.id === force.id ? { ...candidate, locationId: punic.id } : candidate)) },
+    };
+
+    const result = applyDeltas(
+      withArmy,
+      [{ op: "province_control_set", provinceId: punic.id, toPolityRef: force.polityId, firmnessBps: 9_000, reason: "Stormed." }],
+      context(),
+    );
+    expect(result.rejected).toHaveLength(0);
+    // Asked for 9 000 and granted the loser's own cohesion instead.
+    expect(result.world.map.provinces.find((province) => province.id === punic.id)!.controlFirmnessBps).toBe(2_500);
+  });
+
+  it("gives a rising a looser grip than the power it broke from", () => {
+    const before = world();
+    const breaking = before.map.provinces.find((province) => province.controllerPolityId === "rome");
+    if (breaking === undefined) return;
+    const result = applyDeltas(
+      before,
+      [{ op: "polity_create", localId: "rebels", name: "The Latin Revolt", breaksFromPolityId: "rome", provinceIds: [breaking.id], capitalSettlementId: null, reason: "A rising." }],
+      context(),
+    );
+    const created = result.world.map.polities.find((polity) => polity.name === "The Latin Revolt")!;
+    const rome = before.map.polities.find((polity) => polity.id === "rome")!;
+    expect(created.cohesionBps).toBeLessThan(rome.cohesionBps);
+  });
+});

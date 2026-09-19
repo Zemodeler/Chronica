@@ -1,7 +1,9 @@
 import { z } from "zod";
 import {
   CognitionOutputSchema,
+  LOOSE_COHESION_BPS,
   TRAIT_REGISTRY,
+  cohesionInWords,
   deriveRelationDimension,
   formatWorldDate,
   openStorylines,
@@ -305,6 +307,18 @@ function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock
     lines.push(...describeTraits(character));
     lines.push(...describeMind(character));
     lines.push(...describeMeans(character, world));
+
+    // What they can actually speak for. A chieftain of a people who never had a
+    // centre does not answer for the people; he answers for his own ground and
+    // the men who follow him, and a treaty he signs binds him. Told nothing, he
+    // answered as though he were a foreign ministry.
+    const power = world.map.polities.find((polity) => polity.id === character.polityId);
+    if (power !== undefined && power.cohesionBps < LOOSE_COHESION_BPS) {
+      const home = world.map.provinces.find((province) => province.id === character.locationProvinceId);
+      lines.push(
+        `${power.name} ${cohesionInWords(power.cohesionBps)}. They speak for ${home === undefined ? "their own people" : `${home.name} [${home.id}] and the men who follow them`}, not for the whole of it: what they agree to binds them, and the rest of ${power.name} may do otherwise.`,
+      );
+    }
 
     // Their own government's aims, never a foreign power's. A rival's outlook is
     // what espionage exists to win; handing it over here would make the world
