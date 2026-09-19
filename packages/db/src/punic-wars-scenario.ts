@@ -238,6 +238,39 @@ const authoredProvinceIds = new Set(authoredProvinces.map((province) => province
 const authoredEdgeKeys = new Set(authoredEdges.map((edge) => edgeKey(edge.from, edge.to)));
 const authoredPolityIds = new Set<string>(["rome", "carthage", "syracuse", "mamertines", ...italianPolities.map(([id]) => id)]);
 
+/**
+ * How far each power on this map acts as one thing.
+ *
+ * Everything here was modelled identically -- a polity with a capital and a
+ * foreign policy -- so the Boii behaved like a republic with a chancellery and
+ * a treaty struck with one Ligurian bound every Ligurian. Most of these names
+ * are peoples, not states: they are one word on a map covering communities who
+ * never agreed to be covered by it.
+ *
+ * Roughly: a city-state or republic whose centre plainly speaks for it is high;
+ * a kingdom held by a person is a little lower, because it is only as united as
+ * the man holding it; a confederation is halfway; a people who left no central
+ * institution at all is low, and the engine will treat each of its provinces as
+ * answering for itself.
+ */
+const COHESION_BY_POLITY: Readonly<Record<string, number>> = {
+  rome: 8_500,
+  carthage: 8_000,
+  syracuse: 7_500,
+  mamertines: 6_000,
+  "rhegium-campanians": 6_000,
+  "etruscan-cities": 4_000,
+  veneti: 3_500,
+  cenomani: 3_000,
+  insubres: 3_000,
+  boii: 3_000,
+  ligurians: 2_200,
+};
+
+/** Peoples the map names but nobody ever organised: loose unless said otherwise. */
+const DEFAULT_COHESION = 3_000;
+const cohesionFor = (polityId: string): number => COHESION_BY_POLITY[polityId] ?? DEFAULT_COHESION;
+
 const graphSettlementsByProvince = new Map<string, { id: string; name: string; kind: string; provinceId: string; controllerPolityId: string; size: number; fortificationLevel: number }[]>();
 for (const settlement of PUNIC_WARS_GRAPH_SETTLEMENTS) {
   // Authored provinces bring their own settlements; taking the graph's copy too
@@ -250,23 +283,23 @@ for (const settlement of PUNIC_WARS_GRAPH_SETTLEMENTS) {
 
 const initialWorld: WorldState = WorldStateSchema.parse({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 21, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 22, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   map: {
     polities: [
-      { id: "rome", name: "Roman Republic", capitalSettlementId: "settlement-rome" },
-      { id: "carthage", name: "Carthage", capitalSettlementId: "settlement-carthage" },
-      { id: "syracuse", name: "Kingdom of Syracuse", capitalSettlementId: "settlement-syracuse" },
-      { id: "mamertines", name: "Mamertines of Messana", capitalSettlementId: "settlement-messana" },
+      { id: "rome", name: "Roman Republic", capitalSettlementId: "settlement-rome", cohesionBps: cohesionFor("rome") },
+      { id: "carthage", name: "Carthage", capitalSettlementId: "settlement-carthage", cohesionBps: cohesionFor("carthage") },
+      { id: "syracuse", name: "Kingdom of Syracuse", capitalSettlementId: "settlement-syracuse", cohesionBps: cohesionFor("syracuse") },
+      { id: "mamertines", name: "Mamertines of Messana", capitalSettlementId: "settlement-messana", cohesionBps: cohesionFor("mamertines") },
       // The Campanian legion sent to garrison Rhegium killed the citizens and
       // kept the city -- the same thing the Mamertines did at Messana, in the
       // same decade. Filing them under Rome made the Republic unable to attack
       // them at all: two forces of one power will not fight each other, so the
       // assault on Rhegium was refused by the engine and the siege could never
       // end. They are what they actually were: a power holding a city.
-      { id: "rhegium-campanians", name: "Campanian legion of Rhegium", capitalSettlementId: "settlement-rhegium" },
-      ...italianPolities.map(([id, name]) => ({ id, name, capitalSettlementId: null })),
+      { id: "rhegium-campanians", name: "Campanian legion of Rhegium", capitalSettlementId: "settlement-rhegium", cohesionBps: cohesionFor("rhegium-campanians") },
+      ...italianPolities.map(([id, name]) => ({ id, name, capitalSettlementId: null, cohesionBps: cohesionFor(id) })),
       // Everyone else who holds ground on this map: the Gaulish and Iberian
       // peoples, the Britons, the Germanic and Illyrian and Thracian
       // communities, the Greek leagues and cities, Macedon, Epirus, the
@@ -275,7 +308,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       // the simulation could see, name, or answer them.
       ...PUNIC_WARS_GRAPH_POLITIES
         .filter((polity) => !authoredPolityIds.has(polity.polityId))
-        .map((polity) => ({ id: polity.polityId, name: polity.name, capitalSettlementId: polity.capitalSettlementId })),
+        .map((polity) => ({ id: polity.polityId, name: polity.name, capitalSettlementId: polity.capitalSettlementId, cohesionBps: cohesionFor(polity.polityId) })),
     ],
     politicalRelations: [],
     provinces: [

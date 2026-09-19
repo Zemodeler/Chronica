@@ -1441,13 +1441,23 @@ function applyOne(
         reject(`${takerId} has no army in ${province.name} and holds no ground next to it, so it cannot take the province.`);
       }
 
+      // Ground taken from a people who never answered to a centre is not held
+      // by taking their centre. A conqueror who beats the Boii has beaten the
+      // Boii he met; the rest of them have not been beaten and do not know they
+      // are conquered. So the looser the power that lost it, the looser the
+      // grip on it -- which is Pax Historia's "tribes fiercely resist being
+      // conquered" expressed as the number the rest of the engine already reads.
+      const loser = world.map.polities.find((polity) => polity.id === province.controllerPolityId);
+      const ceiling = loser === undefined ? 10_000 : Math.max(1_000, loser.cohesionBps);
+      const firmness = Math.min(delta.firmnessBps, ceiling);
+
       return {
         ...world,
         map: {
           ...world.map,
           provinces: world.map.provinces.map((candidate) =>
             candidate.id === province.id
-              ? { ...candidate, controllerPolityId: takerId, controlFirmnessBps: delta.firmnessBps }
+              ? { ...candidate, controllerPolityId: takerId, controlFirmnessBps: firmness }
               : candidate),
         },
       };
@@ -1459,7 +1469,8 @@ function applyOne(
         reject(`A power called "${delta.name}" already exists.`);
       }
       const parentId = delta.breaksFromPolityId;
-      if (parentId !== null && !world.map.polities.some((polity) => polity.id === parentId)) {
+      const parent = parentId === null ? undefined : world.map.polities.find((polity) => polity.id === parentId);
+      if (parentId !== null && parent === undefined) {
         reject(`No power "${parentId}" exists to break away from.`, "reference");
       }
 
@@ -1517,7 +1528,13 @@ function applyOne(
         ...world,
         map: {
           ...world.map,
-          polities: [...world.map.polities, { id, name: delta.name, capitalSettlementId }],
+          polities: [
+            ...world.map.polities,
+            // A rising holds together by the thing that made it rise, and not
+            // much else. It is never tighter than what it broke from, and
+            // usually looser: nobody has yet built it a centre.
+            { id, name: delta.name, capitalSettlementId, cohesionBps: Math.min(4_000, parent?.cohesionBps ?? 4_000) },
+          ],
           provinces: world.map.provinces.map((province) =>
             wanted.has(province.id)
               // Ground held by a rising is held loosely, whoever ends up with it.

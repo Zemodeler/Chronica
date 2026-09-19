@@ -1,4 +1,5 @@
 import {
+  LOOSE_COHESION_BPS,
   openStorylines,
   stableChoice,
   stableHash,
@@ -287,6 +288,8 @@ function chooseProvince(input: NarratorInput, tension: TensionReading, seedCount
     ? new Set(findPolityGaps({ world, ownPolityId: input.ownPolityId, facts: input.facts, limit: 2 }).map((gap) => gap.polityId))
     : new Set<string>();
 
+  const cohesionOf = new Map(world.map.polities.map((polity) => [polity.id, polity.cohesionBps]));
+
   const candidates = world.map.provinces
     .filter((province) => (!requireController || province.controllerPolityId !== null) && !(province.controllerPolityId !== null && filling.has(province.controllerPolityId)))
     .filter((province) => (province.controllerPolityId === input.ownPolityId) === home);
@@ -296,6 +299,11 @@ function chooseProvince(input: NarratorInput, tension: TensionReading, seedCount
       if (!busy.has(province.id) && (province.controllerPolityId === null || !busy.has(province.controllerPolityId))) score += 3;
       if (!garrisoned.has(province.id)) score += 1;
       if (province.controllerPolityId !== null && atWar.has(province.controllerPolityId)) score -= 3;
+      // Trouble finds the ground nobody is holding down. A province of a power
+      // whose centre does not speak for it is where a rising, a warlord or a
+      // prophet has the least standing in its way.
+      const cohesion = province.controllerPolityId === null ? 0 : cohesionOf.get(province.controllerPolityId) ?? 10_000;
+      if (cohesion < LOOSE_COHESION_BPS) score += 2;
       return { province, score };
     })
     .sort((a, b) => b.score - a.score || a.province.id.localeCompare(b.province.id));

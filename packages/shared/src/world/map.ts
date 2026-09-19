@@ -138,9 +138,39 @@ export const PolitySchema = z
     id: EntityIdSchema,
     name: z.string().trim().min(1).max(120),
     capitalSettlementId: EntityIdSchema.nullable(),
+    /**
+     * How far this power acts as one thing.
+     *
+     * Rome answers as a state: one Senate decides and the provinces follow. The
+     * Boii answer as forty chieftains who happen to share a name, and an
+     * agreement struck with one of them binds nobody else. Both were modelled
+     * identically -- as a polity with a capital and a foreign policy -- so a
+     * confederation of tribes behaved like a republic with a chancellery.
+     *
+     * 10 000 is a state whose centre speaks for the whole; 2 000 is a name on a
+     * map that a dozen peoples are filed under. It is read where the difference
+     * actually shows: who answers for the power, what they believe they answer
+     * for, and how firmly its ground can be held once taken.
+     *
+     * Defaulted rather than required, so a scenario written before this existed
+     * keeps working and simply describes states -- which is what it meant.
+     */
+    cohesionBps: BasisPointsSchema.default(7_000),
   })
   .strict();
 export type Polity = z.infer<typeof PolitySchema>;
+
+/** In words, for a prompt: how far a power's centre speaks for the whole of it. */
+export function cohesionInWords(cohesionBps: number): string {
+  if (cohesionBps >= 7_000) return "acts as one state";
+  if (cohesionBps >= 4_500) return "acts together, loosely";
+  if (cohesionBps >= 2_500) return "acts as a confederation whose parts often go their own way";
+  return "is a name on the map; each place in it answers for itself";
+}
+
+/** Below this, a power has no centre that can bind the rest of it. */
+export const LOOSE_COHESION_BPS = 4_500;
+
 
 /**
  * A declared political tie at the start of a scenario.  It is intentionally
