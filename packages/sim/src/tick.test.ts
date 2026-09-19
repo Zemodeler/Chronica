@@ -113,7 +113,14 @@ describe("projects", () => {
           id: `m${index + 1}`, label: `Milestone ${index + 1}`, requiredAtElapsedOffset: due,
           costAmount: 0, status: "pending" as const, completedAtStep: null,
         })),
-        completionOutcome: null, linkedEntityIds: [],
+        // Two legions are what this project is for, and an effort that declares
+        // no product no longer announces its own completion.
+        completionOutcome: {
+          kind: "force" as const, label: "Two new legions", amount: 8_000, provinceId: "ita-72843720b81376294924159-sicily-northeast",
+          polityId: "rome", commanderCharacterId: "marcus-atilius", forceId: null, beneficiaryAccountId: null, cadenceDays: null,
+          agreementKind: null, withPolityId: null,
+        },
+        linkedEntityIds: [],
         startedAtStep: 0, targetCompletionStep: Math.max(...dueDays), completedAtStep: null, provenanceEventIds: [],
       }],
       material: { ...world.material, incomeSources: [], obligations: [] },
@@ -216,7 +223,7 @@ describe("what a finished project leaves behind", () => {
     const commander = state.characters.find((character) => character.alive && character.polityId === "rome")!;
     const province = state.map.provinces[0]!.id;
     const ready = projectWith(
-      { kind: "force", label: "The new fleet", amount: 4_200, provinceId: province, polityId: "rome", commanderCharacterId: commander.id, forceId: null, beneficiaryAccountId: null, cadenceDays: null },
+      { kind: "force", label: "The new fleet", amount: 4_200, provinceId: province, polityId: "rome", commanderCharacterId: commander.id, forceId: null, beneficiaryAccountId: null, cadenceDays: null, agreementKind: null, withPolityId: null },
       state,
     );
 
@@ -236,7 +243,7 @@ describe("what a finished project leaves behind", () => {
     const marching = state.material.forces[0]!;
     const destination = state.map.provinces.find((province) => province.id !== marching.locationId)!.id;
     const ready = projectWith(
-      { kind: "force_move", label: "Forced march north", amount: 0, provinceId: destination, polityId: null, commanderCharacterId: null, forceId: marching.id, beneficiaryAccountId: null, cadenceDays: null },
+      { kind: "force_move", label: "Forced march north", amount: 0, provinceId: destination, polityId: null, commanderCharacterId: null, forceId: marching.id, beneficiaryAccountId: null, cadenceDays: null, agreementKind: null, withPolityId: null },
       state,
     );
 
@@ -249,7 +256,7 @@ describe("what a finished project leaves behind", () => {
     const state = base();
     const province = state.map.provinces[0]!.id;
     const ready = projectWith(
-      { kind: "force", label: "A fleet under a ghost", amount: 900, provinceId: province, polityId: "rome", commanderCharacterId: "nobody-at-all", forceId: null, beneficiaryAccountId: null, cadenceDays: null },
+      { kind: "force", label: "A fleet under a ghost", amount: 900, provinceId: province, polityId: "rome", commanderCharacterId: "nobody-at-all", forceId: null, beneficiaryAccountId: null, cadenceDays: null, agreementKind: null, withPolityId: null },
       state,
     );
 
@@ -264,7 +271,7 @@ describe("what a finished project leaves behind", () => {
     const state = base();
     const account = state.material.accounts[0]!.id;
     const ready = projectWith(
-      { kind: "income_source", label: "Harbour dues at Ostia", amount: 45, provinceId: null, polityId: "rome", commanderCharacterId: null, forceId: null, beneficiaryAccountId: account, cadenceDays: 30 },
+      { kind: "income_source", label: "Harbour dues at Ostia", amount: 45, provinceId: null, polityId: "rome", commanderCharacterId: null, forceId: null, beneficiaryAccountId: account, cadenceDays: 30, agreementKind: null, withPolityId: null },
       state,
     );
 
@@ -435,5 +442,46 @@ describe("a letter nobody answers", () => {
   it("leaves a letter alone while its term still has time to run", () => {
     const result = tick(withLetter(40), 12);
     expect(result.world.diplomacy[0]!.status).toBe("awaiting_reply");
+  });
+});
+
+describe("a project that produces nothing", () => {
+  const paperwork = (state: WorldState): WorldState => ({
+    ...state,
+    projects: [{
+      id: "project-plan", kind: "financial_plan", sponsorEntityRef: { kind: "character", id: "marcus-atilius" },
+      label: "Protected ally silver and supply scheme", status: "in_progress", reservationId: null,
+      milestones: [{ id: "m1", label: "Draft the disbursement plan", requiredAtElapsedOffset: 5, costAmount: 0, status: "pending", completedAtStep: null }],
+      completionOutcome: { kind: "none", label: "Completed financial plan", amount: 0, provinceId: null, polityId: null, commanderCharacterId: null, forceId: null, beneficiaryAccountId: null, cadenceDays: null, agreementKind: null, withPolityId: null },
+      linkedEntityIds: [], startedAtStep: 0, targetCompletionStep: 5, completedAtStep: null, provenanceEventIds: [],
+    }],
+    material: { ...state.material, incomeSources: [], obligations: [] },
+  });
+
+  it("finishes without announcing itself", () => {
+    // A Chronicle reported "the scheme for providing silver and supplies to the
+    // protected ally was completed" -- no ally named, no silver moved, nothing
+    // in the world different. The project was two milestones of paperwork.
+    const result = tick(paperwork(base()), 10);
+
+    expect(result.world.projects[0]!.status).toBe("completed");
+    expect(result.factProposals.map((proposal) => proposal.kind)).not.toContain("project_completed");
+  });
+
+  it("still says so when it promised a product and failed to deliver one", () => {
+    // Promising nothing and failing to deliver what you promised are different,
+    // and the second is worth the ruler's while.
+    const broken = paperwork(base());
+    const state: WorldState = {
+      ...broken,
+      projects: [{
+        ...broken.projects[0]!,
+        completionOutcome: { ...broken.projects[0]!.completionOutcome!, kind: "force", label: "A legion from nowhere", amount: 4_000, provinceId: "nowhere-at-all", polityId: "rome", commanderCharacterId: "marcus-atilius" },
+      }],
+    };
+    const result = tick(state, 10);
+
+    expect(result.factProposals.map((proposal) => proposal.kind)).toContain("project_completed");
+    expect(result.factProposals.find((proposal) => proposal.kind === "project_completed")!.summary).toContain("produced nothing it was meant to");
   });
 });

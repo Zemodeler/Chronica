@@ -89,6 +89,12 @@ How to answer well:
    has not happened either -- a journey's outcome is "force_move", naming the
    army and where it arrives. Something that can simply be done now is not a
    project: move an army that is already there with "force_modify".
+   "none" means nothing exists afterwards that did not before, and a project
+   that declares it finishes in silence -- no completion is reported, because
+   "the scheme was completed" with nothing to show is a ledger entry and not
+   history. If anybody receives anything, it is not "none": silver or supplies
+   handed to somebody is "transfer" naming the account it reaches, terms with
+   another power are "agreement" naming that power.
 8. Record what becomes true as facts. Set each fact's visibility honestly: a secret
    arrangement is "private", a public mobilization is "public". Use "delayed" or
    "rumoured" discovery with "knowableInDays" for news that has to travel. A

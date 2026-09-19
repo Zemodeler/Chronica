@@ -128,15 +128,24 @@ const ProjectCreateSchema = z.object({
    */
   completionOutcome: z
     .object({
-      kind: z.enum(["force", "structure", "income_source", "force_move", "none"]),
+      kind: z.enum(["force", "structure", "income_source", "force_move", "agreement", "transfer", "none"]),
       label: z.string().trim().min(1).max(160),
-      /** Men for a force, garrison capacity for a structure, revenue per period for an income source. */
+      /** Men for a force, garrison capacity for a structure, revenue per period for an income source, the sum handed over for a transfer. */
       amount: z.number().int().nonnegative().max(10_000_000).default(0),
       provinceId: EntityIdSchema.nullable().default(null),
       polityId: EntityIdSchema.nullable().default(null),
       commanderCharacterRef: RefSchema.nullable().default(null),
       /** For "force_move": the army that arrives at "provinceId" when the journey ends. */
       forceRef: RefSchema.nullable().default(null),
+      /**
+       * For "agreement": what the two powers end up standing in, and who they
+       * are. An embassy that arrives, is heard, and produces nothing has not
+       * happened -- "a protector for Messana was secured" with nobody named as
+       * the protector is a project reporting itself complete while leaving the
+       * world exactly as it was.
+       */
+      agreementKind: PolityAgreementKindSchema.nullable().default(null),
+      withPolityId: EntityIdSchema.nullable().default(null),
       beneficiaryAccountRef: RefSchema.nullable().default(null),
       cadenceDays: z.number().int().positive().max(36_600).nullable().default(null),
     })

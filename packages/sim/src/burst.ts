@@ -365,7 +365,6 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const tickTo = (toDay: number): void => {
     const ticked = runDeterministicTick({ world, toDay, ids, warfare: input.warfare });
     world = ticked.world;
-    let describes: string[] = [];
     if (ticked.factProposals.length > 0) {
       const materialized = materializeFacts({
         proposals: ticked.factProposals,
@@ -378,11 +377,17 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       newFacts.push(...materialized.facts);
       for (const [factId, weight] of materialized.significanceByFactId) significanceByFactId.set(factId, weight);
       significance += materialized.significance;
-      describes = materialized.facts.map((fact) => fact.id);
     }
-    // Nobody's account: the world's own. It reaches the record only through the
-    // facts it describes, the same as everything else.
-    for (const note of ticked.notes) narrative.push({ actorRef: null, line: note, factIds: describes });
+    // The world's own account of its bookkeeping, kept out of the Chronicle.
+    //
+    // These lines are the engine talking about itself -- "Two new legions
+    // [project-3] stands ready, 8000 strong" -- and attaching them to the
+    // tick's facts made them publishable, so the machine's voice arrived in the
+    // historian's hands beside the actors' own. Nothing is lost: everything a
+    // note describes already emits a fact of its own, written to be read. A
+    // line nobody said, about facts it is not an account of, belongs to the
+    // record of the burst rather than to the record of the reign.
+    for (const note of ticked.notes) narrative.push({ actorRef: null, line: note, factIds: [] });
   };
 
   /**

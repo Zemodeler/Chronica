@@ -249,6 +249,16 @@ export const BattleResultSchema = z
   .object({
     battleId: EntityIdSchema,
     participantIds: z.array(EntityIdSchema).min(2),
+    /**
+     * Which of the participants attacked.
+     *
+     * Without it the result recorded who won *by role* -- "attacker_victory" --
+     * and nothing anywhere said which army held which role, so the summary
+     * could only report that "the defender prevails". A historian reading that
+     * has to guess, and guessed wrong: an entry announced that the Boii host
+     * prevailed in a battle it lost two to one, broke, and had its chief taken.
+     */
+    attackerForceIds: z.array(EntityIdSchema).min(1),
     outcome: z.enum(["attacker_victory", "defender_victory", "inconclusive"]),
     phases: z.array(BattlePhaseResultSchema).min(1),
     acceptedTactics: z.array(TacticalModifierProposalSchema),

@@ -271,17 +271,21 @@ function totalPersonnel(force: Force): number {
 /** A deterministic, chronicle-ready paragraph describing a resolved battle from its own structured result. */
 export function summarizeBattleResult(result: BattleResult, forceNameById: ReadonlyMap<string, string>, provinceName: string): string {
   const nameFor = (forceId: string) => forceNameById.get(forceId) ?? forceId;
-  const attackerNames = result.forceChanges
-    .filter((change) => result.participantIds.includes(change.forceId))
-    .map((change) => nameFor(change.forceId));
+  const attackerIds = result.participantIds.filter((forceId) => result.attackerForceIds.includes(forceId));
+  const defenderIds = result.participantIds.filter((forceId) => !result.attackerForceIds.includes(forceId));
+  const sideName = (ids: readonly string[]) => (ids.length === 0 ? "the field" : ids.map(nameFor).join(" and "));
   const casualtyTotal = (forceId: string) =>
     result.casualties.filter((c) => c.forceId === forceId).reduce((sum, c) => sum + c.dead + c.deserted + c.wounded, 0);
   const casualtyLine = result.participantIds
     .map((forceId) => `${nameFor(forceId)} suffers ${casualtyTotal(forceId)} casualties`)
     .join("; ");
+  // Named, never by role. "The defender prevails" made the reader work out who
+  // that was, and a Chronicle got it exactly backwards.
+  const victors = result.outcome === "attacker_victory" ? attackerIds : defenderIds;
+  const beaten = result.outcome === "attacker_victory" ? defenderIds : attackerIds;
   const outcomeLine = result.outcome === "inconclusive"
-    ? `The battle at ${provinceName} ends inconclusively.`
-    : `The ${result.outcome === "attacker_victory" ? "attacker" : "defender"} prevails at ${provinceName}.`;
+    ? `The battle at ${provinceName} ends inconclusively, neither side holding the field.`
+    : `${sideName(victors)} holds the field at ${provinceName}; ${sideName(beaten)} is beaten.`;
   const retreatLine = result.retreats.length > 0
     ? ` ${result.retreats.map((r) => `${nameFor(r.forceId)} ${r.orderly ? "withdraws in good order" : "breaks and flees"}${r.toProvinceId ? "" : ", with nowhere left to retreat"}`).join("; ")}.`
     : "";
@@ -290,7 +294,7 @@ export function summarizeBattleResult(result: BattleResult, forceNameById: Reado
     .map((change) => `${nameFor(change.forceId)}'s commander is ${change.outcome}`)
     .join("; ");
   return [
-    `${attackerNames.length > 0 ? attackerNames.join(" and ") : "The forces"} meet at ${provinceName}. ${outcomeLine}`,
+    `${sideName(attackerIds)} attacks ${sideName(defenderIds)} at ${provinceName}. ${outcomeLine}`,
     `${casualtyLine}.${retreatLine}`,
     commanderLine.length > 0 ? `${commanderLine}.` : "",
   ].filter((line) => line.trim().length > 0).join(" ");
@@ -540,7 +544,7 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
     defenderEffectiveStrength,
     summary: outcome === "inconclusive"
       ? `The battle at ${province.name} ends inconclusively.`
-      : `The ${outcome === "attacker_victory" ? "attacker" : "defender"} prevails at ${province.name}.`,
+      : `${(outcome === "attacker_victory" ? attackerContributions : defenderContributions).map((contribution) => contribution.participant.force.name).join(" and ")} holds the field at ${province.name}.`,
   });
 
   const facts: WorldFact[] = [{
@@ -562,6 +566,7 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
   return {
     battleId: battle.battleId,
     participantIds: participants.map((p) => p.forceId),
+    attackerForceIds: attackerContributions.map((contribution) => contribution.participant.force.id),
     outcome,
     phases,
     acceptedTactics,

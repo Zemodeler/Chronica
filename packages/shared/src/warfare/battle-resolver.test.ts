@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import type { Force } from "../material-state";
 import type { Character } from "../characters/character";
-import { resolveBattle, type ResolveBattleParticipant } from "./battle-resolver";
+import { resolveBattle, summarizeBattleResult, type ResolveBattleParticipant } from "./battle-resolver";
 
 const world = () => structuredClone(firstPunicWarScenario.initialWorld);
 const province = () => world().map.provinces.find((p) => p.id === "ita-72843720b81376294924159-sicily-northeast")!;
@@ -332,5 +332,44 @@ describe("resolveBattle", () => {
       expect(result.acceptedTactics).toEqual([]);
       expect(result.rejectedTactics).toEqual([{ actorId: "some-uninvolved-character", reason: expect.stringContaining("not a participant") }]);
     });
+  });
+});
+
+describe("what the record says about who won", () => {
+  it("names the army that held the field, not the role it happened to hold", () => {
+    // A Chronicle once announced that the Boii host prevailed in a battle it
+    // lost two to one, broke, and had its chief taken prisoner. The engine was
+    // right and the sentence was the problem: "the defender prevails" never
+    // said which army the defender was, so the historian guessed.
+    const summary = summarizeBattleResult(
+      {
+        battleId: "b1",
+        participantIds: ["boii-host", "roman-army"],
+        attackerForceIds: ["boii-host"],
+        outcome: "defender_victory",
+        phases: [{ phase: "contact", attackerEffectiveStrength: 10, defenderEffectiveStrength: 10, summary: "They meet." }],
+        acceptedTactics: [],
+        rejectedTactics: [],
+        draws: [],
+        casualties: [
+          { forceId: "boii-host", categoryId: "infantry", dead: 1_217, wounded: 0, deserted: 0, recoveryEligibleAtStep: 0 },
+          { forceId: "roman-army", categoryId: "infantry", dead: 560, wounded: 0, deserted: 0, recoveryEligibleAtStep: 0 },
+        ],
+        captures: [],
+        forceChanges: [],
+        commanderChanges: [],
+        retreats: [{ forceId: "boii-host", toProvinceId: null, orderly: false }],
+        siegeAndControlChanges: [],
+        facts: [],
+      },
+      new Map([["boii-host", "Boii Host"], ["roman-army", "Roman field army"]]),
+      "Boii",
+    );
+
+    expect(summary).toContain("Roman field army holds the field");
+    expect(summary).toContain("Boii Host is beaten");
+    expect(summary).not.toContain("The defender prevails");
+    // And the army that broke is the one that lost, in the same sentence order.
+    expect(summary.indexOf("Roman field army holds")).toBeLessThan(summary.indexOf("Boii Host breaks and flees"));
   });
 });

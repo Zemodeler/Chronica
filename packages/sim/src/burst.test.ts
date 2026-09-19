@@ -487,7 +487,15 @@ describe("a later order carries the world to what was scheduled", () => {
           { id: "m1", label: "Financing committed", requiredAtElapsedOffset: 9, costAmount: 0, status: "pending", completedAtStep: null },
           { id: "m2", label: "First recruits assemble", requiredAtElapsedOffset: 60, costAmount: 0, status: "pending", completedAtStep: null },
         ],
-        completionOutcome: null,
+        // What the recruitment is for. A project that declares no product no
+        // longer announces its own completion, which is the point: "the scheme
+        // was completed" with nothing to show is a ledger entry, not history.
+        completionOutcome: {
+          kind: "force", label: "Two new legions", amount: 8_000,
+          provinceId: "ita-72843720b81376294924159-sicily-northeast", polityId: "rome",
+          commanderCharacterId: "marcus-atilius", forceId: null, beneficiaryAccountId: null,
+          cadenceDays: null, agreementKind: null, withPolityId: null,
+        },
         linkedEntityIds: [],
         startedAtStep: 0,
         targetCompletionStep: 60,
