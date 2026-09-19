@@ -64,8 +64,13 @@ export const DEFAULT_BUDGET: SimulationBudget = {
   maxModelCalls: 6,
   maxSimulatedDays: 90,
   maxCausalDepth: 3,
-  maxFocusedActors: 3,
-  maxAmbientActors: 3,
+  // Ten people to a round rather than six. A month in which four people in the
+  // whole world did anything is a month with two entries in it, and a reign
+  // read back as two entries a month is a reign nothing happens in. These cost
+  // prompt and output tokens inside a call that is already being made, never an
+  // extra call -- which is why this is the cheap place to buy a busier world.
+  maxFocusedActors: 4,
+  maxAmbientActors: 6,
   maxHops: 64,
 };
 
