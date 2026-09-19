@@ -9,6 +9,7 @@ import {
   type PlayerDecision,
   type Proposal,
   type ScenarioClock,
+  type ScenarioHistoricalPressure,
   type ScheduledEventPayload,
   type ScenarioWarfareRules,
   type TerrainDefinition,
@@ -102,6 +103,8 @@ export interface BurstInput {
   readonly warfare: ScenarioWarfareRules;
   /** The scenario's terrains, so an army is held to the crossings the map admits. */
   readonly terrains?: readonly TerrainDefinition[] | undefined;
+  /** What the period tends toward, offered only where the world still looks like it. */
+  readonly historicalPressures?: readonly ScenarioHistoricalPressure[] | undefined;
   readonly burstId: string;
   readonly gameId: string;
   readonly actorRef: OrderPartyRef;
@@ -505,6 +508,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       ownPolityId: input.actorPolityId,
       playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
       facts: [...input.knownFacts, ...newFacts],
+      ...(input.historicalPressures === undefined ? {} : { pressures: input.historicalPressures }),
     })
     : input.narratorSeed;
   if (seed !== null) world = recordSeedOffered(world, seed);

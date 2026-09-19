@@ -40,6 +40,8 @@ export interface WorldView {
   readonly scenarioWarfare: ScenarioDefinition["warfare"] | undefined;
   /** The scenario's map rules, so movement can be held to the crossings it admits. */
   readonly scenarioMap: ScenarioDefinition["map"] | undefined;
+  /** What the period tends toward -- offered to the narrator only where the world still looks like it. */
+  readonly scenarioHistoricalPressures: ScenarioDefinition["historicalPressures"] | undefined;
   readonly scenarioPeriod: string;
 }
 
@@ -111,6 +113,7 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
     scenarioLife: definition.success ? definition.data.life : undefined,
     scenarioWarfare: definition.success ? definition.data.warfare : undefined,
     scenarioMap: definition.success ? definition.data.map : undefined,
+    scenarioHistoricalPressures: definition.success ? definition.data.historicalPressures : undefined,
     scenarioPeriod: context.period,
   };
 }

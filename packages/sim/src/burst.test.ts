@@ -556,7 +556,7 @@ function capturingScriptedPort(script: Partial<Record<SimOperation, string[]>>):
 }
 
 const PLOT_SEED = {
-  key: "seed-plot", kind: "person_problem" as const, archetype: "conspiracy", severity: "serious" as const, secret: true, oneShot: false, repeated: false,
+  key: "seed-plot", kind: "person_problem" as const, archetype: "conspiracy", severity: "serious" as const, secret: true, oneShot: false, repeated: false, pressureId: null,
   target: { provinceId: null, provinceName: null, polityId: "rome", polityName: "Roman Republic", characterId: "quintus-fabius", characterName: "Quintus Fabius" },
   inPlayerRealm: true, why: "The world has been quiet at home.", brief: "Quintus Fabius [quintus-fabius] has begun something against the government he serves.",
 };
@@ -615,7 +615,7 @@ describe("the world stirs: a secret plot", () => {
     const thread = result.world.storylines.find((storyline) => storyline.seedKey === "seed-plot")!;
     expect(thread.origin).toBe("world");
     expect(thread.visibility).toBe("private");
-    expect(result.world.narrator).toEqual({ lastSeedDay: 0, seedCount: 1, lastSeedKey: "seed-plot", consumed: true });
+    expect(result.world.narrator).toEqual({ lastSeedDay: 0, seedCount: 1, lastSeedKey: "seed-plot", consumed: true, spentPressureIds: [] });
     expect(result.world.characterPressures.some((pressure) => pressure.characterId === "quintus-fabius" && pressure.visibility === "private")).toBe(true);
   });
 

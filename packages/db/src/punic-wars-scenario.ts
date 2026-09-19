@@ -101,6 +101,68 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
     ],
     provinceCount: { min: 779, max: 779 },
   },
+  // What this age was pulling toward, each offered only while the world still
+  // looks like the condition it names -- and each offered once. None of these
+  // is an event: nothing here makes Mylae or the mercenary war happen. They
+  // make them *reachable*, so a Mediterranean that goes the way this one went
+  // is one likely outcome among several rather than a rail the player rides.
+  //
+  // Every condition is checked against the live world. If Carthage never fights
+  // a long war, its mercenaries are never owed years of arrears and the mutiny
+  // that nearly destroyed it simply never becomes available.
+  historicalPressures: [
+    {
+      id: "unpaid-mercenaries",
+      label: "Carthage fights with hired men and pays them late",
+      kind: "world_event",
+      severity: "grave",
+      weight: 16,
+      when: { politiesExist: ["carthage"], notBeforeDay: 730 },
+      target: { polityId: "carthage", provinceId: null },
+      brief: "Carthage's army is not Carthaginian. Libyans, Iberians and Gauls have served a long war on promises, and the treasury has been meeting other obligations first. Decide what the arrears have come to and who speaks for the men. Put it on their captains with \"character_create\" and \"character_intent_set\", move the province they are quartered in with \"province_material_shift\", and record the grievance as a public fact naming Carthage. If they are past being argued with, they hold ground and are a power: \"polity_create\" breaking from Carthage.",
+    },
+    {
+      id: "messana-invites-a-protector",
+      label: "Messana sits on the strait and cannot hold it alone",
+      kind: "world_event",
+      severity: "serious",
+      weight: 14,
+      when: { politiesExist: ["mamertines"], notAfterDay: 2_920 },
+      target: { polityId: "mamertines", provinceId: null },
+      brief: "The Mamertines hold Messana and hold it on sufferance: the strait is worth more than they are, and both great powers know the way across. Decide which of them the Mamertines send to, what they offer, and what the faction that wanted the other one does about it. Use \"diplomatic_message_send\" in their own name, and record the appeal as a fact naming Messana and whoever it was sent to. The answer is not yours to give.",
+    },
+    {
+      id: "a-fleet-can-be-copied",
+      label: "A sea power's advantage is a design, and designs wash ashore",
+      kind: "world_event",
+      severity: "serious",
+      weight: 10,
+      when: { politiesExist: ["carthage"], atWar: [{ polityId: "rome", otherPolityId: "carthage" }] },
+      target: { polityId: null, provinceId: null },
+      brief: "A Carthaginian warship has come into the hands of a power that has no navy -- driven ashore, taken at a landing, or sold by someone who should not have sold it. Decide who has it and what they do about it: a hull on a beach is not a fleet, and copying it is a project of months with shipwrights who have never built one. Open it with \"project_create\" whose outcome is a force, and record the find as a fact naming the province it came ashore in.",
+    },
+    {
+      id: "storm-season",
+      label: "These are not seas to keep a fleet at sea in",
+      kind: "world_event",
+      severity: "grave",
+      weight: 12,
+      when: { notBeforeDay: 365 },
+      target: { polityId: null, provinceId: null },
+      brief: "A fleet has been caught out of season. Decide whose, where, and how much of it is gone -- and remember that ships lost at sea take their crews with them, which is manpower no province gets back this year. Change what it costs now with \"force_modify\" or by destroying the force outright, shift the provinces that raised those men with \"province_material_shift\", and record it as a public fact. If the fleet belonged to nobody in this war, it is somebody's grain convoy instead.",
+    },
+    {
+      id: "a-general-who-outgrows-his-city",
+      label: "A long command far from home makes a man loyal to his army",
+      kind: "person_problem",
+      severity: "serious",
+      weight: 12,
+      secret: true,
+      when: { notBeforeDay: 1_460 },
+      target: { polityId: null, provinceId: null },
+      brief: "Someone who has held an army in the field for years has begun to treat it as his own: paying it from his own takings, settling his own quarrels with it, answering his government later and later. Choose the commander from PEOPLE -- it must be someone who actually commands. Put it on them with \"character_intent_set\" (private) and a \"character_pressure_set\", and record what they have already done as a private fact known to them alone.",
+    },
+  ],
   warfare: {
     troopCategories: [
       { id: "infantry", label: "Infantry", combatWeightBps: 10_000, steadinessBps: 7_000, mobilityBps: 5_000 },
@@ -283,7 +345,7 @@ for (const settlement of PUNIC_WARS_GRAPH_SETTLEMENTS) {
 
 const initialWorld: WorldState = WorldStateSchema.parse({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 22, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 23, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   map: {

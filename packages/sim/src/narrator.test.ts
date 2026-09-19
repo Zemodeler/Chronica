@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario, punicWarsScenario } from "@chronica/db";
 import { WorldStateSchema, ensureProvinceMaterial, type WorldState } from "@chronica/shared";
-import { decideNarratorSeed, readTension, recordSeedOffered, recordSeedOutcome, seedWasTaken, type NarratorInput } from "./narrator";
+import { decideNarratorSeed, livePressures, readTension, recordSeedOffered, recordSeedOutcome, seedWasTaken, type NarratorInput } from "./narrator";
 
 const small = (): WorldState => WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
 const large = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
@@ -117,5 +117,80 @@ describe("deciding what stirs", () => {
     expect(seedWasTaken(world, [], seed)).toBe(false);
     const taken: WorldState = { ...world, storylines: [{ ...world.storylines[0]!, id: "opened", seedKey: seed.key }] };
     expect(seedWasTaken(taken, [], seed)).toBe(true);
+  });
+});
+
+describe("the age's own pull", () => {
+  const pressure = {
+    id: "unpaid-mercenaries",
+    label: "Carthage fights with hired men and pays them late",
+    kind: "world_event" as const,
+    brief: "The arrears have come due.",
+    weight: 40,
+    severity: "grave" as const,
+    secret: false,
+    oneShot: false,
+    when: { politiesExist: ["carthage"], polityHolds: [], atWar: [], atPeace: [], notBeforeDay: 0, notAfterDay: null },
+    target: { polityId: "carthage", provinceId: null },
+  };
+
+  it("is available while the world still looks like the condition it names", () => {
+    const world = later(large(), 40);
+    expect(livePressures(world, [pressure]).map((live) => live.id)).toEqual(["unpaid-mercenaries"]);
+  });
+
+  it("is not available once the power it is about is gone", () => {
+    const world = later(large(), 40);
+    const withoutCarthage: WorldState = {
+      ...world,
+      map: { ...world.map, polities: world.map.polities.filter((polity) => polity.id !== "carthage") },
+    };
+    expect(livePressures(withoutCarthage, [pressure])).toEqual([]);
+  });
+
+  it("waits for its day, and expires after it", () => {
+    const world = later(large(), 40);
+    expect(livePressures(world, [{ ...pressure, when: { ...pressure.when, notBeforeDay: 900 } }])).toEqual([]);
+    expect(livePressures(world, [{ ...pressure, when: { ...pressure.when, notAfterDay: 10 } }])).toEqual([]);
+  });
+
+  it("only counts a war condition when the war is actually on", () => {
+    const world = later(large(), 40);
+    const needsWar = { ...pressure, when: { ...pressure.when, atWar: [{ polityId: "rome", otherPolityId: "carthage" }] } };
+    expect(livePressures(world, [needsWar])).toEqual([]);
+  });
+
+  it("is spent the moment it is offered, so it can never become a rail", () => {
+    // A pressure the world declined to act on is one the age pulled toward and
+    // did not get. Offering it again until it lands is the definition of a rail.
+    const world = later(large(), 40);
+    // The pull is a weight, not a schedule, so find a world where it won the roll.
+    let seed: ReturnType<typeof decideNarratorSeed> = null;
+    let gameId = "";
+    for (let game = 0; game < 40 && seed === null; game += 1) {
+      gameId = `game-${game}`;
+      const candidate = decideNarratorSeed(input(world, { gameId, pressures: [pressure] }));
+      if (candidate?.pressureId === "unpaid-mercenaries") seed = candidate;
+    }
+    expect(seed).not.toBeNull();
+    expect(seed!.brief).toBe("The arrears have come due.");
+    expect(seed!.target.polityName).toBe("Carthage");
+
+    const after = recordSeedOffered(world, seed!);
+    expect(after.narrator.spentPressureIds).toEqual(["unpaid-mercenaries"]);
+    expect(livePressures(after, [pressure])).toEqual([]);
+  });
+
+  it("leaves the ordinary run of trouble in play", () => {
+    // Not a schedule. With one pressure live, most games still meet something
+    // that was nobody's plan.
+    const world = later(large(), 40);
+    const kinds = new Set<string>();
+    for (let game = 0; game < 40; game += 1) {
+      const seed = decideNarratorSeed(input(world, { gameId: `game-${game}`, pressures: [pressure] }));
+      if (seed !== null) kinds.add(seed.pressureId === null ? "ordinary" : "pressure");
+    }
+    expect(kinds.has("ordinary")).toBe(true);
+    expect(kinds.has("pressure")).toBe(true);
   });
 });

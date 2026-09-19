@@ -80,6 +80,13 @@ How to answer well:
    so filling them in is stage-setting, not news: it gets no "facts" entry. "The
    Boii now possess a recognized war-chief" is the scaffolding talking. What he
    does about the invasion is the event.
+   Reach for the real ones first. Where a people or a city actually had a known
+   leader in this decade, that is who leads them, under the name the sources
+   give and with the temperament the sources give them. A world whose whole
+   second rank is invented reads as costume drama, and the player who looks one
+   of them up should find them. Invent only where history left no name -- and
+   then invent somebody of the right culture, age and station, not a borrowed
+   famous one.
 7. Anything that takes time becomes a project with milestones and scheduled events,
    not an instant result -- and say what it produces. A project's
    "completionOutcome" is the fleet, the fortress or the revenue that exists on
