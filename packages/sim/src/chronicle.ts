@@ -98,8 +98,18 @@ const MAX_REPORTED_THREADS = 3;
 /** How many subjects an entry shows on its face. The rest stay on the record, unshown. */
 const MAX_TAGS = 3;
 
-/** Bookkeeping the historian must never see, whoever it happened to. */
-const NEVER_PUBLISHED = new Set(["engine_rejection"]);
+/**
+ * Bookkeeping the historian must never see, whoever it happened to.
+ *
+ * A breach is the engine's own note that somebody acted without the authority
+ * to: its summary is a sentence about grants and account ids, written for an
+ * audit rather than a reader. While every Roman matter was one entry it sank
+ * without trace; the moment matters were told separately it surfaced as an
+ * entry of its own, headlined "Fiscal Record Grants No Spending Power to the
+ * Declared Character". Insubordination belongs in the record -- as something a
+ * person did, written by whoever noticed, not as the ledger line that caught it.
+ */
+const NEVER_PUBLISHED = new Set(["engine_rejection", "authority_breach"]);
 
 /** Ids are for the engine. A summary carrying one must not reach the prose. */
 const ID_IN_BRACKETS = /\s*\[[A-Za-z0-9][A-Za-z0-9._:-]*\]/g;
@@ -143,6 +153,11 @@ or the record will come to it later.
 The exception is a thread marked as part of a longer matter. That matter may be
 named, because the record has already told it.
 
+This binds hardest at the end of a passage. Do not close by reaching for another
+thread -- "Syracuse had still not answered", "the rising continued to threaten",
+"the crisis might lessen sympathy". Those matters have their own passages, and
+what they are doing is not this one's business.
+
 SAY IT ONCE
 
 Every sentence carries something the ones before it did not.
@@ -152,6 +167,15 @@ where the matter now stands, what it means, what it threatens, or what it makes
 more urgent. Do not sum up, and do not count up ("the two decisions", "both
 measures"). A passage stops when the last thing that happened has been written
 down, and not one sentence later.
+
+Never write about what is missing. Not that a battle was not reported, that an
+answer had not come, that a thing was still awaited, that something remained
+unresolved, or that the account says nothing of some other matter. Silence in a
+thread is not news in it.
+
+Never write what might happen next. No "could", "might", "was expected to",
+"would soon", "leaving him to", "while the authorities could". You are writing
+what happened, and what happened next will be written when it has.
 
 WHAT COUNTS AS AN EVENT
 
