@@ -1,9 +1,11 @@
 import {
   LOOSE_COHESION_BPS,
+  agreementsBetween,
   openStorylines,
   stableChoice,
   stableHash,
   type Fact,
+  type ScenarioHistoricalPressure,
   type WorldState,
 } from "@chronica/shared";
 import { findPolityGaps } from "./population";
@@ -71,6 +73,8 @@ export interface NarratorSeed {
   readonly inPlayerRealm: boolean;
   /** Offered once before and not taken up. */
   readonly repeated: boolean;
+  /** The scenario pressure this came from, when it came from one. Spent once offered. */
+  readonly pressureId: string | null;
   /** Why now, in words the prompt can use. */
   readonly why: string;
   /** What must happen and which deltas say so, filled with ids. */
@@ -84,6 +88,12 @@ export interface NarratorInput {
   readonly playerCharacterId: string | null;
   /** The whole recent record, not the player's view: the narrator is code, and may know everything. */
   readonly facts: readonly Fact[];
+  /**
+   * What the period tends toward. Offered only when the world still looks like
+   * the condition each one names, and each only once -- history is something
+   * this world can fall into, never something it is on rails toward.
+   */
+  readonly pressures?: readonly ScenarioHistoricalPressure[] | undefined;
 }
 
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
@@ -221,6 +231,36 @@ const ARCHETYPES: readonly Archetype[] = [
   { kind: "new_actor", name: "cult", weight: 6, oneShot: false, secretTwelfths: 7,
     brief: (t, s) => `A prophet is drawing crowds in ${place(t)}: ${magnitude(s, "a preacher the magistrates are watching", "a movement with followers in every town", "a faith that answers to nobody but its leader")}. Create the leader with "character_create" under ${power(t)} and the movement with "generic_entity_create" (kind "faction"), record the stir as a fact, and plant what they mean to do with "character_intent_set".` },
 ];
+
+
+/**
+ * Which of the period's pressures the world still looks like.
+ *
+ * Every stated condition has to hold. This is the whole of the "favour history
+ * where the circumstances exist" rule: nothing here makes an event happen, it
+ * only makes one *available*. A mercenary mutiny is reachable while Carthage
+ * exists and is not at war; if the war never ends, or Carthage does not
+ * survive, the pressure simply expires unused and the age goes differently.
+ */
+export function livePressures(world: WorldState, pressures: readonly ScenarioHistoricalPressure[]): ScenarioHistoricalPressure[] {
+  const spent = new Set(world.narrator.spentPressureIds);
+  const exists = (polityId: string): boolean => world.map.polities.some((polity) => polity.id === polityId);
+  const atWar = (a: string, b: string): boolean =>
+    agreementsBetween(world.polityAgreements, a, b).some((agreement) => agreement.kind === "war" && agreement.status === "active");
+
+  return pressures.filter((pressure) => {
+    if (spent.has(pressure.id)) return false;
+    const when = pressure.when;
+    if (world.instant.day < when.notBeforeDay) return false;
+    if (when.notAfterDay !== null && world.instant.day > when.notAfterDay) return false;
+    if (!when.politiesExist.every(exists)) return false;
+    if (!when.atWar.every((pair) => atWar(pair.polityId, pair.otherPolityId))) return false;
+    if (when.atPeace.some((pair) => atWar(pair.polityId, pair.otherPolityId))) return false;
+    return when.polityHolds.every((claim) =>
+      claim.provinceIds.every((provinceId) =>
+        world.map.provinces.some((province) => province.id === provinceId && province.controllerPolityId === claim.polityId)));
+  });
+}
 
 // ── The decision ─────────────────────────────────────────────────────────────
 
@@ -365,6 +405,20 @@ export function decideNarratorSeed(input: NarratorInput): NarratorSeed | null {
   }
 
   const seedCount = ledger.seedCount;
+
+  // What the age is pulling toward, where the world still looks like it. These
+  // compete with the ordinary archetypes on the same weights rather than
+  // pre-empting them: a pressure is a heavier-than-usual candidate, never a
+  // scheduled event, so a reign can run its whole course and meet none of them.
+  const live = livePressures(world, input.pressures ?? []);
+  const liveWeight = live.reduce((sum, pressure) => sum + pressure.weight, 0);
+  if (liveWeight > 0 && stableChoice([input.gameId, "narrator", "pressure", seedCount], liveWeight + ORDINARY_TROUBLE_WEIGHT) < liveWeight) {
+    let roll = stableHash([input.gameId, "narrator", "which-pressure", seedCount]) % liveWeight;
+    const chosen = live.find((pressure) => (roll -= pressure.weight) < 0) ?? live[live.length - 1]!;
+    const seed = seedFromPressure(world, chosen, input, seedCount);
+    if (seed !== null) return seed;
+  }
+
   const archetype = chooseArchetype(input, tension, seedCount);
   if (archetype === null) return null;
   const severity = chooseSeverity(tension.comfort, input.gameId, seedCount);
@@ -407,12 +461,66 @@ export function decideNarratorSeed(input: NarratorInput): NarratorSeed | null {
     repeated,
     why: `The world has been quiet ${inPlayerRealm ? "at home" : "there"} for a while: ${tension.summary}.`,
     brief: archetype.brief(target, severity),
+    pressureId: null,
+  };
+}
+
+/**
+ * How heavily the ordinary run of trouble pulls against the age's own.
+ *
+ * Set so that a scenario with a couple of live pressures reaches for one
+ * perhaps a third of the time: often enough that the period has a grain,
+ * rarely enough that most of what happens is still nobody's plan.
+ */
+const ORDINARY_TROUBLE_WEIGHT = 40;
+
+/** A seed carrying the age's own shape, targeted where the pressure says. */
+function seedFromPressure(world: WorldState, pressure: ScenarioHistoricalPressure, input: NarratorInput, seedCount: number): NarratorSeed | null {
+  const province = pressure.target.provinceId === null ? undefined : world.map.provinces.find((candidate) => candidate.id === pressure.target.provinceId);
+  const polityId = pressure.target.polityId ?? province?.controllerPolityId ?? null;
+  const polity = polityId === null ? undefined : world.map.polities.find((candidate) => candidate.id === polityId);
+  if (pressure.kind !== "person_problem" && province === undefined && polity === undefined) return null;
+
+  return {
+    key: `seed-${stableHash([input.gameId, "narrator", seedCount]).toString(36)}`,
+    kind: pressure.kind,
+    archetype: pressure.id,
+    severity: pressure.severity,
+    secret: pressure.secret,
+    oneShot: pressure.oneShot,
+    target: {
+      provinceId: province?.id ?? null,
+      provinceName: province?.name ?? null,
+      polityId: polity?.id ?? null,
+      polityName: polity?.name ?? null,
+      characterId: null,
+      characterName: null,
+    },
+    inPlayerRealm: polityId !== null && polityId === input.ownPolityId,
+    repeated: false,
+    why: `The age has been pulling this way: ${pressure.label}.`,
+    brief: pressure.brief,
+    pressureId: pressure.id,
   };
 }
 
 /** The ledger, once a seed has been put to the orchestrator. */
 export function recordSeedOffered(world: WorldState, seed: NarratorSeed): WorldState {
-  return { ...world, narrator: { ...world.narrator, lastSeedDay: world.instant.day, lastSeedKey: seed.key, consumed: false } };
+  return {
+    ...world,
+    narrator: {
+      ...world.narrator,
+      lastSeedDay: world.instant.day,
+      lastSeedKey: seed.key,
+      consumed: false,
+      // Spent on being offered, not on being taken up. A pressure the world
+      // declined to act on is one the age pulled toward and did not get;
+      // offering it again until it lands is what makes a rail.
+      spentPressureIds: seed.pressureId === null
+        ? world.narrator.spentPressureIds
+        : [...world.narrator.spentPressureIds, seed.pressureId].slice(-200),
+    },
+  };
 }
 
 /**

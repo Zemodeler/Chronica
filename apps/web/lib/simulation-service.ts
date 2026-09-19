@@ -151,6 +151,7 @@ export async function submitOrder(
         offices,
         warfare: view.scenarioWarfare,
         ...(view.scenarioMap === undefined ? {} : { terrains: view.scenarioMap.terrains }),
+        ...(view.scenarioHistoricalPressures === undefined ? {} : { historicalPressures: view.scenarioHistoricalPressures }),
         burstId,
         gameId,
         actorRef,

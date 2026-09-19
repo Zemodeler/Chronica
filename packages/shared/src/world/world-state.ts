@@ -50,11 +50,21 @@ export const NarratorLedgerSchema = z
     lastSeedKey: z.string().trim().min(1).max(80).nullable(),
     /** Whether the orchestrator took the last seed up. An ignored seed is offered once more, then dropped. */
     consumed: z.boolean(),
+    /**
+     * Historical pressures already spent.
+     *
+     * A scenario's pressures are what the period was actually tending toward --
+     * an unpaid mercenary army, a brittle alliance system, a pass that can be
+     * crossed at a price. They are offered when their circumstances hold, and
+     * each is offered once: history is a thing this world can fall into, not a
+     * thing it is on rails toward, and a pressure that keeps firing is a rail.
+     */
+    spentPressureIds: z.array(z.string().trim().min(1).max(80)).max(200).default([]),
   })
   .strict();
 export type NarratorLedger = z.infer<typeof NarratorLedgerSchema>;
 
-export const EMPTY_NARRATOR_LEDGER: NarratorLedger = { lastSeedDay: null, seedCount: 0, lastSeedKey: null, consumed: true };
+export const EMPTY_NARRATOR_LEDGER: NarratorLedger = { lastSeedDay: null, seedCount: 0, lastSeedKey: null, consumed: true, spentPressureIds: [] };
 
 /**
  * The authoritative world: one immutable document per turn, hashed to
