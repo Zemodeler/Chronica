@@ -6,6 +6,7 @@ import type { SocialLink } from "./relationship-dimensions";
 import type { CharacterBelief } from "./beliefs";
 import { KNOWLEDGE_CHANNEL_DEFAULTS, resolveRecipients } from "./beliefs";
 import { createPressure, refreshPressure, resolvePressure } from "./pressures";
+import { stableHash } from "../determinism";
 import { MAX_TRAITS, observeTraits, type TraitObservation } from "./traits";
 import type { Commitment } from "./commitments";
 import { createCommitment } from "./commitments";
@@ -60,6 +61,24 @@ function withAppendedCause(character: Character, targetCharacterId: string, caus
  * spends it -- that only happens later, when the commitment is fulfilled
  * (`character-agency/commitments.ts`).
  */
+/**
+ * A short, stable id for something scoped to an event and two people.
+ *
+ * Built by concatenation, these ran past `EntityIdSchema`'s 120 characters
+ * the moment real ids were involved -- an event id, a `declared-<uuid>`
+ * player and a `character-<burst uuid>-<n>` NPC come to well over that -- and
+ * the whole batch was then rejected with "characters.21.relations.0.causes.0.id:
+ * Too big", which names neither the event nor the people nor the cause. It
+ * was reachable only from dialogue until the simulation started writing
+ * relation causes of its own, and then it began throwing away whole answers,
+ * battles included.
+ *
+ * Hashed rather than truncated: truncating two ids that share a prefix gives
+ * one id, and `stableHash` keeps a replay identical.
+ */
+const scopedId = (eventId: string, kind: string, ...parts: readonly string[]): string =>
+  `${eventId.slice(0, 40)}:${kind}:${stableHash([eventId, kind, ...parts]).toString(36)}`;
+
 export function applySocialEvents(
   world: WorldState,
   events: readonly CharacterSocialEvent[],
@@ -142,7 +161,7 @@ export function applySocialEvents(
       const authorityCheck = createCommitment(
         { characters, commitments, material: world.material },
         {
-          id: `${event.id}:commitment`,
+          id: scopedId(event.id, "commitment"),
           promisorCharacterId: proposal.promisorCharacterId,
           beneficiaryCharacterId: proposal.beneficiaryCharacterId,
           actionKind: proposal.actionKind,
@@ -171,7 +190,7 @@ export function applySocialEvents(
     }
 
     const consequenceRefs = event.relationCauses.map((cause, index) => ({
-      id: `${event.id}:cause:${index}`,
+      id: scopedId(event.id, "cause", String(index)),
       kind: "relationship_cause" as const,
       explanation: cause.label,
     }));
@@ -180,7 +199,7 @@ export function applySocialEvents(
       const subject = characters.find((c) => c.id === cause.subjectCharacterId);
       if (subject === undefined) continue;
       const relationCause: RelationCause = {
-        id: `${event.id}:cause:${cause.subjectCharacterId}:${cause.targetCharacterId}`,
+        id: scopedId(event.id, "cause", cause.subjectCharacterId, cause.targetCharacterId),
         label: cause.label,
         score: cause.score,
         occurredAtStep: atStep,
@@ -200,7 +219,7 @@ export function applySocialEvents(
         );
         if (!alreadyLinked) {
           socialLinks = [...socialLinks, {
-            id: `${event.id}:link:${cause.subjectCharacterId}:${cause.targetCharacterId}:${cause.socialLinkKind}`,
+            id: scopedId(event.id, "link", cause.subjectCharacterId, cause.targetCharacterId, cause.socialLinkKind),
             subjectCharacterId: cause.subjectCharacterId,
             targetCharacterId: cause.targetCharacterId,
             kind: cause.socialLinkKind,
@@ -260,7 +279,7 @@ export function applySocialEvents(
       if (change.action === "create") {
         if (change.kind === undefined || change.intensity === undefined || change.label === undefined) continue;
         const result = createPressure(worldSlice, {
-          id: `${event.id}:pressure:${changeIndex}`,
+          id: scopedId(event.id, "pressure", String(changeIndex)),
           characterId: change.characterId,
           kind: change.kind,
           intensity: change.intensity,
