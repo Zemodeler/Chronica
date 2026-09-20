@@ -506,6 +506,25 @@ function applyOne(
   };
   const atStep = world.elapsedStep;
 
+  /**
+   * A refusal that says what the writer probably meant.
+   *
+   * Engine ids are long -- `character-<burst uuid>-7` -- and a model copying
+   * one back sometimes drops the prefix, writing `<burst uuid>-7`. The act is
+   * then refused with "No character ... exists", which is true, unhelpful, and
+   * gives the repair retry nothing to work with. Naming the near miss costs
+   * nothing and is the difference between a lost intent and a corrected one.
+   *
+   * Deliberately a *message*, not a resolution. Binding a ref to something it
+   * merely resembles is how one man's order ends up carried out by another.
+   */
+  const nearestTo = (ref: string): string => {
+    const near = world.characters.find(
+      (character) => character.id !== ref && (character.id.endsWith(`-${ref}`) || character.id.endsWith(ref)),
+    );
+    return near === undefined ? "" : ` Did you mean "${near.id}"?`;
+  };
+
   switch (delta.op) {
     case "money_transfer": {
       const fromId = required(delta.fromAccountRef, "The paying account");
@@ -719,7 +738,7 @@ function applyOne(
     case "force_create": {
       const commanderId = required(delta.commanderCharacterRef, "The commander");
       const controllerId = required(delta.controllerCharacterRef, "The controller");
-      if (!world.characters.some((character) => character.id === commanderId)) reject(`No character "${commanderId}" exists to command this force.`, "reference");
+      if (!world.characters.some((character) => character.id === commanderId)) reject(`No character "${commanderId}" exists to command this force.${nearestTo(commanderId)}`, "reference");
       if (!world.map.provinces.some((province) => province.id === delta.locationId)) reject(`No province "${delta.locationId}" exists to raise this force in.`, "reference");
       const id = mint("force", delta.localId);
       const force = {
@@ -781,7 +800,7 @@ function applyOne(
       }
       const commanderId = delta.commanderCharacterRef === undefined ? undefined : required(delta.commanderCharacterRef, "The commander");
       if (commanderId !== undefined && !world.characters.some((character) => character.id === commanderId)) {
-        reject(`No character "${commanderId}" exists to take command.`, "reference");
+        reject(`No character "${commanderId}" exists to take command.${nearestTo(commanderId)}`, "reference");
       }
       const strength = Math.max(0, force.authorizedStrength + (delta.authorizedStrengthDelta ?? 0));
       const updated = {
@@ -954,7 +973,7 @@ function applyOne(
 
     case "character_intent_set": {
       const actorId = required(delta.actorCharacterRef, "The acting character");
-      if (!world.characters.some((character) => character.id === actorId)) reject(`No character "${actorId}" exists to hold this intent.`, "reference");
+      if (!world.characters.some((character) => character.id === actorId)) reject(`No character "${actorId}" exists to hold this intent.${nearestTo(actorId)}`, "reference");
       const targetIds = delta.targetRefs.map((ref) => required(ref, "An intent target"));
       const intent = {
         id: context.ids.next("intent"),
@@ -1097,7 +1116,7 @@ function applyOne(
     case "political_procedure_open": {
       const sponsorId = required(delta.sponsorCharacterRef, "The sponsor");
       if (!world.characters.some((character) => character.id === sponsorId)) {
-        reject(`No character "${sponsorId}" exists to sponsor this.`, "reference");
+        reject(`No character "${sponsorId}" exists to sponsor this.${nearestTo(sponsorId)}`, "reference");
       }
       const institutionId = delta.institutionRef === null ? null : required(delta.institutionRef, "The institution");
       if (institutionId !== null && !world.material.institutions.some((institution) => institution.id === institutionId)) {
@@ -1220,7 +1239,7 @@ function applyOne(
       if (holding === undefined) reject(`No holding "${holdingId}" exists to change hands.`, "reference");
       const toId = delta.toCharacterRef === null ? null : required(delta.toCharacterRef, "The new holder");
       if (toId !== null && !world.characters.some((character) => character.id === toId)) {
-        reject(`No character "${toId}" exists to receive it.`, "reference");
+        reject(`No character "${toId}" exists to receive it.${nearestTo(toId)}`, "reference");
       }
       const moved = {
         ...holding,
@@ -1446,7 +1465,7 @@ function applyOne(
         .map((ref) => required(ref, "A storyline participant"))
         .filter((participantId) => !isThing(participantId));
       for (const participantId of participantIds) {
-        if (!world.characters.some((character) => character.id === participantId)) reject(`No character "${participantId}" exists to take part in this.`, "reference");
+        if (!world.characters.some((character) => character.id === participantId)) reject(`No character "${participantId}" exists to take part in this.${nearestTo(participantId)}`, "reference");
       }
       if (delta.provinceId !== null && !world.map.provinces.some((province) => province.id === delta.provinceId)) {
         reject(`No province "${delta.provinceId}" exists for this to happen in.`, "reference");
@@ -1491,7 +1510,7 @@ function applyOne(
       if (storyline.phase === "closed") reject(`"${storyline.title}" is over; a closed thread is not advanced.`);
       const added = delta.addParticipantRefs.map((ref) => required(ref, "A new participant"));
       for (const participantId of added) {
-        if (!world.characters.some((character) => character.id === participantId)) reject(`No character "${participantId}" exists to join this.`, "reference");
+        if (!world.characters.some((character) => character.id === participantId)) reject(`No character "${participantId}" exists to join this.${nearestTo(participantId)}`, "reference");
       }
       const phase = delta.phase ?? storyline.phase;
       return {
@@ -1516,7 +1535,7 @@ function applyOne(
     case "character_state_set": {
       const characterId = required(delta.characterRef, "Whose health this is");
       const person = world.characters.find((character) => character.id === characterId);
-      if (person === undefined) reject(`No character "${characterId}" exists to fall ill.`, "reference");
+      if (person === undefined) reject(`No character "${characterId}" exists to fall ill.${nearestTo(characterId)}`, "reference");
       const heirId = delta.heirRef === null ? null : required(delta.heirRef, "The named heir");
       if (heirId !== null && !world.characters.some((character) => character.id === heirId && character.alive)) {
         reject(`No living character "${heirId}" exists to inherit.`, "reference");
@@ -1545,7 +1564,7 @@ function applyOne(
 
     case "character_pressure_set": {
       const characterId = required(delta.characterRef, "The person under pressure");
-      if (!world.characters.some((character) => character.id === characterId)) reject(`No character "${characterId}" exists to be under pressure.`, "reference");
+      if (!world.characters.some((character) => character.id === characterId)) reject(`No character "${characterId}" exists to be under pressure.${nearestTo(characterId)}`, "reference");
       const strongest = world.characterPressures
         .filter((pressure) => pressure.characterId === characterId && pressure.kind === delta.kind && pressure.status === "active")
         .sort((a, b) => b.intensity - a.intensity || a.id.localeCompare(b.id))[0];
@@ -1573,7 +1592,7 @@ function applyOne(
     case "diplomatic_message_send": {
       const senderId = required(delta.fromCharacterRef, "Whoever is writing");
       if (!world.characters.some((character) => character.id === senderId)) {
-        reject(`No character "${senderId}" exists to send this.`, "reference");
+        reject(`No character "${senderId}" exists to send this.${nearestTo(senderId)}`, "reference");
       }
       const known = new Set(world.map.polities.map((polity) => polity.id));
       if (!known.has(delta.fromPolityId) || !known.has(delta.toPolityId)) {
@@ -1582,7 +1601,7 @@ function applyOne(
       if (delta.fromPolityId === delta.toPolityId) reject("A power does not write to itself.");
       const recipientId = delta.toCharacterRef === null ? null : required(delta.toCharacterRef, "The named recipient");
       if (recipientId !== null && !world.characters.some((character) => character.id === recipientId)) {
-        reject(`No character "${recipientId}" exists to receive this.`, "reference");
+        reject(`No character "${recipientId}" exists to receive this.${nearestTo(recipientId)}`, "reference");
       }
       const inReplyToId = delta.inReplyToRef === null ? null : required(delta.inReplyToRef, "The letter this answers");
       if (inReplyToId !== null && !world.diplomacy.some((message) => message.id === inReplyToId)) {
@@ -1866,11 +1885,11 @@ function applyOne(
     case "belief_set": {
       const holderId = required(delta.holderCharacterRef, "The person who is to believe it");
       if (!world.characters.some((character) => character.id === holderId)) {
-        reject(`No character "${holderId}" exists to believe anything.`, "reference");
+        reject(`No character "${holderId}" exists to believe anything.${nearestTo(holderId)}`, "reference");
       }
       const sourceId = delta.sourceCharacterRef === null ? null : required(delta.sourceCharacterRef, "Who they heard it from");
       if (sourceId !== null && !world.characters.some((character) => character.id === sourceId)) {
-        reject(`No character "${sourceId}" exists to have told them.`, "reference");
+        reject(`No character "${sourceId}" exists to have told them.${nearestTo(sourceId)}`, "reference");
       }
       const subjectId = delta.subjectRef === null ? null : required(delta.subjectRef, "What it is about");
 
@@ -2004,7 +2023,7 @@ function applyOne(
         const participants = draft.participantCharacterRefs.map((ref, index) => required(ref, `Participant ${index + 1}`));
         for (const participantId of participants) {
           if (!world.characters.some((character) => character.id === participantId)) {
-            reject(`No character "${participantId}" exists to take part in this.`, "reference");
+            reject(`No character "${participantId}" exists to take part in this.${nearestTo(participantId)}`, "reference");
           }
         }
         return CharacterSocialEventSchema.parse({

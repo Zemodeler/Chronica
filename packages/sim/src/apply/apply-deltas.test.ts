@@ -1522,6 +1522,40 @@ describe("offices that actually move", () => {
     expect(result.rejected[1]!.reason).not.toMatch(/character-[0-9a-f]{8}/);
   });
 
+  it("names the near miss when a ref has lost its prefix", () => {
+    // Engine ids are long -- `character-<burst uuid>-7` -- and a model copying
+    // one back sometimes drops the prefix. "No character ... exists" is true,
+    // unhelpful, and gives the repair retry nothing to work with.
+    const before = world();
+    const someone = before.characters[0]!;
+    const stripped = someone.id.replace(/^character-/, "").replace(/^declared-/, "");
+    if (stripped === someone.id) return;
+
+    const result = applyDeltas(
+      before,
+      [{
+        op: "character_intent_set", actorCharacterRef: stripped, actionType: "prepare",
+        targetRefs: [], rationale: "Doing something.", priority: 50, visibility: "private",
+      }],
+      context(),
+    );
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.reason).toContain(someone.id);
+    expect(result.rejected[0]!.reason).toContain("Did you mean");
+  });
+
+  it("says nothing about a near miss when there is none", () => {
+    const result = applyDeltas(
+      world(),
+      [{
+        op: "character_intent_set", actorCharacterRef: "nobody-resembling-anything", actionType: "prepare",
+        targetRefs: [], rationale: "Doing something.", priority: 50, visibility: "private",
+      }],
+      context(),
+    );
+    expect(result.rejected[0]!.reason).not.toContain("Did you mean");
+  });
+
   it("enlarges an office that exists rather than inventing a second one beside it", () => {
     const before = world();
     const seat = before.material.officeSeats.find((candidate) => candidate.status === "held");
