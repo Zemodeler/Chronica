@@ -11,6 +11,7 @@ import {
   listChronicle,
   listPendingEvents,
   listRecentFacts,
+  subjectsOfNewestReport,
   resolveDecision,
   schema,
   startBurst,
@@ -197,6 +198,10 @@ export async function submitOrder(
       personalEntityIds: personallyTouchedBy(result.world, actorRef.id, actorPolityId, offices),
       orderFactIds: new Set(result.orderFactIds),
       changes: diffWorlds(view.world, result.world),
+      // What the last report was already about, so a matter that is merely
+      // continuing is not given a fresh headline. Read before this one is
+      // written; a thread held back is written up the report after.
+      recentSubjects: await subjectsOfNewestReport(db, gameId),
     });
 
     // And the books close because the calendar turned, not because anybody

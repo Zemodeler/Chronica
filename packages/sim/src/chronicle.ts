@@ -348,6 +348,18 @@ export interface ChronicleInput {
   /** What a subject is called, for the tags a reader sees. Unnamed subjects fall back to their id. */
   readonly nameOf?: (ref: OrderPartyRef) => string | null;
   /**
+   * Who the last report was already about: one set of subject ids per entry.
+   *
+   * Without it, a matter that is merely *continuing* gets a fresh headline
+   * every report. A live game produced five consecutive reports led by "Hieron
+   * II Tightens the Investment of Messana", "…the Cordon Around Messana",
+   * "…Interception of the Mamertine Sortie" -- two of them word for word the
+   * same title -- describing one siege in which nothing whatever had changed.
+   * A chronicle is a record of what happened, and a siege going on is not a
+   * thing that happened.
+   */
+  readonly recentSubjects?: readonly (readonly string[])[];
+  /**
    * Everything the observer's own side answers for: their polity, its people,
    * its provinces, themselves. A secret touching any of it stays dark; a secret
    * touching none of it may travel as distant news.
@@ -782,10 +794,31 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   const byWeight = (a: Thread, b: Thread): number =>
     b.weight - a.weight || sortKeyOf(a.facts[0]!.time) - sortKeyOf(b.facts[0]!.time) || a.facts[0]!.id.localeCompare(b.facts[0]!.id);
 
+  /**
+   * The same people, doing the same thing, again.
+   *
+   * A thread that names nobody the last report did not already name, and
+   * carries no battle, is a matter continuing rather than a matter happening.
+   * It waits: its facts stay on the record and it is written up the moment
+   * something actually moves, which is when it is worth a headline.
+   *
+   * Never applied to the reader's own business. A ruler is entitled to the
+   * whole of his own reign however slowly it goes, and an order must always be
+   * answered -- suppressing a repeat there would break the one guarantee the
+   * Chronicle makes.
+   */
+  const alreadyTold = (input.recentSubjects ?? []).map((subjects) => new Set(subjects));
+  const echoing = (thread: Thread): boolean => {
+    if (thread.battle !== null || alreadyTold.length === 0) return false;
+    const subjects = subjectsOf(thread.facts).map(keyOf);
+    if (subjects.length === 0) return false;
+    return alreadyTold.some((told) => subjects.every((subject) => told.has(subject)));
+  };
+
   const ours = built.filter((thread) => thread.ours).sort(byWeight);
-  const home = built.filter((thread) => !thread.ours && thread.home && !thread.reported && thread.weight >= HOME_THRESHOLD).sort(byWeight);
-  const seen = built.filter((thread) => !thread.ours && !thread.home && !thread.reported && thread.weight >= threshold).sort(byWeight);
-  const hearsay = built.filter((thread) => !thread.ours && thread.reported && thread.weight >= threshold).sort(byWeight);
+  const home = built.filter((thread) => !thread.ours && thread.home && !thread.reported && thread.weight >= HOME_THRESHOLD && !echoing(thread)).sort(byWeight);
+  const seen = built.filter((thread) => !thread.ours && !thread.home && !thread.reported && thread.weight >= threshold && !echoing(thread)).sort(byWeight);
+  const hearsay = built.filter((thread) => !thread.ours && thread.reported && thread.weight >= threshold && !echoing(thread)).sort(byWeight);
 
   const banded = [...ours, ...home.slice(0, MAX_HOME_THREADS), ...seen, ...hearsay.slice(0, MAX_REPORTED_THREADS)];
   // A battle is never the entry that gets dropped for room. Men died in it.
@@ -795,7 +828,15 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   // only when the bands would have produced nothing at all, which is a
   // different thing from the weight floor that was tried and reverted -- that
   // one fired on every report and drowned the record in routine.
-  if (threads.length === 0 && built.length > 0) threads = [[...built].sort(byWeight)[0]!];
+  //
+  // It will not, however, put back a thread the bands held for being a repeat.
+  // A report whose only candidate is the same people doing the same thing is
+  // better blank: the floor exists so a reader is not met with nothing when
+  // something happened, not so they are met with the same thing twice.
+  if (threads.length === 0) {
+    const worthTelling = built.filter((thread) => !echoing(thread)).sort(byWeight);
+    if (worthTelling.length > 0) threads = [worthTelling[0]!];
+  }
   if (threads.length === 0) return { entries: [], calls: 0 };
 
   const period = `${formatWorldDate(input.from, input.clock)} – ${formatWorldDate(input.to, input.clock)}`;

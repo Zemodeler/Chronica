@@ -402,6 +402,38 @@ export async function listChronicle(db: ChronicaDatabase, gameId: string, limit 
   return newestFirst.reverse();
 }
 
+/**
+ * Who the newest report was already about, one set of subject ids per entry.
+ *
+ * Read before the next report is written, so a matter that is merely
+ * continuing is not given a fresh headline every time. Deliberately only the
+ * newest report: a thread held back once is written up the report after,
+ * which is the behaviour wanted -- it waits, it is not forgotten.
+ */
+export async function subjectsOfNewestReport(db: ChronicaDatabase, gameId: string): Promise<string[][]> {
+  const [newest] = await db
+    .select({ burstId: chronicleCheckpoints.burstId })
+    .from(chronicleCheckpoints)
+    .where(eq(chronicleCheckpoints.gameId, gameId))
+    .orderBy(desc(chronicleCheckpoints.toInstantSortKey), desc(chronicleCheckpoints.ordinal))
+    .limit(1);
+  if (newest?.burstId == null) return [];
+
+  const rows = await db
+    .select({ subjects: chronicleCheckpoints.subjects })
+    .from(chronicleCheckpoints)
+    .where(and(eq(chronicleCheckpoints.gameId, gameId), eq(chronicleCheckpoints.burstId, newest.burstId)));
+
+  return rows.map((row) => {
+    const subjects = Array.isArray(row.subjects) ? row.subjects : [];
+    return subjects
+      .map((subject) => (typeof subject === "object" && subject !== null && "kind" in subject && "id" in subject
+        ? `${String((subject as { kind: unknown }).kind)}:${String((subject as { id: unknown }).id)}`
+        : null))
+      .filter((key): key is string => key !== null);
+  });
+}
+
 export async function getOpenDecision(db: ChronicaDatabase, gameId: string) {
   const [row] = await db
     .select()
