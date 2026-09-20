@@ -117,3 +117,35 @@ describe("closing the books", () => {
     expect(closeTheBooks({ world: base(), clock, from: { day: 0, minute: 0 }, to: { day: NEW_YEAR + 5, minute: 0 }, polityId: null })).toEqual([]);
   });
 });
+
+describe("what the books call things", () => {
+  it("names every kind of money in words, never in the engine's own enum", () => {
+    // The year-end statement printed "tax", "upkeep", "transfer" in lowercase
+    // in the middle of a Chronicle entry whose other lines are written prose.
+    const treasury = withTreasury(base(), 5_000);
+    const stocked = withLedger(treasury.world, treasury.accountId, [
+      { kind: "tax", amount: 900 },
+      { kind: "income", amount: 400 },
+      { kind: "upkeep", amount: 300, sourceAccountId: treasury.accountId, destinationAccountId: undefined },
+      { kind: "transfer", amount: 200, sourceAccountId: treasury.accountId, destinationAccountId: undefined },
+      { kind: "spoils", amount: 150 },
+    ]);
+    const entries = closeTheBooks({
+      world: stocked,
+      clock,
+      from: { day: 0, minute: 0 },
+      to: { day: 800, minute: 0 },
+      polityId: treasury.polityId,
+    });
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) {
+      for (const line of entry.body.split("\n")) {
+        const label = line.split(":")[0]?.trim() ?? "";
+        if (label.length === 0) continue;
+        // Every label reads as a phrase somebody wrote, not a key somebody typed.
+        expect(label, line).not.toMatch(/_/);
+        expect(label[0], line).toBe(label[0]!.toUpperCase());
+      }
+    }
+  });
+});

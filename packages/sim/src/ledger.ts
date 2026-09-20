@@ -59,6 +59,27 @@ const sortKeyOf = (instant: WorldInstant): number => instant.day * 1440 + instan
  * Empty in the ordinary case: a burst of a few weeks crosses no new year, and
  * the overwhelming majority of reports carry no ledger at all.
  */
+/**
+ * What a transaction kind is called in a book somebody reads.
+ *
+ * The year-end statement printed the engine's own enum -- "tax", "upkeep",
+ * "transfer" -- in lowercase, in the middle of a Chronicle entry whose other
+ * lines are written prose. An unlabelled kind still falls through to itself
+ * with its underscores opened out, so a kind added later reads badly rather
+ * than breaking, and this list is the only thing that needs extending.
+ */
+const MONEY_KIND_WORDS: Readonly<Record<string, string>> = {
+  income: "Rents and revenues",
+  tax: "Taxes",
+  purchase: "Purchases",
+  transfer: "Payments made",
+  upkeep: "Upkeep of forces",
+  spoils: "Spoils of war",
+  ransom: "Ransoms",
+  confiscation: "Confiscations",
+  inheritance: "Inheritances",
+};
+
 export function closeTheBooks(input: LedgerInput): ChronicleEntry[] {
   if (input.polityId === null) return [];
   const polity = input.world.map.polities.find((candidate) => candidate.id === input.polityId);
@@ -127,7 +148,7 @@ export function closeTheBooks(input: LedgerInput): ChronicleEntry[] {
     const breakdown = (book: Map<string, number>): string[] =>
       [...book.entries()]
         .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-        .map(([kind, amount]) => line(`  ${kind.replace(/_/g, " ")}`, amount));
+        .map(([kind, amount]) => line(`  ${MONEY_KIND_WORDS[kind] ?? kind.replace(/_/g, " ")}`, amount));
 
     const firstDay = firstDayOf(statement.astronomical);
     const lastDay = firstDayOf(statement.astronomical + 1) - 1;
