@@ -114,6 +114,11 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       return { kind: delta.target === "polity" ? "polity" : "institution", id: delta.targetId };
     case "province_material_shift":
       return { kind: "province", id: delta.provinceId };
+    case "office_seat_set":
+      // Scoped to the power whose office it is: seating a man is an act over a
+      // government, and judging it against the office itself would let anybody
+      // who could name an office fill it.
+      return { kind: "institution", id: delta.officeId };
     case "province_control_set":
       return { kind: "province", id: delta.provinceId };
     case "political_procedure_open":
@@ -180,6 +185,7 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   agreement_close: "negotiate",
   province_control_set: "command",
   polity_create: "override",
+  office_seat_set: "appoint",
 };
 
 /**
@@ -1495,6 +1501,44 @@ function applyOne(
         polityAgreements: world.polityAgreements.map((candidate) =>
           candidate.id === agreementId ? { ...candidate, status: "ended" as const, endedAtStep: atStep, endedReason: delta.reason } : candidate,
         ),
+      };
+    }
+
+    case "office_seat_set": {
+      const office = allOffices(world, context.offices).find((candidate) => candidate.id === delta.officeId);
+      if (office === undefined) reject(`No office "${delta.officeId}" exists.`, "reference");
+      const holderId = delta.holderCharacterRef === null ? null : required(delta.holderCharacterRef, "The person taking the office");
+      if (holderId !== null && !world.characters.some((character) => character.id === holderId && character.alive)) {
+        reject(`No living character "${holderId}" exists to hold an office.`, "reference");
+      }
+
+      // Emptying it.
+      if (holderId === null) {
+        const seat = delta.seatId === null
+          ? world.material.officeSeats.find((candidate) => candidate.officeId === office.id && candidate.status === "held")
+          : world.material.officeSeats.find((candidate) => candidate.id === delta.seatId);
+        if (seat?.holderCharacterId == null) reject(`No held seat of "${office.id}" to empty.`);
+        return vacateOfficesOf(world, seat.holderCharacterId, delta.cause === "none" ? "removal" : delta.cause, atStep);
+      }
+
+      const seated = seatCharacterInOffice(
+        world,
+        holderId,
+        delta.seatId === null
+          ? { office, vacantSeatId: world.material.officeSeats.find((candidate) => candidate.officeId === office.id && candidate.status !== "held")?.id ?? null }
+          : { office, vacantSeatId: delta.seatId },
+        atStep,
+      );
+      if (delta.termDays === null) return seated;
+      return {
+        ...seated,
+        material: {
+          ...seated.material,
+          officeSeats: seated.material.officeSeats.map((seat) =>
+            seat.officeId === office.id && seat.holderCharacterId === holderId
+              ? { ...seat, termExpiresAtStep: atStep + delta.termDays! }
+              : seat),
+        },
       };
     }
 

@@ -760,6 +760,41 @@ export function runDeterministicTick(input: TickInput): TickResult {
     return ignored;
   });
 
+  // A term ends the day it ends, whether or not anybody remembers it.
+  //
+  // `termExpiresAtStep` has been on every office seat since the character
+  // system was written and nothing has ever read it, so a consulship held for
+  // a year was held for ever. `deriveOfficeGrants` expires the *grant* on the
+  // same date, which made it worse than useless: the man went on being the
+  // consul everywhere a character is read while quietly holding none of the
+  // consul's powers.
+  const expiredSeats = recovered.material.officeSeats.filter(
+    (seat) => seat.status === "held" && seat.termExpiresAtStep !== null && seat.termExpiresAtStep <= input.toDay,
+  );
+  const officeSeats = expiredSeats.length === 0
+    ? recovered.material.officeSeats
+    : recovered.material.officeSeats.map((seat) =>
+      expiredSeats.some((expired) => expired.id === seat.id)
+        ? { ...seat, status: "vacant" as const, vacancyCause: "term_expired" as const, holderCharacterId: null }
+        : seat);
+  const laidDown = new Set(expiredSeats.flatMap((seat) => (seat.holderCharacterId === null ? [] : [seat.holderCharacterId])));
+  for (const seat of expiredSeats) {
+    if (seat.holderCharacterId === null) continue;
+    const who = recovered.characters.find((character) => character.id === seat.holderCharacterId)?.name ?? seat.holderCharacterId;
+    facts.push({
+      localId: nextLocalId("term"),
+      kind: "office_term_ended",
+      summary: `${who} laid down his office at the end of its term.`,
+      affectedRefs: [{ kind: "character", id: seat.holderCharacterId }],
+      visibility: "public",
+      discoveryState: "public",
+      knowableInDays: 0,
+      // A magistracy changing hands on the calendar is ordinary, and worth
+      // knowing: it is how a republic differs from a reign.
+      significance: 45,
+    });
+  }
+
   // A truce with a term ends the day its term does, whether or not anybody
   // remembers it. One that ends only when somebody says so is a peace.
   const polityAgreements = expireDatedAgreements(agreements, input.toDay);
@@ -784,7 +819,18 @@ export function runDeterministicTick(input: TickInput): TickResult {
     // wars from the agreements that are the wars, sieges from the projects
     // prosecuting them. Battles are left alone -- they are moments, and the
     // engagement that caused one records it.
-    world: projectConflictsInto({ ...recovered, storylines, diplomacy, polityStances, polityAgreements }),
+    world: projectConflictsInto({
+      ...recovered,
+      storylines,
+      diplomacy,
+      polityStances,
+      polityAgreements,
+      material: { ...recovered.material, officeSeats },
+      // The mirror on the character, which the seat cannot reach on its own.
+      characters: laidDown.size === 0
+        ? recovered.characters
+        : recovered.characters.map((character) => (laidDown.has(character.id) ? { ...character, officeId: null } : character)),
+    }),
     factProposals: facts,
     notes,
   };

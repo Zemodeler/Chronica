@@ -14,6 +14,7 @@ import {
   BasisPointsSchema,
   EntityIdSchema,
   MoneyAmountSchema,
+  OfficeSeatVacancyCauseSchema,
   PoliticalProcedureSubjectKindSchema,
   PoliticalProcedureTypeSchema,
   PoliticalResolutionMechanismSchema,
@@ -567,6 +568,34 @@ const StorylineOpenSchema = z.object({
  * Control taken is not control held. The province arrives at low firmness, and
  * the people in it are free to make that everyone's problem.
  */
+/**
+ * Somebody seated in an office, or put out of one.
+ *
+ * Nothing in the union could do either. Office was assigned exactly once in a
+ * game's life -- inside `materializePlayerCharacter`, when the player declared
+ * their character -- and never again by anything. A procedure that passed
+ * settled its own row and moved no seat.
+ *
+ * It is worth its place in the contract for a second reason. `checkAuthority`
+ * judges it like any other act, so a man who seats himself commits a breach
+ * that somebody may come across and put before a court -- which is VISION §12's
+ * illegal seizure of power falling out of the tables that already exist,
+ * instead of needing a mechanic of its own.
+ */
+const OfficeSeatSetSchema = z.object({
+  op: z.literal("office_seat_set"),
+  officeId: EntityIdSchema,
+  /** The seat, when an existing one is meant. Null takes the first free seat, or opens one. */
+  seatId: EntityIdSchema.nullable().default(null),
+  /** Who holds it now. Null empties it. */
+  holderCharacterRef: RefSchema.nullable().default(null),
+  /** Why it fell vacant, when it did. */
+  cause: OfficeSeatVacancyCauseSchema.default("none"),
+  /** How long they hold it, in days. Null for a term that ends when somebody ends it. */
+  termDays: z.number().int().positive().max(36_600).nullable().default(null),
+  reason: ReasonSchema,
+}).strict();
+
 const ProvinceControlSetSchema = z.object({
   op: z.literal("province_control_set"),
   provinceId: EntityIdSchema,
@@ -757,6 +786,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   AgreementCloseSchema,
   ProvinceControlSetSchema,
   PolityCreateSchema,
+  OfficeSeatSetSchema,
 ]);
 export type WorldDelta = z.infer<typeof WorldDeltaSchema>;
 export type WorldDeltaOp = WorldDelta["op"];
@@ -798,6 +828,7 @@ export const WORLD_DELTA_OPS = [
   "agreement_close",
   "province_control_set",
   "polity_create",
+  "office_seat_set",
 ] as const satisfies readonly WorldDeltaOp[];
 
 /**
@@ -843,4 +874,6 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   // Taking ground is a military act; founding a power is not anyone's office.
   province_control_set: "military",
   polity_create: "civil",
+  // Putting a man in office, or out of it, is the civil power at its plainest.
+  office_seat_set: "civil",
 };

@@ -552,3 +552,54 @@ describe("a letter nobody answered", () => {
     expect(silence.significance).toBeGreaterThanOrEqual(45);
   });
 });
+
+describe("a term that ends", () => {
+  it("empties the seat on the day, and says so", () => {
+    // `termExpiresAtStep` has been on every seat since the character system was
+    // written and nothing ever read it, so a consulship held for a year was
+    // held for ever -- while `deriveOfficeGrants` expired the grant on the same
+    // date, leaving a man who was the consul everywhere and held none of the
+    // consul's powers.
+    const state = base();
+    const seat = state.material.officeSeats.find((candidate) => candidate.status === "held" && candidate.holderCharacterId !== null);
+    if (seat === undefined) return;
+    const holderId = seat.holderCharacterId!;
+
+    const expiring: WorldState = {
+      ...state,
+      characters: state.characters.map((character) => (character.id === holderId ? { ...character, officeId: seat.officeId } : character)),
+      material: {
+        ...state.material,
+        officeSeats: state.material.officeSeats.map((candidate) =>
+          candidate.id === seat.id ? { ...candidate, termExpiresAtStep: state.instant.day + 5 } : candidate),
+      },
+    };
+
+    const result = tick(expiring, state.instant.day + 10);
+    const after = result.world.material.officeSeats.find((candidate) => candidate.id === seat.id)!;
+    expect(after.status).toBe("vacant");
+    expect(after.holderCharacterId).toBeNull();
+    expect(after.vacancyCause).toBe("term_expired");
+    // And the mirror, which the seat cannot reach on its own.
+    expect(result.world.characters.find((character) => character.id === holderId)!.officeId).toBeNull();
+    // A magistracy changing hands on the calendar is how a republic differs
+    // from a reign, and worth the reader knowing.
+    expect(result.factProposals.find((fact) => fact.kind === "office_term_ended")!.summary).toContain("laid down");
+  });
+
+  it("leaves a term that has not run alone", () => {
+    const state = base();
+    const seat = state.material.officeSeats.find((candidate) => candidate.status === "held");
+    if (seat === undefined) return;
+    const later: WorldState = {
+      ...state,
+      material: {
+        ...state.material,
+        officeSeats: state.material.officeSeats.map((candidate) =>
+          candidate.id === seat.id ? { ...candidate, termExpiresAtStep: state.instant.day + 500 } : candidate),
+      },
+    };
+    const result = tick(later, state.instant.day + 10);
+    expect(result.world.material.officeSeats.find((candidate) => candidate.id === seat.id)!.status).toBe("held");
+  });
+});
