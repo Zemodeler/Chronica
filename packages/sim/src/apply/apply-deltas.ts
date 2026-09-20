@@ -7,6 +7,7 @@ import {
   crossingAdmitted,
   allOffices,
   TRAIT_REGISTRY,
+  canonicalTraitIds,
   clampWealth,
   deriveOfficeActions,
   findOfficeForRole,
@@ -819,8 +820,14 @@ function applyOne(
         creationReason: delta.generatedBecause,
       });
       if (created === null) reject(`Could not create "${delta.name}" at province "${provinceId}".`);
+      // The registry's own words, not the free text. A live world was holding
+      // "hellenistic_governor", "cavalry leader" and "protective of tribal
+      // autonomy" as traits -- none of which mean anything to the dialogue
+      // guidance NPC prompts read or to the incompatibilities the observation
+      // rule checks, because both live in `TRAIT_REGISTRY` and none of those
+      // are in it.
       const withTraits = created.world.characters.map((character) =>
-        character.id === id ? { ...character, traits: delta.traits.slice(0, 8) } : character,
+        character.id === id ? { ...character, traits: canonicalTraitIds(delta.traits) } : character,
       );
       // The world says what it made this person: "Military Quaestor", "chief of
       // the Boii". That was parsed and thrown on the floor -- every generated

@@ -181,7 +181,11 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     // strait while the other refuses to have it is the pressure that follows
     // it -- held back by `afterPressureIds` until the asking has happened.
     await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 22, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Gives the age its own mortality -- six historical bands, reviewed monthly -- and chains the crossing of the strait to Messana having asked for a protector, so the First Punic War is something this world can fall into." }).onConflictDoNothing();
-    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 22, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
+    // What a Roman of a given standing is actually worth, off the census
+    // classes. Without bands the declaration prompt asked for the standing and
+    // the money in the same breath and believed whatever came back.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 23, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Bounds what a person of a given standing is worth by the Roman census classes, so a common soldier cannot open with a senator's fortune and a merchant invented to lend money has something to lend." }).onConflictDoNothing();
+    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 23, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
   });
 }
 

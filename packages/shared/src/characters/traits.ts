@@ -96,6 +96,66 @@ export const TRAIT_REGISTRY: Readonly<Record<string, TraitDefinition>> = {
 };
 
 /**
+ * The registry's own words for what somebody was described as.
+ *
+ * `character_create` takes free text and wrote it straight onto the character,
+ * so a live world ended up holding "hellenistic_governor", "protective of
+ * tribal autonomy", "cavalry leader" and "anti-roman" as traits. None of them
+ * mean anything to anything: `TRAIT_REGISTRY` supplies the dialogue guidance
+ * NPC prompts read and the incompatibilities the observation rule checks, and
+ * a trait outside it silently confers neither. The registry has had
+ * `validateTraitIds` since it was written and `character_create` never called
+ * it.
+ *
+ * So a description is mapped to the nearest word the engine actually has, by
+ * the words in it, and anything that maps to nothing is dropped rather than
+ * stored as furniture. The scenario-authored forward compatibility the header
+ * of this file promises is preserved: an id that *is* in the registry passes
+ * through untouched, whoever put it there.
+ */
+const TRAIT_SYNONYMS: Readonly<Record<string, readonly string[]>> = {
+  cautious: ["cautious", "careful", "prudent", "wary", "watchful", "guarded", "circumspect", "hesitant", "conservative"],
+  bold: ["bold", "brave", "daring", "fearless", "aggressive", "rash", "reckless", "audacious", "martial", "warlike", "courageous"],
+  ambitious: ["ambitious", "aspiring", "climbing", "calculating", "opportunistic", "grasping"],
+  dutiful: ["dutiful", "loyal", "faithful", "honourable", "honorable", "steadfast", "reliable", "principled", "devoted"],
+  vengeful: ["vengeful", "vindictive", "unforgiving", "spiteful", "bitter", "resentful"],
+  sociable: ["sociable", "charismatic", "affable", "gregarious", "popular", "persuasive", "charming", "genial"],
+  disciplined: ["disciplined", "methodical", "organised", "organized", "orderly", "systematic", "meticulous", "rigorous", "pragmatic", "administrative"],
+  deceitful: ["deceitful", "duplicitous", "scheming", "treacherous", "cunning", "devious", "secretive", "discreet", "sly"],
+  compassionate: ["compassionate", "merciful", "kind", "generous", "humane", "protective", "gentle"],
+  cruel: ["cruel", "ruthless", "brutal", "harsh", "merciless", "savage", "callous"],
+};
+
+/**
+ * Every description reduced to the traits the engine has words for.
+ *
+ * Order-stable and deduplicated, so two identically-described people carry
+ * identical traits. Drops what it cannot place: a trait that confers nothing
+ * and means nothing is not worth storing.
+ */
+export function canonicalTraitIds(described: readonly string[], limit = MAX_TRAITS): string[] {
+  const found = new Set<string>();
+  for (const description of described) {
+    const raw = description.trim().toLowerCase();
+    if (TRAIT_REGISTRY[raw] !== undefined) {
+      found.add(raw);
+      continue;
+    }
+    const words = new Set(raw.replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((token) => token.length > 2));
+    for (const [id, synonyms] of Object.entries(TRAIT_SYNONYMS)) {
+      if (synonyms.some((synonym) => words.has(synonym))) found.add(id);
+    }
+  }
+  // Incompatible pairs cannot both be true of one person. Where a description
+  // produced both, neither is kept: the engine has no basis to pick.
+  const kept = [...found].filter((id) => {
+    const definition = TRAIT_REGISTRY[id];
+    return definition === undefined || !definition.incompatibleTraitIds.some((other) => found.has(other));
+  });
+  return Object.keys(TRAIT_REGISTRY).filter((id) => kept.includes(id)).slice(0, limit);
+}
+
+/**
  * Somebody's judgment of somebody else, before it is anybody's character
  * (slice 11).
  *

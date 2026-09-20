@@ -209,7 +209,12 @@ describe("dynamic world generation", () => {
     expect(result.rejected).toHaveLength(0);
     const created = result.world.characters.find((c) => c.name === "Marcus Fabius Varro");
     expect(created).toBeDefined();
-    expect(created!.traits).toContain("methodical");
+    // Stored as the registry's own words, not as the free text the world used.
+    // "methodical" and "politically cautious" were carried verbatim onto the
+    // character and conferred nothing, because the dialogue guidance NPC
+    // prompts read and the incompatibilities the observation rule checks both
+    // live in `TRAIT_REGISTRY` and neither of those is in it.
+    expect(created!.traits).toEqual(["cautious", "disciplined"]);
     expect(result.world.material.accounts.some((a) => a.id === created!.personalAccountId)).toBe(true);
   });
 

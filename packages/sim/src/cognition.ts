@@ -42,6 +42,16 @@ const OUTPUT_JSON_SCHEMA = JSON.stringify(z.toJSONSchema(CognitionOutputSchema, 
 const PROPOSAL_LISTS = ["deltas", "facts", "delegations", "schedule", "discoveries", "socialEvents"] as const;
 
 /**
+ * Ops a model writes as a key of the proposal rather than as a delta in it.
+ *
+ * `social_events` is the one that actually happens: it reads like a field
+ * because every other thing named in the same breath -- `relationCauses`,
+ * `observedTraits` -- *is* a field. A batch of four people's answers was lost
+ * to it in a live game, all four of them correct in substance.
+ */
+const MISPLACED_OPS = ["social_events"] as const;
+
+/**
  * Puts a proposal's own lists back inside the proposal.
  *
  * Cognition answers in the same shape the orchestrator does, and the shape the
@@ -79,6 +89,23 @@ export function foldStrayProposalKeys(value: unknown): unknown {
       ? { ...(actor.proposal as Record<string, unknown>) }
       : {};
     drain(actor, proposal);
+    // An op written as a key of the proposal is still that op. Put it back in
+    // the deltas where it belongs rather than losing the whole answer to it.
+    for (const op of MISPLACED_OPS) {
+      const stray = proposal[op] ?? actor[op];
+      if (stray === undefined || stray === null) continue;
+      delete proposal[op];
+      delete actor[op];
+      const deltas = Array.isArray(proposal.deltas) ? [...(proposal.deltas as unknown[])] : [];
+      const entries = Array.isArray(stray) ? stray : [stray];
+      for (const entry of entries) {
+        if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
+        const asDelta = entry as Record<string, unknown>;
+        // Either "{events: [...]}" or a bare list of events; both are meant.
+        deltas.push(Array.isArray(asDelta.events) ? { op, ...asDelta } : { op, events: [asDelta] });
+      }
+      proposal.deltas = deltas;
+    }
     actor.proposal = proposal;
     return actor;
   });
@@ -169,17 +196,19 @@ The same engine rules apply as elsewhere:
   quotes nobody.
 - Dealing with somebody changes what you think of them. Where this turn put
   two people in the same room, on the same order or on opposite sides of a
-  refusal, say so with "social_events": name them both, and give
-  "relationCauses" one entry per direction that changed, scored -20 to 20 with
-  the dimensions it moves (trust, respect, fear, affection, obligation). A
-  season in which nobody's opinion of anybody moved is a season nobody lived
-  through.
+  refusal, record it as a delta in "deltas" with "op": "social_events" -- it
+  is a delta like any other, not a field of the proposal. Its "events" name
+  both people in "participantCharacterRefs", and "relationCauses" gives one
+  entry per direction that changed, scored -20 to 20 with the dimensions it
+  moves (trust, respect, fear, affection, obligation). A season in which
+  nobody's opinion of anybody moved is a season nobody lived through.
 - And where somebody has now seen enough of another person to say what they
-  are like, put it in that event's "observedTraits": the person judged, the
-  person judging, and one of cautious, bold, ambitious, dutiful, vengeful,
-  sociable, disciplined, deceitful, compassionate, cruel. Say only what this
-  person actually saw. It takes two different people to make it true, so one
-  opinion is an opinion, and that is deliberate.
+  are like, put it in that same event's "observedTraits": the person judged,
+  the person judging, and one of cautious, bold, ambitious, dutiful, vengeful,
+  sociable, disciplined, deceitful, compassionate, cruel -- those ten words
+  and no others. Say only what this person actually saw. It takes two
+  different people to make it true, so one opinion is an opinion, and that is
+  deliberate.
 - Something they have found out that somebody did without the authority to do
   it is theirs to make of what they will. They may sit on it, tell somebody
   ("belief_set"), demand an accounting, or put it to the body that can judge it

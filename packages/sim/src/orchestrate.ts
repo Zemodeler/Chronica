@@ -325,6 +325,33 @@ function inertOutput(reason: string): OrchestratorOutput {
 }
 
 
+/**
+ * The schema's own ceilings, and what happens when an answer goes past one.
+ *
+ * A live game lost an entire order because the answer carried twenty-five
+ * deltas and the cap is twenty-four: the schema is strict, so all
+ * twenty-five were discarded, the retry produced another long answer, and the
+ * burst committed having done nothing. Twenty-four good acts thrown away over
+ * the twenty-fifth is the worst trade in the pipeline.
+ *
+ * A ceiling is a budget, not a contract. Past it the tail is dropped -- the
+ * model puts the important things first, and losing the last of a long list
+ * is a far smaller loss than losing the list.
+ */
+const OUTPUT_CAPS: Readonly<Record<string, number>> = {
+  deltas: 24, facts: 16, discoveries: 12, delegations: 8, schedule: 12,
+};
+
+export function trimToCaps(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+  const output = { ...(value as Record<string, unknown>) };
+  for (const [key, cap] of Object.entries(OUTPUT_CAPS)) {
+    const list = output[key];
+    if (Array.isArray(list) && list.length > cap) output[key] = list.slice(0, cap);
+  }
+  return output;
+}
+
 export async function orchestrate(port: SimModelPort, slice: WorldSlice): Promise<OrchestrateResult> {
   const userMessage = renderWorldSlice(slice);
   let calls = 0;
@@ -332,7 +359,7 @@ export async function orchestrate(port: SimModelPort, slice: WorldSlice): Promis
   const attempt = async (message: string) => {
     calls += 1;
     const raw = await port.complete("simulate_orchestrate", ORCHESTRATOR_SYSTEM_PROMPT, message);
-    return OrchestratorOutputSchema.safeParse(extractJson(raw));
+    return OrchestratorOutputSchema.safeParse(trimToCaps(extractJson(raw)));
   };
 
   let failure: string;
