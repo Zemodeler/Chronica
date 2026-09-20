@@ -580,9 +580,12 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         ownPolityId: input.actorPolityId,
         playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
         facts: [...input.knownFacts, ...newFacts],
+        // What this order may carry the world through, so the batch is the
+        // season's and not the morning's.
+        spanDays: Math.min(budget.maxSimulatedDays, input.clock.maxSpanDays),
         ...(input.historicalPressures === undefined ? {} : { pressures: input.historicalPressures }),
       });
-  world = recordSeedsOffered(world, seeds);
+  world = recordSeedsOffered(world, seeds, world.instant.day + Math.min(budget.maxSimulatedDays, input.clock.maxSpanDays));
 
   const slice = buildWorldSlice({
     world,

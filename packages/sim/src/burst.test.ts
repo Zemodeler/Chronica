@@ -615,7 +615,9 @@ describe("the world stirs: a secret plot", () => {
     const thread = result.world.storylines.find((storyline) => storyline.seedKey === "seed-plot")!;
     expect(thread.origin).toBe("world");
     expect(thread.visibility).toBe("private");
-    expect(result.world.narrator).toEqual({ lastSeedDay: 0, seedCount: 1, lastSeedKey: "seed-plot", consumed: true, spentPressureIds: [] });
+    // `lastSeedDay` is the far end of what the batch covers, not the day it
+    // was decided: a batch sized for a season is that season's stirrings.
+    expect(result.world.narrator).toEqual({ lastSeedDay: 90, seedCount: 1, lastSeedKey: "seed-plot", consumed: true, spentPressureIds: [] });
     expect(result.world.characterPressures.some((pressure) => pressure.characterId === "quintus-fabius" && pressure.visibility === "private")).toBe(true);
   });
 
