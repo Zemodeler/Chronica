@@ -122,6 +122,44 @@ const COMMAND_ROLE_WORDS = [
 ];
 
 /**
+ * The power a stated role and culture actually name.
+ *
+ * Matched on the powers that exist in this world rather than on a list, so a
+ * scenario about anywhere works: "Consul of the Roman Republic" names Rome
+ * because Rome is called "Roman Republic", and "Roman Patrician" names it
+ * again. A description naming no power at all returns undefined and the
+ * caller falls back to the ground, which is the right answer for a farmer.
+ */
+export function findPolityForRole(
+  world: { readonly map: { readonly polities: readonly { readonly id: string; readonly name: string }[] } },
+  role: string,
+  culture: string,
+): string | undefined {
+  const said = `${role} ${culture}`.toLowerCase();
+  const words = new Set(said.replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((token) => token.length > 3));
+
+  const scored = world.map.polities
+    .map((polity) => {
+      const nameWords = polity.name.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((token) => token.length > 3);
+      // Every distinctive word of the power's name that the description uses.
+      // "Roman Republic" scores twice on "Consul of the Roman Republic", and a
+      // power whose name shares nothing with the description scores nothing.
+      //
+      // Matched on a shared stem rather than a shared word, because a people
+      // and their country are rarely spelled the same: a "Carthaginian
+      // trader" is a man of Carthage, and nothing that compares whole words
+      // will ever say so.
+      const hits = nameWords.filter((word) => [...words].some((said) => said.startsWith(word.slice(0, 5)) || word.startsWith(said.slice(0, 5)))).length;
+      return { id: polity.id, hits, length: nameWords.length };
+    })
+    .filter((entry) => entry.hits > 0)
+    // The fullest match wins, then the most specific name: "Roman Republic"
+    // beats a power merely called "Rome" on a description that says both.
+    .sort((a, b) => b.hits - a.hits || a.length - b.length || a.id.localeCompare(b.id));
+  return scored[0]?.id;
+}
+
+/**
  * A force for somebody whose role says they command one.
  *
  * `findOfficeSeatForRole` was the only path from a declared character to real
@@ -189,13 +227,33 @@ export function materializePlayerCharacter(
   };
   const cultureId = `culture-${knowledgebase.culture.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "local"}`;
 
+  /**
+   * Whose man this is.
+   *
+   * It used to be simply whoever controlled the ground he was standing on,
+   * which is right for a farmer and catastrophic for anybody else. A player
+   * who declared "a Roman consul charged with the northern frontier" was
+   * placed on the Insubrian Plain, because that is where the northern frontier
+   * is -- and came out an **Insubrian**. Everything downstream then went
+   * wrong in ways that looked like separate bugs: his retinue was Insubrian,
+   * the legion Rome raised for him was Insubrian, a Roman consul refused his
+   * orders on the grounds that "a Roman consul takes orders from Rome", and
+   * requisitioning supplies in Insubria was recorded as a breach against a
+   * country he was supposedly a citizen of.
+   *
+   * What a person says they are outranks where they happen to be. The role and
+   * the culture name the power; the ground is only the fallback, for somebody
+   * whose description names none.
+   */
+  const declaredPolityId = findPolityForRole(world, knowledgebase.role, knowledgebase.culture) ?? location.controllerPolityId;
+
   // A researched character whose role names a real office in their own polity,
   // and where that office has a seat free, starts holding it. This is the only
   // mechanical link between character creation and the canonical Authority
   // projection (characters/authority-projection.ts); a role that names no
   // office, or one whose seats are all filled, leaves officeId null rather
   // than granting power the scenario did not actually have to give.
-  const matched = findOfficeSeatForRole(world, scenarioGovernment, location.controllerPolityId, knowledgebase.role);
+  const matched = findOfficeSeatForRole(world, scenarioGovernment, declaredPolityId, knowledgebase.role);
   const officeId = matched?.office.id ?? null;
   const playerCharacter: WorldState["characters"][number] = {
     id: actorCharacterId,
@@ -204,7 +262,7 @@ export function materializePlayerCharacter(
     faithId: null,
     dynastyId: null,
     locationProvinceId: location.id,
-    polityId: location.controllerPolityId,
+    polityId: declaredPolityId,
     ageYearsAtStart: 35,
     officeId,
     personalAccountId: accountId,
@@ -226,7 +284,7 @@ export function materializePlayerCharacter(
   // Fixed id and fixed numbers: `materializePlayerCharacter` is a pure
   // projection re-run by read paths, so anything it creates must be the same
   // thing every time it is called.
-  const command = findCommandForRole(world, location.controllerPolityId, knowledgebase.role, location.id);
+  const command = findCommandForRole(world, declaredPolityId, knowledgebase.role, location.id);
   const retinueId = `force-${actorCharacterId}`;
   const commandedForces = command === undefined || world.material.forces.some((force) => force.id === retinueId)
     ? command?.kind === "existing"
@@ -241,7 +299,7 @@ export function materializePlayerCharacter(
       : [...world.material.forces, {
         id: retinueId,
         name: `${knowledgebase.canonicalName}'s retinue`,
-        polityId: location.controllerPolityId ?? "",
+        polityId: declaredPolityId ?? "",
         commanderCharacterId: actorCharacterId,
         controllerCharacterId: actorCharacterId,
         locationId: location.id,

@@ -3,7 +3,7 @@ import { punicWarsScenario } from "@chronica/db";
 import { WorldStateSchema, type WorldState } from "../world/world-state";
 import { CharacterKnowledgebaseSchema, type CharacterKnowledgebase } from "./knowledgebase";
 import { deriveAuthoritySummary } from "./authority-projection";
-import { findOfficeSeatForRole, materializePlayerCharacter } from "./player-materialization";
+import { findOfficeSeatForRole, findPolityForRole, materializePlayerCharacter } from "./player-materialization";
 
 // A declared player who researched their way into a consulship must actually
 // hold it. These tests use the real Punic Wars scenario and the shape of role
@@ -157,5 +157,34 @@ describe("a declared soldier", () => {
     const once = materializePlayerCharacter(world(), PLAYER, knowledgebase({ role: LEGATE_ROLE }), government);
     const twice = materializePlayerCharacter(once, PLAYER, knowledgebase({ role: LEGATE_ROLE }), government);
     expect(twice.material.forces.length).toBe(once.material.forces.length);
+  });
+});
+
+describe("whose man the player actually is", () => {
+  it("makes a declared Roman consul a Roman, wherever he is standing", () => {
+    // From a live game, and it looked like five separate bugs. A player who
+    // declared "a Roman consul charged with the northern frontier" was placed
+    // on the Insubrian Plain -- which is where the northern frontier is -- and
+    // came out an Insubrian. His retinue was Insubrian, the legion Rome raised
+    // for him was Insubrian, a Roman consul refused his orders on the grounds
+    // that a Roman consul takes orders from Rome, and requisitioning supplies
+    // in Insubria was recorded as a breach against his own country.
+    const world = { map: { polities: [{ id: "rome", name: "Roman Republic" }, { id: "insubres", name: "Insubres" }, { id: "carthage", name: "Carthage" }] } };
+    expect(findPolityForRole(world, "Consul of the Roman Republic, commanding a field army", "Roman Patrician")).toBe("rome");
+  });
+
+  it("reads the culture when the role names no power", () => {
+    const world = { map: { polities: [{ id: "rome", name: "Roman Republic" }, { id: "carthage", name: "Carthage" }] } };
+    expect(findPolityForRole(world, "A merchant of the inland roads", "Carthaginian trader")).toBe("carthage");
+  });
+
+  it("says nothing about a description that names no power, so the ground still answers", () => {
+    const world = { map: { polities: [{ id: "rome", name: "Roman Republic" }, { id: "insubres", name: "Insubres" }] } };
+    expect(findPolityForRole(world, "A shepherd", "Hill people")).toBeUndefined();
+  });
+
+  it("prefers the fuller match", () => {
+    const world = { map: { polities: [{ id: "rome-city", name: "Rome" }, { id: "rome", name: "Roman Republic" }] } };
+    expect(findPolityForRole(world, "Consul of the Roman Republic", "Roman")).toBe("rome");
   });
 });
