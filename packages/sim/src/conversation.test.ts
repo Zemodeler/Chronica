@@ -22,6 +22,7 @@ function event(overrides: Partial<CharacterSocialEvent> = {}): CharacterSocialEv
     knowledgeClaims: [],
     proposedBeliefs: [],
     pressureChanges: [],
+    observedTraits: [],
     commitmentProposal: null,
     introducedCharacter: null,
     introducedProfile: null,

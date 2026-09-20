@@ -13,6 +13,7 @@ import {
   type ScenarioHistoricalPressure,
   type ScheduledEventPayload,
   type ScenarioLifeRules,
+  type ScenarioWealthRules,
   type ScenarioWarfareRules,
   type TerrainDefinition,
   type StopReason,
@@ -113,6 +114,8 @@ export interface BurstInput {
    * which is what every game did until this was passed in.
    */
   readonly life?: ScenarioLifeRules | undefined;
+  /** What a person of a given standing is worth here, so an invented one is worth it too. */
+  readonly wealth?: ScenarioWealthRules | undefined;
   /** What the period tends toward, offered only where the world still looks like it. */
   readonly historicalPressures?: readonly ScenarioHistoricalPressure[] | undefined;
   readonly burstId: string;
@@ -225,6 +228,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       offices: input.offices,
       warfare: input.warfare,
       ...(input.terrains === undefined ? {} : { terrains: input.terrains }),
+      ...(input.wealth === undefined ? {} : { wealth: input.wealth }),
       ids,
       gameId: input.gameId,
       actsForTheWorld,

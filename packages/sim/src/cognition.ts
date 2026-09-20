@@ -167,6 +167,19 @@ The same engine rules apply as elsewhere:
   words, under twenty-five, with the occasion. Leave it null otherwise; almost
   every answer leaves it null, and a chronicle in which everyone is quotable
   quotes nobody.
+- Dealing with somebody changes what you think of them. Where this turn put
+  two people in the same room, on the same order or on opposite sides of a
+  refusal, say so with "social_events": name them both, and give
+  "relationCauses" one entry per direction that changed, scored -20 to 20 with
+  the dimensions it moves (trust, respect, fear, affection, obligation). A
+  season in which nobody's opinion of anybody moved is a season nobody lived
+  through.
+- And where somebody has now seen enough of another person to say what they
+  are like, put it in that event's "observedTraits": the person judged, the
+  person judging, and one of cautious, bold, ambitious, dutiful, vengeful,
+  sociable, disciplined, deceitful, compassionate, cruel. Say only what this
+  person actually saw. It takes two different people to make it true, so one
+  opinion is an opinion, and that is deliberate.
 - Something they have found out that somebody did without the authority to do
   it is theirs to make of what they will. They may sit on it, tell somebody
   ("belief_set"), demand an accounting, or put it to the body that can judge it

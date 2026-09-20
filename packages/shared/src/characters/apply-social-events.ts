@@ -6,6 +6,7 @@ import type { SocialLink } from "./relationship-dimensions";
 import type { CharacterBelief } from "./beliefs";
 import { KNOWLEDGE_CHANNEL_DEFAULTS, resolveRecipients } from "./beliefs";
 import { createPressure, refreshPressure, resolvePressure } from "./pressures";
+import { MAX_TRAITS, observeTraits, type TraitObservation } from "./traits";
 import type { Commitment } from "./commitments";
 import { createCommitment } from "./commitments";
 
@@ -22,6 +23,8 @@ export interface ApplySocialEventsOutcome {
   readonly rejectedIds: readonly { id: string; reason: string }[];
   /** Profiles paired with a newly-introduced character, for the caller to persist (DB-side, not part of `WorldState`). */
   readonly introducedProfiles: readonly CharacterProfile[];
+  /** Traits that two people have now independently seen, so they are who somebody is. */
+  readonly traitsConfirmed: readonly { readonly characterId: string; readonly traitId: string; readonly observerCharacterIds: readonly string[] }[];
 }
 
 function findRelation(character: Character, targetCharacterId: string): DirectedRelation | undefined {
@@ -69,6 +72,8 @@ export function applySocialEvents(
   let characterPressures: readonly WorldState["characterPressures"][number][] = world.characterPressures;
   let socialLinks: readonly SocialLink[] = world.socialLinks;
   let commitments: readonly Commitment[] = world.commitments;
+  let traitObservations: readonly TraitObservation[] = world.traitObservations;
+  const traitsConfirmed: { characterId: string; traitId: string; observerCharacterIds: readonly string[] }[] = [];
   const appliedIds: string[] = [];
   const rejectedIds: { id: string; reason: string }[] = [];
   const introducedProfiles: CharacterProfile[] = [];
@@ -304,6 +309,39 @@ export function applySocialEvents(
       },
     ];
 
+    // What the people in this event now think somebody is like (slice 11).
+    //
+    // An observer has to have been there -- a trait is what somebody saw, not
+    // what they heard -- and two of them have to say it before it is who
+    // anybody is. Refused observations do not fail the event: an NPC naming a
+    // trait the registry has no word for has simply said something the engine
+    // cannot write down.
+    const witnesses = new Set(event.participantCharacterIds);
+    const proposals = event.observedTraits.filter((proposal) => witnesses.has(proposal.observerCharacterId));
+    if (proposals.length > 0) {
+      const traitsOf = (characterId: string): readonly string[] =>
+        characters.find((candidate) => candidate.id === characterId)?.traits ?? [];
+      const outcome = observeTraits(
+        traitObservations,
+        proposals.map((proposal) => ({
+          characterId: proposal.subjectCharacterId,
+          observerCharacterId: proposal.observerCharacterId,
+          traitId: proposal.traitId,
+          note: proposal.note,
+        })),
+        traitsOf,
+        atStep,
+        (prefix) => `${event.id}:${prefix}:${traitObservations.length}`,
+      );
+      traitObservations = outcome.observations;
+      for (const entry of outcome.confirmed) {
+        traitsConfirmed.push(entry);
+        characters = characters.map((candidate) => (candidate.id === entry.characterId
+          ? { ...candidate, traits: [...candidate.traits, entry.traitId].slice(0, MAX_TRAITS) }
+          : candidate));
+      }
+    }
+
     appliedIds.push(event.id);
   }
 
@@ -316,9 +354,11 @@ export function applySocialEvents(
       characterPressures: [...characterPressures],
       socialLinks: [...socialLinks],
       commitments: [...commitments],
+      traitObservations: [...traitObservations],
     },
     appliedIds,
     rejectedIds,
     introducedProfiles,
+    traitsConfirmed,
   };
 }

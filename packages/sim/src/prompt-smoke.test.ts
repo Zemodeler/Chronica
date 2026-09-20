@@ -29,7 +29,13 @@ describe("orchestrator prompt", () => {
     // could not impair anybody, so a man "fell ill" in a fact and went on
     // doing everything he had done the day before.
     console.log("system prompt chars:", ORCHESTRATOR_SYSTEM_PROMPT.length, "~tokens:", Math.round(ORCHESTRATOR_SYSTEM_PROMPT.length / 4));
-    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(59_000);
+    // Raised again for slice 11: `social_events` now carries relation causes
+    // and observed traits, and most of this prompt's bulk is the delta union's
+    // own generated JSON schema rather than prose -- so it grows with every
+    // field added anywhere in `deltas.ts`. It is cached on every call after
+    // the first, which is why this is a ceiling rather than a budget; if it
+    // reaches seventy thousand the schema itself wants pruning, not the rule.
+    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(64_000);
   });
 });
 

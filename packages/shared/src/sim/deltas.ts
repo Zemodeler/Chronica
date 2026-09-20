@@ -10,6 +10,7 @@ import {
 import { CharacterIntentActionTypeSchema } from "../characters/intents";
 import { CharacterPressureKindSchema } from "../characters/pressures";
 import { CharacterSocialEventKindSchema } from "../characters/social-events";
+import { RelationDimensionScoresSchema } from "../characters/character";
 import {
   BasisPointsSchema,
   EntityIdSchema,
@@ -214,11 +215,21 @@ const CharacterCreateSchema = z.object({
   officeAuthorises: z.array(z.string().trim().min(1).max(60)).max(12).default([]),
   traits: z.array(z.string().trim().min(1).max(60)).max(8),
   /**
+   * What sort of person they are, in the world's own words: "a merchant of
+   * Ostia", "senatorial", "a common soldier". What they are worth is bounded
+   * by this, so a merchant invented to lend the state money cannot be worth
+   * four coins and a ranker cannot be worth a senator's fortune.
+   */
+  standing: z.string().trim().max(120).nullable().default(null),
+  /**
    * What they are worth, in their own purse.
    *
    * A merchant generated to lend the state money had nothing to lend with, so
    * the loan was refused by the very person invented to make it. Wealth is part
    * of who someone is, and the world decides it when it decides they exist.
+   *
+   * Clamped to `standing`'s band on the way in -- clamped, never rejected, so
+   * the world's judgment inside a band still counts.
    */
   wealth: MoneyAmountSchema.default(0),
   /** VISION §5 keeps the reason a generated person exists, because it is often why they matter later. */
@@ -250,6 +261,48 @@ const SocialEventsSchema = z.object({
         kind: CharacterSocialEventKindSchema,
         visibility: VisibilitySchema,
         summary: ReasonSchema,
+        /**
+         * What this did to how they see each other.
+         *
+         * The arm existed and always passed an empty list, so a social event
+         * changed nobody's opinion of anybody -- the one thing a social event
+         * is for. Each entry is one person's directed view of another, bounded
+         * to ±20, with the dimensions it moves.
+         */
+        relationCauses: z
+          .array(
+            z.object({
+              subjectCharacterRef: RefSchema,
+              targetCharacterRef: RefSchema,
+              label: z.string().trim().min(1).max(200),
+              score: z.number().int().min(-20).max(20),
+              /** How much of it fades a year. Zero is permanent, which is the point of the field. */
+              decayPerYearBps: z.number().int().min(0).max(10_000).default(2_000),
+              dimensions: RelationDimensionScoresSchema.optional(),
+            }).strict(),
+          )
+          .max(8)
+          .default([]),
+        /**
+         * What somebody there now thinks somebody else is like.
+         *
+         * Traits were written once, at creation, and never again -- a man
+         * declared cautious stayed cautious however boldly he played. Two
+         * different people have to say the same thing before it becomes who
+         * he is; one is an opinion on the record.
+         */
+        observedTraits: z
+          .array(
+            z.object({
+              subjectCharacterRef: RefSchema,
+              observerCharacterRef: RefSchema,
+              /** One of the engine's trait ids. Anything else is a word it does not have. */
+              traitId: z.string().trim().min(1).max(60),
+              note: z.string().trim().min(1).max(200),
+            }).strict(),
+          )
+          .max(4)
+          .default([]),
       }),
     )
     .min(1)

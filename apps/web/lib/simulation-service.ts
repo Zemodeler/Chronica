@@ -154,6 +154,7 @@ export async function submitOrder(
         // Loaded since the life system was written and read only by an admin
         // route, so nobody in any game has ever aged.
         ...(view.scenarioLife === undefined ? {} : { life: view.scenarioLife }),
+        ...(view.scenarioWealth === undefined ? {} : { wealth: view.scenarioWealth }),
         ...(view.scenarioHistoricalPressures === undefined ? {} : { historicalPressures: view.scenarioHistoricalPressures }),
         burstId,
         gameId,

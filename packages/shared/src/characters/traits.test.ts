@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TRAIT_REGISTRY, TraitDefinitionSchema, getTraitDefinition, resolveTraits, validateTraitIds } from "./traits";
+import { TRAIT_REGISTRY, TraitDefinitionSchema, getTraitDefinition, observeTraits, resolveTraits, validateTraitIds } from "./traits";
 
 describe("TRAIT_REGISTRY", () => {
   it("seeds the initial ten traits, each schema-valid", () => {
@@ -43,5 +43,56 @@ describe("resolveTraits", () => {
   it("resolves known ids and silently drops unknown ones", () => {
     const defs = resolveTraits(["bold", "unknown-id"]);
     expect(defs.map((d) => d.id)).toEqual(["bold"]);
+  });
+});
+
+describe("the people around you decide what you are", () => {
+  const traitsOf = (held: readonly string[]) => () => held;
+  const ids = () => { let n = 0; return (prefix: string) => `${prefix}-${(n += 1)}`; };
+
+  it("takes two people saying it before it is who somebody is", () => {
+    // One hostile legate does not get to rename the player "deceitful".
+    const first = observeTraits([], [{ characterId: "marcus", observerCharacterId: "hanno", traitId: "bold", note: "He crossed before dawn." }], traitsOf([]), 10, ids());
+    expect(first.observations).toHaveLength(1);
+    expect(first.confirmed).toHaveLength(0);
+
+    const second = observeTraits(first.observations, [{ characterId: "marcus", observerCharacterId: "quintus", traitId: "bold", note: "He never waits for the Senate." }], traitsOf([]), 20, ids());
+    expect(second.confirmed).toEqual([{ characterId: "marcus", traitId: "bold", observerCharacterIds: ["hanno", "quintus"] }]);
+  });
+
+  it("does not let one person say it twice and call that agreement", () => {
+    const once = observeTraits([], [{ characterId: "marcus", observerCharacterId: "hanno", traitId: "bold", note: "Again." }], traitsOf([]), 10, ids());
+    const twice = observeTraits(once.observations, [{ characterId: "marcus", observerCharacterId: "hanno", traitId: "bold", note: "Still." }], traitsOf([]), 20, ids());
+    expect(twice.observations).toHaveLength(1);
+    expect(twice.confirmed).toHaveLength(0);
+  });
+
+  it("refuses a trait that contradicts what somebody is already known to be", () => {
+    // It took two people to put "cautious" there. One contrary opinion does
+    // not unmake it.
+    const outcome = observeTraits([], [{ characterId: "marcus", observerCharacterId: "hanno", traitId: "bold", note: "He seemed rash to me." }], traitsOf(["cautious"]), 10, ids());
+    expect(outcome.observations).toHaveLength(0);
+    expect(outcome.refused[0]!.reason).toContain("contradicts");
+  });
+
+  it("refuses a word the engine does not have, without failing anything else", () => {
+    const outcome = observeTraits([], [
+      { characterId: "marcus", observerCharacterId: "hanno", traitId: "lugubrious", note: "A sad man." },
+      { characterId: "marcus", observerCharacterId: "hanno", traitId: "bold", note: "And a rash one." },
+    ], traitsOf([]), 10, ids());
+    expect(outcome.refused).toHaveLength(1);
+    expect(outcome.observations).toHaveLength(1);
+  });
+
+  it("does not let anybody observe themselves into a character", () => {
+    const outcome = observeTraits([], [{ characterId: "marcus", observerCharacterId: "marcus", traitId: "bold", note: "I am bold." }], traitsOf([]), 10, ids());
+    expect(outcome.observations).toHaveLength(0);
+    expect(outcome.refused[0]!.reason).toContain("themselves");
+  });
+
+  it("stops when the world has said enough about somebody", () => {
+    const full = ["cautious", "ambitious", "dutiful", "sociable", "disciplined", "compassionate", "vengeful", "cruel"];
+    const outcome = observeTraits([], [{ characterId: "marcus", observerCharacterId: "hanno", traitId: "bold", note: "One more." }], traitsOf(full), 10, ids());
+    expect(outcome.observations).toHaveLength(0);
   });
 });

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ScenarioGovernmentRulesSchema } from "../characters/character";
 import { ScenarioLifeRulesSchema } from "../characters/family";
+import { ScenarioWealthRulesSchema } from "../characters/wealth";
 import { ContinuityConfigSchema } from "../continuity/continuity";
 import { ScenarioDialogueRulesSchema } from "../dialogue/dialogue";
 import { ScenarioWarfareRulesSchema } from "../warfare/battle";
@@ -139,6 +140,12 @@ export const ScenarioDefinitionSchema = z
     knowledge: z.array(ScenarioKnowledgeFactSchema).max(200).default([]),
     /** Life stages, mortality/incapacity rates, and inheritance rules (character-sim phase 5). */
     life: ScenarioLifeRulesSchema.default({ lifeStages: [], inheritanceRules: [], reviewIntervalSteps: 4 }),
+    /**
+     * What a person of a given standing is worth, in this scenario's own
+     * currency. Empty means the engine's coarse defaults, which is what every
+     * scenario got before there was anywhere to say otherwise.
+     */
+    wealth: ScenarioWealthRulesSchema.default({ bands: [], defaultBandId: null }),
     /** Opening Chronicle context, historical background, tensions, and terminology (character-sim phase 6). */
     chronicle: ScenarioChronicleRulesSchema.default({ openingContext: "", historicalBackground: [], openingTensions: [], terminology: {} }),
     /** What the period tends toward, offered when its circumstances hold -- see `ScenarioHistoricalPressureSchema`. */
