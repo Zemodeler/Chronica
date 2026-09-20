@@ -16,7 +16,7 @@ describe("canonical NPC construction", () => {
   it("creates one complete NPC and canonical reciprocal links without duplicates", () => {
     let world = materializePlayerCharacter(structuredClone(firstPunicWarScenario.initialWorld), "declared-player", playerKnowledgebase, undefined);
     const created = createCanonicalNpc(world, {
-      characterId: "npc-relation", name: "Livia Testia", locationProvinceId: playerKnowledgebase.locationProvinceId!, polityId: "rome",
+      characterId: "npc-relation", name: "Livia Testia", locationProvinceId: playerKnowledgebase.locationProvinceId, polityId: "rome",
       startingMoney: 0, createdAtStep: world.elapsedStep, creationReason: "Declared sibling.",
     });
     expect(created).not.toBeNull();
@@ -31,7 +31,7 @@ describe("canonical NPC construction", () => {
     expect(npc?.relations).toHaveLength(1);
 
     const again = createCanonicalNpc(world, {
-      characterId: "npc-relation", name: "Livia Testia", locationProvinceId: playerKnowledgebase.locationProvinceId!, polityId: "rome",
+      characterId: "npc-relation", name: "Livia Testia", locationProvinceId: playerKnowledgebase.locationProvinceId, polityId: "rome",
       createdAtStep: world.elapsedStep, creationReason: "Retry.",
     });
     expect(again?.world.characters.filter((character) => character.id === "npc-relation")).toHaveLength(1);

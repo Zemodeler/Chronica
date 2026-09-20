@@ -132,6 +132,26 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
       brief: "The Mamertines hold Messana and hold it on sufferance: the strait is worth more than they are, and both great powers know the way across. Decide which of them the Mamertines send to, what they offer, and what the faction that wanted the other one does about it. Use \"diplomatic_message_send\" in their own name, and record the appeal as a fact naming Messana and whoever it was sent to. The answer is not yours to give.",
     },
     {
+      // Messana asking is one event. A great power answering, and the other
+      // one refusing to let it stand, is what the asking turns into -- and it
+      // is only reachable once the asking has happened, which is what
+      // "afterPressureIds" is for. Nothing here makes it happen: if the
+      // Mamertines were never answered, or Rome and Carthage are already at
+      // war, or one of them is gone, the age simply goes differently.
+      id: "the-strait-is-crossed",
+      label: "Whoever crosses to Messana has crossed the strait",
+      kind: "world_event",
+      severity: "grave",
+      weight: 24,
+      when: {
+        politiesExist: ["rome", "carthage", "mamertines"],
+        afterPressureIds: ["messana-invites-a-protector"],
+        atPeace: [{ polityId: "rome", otherPolityId: "carthage" }],
+      },
+      target: { polityId: "rome", provinceId: "ita-72843720b81376294924159-sicily-northeast", otherPolityId: "carthage" },
+      brief: "A protector has been asked for at Messana, and one of the great powers has moved -- a garrison put ashore, a fleet standing into the strait, a magistrate sent to take the city's submission. The other will not have it: the strait is three miles wide and whoever holds both sides of it holds everything that passes. Decide which of them crossed, what the other did about it, and who in each government carried the argument. Open the war itself with \"agreement_open\" of kind \"war\" between rome and carthage, record the breaking as a public fact naming both powers and Messana, and give the men who pushed for it a \"character_intent_set\". Do not fight it here -- opening it is the whole of this, and the campaign belongs to the people who will have to make it.",
+    },
+    {
       id: "a-fleet-can-be-copied",
       label: "A sea power's advantage is a design, and designs wash ashore",
       kind: "world_event",

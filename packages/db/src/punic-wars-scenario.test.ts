@@ -168,3 +168,19 @@ describe("the Punic Wars map as authoritative world state", () => {
     expect(mangled.map((province) => province.name)).toEqual([]);
   });
 });
+
+describe("the age arrives in an order", () => {
+  it("cannot reach the war over the strait until Messana has asked for a protector", () => {
+    const pressures = punicWarsScenario.definition.historicalPressures ?? [];
+    const war = pressures.find((pressure) => pressure.id === "the-strait-is-crossed")!;
+    expect(war.when.afterPressureIds).toContain("messana-invites-a-protector");
+    expect(pressures.some((pressure) => pressure.id === "messana-invites-a-protector")).toBe(true);
+    // Both parties named by id, so the orchestrator opens the war between the
+    // powers that exist rather than inventing one.
+    expect(war.target.polityId).toBe("rome");
+    expect(war.target.otherPolityId).toBe("carthage");
+    expect(war.brief).toContain("agreement_open");
+    // And it is unreachable once they are already fighting.
+    expect(war.when.atPeace).toEqual([{ polityId: "rome", otherPolityId: "carthage" }]);
+  });
+});

@@ -53,7 +53,7 @@ function readMockScriptFromEnvFile(): MockScriptFile | undefined {
   if (!path) return undefined;
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as MockScriptFile) : undefined;
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
   } catch {
     return undefined;
   }

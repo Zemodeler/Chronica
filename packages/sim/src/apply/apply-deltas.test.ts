@@ -1462,6 +1462,28 @@ describe("offices that actually move", () => {
     expect(index.grants.some((grant) => grant.holder.id === titus.id && grant.source === "office")).toBe(true);
   });
 
+  it("makes the office real even when the caller states no powers at all", () => {
+    // Which is every office the world has ever made. The prompt asks for
+    // "officeAuthorises" and the answer has always been an empty list, so the
+    // quaestor named to handle the war chest could not touch money.
+    const result = applyDeltas(
+      world(),
+      [{
+        op: "character_create", localId: "quaestor", name: "Servius Fulvius", polityId: "rome", provinceId: null,
+        age: 44, officeLabel: "Quaestor of the War Chest", officeAuthorises: [],
+        traits: [], wealth: 200, generatedBecause: "Somebody has to keep the accounts of the campaign.",
+      }],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    const servius = result.world.characters.find((character) => character.name === "Servius Fulvius")!;
+    const made = result.world.offices.find((office) => office.id === servius.officeId)!;
+    expect(made.authorisedActionIds).toContain("money_transfer");
+    const index = buildAuthorityIndex(result.world.material, result.world.authorityGrants, allOffices(result.world, offices), result.world.elapsedStep);
+    expect(index.grants.some((grant) => grant.holder.id === servius.id && grant.source === "office")).toBe(true);
+  });
+
   it("enlarges an office that exists rather than inventing a second one beside it", () => {
     const before = world();
     const seat = before.material.officeSeats.find((candidate) => candidate.status === "held");

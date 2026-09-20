@@ -314,7 +314,9 @@ describe("resolveBattle", () => {
       };
       const result = resolveBattle(buildInput([proposal]), "seed-tactic-reject");
       expect(result.acceptedTactics).toEqual([]);
-      expect(result.rejectedTactics).toEqual([{ actorId: "marcus-atilius", reason: expect.stringContaining("Precondition unmet") }]);
+      expect(result.rejectedTactics).toHaveLength(1);
+      expect(result.rejectedTactics[0]!.actorId).toBe("marcus-atilius");
+      expect(result.rejectedTactics[0]!.reason).toContain("Precondition unmet");
     });
 
     it("rejects a proposal from an actor who isn't a participant in this battle", () => {
@@ -330,7 +332,9 @@ describe("resolveBattle", () => {
       };
       const result = resolveBattle(buildInput([proposal]), "seed-tactic-outsider");
       expect(result.acceptedTactics).toEqual([]);
-      expect(result.rejectedTactics).toEqual([{ actorId: "some-uninvolved-character", reason: expect.stringContaining("not a participant") }]);
+      expect(result.rejectedTactics).toHaveLength(1);
+      expect(result.rejectedTactics[0]!.actorId).toBe("some-uninvolved-character");
+      expect(result.rejectedTactics[0]!.reason).toContain("not a participant");
     });
   });
 });

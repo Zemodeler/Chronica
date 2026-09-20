@@ -87,6 +87,8 @@ export interface WorldSliceInput {
   readonly pendingEvents: readonly SliceEvent[];
   /** What the narrator has decided stirs this burst, if anything. */
   readonly narratorSeed?: NarratorSeed | null | undefined;
+  /** Everything that stirs this burst. `narratorSeed` is the one-seed form of the same thing. */
+  readonly narratorSeeds?: readonly NarratorSeed[] | undefined;
 }
 
 export interface WorldSlice {
@@ -278,7 +280,7 @@ export interface WorldSlice {
     readonly factIds: readonly string[];
     readonly secret: boolean;
   }[];
-  readonly seed: NarratorSeed | null;
+  readonly seeds: readonly NarratorSeed[];
 }
 
 export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
@@ -851,7 +853,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     pendingEvents: input.pendingEvents.slice(0, CAPS.events),
     openOrders,
     threads,
-    seed: input.narratorSeed ?? null,
+    seeds: input.narratorSeeds ?? (input.narratorSeed == null ? [] : [input.narratorSeed]),
   };
 }
 
@@ -960,20 +962,25 @@ export function renderWorldSlice(slice: WorldSlice): string {
   // A directive, like the one above, not data: the world is being told that
   // something happens, beside the order and not because of it. The model is
   // shown the scale and the target and never the reason it was chosen.
-  if (slice.seed !== null) {
-    const seed = slice.seed;
+  if (slice.seeds.length > 0) {
     lines.push(
-      `THE WORLD STIRS (seed ${seed.key}):`,
-      `  ${seed.why}`,
-      `  ${seed.brief}`,
-      `  Scale: ${seed.severity}.`,
-      ...(seed.repeated ? ["  This was asked before and did not happen. It happens now."] : []),
-      "  This is the world moving on its own. It is not the ruler's order and not the ruler's doing; nobody in the government asked for it, and it is attributed to nobody in it. Answer PLAYER ORDER first and in full. Then, in the same answer, make this happen too, under its own facts" + (seed.oneShot ? "" : ` and its own thread, opened with "storyline_open" carrying seedKey "${seed.key}"`) + ".",
-      ...(seed.secret
-        ? [`  It is a secret. Every fact of it is "private" with "knownToRefs" naming only those in it; its thread is "private"; nothing of it appears in narrativeSummary, frictions or a playerDecision.`]
-        : ["  It is news: record it as a fact with the visibility the world would actually give it, and score it honestly."]),
+      `THE WORLD STIRS — ${slice.seeds.length === 1 ? "one thing happens" : `${slice.seeds.length} separate things happen`} this season, beside the order and not because of it:`,
+      "  None of this is the ruler's doing and none of it is attributed to anybody in the government. Answer PLAYER ORDER first and in full; then, in the same answer, make every one of these happen too, each under its own facts. They are unrelated to each other: do not join them into one event, and do not let one of them be the reason for another.",
+      "  Spread them over the season. What happens at once, change now; what would take weeks, schedule with a scheduled event citing its own fact.",
       "",
     );
+    for (const seed of slice.seeds) {
+      lines.push(
+        `  (seed ${seed.key}) ${seed.why}`,
+        `  ${seed.brief}`,
+        `  Scale: ${seed.severity}.${seed.oneShot ? " This one runs its course; it needs no thread." : ` Open its thread with "storyline_open" carrying seedKey "${seed.key}".`}`,
+        ...(seed.repeated ? ["  This was asked before and did not happen. It happens now."] : []),
+        ...(seed.secret
+          ? [`  It is a secret. Every fact of it is "private" with "knownToRefs" naming only those in it; its thread is "private"; nothing of it appears in narrativeSummary, frictions or a playerDecision.`]
+          : ["  It is news: record it as a fact with the visibility the world would actually give it, and score it honestly."]),
+        "",
+      );
+    }
   }
   section("PEOPLE", slice.politics.map((person) => `${person.name} [${person.id}]${person.office === null ? "" : `, ${person.office}`}, aged ${person.age}`));
   section(

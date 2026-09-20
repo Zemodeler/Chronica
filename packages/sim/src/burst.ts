@@ -24,7 +24,7 @@ import type { AuthorityBreach } from "./apply/context";
 import { routeAmbientActors, routeAttention, type RoutedActor } from "./attention";
 import { runCognition } from "./cognition";
 import { materializeFacts } from "./facts";
-import { decideNarratorSeed, recordSeedOffered, recordSeedOutcome, seedParticipants, seedWasTaken, type NarratorSeed } from "./narrator";
+import { decideNarratorSeeds, recordSeedsOffered, seedParticipants, seedWasTaken, type NarratorSeed } from "./narrator";
 import { orchestrate } from "./orchestrate";
 import { describeBreach, findWhoWouldNotice, noticersAsRefs } from "./oversight";
 import { createIdFactory, type SimModelPort } from "./ports";
@@ -127,6 +127,8 @@ export interface BurstInput {
    * decides. Null means nothing stirs.
    */
   readonly narratorSeed?: NarratorSeed | null | undefined;
+  /** Everything that stirs, for a test that wants to fix the whole batch. */
+  readonly narratorSeeds?: readonly NarratorSeed[] | undefined;
 }
 
 export interface BurstResult {
@@ -547,20 +549,23 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     .slice(0, 8)
     .map((event) => ({ kind: event.kind, summary: event.summary, dueInDays: Math.round((event.dueInstantSortKey - nowKey()) / 1440), thread: threadOf(event) }));
 
-  // The world makes trouble of its own (VISION §32). Decided here, once, so a
-  // burst carries at most one seed, and before the orchestrator so it can be
-  // carried out in the call the order was already paying for.
-  const seed: NarratorSeed | null = input.narratorSeed === undefined
-    ? decideNarratorSeed({
-      world,
-      gameId: input.gameId,
-      ownPolityId: input.actorPolityId,
-      playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
-      facts: [...input.knownFacts, ...newFacts],
-      ...(input.historicalPressures === undefined ? {} : { pressures: input.historicalPressures }),
-    })
-    : input.narratorSeed;
-  if (seed !== null) world = recordSeedOffered(world, seed);
+  // The world makes trouble of its own (VISION §32). Decided here, before the
+  // orchestrator, so it can be carried out in the call the order was already
+  // paying for -- and decided as a batch, because a burst covers a season and
+  // one stirring a season is not a world that moves on its own.
+  const seeds: readonly NarratorSeed[] = input.narratorSeeds !== undefined
+    ? input.narratorSeeds
+    : input.narratorSeed !== undefined
+      ? (input.narratorSeed === null ? [] : [input.narratorSeed])
+      : decideNarratorSeeds({
+        world,
+        gameId: input.gameId,
+        ownPolityId: input.actorPolityId,
+        playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
+        facts: [...input.knownFacts, ...newFacts],
+        ...(input.historicalPressures === undefined ? {} : { pressures: input.historicalPressures }),
+      });
+  world = recordSeedsOffered(world, seeds);
 
   const slice = buildWorldSlice({
     world,
@@ -573,7 +578,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     facts: input.knownFacts,
     dueEvents: dueNow,
     pendingEvents: upcoming,
-    narratorSeed: seed,
+    narratorSeeds: seeds,
   });
 
   const orchestration = await orchestrate(input.port, slice);
@@ -585,14 +590,13 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const orderFactIds = newFacts.slice(factsBefore).map((fact) => fact.id);
   if (orchestration.output.playerDecision !== null) playerDecision = orchestration.output.playerDecision;
 
-  // Whether the seed was taken up decides the ledger, and who it landed on
-  // decides who is asked first what they do about it.
-  let priorityCharacterIds: string[] = [];
-  if (seed !== null) {
-    const taken = seedWasTaken(world, newFacts.slice(factsBefore), seed);
-    world = recordSeedOutcome(world, seed, taken);
-    if (taken) priorityCharacterIds = seedParticipants(world, seed).filter((id) => input.actorRef.kind !== "character" || id !== input.actorRef.id);
-  }
+  // Who the stirrings landed on decides who is asked first what they do about
+  // it. The ledger was written when they were offered: a batch is not
+  // re-offered, so there is nothing further to record here.
+  const priorityCharacterIds: string[] = seeds
+    .filter((seed) => seedWasTaken(world, newFacts.slice(factsBefore), seed))
+    .flatMap((seed) => seedParticipants(world, seed))
+    .filter((id) => input.actorRef.kind !== "character" || id !== input.actorRef.id);
 
   // An open-ended order says what would end it. The world then carries on until
   // that happens rather than until this burst runs out of things to do.

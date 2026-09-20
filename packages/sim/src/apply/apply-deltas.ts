@@ -5,8 +5,8 @@ import {
   applyDiplomaticAnswerToStance,
   canMoveTo,
   crossingAdmitted,
-  WORLD_DELTA_OPS,
   allOffices,
+  deriveOfficeActions,
   findOfficeForRole,
   findOfficeSeatForRole,
   seatCharacterInOffice,
@@ -37,7 +37,6 @@ import {
   type FactProposalDraft,
   type OrderPartyRef,
   type WorldDelta,
-  type WorldDeltaOp,
   type WorldState,
 } from "@chronica/shared";
 import { resolveEngagement, type BattleAccount } from "../battle";
@@ -782,9 +781,12 @@ function applyOne(
           id: officeId,
           label: delta.officeLabel,
           polityId: delta.polityId,
-          // An office that authorises nothing is a title, which is a real thing
-          // to be. Powers arrive in the same vocabulary everything else does.
-          authorisedActionIds: delta.officeAuthorises.filter((action): action is WorldDeltaOp => (WORLD_DELTA_OPS as readonly string[]).includes(action)),
+          // What the name of the office means, with whatever the caller said on
+          // top of it. Asked to state the powers, the model has never once
+          // done so -- every office the world has made came back authorising
+          // nothing, which is a title rather than an office and leaves the man
+          // it was created for in breach of it the first time he acts.
+          authorisedActionIds: deriveOfficeActions(delta.officeLabel, delta.officeAuthorises),
           sponsorableCategories: [],
           treasuryAccountId: null,
           treasuryPermissions: [],

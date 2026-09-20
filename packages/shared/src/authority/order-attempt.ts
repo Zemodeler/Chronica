@@ -118,7 +118,7 @@ export function receiveOrderAttempt(attempt: OrderAttempt): OrderAttempt {
   return { ...attempt, status: "received" };
 }
 
-const RECIPIENT_DECISIONS = ["accept", "delay", "refuse", "ignore", "subvert"] as const;
+export const RECIPIENT_DECISIONS = ["accept", "delay", "refuse", "ignore", "subvert"] as const;
 export type OrderAttemptDecision = (typeof RECIPIENT_DECISIONS)[number];
 
 const DECISION_TO_STATUS: Record<OrderAttemptDecision, OrderAttemptStatus> = {
