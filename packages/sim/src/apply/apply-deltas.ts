@@ -178,6 +178,7 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   storyline_open: "propose",
   storyline_advance: "propose",
   character_pressure_set: "propose",
+  character_state_set: "propose",
   diplomatic_message_send: "negotiate",
   diplomatic_message_answer: "negotiate",
   agreement_open: "negotiate",
@@ -242,6 +243,11 @@ function actorIsAnswerableFor(delta: WorldDelta, scope: AuthorityScope, world: W
   // act of insubordination by the ruler -- the sixth time this check would
   // have manufactured it.
   if (delta.op === "storyline_open" || delta.op === "storyline_advance" || delta.op === "character_pressure_set") return false;
+  // What has become of a person's body is not an exercise of authority over
+  // anything. Scoped to their polity -- where it falls through to -- a man
+  // falling ill would be recorded as insubordination by whoever wrote it down,
+  // which is the ninth way this check has found to manufacture it.
+  if (delta.op === "character_state_set") return false;
   // A country coming apart is not an act of office. Scoped to the power it
   // breaks from -- which for a rising is usually the ruler's own -- it would
   // have recorded the ruler as personally insubordinate for a rebellion in his
@@ -1357,6 +1363,36 @@ function applyOne(
               closedAtStep: phase === "closed" ? atStep : candidate.closedAtStep,
             },
         ),
+      };
+    }
+
+    case "character_state_set": {
+      const characterId = required(delta.characterRef, "Whose health this is");
+      const person = world.characters.find((character) => character.id === characterId);
+      if (person === undefined) reject(`No character "${characterId}" exists to fall ill.`, "reference");
+      const heirId = delta.heirRef === null ? null : required(delta.heirRef, "The named heir");
+      if (heirId !== null && !world.characters.some((character) => character.id === heirId && character.alive)) {
+        reject(`No living character "${heirId}" exists to inherit.`, "reference");
+      }
+      const lifted = new Set(delta.removeStatuses);
+      const statuses = [
+        ...person.disqualifyingStatuses.filter((status) => !lifted.has(status)),
+        ...delta.addStatuses.filter((status) => !person.disqualifyingStatuses.includes(status)),
+      ];
+      return {
+        ...world,
+        // `alive` is untouched here and has no field to touch it with. A
+        // health of zero is a man who cannot get out of bed, not a corpse:
+        // only `killCharacter` ends a life, and only after a peril has stood
+        // open long enough to have been acted against.
+        characters: world.characters.map((character) => (character.id === characterId
+          ? {
+            ...character,
+            healthBps: Math.max(0, Math.min(10_000, character.healthBps + delta.healthDeltaBps)),
+            disqualifyingStatuses: statuses.slice(0, 8),
+            ...(heirId === null ? {} : { heirCharacterId: heirId }),
+          }
+          : character)),
       };
     }
 

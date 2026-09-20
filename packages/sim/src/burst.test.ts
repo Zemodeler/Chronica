@@ -665,7 +665,7 @@ describe("the world stirs: a secret plot", () => {
     // The plotter's own account travels with his private facts and is not
     // his ruler's to read; the thread's title is known to its participants
     // alone. The orchestrator's summary is the one thing code cannot gate --
-    // it describes the visible order too -- which is what rule 20 is for.
+    // it describes the visible order too -- which is what rule 21 is for.
     const historian = capturingScriptedPort({ compose_chronicle: [JSON.stringify({ entries: [] })] });
     await composeChronicle({
       port: historian, clock, observer: player, observerPolityId: "rome", facts: result.newFacts, from: { day: 0, minute: 0 }, to: result.world.instant,

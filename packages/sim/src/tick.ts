@@ -9,11 +9,13 @@ import {
   nextDueMilestone,
   type FactProposalDraft,
   type MoneyObligation,
+  type ScenarioLifeRules,
   type ScenarioWarfareRules,
   type MoneyTransaction,
   type WorldState,
 } from "@chronica/shared";
 import { projectConflicts } from "./conflicts";
+import { reviewLives } from "./mortality";
 import type { IdFactory } from "./ports";
 
 /** The world with its conflict overlay brought back in step with it. */
@@ -45,6 +47,13 @@ export interface TickInput {
   readonly world: WorldState;
   /** The scenario's rules of war -- how long unpaid wages take to bite. */
   readonly warfare?: ScenarioWarfareRules | undefined;
+  /**
+   * The scenario's own age bands. Absent, nobody ages and nobody dies -- which
+   * was every game up to now, because nothing passed this in.
+   */
+  readonly life?: ScenarioLifeRules | undefined;
+  /** Whose death ends the game rather than the man. Never taken by a roll without a peril first. */
+  readonly playerCharacterId?: string | null | undefined;
   /** The day the world is advancing to. Everything due at or before it resolves. */
   readonly toDay: number;
   readonly ids: IdFactory;
@@ -56,6 +65,8 @@ export interface TickResult {
   readonly factProposals: readonly FactProposalDraft[];
   /** Plain lines for the Chronicle, which would otherwise never hear about routine upkeep. */
   readonly notes: readonly string[];
+  /** Whoever died of the passage of time this tick, so the caller can ask who follows. */
+  readonly died: readonly string[];
 }
 
 /** Days without a development before the world stops following a thread. */
@@ -814,24 +825,40 @@ export function runDeterministicTick(input: TickInput): TickResult {
     }
   }
 
+  // The map's picture of the fighting, recomputed from the world that is:
+  // wars from the agreements that are the wars, sieges from the projects
+  // prosecuting them. Battles are left alone -- they are moments, and the
+  // engagement that caused one records it.
+  const afterTime = projectConflictsInto({
+    ...recovered,
+    storylines,
+    diplomacy,
+    polityStances,
+    polityAgreements,
+    material: { ...recovered.material, officeSeats },
+    // The mirror on the character, which the seat cannot reach on its own.
+    characters: laidDown.size === 0
+      ? recovered.characters
+      : recovered.characters.map((character) => (laidDown.has(character.id) ? { ...character, officeId: null } : character)),
+  });
+
+  // Last, because a man who died today should not also have his wages paid and
+  // his term expired today -- and because vacating a seat after the term check
+  // means a death and an expiry cannot both claim the same seat.
+  const lives = input.life === undefined
+    ? { world: afterTime, facts: [] as FactProposalDraft[], died: [] as readonly string[] }
+    : reviewLives({
+      world: afterTime,
+      life: input.life,
+      toDay: input.toDay,
+      ids: input.ids,
+      ...(input.playerCharacterId === undefined ? {} : { playerCharacterId: input.playerCharacterId }),
+    });
+
   return {
-    // The map's picture of the fighting, recomputed from the world that is:
-    // wars from the agreements that are the wars, sieges from the projects
-    // prosecuting them. Battles are left alone -- they are moments, and the
-    // engagement that caused one records it.
-    world: projectConflictsInto({
-      ...recovered,
-      storylines,
-      diplomacy,
-      polityStances,
-      polityAgreements,
-      material: { ...recovered.material, officeSeats },
-      // The mirror on the character, which the seat cannot reach on its own.
-      characters: laidDown.size === 0
-        ? recovered.characters
-        : recovered.characters.map((character) => (laidDown.has(character.id) ? { ...character, officeId: null } : character)),
-    }),
-    factProposals: facts,
+    world: lives.world,
+    factProposals: [...facts, ...lives.facts],
     notes,
+    died: lives.died,
   };
 }

@@ -151,6 +151,9 @@ export async function submitOrder(
         offices,
         warfare: view.scenarioWarfare,
         ...(view.scenarioMap === undefined ? {} : { terrains: view.scenarioMap.terrains }),
+        // Loaded since the life system was written and read only by an admin
+        // route, so nobody in any game has ever aged.
+        ...(view.scenarioLife === undefined ? {} : { life: view.scenarioLife }),
         ...(view.scenarioHistoricalPressures === undefined ? {} : { historicalPressures: view.scenarioHistoricalPressures }),
         burstId,
         gameId,
@@ -395,10 +398,13 @@ export async function getGameView(gameId: string) {
   }
 }
 
+/** How `successionDecision` marks an option that names the player's next character. */
+const SUCCESSION_OPTION_PREFIX = "succeed-";
+
 export async function answerDecision(gameId: string, decisionId: string, optionId: string): Promise<SimulationOutcome> {
   const context = await resolveContext(gameId);
   if (context === null) return { status: "error", message: "You are not playing in this game." };
-  const { db, close } = context;
+  const { db, close, playerId } = context;
   let answered: AnsweredDecision;
   try {
     const open = await getOpenDecision(db, gameId);
@@ -409,6 +415,14 @@ export async function answerDecision(gameId: string, decisionId: string, optionI
     if (chosen === undefined) return { status: "error", message: "That is not one of the options." };
 
     await resolveDecision(db, decisionId, optionId);
+
+    // The one decision that changes who is asking. `successionDecision` mints
+    // its option ids as "succeed-<characterId>" precisely so this needs no
+    // second table: the answer names the man, and the next order is his.
+    if (optionId.startsWith(SUCCESSION_OPTION_PREFIX)) {
+      const successorId = optionId.slice(SUCCESSION_OPTION_PREFIX.length);
+      await db.update(schema.players).set({ characterId: successorId }).where(eq(schema.players.id, playerId));
+    }
     // Hand the world the question and the answer, not a sentence about them.
     // Round-tripping through prose lost the prompt entirely, so the world
     // resumed a decision without quite knowing what had been asked.

@@ -12,6 +12,7 @@ import {
   type ScenarioClock,
   type ScenarioHistoricalPressure,
   type ScheduledEventPayload,
+  type ScenarioLifeRules,
   type ScenarioWarfareRules,
   type TerrainDefinition,
   type StopReason,
@@ -30,6 +31,7 @@ import { describeBreach, findWhoWouldNotice, noticersAsRefs } from "./oversight"
 import { createIdFactory, type SimModelPort } from "./ports";
 import type { NarrativeLine, UtteranceLine } from "./chronicle";
 import { buildWorldSlice, type AnsweredDecision, type SliceEvent } from "./slice";
+import { successionDecision } from "./mortality";
 import { runDeterministicTick } from "./tick";
 import { isWatchSatisfied } from "./watch";
 
@@ -106,6 +108,11 @@ export interface BurstInput {
   readonly warfare: ScenarioWarfareRules;
   /** The scenario's terrains, so an army is held to the crossings the map admits. */
   readonly terrains?: readonly TerrainDefinition[] | undefined;
+  /**
+   * The scenario's age bands. Left out, nobody in the world ages or dies --
+   * which is what every game did until this was passed in.
+   */
+  readonly life?: ScenarioLifeRules | undefined;
   /** What the period tends toward, offered only where the world still looks like it. */
   readonly historicalPressures?: readonly ScenarioHistoricalPressure[] | undefined;
   readonly burstId: string;
@@ -203,6 +210,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const battleAccounts: BattleAccount[] = [];
   const breaches: AuthorityBreach[] = [];
   const parseFailures: string[] = [];
+  /** Who the passage of time took, so the burst can end on the question of who follows. */
+  const deadThisBurst = new Set<string>();
   let playerDecision: PlayerDecision | null = null;
   let stopReason: StopReason = "no_due_events";
   /** What the ruler is waiting for, when the order was an open-ended one. */
@@ -442,8 +451,16 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
    * milestones reached. Deterministic, and therefore free.
    */
   const tickTo = (toDay: number): void => {
-    const ticked = runDeterministicTick({ world, toDay, ids, warfare: input.warfare });
+    const ticked = runDeterministicTick({
+      world, toDay, ids, warfare: input.warfare,
+      ...(input.life === undefined ? {} : { life: input.life }),
+      playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
+    });
     world = ticked.world;
+    // A death the world produced, not one anybody ordered. Held until the
+    // burst ends: the deltas of this hop are still being applied, and the
+    // Chronicle writes the death before the player is asked who follows.
+    for (const id of ticked.died) deadThisBurst.add(id);
     if (ticked.factProposals.length > 0) {
       const materialized = materializeFacts({
         proposals: ticked.factProposals,
@@ -719,6 +736,16 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       stopReason = "no_due_events";
       break;
     }
+  }
+
+  // The player is dead, and nothing else that happened this burst is the
+  // question any more. This pre-empts whatever the orchestrator asked, because
+  // a world that asks "shall we winter in Sicily?" of a corpse is not asking
+  // anybody anything -- and there is always at least one name on it, because a
+  // dead end is the one thing this branch's constraints forbid outright.
+  const playerId = input.actorRef.kind === "character" ? input.actorRef.id : null;
+  if (playerId !== null && deadThisBurst.has(playerId)) {
+    playerDecision = successionDecision(world, playerId, world.instant.day);
   }
 
   if (playerDecision !== null) stopReason = "player_decision";

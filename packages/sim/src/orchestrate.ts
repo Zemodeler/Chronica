@@ -217,7 +217,9 @@ How to answer well:
    not because of it. Treat it like an order you gave yourself: describing it
    is not doing it. A plague changes a province with "province_material_shift";
    a governor's trouble is a "character_pressure_set" and a
-   "character_intent_set" on him; a stranger is a "character_create". Rule 6
+   "character_intent_set" on him; a man falling ill is a "character_state_set"
+   with a negative "healthDeltaBps" and, if it keeps him from his duties,
+   "incapacitated" in "addStatuses"; a stranger is a "character_create". Rule 6
    still holds for the scaffolding: the people and things you create to carry
    the stirring were always there and get no fact -- the stirring itself is
    news and does. "A pirate squadron appears off Lilybaeum" is the event;
@@ -226,7 +228,12 @@ How to answer well:
    government as its author, and open its thread with "storyline_open" carrying
    the seedKey shown. If the order and the stirring touch the same people, keep
    their facts apart.
-20. What is secret stays secret in every field, not only in "visibility". A
+20. You cannot kill anybody, and there is no field for it. "character_state_set"
+   takes a man to the edge -- health to nothing, "incapacitated", "wounded",
+   "captured" -- and no further. Whether he comes through it is the engine's,
+   and it never takes anyone who matters without a thread having stood open on
+   them first. Write the illness; do not write the death.
+21. What is secret stays secret in every field, not only in "visibility". A
    private fact names in "knownToRefs" exactly who knows it now; nobody else can
    see it, act on it, or read it in a record. An act done in secret inside the
    ruler's own country is "private", not "polity" -- "polity" is what the
@@ -236,7 +243,7 @@ How to answer well:
    "private" visibility and the same "knownToRefs". A secret becomes known
    only through "discoveries": someone learns a fact already on record, by the
    id shown in square brackets after it.
-21. OPEN THREADS are the matters the world is following, with their phase,
+22. OPEN THREADS are the matters the world is following, with their phase,
    their stakes and what comes next. A fact that belongs to one says so in
    "storylineRef"; when the matter has moved, advance it with
    "storyline_advance" -- what happened, the new phase, a fresh
@@ -244,11 +251,11 @@ How to answer well:
    a second thread for one matter, and do not open one for the order itself
    unless the matter will plainly outlive it. A thread is the world's
    bookkeeping, never the ruler's.
-22. DUE NOW is what fell due before this order was given. Each entry is the
+23. DUE NOW is what fell due before this order was given. Each entry is the
    world's own promise that something happens, and it has not happened until
    you carry it out: apply its consequences as deltas and record what actually
    occurred. The queue's summary is what was expected, not what took place.
-23. One power speaks to another by writing to it. An embassy, an offer of
+24. One power speaks to another by writing to it. An embassy, an offer of
    alliance, a demand for tribute, an ultimatum: "diplomatic_message_send",
    naming the power whose word it is and the person carrying it, what is
    actually being proposed in "terms", and how long the sender will wait. It is
@@ -259,7 +266,7 @@ How to answer well:
    that would bind their own polity -- peace, alliance, an ultimatum, a demand
    for tribute -- is theirs to settle, so raise it as "playerDecision" rather
    than answering it for them.
-24. War and peace are things the world holds, not moods. WHERE THE POWERS STAND
+25. War and peace are things the world holds, not moods. WHERE THE POWERS STAND
    lists them: open one with "agreement_open" -- war, truce, peace, alliance,
    non-aggression, tributary, trade pact -- and end one with "agreement_close".
    Opening a war closes the peace it breaks, and opening a peace closes the war,
@@ -267,7 +274,7 @@ How to answer well:
    powers stand at peace will not fight: declaring the war is what makes the
    attack possible, and it is a decision somebody has to take. A war cuts the
    trade that names the enemy as its counterparty, without anybody ordering it.
-25. An army crosses ground. "force_modify" moves it one province, and only to
+26. An army crosses ground. "force_modify" moves it one province, and only to
    one it borders by a crossing the terrain on both sides admits; anything
    further is refused and the army stays where it was. A journey worth the name
    is a project whose completionOutcome is "force_move", naming the army and

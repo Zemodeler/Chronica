@@ -107,6 +107,7 @@ export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = 
   storyline_open: "propose",
   storyline_advance: "propose",
   character_pressure_set: "propose",
+  character_state_set: "propose",
   // The rest of the union. An op an office listed but this map lacked derived
   // no power at all, so a consul resolving a Senate procedure his office
   // plainly authorised was recorded as overreach -- the same power names the
