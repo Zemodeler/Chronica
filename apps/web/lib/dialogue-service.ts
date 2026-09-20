@@ -46,6 +46,10 @@ import {
   NEUTRAL_MIND,
   opinionLabel,
   queryBeliefs,
+  whoMayBeReached,
+  type AccessStep,
+  type Office,
+  type WorldState,
 } from "@chronica/shared";
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
@@ -852,9 +856,46 @@ interface DiscoverContactOutput {
   knownName?: string;
   explanation?: string;
   candidates?: { characterId: string; name: string; roleLabel: string }[];
+  /**
+   * What it would take, when station is what is in the way.
+   *
+   * Never empty when access is what refused: the last rung is always "write",
+   * so a refusal is a door to knock on rather than a lock (slice 10).
+   */
+  ladder?: { rung: string; label: string; throughCharacterId: string | null }[];
 }
 
 const normalizeContactQuery = (value: string): string => value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * Whether the player's own character can get a hearing from this one.
+ *
+ * Checked at every branch that would open a session, and **before the coin
+ * gate**: charging a player for a refusal is worse than either the charge or
+ * the refusal. `whoSeeksThePlayer` is deliberately not routed through this --
+ * that is the world reaching toward the player, and it is the main way
+ * somebody with no station acquires anybody at all.
+ */
+function accessCheck(
+  world: WorldState,
+  offices: readonly Office[],
+  playerCharacterId: string,
+  targetCharacterId: string,
+  introducedCharacterIds: ReadonlySet<string>,
+): DiscoverContactOutput | null {
+  const verdict = whoMayBeReached({
+    world, offices, reacherId: playerCharacterId, targetId: targetCharacterId,
+    channel: "correspondence",
+    orderAttempts: world.orderAttempts,
+    introducedCharacterIds,
+  });
+  if (verdict.reachable) return null;
+  return {
+    status: "unavailable",
+    explanation: verdict.reason ?? "You have no way to reach him yet.",
+    ladder: verdict.ladder.map((step: AccessStep) => ({ rung: step.rung, label: step.label, throughCharacterId: step.throughCharacterId })),
+  };
+}
 
 export async function discoverContact(input: DiscoverContactInput): Promise<DiscoverContactOutput> {
   const {
@@ -864,6 +905,7 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
 
   const worldView = await getWorldView(db, gameId);
   if (!worldView) return { status: "unavailable", explanation: "This world is unavailable." };
+  const offices = worldView.scenarioGovernment?.offices ?? [];
   // Candidates resolve exclusively from canonical `world.characters`, plus any
   // NPC a discovery event has already introduced but turn resolution has not
   // yet folded into the snapshot -- so a person discovered moments ago in
@@ -876,9 +918,15 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
     ...pendingDiscoveries.map((event) => ({ character: event.introducedCharacter, roleLabel: event.introducedProfile?.roleLabel ?? "contact" })),
   ];
   const unique = [...new Map(candidates.map((candidate) => [candidate.character.id, candidate])).values()];
+  // Somebody an intermediary introduced a moment ago is introduced, whatever
+  // the snapshot still says. Otherwise the ladder's own payoff is barred by
+  // the ladder.
+  const introduced = new Set(pendingDiscoveries.map((event) => event.introducedCharacter.id));
   if (characterId) {
     const selected = unique.find((candidate) => candidate.character.id === characterId && candidate.character.alive);
     if (!selected) return { status: "unavailable", explanation: "That contact is no longer available." };
+    const barred = accessCheck(worldView.world, offices, playerCharacterId, selected.character.id, introduced);
+    if (barred !== null) return barred;
     await getOrCreateNpcKnowledgebase(db, gameId, playerId, selected.character.id, {
       canonicalName: selected.character.name,
       role: selected.roleLabel,
@@ -896,6 +944,8 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
   ));
   if (matches.length === 1) {
     const match = matches[0]!;
+    const barred = accessCheck(worldView.world, offices, playerCharacterId, match.character.id, introduced);
+    if (barred !== null) return barred;
     const session = await findOrOpenSession(db, gameId, playerId, match.character.id);
     // Lazily enrich world characters that haven't been profiled yet.
     const existingKb = await getOrCreateNpcKnowledgebase(db, gameId, playerId, match.character.id, {
@@ -916,7 +966,19 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
     }
     return { status: "found", sessionId: session.id, knownName: match.character.name };
   }
-  if (matches.length > 1) return { status: "choice", candidates: matches.slice(0, 8).map((match) => ({ characterId: match.character.id, name: match.character.name, roleLabel: match.roleLabel })) };
+  if (matches.length > 1) {
+    const withinReach = matches.filter((match) => accessCheck(worldView.world, offices, playerCharacterId, match.character.id, introduced) === null);
+    // Offering a name and then refusing it is the worst of both. If none of
+    // them is within reach, refuse once, with the ladder for the nearest.
+    if (withinReach.length === 0) return accessCheck(worldView.world, offices, playerCharacterId, matches[0]!.character.id, introduced)!;
+    if (withinReach.length === 1) {
+      const only = withinReach[0]!;
+      const session = await findOrOpenSession(db, gameId, playerId, only.character.id);
+      await getOrCreateNpcKnowledgebase(db, gameId, playerId, only.character.id, { canonicalName: only.character.name, role: only.roleLabel });
+      return { status: "found", sessionId: session.id, knownName: only.character.name };
+    }
+    return { status: "choice", candidates: withinReach.slice(0, 8).map((match) => ({ characterId: match.character.id, name: match.character.name, roleLabel: match.roleLabel })) };
+  }
 
   const existingKbs = await listNpcKnowledgebases(db, gameId, playerId);
   const existingContactNames = existingKbs.map((kb) => kb.canonicalName);
