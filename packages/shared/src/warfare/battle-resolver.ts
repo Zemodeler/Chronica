@@ -245,7 +245,12 @@ function computeForceContribution(
   // Terrain and position favor the defender; an attacker is, by definition, on the move.
   const positionBps = participant.side === "defender" ? position.combatModifierBps : 0;
   const terrainBps = participant.side === "defender" ? (TERRAIN_DEFENSE_BPS[province.terrainId] ?? 0) : 0;
-  const postureBps = participant.posture ? POSTURE_MODIFIER_BPS[participant.posture] : 0;
+  // `?? 0`, because an unrecognised posture here does not fail: it makes
+  // `modifierBps` NaN, which makes the effective strength NaN, which makes
+  // every casualty NaN, which lands in the world as `fit: NaN` and comes back
+  // out of the schema as "authorizedStrength: expected number, received NaN" --
+  // a rejected battle whose stated reason names neither battles nor posture.
+  const postureBps = participant.posture ? POSTURE_MODIFIER_BPS[participant.posture] ?? 0 : 0;
   const modifierBps = positionBps + terrainBps
     + structureDefenseBps(participant, province, structures)
     + garrisonOvercrowdingBps(participant, province, structures)
