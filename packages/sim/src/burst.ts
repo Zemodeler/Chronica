@@ -1,5 +1,6 @@
 import {
   addMinutes,
+  assessOrderStanding,
   advanceWorldTo,
   ScheduledEventPayloadSchema,
   type Fact,
@@ -347,7 +348,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     }
 
     applyDiscoveries(proposal.discoveries, causalDepth);
-    world = recordDelegations(world, proposal.delegations, ids, result.assignedIds);
+    world = recordDelegations(world, proposal.delegations, ids, result.assignedIds, input.offices);
   };
 
   const firedEventIds: string[] = [];
@@ -783,6 +784,7 @@ function recordDelegations(
   delegations: Proposal["delegations"],
   ids: { next(prefix: string): string },
   assignedIds: ReadonlyMap<string, string>,
+  offices: readonly Office[],
 ): WorldState {
   if (delegations.length === 0) return world;
   const resolveParty = (ref: Proposal["delegations"][number]["issuerRef"]) =>
@@ -792,20 +794,34 @@ function recordDelegations(
     // An order to someone who does not exist is not an order. This happens when
     // the model names a person it only planned to create.
     .filter((delegation) => world.characters.some((character) => character.id === resolveParty(delegation.recipientRef).id))
-    .map((delegation) => ({
-    id: ids.next("order"),
-    actionId: ids.next("action"),
-    issuerRef: resolveParty(delegation.issuerRef),
-    recipientRef: resolveParty(delegation.recipientRef),
-    claimedAuthorityGrantId: null,
-    // The instruction is snapshotted into the reason so the recipient's own
-    // cognition can read what they were actually told.
-    authorityCheck: { authorized: true, grant: null, standing: null, reason: delegation.instruction.slice(0, 400) },
-    status: "issued" as const,
-    recipientDecisionReason: null,
-    issuedAtStep: world.elapsedStep,
-    decidedAtStep: null,
-    consequenceFactRefs: [],
-  }));
+    .map((delegation) => {
+      const issuerRef = resolveParty(delegation.issuerRef);
+      const recipientRef = resolveParty(delegation.recipientRef);
+      // Every delegation ever recorded said `authorized: true`. It was a
+      // constant, so a merchant's request and a consul's command were the same
+      // record, and the instruction itself was smuggled through a field
+      // documented as a snapshot of the authority check.
+      const verdict = assessOrderStanding({ world, offices, issuerRef, recipientRef });
+      return {
+        id: ids.next("order"),
+        actionId: ids.next("action"),
+        issuerRef,
+        recipientRef,
+        claimedAuthorityGrantId: verdict.grant?.id ?? null,
+        authorityCheck: {
+          authorized: verdict.standing === "binding",
+          grant: verdict.grant,
+          standing: verdict.grant?.standing ?? null,
+          reason: verdict.reason,
+        },
+        instruction: delegation.instruction.slice(0, 400),
+        standing: verdict.standing,
+        status: "issued" as const,
+        recipientDecisionReason: null,
+        issuedAtStep: world.elapsedStep,
+        decidedAtStep: null,
+        consequenceFactRefs: [],
+      };
+    });
   return { ...world, orderAttempts: [...world.orderAttempts, ...attempts] };
 }

@@ -22,9 +22,11 @@ describe("orchestrator prompt", () => {
     // than infers, and a map an army has to actually cross; and now conquest
     // itself, which no arm expressed at all -- a province could not change
     // hands and a rising could not become a country, so a war could be fought
-    // for a generation and leave the map exactly as it began.
+    // for a generation and leave the map exactly as it began; and now a person
+    // being able to refuse, which the prompt previously forbade outright and
+    // which nothing in the engine had ever recorded happening.
     console.log("system prompt chars:", ORCHESTRATOR_SYSTEM_PROMPT.length, "~tokens:", Math.round(ORCHESTRATOR_SYSTEM_PROMPT.length / 4));
-    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(56_000);
+    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(57_500);
   });
 });
 

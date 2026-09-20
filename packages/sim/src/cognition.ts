@@ -113,6 +113,14 @@ The same engine rules apply as elsewhere:
   words, under twenty-five, with the occasion. Leave it null otherwise; almost
   every answer leaves it null, and a chronicle in which everyone is quotable
   quotes nobody.
+- An order or a request put to them is theirs to answer: "order_attempt_decide",
+  naming it and saying why in their own words. "accept" means they do it -- so
+  actually do it, in the same answer, with the deltas it takes. "refuse",
+  "delay" and "ignore" are real answers, and the right ones when the man asking
+  has no standing to command them, or when obeying would cost them more than
+  refusing. "subvert" is appearing to comply and doing otherwise. Answer every
+  one of them: an order left unanswered is simply put to them again next time.
+  A refusal is an event, and the man who gave the order will hear of it.
 - A letter put to them is theirs to answer: "diplomatic_message_answer", naming
   the letter, accepting, refusing or countering it, and saying why in their own
   words. Answer it as the person who received it, weighing what it would cost
@@ -422,7 +430,14 @@ export function renderCharacterPortrait(
     (attempt) => attempt.recipientRef.id === characterId && (attempt.status === "issued" || attempt.status === "received" || attempt.status === "delayed"),
   );
   if (owed.length > 0) {
-    lines.push("Orders awaiting their answer:", ...owed.map((attempt) => `  - [${attempt.id}] from ${name(attempt.issuerRef.id)} — lawful: ${attempt.authorityCheck.authorized}`));
+    // What was actually asked, and by somebody with what standing to ask it.
+    // This used to print "lawful: true" for every order ever recorded, because
+    // that field was a constant -- so a recipient was told, of a merchant's
+    // request and a consul's command alike, that it was lawful.
+    lines.push("Orders and requests put to them, still unanswered:", ...owed.map((attempt) => {
+      const asking = attempt.standing === "binding" ? "" : attempt.standing === "requested" ? " He is asking, not commanding." : " He has no business commanding them.";
+      return `  - [${attempt.id}] from ${attempt.authorityCheck.reason}${asking} What he wants: "${attempt.instruction}"`;
+    }));
   }
 
   // Letters put to them or to their government, unanswered. The answer is
