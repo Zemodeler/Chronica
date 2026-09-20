@@ -97,6 +97,16 @@ export interface NarratorInput {
    * this world can fall into, never something it is on rails toward.
    */
   readonly pressures?: readonly ScenarioHistoricalPressure[] | undefined;
+  /**
+   * How far this burst may carry the world.
+   *
+   * The narrator is asked once, at the top of a burst, and the burst is the
+   * thing that moves time -- so sizing the batch on the silence *behind* it
+   * meant a season got the stirrings of the moment it began. A live run made
+   * this plain: one order covered ninety days and the world did nothing at
+   * all in them, because the previous order had stirred it that same morning.
+   */
+  readonly spanDays?: number | undefined;
 }
 
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
@@ -511,8 +521,10 @@ export function decideNarratorSeeds(input: NarratorInput): NarratorSeed[] {
   if (!cadenceHasRun(input, tension)) return [];
   const ledger = input.world.narrator;
 
+  // The season ahead, or the silence behind, whichever is longer.
   const since = ledger.lastSeedDay === null ? SEED_EVERY_DAYS * MIN_SEEDS_PER_BURST : input.world.instant.day - ledger.lastSeedDay;
-  const wanted = Math.max(MIN_SEEDS_PER_BURST, Math.min(MAX_SEEDS_PER_BURST, Math.round(since / SEED_EVERY_DAYS)));
+  const horizon = Math.max(since, input.spanDays ?? 0);
+  const wanted = Math.max(MIN_SEEDS_PER_BURST, Math.min(MAX_SEEDS_PER_BURST, Math.round(horizon / SEED_EVERY_DAYS)));
 
   const seeds: NarratorSeed[] = [];
   const keys = new Set<string>();
@@ -557,7 +569,11 @@ function cadenceHasRun(input: NarratorInput, tension: TensionReading): boolean {
   // A fresh world waits half a cadence before its first stirring: the
   // opening orders are the ruler's, not the world's.
   const since = ledger.lastSeedDay === null ? world.instant.day + Math.floor(gap / 2) : world.instant.day - ledger.lastSeedDay;
-  return since >= gap;
+  // Plus the season this burst is about to cover. `lastSeedDay` records the
+  // far end of what the last batch covered, so this asks the only question
+  // that matters: does the world run past the end of its last stirrings
+  // before this order is done?
+  return since + (input.spanDays ?? 0) >= gap;
 }
 
 /** The seed at one ordinal. Every choice in it hashes on that ordinal and nothing else. */
@@ -704,14 +720,18 @@ export function recordSeedOffered(world: WorldState, seed: NarratorSeed): WorldS
  * next month's, and re-offering a batch of six because one of them went
  * unread would be the same season narrated twice.
  */
-export function recordSeedsOffered(world: WorldState, seeds: readonly NarratorSeed[]): WorldState {
+export function recordSeedsOffered(world: WorldState, seeds: readonly NarratorSeed[], throughDay?: number): WorldState {
   if (seeds.length === 0) return world;
   const spent = seeds.map((seed) => seed.pressureId).filter((id): id is string => id !== null);
   return {
     ...world,
     narrator: {
       ...world.narrator,
-      lastSeedDay: world.instant.day,
+      // The day this batch *covers to*, not the day it was decided. A batch
+      // sized for a season is that season's stirrings, and the next burst
+      // measures its silence from the far end of it -- otherwise an order
+      // answered the same afternoon would stir the same months again.
+      lastSeedDay: Math.max(world.instant.day, throughDay ?? world.instant.day),
       lastSeedKey: seeds[0]!.key,
       seedCount: world.narrator.seedCount + seeds.length,
       consumed: true,

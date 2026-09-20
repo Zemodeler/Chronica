@@ -199,6 +199,17 @@ describe("the age's own pull", () => {
 });
 
 describe("how much stirs in a season", () => {
+  it("sizes the batch on the season the burst will cover, not the morning it starts in", () => {
+    // A live run made this plain: one order carried the world ninety days and
+    // nothing stirred in any of them, because the order before it had stirred
+    // the world that same morning. The narrator is asked once, at the top of
+    // a burst, and the burst is the thing that moves time.
+    const world = large();
+    const sameMorning = { ...world, narrator: { ...world.narrator, lastSeedDay: 45, seedCount: 3, lastSeedKey: "seed-x", consumed: true } };
+    expect(decideNarratorSeeds(input(later(sameMorning, 45)))).toEqual([]);
+    expect(decideNarratorSeeds(input(later(sameMorning, 45), { spanDays: 90 })).length).toBeGreaterThanOrEqual(3);
+  });
+
   it("offers a month's worth, not one thing, and never the same thing twice", () => {
     // A burst covers a season and used to carry exactly one stirring, so a
     // record of three months came back with two entries, both of them the

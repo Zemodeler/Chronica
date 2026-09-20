@@ -173,7 +173,15 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     // polity, with its own army, its own aims, and Rome's war against it
     // already on the books.
     await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 21, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Makes the Campanian legion at Rhegium its own power with its own army and aims, and records Rome's war against it, so the siege the scenario is about can actually be fought." }).onConflictDoNothing();
-    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 21, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
+    // Nobody in this world had ever aged: `life` was defaulted to no bands at
+    // all, so the mortality roll that has existed since the character system
+    // was written could never fire. Six bands off Roman evidence, reviewed
+    // monthly. And the war the age is named for becomes reachable: Messana
+    // asking for a protector is one pressure, and a great power crossing the
+    // strait while the other refuses to have it is the pressure that follows
+    // it -- held back by `afterPressureIds` until the asking has happened.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 22, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Gives the age its own mortality -- six historical bands, reviewed monthly -- and chains the crossing of the strait to Messana having asked for a protector, so the First Punic War is something this world can fall into." }).onConflictDoNothing();
+    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 22, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
   });
 }
 
