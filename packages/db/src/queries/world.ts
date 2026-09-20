@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNotNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import {
   ScenarioDefinitionSchema,
   WorldStateSchema,
@@ -403,26 +403,35 @@ export async function listChronicle(db: ChronicaDatabase, gameId: string, limit 
 }
 
 /**
- * Who the newest report was already about, one set of subject ids per entry.
+ * Who the last few reports were already about, one set of subject ids per entry.
  *
  * Read before the next report is written, so a matter that is merely
- * continuing is not given a fresh headline every time. Deliberately only the
- * newest report: a thread held back once is written up the report after,
- * which is the behaviour wanted -- it waits, it is not forgotten.
+ * continuing is not given a fresh headline every time.
+ *
+ * Two reports, not one. One was the first attempt and it let the repetition
+ * alternate instead of stopping it: a thread held back in one report was told
+ * in the next, held in the one after, and "Boiocalus Renews Contributions for
+ * the Boii Warband" appeared under that exact headline twice in three
+ * reports. Two is enough to break the alternation and short enough that a
+ * matter which genuinely goes quiet for a season is still news when it comes
+ * back.
  */
-export async function subjectsOfNewestReport(db: ChronicaDatabase, gameId: string): Promise<string[][]> {
-  const [newest] = await db
-    .select({ burstId: chronicleCheckpoints.burstId })
+const REPORTS_REMEMBERED = 2;
+
+export async function subjectsOfRecentReports(db: ChronicaDatabase, gameId: string): Promise<string[][]> {
+  const recent = await db
+    .selectDistinct({ burstId: chronicleCheckpoints.burstId, at: chronicleCheckpoints.toInstantSortKey })
     .from(chronicleCheckpoints)
-    .where(eq(chronicleCheckpoints.gameId, gameId))
-    .orderBy(desc(chronicleCheckpoints.toInstantSortKey), desc(chronicleCheckpoints.ordinal))
-    .limit(1);
-  if (newest?.burstId == null) return [];
+    .where(and(eq(chronicleCheckpoints.gameId, gameId), isNotNull(chronicleCheckpoints.burstId)))
+    .orderBy(desc(chronicleCheckpoints.toInstantSortKey))
+    .limit(REPORTS_REMEMBERED);
+  const burstIds = recent.map((row) => row.burstId).filter((id): id is string => id !== null);
+  if (burstIds.length === 0) return [];
 
   const rows = await db
     .select({ subjects: chronicleCheckpoints.subjects })
     .from(chronicleCheckpoints)
-    .where(and(eq(chronicleCheckpoints.gameId, gameId), eq(chronicleCheckpoints.burstId, newest.burstId)));
+    .where(and(eq(chronicleCheckpoints.gameId, gameId), inArray(chronicleCheckpoints.burstId, burstIds)));
 
   return rows.map((row) => {
     const subjects = Array.isArray(row.subjects) ? row.subjects : [];
