@@ -251,13 +251,13 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
     phases: ["contact", "engagement", "cohesion", "withdrawal", "aftermath"], routCohesionBps: 2_000, arrearsMoralePeriods: 1, arrearsDesertionPeriods: 2,
   },
   government: {
-    offices: [{ id: "roman-consul", label: "Roman consul", polityId: "rome", authorisedActionIds: ["force_create", "force_modify", "project_create", "project_milestone_update", "character_create", "authority_grant_upsert", "character_intent_set", "polity_stance_shift", "social_events", "political_procedure_open", "political_procedure_resolve", "political_support_set", "legitimacy_shift", "province_material_shift", "generic_entity_create", "generic_entity_update", "force_engage", "belief_set"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "roman-election", eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-not-disqualified"] },
+    offices: [{ id: "roman-consul", label: "Roman consul", polityId: "rome", authorisedActionIds: ["force_create", "force_modify", "project_create", "project_milestone_update", "character_create", "authority_grant_upsert", "character_intent_set", "polity_stance_shift", "social_events", "political_procedure_open", "political_procedure_resolve", "political_support_set", "legitimacy_shift", "province_material_shift", "generic_entity_create", "generic_entity_update", "force_engage", "belief_set"], sponsorableCategories: [], treasuryAccountId: "rome-treasury", treasuryPermissions: ["view", "propose_spending", "spend_without_vote"], incomeSourceId: null, expectedBlocId: null, successionRuleId: "roman-election", eligibilityRequirementIds: ["req-alive", "req-roman-polity", "req-not-disqualified"] },
       // The other powers' heads. Without an office a king of Syracuse
       // negotiating for Syracuse was recorded as insubordinate, which made
       // every foreign government's ordinary business a breach.
-      { id: "syracusan-king", label: "King of Syracuse", polityId: "syracuse", authorisedActionIds: ["force_create", "force_modify", "project_create", "project_milestone_update", "character_create", "authority_grant_upsert", "character_intent_set", "polity_stance_shift", "social_events", "political_procedure_open", "political_procedure_resolve", "political_support_set", "legitimacy_shift", "province_material_shift", "generic_entity_create", "generic_entity_update", "force_engage", "belief_set"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "syracusan-succession", eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
-      { id: "mamertine-leader", label: "Leader of the Mamertines", polityId: "mamertines", authorisedActionIds: ["force_create", "force_modify", "project_create", "project_milestone_update", "character_create", "authority_grant_upsert", "character_intent_set", "polity_stance_shift", "social_events", "political_procedure_open", "political_procedure_resolve", "political_support_set", "legitimacy_shift", "province_material_shift", "generic_entity_create", "generic_entity_update", "force_engage", "belief_set"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "mamertine-acclamation", eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
-      { id: "carthaginian-strategos", label: "Carthaginian commander in Sicily", polityId: "carthage", authorisedActionIds: ["force_create", "force_modify", "project_create", "project_milestone_update", "character_create", "authority_grant_upsert", "character_intent_set", "polity_stance_shift", "social_events", "political_procedure_open", "political_procedure_resolve", "political_support_set", "legitimacy_shift", "province_material_shift", "generic_entity_create", "generic_entity_update", "force_engage", "belief_set"], sponsorableCategories: [], treasuryAccountId: null, treasuryPermissions: [], incomeSourceId: null, expectedBlocId: null, successionRuleId: "carthaginian-appointment", eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
+      { id: "syracusan-king", label: "King of Syracuse", polityId: "syracuse", authorisedActionIds: ["force_create", "force_modify", "project_create", "project_milestone_update", "character_create", "authority_grant_upsert", "character_intent_set", "polity_stance_shift", "social_events", "political_procedure_open", "political_procedure_resolve", "political_support_set", "legitimacy_shift", "province_material_shift", "generic_entity_create", "generic_entity_update", "force_engage", "belief_set"], sponsorableCategories: [], treasuryAccountId: "syracuse-treasury", treasuryPermissions: ["view", "propose_spending", "spend_without_vote"], incomeSourceId: null, expectedBlocId: null, successionRuleId: "syracusan-succession", eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
+      { id: "mamertine-leader", label: "Leader of the Mamertines", polityId: "mamertines", authorisedActionIds: ["force_create", "force_modify", "project_create", "project_milestone_update", "character_create", "authority_grant_upsert", "character_intent_set", "polity_stance_shift", "social_events", "political_procedure_open", "political_procedure_resolve", "political_support_set", "legitimacy_shift", "province_material_shift", "generic_entity_create", "generic_entity_update", "force_engage", "belief_set"], sponsorableCategories: [], treasuryAccountId: "mamertine-treasury", treasuryPermissions: ["view", "propose_spending", "spend_without_vote"], incomeSourceId: null, expectedBlocId: null, successionRuleId: "mamertine-acclamation", eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
+      { id: "carthaginian-strategos", label: "Carthaginian commander in Sicily", polityId: "carthage", authorisedActionIds: ["force_create", "force_modify", "project_create", "project_milestone_update", "character_create", "authority_grant_upsert", "character_intent_set", "polity_stance_shift", "social_events", "political_procedure_open", "political_procedure_resolve", "political_support_set", "legitimacy_shift", "province_material_shift", "generic_entity_create", "generic_entity_update", "force_engage", "belief_set"], sponsorableCategories: [], treasuryAccountId: "carthage-treasury", treasuryPermissions: ["view", "propose_spending", "spend_without_vote"], incomeSourceId: null, expectedBlocId: null, successionRuleId: "carthaginian-appointment", eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
     ],
     successionRules: [
       { id: "roman-election", label: "Election by the Senate", kind: "elective", institutionId: "roman-senate" },
@@ -574,12 +574,22 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { id: "vibellius-purse", owner: { kind: "character", id: "decius-vibellius" }, currencyId: "denarius", balance: 600, status: "active", visibility: "private" },
       { id: "leptines-purse", owner: { kind: "character", id: "leptines-syracuse" }, currencyId: "denarius", balance: 1_400, status: "active", visibility: "private" },
       { id: "gisco-purse", owner: { kind: "character", id: "hannibal-gisco" }, currencyId: "denarius", balance: 950, status: "active", visibility: "private" },
+      // The powers' own chests. There were none at all: nine personal purses
+      // and no treasury anywhere, so a war cost nobody anything, no office
+      // could confer fiscal reach because there was nothing to reach, and
+      // VISION §7's whole economy -- income, expenditure, surplus -- had no
+      // subject. A republic that cannot run out of money is not a republic
+      // anybody has to govern.
+      { id: "rome-treasury", owner: { kind: "polity", id: "rome" }, currencyId: "denarius", balance: 9_000, status: "active", visibility: "polity" },
+      { id: "carthage-treasury", owner: { kind: "polity", id: "carthage" }, currencyId: "denarius", balance: 16_000, status: "active", visibility: "polity" },
+      { id: "syracuse-treasury", owner: { kind: "polity", id: "syracuse" }, currencyId: "denarius", balance: 5_200, status: "active", visibility: "polity" },
+      { id: "mamertine-treasury", owner: { kind: "polity", id: "mamertines" }, currencyId: "denarius", balance: 600, status: "active", visibility: "polity" },
     ],
     accountAccess: [
       ["gaius", "gaius-genucius"], ["hanno", "hanno-carthage"], ["hieron", "hieron-ii"], ["mamertine", "mamertine-spokesman"],
       ["curius", "manius-curius"], ["ogulnius", "quintus-ogulnius"], ["vibellius", "decius-vibellius"], ["leptines", "leptines-syracuse"], ["gisco", "hannibal-gisco"],
     ].map(([id, characterId]) => ({ id: `${id}-purse-access`, characterId, accountId: `${id}-purse`, permissions: ["view", "spend_without_vote"], sourceKind: "ownership", sourceId: characterId })),
-    incomeSources: [], obligations: [], transactions: [], capturableValues: [], holdings: [],
+    transactions: [], capturableValues: [], holdings: [],
     institutions: [
       {
         id: "roman-senate",
@@ -611,6 +621,42 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { id: "syracusan-king:seat:0", officeId: "syracusan-king", seatIndex: 0, holderCharacterId: "hieron-ii", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
       { id: "mamertine-leader:seat:0", officeId: "mamertine-leader", seatIndex: 0, holderCharacterId: "mamertine-spokesman", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
       { id: "carthaginian-strategos:seat:0", officeId: "carthaginian-strategos", seatIndex: 0, holderCharacterId: "hanno-carthage", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
+    ],
+    /**
+     * What each power takes in, in the units its treasury is kept in.
+     *
+     * Rome in 270 BCE lives off the land tax of its own citizens and the
+     * obligations of the Italian allies, who mostly owe men rather than money;
+     * Carthage lives off trade and the tribute of its African subjects, which
+     * is why it is the richer power and why a long war hurts it in a different
+     * place. The counterparty is named where the money comes from abroad, so a
+     * war can actually cut it -- which is what `counterpartyPolityId` is for
+     * and what nothing in this scenario previously gave it to do.
+     */
+    incomeSources: [
+      { id: "rome-tributum", kind: "tax", label: "The tributum on Roman citizens", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", amount: 520, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 9_000, active: true },
+      { id: "rome-allied-contributions", kind: "tribute", label: "Contributions of the Italian allies", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", amount: 260, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 8_000, active: true },
+      { id: "rome-ager-publicus", kind: "land", label: "Rents of the public land", beneficiaryAccountId: "rome-treasury", originKind: "polity", originId: "rome", amount: 140, cadenceSteps: 30, nextDueStep: 30, active: true },
+      { id: "carthage-harbour-dues", kind: "trade", label: "Harbour dues at Carthage", beneficiaryAccountId: "carthage-treasury", originKind: "polity", originId: "carthage", amount: 700, cadenceSteps: 30, nextDueStep: 30, active: true },
+      { id: "carthage-african-tribute", kind: "tribute", label: "Tribute of the African subjects", beneficiaryAccountId: "carthage-treasury", originKind: "polity", originId: "carthage", amount: 480, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 8_500, active: true },
+      { id: "syracuse-tax", kind: "tax", label: "The Syracusan tithe", beneficiaryAccountId: "syracuse-treasury", originKind: "polity", originId: "syracuse", amount: 380, cadenceSteps: 30, nextDueStep: 30, active: true },
+      { id: "mamertine-tolls", kind: "trade", label: "Tolls on the strait", beneficiaryAccountId: "mamertine-treasury", originKind: "polity", originId: "mamertines", amount: 90, cadenceSteps: 30, nextDueStep: 30, collectionRateBps: 7_000, active: true },
+    ],
+    /**
+     * And what it costs them to stand still.
+     *
+     * Pay is the first charge on every treasury here and the one that bites
+     * first: `arrearsMoralePeriods` and `arrearsDesertionPeriods` in the
+     * warfare rules have always described what happens to an unpaid army and
+     * had no unpaid army to describe, because nothing was ever owed.
+     */
+    obligations: [
+      { id: "rome-legion-pay", kind: "army_pay", label: "Pay of the field army", payerAccountId: "rome-treasury", amount: 300, cadenceSteps: 30, nextDueStep: 30, priority: 900, arrears: 0, missedPeriods: 0, active: true },
+      { id: "rome-magistracies", kind: "salary", label: "The magistracies and the public works", payerAccountId: "rome-treasury", amount: 190, cadenceSteps: 30, nextDueStep: 30, priority: 500, arrears: 0, missedPeriods: 0, active: true },
+      { id: "carthage-fleet-pay", kind: "army_pay", label: "Pay of the fleet and its crews", payerAccountId: "carthage-treasury", amount: 430, cadenceSteps: 30, nextDueStep: 30, priority: 900, arrears: 0, missedPeriods: 0, active: true },
+      { id: "carthage-mercenaries", kind: "army_upkeep", label: "The hired men of Libya and Iberia", payerAccountId: "carthage-treasury", amount: 520, cadenceSteps: 30, nextDueStep: 30, priority: 850, arrears: 0, missedPeriods: 0, active: true },
+      { id: "syracuse-squadron-pay", kind: "army_pay", label: "Pay of the Syracusan squadron", payerAccountId: "syracuse-treasury", amount: 210, cadenceSteps: 30, nextDueStep: 30, priority: 900, arrears: 0, missedPeriods: 0, active: true },
+      { id: "mamertine-soldiery", kind: "army_pay", label: "The soldiery that holds Messana", payerAccountId: "mamertine-treasury", amount: 120, cadenceSteps: 30, nextDueStep: 30, priority: 950, arrears: 0, missedPeriods: 0, active: true },
     ],
     forces: [
       { id: "roman-field-army", name: "Roman field army", polityId: "rome", commanderCharacterId: "gaius-genucius", controllerCharacterId: "gaius-genucius", locationId: "punic-italy-latium", authorizedStrength: 4_000, personnel: [{ categoryId: "infantry", label: "Legionaries", fit: 3_500, unavailable: [] }], moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: null, payArrearsPeriods: 0, history: [] },

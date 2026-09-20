@@ -45,6 +45,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { resolveEngagement, type BattleAccount } from "../battle";
+import { assessExecution, daysInHand, throughHand } from "../delegation";
 import type { ApplyContext, ApplyResult, AppliedDelta, AuthorityBreach, RejectedDelta } from "./context";
 
 /**
@@ -600,14 +601,65 @@ function applyOne(
       if (fundingId !== null && !world.material.accounts.some((account) => account.id === fundingId)) {
         reject(`No account "${fundingId}" exists to fund this project.`, "reference");
       }
-      const milestones = delta.milestones.map((milestone, index) => ({
-        id: `${id}-m${index + 1}`,
-        label: milestone.label,
-        requiredAtElapsedOffset: milestone.dueInDays,
-        costAmount: milestone.costAmount,
-        status: "pending" as const,
-        completedAtStep: null,
-      }));
+      // Whose hands this passes through (VISION §13). A project is the
+      // commonest form a delegated order takes, and until now the man given it
+      // made no difference to it at all: two officials handed "find the money
+      // for two new legions" produced identical milestones at identical cost,
+      // however good or honest either of them was.
+      //
+      // The sponsor is who does the work. Code owns what it costs and how long
+      // it takes; the model owns what they actually did about it.
+      const doerId = delta.sponsorRef.kind === "character" ? resolve(delta.sponsorRef.id) ?? delta.sponsorRef.id : null;
+      const hand = doerId === null ? null : assessExecution(world, doerId, DELTA_AUTHORITY_DOMAIN.project_create);
+      const milestones = delta.milestones.map((milestone, index) => {
+        const through = throughHand(milestone.costAmount, hand);
+        return {
+          id: `${id}-m${index + 1}`,
+          label: milestone.label,
+          requiredAtElapsedOffset: daysInHand(milestone.dueInDays, hand),
+          costAmount: through.cost,
+          status: "pending" as const,
+          completedAtStep: null,
+        };
+      });
+
+      // And what quietly does not arrive. A private fact, which is exactly
+      // what `oversight.ts` discovers and what a rival can prosecute: this is
+      // a story somebody can find out, not a modifier on a number.
+      const skimmed = hand === null || fundingId === null
+        ? 0
+        : delta.milestones.reduce((sum, milestone) => sum + throughHand(milestone.costAmount, hand).skimmed, 0);
+      let withSkim = world;
+      if (skimmed > 0 && hand !== null && doerId !== null) {
+        const funding = world.material.accounts.find((account) => account.id === fundingId);
+        const purse = world.characters.find((character) => character.id === doerId)?.personalAccountId;
+        const takeable = Math.min(skimmed, funding?.balance ?? 0);
+        if (purse !== undefined && takeable > 0) {
+          withSkim = {
+            ...world,
+            material: {
+              ...world.material,
+              accounts: world.material.accounts.map((account) => {
+                if (account.id === fundingId) return { ...account, balance: account.balance - takeable };
+                if (account.id === purse) return { ...account, balance: account.balance + takeable };
+                return account;
+              }),
+            },
+          };
+          emitFact({
+            localId: `skim_${id}`,
+            kind: "peculation",
+            summary: `${hand.name} let ${takeable} of what was voted for ${delta.label} find its way into his own purse.`,
+            affectedRefs: [{ kind: "character", id: doerId }],
+            visibility: "private",
+            discoveryState: "private",
+            knowableInDays: 0,
+            knownToRefs: [{ kind: "character", id: doerId }],
+            // Worth a chapter if anybody ever finds it.
+            significance: 55,
+          });
+        }
+      }
       const project = {
         id,
         kind: delta.kind,
@@ -623,7 +675,7 @@ function applyOne(
         completedAtStep: null,
         provenanceEventIds: [],
       };
-      return { ...world, projects: [...world.projects, project] };
+      return { ...withSkim, projects: [...withSkim.projects, project] };
     }
 
     case "project_milestone_update": {

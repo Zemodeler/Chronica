@@ -16,6 +16,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { RoutedActor } from "./attention";
+import { assessExecution } from "./delegation";
 import { extractJson } from "./json";
 import type { SimModelPort } from "./ports";
 
@@ -540,6 +541,25 @@ export function renderCharacterPortrait(
       const asking = attempt.standing === "binding" ? "" : attempt.standing === "requested" ? " He is asking, not commanding." : " He has no business commanding them.";
       return `  - [${attempt.id}] from ${attempt.authorityCheck.reason}${asking} What he wants: "${attempt.instruction}"`;
     }));
+    // What sort of workman is being handed this (VISION §13). Their skills
+    // were printed above as "Capable at: ..." and nothing, here or anywhere,
+    // said what that meant for work somebody else had asked them to do -- so
+    // a corrupt quaestor and an honest one carried out the same order the same
+    // way. The engine takes the cost and the delay out of this; the words are
+    // here so the answer reads like the man rather than like the order.
+    if (character !== undefined) {
+      const hand = assessExecution(world, characterId, "fiscal");
+      const field = assessExecution(world, characterId, "military");
+      const each = [hand, field].filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+      if (each.length > 0) {
+        lines.push(
+          "Carrying out somebody else's business, they are:",
+          `  - with money and administration: ${each[0]!.words}`,
+          ...(each[1] === undefined ? [] : [`  - with soldiers and campaigns: ${each[1].words}`]),
+          "  Answer as that man. Doing it badly, slowly, or partly is a real answer, and so is doing it your own way.",
+        );
+      }
+    }
   }
 
   // Letters put to them or to their government, unanswered. The answer is

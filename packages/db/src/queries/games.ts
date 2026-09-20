@@ -185,7 +185,12 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     // classes. Without bands the declaration prompt asked for the standing and
     // the money in the same breath and believed whatever came back.
     await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 23, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Bounds what a person of a given standing is worth by the Roman census classes, so a common soldier cannot open with a senator's fortune and a merchant invented to lend money has something to lend." }).onConflictDoNothing();
-    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 23, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
+    // An economy, which this scenario simply did not have: nine personal
+    // purses, no treasury anywhere, nothing coming in and nothing owed. A war
+    // cost nobody anything, no office could confer fiscal reach because there
+    // was nothing to reach, and VISION §7 had no subject.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 24, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Gives each power a treasury, what it takes in and what it owes, and gives each office the chest it answers for -- so a war costs money, an unpaid army can go unpaid, and the ruler can read his own books." }).onConflictDoNothing();
+    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 24, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
   });
 }
 

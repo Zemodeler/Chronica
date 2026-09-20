@@ -52,7 +52,10 @@ export type AccountAccess = z.infer<typeof AccountAccessSchema>;
 
 export const IncomeSourceSchema = z.object({
   id: EntityIdSchema,
-  kind: z.enum(["land", "office", "trade", "pension", "tax"]),
+  // Tribute received was missing while tribute *paid* was a `MoneyObligation`
+  // kind from the beginning, so a power could owe it and not be owed it.
+  // VISION §7's own income breakdown lists it between trade and state estates.
+  kind: z.enum(["land", "office", "trade", "pension", "tax", "tribute"]),
   label: z.string().trim().min(1).max(120),
   beneficiaryAccountId: EntityIdSchema,
   originKind: z.enum(["holding", "office", "position", "polity"]),
