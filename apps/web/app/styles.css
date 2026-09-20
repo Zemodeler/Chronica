@@ -1236,3 +1236,21 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .sim-panel__order button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .sim-panel__error { margin: 0; padding: 0 1rem 1rem; color: var(--danger, #e06c6c); font-size: 0.85rem; }
+
+/* The treasury, laid out the way VISION §7 lays it out: income against
+   expenditure, the surplus at the foot, and nothing a model was asked for. */
+.books { display: grid; gap: .9rem; padding: 0 1rem 1rem; overflow-y: auto; }
+.books__accounts ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .3rem; }
+.books__accounts li { display: flex; justify-content: space-between; gap: 1rem; padding: .45rem .6rem; border-radius: .4rem; background: var(--surface); border: 1px solid var(--border); font-size: .88rem; }
+.books__accounts strong { font-variant-numeric: tabular-nums; }
+.books__side h3 { margin: 0 0 .5rem; font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+.books__side h3 em { font-style: normal; text-transform: none; letter-spacing: 0; }
+.books__table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+.books__table th { text-align: left; font-weight: 400; padding: .3rem .1rem; }
+.books__table td { text-align: right; padding: .3rem .1rem; font-variant-numeric: tabular-nums; }
+.books__in td { color: var(--text); }
+.books__out td { color: var(--muted); }
+.books__total th, .books__total td { border-top: 1px solid var(--border); font-weight: 600; padding-top: .45rem; }
+.books__surplus th, .books__surplus td { border-top: 2px solid var(--border); font-weight: 700; padding-top: .5rem; }
+.books__deficit th, .books__deficit td { border-top: 2px solid color-mix(in srgb, red 45%, var(--border)); font-weight: 700; padding-top: .5rem; color: color-mix(in srgb, red 65%, var(--text)); }
+.books__arrears { margin: .2rem 0 0; font-size: .82rem; color: color-mix(in srgb, red 55%, var(--text)); }

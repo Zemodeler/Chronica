@@ -15,3 +15,4 @@ export * from "./narrator";
 export * from "./ledger";
 export * from "./oversight";
 export * from "./mortality";
+export * from "./delegation";

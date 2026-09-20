@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { BooksPanel } from "./books-panel";
 import { ChroniclePanel } from "./chronicle-panel";
 import { latestReport, useGameView } from "./use-game-view";
 
 /**
- * The player's two surfaces onto the simulation, and the tabs that open them.
+ * The player's three surfaces onto the simulation, and the tabs that open them.
  *
  * Council is where you speak to the world: an order, and the rare decision the
  * world puts back to you. Chronicle is where you read what it did. They used to
@@ -16,10 +17,16 @@ import { latestReport, useGameView } from "./use-game-view";
  *
  * What the Council keeps of the record is the headlines of the newest report,
  * as an answer to the order just given. The passages themselves are next door.
+ *
+ * Treasury is the third, and the newest. VISION §7 opens with a worked monthly
+ * statement -- taxes, trade, tribute and estates against army, administration
+ * and debt service -- and the engine has computed every line of it since the
+ * economy was built while the client showed none of it. A ruler who wanted to
+ * know whether he could afford a war had to infer it from a balance.
  */
 export function SimulationPanel({ gameId }: { readonly gameId: string }) {
   const controller = useGameView(gameId);
-  const [open, setOpen] = useState<"none" | "council" | "chronicle">("none");
+  const [open, setOpen] = useState<"none" | "council" | "chronicle" | "books">("none");
   const [order, setOrder] = useState("");
 
   const { view, busy, error } = controller;
@@ -42,17 +49,24 @@ export function SimulationPanel({ gameId }: { readonly gameId: string }) {
         <button type="button" className="sim-tab" onClick={() => setOpen("chronicle")} aria-label="Open the chronicle">
           Chronicle{unopened === 0 ? "" : ` (${unopened})`}
         </button>
+        <button type="button" className="sim-tab" onClick={() => setOpen("books")} aria-label="Open the treasury">
+          Treasury
+        </button>
       </div>
     );
   }
 
   if (open === "chronicle") return <ChroniclePanel controller={controller} onClose={() => setOpen("none")} />;
+  // The books move only when simulated time does, and a new report is the
+  // cheapest honest signal that it has.
+  if (open === "books") return <BooksPanel gameId={gameId} revision={view.chronicle.length} onClose={() => setOpen("none")} />;
 
   return (
     <aside className="sim-panel" aria-label="Council">
       <header className="sim-panel__header">
         <h2>Council</h2>
         <div className="sim-panel__header-actions">
+          <button type="button" onClick={() => setOpen("books")}>Treasury</button>
           <button type="button" onClick={() => setOpen("chronicle")}>Chronicle</button>
           <button type="button" onClick={() => setOpen("none")} aria-label="Close the council">×</button>
         </div>
