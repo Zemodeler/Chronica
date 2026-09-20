@@ -494,6 +494,21 @@ function selectFacts(
     // Ours, and hidden. This is the line the whole epistemic layer exists to
     // hold: a plot against the ruler does not become colour by being interesting.
     if (fact.affectedEntities.some((entity) => ownEntityIds.has(entity.id))) continue;
+    // And theirs, and hidden, which this band did not check at all.
+    //
+    // Distance was doing the whole of the work: anything that touched nothing
+    // of the reader's could travel as news. A live game published a
+    // Carthaginian's private conspiracy -- `discovery: "private"`, known to
+    // the one man who had begun it and to nobody else in the world -- in full,
+    // in a Roman consul's Chronicle, because it named nothing Roman.
+    //
+    // News is a report of something somebody can come to know. `private` is
+    // the state that says nobody can: there is no road out of it and no
+    // instant at which it becomes knowable, so no distance makes it
+    // reportable. Everything else -- rumoured, delayed, intercepted, a
+    // government's own business -- is loose in the world, and the travel-time
+    // check below decides when it gets here.
+    if (fact.discovery.state === "private") continue;
     if (weightOf(fact) < DISTANT_NEWS_THRESHOLD) continue;
     // Word has to get here. A fact with a travel time keeps it.
     const knowableAt = fact.discovery.knowableAtInstant;
