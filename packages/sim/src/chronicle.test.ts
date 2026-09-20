@@ -290,11 +290,30 @@ describe("a passage that continues a longer matter", () => {
 describe("the world elsewhere", () => {
   const OBSERVER = { kind: "character" as const, id: "marcus-atilius" };
   const ROMAN_SIDE = new Set(["marcus-atilius", "rome", "quintus-fabius", "latium"]);
-  const secret = (overrides: Partial<Parameters<typeof fact>[0]> = {}) =>
+  /**
+   * Far away, and loose in the world: Rome has not seen it, but it is abroad
+   * and a report of it can reach the court.
+   *
+   * This helper used to be called `secret` and to model a poisoning at a
+   * public banquet as `discovery: "private"` -- and the distant-news band,
+   * which checked distance and nothing else, let it through on distance
+   * alone. A live game then published a Carthaginian's private conspiracy in
+   * a Roman consul's Chronicle. Far and hidden are different things, and the
+   * fixtures now say which they mean.
+   */
+  const distant = (overrides: Partial<Parameters<typeof fact>[0]> = {}) =>
     fact({
       kind: "assassination",
       summary: "Agathocles of Syracuse is poisoned at a banquet by his own nephew.",
       affectedEntities: [{ kind: "polity", id: "syracuse" }],
+      visibility: "private",
+      discovery: { state: "rumoured", knowableAtInstant: null, discoveredBy: [] },
+      ...overrides,
+    });
+
+  /** Far away, and hidden: something nobody in the world can come to know. */
+  const secret = (overrides: Partial<Parameters<typeof fact>[0]> = {}) =>
+    distant({
       visibility: "private",
       discovery: { state: "private", knowableAtInstant: null, discoveredBy: [] },
       ...overrides,
@@ -314,11 +333,31 @@ describe("the world elsewhere", () => {
     // happens in Syracuse cannot be acted on from Rome, so knowing it costs
     // nothing and not knowing it costs the whole feeling of a world.
     const port = capturingPort();
-    const result = await compose(port, [secret()]);
+    const result = await compose(port, [distant()]);
     expect(port.lastUserMessage).toContain("news reaching the court");
     expect(port.lastUserMessage).toContain("Reported to have happened:");
     expect(port.lastUserMessage).toContain("poisoned at a banquet");
     expect(result.entries).toHaveLength(1);
+  });
+
+  it("keeps a foreign secret secret, which distance alone used to publish", async () => {
+    // From a live game. Hanno of Carthage began cultivating a faction against
+    // his own government -- `visibility: "private"`, `discovery: "private"`,
+    // known to the one man who began it -- and the whole of it was written
+    // into a Roman consul's Chronicle, because it named nothing Roman and
+    // the distant-news band checked only distance. News is a report of
+    // something that can be seen happening; no distance makes a private fact
+    // reportable.
+    const port = capturingPort();
+    const plot = secret({
+      kind: "secret_political_action",
+      summary: "Hanno of Carthage has begun secretly cultivating a private faction against his own government.",
+      affectedEntities: [{ kind: "character", id: "hanno-carthage" }, { kind: "polity", id: "carthage" }],
+      discovery: { state: "private", knowableAtInstant: null, discoveredBy: [{ via: "witnessed", atInstant: { day: 1, minute: 0 }, observerRef: { kind: "character", id: "hanno-carthage" } }] },
+    });
+    const result = await compose(port, [plot]);
+    expect(result.entries).toHaveLength(0);
+    expect(port.lastUserMessage ?? "").not.toContain("Hanno");
   });
 
   it("keeps a secret that touches the reader's own side, however weighty", async () => {
@@ -336,7 +375,7 @@ describe("the world elsewhere", () => {
     // The strict answer, not a guess: a wrong guess here publishes a plot
     // against the reader as local colour.
     const port = capturingPort();
-    const facts = [secret()];
+    const facts = [distant()];
     const result = await composeChronicle({
       port, clock, observer: OBSERVER, observerPolityId: "rome", facts,
       from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
@@ -347,14 +386,14 @@ describe("the world elsewhere", () => {
 
   it("does not carry foreign trivia, only what would travel", async () => {
     const port = capturingPort();
-    const gossip = secret({ summary: "A Syracusan magistrate loses a lawsuit over a vineyard." });
+    const gossip = distant({ summary: "A Syracusan magistrate loses a lawsuit over a vineyard." });
     const result = await compose(port, [gossip], { significanceByFactId: new Map([[gossip.id, 10]]) });
     expect(result.entries).toHaveLength(0);
   });
 
   it("waits for word to arrive when the news has a road to travel", async () => {
     const port = capturingPort();
-    const slow = secret({ discovery: { state: "rumoured", knowableAtInstant: { day: 90, minute: 0 }, discoveredBy: [] } });
+    const slow = distant({ discovery: { state: "rumoured", knowableAtInstant: { day: 90, minute: 0 }, discoveredBy: [] } });
     expect((await compose(port, [slow])).entries).toHaveLength(0);
     expect((await compose(port, [slow], { to: { day: 120, minute: 0 } })).entries).toHaveLength(1);
   });
@@ -677,8 +716,11 @@ describe("a battle worth dying in", () => {
       kind: "battle",
       summary: "Syracuse and Carthage meet near Selinous.",
       affectedEntities: [{ kind: "polity", id: "syracuse" }],
+      // Rome has not seen it, but a battle is loose in the world the moment it
+      // is fought: "rumoured", not "private", which is the state for a thing
+      // nobody can come to know at all.
       visibility: "private",
-      discovery: { state: "private", knowableAtInstant: null, discoveredBy: [] },
+      discovery: { state: "rumoured", knowableAtInstant: null, discoveredBy: [] },
     });
     await composeChronicle({
       port, clock, observer: OBSERVER, observerPolityId: "rome", facts: [distant],

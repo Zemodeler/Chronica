@@ -426,7 +426,13 @@ export function runDeterministicTick(input: TickInput): TickResult {
       // scheduled march put an army anywhere on the map in one step.
       if (hopsBetween(input.world, marching.locationId, provinceId) === null) return null;
       movedForces.set(forceId, { ...marching, locationId: provinceId, positionId: null });
-      return { entityId: forceId, summary: `${marching.name} [${forceId}] has arrived in ${provinceId}.` };
+      // Named, not identified. This summary is copied verbatim into the
+      // Chronicle by whoever writes the project up, and a chronicler
+      // reporting that an army "arrived in
+      // ita-72843720b81376294924159-sicily-northeast" is the engine's
+      // bookkeeping arriving in the historian's hands.
+      const arrivedAt = input.world.map.provinces.find((province) => province.id === provinceId)?.name ?? provinceId;
+      return { entityId: forceId, summary: `${marching.name} [${forceId}] has arrived in ${arrivedAt} [${provinceId}].` };
     }
 
     if (outcome.kind === "structure") {
