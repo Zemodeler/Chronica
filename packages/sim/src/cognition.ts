@@ -589,15 +589,39 @@ export async function runCognition(
 
   const inBatch = actors.map((actor) => actor.characterId);
   const userMessage = actors.map((actor) => renderActor(actor, world, clock, inBatch)).join("\n\n");
+  const complain = (issues: readonly { path: readonly PropertyKey[]; message: string }[]): string =>
+    issues.slice(0, 4).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
+
+  let failure: string;
   try {
     const raw = await port.complete("simulate_cognition", COGNITION_SYSTEM_PROMPT, userMessage);
     const parsed = CognitionOutputSchema.safeParse(foldStrayProposalKeys(extractJson(raw)));
     if (parsed.success) return { output: parsed.data, calls: 1, parseFailure: null };
-    // No repair retry here, unlike orchestration. A failed orchestration means
-    // the player's order goes unanswered; a failed cognition only means nobody
-    // reacted this iteration, which the world can absorb silently.
-    return { output: EMPTY, calls: 1, parseFailure: parsed.error.issues.slice(0, 4).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ") };
+    failure = complain(parsed.error.issues);
   } catch (error) {
     return { output: EMPTY, calls: 1, parseFailure: error instanceof Error ? error.message : String(error) };
+  }
+
+  // One repair attempt, the same one orchestration gets.
+  //
+  // This used to be deliberately absent, on the reasoning that "a failed
+  // cognition only means nobody reacted this iteration, which the world can
+  // absorb silently". Watching it happen says otherwise: a batch is three to
+  // six people, each of whom had somewhere to be, and it failed on three
+  // bursts out of six in one evening's play. Silently absorbing that is a
+  // season in which a third of the world stood still for no reason anybody
+  // can see. The deterministic repairs above catch the shapes that recur;
+  // this catches the ones that do not.
+  try {
+    const raw = await port.complete(
+      "simulate_cognition",
+      COGNITION_SYSTEM_PROMPT,
+      `${userMessage}\n\nYour previous answer was rejected. Fix exactly these problems and answer again with the whole object:\n${failure}`,
+    );
+    const repaired = CognitionOutputSchema.safeParse(foldStrayProposalKeys(extractJson(raw)));
+    if (repaired.success) return { output: repaired.data, calls: 2, parseFailure: null };
+    return { output: EMPTY, calls: 2, parseFailure: complain(repaired.error.issues) };
+  } catch (error) {
+    return { output: EMPTY, calls: 2, parseFailure: error instanceof Error ? error.message : String(error) };
   }
 }
