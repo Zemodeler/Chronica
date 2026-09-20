@@ -13,3 +13,4 @@ export * from "./initiative";
 export * from "./population";
 export * from "./narrator";
 export * from "./ledger";
+export * from "./oversight";

@@ -163,6 +163,20 @@ export function routeAttention(input: AttentionInput): AttentionResult {
       reasons.push("owes an answer to a letter");
     }
 
+    // Something they have found out that somebody did without the authority to
+    // do it. Recent only: without the window the same official is woken by the
+    // same scandal every burst for a year, which is how a consequence becomes
+    // a nuisance.
+    if (knownFacts.some(
+      (fact) => fact.kind === "authority_breach"
+        && fact.discovery.discoveredBy.some(
+          (entry) => entry.observerRef.id === character.id && world.elapsedStep - entry.atInstant.day <= 14,
+        ),
+    )) {
+      score += 30;
+      reasons.push("has come upon an irregularity");
+    }
+
     // Gate 3: could they do anything about it? Someone with no office, no
     // command and no standing grant may care deeply and still not be a
     // strategic actor.

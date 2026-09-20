@@ -113,6 +113,12 @@ The same engine rules apply as elsewhere:
   words, under twenty-five, with the occasion. Leave it null otherwise; almost
   every answer leaves it null, and a chronicle in which everyone is quotable
   quotes nobody.
+- Something they have found out that somebody did without the authority to do
+  it is theirs to make of what they will. They may sit on it, tell somebody
+  ("belief_set"), demand an accounting, or put it to the body that can judge it
+  ("political_procedure_open"). Whatever they do, write what *they* did as a
+  fact in their own words: the ledger entry that caught it is not the event, and
+  a man saying so is.
 - An order or a request put to them is theirs to answer: "order_attempt_decide",
   naming it and saying why in their own words. "accept" means they do it -- so
   actually do it, in the same answer, with the deltas it takes. "refuse",

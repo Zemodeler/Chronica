@@ -25,6 +25,7 @@ import { runCognition } from "./cognition";
 import { materializeFacts } from "./facts";
 import { decideNarratorSeed, recordSeedOffered, recordSeedOutcome, seedParticipants, seedWasTaken, type NarratorSeed } from "./narrator";
 import { orchestrate } from "./orchestrate";
+import { describeBreach, findWhoWouldNotice, noticersAsRefs } from "./oversight";
 import { createIdFactory, type SimModelPort } from "./ports";
 import type { NarrativeLine, UtteranceLine } from "./chronicle";
 import { buildWorldSlice, type AnsweredDecision, type SliceEvent } from "./slice";
@@ -229,16 +230,35 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // -- private history, known to the one who did it, which is what an audit
     // later discovers. Computed and dropped, a breach was insubordination
     // nobody could ever find out about.
-    const breachFacts: FactProposalDraft[] = result.breaches.map((breach, index) => ({
-      localId: `breach_${newFacts.length}_${index}`,
-      kind: "authority_breach",
-      summary: breach.reason,
-      affectedRefs: [actorRef],
-      visibility: "private",
-      discoveryState: "private",
-      knownToRefs: [actorRef],
-      significance: 25,
-    }));
+    const actorName = world.characters.find((character) => character.id === actorRef.id)?.name ?? actorRef.id;
+    const breachFacts: FactProposalDraft[] = result.breaches.map((breach, index) => {
+      // Who, going about their own duties, would come across this -- and how
+      // long it takes them. A consequence nobody can ever learn of is not a
+      // consequence, and this fact used to be known to its author alone, in
+      // the engine's own audit language, forever.
+      // Unless the act itself was covert. A man whose whole business this turn
+      // was secret has covered his tracks, and the ordinary reading of the
+      // books does not catch him -- without this a conspirator's first
+      // unauthorised move is seen by his own government's auditors, and no
+      // plot survives the turn it begins in.
+      const covert = keptSecret.some((fact) => fact.visibility === "private");
+      const noticers = covert ? [] : findWhoWouldNotice(world, input.offices, breach, actorRef.id);
+      const soonest = noticers.reduce((days, noticer) => Math.min(days, noticer.afterDays), Number.POSITIVE_INFINITY);
+      return {
+        localId: `breach_${newFacts.length}_${index}`,
+        kind: "authority_breach",
+        summary: describeBreach(breach.delta, world, actorName),
+        affectedRefs: [actorRef],
+        visibility: "private",
+        // Nobody notices some things, and that has to stay possible: a world
+        // where every irregularity is always caught is one where nobody would
+        // ever try anything.
+        discoveryState: noticers.length === 0 ? "private" : "delayed",
+        knowableInDays: noticers.length === 0 ? 0 : soonest,
+        knownToRefs: [actorRef, ...noticersAsRefs(noticers)],
+        significance: 25,
+      };
+    });
 
     // What the engine itself made true (casualties, seizures) counts as history
     // exactly as much as what the actor said they were doing.
