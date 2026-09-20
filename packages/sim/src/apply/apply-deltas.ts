@@ -193,6 +193,12 @@ function orderAnswerCauses(
   }
 }
 
+/** Puts the batch's handles back as they were, in place: callers hold this map. */
+function restoreHandles(handles: Map<string, string>, asTheyWere: ReadonlyMap<string, string>): void {
+  handles.clear();
+  for (const [localId, id] of asTheyWere) handles.set(localId, id);
+}
+
 /** The pressure helpers hand back the two collections they touch; the world takes them. */
 function withPressures(world: WorldState, next: { readonly characters: readonly WorldState["characters"][number][]; readonly characterPressures: readonly WorldState["characterPressures"][number][] }): WorldState {
   return { ...world, characters: [...next.characters], characterPressures: [...next.characterPressures] };
@@ -363,6 +369,21 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
 
   for (const delta of deltas) {
     const previous = current;
+    /**
+     * The handles this batch has minted, as they stood before this delta.
+     *
+     * Rolled back with the world, and for exactly the same reason. It was not,
+     * and the consequence was a phantom: `mint` writes `local:x ->
+     * character-<burst>-7` *before* the delta can be rejected, so a creation
+     * that failed left the handle behind, and every later delta naming
+     * `local:x` resolved to an id nothing had ever created. The world then
+     * filled with "No character character-d4557447-...-13 exists to command
+     * this force", "...to hold this intent", "...to take part in this" --
+     * three refusals whose stated reason names an id the model never wrote and
+     * cannot look up, instead of the one true reason, which is that the person
+     * was never made.
+     */
+    const previousHandles = new Map(assignedIds);
     // Buffered per delta: a delta that is rolled back must not leave the world
     // asserting consequences that never happened.
     const emitted: FactProposalDraft[] = [];
@@ -399,6 +420,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
       if (error instanceof DeltaRejection) {
         rejected.push({ delta, reason: error.message, kind: error.kind });
         current = previous;
+        restoreHandles(assignedIds, previousHandles);
         continue;
       }
       throw error;
@@ -409,6 +431,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
     if (introduced.length > 0) {
       rejected.push({ delta, reason: `Would leave a reference to something that does not exist: ${introduced[0]}.`, kind: "reference" });
       current = previous;
+      restoreHandles(assignedIds, previousHandles);
       continue;
     }
     violations = new Set(afterViolations);

@@ -1489,6 +1489,39 @@ describe("offices that actually move", () => {
     expect(index.grants.some((grant) => grant.holder.id === servius.id && grant.source === "office")).toBe(true);
   });
 
+  it("does not leave a handle behind when the thing it named was never made", () => {
+    // From a live game. `mint` writes the local handle before the delta can be
+    // rejected, and the world was rolled back on rejection while the handles
+    // were not -- so a creation that failed left `local:x` pointing at an id
+    // nothing had ever created, and every later delta naming it was refused
+    // with "No character character-<burst>-13 exists to command this force":
+    // an id the model never wrote and cannot look up, in place of the one true
+    // reason, which is that the person was never made.
+    const result = applyDeltas(
+      world(),
+      [
+        // Rejected: no such province, so nobody is created.
+        {
+          op: "character_create", localId: "ghost", name: "Nobody At All", polityId: "rome",
+          provinceId: "no-such-province-anywhere", age: 40, officeLabel: null, officeAuthorises: [],
+          traits: [], standing: null, wealth: 0, generatedBecause: "To prove a point.",
+        },
+        // And now somebody refers to them.
+        {
+          op: "character_intent_set", actorCharacterRef: "local:ghost", actionType: "prepare",
+          targetRefs: [], rationale: "Doing something.", priority: 50, visibility: "private",
+        },
+      ],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(2);
+    // The second refusal says what actually went wrong, and names the handle
+    // the model itself wrote rather than an id the engine minted and dropped.
+    expect(result.rejected[1]!.reason).toContain("local:ghost");
+    expect(result.rejected[1]!.reason).not.toMatch(/character-[0-9a-f]{8}/);
+  });
+
   it("enlarges an office that exists rather than inventing a second one beside it", () => {
     const before = world();
     const seat = before.material.officeSeats.find((candidate) => candidate.status === "held");

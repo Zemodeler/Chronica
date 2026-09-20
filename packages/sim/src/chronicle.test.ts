@@ -733,3 +733,71 @@ describe("a battle worth dying in", () => {
     expect(port.lastUserMessage).not.toContain("This thread holds a battle");
   });
 });
+
+describe("a matter that is only continuing", () => {
+  const OBSERVER = { kind: "character" as const, id: "marcus-atilius" };
+  const ROMAN_SIDE = new Set(["marcus-atilius", "rome"]);
+
+  /** The Syracusans tightening their siege of Messana, again. */
+  const siege = (summary: string) =>
+    fact({
+      kind: "military_preparation",
+      summary,
+      affectedEntities: [{ kind: "character", id: "hieron-ii" }, { kind: "force", id: "syracusan-army" }],
+      visibility: "public",
+      discovery: { state: "public", knowableAtInstant: null, discoveredBy: [] },
+    });
+
+  const compose = (port: SimModelPort, facts: Fact[], extra: Partial<Parameters<typeof composeChronicle>[0]> = {}) =>
+    composeChronicle({
+      port, clock, observer: OBSERVER, observerPolityId: "rome", facts,
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+      ownEntityIds: ROMAN_SIDE,
+      significanceByFactId: new Map(facts.map((candidate) => [candidate.id, 60])),
+      ...extra,
+    });
+
+  it("does not headline the same people doing the same thing a second time", async () => {
+    // A live game produced five consecutive reports led by "Hieron II Tightens
+    // the Investment of Messana", "…the Cordon Around Messana", "…Interception
+    // of the Mamertine Sortie" -- two of them word for word the same title --
+    // describing one siege in which nothing whatever had changed. A siege
+    // going on is not a thing that happened.
+    const again = siege("Hieron II tightened the Syracusan cordon around Messana once more.");
+    const told = [["character:hieron-ii", "force:syracusan-army"]];
+    expect((await compose(capturingPort(), [again], { recentSubjects: told })).entries).toHaveLength(0);
+    // And with no previous report to compare against, it is simply news.
+    expect((await compose(capturingPort(), [again])).entries).toHaveLength(1);
+  });
+
+  it("tells it the moment somebody new is in it", async () => {
+    const turn = fact({
+      kind: "battle",
+      summary: "The Mamertines broke out and scattered a Syracusan detachment.",
+      affectedEntities: [
+        { kind: "character", id: "hieron-ii" },
+        { kind: "force", id: "syracusan-army" },
+        { kind: "polity", id: "mamertines" },
+      ],
+      visibility: "public",
+      discovery: { state: "public", knowableAtInstant: null, discoveredBy: [] },
+    });
+    const told = [["character:hieron-ii", "force:syracusan-army"]];
+    expect((await compose(capturingPort(), [turn], { recentSubjects: told })).entries).toHaveLength(1);
+  });
+
+  it("never holds back the reader's own business, however slowly it goes", async () => {
+    // A ruler is entitled to the whole of his own reign, and an order must
+    // always be answered: suppressing a repeat here would break the one
+    // guarantee the Chronicle makes.
+    const ours = fact({
+      kind: "military_preparation",
+      summary: "Rome went on preparing, exactly as before.",
+      affectedEntities: [{ kind: "polity", id: "rome" }],
+      visibility: "public",
+      discovery: { state: "public", knowableAtInstant: null, discoveredBy: [] },
+    });
+    const told = [["polity:rome"]];
+    expect((await compose(capturingPort(), [ours], { recentSubjects: told })).entries).toHaveLength(1);
+  });
+});
