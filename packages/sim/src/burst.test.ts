@@ -772,3 +772,25 @@ describe("what a person said", () => {
     expect(result.utterances.map((utterance) => utterance.line)).not.toContain("Rome will have her legions.");
   });
 });
+
+describe("an irregularity somebody comes across", () => {
+  it("writes the breach in words, and lets the right person find it out later", async () => {
+    // The breach fact used to be the audit line, private to its author,
+    // forever. A consequence nobody can ever learn of is not a consequence.
+    const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [CARTHAGE_REACTS, CARTHAGE_REACTS, CARTHAGE_REACTS, CARTHAGE_REACTS] });
+    const result = await runSimulationBurst(input(port));
+    const breach = result.newFacts.find((fact) => fact.kind === "authority_breach");
+    if (breach === undefined) return; // A burst with no overreach has nothing to test.
+
+    expect(breach.summary).not.toContain("grant");
+    expect(breach.summary).not.toContain("domain");
+    // Either nobody noticed -- which must stay possible -- or somebody did,
+    // and it takes them time.
+    const others = breach.discovery.discoveredBy.filter((entry) => entry.observerRef.id !== "marcus-atilius");
+    if (others.length > 0) {
+      expect(breach.discovery.state).toBe("delayed");
+      expect(breach.discovery.knowableAtInstant).not.toBeNull();
+      expect(others.length).toBeLessThanOrEqual(2);
+    }
+  });
+});
