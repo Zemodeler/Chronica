@@ -38,6 +38,60 @@ import type { SimModelPort } from "./ports";
 
 const OUTPUT_JSON_SCHEMA = JSON.stringify(z.toJSONSchema(CognitionOutputSchema, { io: "input" }));
 
+/** The lists that belong inside a proposal, and that a model keeps putting beside one. */
+const PROPOSAL_LISTS = ["deltas", "facts", "delegations", "schedule", "discoveries", "socialEvents"] as const;
+
+/**
+ * Puts a proposal's own lists back inside the proposal.
+ *
+ * Cognition answers in the same shape the orchestrator does, and the shape the
+ * orchestrator answers in has `facts`, `delegations` and `schedule` at the top
+ * level. So a model writing for several people sometimes hoists them there --
+ * and the schema is strict, so the whole answer was thrown away over a
+ * nesting level, with nothing kept and nothing retried. A live game lost a
+ * season to it: three people had been asked what they were doing, all three
+ * had answered at length, and the world recorded nothing at all.
+ *
+ * A stray list beside an actor's own `proposal` is unambiguous and is folded
+ * into it. A stray list at the root belongs to nobody in particular, so it is
+ * folded in only when there is exactly one actor to fold it into -- guessing
+ * which of five people said a thing would put words in somebody's mouth, and
+ * a fact carries its author's visibility with it.
+ */
+export function foldStrayProposalKeys(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+  const root = { ...(value as Record<string, unknown>) };
+  if (!Array.isArray(root.actors)) return root;
+
+  const drain = (from: Record<string, unknown>, into: Record<string, unknown>): void => {
+    for (const key of PROPOSAL_LISTS) {
+      if (!Array.isArray(from[key])) continue;
+      const already = Array.isArray(into[key]) ? (into[key] as unknown[]) : [];
+      into[key] = [...already, ...(from[key] as unknown[])];
+      delete from[key];
+    }
+  };
+
+  const actors = (root.actors as unknown[]).map((entry): unknown => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return entry;
+    const actor = { ...(entry as Record<string, unknown>) };
+    const proposal = typeof actor.proposal === "object" && actor.proposal !== null && !Array.isArray(actor.proposal)
+      ? { ...(actor.proposal as Record<string, unknown>) }
+      : {};
+    drain(actor, proposal);
+    actor.proposal = proposal;
+    return actor;
+  });
+
+  if (actors.length === 1 && typeof actors[0] === "object" && actors[0] !== null) {
+    const only = actors[0] as Record<string, unknown>;
+    drain(root, only.proposal as Record<string, unknown>);
+  }
+  for (const key of PROPOSAL_LISTS) delete root[key];
+
+  return { ...root, actors };
+}
+
 export const COGNITION_SYSTEM_PROMPT = `You are several people in a historical world, reasoning separately.
 
 You will be given one section per person. Each section contains only what that
@@ -495,7 +549,7 @@ export async function runCognition(
   const userMessage = actors.map((actor) => renderActor(actor, world, clock, inBatch)).join("\n\n");
   try {
     const raw = await port.complete("simulate_cognition", COGNITION_SYSTEM_PROMPT, userMessage);
-    const parsed = CognitionOutputSchema.safeParse(extractJson(raw));
+    const parsed = CognitionOutputSchema.safeParse(foldStrayProposalKeys(extractJson(raw)));
     if (parsed.success) return { output: parsed.data, calls: 1, parseFailure: null };
     // No repair retry here, unlike orchestration. A failed orchestration means
     // the player's order goes unanswered; a failed cognition only means nobody

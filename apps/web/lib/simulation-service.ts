@@ -205,6 +205,15 @@ export async function submitOrder(
       ...closeTheBooks({ world: result.world, clock: view.scenarioClock, from, to: result.world.instant, polityId: actorPolityId }),
     ].sort((a, b) => a.toInstantSortKey - b.toInstantSortKey);
 
+    // A model answer the engine could not read is the one failure that leaves
+    // no trace anywhere: `orchestrate` retries once and then hands back an
+    // inert answer, so the burst commits, the clock advances, and the world
+    // simply does nothing. A live game lost a whole season that way and the
+    // only sign of it was a silent Chronicle. It costs a line to say so.
+    if (result.parseFailures.length > 0) {
+      console.warn(`[burst ${burstId}] the model's answer could not be read (${result.parseFailures.length}): ${result.parseFailures.join(" | ")}`);
+    }
+
     try {
       await commitBurst(db, {
         gameId,
