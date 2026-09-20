@@ -19,6 +19,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
+import type { BattleAccount } from "./battle";
 import type { AuthorityBreach } from "./apply/context";
 import { routeAmbientActors, routeAttention, type RoutedActor } from "./attention";
 import { runCognition } from "./cognition";
@@ -167,6 +168,13 @@ export interface BurstResult {
    * world, and the world has no mouth.
    */
   readonly utterances: readonly UtteranceLine[];
+  /**
+   * What happened in any battle this burst fought, for the historian.
+   *
+   * A death in the field has to be earned by the account of the fight that
+   * caused it, and the fight used to reach the record as one line.
+   */
+  readonly battleAccounts: readonly BattleAccount[];
   readonly breaches: readonly AuthorityBreach[];
   readonly playerDecision: PlayerDecision | null;
   readonly parseFailures: readonly string[];
@@ -190,6 +198,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const narrative: NarrativeLine[] = [];
   const frictions: NarrativeLine[] = [];
   const utterances: UtteranceLine[] = [];
+  const battleAccounts: BattleAccount[] = [];
   const breaches: AuthorityBreach[] = [];
   const parseFailures: string[] = [];
   let playerDecision: PlayerDecision | null = null;
@@ -293,6 +302,17 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const visibleDescribed = materialized.facts.filter((fact) => fact.visibility !== "private").map((fact) => fact.id);
     const describes = actsForTheWorld ? visibleDescribed : materialized.facts.map((fact) => fact.id);
     const author = actsForTheWorld ? null : actorRef;
+    // The account's fact handles are local ids until the batch assigns them.
+    for (const account of result.battleAccounts) {
+      battleAccounts.push({
+        ...account,
+        factIds: account.factIds.flatMap((localId) => {
+          const assigned = materialized.factIds.get(localId);
+          return assigned === undefined ? [] : [assigned];
+        }),
+      });
+    }
+
     narrative.push({ actorRef: author, line: proposal.narrativeSummary, factIds: actsForTheWorld ? [] : describes });
     // A quotation has to have been said by somebody. The orchestrator answers
     // for the whole world in one breath -- for Rome and for the Boii chieftain
@@ -720,6 +740,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     narrative,
     frictions,
     utterances,
+    battleAccounts,
     breaches,
     playerDecision,
     parseFailures,

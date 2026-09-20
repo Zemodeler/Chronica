@@ -40,7 +40,7 @@ import {
   type WorldDeltaOp,
   type WorldState,
 } from "@chronica/shared";
-import { resolveEngagement } from "../battle";
+import { resolveEngagement, type BattleAccount } from "../battle";
 import type { ApplyContext, ApplyResult, AppliedDelta, AuthorityBreach, RejectedDelta } from "./context";
 
 /**
@@ -281,6 +281,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
   const rejected: RejectedDelta[] = [];
   const breaches: AuthorityBreach[] = [];
   const factProposals: FactProposalDraft[] = [];
+  const battleAccounts: BattleAccount[] = [];
 
   const resolve = (ref: string): string | undefined => resolveRef(ref, assignedIds);
   let current = world;
@@ -301,6 +302,12 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
     const emitFact = (fact: FactProposalDraft): void => {
       emitted.push(fact);
     };
+    // Buffered with the facts, for the same reason: a delta rolled back must
+    // not leave an account of a battle that never happened.
+    const emittedAccounts: BattleAccount[] = [];
+    const emitAccount = (account: BattleAccount): void => {
+      emittedAccounts.push(account);
+    };
     let authority: AuthorityCheckResult;
     let answerable = true;
     try {
@@ -320,7 +327,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
         // motion to its own Senate.
         (granted, wanted) => granted.kind === "polity" && polityOfScope(wanted, current) === granted.id,
       );
-      current = applyOne(current, delta, context, assignedIds, resolve, emitFact);
+      current = applyOne(current, delta, context, assignedIds, resolve, emitFact, emitAccount);
     } catch (error) {
       if (error instanceof DeltaRejection) {
         rejected.push({ delta, reason: error.message, kind: error.kind });
@@ -341,6 +348,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
 
     applied.push({ delta, authority });
     factProposals.push(...emitted);
+    battleAccounts.push(...emittedAccounts);
     if (answerable && !authority.authorized) breaches.push({ delta, reason: authority.reason });
   }
 
@@ -352,6 +360,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
     return {
       world,
       applied: [],
+      battleAccounts: [],
       breaches: [],
       rejected: deltas.map((delta) => ({
         delta,
@@ -365,7 +374,7 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
     };
   }
 
-  return { world: parsed.data, applied, rejected, breaches, factProposals, assignedIds };
+  return { world: parsed.data, applied, rejected, breaches, factProposals, battleAccounts, assignedIds };
 }
 
 /** Basis points never leave 0..10 000, and the schema refuses anything that does. */
@@ -393,6 +402,7 @@ function applyOne(
   resolve: (ref: string) => string | undefined,
   /** For consequences the model is not permitted to author -- battle casualties. */
   emitFact: (fact: FactProposalDraft) => void,
+  emitAccount: (account: BattleAccount) => void,
 ): WorldState {
   const required = (ref: string, label: string): string => {
     const resolved = resolve(ref);
@@ -708,6 +718,7 @@ function applyOne(
         world.material.forces.findIndex((force) => force.id === attackerId),
       );
       for (const fact of engagement.facts) emitFact(fact);
+      if (engagement.account !== undefined) emitAccount(engagement.account);
       // The map has read `conflicts` from the beginning and nothing ever wrote
       // it, so a battle was fought, a province changed hands, and the map where
       // it happened showed nothing at all.

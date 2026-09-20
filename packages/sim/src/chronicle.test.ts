@@ -605,3 +605,89 @@ describe("a record read by station", () => {
     expect(result.entries).toHaveLength(1);
   });
 });
+
+describe("a battle worth dying in", () => {
+  const OBSERVER = { kind: "character" as const, id: "marcus-atilius" };
+  const battleFact = () => fact({
+    kind: "battle",
+    summary: "The legions meet the Boii host at Vatluna.",
+    affectedEntities: [{ kind: "province", id: "vatluna" }, { kind: "polity", id: "rome" }],
+  });
+
+  const account = (factId: string) => ({
+    factIds: [factId],
+    provinceName: "Vatluna",
+    sides: [
+      { name: "Legio I", attacking: true, strength: 4_200, commander: "Marcus Atilius" },
+      { name: "The Boii host", attacking: false, strength: 6_000, commander: "Brennos" },
+    ],
+    phases: [
+      { phase: "contact", summary: "The lines close on broken ground.", attacker: 4_100, defender: 5_800 },
+      { phase: "engagement", summary: "The Boii left gives way.", attacker: 3_900, defender: 4_100 },
+    ],
+    tactics: ["Marcus Atilius tried surprise (meaningful): a night crossing of the ford."],
+    refusedTactics: ["Brennos could not: the ground gave no room to turn the flank."],
+    losses: [{ name: "Legio I", dead: 400, deserted: 30, wounded: 600 }],
+    commanders: [{ name: "Brennos", outcome: "captured" }],
+    retreats: [{ name: "The Boii host", to: "Rusellae", orderly: false }],
+    outcome: "attacker_victory",
+  });
+
+  it("hands the historian the fight, not a line about who won", async () => {
+    // `resolveBattle` computes five phases, the tactics tried and refused,
+    // casualties by force, who broke and where they ran -- and all of it was
+    // collapsed into one six-hundred-character summary and discarded.
+    const port = capturingPort();
+    const battle = battleFact();
+    await composeChronicle({
+      port, clock, observer: OBSERVER, observerPolityId: "rome", facts: [battle],
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+      battleAccounts: [account(battle.id)],
+    });
+
+    expect(port.lastUserMessage).toContain("This thread holds a battle");
+    expect(port.lastUserMessage).toContain("night crossing of the ford");
+    expect(port.lastUserMessage).toContain("no room to turn the flank");
+    expect(port.lastUserMessage).toContain("400 dead");
+    expect(port.lastUserMessage).toContain("Brennos was captured");
+    expect(port.lastUserMessage).toContain("in rout");
+  });
+
+  it("never drops a battle for room, however crowded the report", async () => {
+    // Men died in it.
+    const battle = battleFact();
+    const crowd = Array.from({ length: 12 }, (_, index) =>
+      fact({ summary: `A quiet matter, number ${index}.`, affectedEntities: [{ kind: "polity", id: `power-${index}` }] }));
+    const facts = [...crowd, battle];
+
+    const result = await composeChronicle({
+      port: capturingPort(), clock, observer: OBSERVER, observerPolityId: "rome", facts,
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+      battleAccounts: [account(battle.id)],
+      significanceByFactId: new Map(facts.map((candidate) => [candidate.id, candidate.id === battle.id ? 90 : 80])),
+    });
+    expect(result.entries.some((entry) => entry.factIds.includes(battle.id))).toBe(true);
+  });
+
+  it("does not write up a fight the court only heard about", async () => {
+    // News of a battle is not an account of one, and writing it phase by phase
+    // would give a rumour the authority of a dispatch.
+    const port = capturingPort();
+    const distant = fact({
+      kind: "battle",
+      summary: "Syracuse and Carthage meet near Selinous.",
+      affectedEntities: [{ kind: "polity", id: "syracuse" }],
+      visibility: "private",
+      discovery: { state: "private", knowableAtInstant: null, discoveredBy: [] },
+    });
+    await composeChronicle({
+      port, clock, observer: OBSERVER, observerPolityId: "rome", facts: [distant],
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+      ownEntityIds: new Set(["marcus-atilius", "rome"]),
+      significanceByFactId: new Map([[distant.id, 90]]),
+      battleAccounts: [account(distant.id)],
+    });
+    expect(port.lastUserMessage).toContain("news reaching the court");
+    expect(port.lastUserMessage).not.toContain("This thread holds a battle");
+  });
+});

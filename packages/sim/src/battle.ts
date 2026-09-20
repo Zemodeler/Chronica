@@ -45,6 +45,8 @@ export interface EngagementInput {
 export interface EngagementResult {
   readonly world: WorldState;
   readonly facts: readonly FactProposalDraft[];
+  /** The fight itself, for whoever writes it up. Absent when no battle happened. */
+  readonly account?: BattleAccount | undefined;
 }
 
 /** Every province sharing an edge with this one, in a stable order. */
@@ -235,6 +237,91 @@ function factsFor(world: WorldState, result: BattleResult, provinceId: string, i
  * now knows. The two forces must already stand in the same province: getting
  * them there is movement, which is somebody's decision, not a battle's.
  */
+
+/**
+ * What actually happened in a battle, for somebody to write it up.
+ *
+ * `resolveBattle` computes the shape of a fight in detail: five phases with
+ * their own summaries and the effective strength on each side at each,
+ * the tactics tried and the tactics refused and why, casualties by force and by
+ * kind, who broke and where they ran to, and what became of each commander.
+ * All of it was collapsed into one summary line of at most six hundred
+ * characters and discarded.
+ *
+ * That was tolerable while a battle was one line of a report. It stopped being
+ * tolerable the moment the player could die in one: a death has to be earned by
+ * the account of the fight that caused it, and "the defender prevails" earns
+ * nothing. So the account travels to the Chronicle beside the facts, on exactly
+ * the pattern accounts and quotations already use -- tied to fact ids, and
+ * therefore gated by the same visibility rules without needing its own.
+ */
+export interface BattleAccount {
+  /** The facts this is an account of. It publishes only where one of them does. */
+  readonly factIds: readonly string[];
+  readonly provinceName: string;
+  /** Who attacked, who defended, and what each was worth going in. */
+  readonly sides: readonly { readonly name: string; readonly attacking: boolean; readonly strength: number; readonly commander: string }[];
+  /** The fight in order, with the weight on each side as it shifted. */
+  readonly phases: readonly { readonly phase: string; readonly summary: string; readonly attacker: number; readonly defender: number }[];
+  /** What was tried out of the ordinary, and what the ground would not allow. */
+  readonly tactics: readonly string[];
+  readonly refusedTactics: readonly string[];
+  /** Dead, deserted and wounded, by force. */
+  readonly losses: readonly { readonly name: string; readonly dead: number; readonly deserted: number; readonly wounded: number }[];
+  readonly commanders: readonly { readonly name: string; readonly outcome: string }[];
+  readonly retreats: readonly { readonly name: string; readonly to: string | null; readonly orderly: boolean }[];
+  readonly outcome: string;
+}
+
+function accountOf(world: WorldState, result: BattleResult, provinceId: string, factIds: readonly string[]): BattleAccount {
+  const forceName = (id: string): string => world.material.forces.find((force) => force.id === id)?.name ?? id;
+  const characterName = (id: string): string => world.characters.find((character) => character.id === id)?.name ?? id;
+  const provinceName = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
+  const attacking = new Set(result.attackerForceIds);
+
+  const lossesByForce = new Map<string, { dead: number; deserted: number; wounded: number }>();
+  for (const casualty of result.casualties) {
+    const held = lossesByForce.get(casualty.forceId) ?? { dead: 0, deserted: 0, wounded: 0 };
+    lossesByForce.set(casualty.forceId, {
+      dead: held.dead + casualty.dead,
+      deserted: held.deserted + casualty.deserted,
+      wounded: held.wounded + casualty.wounded,
+    });
+  }
+
+  return {
+    factIds,
+    provinceName: provinceName(provinceId),
+    sides: result.participantIds.map((forceId) => {
+      const force = world.material.forces.find((candidate) => candidate.id === forceId);
+      return {
+        name: forceName(forceId),
+        attacking: attacking.has(forceId),
+        strength: force?.personnel.reduce((sum, category) => sum + category.fit, 0) ?? 0,
+        commander: force === undefined ? "nobody" : characterName(force.commanderCharacterId),
+      };
+    }),
+    phases: result.phases.map((phase) => ({
+      phase: phase.phase,
+      summary: phase.summary,
+      attacker: phase.attackerEffectiveStrength,
+      defender: phase.defenderEffectiveStrength,
+    })),
+    tactics: result.acceptedTactics.map((tactic) => `${characterName(tactic.actorId)} tried ${tactic.factor} (${tactic.magnitude}): ${tactic.rationale}`),
+    refusedTactics: result.rejectedTactics.map((rejected) => `${characterName(rejected.actorId)} could not: ${rejected.reason}`),
+    losses: [...lossesByForce.entries()].map(([forceId, losses]) => ({ name: forceName(forceId), ...losses })),
+    commanders: result.commanderChanges
+      .filter((change) => change.outcome !== "unharmed")
+      .map((change) => ({ name: characterName(change.characterId), outcome: change.outcome })),
+    retreats: result.retreats.map((retreat) => ({
+      name: forceName(retreat.forceId),
+      to: retreat.toProvinceId === null ? null : provinceName(retreat.toProvinceId),
+      orderly: retreat.orderly,
+    })),
+    outcome: result.outcome,
+  };
+}
+
 export function resolveEngagement(input: EngagementInput, index: number): EngagementResult {
   const { world, attacker, defender } = input;
   const province = world.map.provinces.find((candidate) => candidate.id === attacker.locationId);
@@ -280,8 +367,12 @@ export function resolveEngagement(input: EngagementInput, index: number): Engage
     input.seed,
   );
 
+  const facts = factsFor(world, result, province.id, index);
   return {
     world: applyResult(world, result, world.elapsedStep),
-    facts: factsFor(world, result, province.id, index),
+    facts,
+    // Read from the world as it stood *before* the fight, so the strengths are
+    // what each side brought to it rather than what survived it.
+    account: accountOf(world, result, province.id, facts.map((fact) => fact.localId)),
   };
 }
