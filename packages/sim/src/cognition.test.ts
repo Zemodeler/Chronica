@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, type ScenarioClock, type WorldState } from "@chronica/shared";
 import type { RoutedActor } from "./attention";
-import { runCognition } from "./cognition";
+import { foldStrayProposalKeys, runCognition } from "./cognition";
 import type { SimModelPort } from "./ports";
 
 const definition = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition);
@@ -176,5 +176,66 @@ describe("the cost of a section", () => {
     // Roughly 4 characters per token. Three focused actors share one call, so a
     // section that balloons is paid for three times over, every iteration.
     expect(Math.round(prompt.length / 4)).toBeLessThan(900);
+  });
+});
+
+describe("an answer that is right but nested wrong", () => {
+  it("puts a proposal's own lists back inside the proposal instead of throwing the answer away", () => {
+    // From a live game. Cognition answers in the same shape the orchestrator
+    // does, and that shape has `facts`, `delegations` and `schedule` at the
+    // top level -- so the model hoisted them there. The schema is strict, so
+    // the whole answer went in the bin over a nesting level: three people had
+    // been asked what they were doing, all three had answered at length, and
+    // the world recorded nothing at all.
+    const hoisted = {
+      actors: [{
+        actorRef: { kind: "character", id: "hanno" },
+        reasoning: "He means to hold the strait.",
+        proposal: { deltas: [] },
+      }],
+      facts: [{ localId: "f1", kind: "council", summary: "Carthage resolves to hold the strait." }],
+      delegations: [{ localId: "d1" }],
+      schedule: [{ kind: "muster", dueInDays: 10 }],
+      discoveries: [],
+    };
+    const folded = foldStrayProposalKeys(hoisted) as { actors: { proposal: Record<string, unknown[]> }[] } & Record<string, unknown>;
+    expect(folded.actors[0]!.proposal.facts).toHaveLength(1);
+    expect(folded.actors[0]!.proposal.delegations).toHaveLength(1);
+    expect(folded.actors[0]!.proposal.schedule).toHaveLength(1);
+    expect(folded.facts).toBeUndefined();
+  });
+
+  it("folds a list sitting beside an actor's own proposal, which is never ambiguous", () => {
+    const beside = {
+      actors: [
+        { actorRef: { kind: "character", id: "a" }, reasoning: "x", proposal: { deltas: [1] }, facts: [{ localId: "fa" }] },
+        { actorRef: { kind: "character", id: "b" }, reasoning: "y", proposal: { deltas: [2] }, facts: [{ localId: "fb" }] },
+      ],
+    };
+    const folded = foldStrayProposalKeys(beside) as { actors: { proposal: Record<string, unknown[]> }[] };
+    expect(folded.actors[0]!.proposal.facts).toEqual([{ localId: "fa" }]);
+    expect(folded.actors[1]!.proposal.facts).toEqual([{ localId: "fb" }]);
+    expect(folded.actors[0]!.proposal.deltas).toEqual([1]);
+  });
+
+  it("drops a root list it cannot attribute rather than putting words in somebody's mouth", () => {
+    // A fact carries its author's visibility with it, so guessing which of
+    // several people said a thing is worse than losing it.
+    const ambiguous = {
+      actors: [
+        { actorRef: { kind: "character", id: "a" }, reasoning: "x", proposal: { deltas: [] } },
+        { actorRef: { kind: "character", id: "b" }, reasoning: "y", proposal: { deltas: [] } },
+      ],
+      facts: [{ localId: "orphan" }],
+    };
+    const folded = foldStrayProposalKeys(ambiguous) as { actors: { proposal: Record<string, unknown[]> }[] } & Record<string, unknown>;
+    expect(folded.facts).toBeUndefined();
+    expect(folded.actors[0]!.proposal.facts).toBeUndefined();
+    expect(folded.actors[1]!.proposal.facts).toBeUndefined();
+  });
+
+  it("leaves an answer that was already right exactly as it was", () => {
+    const fine = { actors: [{ actorRef: { kind: "character", id: "a" }, reasoning: "x", proposal: { deltas: [], facts: [{ localId: "f" }] } }] };
+    expect(foldStrayProposalKeys(structuredClone(fine))).toEqual(fine);
   });
 });
