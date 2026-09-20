@@ -49,6 +49,10 @@ those. So:
   this same answer and refer to them everywhere else as "local:<their localId>".
   Never invent a plausible-looking id such as "publius_scutarius" and then act
   as though that person were already in the world.
+- Say what sort of person they are in "standing" -- "a merchant of Ostia", "a
+  common soldier", "senatorial" -- and what they are worth in "wealth". The
+  first bounds the second: a ranker does not have a senator's fortune, and a
+  merchant you invented to lend the state money has to have something to lend.
 
 How to answer well:
 

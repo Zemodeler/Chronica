@@ -37,6 +37,7 @@ export interface WorldView {
   readonly scenarioClock: ScenarioClock | undefined;
   readonly scenarioGovernment: ScenarioDefinition["government"] | undefined;
   readonly scenarioLife: ScenarioDefinition["life"] | undefined;
+  readonly scenarioWealth: ScenarioDefinition["wealth"] | undefined;
   readonly scenarioWarfare: ScenarioDefinition["warfare"] | undefined;
   /** The scenario's map rules, so movement can be held to the crossings it admits. */
   readonly scenarioMap: ScenarioDefinition["map"] | undefined;
@@ -111,6 +112,7 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
     scenarioClock: definition.success ? definition.data.clock : undefined,
     scenarioGovernment: definition.success ? definition.data.government : undefined,
     scenarioLife: definition.success ? definition.data.life : undefined,
+    scenarioWealth: definition.success ? definition.data.wealth : undefined,
     scenarioWarfare: definition.success ? definition.data.warfare : undefined,
     scenarioMap: definition.success ? definition.data.map : undefined,
     scenarioHistoricalPressures: definition.success ? definition.data.historicalPressures : undefined,

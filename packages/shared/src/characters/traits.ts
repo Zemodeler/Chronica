@@ -95,6 +95,121 @@ export const TRAIT_REGISTRY: Readonly<Record<string, TraitDefinition>> = {
   }),
 };
 
+/**
+ * Somebody's judgment of somebody else, before it is anybody's character
+ * (slice 11).
+ *
+ * `Character.traits` is written once, at creation, and never again: a man
+ * declared cautious at the opening is cautious for the rest of his life
+ * however boldly he plays. The decision taken at the table was that **the
+ * people around you decide** what you are, so a trait arrives as an
+ * observation by a named person who has actually dealt with you.
+ *
+ * One observation is not a character. A trait sticks only once two different
+ * people have independently said the same thing -- which is what keeps a
+ * single hostile legate from renaming the player "deceitful", and what makes
+ * the second observation a real event rather than a duplicate.
+ */
+export const TraitObservationSchema = z
+  .object({
+    id: EntityIdSchema,
+    /** Whose character is being judged. */
+    characterId: EntityIdSchema,
+    /** Who is judging. Never the same person: nobody observes themselves into a trait. */
+    observerCharacterId: EntityIdSchema,
+    traitId: EntityIdSchema,
+    /** What they saw, in their own words. */
+    note: z.string().trim().min(1).max(200),
+    atStep: z.number().int().nonnegative(),
+  })
+  .strict();
+export type TraitObservation = z.infer<typeof TraitObservationSchema>;
+
+/** How many people must independently say it before it is who somebody is. */
+export const TRAIT_CORROBORATION = 2;
+/** The most traits anybody carries. Past this, the world has said enough about them. */
+export const MAX_TRAITS = 8;
+
+export interface TraitObservationOutcome {
+  readonly observations: readonly TraitObservation[];
+  /** Traits that just reached corroboration, with the people who said so. */
+  readonly confirmed: readonly { readonly characterId: string; readonly traitId: string; readonly observerCharacterIds: readonly string[] }[];
+  /** Why an observation was not recorded, for the record rather than for a rejection. */
+  readonly refused: readonly { readonly traitId: string; readonly reason: string }[];
+}
+
+/**
+ * Records what people have observed, and says which of it has become true.
+ *
+ * Pure: the caller owns the world. Refuses an observation rather than the
+ * whole event -- an NPC naming a trait that does not exist has simply said
+ * something the engine has no word for.
+ */
+export function observeTraits(
+  existing: readonly TraitObservation[],
+  proposals: readonly { readonly characterId: string; readonly observerCharacterId: string; readonly traitId: string; readonly note: string }[],
+  traitsOf: (characterId: string) => readonly string[],
+  atStep: number,
+  nextId: (prefix: string) => string,
+): TraitObservationOutcome {
+  const observations = [...existing];
+  const confirmed: { characterId: string; traitId: string; observerCharacterIds: string[] }[] = [];
+  const refused: { traitId: string; reason: string }[] = [];
+
+  for (const proposal of proposals) {
+    const definition = TRAIT_REGISTRY[proposal.traitId];
+    if (definition === undefined) {
+      refused.push({ traitId: proposal.traitId, reason: "No such trait." });
+      continue;
+    }
+    if (proposal.observerCharacterId === proposal.characterId) {
+      refused.push({ traitId: proposal.traitId, reason: "Nobody observes themselves into a character." });
+      continue;
+    }
+    const already = traitsOf(proposal.characterId);
+    if (already.includes(proposal.traitId)) continue;
+    if (already.length >= MAX_TRAITS) {
+      refused.push({ traitId: proposal.traitId, reason: "The world has said enough about this person." });
+      continue;
+    }
+    // A man is not both cautious and bold. The trait he already has stands:
+    // it took two people to put it there, and one person's contrary opinion
+    // does not unmake it.
+    const clashes = already.some((held) => {
+      const heldDefinition = TRAIT_REGISTRY[held];
+      return definition.incompatibleTraitIds.includes(held) || heldDefinition?.incompatibleTraitIds.includes(proposal.traitId) === true;
+    });
+    if (clashes) {
+      refused.push({ traitId: proposal.traitId, reason: "It contradicts what they are already known to be." });
+      continue;
+    }
+    const seen = observations.some(
+      (observation) => observation.characterId === proposal.characterId
+        && observation.traitId === proposal.traitId
+        && observation.observerCharacterId === proposal.observerCharacterId,
+    );
+    if (seen) continue;
+
+    observations.push(TraitObservationSchema.parse({
+      id: nextId("trait-seen"),
+      characterId: proposal.characterId,
+      observerCharacterId: proposal.observerCharacterId,
+      traitId: proposal.traitId,
+      note: proposal.note,
+      atStep,
+    }));
+
+    const observers = observations
+      .filter((observation) => observation.characterId === proposal.characterId && observation.traitId === proposal.traitId)
+      .map((observation) => observation.observerCharacterId);
+    if (new Set(observers).size >= TRAIT_CORROBORATION && !confirmed.some((entry) => entry.characterId === proposal.characterId && entry.traitId === proposal.traitId)) {
+      confirmed.push({ characterId: proposal.characterId, traitId: proposal.traitId, observerCharacterIds: [...new Set(observers)] });
+    }
+  }
+
+  return { observations, confirmed, refused };
+}
+
 export function getTraitDefinition(id: string): TraitDefinition | undefined {
   return TRAIT_REGISTRY[id];
 }

@@ -22,6 +22,7 @@ function baseEvent(overrides: Partial<CharacterSocialEvent> = {}): CharacterSoci
     knowledgeClaims: [],
     proposedBeliefs: [],
     pressureChanges: [],
+    observedTraits: [],
     commitmentProposal: null,
     introducedCharacter: null,
     introducedProfile: null,
@@ -187,5 +188,46 @@ describe("applySocialEvents — character-sim phase 2 extensions", () => {
     const cause = outcome.world.characters.find((c) => c.id === "hanno")!.relations
       .find((r) => r.subjectCharacterId === "marcus-atilius")!.causes[0]!;
     expect(cause.dimensions).toEqual({ fear: 30, trust: -10 });
+  });
+});
+
+describe("the people around you deciding what you are", () => {
+  it("records one person's judgment without making it true", () => {
+    const outcome = applySocialEvents(world(), [baseEvent({
+      kind: "conversation",
+      observedTraits: [{ subjectCharacterId: "marcus-atilius", observerCharacterId: "hanno", traitId: "bold", note: "He crossed before dawn." }],
+    })], 5, "turn-1");
+    expect(outcome.appliedIds).toHaveLength(1);
+    expect(outcome.traitsConfirmed).toHaveLength(0);
+    expect(outcome.world.traitObservations).toHaveLength(1);
+    expect(outcome.world.characters.find((character) => character.id === "marcus-atilius")!.traits).not.toContain("bold");
+  });
+
+  it("makes it true, and says so, once a second person agrees", () => {
+    const first = applySocialEvents(world(), [baseEvent({
+      id: "event-a", kind: "conversation",
+      observedTraits: [{ subjectCharacterId: "marcus-atilius", observerCharacterId: "hanno", traitId: "bold", note: "He crossed before dawn." }],
+    })], 5, "turn-1");
+    const second = applySocialEvents(first.world, [baseEvent({
+      id: "event-b", kind: "conversation",
+      participantCharacterIds: ["marcus-atilius", "quintus-fabius"],
+      knownByCharacterIds: ["marcus-atilius", "quintus-fabius"],
+      relationCauses: [],
+      observedTraits: [{ subjectCharacterId: "marcus-atilius", observerCharacterId: "quintus-fabius", traitId: "bold", note: "He never waits for the Senate." }],
+    })], 9, "turn-2");
+
+    expect(second.traitsConfirmed).toHaveLength(1);
+    expect(second.world.characters.find((character) => character.id === "marcus-atilius")!.traits).toContain("bold");
+  });
+
+  it("ignores a judgment from somebody who was not there", () => {
+    // A trait is what somebody saw, not what they heard.
+    const outcome = applySocialEvents(world(), [baseEvent({
+      kind: "conversation",
+      observedTraits: [{ subjectCharacterId: "marcus-atilius", observerCharacterId: "quintus-fabius", traitId: "bold", note: "I hear he is rash." }],
+    })], 5, "turn-1");
+    expect(outcome.world.traitObservations).toHaveLength(0);
+    // And the event itself still applies: one bad observation is not a failure.
+    expect(outcome.appliedIds).toHaveLength(1);
   });
 });

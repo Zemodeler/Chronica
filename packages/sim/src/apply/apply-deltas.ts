@@ -6,6 +6,8 @@ import {
   canMoveTo,
   crossingAdmitted,
   allOffices,
+  TRAIT_REGISTRY,
+  clampWealth,
   deriveOfficeActions,
   findOfficeForRole,
   findOfficeSeatForRole,
@@ -36,6 +38,8 @@ import {
   type AuthorityScope,
   type FactProposalDraft,
   type OrderPartyRef,
+  type OrderAttempt,
+  type OrderStanding,
   type WorldDelta,
   type WorldState,
 } from "@chronica/shared";
@@ -128,6 +132,62 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       return { kind: "polity", id: delta.polityId };
     default:
       return polityFallback;
+  }
+}
+
+/**
+ * What answering an order does to the two people in it (slice 11).
+ *
+ * Directed, because A's view of B is not B's view of A, and asymmetric where
+ * the knowledge is: a man who says yes and does otherwise has not changed his
+ * commander's opinion of him, because his commander does not know. That
+ * asymmetry is the whole reason subversion is a separate status from refusal.
+ *
+ * Deliberately small numbers. One order is one order; it is the accumulation
+ * that makes a relationship, and a legate who has refused you four times has
+ * earned the -32 rather than been handed it.
+ */
+function orderAnswerCauses(
+  world: WorldState,
+  decided: OrderAttempt,
+  standing: OrderStanding,
+): { subjectCharacterId: string; targetCharacterId: string; label: string; score: number; decayPerYearBps: number; dimensions?: Record<string, number> }[] {
+  if (decided.issuerRef.kind !== "character" || decided.recipientRef.kind !== "character") return [];
+  const issuer = decided.issuerRef.id;
+  const recipient = decided.recipientRef.id;
+  if (issuer === recipient) return [];
+  const known = (id: string): boolean => world.characters.some((character) => character.id === id);
+  if (!known(issuer) || !known(recipient)) return [];
+
+  const cause = (subject: string, target: string, label: string, score: number, dimensions: Record<string, number>) =>
+    ({ subjectCharacterId: subject, targetCharacterId: target, label, score, decayPerYearBps: 1_500, dimensions });
+
+  switch (decided.status) {
+    case "accepted":
+      // Carrying out a lawful order is duty and earns a little; granting a
+      // request you could have declined is a favour and earns more, and puts
+      // the asker under an obligation he now owes.
+      return standing === "binding"
+        ? [cause(issuer, recipient, "He did as he was told.", 4, { trust: 6, respect: 4 })]
+        : [
+          cause(issuer, recipient, "He did it, and he did not have to.", 8, { trust: 10, affection: 6 }),
+          cause(recipient, issuer, "He asked rather than commanded, and I obliged him.", 3, { obligation: 8 }),
+        ];
+    case "refused":
+      return [
+        cause(issuer, recipient, standing === "binding" ? "He refused me outright." : "He would not do it.", standing === "binding" ? -12 : -5,
+          standing === "binding" ? { trust: -14, respect: -8 } : { affection: -6 }),
+        cause(recipient, issuer, "I would not do as he asked.", -3, { affection: -4 }),
+      ];
+    case "ignored":
+      return [cause(issuer, recipient, "He gave me no answer at all.", -8, { trust: -10, respect: -6 })];
+    case "delayed":
+      return [cause(issuer, recipient, "He is taking his time about it.", -3, { trust: -4 })];
+    case "subverted":
+      // He knows what he did. His commander does not, which is the point.
+      return [cause(recipient, issuer, "I agreed to his face and did otherwise.", -10, { trust: -12, respect: -6 })];
+    default:
+      return [];
   }
 }
 
@@ -743,8 +803,13 @@ function applyOne(
       const provinceId = delta.provinceId ?? world.map.provinces[0]?.id;
       if (provinceId === undefined) reject("The world has no province to place a new character in.");
       const id = mint("character", delta.localId);
+      // What the world says this person is worth, brought inside what somebody
+      // of that description could plausibly have. Clamped, never rejected: a
+      // rich merchant and a poor one are both merchants, and refusing the
+      // whole creation over a number would cost the world the person.
+      const purse = clampWealth(delta.wealth, delta.standing ?? delta.officeLabel, context.wealth);
       const created = createCanonicalNpc(world, {
-        ...(delta.wealth > 0 ? { startingMoney: delta.wealth } : {}),
+        ...(purse > 0 ? { startingMoney: purse } : {}),
         characterId: id,
         name: delta.name,
         locationProvinceId: provinceId,
@@ -1812,7 +1877,40 @@ function applyOne(
           significance: subverted ? 60 : attempt.standing === "binding" ? 55 : 40,
         });
       }
-      return { ...world, orderAttempts: world.orderAttempts.map((candidate) => (candidate.id === attemptId ? decided : candidate)) };
+      // Answering somebody changes what they think of you, and what you think
+      // of them. `applySocialEvents` has been able to write a relation cause
+      // since the character system was built and nothing in the simulation
+      // ever handed it one, so every NPC's view of the player was still the
+      // single seed written at creation, step zero, in every save in the
+      // database. An order answered is the commonest thing two people do to
+      // each other here, so it is where the loop closes.
+      const answered = orderAnswerCauses(world, decided, attempt.standing);
+      const socially = answered.length === 0 ? world : applySocialEvents(
+        world,
+        [CharacterSocialEventSchema.parse({
+          id: context.ids.next("social"),
+          gameId: context.gameId,
+          sourceTurnId: null, sourceSessionId: null, sourceMessageId: null,
+          participantCharacterIds: [decided.issuerRef.id, decided.recipientRef.id],
+          kind: decided.status === "accepted" ? "favour" : decided.status === "subverted" ? "deception" : "conversation",
+          // A subversion is known to the man doing it and to nobody else --
+          // which is exactly why it is worth doing.
+          visibility: decided.status === "subverted" ? "private" : "polity",
+          knownByCharacterIds: decided.status === "subverted"
+            ? [decided.recipientRef.id]
+            : [decided.issuerRef.id, decided.recipientRef.id],
+          relationCauses: answered,
+          observedTraits: [],
+          knowledgeClaims: [], proposedBeliefs: [], pressureChanges: [],
+          commitmentProposal: null, introducedCharacter: null, introducedProfile: null,
+          createdAtStep: atStep, appliedAtStep: null, appliedInTurnId: null,
+          status: "proposed", rejectionReason: null,
+        })],
+        atStep,
+        context.ids.next("social-batch"),
+      ).world;
+
+      return { ...socially, orderAttempts: socially.orderAttempts.map((candidate) => (candidate.id === attemptId ? decided : candidate)) };
     }
 
     case "social_events": {
@@ -1837,7 +1935,23 @@ function applyOne(
           kind: draft.kind,
           visibility: draft.visibility,
           knownByCharacterIds: participants,
-          relationCauses: [],
+          // These were both hardcoded empty, so a social event changed
+          // nobody's opinion of anybody and nobody's character ever moved --
+          // which is the whole of what a social event is for.
+          relationCauses: draft.relationCauses.map((cause) => ({
+            subjectCharacterId: required(cause.subjectCharacterRef, "Whose view of them this is"),
+            targetCharacterId: required(cause.targetCharacterRef, "Who they are forming a view of"),
+            label: cause.label,
+            score: cause.score,
+            decayPerYearBps: cause.decayPerYearBps,
+            ...(cause.dimensions === undefined ? {} : { dimensions: cause.dimensions }),
+          })),
+          observedTraits: draft.observedTraits.map((observed) => ({
+            subjectCharacterId: required(observed.subjectCharacterRef, "Whose character this is"),
+            observerCharacterId: required(observed.observerCharacterRef, "Who is judging"),
+            traitId: observed.traitId,
+            note: observed.note,
+          })),
           knowledgeClaims: [],
           proposedBeliefs: [],
           pressureChanges: [],
@@ -1855,6 +1969,24 @@ function applyOne(
       const outcome = applySocialEvents(world, events, atStep, context.ids.next("social-batch"));
       const refused = outcome.rejectedIds[0];
       if (refused !== undefined) reject(refused.reason);
+      // A trait becoming true is a thing people notice about somebody, and the
+      // second person to say it is what made it so. Recorded publicly: this is
+      // reputation, which is by definition what others hold.
+      for (const confirmed of outcome.traitsConfirmed) {
+        const who = world.characters.find((character) => character.id === confirmed.characterId)?.name ?? confirmed.characterId;
+        const label = TRAIT_REGISTRY[confirmed.traitId]?.label ?? confirmed.traitId;
+        emitFact({
+          localId: `trait_${confirmed.characterId}_${confirmed.traitId}`,
+          kind: "reputation",
+          summary: `${who} has a name now for being ${label.toLowerCase()}, and more than one person has said so.`,
+          affectedRefs: [{ kind: "character", id: confirmed.characterId }],
+          visibility: "public",
+          discoveryState: "public",
+          knowableInDays: 0,
+          // Somebody's reputation settling is a quiet thing, and real.
+          significance: 35,
+        });
+      }
       return outcome.world;
     }
   }

@@ -16,6 +16,7 @@ import { WorldStorylineSchema } from "./storylines";
 import { CharacterPressureSchema } from "../characters/pressures";
 import { CharacterBeliefSchema } from "../characters/beliefs";
 import { SocialLinkSchema } from "../characters/relationship-dimensions";
+import { TraitObservationSchema } from "../characters/traits";
 import { CommitmentSchema } from "../characters/commitments";
 import { CharacterIntentSchema } from "../characters/intents";
 import { FamilyLinkSchema, HouseholdSchema, LifeContractSchema } from "../characters/family";
@@ -141,6 +142,12 @@ export const WorldStateSchema = z
     characterPressures: z.array(CharacterPressureSchema).default([]),
     characterBeliefs: z.array(CharacterBeliefSchema).default([]),
     socialLinks: z.array(SocialLinkSchema).default([]),
+    /**
+     * What people have said about each other's character, before enough of
+     * them have said it (slice 11). Defaulted, so every snapshot written
+     * before traits could change still loads.
+     */
+    traitObservations: z.array(TraitObservationSchema).default([]),
     // Character-sim phase 3: canonical commitments and the concrete intents
     // characters form to fulfil/defer/break them or otherwise pursue an
     // active plot. Defaulted so archived snapshots load cleanly; see

@@ -199,7 +199,7 @@ describe("dynamic world generation", () => {
           age: 38,
           officeLabel: "Military Quaestor", officeAuthorises: [],
           traits: ["methodical", "politically cautious"],
-          wealth: 250,
+          standing: null, wealth: 250,
           generatedBecause: "Responsible for financing the current mobilization.",
         },
       ],
@@ -544,7 +544,7 @@ describe("borrowing", () => {
     const result = applyDeltas(
       world(),
       [
-        { op: "character_create", localId: "merchant", name: "Titus Sestius", polityId: "rome", provinceId: null, age: 50, officeLabel: null, officeAuthorises: [], traits: [], wealth: 4_000, generatedBecause: "Somebody had to be rich enough to lend." },
+        { op: "character_create", localId: "merchant", name: "Titus Sestius", polityId: "rome", provinceId: null, age: 50, officeLabel: null, officeAuthorises: [], traits: [], standing: null, wealth: 4_000, generatedBecause: "Somebody had to be rich enough to lend." },
         { op: "loan_open", localId: "merchant_credit", lenderKind: "character", lenderRef: localRef("merchant"), borrowerAccountRef: "marcus-purse", principal: 1_000, interestBps: 900, cadenceDays: 90, terms: "Merchant credit for the legions", collateralHoldingRef: null, reason: "The legions cannot wait for the levy." },
       ],
       context(),
@@ -788,7 +788,7 @@ describe("whose act it is", () => {
     age: 44,
     officeLabel: null, officeAuthorises: [],
     traits: [],
-    wealth: 0,
+    standing: null, wealth: 0,
     generatedBecause: "A people being invaded has someone to lead it.",
   };
 
@@ -1417,7 +1417,7 @@ describe("offices that actually move", () => {
       before,
       [{
         op: "character_create", localId: "quaestor", name: "Marcus Fabius Varro", polityId: "rome", provinceId: null,
-        age: 38, officeLabel: office.label, officeAuthorises: [], traits: [], wealth: 0, generatedBecause: "Responsible for financing the mobilization.",
+        age: 38, officeLabel: office.label, officeAuthorises: [], traits: [], standing: null, wealth: 0, generatedBecause: "Responsible for financing the mobilization.",
       }],
       context(),
     );
@@ -1445,7 +1445,7 @@ describe("offices that actually move", () => {
       [{
         op: "character_create", localId: "quaestor", name: "Titus of Ostia", polityId: "rome", provinceId: null,
         age: 40, officeLabel: "Prefect of the Levy", officeAuthorises: ["force_create", "money_transfer"],
-        traits: [], wealth: 300, generatedBecause: "To raise the men the campaign needs.",
+        traits: [], standing: null, wealth: 300, generatedBecause: "To raise the men the campaign needs.",
       }],
       context(),
     );
@@ -1471,7 +1471,7 @@ describe("offices that actually move", () => {
       [{
         op: "character_create", localId: "quaestor", name: "Servius Fulvius", polityId: "rome", provinceId: null,
         age: 44, officeLabel: "Quaestor of the War Chest", officeAuthorises: [],
-        traits: [], wealth: 200, generatedBecause: "Somebody has to keep the accounts of the campaign.",
+        traits: [], standing: null, wealth: 200, generatedBecause: "Somebody has to keep the accounts of the campaign.",
       }],
       context(),
     );
@@ -1494,7 +1494,7 @@ describe("offices that actually move", () => {
       before,
       [{
         op: "character_create", localId: "colleague", name: "The Other Consul", polityId: office.polityId, provinceId: null,
-        age: 45, officeLabel: office.label, officeAuthorises: [], traits: [], wealth: 0, generatedBecause: "The colleague for the year.",
+        age: 45, officeLabel: office.label, officeAuthorises: [], traits: [], standing: null, wealth: 0, generatedBecause: "The colleague for the year.",
       }],
       context(),
     );
@@ -1584,6 +1584,46 @@ describe("answering an order", () => {
     // Defying a man who could command you is a headline; it must clear the bar.
     expect(fact.significance).toBeGreaterThanOrEqual(45);
     expect(fact.affectedRefs!.map((ref) => ref.id).sort()).toEqual([issuer, recipient].sort());
+  });
+
+  it("changes what the two of them think of each other, which nothing ever did", () => {
+    // Every NPC's view of the player in every save was still the single seed
+    // written at creation, step zero. `applySocialEvents` could write a
+    // relation cause from the day it was built and the simulation never
+    // handed it one.
+    const [issuer, recipient] = pair(world());
+    const viewOf = (state: WorldState, subject: string, target: string): number =>
+      state.characters.find((character) => character.id === subject)
+        ?.relations.find((relation) => relation.subjectCharacterId === target)
+        ?.causes.length ?? 0;
+
+    const before = withOrder(world(), issuer, recipient, "binding");
+    const after = applyDeltas(
+      before,
+      [{ op: "order_attempt_decide", orderAttemptRef: "order-1", decision: "refuse", reason: "The strait cannot be held with the ships I have." }],
+      context({ actorRef: { kind: "character", id: recipient } }),
+    );
+    expect(after.rejected).toHaveLength(0);
+    expect(viewOf(after.world, issuer, recipient)).toBeGreaterThan(viewOf(before, issuer, recipient));
+  });
+
+  it("leaves a commander's opinion untouched by a subversion he does not know about", () => {
+    // Which is exactly why subversion is a separate status from refusal.
+    const [issuer, recipient] = pair(world());
+    const before = withOrder(world(), issuer, recipient, "binding");
+    const causes = (state: WorldState, subject: string, target: string): number =>
+      state.characters.find((character) => character.id === subject)
+        ?.relations.find((relation) => relation.subjectCharacterId === target)
+        ?.causes.length ?? 0;
+
+    const after = applyDeltas(
+      before,
+      [{ op: "order_attempt_decide", orderAttemptRef: "order-1", decision: "subvert", reason: "I agreed, and did otherwise." }],
+      context({ actorRef: { kind: "character", id: recipient } }),
+    );
+    expect(after.world.orderAttempts[0]!.status).toBe("subverted");
+    expect(causes(after.world, issuer, recipient)).toBe(causes(before, issuer, recipient));
+    expect(causes(after.world, recipient, issuer)).toBeGreaterThan(causes(before, recipient, issuer));
   });
 
   it("weighs a declined request below a defied command", () => {

@@ -13,13 +13,20 @@ import {
 } from "@chronica/db";
 import {
   CharacterKnowledgebaseSchema,
+  ScenarioDefinitionSchema,
   WorldStateSchema,
+  clampWealth,
   deriveAuthoritySummary,
   createCanonicalNpc,
+  describeWealthBands,
+  skillsInWords,
+  standingInWords,
+  traitsInWords,
   linkCanonicalCharacters,
   materializePlayerCharacter,
   type CharacterKnowledgebase,
   type ScenarioGovernmentRules,
+  type ScenarioWealthRules,
   type WorldState,
 } from "@chronica/shared";
 import { eq, and, isNull } from "drizzle-orm";
@@ -75,6 +82,8 @@ type ScenarioContext = Readonly<{
   period: string;
   timelineStartYear: number | null;
   regions: readonly { id: string; name: string }[];
+  /** What a person of a given standing is worth here (slice 11). */
+  wealth: ScenarioWealthRules | undefined;
   currency: Readonly<{
     name: string;
     unitName: string;
@@ -95,7 +104,7 @@ export function ageAtScenarioStart(birthYearApprox: number | null, timelineStart
 
 async function getScenarioContext(db: ReturnType<typeof createDatabase>["db"], gameId: string): Promise<ScenarioContext> {
   const [row] = await db
-    .select({ period: schema.scenarios.period, initialWorld: schema.scenarioVersions.initialWorld, mapAssetId: schema.scenarioVersions.mapAssetId })
+    .select({ period: schema.scenarios.period, initialWorld: schema.scenarioVersions.initialWorld, mapAssetId: schema.scenarioVersions.mapAssetId, definition: schema.scenarioVersions.definition })
     .from(schema.games)
     .innerJoin(schema.scenarios, eq(schema.games.scenarioId, schema.scenarios.id))
     .innerJoin(schema.scenarioVersions, and(eq(schema.scenarioVersions.scenarioId, schema.games.scenarioId), eq(schema.scenarioVersions.version, schema.games.scenarioVersion)))
@@ -114,10 +123,12 @@ async function getScenarioContext(db: ReturnType<typeof createDatabase>["db"], g
         symbol: world.data.material.currency.symbol,
       }
     : { name: "Money", unitName: "unit", unitNamePlural: "units", symbol: undefined };
+  const definition = ScenarioDefinitionSchema.safeParse(row?.definition);
   return {
     period: row?.period ?? "an unspecified historical period",
     timelineStartYear,
     regions: world.success ? canvasRegions(row?.mapAssetId ?? null, world.data) : [],
+    wealth: definition.success ? definition.data.wealth : undefined,
     currency,
   };
 }
@@ -154,6 +165,8 @@ ${regions}
 - Skills are on a 0–100 scale and represent innate talent plus experience. A 50 is average for the era's population. A 75+ is exceptional. Skills: martial, intrigue, learning, piety, stewardship, diplomacy, body.
 - Sub-skills are more granular. Only assign sub-skills the character would realistically have.
 - Decide the character's startingMoney in the scenario currency: ${currency}. It must be a non-negative whole number representing liquid personal funds at the opening, appropriate to the character's role, social class, culture, period, and circumstances. Do not include a state treasury, institutional funds, land, ships, equipment, or other non-cash assets.
+- What somebody of that standing is actually worth here, so a soldier is not handed a senator's fortune and a merchant is not left with nothing to trade on. Say the standing in socioEconomicClass in words that include one of these, and keep startingMoney inside the matching range:
+${describeWealthBands(context.wealth).map((band) => `  · ${band}`).join("\n")}
 - Create exactly 4 to 8 key relations. Every relation must be an individually named human being; never include an institution, dynasty, army, navy, office, or other collective. Include at least one family member and at least one significant non-family NPC. Family relations need a familyRole; non-family relations must use null for familyRole.
 
 Output ONLY a valid JSON object matching this schema (no markdown fences, no commentary):
@@ -326,7 +339,15 @@ function parseAiKnowledgebase(
   }
 
   if (knowledgebase.locationProvinceId === null || !context.regions.some((region) => region.id === knowledgebase.locationProvinceId)) return null;
-  return knowledgebase;
+
+  // Clamp, never reject. The prompt names the bands and this holds them: a
+  // player who declared a common soldier does not open with a senator's
+  // fortune, and one who declared a merchant is not left with nothing to
+  // trade on. Throwing the whole declaration away over a number would cost
+  // the player their character for the engine's convenience, and the model's
+  // judgment *inside* a band is worth keeping.
+  const purse = clampWealth(knowledgebase.startingMoney, knowledgebase.socioEconomicClass, context.wealth);
+  return purse === knowledgebase.startingMoney ? knowledgebase : { ...knowledgebase, startingMoney: purse };
 }
 
 export async function declareCharacter(gameId: string, playerInput: string): Promise<CharacterDeclarationResult> {
@@ -575,6 +596,44 @@ export async function getCharacterPanelData(gameId: string): Promise<CharacterKn
     const playerId = await resolvePlayerInGame(db, gameId, userId);
     if (playerId === null) return null;
     return await getCharacterKnowledgebase(db, gameId, playerId);
+  } finally {
+    await close();
+  }
+}
+
+/**
+ * Who the world thinks this person is (slice 11).
+ *
+ * Deliberately reverses the rule at the top of
+ * `app/api/games/[gameId]/character/route.ts`: "AI-only skill data must never
+ * cross this boundary", which meant the panel could tell a player nothing
+ * about their own abilities at all. The rule was protecting the wrong thing.
+ * A number invites optimisation and a person does not have one -- but the
+ * player being unable to find out whether they are any good with an army was
+ * never the point of it. The numbers stay behind the boundary; the judgment
+ * crosses it, in the register the rest of the game is written in.
+ *
+ * Traits and standing come from canonical world state rather than from the
+ * declaration, because both are now things other people decide.
+ */
+export async function getCharacterReputation(
+  gameId: string,
+  characterId: string,
+): Promise<{ readonly traits: readonly string[]; readonly standing: string | null; readonly skills: readonly string[] }> {
+  const empty = { traits: [], standing: null, skills: [] };
+  if (gameId === DEMO_GAME_ID) return empty;
+  const { db, close } = createDatabase(requiredDatabaseUrl());
+  try {
+    const view = await getWorldView(db, gameId);
+    if (view === undefined) return empty;
+    const world = await materializeDeclaredPlayer(db, gameId, view.world, characterId, view.scenarioGovernment, view.mapAssetId);
+    const character = world.characters.find((candidate) => candidate.id === characterId);
+    if (character === undefined) return empty;
+    return {
+      traits: traitsInWords(character.traits),
+      standing: standingInWords(character.prestigeBps),
+      skills: skillsInWords(character.skills),
+    };
   } finally {
     await close();
   }

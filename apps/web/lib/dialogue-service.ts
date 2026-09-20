@@ -201,6 +201,15 @@ const ProposeSocialEventsResponseSchema = z.object({
     pressureChange: ProposedPressureChangeSchema.nullable().default(null),
     /** Only a promise the NPC just made to the player -- never on the player's behalf. */
     commitmentProposal: ProposedCommitmentSchema.nullable().default(null),
+    /**
+     * What the NPC now thinks the player is like (slice 11). Only ever the
+     * NPC judging the player: a conversation is the NPC's own experience of
+     * them, and the player does not get to decide who they are.
+     */
+    observedTraits: z.array(z.object({
+      traitId: z.string().trim().min(1).max(60),
+      note: z.string().trim().min(1).max(200),
+    })).max(2).default([]),
   })).max(3),
 });
 
@@ -220,11 +229,13 @@ Respond ONLY with JSON matching this schema:
       "visibility": "public" | "polity" | "private",
       "proposedBeliefs": [ { "subjectEntityId": "id this is about, or null", "claim": "third-person statement", "kind": "fact"|"rumour"|"suspicion"|"secret", "channel": "direct_witness"|"event_participant"|"private_disclosure"|"trusted_report", "recipientCharacterIds": ["${npcCharacterId}" and/or "${playerCharacterId}" -- only these two ids] } ],
       "pressureChange": { "action": "create"|"refresh"|"resolve", "kind": "debt"|"threat"|"grief"|"illness"|"political_danger"|"family_obligation"|"opportunity"|"humiliation"|"military_emergency", "intensity": 0-100, "label": "short reason" } | null,
-      "commitmentProposal": { "actionKind": "payment"|"military_support"|"political_support"|"information_sharing"|"protection"|"office_favour"|"other", "promisedResult": "what was actually promised, in the NPC's own words", "conditions": "any stated condition, or empty string", "amount": integer or null (only for "payment", the exact amount if a specific number was promised) } | null
+      "commitmentProposal": { "actionKind": "payment"|"military_support"|"political_support"|"information_sharing"|"protection"|"office_favour"|"other", "promisedResult": "what was actually promised, in the NPC's own words", "conditions": "any stated condition, or empty string", "amount": integer or null (only for "payment", the exact amount if a specific number was promised) } | null,
+      "observedTraits": [ { "traitId": "cautious"|"bold"|"ambitious"|"dutiful"|"vengeful"|"sociable"|"disciplined"|"deceitful"|"compassionate"|"cruel", "note": "what in this exchange showed it" } ]
     }
   ]
 }
 "pressureChange" may only ever describe a pressure on "${npcCharacterId}" (the NPC speaking), never on "${playerCharacterId}" or anyone else -- omit it (null) unless this exchange concretely changes what the NPC is under pressure from.
+"observedTraits" is what "${npcCharacterId}" now thinks "${playerCharacterId}" is like, on the evidence of this exchange alone -- never the reverse, and never a trait you merely expect of somebody in their position. Leave it empty unless they actually showed it here; most exchanges show nothing. It takes two different people to make a trait stick, so one observation is an opinion, which is the point.
 "commitmentProposal" may only ever describe a promise "${npcCharacterId}" just made to "${playerCharacterId}" -- never a promise on the player's behalf, and only when the NPC's reply contains an explicit, concrete commitment (not a vague offer of sympathy). Omit it (null) otherwise.
 Return { "events": [] } if nothing consequential happened.`;
 }
@@ -349,6 +360,14 @@ async function proposeAndPersistSocialEvents(
       visibility: draft.visibility,
       knownByCharacterIds: [npcCharacterId, playerCharacterId],
       relationCauses: draft.relationCauses as RelationCauseProposal[],
+      // The NPC judging the player, never the reverse: a conversation is the
+      // NPC's own experience of them, and nobody decides their own character.
+      observedTraits: draft.observedTraits.map((observed) => ({
+        subjectCharacterId: playerCharacterId,
+        observerCharacterId: npcCharacterId,
+        traitId: observed.traitId,
+        note: observed.note,
+      })),
       knowledgeClaims: [],
       proposedBeliefs,
       pressureChanges,
@@ -463,6 +482,7 @@ async function extractAndPropagateKnowledge(
       visibility: "private",
       knownByCharacterIds: [npcCharacterId],
       relationCauses: [],
+      observedTraits: [],
       knowledgeClaims: [],
       proposedBeliefs: [{
         subjectEntityId: null,
@@ -1065,6 +1085,7 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
     visibility: "private",
     knownByCharacterIds: [playerCharacterId, npcCharacterId],
     relationCauses: [],
+    observedTraits: [],
     knowledgeClaims: [],
     proposedBeliefs: [],
     pressureChanges: [],

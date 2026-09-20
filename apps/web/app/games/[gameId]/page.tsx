@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { gameRepository } from "../../../lib/game-repository";
-import { ageAtScenarioStart, getCharacterPanelData, getPlayerAuthoritySummary, getScenarioTimelineStartYear } from "../../../lib/character-service";
+import { ageAtScenarioStart, getCharacterPanelData, getCharacterReputation, getPlayerAuthoritySummary, getScenarioTimelineStartYear } from "../../../lib/character-service";
 import { GameShell } from "./components/game-shell";
 import type { CharacterPanelProps } from "./components/character-panel";
 
@@ -36,7 +36,11 @@ export default async function GamePage({
 
   let characterPanel: CharacterPanelProps | undefined;
   if (knowledgebase !== null && knowledgebase.confirmedByPlayer) {
-    const canonicalAuthority = await getPlayerAuthoritySummary(gameId, knowledgebase.characterId);
+    const [canonicalAuthority, reputation] = await Promise.all([
+      getPlayerAuthoritySummary(gameId, knowledgebase.characterId),
+      // Words, never scores (slice 11): what the world would say of them.
+      getCharacterReputation(gameId, knowledgebase.characterId),
+    ]);
     const hasCanonicalAuthority = canonicalAuthority.length > 0 && canonicalAuthority[0] !== "No current public office";
     // Legacy free-text authority claims never grant power; once canonical
     // state names any authority, the AI-generated text is downgraded to a
@@ -70,6 +74,9 @@ export default async function GamePage({
       notableEvents: knowledgebase.notableEvents,
       authority: canonicalAuthority,
       authorityBackgroundNote: legacyAuthorityNote,
+      traits: reputation.traits,
+      standing: reputation.standing,
+      skills: reputation.skills,
     };
   }
 

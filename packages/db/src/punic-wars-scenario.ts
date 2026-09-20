@@ -102,6 +102,32 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
     provinceCount: { min: 779, max: 779 },
   },
   /**
+   * What a Roman of a given standing is worth, in the units this scenario's
+   * treasuries are kept in.
+   *
+   * The census classes are the frame: the Senate's own property qualification
+   * sat an order of magnitude above the equestrian one, which sat an order
+   * above the assidui who could afford their own arms, which sat above the
+   * capite censi who could not. The numbers here are those ratios in the
+   * scenario's own money rather than in asses, because what a sum means is a
+   * property of this economy and nothing the engine could work out.
+   */
+  wealth: {
+    bands: [
+      { id: "capite-censi", label: "counted by his head and nothing else", min: 0, max: 40,
+        words: ["poor", "capite", "censi", "proletarian", "labourer", "laborer", "peasant", "slave", "freedman", "servant", "shepherd", "rower", "sailor"] },
+      { id: "assidui", label: "a man who can arm himself", min: 10, max: 150,
+        words: ["soldier", "legionary", "ranker", "assidui", "smallholder", "farmer", "artisan", "craftsman", "smith", "veteran"] },
+      { id: "citizen", label: "a household of some standing", min: 60, max: 600,
+        words: ["citizen", "plebeian", "plebian", "commoner", "centurion", "shopkeeper", "trader", "scribe", "clerk", "priest", "physician", "teacher"] },
+      { id: "equestrian", label: "money enough to be courted for it", min: 400, max: 5_000,
+        words: ["merchant", "shipowner", "equestrian", "equites", "eques", "knight", "landowner", "banker", "financier", "publican", "officer", "tribune", "decurion", "magistrate"] },
+      { id: "senatorial", label: "a fortune that is itself a kind of office", min: 2_500, max: 60_000,
+        words: ["patrician", "senatorial", "senator", "aristocracy", "aristocrat", "noble", "nobility", "consul", "praetor", "king", "queen", "prince", "royal", "dynast", "tyrant", "suffete"] },
+    ],
+    defaultBandId: "citizen",
+  },
+  /**
    * How long people live in the third century BCE, and what shortens it.
    *
    * The rates are per year in basis points and are for adults who survived

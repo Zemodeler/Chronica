@@ -86,6 +86,7 @@ function toSocialEvent(row: typeof characterSocialEvents.$inferSelect): Characte
     relationCauses: row.relationCauses,
     knowledgeClaims: row.knowledgeClaims,
     proposedBeliefs: row.proposedBeliefs,
+    observedTraits: [],
     pressureChanges: row.pressureChanges,
     commitmentProposal: row.commitmentProposal,
     introducedCharacter: row.introducedCharacter,

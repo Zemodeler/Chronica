@@ -4,6 +4,7 @@ import type {
   Office,
   OrderPartyRef,
   ScenarioWarfareRules,
+  ScenarioWealthRules,
   TerrainDefinition,
   WorldDelta,
   WorldInstant,
@@ -30,6 +31,12 @@ export interface ApplyContext {
    * behaviour for a scenario that declares no terrain rules at all.
    */
   readonly terrains?: readonly TerrainDefinition[] | undefined;
+  /**
+   * What a person of a given standing is worth here. Omitted, the engine's
+   * own coarse bands apply -- which is still better than believing whatever
+   * number came back.
+   */
+  readonly wealth?: ScenarioWealthRules | undefined;
   readonly ids: IdFactory;
   readonly gameId: string;
   /**
