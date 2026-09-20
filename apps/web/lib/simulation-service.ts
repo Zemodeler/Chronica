@@ -184,6 +184,7 @@ export async function submitOrder(
       narrative: result.narrative,
       frictions: result.frictions,
       utterances: result.utterances,
+      battleAccounts: result.battleAccounts,
       significanceByFactId: result.significanceByFactId,
       storylines: result.world.storylines,
       polityOfCharacter: (id) => result.world.characters.find((character) => character.id === id)?.polityId ?? null,

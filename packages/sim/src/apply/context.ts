@@ -9,6 +9,7 @@ import type {
   WorldInstant,
   WorldState,
 } from "@chronica/shared";
+import type { BattleAccount } from "../battle";
 import type { IdFactory } from "../ports";
 
 export interface ApplyContext {
@@ -94,6 +95,14 @@ export interface ApplyResult {
    * Facts emitted by a delta that is then rejected are discarded with it.
    */
   readonly factProposals: readonly FactProposalDraft[];
+  /**
+   * What happened in any battle this batch fought, for whoever writes it up.
+   *
+   * Carried out beside the facts rather than folded into them: a summary of at
+   * most six hundred characters is what a battle used to be reduced to, and
+   * that is what made a death in one unearnable.
+   */
+  readonly battleAccounts: readonly BattleAccount[];
   /** `localId` → the id the engine assigned, for resolving references in facts and events. */
   readonly assignedIds: ReadonlyMap<string, string>;
 }

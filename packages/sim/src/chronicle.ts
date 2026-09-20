@@ -291,6 +291,20 @@ export interface UtteranceLine {
   readonly factIds: readonly string[];
 }
 
+/** A fight, as the engine actually resolved it. See `battle.ts`'s `BattleAccount`. */
+export interface BattleAccountLine {
+  readonly factIds: readonly string[];
+  readonly provinceName: string;
+  readonly sides: readonly { readonly name: string; readonly attacking: boolean; readonly strength: number; readonly commander: string }[];
+  readonly phases: readonly { readonly phase: string; readonly summary: string; readonly attacker: number; readonly defender: number }[];
+  readonly tactics: readonly string[];
+  readonly refusedTactics: readonly string[];
+  readonly losses: readonly { readonly name: string; readonly dead: number; readonly deserted: number; readonly wounded: number }[];
+  readonly commanders: readonly { readonly name: string; readonly outcome: string }[];
+  readonly retreats: readonly { readonly name: string; readonly to: string | null; readonly orderly: boolean }[];
+  readonly outcome: string;
+}
+
 export interface EntryQuote {
   readonly line: string;
   readonly speaker: string;
@@ -318,6 +332,13 @@ export interface ChronicleInput {
   readonly frictions: readonly NarrativeLine[];
   /** What people actually said. At most one reaches the record. */
   readonly utterances?: readonly UtteranceLine[];
+  /**
+   * What happened in any battle, phase by phase.
+   *
+   * Gated exactly like an account or a quotation -- it travels with its facts,
+   * so a battle the reader never heard of cannot be written up for them.
+   */
+  readonly battleAccounts?: readonly BattleAccountLine[];
   /** Fact id → its author's weight, for ordering threads and for the bar. */
   readonly significanceByFactId?: ReadonlyMap<string, number>;
   /** The threads the world is following, so a passage that continues one can say so. */
@@ -398,6 +419,8 @@ interface Thread {
   readonly matter: string | null;
   /** True when nothing in it was witnessed: the court has this at second hand. */
   readonly reported: boolean;
+  /** A fight, where this thread holds one. Written at length, and never cut. */
+  readonly battle: BattleAccountLine | null;
   readonly weight: number;
   /** The reader's own business, which is told whatever it weighs. */
   readonly ours: boolean;
@@ -607,6 +630,31 @@ function tagsOf(
     .map((ref) => ({ kind: ref.kind, id: ref.id, label: nameOf(ref) ?? ref.id }));
 }
 
+/** The fight itself, in the order it happened, for a passage that has to earn a death. */
+function renderBattle(battle: BattleAccountLine): string[] {
+  const lines = [
+    "This thread holds a battle. Write it at length -- three hundred and fifty to six",
+    "hundred words -- and write the fight, not only who won: where the lines met, what",
+    "was tried, when it turned, who broke and where they ran to. The detail is the",
+    "point even where it changes nothing strategically.",
+    `The field: ${battle.provinceName}. It ended in ${battle.outcome.replace(/_/g, " ")}.`,
+    "Who fought:",
+    ...battle.sides.map((side) => `  - ${side.name}, ${side.attacking ? "attacking" : "defending"}, ${side.strength} men under ${side.commander}`),
+    "How it went, in order:",
+    ...battle.phases.map((phase) => `  - ${phase.phase}: ${phase.summary} (weight ${phase.attacker} against ${phase.defender})`),
+  ];
+  if (battle.tactics.length > 0) lines.push("What was tried:", ...battle.tactics.map((tactic) => `  - ${tactic}`));
+  if (battle.refusedTactics.length > 0) lines.push("What the ground would not allow:", ...battle.refusedTactics.map((refused) => `  - ${refused}`));
+  if (battle.losses.length > 0) {
+    lines.push("What it cost:", ...battle.losses.map((loss) => `  - ${loss.name}: ${loss.dead} dead, ${loss.deserted} deserted, ${loss.wounded} wounded`));
+  }
+  if (battle.commanders.length > 0) lines.push("The commanders:", ...battle.commanders.map((commander) => `  - ${commander.name} was ${commander.outcome}`));
+  if (battle.retreats.length > 0) {
+    lines.push("Who left the field:", ...battle.retreats.map((retreat) => `  - ${retreat.name} fell back ${retreat.orderly ? "in order" : "in rout"}${retreat.to === null ? ", with nowhere to go" : ` to ${retreat.to}`}`));
+  }
+  return lines;
+}
+
 function renderThread(thread: Thread, index: number): string {
   const lines = [`THREAD ${index + 1}${thread.reported ? " (news reaching the court; nobody here witnessed it)" : ""}`];
   if (thread.matter !== null) lines.push(`Part of a longer matter: ${thread.matter}.`);
@@ -616,6 +664,7 @@ function renderThread(thread: Thread, index: number): string {
   );
   if (thread.narrative.length > 0) lines.push("Accounts given at the time:", ...thread.narrative.map((line) => `- ${readable(line)}`));
   if (thread.frictions.length > 0) lines.push("Difficulties reported:", ...thread.frictions.map((line) => `- ${readable(line)}`));
+  if (thread.battle !== null) lines.push(...renderBattle(thread.battle));
   return lines.join("\n");
 }
 
@@ -706,6 +755,12 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
       weight: facts.reduce((sum, fact) => sum + weightOf(fact), 0),
       ours: isOurs(facts),
       home: isHome(facts),
+      // Witnessed only. A fight the court heard of at second hand is news of a
+      // battle, not an account of one, and writing it up phase by phase would
+      // give a rumour the authority of a dispatch.
+      battle: (input.battleAccounts ?? []).find(
+        (account) => account.factIds.some((factId) => ids.has(factId) && !reportedIds.has(factId)),
+      ) ?? null,
     };
   });
 
@@ -717,7 +772,10 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   const seen = built.filter((thread) => !thread.ours && !thread.home && !thread.reported && thread.weight >= threshold).sort(byWeight);
   const hearsay = built.filter((thread) => !thread.ours && thread.reported && thread.weight >= threshold).sort(byWeight);
 
-  let threads = [...ours, ...home.slice(0, MAX_HOME_THREADS), ...seen, ...hearsay.slice(0, MAX_REPORTED_THREADS)].slice(0, MAX_ENTRIES);
+  const banded = [...ours, ...home.slice(0, MAX_HOME_THREADS), ...seen, ...hearsay.slice(0, MAX_REPORTED_THREADS)];
+  // A battle is never the entry that gets dropped for room. Men died in it.
+  const fights = banded.filter((thread) => thread.battle !== null);
+  let threads = [...fights, ...banded.filter((thread) => thread.battle === null)].slice(0, MAX_ENTRIES);
   // A record that goes blank teaches the reader to stop opening it. This fires
   // only when the bands would have produced nothing at all, which is a
   // different thing from the weight floor that was tried and reverted -- that
