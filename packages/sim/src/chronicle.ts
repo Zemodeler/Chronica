@@ -797,22 +797,42 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   /**
    * The same people, doing the same thing, again.
    *
-   * A thread that names nobody the last report did not already name, and
-   * carries no battle, is a matter continuing rather than a matter happening.
-   * It waits: its facts stay on the record and it is written up the moment
-   * something actually moves, which is when it is worth a headline.
+   * Two signals have to agree, because either alone is wrong.
    *
-   * Never applied to the reader's own business. A ruler is entitled to the
-   * whole of his own reign however slowly it goes, and an order must always be
-   * answered -- suppressing a repeat there would break the one guarantee the
-   * Chronicle makes.
+   * **The same people and powers.** Measured on those, not on every subject:
+   * a matter's actors are stable while the forces and provinces it happens to
+   * name drift by one from report to report, and a subject-set comparison let
+   * "Manius Curius Dentatus Renews His Petition" through twice running for
+   * want of a single id. A thread naming neither is compared on everything it
+   * names instead.
+   *
+   * **And nothing moved.** `diffWorlds` already says what actually changed --
+   * ground taken, an army raised or marched or bled, somebody dead. A thread
+   * carrying one of those is news however familiar its cast; a siege that is
+   * merely still going is not. This is the conjunct that keeps the rule from
+   * silencing a matter that is genuinely developing.
+   *
+   * Never applied to the reader's own business, and never to a battle. A ruler
+   * is entitled to the whole of his own reign however slowly it goes, and an
+   * order must always be answered -- suppressing a repeat there would break
+   * the one guarantee the Chronicle makes.
    */
   const alreadyTold = (input.recentSubjects ?? []).map((subjects) => new Set(subjects));
+  const everyoneTold = new Set(alreadyTold.flatMap((told) => [...told]));
+  const movedIds = new Set((input.changes ?? []).map((change) => change.id));
   const echoing = (thread: Thread): boolean => {
     if (thread.battle !== null || alreadyTold.length === 0) return false;
-    const subjects = subjectsOf(thread.facts).map(keyOf);
+    const subjects = subjectsOf(thread.facts);
     if (subjects.length === 0) return false;
-    return alreadyTold.some((told) => subjects.every((subject) => told.has(subject)));
+    // Something in it actually moved, so it happened.
+    if (thread.facts.some((fact) => fact.affectedEntities.some((entity) => movedIds.has(entity.id)))) return false;
+
+    // The actors, not the scenery: a matter's people and powers are what
+    // identify it, while the forces and provinces it happens to name drift by
+    // one from report to report. A new power in it is a new matter.
+    const actors = subjects.filter((subject) => subject.kind === "character" || subject.kind === "polity");
+    const identifying = actors.length > 0 ? actors : subjects;
+    return identifying.every((subject) => everyoneTold.has(keyOf(subject)));
   };
 
   const ours = built.filter((thread) => thread.ours).sort(byWeight);

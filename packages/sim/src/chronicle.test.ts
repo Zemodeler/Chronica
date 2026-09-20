@@ -786,6 +786,22 @@ describe("a matter that is only continuing", () => {
     expect((await compose(capturingPort(), [turn], { recentSubjects: told })).entries).toHaveLength(1);
   });
 
+  it("tells it anyway when something actually moved, however familiar the cast", async () => {
+    // The conjunct that keeps the rule from silencing a matter that is
+    // genuinely developing. `diffWorlds` already says what changed; a thread
+    // carrying one of those is news whoever is in it.
+    const marched = siege("The Syracusan army marched from the hills down to the shore.");
+    const told = [["character:hieron-ii", "force:syracusan-army"]];
+    const held = await compose(capturingPort(), [marched], { recentSubjects: told });
+    expect(held.entries).toHaveLength(0);
+
+    const moved = await compose(capturingPort(), [marched], {
+      recentSubjects: told,
+      changes: [{ kind: "force_moved", id: "syracusan-army", label: "Syracusan army", detail: "marched to the shore" }],
+    });
+    expect(moved.entries).toHaveLength(1);
+  });
+
   it("never holds back the reader's own business, however slowly it goes", async () => {
     // A ruler is entitled to the whole of his own reign, and an order must
     // always be answered: suppressing a repeat here would break the one
