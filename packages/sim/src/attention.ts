@@ -1,4 +1,5 @@
 import {
+  allOffices,
   buildAuthorityIndex,
   factsKnownTo,
   openStorylines,
@@ -89,7 +90,7 @@ export function routeAttention(input: AttentionInput): AttentionResult {
   const authority = buildAuthorityIndex(
     { officeSeats: world.material.officeSeats, forces: world.material.forces, accounts: world.material.accounts },
     world.authorityGrants,
-    input.offices,
+    allOffices(world, input.offices),
     world.elapsedStep,
   );
   const holdsAuthority = new Set(authority.grants.map((grant) => grant.holder.id));
@@ -250,7 +251,7 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
   const authority = buildAuthorityIndex(
     { officeSeats: world.material.officeSeats, forces: world.material.forces, accounts: world.material.accounts },
     world.authorityGrants,
-    input.offices,
+    allOffices(world, input.offices),
     world.elapsedStep,
   );
   const holdsAuthority = new Set(authority.grants.map((grant) => grant.holder.id));

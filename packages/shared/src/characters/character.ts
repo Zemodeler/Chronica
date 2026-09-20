@@ -277,6 +277,25 @@ export const SuccessionRuleSchema = z
   .strict();
 export type SuccessionRule = z.infer<typeof SuccessionRuleSchema>;
 
+/**
+ * Every office that exists: the ones the scenario opened with, and the ones the
+ * world has made since.
+ *
+ * Called everywhere offices are read, so an office a government invented for
+ * one war confers authority exactly as an authored one does. Scenario offices
+ * win a collision, because a match already running is pinned to its scenario
+ * version and a world that redefined `roman-consul` would be rewriting history.
+ */
+export function allOffices(
+  world: { readonly offices?: readonly Office[] },
+  scenarioOffices: readonly Office[] = [],
+): readonly Office[] {
+  const made = world.offices ?? [];
+  if (made.length === 0) return scenarioOffices;
+  const authored = new Set(scenarioOffices.map((office) => office.id));
+  return [...scenarioOffices, ...made.filter((office) => !authored.has(office.id))];
+}
+
 export const ScenarioGovernmentRulesSchema = z
   .object({
     offices: z.array(OfficeSchema),

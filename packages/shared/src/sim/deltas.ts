@@ -197,7 +197,20 @@ const CharacterCreateSchema = z.object({
   polityId: EntityIdSchema,
   provinceId: EntityIdSchema.nullable(),
   age: z.number().int().min(0).max(120),
+  /**
+   * What they are made, if they are made anything: "Military Quaestor",
+   * "Prefect of the Fleet", "chief of the Boii". Where no such office exists
+   * yet, the engine creates it -- a government invents offices constantly, and
+   * the scenario's list is where one starts rather than all there may be.
+   */
   officeLabel: z.string().trim().max(120).nullable(),
+  /**
+   * What that office lets its holder do, named in the same vocabulary the world
+   * changes in. Only consulted when the office has to be created: an office
+   * that authorises nothing is a title, which is a real thing to be, and the
+   * powers of one that already exists are not the new holder's to rewrite.
+   */
+  officeAuthorises: z.array(z.string().trim().min(1).max(60)).max(12).default([]),
   traits: z.array(z.string().trim().min(1).max(60)).max(8),
   /**
    * What they are worth, in their own purse.

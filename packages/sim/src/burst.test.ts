@@ -44,7 +44,7 @@ const RAISE_TWO_LEGIONS = JSON.stringify({
       polityId: "rome",
       provinceId: null,
       age: 38,
-      officeLabel: "Military Quaestor",
+      officeLabel: "Military Quaestor", officeAuthorises: [],
       traits: ["methodical", "politically cautious"],
       generatedBecause: "Responsible for financing the current mobilization.",
     },

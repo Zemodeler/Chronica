@@ -1,6 +1,6 @@
 import { buildAuthorityIndex, deriveOfficeGrants, isActive, type AuthorityGrant } from "./authority-grant";
 import type { AuthorityDomain } from "./vocabulary";
-import type { Office } from "../characters/character";
+import { allOffices, type Office } from "../characters/character";
 import { factsKnownTo, type Fact } from "../world/facts";
 import type { WorldInstant } from "../world/instant";
 import type { WorldState } from "../world/world-state";
@@ -115,7 +115,10 @@ function grantsFromClaimedOffice(world: WorldState, characterId: string, officeI
 }
 
 export function buildStation(input: StationInput): Station {
-  const { world, characterId, offices } = input;
+  const { world, characterId } = input;
+  // Including the ones the world has made since it opened: an office invented
+  // for this war confers sight exactly as an authored one does.
+  const offices = allOffices(world, input.offices);
   const character = world.characters.find((candidate) => candidate.id === characterId);
   const polityId = character?.polityId ?? null;
 

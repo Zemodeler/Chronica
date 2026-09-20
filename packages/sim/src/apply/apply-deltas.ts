@@ -5,6 +5,9 @@ import {
   applyDiplomaticAnswerToStance,
   canMoveTo,
   crossingAdmitted,
+  WORLD_DELTA_OPS,
+  allOffices,
+  findOfficeForRole,
   findOfficeSeatForRole,
   seatCharacterInOffice,
   vacateOfficesOf,
@@ -34,6 +37,7 @@ import {
   type FactProposalDraft,
   type OrderPartyRef,
   type WorldDelta,
+  type WorldDeltaOp,
   type WorldState,
 } from "@chronica/shared";
 import { resolveEngagement } from "../battle";
@@ -727,11 +731,45 @@ function applyOne(
       // the Boii". That was parsed and thrown on the floor -- every generated
       // official came out holding no office, which is how the world's own
       // invented magistrates could never do anything a magistrate does.
-      const withOffice = { ...created.world, characters: withTraits };
+      const withOffice: WorldState = { ...created.world, characters: withTraits };
       if (delta.officeLabel === null) return withOffice;
-      const matched = findOfficeSeatForRole(withOffice, { offices: context.offices }, delta.polityId, delta.officeLabel);
-      if (matched === undefined) return withOffice;
-      return seatCharacterInOffice(withOffice, id, matched, atStep);
+
+      const known = allOffices(withOffice, context.offices);
+      // Is there such an office at all -- not is there room in it. A
+      // consulship whose seats are both filled is still a consulship, and
+      // asked for another consul the world should enlarge the college rather
+      // than invent a second consulship beside it.
+      const existing = findOfficeForRole(known, delta.polityId, delta.officeLabel);
+      if (existing !== undefined) {
+        const seat = findOfficeSeatForRole(withOffice, { offices: [existing] }, delta.polityId, delta.officeLabel);
+        return seatCharacterInOffice(withOffice, id, seat ?? { office: existing, vacantSeatId: null }, atStep);
+      }
+
+      // No such office yet -- so the government makes one. A scenario's list is
+      // where a government starts, not the whole of what it may ever contain:
+      // "name a quaestor to handle the war chest" used to match nothing and
+      // leave the man holding no office at all, because there was no
+      // quaestorship and no way to make one.
+      const officeId = context.ids.next("office");
+      const opened: WorldState = {
+        ...withOffice,
+        offices: [...withOffice.offices, {
+          id: officeId,
+          label: delta.officeLabel,
+          polityId: delta.polityId,
+          // An office that authorises nothing is a title, which is a real thing
+          // to be. Powers arrive in the same vocabulary everything else does.
+          authorisedActionIds: delta.officeAuthorises.filter((action): action is WorldDeltaOp => (WORLD_DELTA_OPS as readonly string[]).includes(action)),
+          sponsorableCategories: [],
+          treasuryAccountId: null,
+          treasuryPermissions: [],
+          incomeSourceId: null,
+          expectedBlocId: null,
+          successionRuleId: "appointed-by-the-government",
+          eligibilityRequirementIds: [],
+        }],
+      };
+      return seatCharacterInOffice(opened, id, { office: { id: officeId, eligibilityRequirementIds: [] }, vacantSeatId: null }, atStep);
     }
 
     case "character_intent_set": {

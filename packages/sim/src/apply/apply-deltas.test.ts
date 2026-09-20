@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario, punicWarsScenario } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldStateSchema, buildAuthorityIndex, localRef, vacateOfficesOf, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
+import { ScenarioDefinitionSchema, WorldStateSchema, allOffices, buildAuthorityIndex, localRef, vacateOfficesOf, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
 import { createIdFactory } from "../ports";
 import { applyDeltas } from "./apply-deltas";
 import type { ApplyContext } from "./context";
@@ -197,7 +197,7 @@ describe("dynamic world generation", () => {
           polityId: "rome",
           provinceId: null,
           age: 38,
-          officeLabel: "Military Quaestor",
+          officeLabel: "Military Quaestor", officeAuthorises: [],
           traits: ["methodical", "politically cautious"],
           wealth: 250,
           generatedBecause: "Responsible for financing the current mobilization.",
@@ -544,7 +544,7 @@ describe("borrowing", () => {
     const result = applyDeltas(
       world(),
       [
-        { op: "character_create", localId: "merchant", name: "Titus Sestius", polityId: "rome", provinceId: null, age: 50, officeLabel: null, traits: [], wealth: 4_000, generatedBecause: "Somebody had to be rich enough to lend." },
+        { op: "character_create", localId: "merchant", name: "Titus Sestius", polityId: "rome", provinceId: null, age: 50, officeLabel: null, officeAuthorises: [], traits: [], wealth: 4_000, generatedBecause: "Somebody had to be rich enough to lend." },
         { op: "loan_open", localId: "merchant_credit", lenderKind: "character", lenderRef: localRef("merchant"), borrowerAccountRef: "marcus-purse", principal: 1_000, interestBps: 900, cadenceDays: 90, terms: "Merchant credit for the legions", collateralHoldingRef: null, reason: "The legions cannot wait for the levy." },
       ],
       context(),
@@ -786,7 +786,7 @@ describe("whose act it is", () => {
     polityId: "carthage",
     provinceId: null,
     age: 44,
-    officeLabel: null,
+    officeLabel: null, officeAuthorises: [],
     traits: [],
     wealth: 0,
     generatedBecause: "A people being invaded has someone to lead it.",
@@ -1417,7 +1417,7 @@ describe("offices that actually move", () => {
       before,
       [{
         op: "character_create", localId: "quaestor", name: "Marcus Fabius Varro", polityId: "rome", provinceId: null,
-        age: 38, officeLabel: office.label, traits: [], wealth: 0, generatedBecause: "Responsible for financing the mobilization.",
+        age: 38, officeLabel: office.label, officeAuthorises: [], traits: [], wealth: 0, generatedBecause: "Responsible for financing the mobilization.",
       }],
       context(),
     );
@@ -1435,17 +1435,52 @@ describe("offices that actually move", () => {
     }
   });
 
-  it("leaves a created person without an office when the label names none", () => {
+  it("makes the office when the government names one that does not exist yet", () => {
+    // A scenario's four authored offices were the only ones that could ever
+    // exist, so "name a quaestor to handle the war chest" matched nothing and
+    // the man was created holding nothing.
     const before = world();
     const result = applyDeltas(
       before,
       [{
-        op: "character_create", localId: "trader", name: "Titus of Ostia", polityId: "rome", provinceId: null,
-        age: 40, officeLabel: "grain factor", traits: [], wealth: 300, generatedBecause: "Lends the state money.",
+        op: "character_create", localId: "quaestor", name: "Titus of Ostia", polityId: "rome", provinceId: null,
+        age: 40, officeLabel: "Prefect of the Levy", officeAuthorises: ["force_create", "money_transfer"],
+        traits: [], wealth: 300, generatedBecause: "To raise the men the campaign needs.",
       }],
       context(),
     );
-    expect(result.world.characters.find((character) => character.name === "Titus of Ostia")!.officeId).toBeNull();
+
+    expect(result.rejected).toHaveLength(0);
+    const titus = result.world.characters.find((character) => character.name === "Titus of Ostia")!;
+    expect(titus.officeId).not.toBeNull();
+    const made = result.world.offices.find((office) => office.id === titus.officeId)!;
+    expect(made.label).toBe("Prefect of the Levy");
+    expect(made.polityId).toBe("rome");
+    // And the office is real: its powers confer authority like any other's.
+    expect(made.authorisedActionIds).toContain("money_transfer");
+    const index = buildAuthorityIndex(result.world.material, result.world.authorityGrants, allOffices(result.world, offices), result.world.elapsedStep);
+    expect(index.grants.some((grant) => grant.holder.id === titus.id && grant.source === "office")).toBe(true);
+  });
+
+  it("enlarges an office that exists rather than inventing a second one beside it", () => {
+    const before = world();
+    const seat = before.material.officeSeats.find((candidate) => candidate.status === "held");
+    const office = seat === undefined ? undefined : offices.find((candidate) => candidate.id === seat.officeId);
+    if (office === undefined) return;
+
+    const result = applyDeltas(
+      before,
+      [{
+        op: "character_create", localId: "colleague", name: "The Other Consul", polityId: office.polityId, provinceId: null,
+        age: 45, officeLabel: office.label, officeAuthorises: [], traits: [], wealth: 0, generatedBecause: "The colleague for the year.",
+      }],
+      context(),
+    );
+
+    const colleague = result.world.characters.find((character) => character.name === "The Other Consul")!;
+    expect(colleague.officeId).toBe(office.id);
+    // No duplicate consulship was founded beside the real one.
+    expect(result.world.offices.some((candidate) => candidate.label === office.label)).toBe(false);
   });
 
   it("empties a dead commander's seat, and stops it conferring his authority", () => {

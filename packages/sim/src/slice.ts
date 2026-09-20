@@ -9,6 +9,7 @@ function bandStrength(men: number): number {
   return Math.round(men / 500) * 500;
 }
 import {
+  allOffices,
   buildStation,
   currentAgeYears,
   describeAuthority,
@@ -811,7 +812,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       id: input.actorRef.id,
       name: actor?.name ?? input.actorRef.id,
       office: actor?.officeId ?? null,
-      officeLabel: input.offices.find((office) => office.id === actor?.officeId)?.label ?? null,
+      officeLabel: allOffices(world, input.offices).find((office) => office.id === actor?.officeId)?.label ?? null,
       polityId: ownPolity,
       polityName: ownPolity === null ? null : polityName(ownPolity),
       // The world knew a minor Carthaginian admiral's temperament, drives and
