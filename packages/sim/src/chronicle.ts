@@ -89,6 +89,16 @@ const MAX_ENTRIES = 10;
  */
 export const DEFAULT_ENTRY_THRESHOLD = 45;
 
+/**
+ * What a matter of the reader's own country must weigh, when it is not their own
+ * business. Lower than the wider world's: news from your own city reaches you
+ * more cheaply than news from Syracuse.
+ */
+const HOME_THRESHOLD = 25;
+
+/** How many of those one report may carry. */
+const MAX_HOME_THREADS = 4;
+
 /** And what a *foreign secret* must weigh before word of it travels at all. */
 const DISTANT_NEWS_THRESHOLD = 40;
 
@@ -327,6 +337,30 @@ export interface ChronicleInput {
    * of the answer is treated as the strict answer rather than as licence.
    */
   readonly ownEntityIds?: ReadonlySet<string>;
+  /**
+   * What the reader personally touches: their money, their people, their
+   * ground, the matters they are party to.
+   *
+   * Split from `ownEntityIds` rather than replacing it, because that one set
+   * was quietly doing two opposed jobs. It is the secrecy shield -- a secret
+   * touching our side never travels as distant news -- and it is the weight
+   * exemption -- our own business is told whatever it weighs. Narrowing it to
+   * a merchant would narrow the shield too, and a secret plot inside the Roman
+   * Senate, naming no merchant, would become publishable to him as news
+   * reaching the court. That is the exact leak the epistemic layer exists to
+   * prevent, arriving through the fix for something else.
+   *
+   * Absent, this falls back to `ownEntityIds` and the record reads as it did.
+   */
+  readonly personalEntityIds?: ReadonlySet<string>;
+  /**
+   * The facts this burst produced in answer to the reader's own order. Always
+   * told, whatever they weigh: a ruler who gives an order and reads nothing has
+   * been failed by the record. A weight floor under the reign's whole business
+   * was tried for this and reverted -- it was a floor under a category, and
+   * this is a floor under the answer to the question actually asked.
+   */
+  readonly orderFactIds?: ReadonlySet<string>;
   /** What moved on the map while this was happening, for the change list. */
   readonly changes?: readonly WorldChange[];
   /** What a thread must weigh to be written up. */
@@ -365,8 +399,10 @@ interface Thread {
   /** True when nothing in it was witnessed: the court has this at second hand. */
   readonly reported: boolean;
   readonly weight: number;
-  /** The reign's own business, which is told whatever it weighs. */
+  /** The reader's own business, which is told whatever it weighs. */
   readonly ours: boolean;
+  /** Their country's business, which is told for less than the wider world's. */
+  readonly home: boolean;
 }
 
 /**
@@ -636,11 +672,25 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
    * the safe direction is the other way.
    */
   const ownKeys = new Set([keyOf(input.observer), ...(input.observerPolityId === null ? [] : [`polity:${input.observerPolityId}`])]);
+  const personal = input.personalEntityIds ?? input.ownEntityIds;
   const isOurs = (facts: readonly Fact[]): boolean =>
-    input.ownEntityIds === undefined
+    personal === undefined
     || facts.some((fact) =>
-      fact.affectedEntities.length === 0
-      || fact.affectedEntities.some((entity) => ownKeys.has(keyOf(entity)) || input.ownEntityIds!.has(entity.id)));
+      (input.orderFactIds?.has(fact.id) ?? false)
+      || fact.affectedEntities.length === 0
+      || fact.affectedEntities.some((entity) => ownKeys.has(keyOf(entity)) || personal.has(entity.id)));
+  /**
+   * Their own country's doings, which are not their own affairs.
+   *
+   * A consul's realm and a consul's business are the same thing, and
+   * `personalEntityIds` says so for him. For a merchant they are not: the war
+   * is not his to conduct and reaches him as news -- but news from his own city
+   * reaches him more cheaply than news from Syracuse, which is why this band
+   * sits between the two rather than being folded into either.
+   */
+  const isHome = (facts: readonly Fact[]): boolean =>
+    input.ownEntityIds !== undefined
+    && facts.some((fact) => fact.affectedEntities.some((entity) => input.ownEntityIds!.has(entity.id)));
 
   const built: Thread[] = grouped.map((facts) => {
     const ids = new Set(facts.map((fact) => fact.id));
@@ -655,6 +705,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
       reported: facts.every((fact) => reportedIds.has(fact.id)),
       weight: facts.reduce((sum, fact) => sum + weightOf(fact), 0),
       ours: isOurs(facts),
+      home: isHome(facts),
     };
   });
 
@@ -662,10 +713,16 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
     b.weight - a.weight || sortKeyOf(a.facts[0]!.time) - sortKeyOf(b.facts[0]!.time) || a.facts[0]!.id.localeCompare(b.facts[0]!.id);
 
   const ours = built.filter((thread) => thread.ours).sort(byWeight);
-  const seen = built.filter((thread) => !thread.ours && !thread.reported && thread.weight >= threshold).sort(byWeight);
+  const home = built.filter((thread) => !thread.ours && thread.home && !thread.reported && thread.weight >= HOME_THRESHOLD).sort(byWeight);
+  const seen = built.filter((thread) => !thread.ours && !thread.home && !thread.reported && thread.weight >= threshold).sort(byWeight);
   const hearsay = built.filter((thread) => !thread.ours && thread.reported && thread.weight >= threshold).sort(byWeight);
 
-  const threads = [...ours, ...seen, ...hearsay.slice(0, MAX_REPORTED_THREADS)].slice(0, MAX_ENTRIES);
+  let threads = [...ours, ...home.slice(0, MAX_HOME_THREADS), ...seen, ...hearsay.slice(0, MAX_REPORTED_THREADS)].slice(0, MAX_ENTRIES);
+  // A record that goes blank teaches the reader to stop opening it. This fires
+  // only when the bands would have produced nothing at all, which is a
+  // different thing from the weight floor that was tried and reverted -- that
+  // one fired on every report and drowned the record in routine.
+  if (threads.length === 0 && built.length > 0) threads = [[...built].sort(byWeight)[0]!];
   if (threads.length === 0) return { entries: [], calls: 0 };
 
   const period = `${formatWorldDate(input.from, input.clock)} – ${formatWorldDate(input.to, input.clock)}`;

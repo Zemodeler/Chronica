@@ -550,3 +550,58 @@ describe("the engine's own bookkeeping", () => {
     expect(result.entries[0]!.factIds).toEqual([real.id]);
   });
 });
+
+describe("a record read by station", () => {
+  const OBSERVER = { kind: "character" as const, id: "manius-curius" };
+  const SHIELD = new Set(["manius-curius", "rome", "quintus-fabius", "latium", "legio-i"]);
+
+  const compose = (facts: Fact[], extra: Partial<Parameters<typeof composeChronicle>[0]> = {}) =>
+    composeChronicle({
+      port: capturingPort(), clock, observer: OBSERVER, observerPolityId: "rome", facts,
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+      ownEntityIds: SHIELD,
+      // A private man: his own person and nothing else.
+      personalEntityIds: new Set(["manius-curius"]),
+      significanceByFactId: new Map(facts.map((fact) => [fact.id, 5])),
+      ...extra,
+    });
+
+  it("answers the order whatever it weighed", async () => {
+    // The guarantee, and the reason it is a floor under the answer rather than
+    // under a category: the weight-floor version was tried and reverted.
+    const own = fact({ summary: "The quaestor finds the money, slowly.", affectedEntities: [{ kind: "polity", id: "rome" }] });
+    const result = await compose([own], { orderFactIds: new Set([own.id]) });
+    expect(result.entries).toHaveLength(1);
+  });
+
+  it("brings the realm's doings as news competing on weight, not as his own business", async () => {
+    const light = fact({ summary: "A routine levy is collected in Latium.", affectedEntities: [{ kind: "province", id: "latium" }] });
+    const heavy = fact({ summary: "Legio I is broken at Latium.", affectedEntities: [{ kind: "force", id: "legio-i" }] });
+    const result = await compose([light, heavy], { significanceByFactId: new Map([[light.id, 5], [heavy.id, 70]]) });
+    // The heavy one clears the home bar; the routine one does not.
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]!.factIds).toContain(heavy.id);
+  });
+
+  it("keeps the shield whole while the exemption narrows", async () => {
+    // The bug this split exists to prevent: a secret naming the reader's polity
+    // but not the reader must publish nowhere -- not as hearsay, not as home news.
+    const plot = fact({
+      kind: "conspiracy_begun",
+      summary: "A senator begins gathering the patrician bloc against the consul.",
+      affectedEntities: [{ kind: "character", id: "quintus-fabius" }],
+      visibility: "private",
+      discovery: { state: "private", knowableAtInstant: null, discoveredBy: [] },
+    });
+    const result = await compose([plot], { significanceByFactId: new Map([[plot.id, 90]]) });
+    expect(result.entries).toHaveLength(0);
+  });
+
+  it("does not go blank when nothing personal happened", async () => {
+    const far = fact({ summary: "A farmstead burns in Latium.", affectedEntities: [{ kind: "province", id: "latium" }] });
+    const result = await compose([far], { significanceByFactId: new Map([[far.id, 1]]) });
+    // Below every bar, and still one entry: a record that goes blank teaches
+    // the reader to stop opening it.
+    expect(result.entries).toHaveLength(1);
+  });
+});

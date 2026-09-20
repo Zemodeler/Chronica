@@ -17,7 +17,7 @@ import {
   type BurstFactRow,
   type ChronicaDatabase,
 } from "@chronica/db";
-import { FactSchema, PlayerDecisionSchema, diffWorlds, formatWorldDate, type Fact, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
+import { FactSchema, PlayerDecisionSchema, buildStation, diffWorlds, formatWorldDate, holdsPolityStanding, type Fact, type Office, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
 import { closeTheBooks, composeChronicle, runSimulationBurst, whoSeeksThePlayer, type AnsweredDecision, type ChronicleEntry, type SimModelPort } from "@chronica/sim";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { requiredDatabaseUrl } from "./database-url";
@@ -189,6 +189,8 @@ export async function submitOrder(
       polityOfCharacter: (id) => result.world.characters.find((character) => character.id === id)?.polityId ?? null,
       nameOf: (ref) => nameOfSubject(result.world, ref),
       ownEntityIds: ownSideOf(result.world, actorRef.id, actorPolityId),
+      personalEntityIds: personallyTouchedBy(result.world, actorRef.id, actorPolityId, offices),
+      orderFactIds: new Set(result.orderFactIds),
       changes: diffWorlds(view.world, result.world),
     });
 
@@ -305,6 +307,31 @@ function namedTags(world: WorldState, stored: unknown): { kind: string; id: stri
     if (typeof label === "string" && label.length > 0) return [{ kind, id, label }];
     return [{ kind, id, label: nameOfSubject(world, { kind, id } as OrderPartyRef) ?? id }];
   });
+}
+
+/**
+ * What the reader personally touches, as against what their government does.
+ *
+ * A consul's realm and a consul's business are the same thing, so somebody with
+ * standing over their whole power gets the polity-wide set unchanged and their
+ * record reads exactly as it did. For everybody else it is their money, their
+ * people, their ground and the matters they are party to -- their country's
+ * doings still reach them, as news competing on weight like anything else.
+ */
+function personallyTouchedBy(world: WorldState, characterId: string, polityId: string | null, offices: readonly Office[]): Set<string> {
+  const station = buildStation({ world, characterId, offices });
+  if (holdsPolityStanding(station)) return ownSideOf(world, characterId, polityId);
+  return new Set<string>([
+    characterId,
+    ...station.accountIds,
+    ...station.forceIds,
+    ...station.provinceIds,
+    ...station.institutionIds,
+    ...station.procedureIds,
+    ...station.holdingIds,
+    ...station.knownCharacterIds,
+    ...station.storylineIds,
+  ]);
 }
 
 function ownSideOf(world: WorldState, characterId: string, polityId: string | null): Set<string> {

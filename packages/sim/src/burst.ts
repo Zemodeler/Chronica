@@ -134,6 +134,14 @@ export interface BurstResult {
    * the same events, with a wider audience, for the caller to write back.
    */
   readonly rediscoveredFacts: readonly Fact[];
+  /**
+   * The facts this burst produced in answering the order itself.
+   *
+   * The Chronicle's guarantee that an order is always answered rests on this:
+   * a floor under the answer to the question actually asked, rather than under
+   * the whole category of the reign's business.
+   */
+  readonly orderFactIds: readonly string[];
   /** Fact id → the significance its author assigned it, for storage and pacing. */
   readonly significanceByFactId: ReadonlyMap<string, number>;
   readonly scheduled: readonly ScheduledEventDraft[];
@@ -533,6 +541,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   if (orchestration.parseFailure !== null) parseFailures.push(orchestration.parseFailure);
   const factsBefore = newFacts.length;
   applyProposal(orchestration.output, input.actorRef, 0, true);
+  const orderFactIds = newFacts.slice(factsBefore).map((fact) => fact.id);
   if (orchestration.output.playerDecision !== null) playerDecision = orchestration.output.playerDecision;
 
   // Whether the seed was taken up decides the ledger, and who it landed on
@@ -686,6 +695,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     outcome,
     stopReason,
     accumulatedSignificance: significance,
+    orderFactIds,
     narrative,
     frictions,
     utterances,
