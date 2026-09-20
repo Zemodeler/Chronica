@@ -54,6 +54,32 @@ const GENERIC_ROLE_WORDS = new Set([
  * all is treated as having one implicit seat, which is how a scenario that
  * never authored seats has always behaved.
  */
+/**
+ * An office of this power whose name the role names, whether or not a seat in
+ * it is free.
+ *
+ * Separate from `findOfficeSeatForRole` because the two questions came apart
+ * the moment offices could be created: "is there such an office" and "is there
+ * room in it" are different, and answering only the second means a consulship
+ * whose seats are both filled looks like no consulship at all -- so the world,
+ * asked for another consul, would invent a second consulship rather than
+ * enlarging the one that exists.
+ */
+export function findOfficeForRole(
+  offices: readonly Office[],
+  polityId: string | null,
+  role: string,
+): Office | undefined {
+  if (polityId === null) return undefined;
+  const roleTokens = labelTokens(role);
+  if (roleTokens.size === 0) return undefined;
+  return offices.find((office) => {
+    if (office.polityId !== polityId) return false;
+    const officeTokens = labelTokens(office.label);
+    return officeTokens.size > 0 && [...officeTokens].every((token) => roleTokens.has(token));
+  });
+}
+
 export function findOfficeSeatForRole(
   world: WorldState,
   scenarioGovernment: { readonly offices: readonly Office[] } | undefined,

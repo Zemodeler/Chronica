@@ -69,6 +69,13 @@ How to answer well:
    and none exists, create one, with a reason they exist. They will persist and may
    matter later. Give them what they are worth: a merchant you invent to lend the
    state money must be rich enough to lend it, and "wealth" is how you say so.
+   Make the office too, where the office is the point. "officeLabel" names what
+   they are made -- "Military Quaestor", "Prefect of the Levy" -- and if no such
+   office exists yet the government creates it, which is what a government does
+   constantly. Say what it lets its holder do in "officeAuthorises", naming the
+   operations above. Leave that empty and it is a title, which is a real thing
+   to be and confers nothing. An office that already exists keeps the powers it
+   has; a new holder does not rewrite them.
 6. Populate the world's countries. A country that holds land has people in it,
    and any listed under COUNTRIES WITH NOBODY IN THEM must be given them in this
    answer -- a ruler or chieftain of their own culture, and the forces they would

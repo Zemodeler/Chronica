@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ElapsedStepSchema, MaterialWorldStateSchema } from "../material-state";
-import { CharacterSchema } from "../characters/character";
+import { CharacterSchema, OfficeSchema } from "../characters/character";
 import { CharacterContinuitySchema, EncounterMemorySchema } from "../continuity/continuity";
 import { WorldPinsSchema } from "./clock";
 import { WorldInstantSchema, type WorldInstant } from "./instant";
@@ -116,6 +116,22 @@ export const WorldStateSchema = z
     storylines: z.array(WorldStorylineSchema).default([]),
     /** The narrator's own bookkeeping -- see `NarratorLedgerSchema`. */
     narrator: NarratorLedgerSchema.default(EMPTY_NARRATOR_LEDGER),
+    /**
+     * Offices the world has made for itself, beside the ones the scenario opened with.
+     *
+     * A scenario's government was a fixed list, so the only offices that could
+     * ever exist were the handful somebody authored -- four, in the Punic Wars.
+     * "Name a quaestor to handle the war chest" matched nothing, and the man
+     * was created holding no office at all, because there was no quaestorship
+     * for him to hold and no way to make one.
+     *
+     * A government invents offices constantly: a commission, a prefecture, a
+     * command created for one war. The scenario's list is the opening state of
+     * a thing that grows, not the whole of what may exist (VISION §9). These
+     * are merged with it everywhere offices are read, so an office the world
+     * made confers authority exactly as an authored one does.
+     */
+    offices: z.array(OfficeSchema).default([]),
     /** Current authoritative combat, siege, and war state for map projection. */
     conflicts: MapConflictsOverlaySchema.default({ battles: [], sieges: [], wars: [] }),
     material: MaterialWorldStateSchema,
