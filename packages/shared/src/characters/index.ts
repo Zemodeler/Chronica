@@ -17,6 +17,7 @@ export * from "./knowledgebase";
 export * from "./life-events";
 export * from "./mind";
 export * from "./opinion";
+export * from "./access";
 export * from "./office-powers";
 export * from "./player-materialization";
 export * from "./political-authority";

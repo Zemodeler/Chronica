@@ -1151,6 +1151,8 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .chat-discover-input { width: 100%; padding: .5rem .7rem; border: 1px solid var(--border); border-radius: .45rem; background: var(--surface-raised); color: var(--text); font-size: .9rem; box-sizing: border-box; }
 .chat-discover-input:focus { outline: none; border-color: var(--accent); }
 .chat-discover-error { margin: 0; padding: .5rem .7rem; border-radius: .4rem; background: color-mix(in srgb, red 12%, var(--surface)); color: var(--text); font-size: .85rem; border: 1px solid color-mix(in srgb, red 30%, var(--border)); }
+/* What it would take, when station is what stands in the way: never empty, and the last rung is always "write to him". */
+.chat-discover-ladder { margin: .4rem 0 0; padding: .5rem .7rem .5rem 1.6rem; border-radius: .4rem; background: var(--surface); border: 1px solid var(--border); font-size: .82rem; color: var(--muted); display: grid; gap: .3rem; }
 .chat-discover-actions { display: flex; gap: .5rem; justify-content: flex-end; }
 
 /* ── The council: the player's whole interface to the simulation ────────── */

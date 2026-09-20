@@ -42,6 +42,8 @@ export function ChatPanel({ gameId, playerCharacterId, openSessionId, onOpenSess
   const [discoverQuery, setDiscoverQuery] = useState("");
   const [discovering, setDiscovering] = useState(false);
   const [discoverError, setDiscoverError] = useState<string | null>(null);
+  /** What it would take, when station is what stands in the way (slice 10). */
+  const [discoverLadder, setDiscoverLadder] = useState<{ rung: string; label: string }[]>([]);
   const [groupParticipantIds, setGroupParticipantIds] = useState<string[]>([]);
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -164,6 +166,7 @@ export function ChatPanel({ gameId, playerCharacterId, openSessionId, onOpenSess
     if (!query || discovering) return;
     setDiscovering(true);
     setDiscoverError(null);
+    setDiscoverLadder([]);
     try {
       const res = await fetch(
         `/api/games/${encodeURIComponent(gameId)}/conversations/discover`,
@@ -173,9 +176,14 @@ export function ChatPanel({ gameId, playerCharacterId, openSessionId, onOpenSess
         setDiscoverError("Could not reach the server. Please try again.");
         return;
       }
-      const data = await res.json() as { status: "found" | "unavailable"; sessionId?: string; explanation?: string };
+      const data = await res.json() as {
+        status: "found" | "unavailable"; sessionId?: string; explanation?: string;
+        ladder?: { rung: string; label: string }[];
+      };
       if (data.status === "unavailable") {
         setDiscoverError(data.explanation ?? "No one matching that description could be found nearby.");
+        // Never a dead end: the last rung is always "write to him and see".
+        setDiscoverLadder(data.ladder ?? []);
         return;
       }
       if (data.sessionId) {
@@ -306,6 +314,9 @@ export function ChatPanel({ gameId, playerCharacterId, openSessionId, onOpenSess
             autoFocus
           />
           {discoverError && <p className="chat-discover-error">{discoverError}</p>}
+          {discoverLadder.length > 0 && <ul className="chat-discover-ladder">
+            {discoverLadder.map((step) => <li key={step.rung + step.label}>{step.label}</li>)}
+          </ul>}
           <div className="chat-discover-actions">
             <button type="button" className="btn-secondary" onClick={closeDiscover}>Cancel</button>
             <button type="submit" className="btn-primary" disabled={discovering || !discoverQuery.trim()}>
