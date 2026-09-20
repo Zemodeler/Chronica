@@ -239,3 +239,37 @@ describe("an answer that is right but nested wrong", () => {
     expect(foldStrayProposalKeys(structuredClone(fine))).toEqual(fine);
   });
 });
+
+describe("an op written as a field of the proposal", () => {
+  it("puts social_events back in the deltas instead of losing four people's answers", () => {
+    // From a live game, and my own fault: the prompt named "social_events"
+    // beside "relationCauses" and "observedTraits", both of which *are*
+    // fields, so the model read it as one. All four actors in the batch were
+    // correct in substance and the whole batch was discarded.
+    const misplaced = {
+      actors: [{
+        actorRef: { kind: "character", id: "hanno" },
+        reasoning: "He takes the measure of the man.",
+        proposal: {
+          deltas: [{ op: "belief_set" }],
+          social_events: { events: [{ participantCharacterRefs: ["hanno", "marcus"], kind: "conversation", visibility: "polity", summary: "They met." }] },
+        },
+      }],
+    };
+    const folded = foldStrayProposalKeys(misplaced) as { actors: { proposal: { deltas: { op: string }[] } }[] };
+    expect(folded.actors[0]!.proposal.deltas).toHaveLength(2);
+    expect(folded.actors[0]!.proposal.deltas[1]!.op).toBe("social_events");
+    expect(folded.actors[0]!.proposal).not.toHaveProperty("social_events");
+  });
+
+  it("accepts a bare event where the model skipped the wrapper", () => {
+    const bare = {
+      actors: [{
+        actorRef: { kind: "character", id: "hanno" }, reasoning: "x",
+        proposal: { deltas: [], social_events: [{ participantCharacterRefs: ["a", "b"], kind: "insult", visibility: "polity", summary: "Words were had." }] },
+      }],
+    };
+    const folded = foldStrayProposalKeys(bare) as { actors: { proposal: { deltas: { op: string; events: unknown[] }[] } }[] };
+    expect(folded.actors[0]!.proposal.deltas[0]!.events).toHaveLength(1);
+  });
+});

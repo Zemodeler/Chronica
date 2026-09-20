@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TRAIT_REGISTRY, TraitDefinitionSchema, getTraitDefinition, observeTraits, resolveTraits, validateTraitIds } from "./traits";
+import { TRAIT_REGISTRY, TraitDefinitionSchema, canonicalTraitIds, getTraitDefinition, observeTraits, resolveTraits, validateTraitIds } from "./traits";
 
 describe("TRAIT_REGISTRY", () => {
   it("seeds the initial ten traits, each schema-valid", () => {
@@ -94,5 +94,35 @@ describe("the people around you decide what you are", () => {
     const full = ["cautious", "ambitious", "dutiful", "sociable", "disciplined", "compassionate", "vengeful", "cruel"];
     const outcome = observeTraits([], [{ characterId: "marcus", observerCharacterId: "hanno", traitId: "bold", note: "One more." }], traitsOf(full), 10, ids());
     expect(outcome.observations).toHaveLength(0);
+  });
+});
+
+describe("reducing a description to words the engine has", () => {
+  it("maps what a live world was actually storing as traits", () => {
+    // Every one of these was a real trait on a real character in a real save,
+    // and not one of them conferred anything: the dialogue guidance NPC
+    // prompts read and the incompatibilities the observation rule checks both
+    // live in the registry, and none of these were in it.
+    expect(canonicalTraitIds(["methodical"])).toEqual(["disciplined"]);
+    expect(canonicalTraitIds(["charismatic"])).toEqual(["sociable"]);
+    expect(canonicalTraitIds(["cavalry leader", "pragmatic"])).toEqual(["disciplined"]);
+    expect(canonicalTraitIds(["hellenistic_governor", "administrative"])).toEqual(["disciplined"]);
+    expect(canonicalTraitIds(["protective of tribal autonomy"])).toEqual(["compassionate"]);
+  });
+
+  it("passes a real registry id straight through, whoever authored it", () => {
+    expect(canonicalTraitIds(["bold", "dutiful"])).toEqual(["bold", "dutiful"]);
+  });
+
+  it("drops what it cannot place rather than storing furniture", () => {
+    expect(canonicalTraitIds(["anti-roman", "hellenic"])).toEqual([]);
+  });
+
+  it("keeps neither half of a contradiction it has no basis to settle", () => {
+    expect(canonicalTraitIds(["cautious", "reckless"])).toEqual([]);
+  });
+
+  it("is order-stable, so two identically-described people are identical", () => {
+    expect(canonicalTraitIds(["loyal", "bold"])).toEqual(canonicalTraitIds(["bold", "loyal"]));
   });
 });
