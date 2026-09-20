@@ -271,28 +271,6 @@ function provinceIds(map: GeoJsonMap, prefix: string, omit: readonly string[] = 
   return new Set(map.features.filter((feature) => feature.properties.kind === "province" && feature.id.startsWith(prefix) && !excluded.has(feature.id)).map((feature) => feature.id));
 }
 
-// These are territorial reconstructions rather than exact frontiers.  They
-// deliberately use broad Iron Age community areas, while keeping every base
-// coastline and external border intact.
-const ILLYRIAN_SITES: readonly HistoricalSite[] = [
-  { id: "punic-illyria-histri", name: "Histri", coordinate: [13.85, 45.10] },
-  { id: "punic-illyria-iapodes", name: "Iapodes", coordinate: [15.85, 44.90] },
-  { id: "punic-illyria-liburni", name: "Liburni", coordinate: [15.30, 44.10] },
-  { id: "punic-illyria-delmatae", name: "Delmatae", coordinate: [16.70, 43.60] },
-  { id: "punic-illyria-daorsi", name: "Daorsi", coordinate: [17.90, 43.35] },
-  { id: "punic-illyria-autariatae", name: "Autariatae", coordinate: [18.60, 43.55] },
-  { id: "punic-illyria-pirustae", name: "Pirustae", coordinate: [19.80, 42.00] },
-  { id: "punic-illyria-ardiaei", name: "Ardiaei", coordinate: [19.00, 42.30] },
-  { id: "punic-illyria-docleatae", name: "Docleatae", coordinate: [19.30, 42.60] },
-  { id: "punic-illyria-labeatae", name: "Labeatae", coordinate: [19.50, 42.20] },
-  { id: "punic-illyria-taulantii", name: "Taulantii", coordinate: [19.50, 41.30] },
-  { id: "punic-illyria-parthini", name: "Parthini", coordinate: [20.10, 41.30] },
-  { id: "punic-illyria-dassaretii", name: "Dassaretii", coordinate: [20.70, 40.70] },
-  { id: "punic-illyria-dardani", name: "Dardani", coordinate: [21.00, 42.70] },
-  { id: "punic-illyria-breuci", name: "Breuci", coordinate: [18.70, 45.10] },
-  { id: "punic-illyria-pannonii", name: "Pannonii", coordinate: [17.70, 45.50] },
-];
-
 const THRACIAN_SITES: readonly HistoricalSite[] = [
   { id: "punic-thrace-odrysians", name: "Odrysians", coordinate: [26.30, 42.50] },
   { id: "punic-thrace-bessi", name: "Bessi", coordinate: [24.70, 41.70] },
@@ -333,17 +311,6 @@ const LOW_COUNTRIES_SITES: readonly HistoricalSite[] = [
   { id: "punic-low-countries-frisii", name: "Frisii", coordinate: [5.50, 53.20] },
 ];
 
-// These labels identify Iron Age communities in the territory of today's
-// Hungary and Czechia/Slovakia; they do not project modern national identities
-// into the 270 BCE setting. Their boundaries are broad reconstructions.
-const HUNGARIAN_SITES: readonly HistoricalSite[] = [
-  { id: "punic-hungary-boii-western-pannonia", name: "Boii of western Pannonia", coordinate: [17.20, 47.65] },
-  { id: "punic-hungary-pannonii", name: "Pannonii", coordinate: [18.25, 46.55] },
-  { id: "punic-hungary-scordisci", name: "Scordisci", coordinate: [19.10, 46.15] },
-  { id: "punic-hungary-carpathian-communities", name: "Carpathian communities", coordinate: [19.65, 47.50] },
-  { id: "punic-hungary-upper-tisza-communities", name: "Upper Tisza communities", coordinate: [21.20, 47.85] },
-];
-
 const CZECHOSLOVAK_SITES: readonly HistoricalSite[] = [
   { id: "punic-czechoslovakia-boii-bohemia", name: "Boii of Bohemia", coordinate: [14.45, 50.05] },
   { id: "punic-czechoslovakia-boii-moravia", name: "Boii of Moravia", coordinate: [16.85, 49.20] },
@@ -354,64 +321,6 @@ const CZECHOSLOVAK_SITES: readonly HistoricalSite[] = [
 
 const LUXEMBOURG_SITES: readonly HistoricalSite[] = [
   { id: "punic-luxembourg-treveri", name: "Treveri", coordinate: [6.10, 49.75] },
-];
-
-const IBERIAN_SITES: readonly HistoricalSite[] = [
-  { id: "punic-iberia-gallaeci", name: "Gallaeci", coordinate: [-8.41, 42.88] },
-  { id: "punic-iberia-astures", name: "Astures", coordinate: [-5.85, 43.36] },
-  { id: "punic-iberia-cantabri", name: "Cantabri", coordinate: [-4.08, 43.29] },
-  { id: "punic-iberia-varduli", name: "Varduli and Autrigones", coordinate: [-2.69, 42.85] },
-  { id: "punic-iberia-vascones", name: "Vascones", coordinate: [-1.64, 42.82] },
-  { id: "punic-iberia-vaccei", name: "Vaccei", coordinate: [-4.72, 41.65], territorialWeight: 0.07 },
-  { id: "punic-iberia-vettones", name: "Vettones", coordinate: [-5.75, 40.46], territorialWeight: 0.11 },
-  { id: "punic-iberia-lusitani", name: "Lusitani", coordinate: [-7.35, 39.82], territorialWeight: 0.15 },
-  { id: "punic-iberia-carpetani", name: "Carpetani", coordinate: [-3.70, 40.42], territorialWeight: -0.05 },
-  { id: "punic-iberia-celtiberi", name: "Celtiberi", coordinate: [-2.22, 41.21], territorialWeight: 0.16 },
-  { id: "punic-iberia-oretani", name: "Oretani", coordinate: [-3.42, 38.98], territorialWeight: 0.04 },
-  { id: "punic-iberia-turdetani", name: "Turdetani", coordinate: [-5.99, 37.39], territorialWeight: -0.08 },
-  { id: "punic-iberia-turduli", name: "Turduli", coordinate: [-6.18, 38.88], territorialWeight: 0.09 },
-  { id: "punic-iberia-celtici", name: "Celtici", coordinate: [-6.80, 37.68], territorialWeight: 0.08 },
-  { id: "punic-iberia-conii", name: "Conii", coordinate: [-7.96, 37.02] },
-  { id: "punic-iberia-bastetani", name: "Bastetani", coordinate: [-2.77, 37.39], territorialWeight: 0.06 },
-  { id: "punic-iberia-contestani", name: "Contestani", coordinate: [-0.70, 38.35], territorialWeight: 0.1 },
-  { id: "punic-iberia-edetani", name: "Edetani", coordinate: [-0.38, 39.47], territorialWeight: 0.09 },
-  { id: "punic-iberia-ilergetes", name: "Ilergetes", coordinate: [0.62, 41.62] },
-  { id: "punic-iberia-lacetani", name: "Lacetani", coordinate: [1.83, 41.58] },
-];
-
-const ENGLAND_SITES: readonly HistoricalSite[] = [
-  { id: "punic-britain-cornish", name: "South-western Britons", coordinate: [-4.53, 50.42] },
-  { id: "punic-britain-dorset", name: "Southern Chalkland Britons", coordinate: [-2.44, 50.72] },
-  { id: "punic-britain-thames", name: "Thames Basin Britons", coordinate: [-0.13, 51.51] },
-  { id: "punic-britain-kentish", name: "Channel Britons", coordinate: [0.52, 51.28] },
-  { id: "punic-britain-fenland", name: "Fenland Britons", coordinate: [0.18, 52.64] },
-  { id: "punic-britain-east-anglian", name: "East Anglian Britons", coordinate: [1.30, 52.63] },
-  { id: "punic-britain-midlands", name: "Midland Britons", coordinate: [-1.54, 52.64] },
-  { id: "punic-britain-marches", name: "Marchland Britons", coordinate: [-2.71, 52.35] },
-  { id: "punic-britain-humber", name: "Humber Britons", coordinate: [-0.54, 53.75] },
-  { id: "punic-britain-pennine", name: "Pennine Britons", coordinate: [-1.78, 54.16] },
-  { id: "punic-britain-cumbrian", name: "Cumbrian Britons", coordinate: [-3.05, 54.89] },
-  { id: "punic-britain-northumbrian", name: "Northern English Britons", coordinate: [-1.62, 55.05] },
-];
-
-const SCOTLAND_SITES: readonly HistoricalSite[] = [
-  { id: "punic-britain-southern-uplands", name: "Southern Upland Britons", coordinate: [-3.55, 55.55] },
-  { id: "punic-britain-forth-clyde", name: "Forth-Clyde Communities", coordinate: [-4.25, 55.95] },
-  { id: "punic-britain-east-lowlands", name: "Eastern Lowland Communities", coordinate: [-3.18, 56.20] },
-  { id: "punic-britain-grampian", name: "Grampian Communities", coordinate: [-4.60, 56.82] },
-  { id: "punic-britain-northeast", name: "North-eastern Communities", coordinate: [-2.10, 57.25] },
-  { id: "punic-britain-hebridean", name: "Hebridean Communities", coordinate: [-6.05, 57.50] },
-  { id: "punic-britain-highland", name: "Northern Highland Communities", coordinate: [-4.85, 58.40] },
-  { id: "punic-britain-northern-isles", name: "Northern Isles Communities", coordinate: [-3.00, 59.00] },
-];
-
-const WALES_SITES: readonly HistoricalSite[] = [
-  { id: "punic-britain-welsh-northwest", name: "North-western Britons", coordinate: [-4.15, 53.15] },
-  { id: "punic-britain-welsh-northeast", name: "North-eastern Welsh Britons", coordinate: [-3.08, 53.10] },
-  { id: "punic-britain-welsh-midlands", name: "Central Upland Britons", coordinate: [-3.70, 52.35] },
-  { id: "punic-britain-welsh-southwest", name: "South-western Welsh Britons", coordinate: [-4.25, 51.78] },
-  { id: "punic-britain-welsh-southeast", name: "South-eastern Welsh Britons", coordinate: [-3.05, 51.67] },
-  { id: "punic-britain-welsh-marches", name: "Welsh March Communities", coordinate: [-2.80, 52.05] },
 ];
 
 const base = europeNorthAfricaGeoJson;

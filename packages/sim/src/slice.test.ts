@@ -306,12 +306,12 @@ describe("what the world is following, and what stirs", () => {
         orderText: "Invade the Boii lands", facts: [], dueEvents: [], pendingEvents: [],
         narratorSeed: {
           key: "seed-abc", kind: "world_event", archetype: "plague", severity: "serious", secret: false, oneShot: false, repeated: false, pressureId: null,
-          target: { provinceId: "punic-italy-latium", provinceName: "Latium", polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null },
+          target: { provinceId: "punic-italy-latium", provinceName: "Latium", polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null, otherPolityId: null, otherPolityName: null },
           inPlayerRealm: true, why: "The world has been quiet at home for a while.", brief: "Sickness has come to Latium [punic-italy-latium].",
         },
       }),
     );
-    expect(stirred).toContain("THE WORLD STIRS (seed seed-abc)");
+    expect(stirred).toContain("(seed seed-abc)");
     expect(stirred).toContain("Latium [punic-italy-latium]");
     expect(stirred).toContain('carrying seedKey "seed-abc"');
     expect(stirred).toContain("It is news");

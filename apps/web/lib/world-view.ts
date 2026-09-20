@@ -68,7 +68,6 @@ export interface WorldViewMeta {
 const NO_ACCOUNT: AccountView = { id: "no-account", label: "No personal account", balance: 0, recentChanges: [] };
 
 function projectOverlay(world: WorldState): DynamicMapOverlay {
-  const polityNames = new Map(world.map.polities.map((polity) => [polity.id, polity.name]));
   const characterNames = new Map(world.characters.map((character) => [character.id, character.name]));
 
   return DynamicMapOverlaySchema.parse({

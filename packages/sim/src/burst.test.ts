@@ -557,7 +557,7 @@ function capturingScriptedPort(script: Partial<Record<SimOperation, string[]>>):
 
 const PLOT_SEED = {
   key: "seed-plot", kind: "person_problem" as const, archetype: "conspiracy", severity: "serious" as const, secret: true, oneShot: false, repeated: false, pressureId: null,
-  target: { provinceId: null, provinceName: null, polityId: "rome", polityName: "Roman Republic", characterId: "quintus-fabius", characterName: "Quintus Fabius" },
+  target: { provinceId: null, provinceName: null, polityId: "rome", polityName: "Roman Republic", characterId: "quintus-fabius", characterName: "Quintus Fabius", otherPolityId: null, otherPolityName: null },
   inPlayerRealm: true, why: "The world has been quiet at home.", brief: "Quintus Fabius [quintus-fabius] has begun something against the government he serves.",
 };
 
@@ -611,7 +611,7 @@ describe("the world stirs: a secret plot", () => {
 
   it("puts the seed to the orchestrator, and records that it was taken up", async () => {
     const { port, result } = await run();
-    expect(port.shown.simulate_orchestrate![0]).toContain("THE WORLD STIRS (seed seed-plot)");
+    expect(port.shown.simulate_orchestrate![0]).toContain("(seed seed-plot)");
     const thread = result.world.storylines.find((storyline) => storyline.seedKey === "seed-plot")!;
     expect(thread.origin).toBe("world");
     expect(thread.visibility).toBe("private");
@@ -695,7 +695,7 @@ describe("the world stirs: a plague in the open", () => {
   const LATIUM = "ita-local-23120603B86473916475875";
   const SEED = {
     ...PLOT_SEED, key: "seed-plague", kind: "world_event" as const, archetype: "plague", secret: false,
-    target: { provinceId: LATIUM, provinceName: "Latium", polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null },
+    target: { provinceId: LATIUM, provinceName: "Latium", polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null, otherPolityId: null, otherPolityName: null },
     brief: `Sickness has come to Latium [${LATIUM}].`,
   };
   const PLAGUE = JSON.stringify({

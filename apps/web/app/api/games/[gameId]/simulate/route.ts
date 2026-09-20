@@ -4,7 +4,7 @@ import { getGameView, submitOrder } from "../../../../../lib/simulation-service"
 export async function POST(request: Request, { params }: { params: Promise<{ gameId: string }> }) {
   const { gameId } = await params;
   const body: unknown = await request.json().catch(() => null);
-  const orderText = typeof body === "object" && body !== null && "orderText" in body ? String((body as { orderText: unknown }).orderText) : "";
+  const orderText = typeof body === "object" && body !== null && "orderText" in body ? String(body.orderText) : "";
   if (orderText.trim().length === 0) return Response.json({ error: "An order is required." }, { status: 400 });
   if (orderText.length > 2_000) return Response.json({ error: "That order is too long." }, { status: 400 });
 

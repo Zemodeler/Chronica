@@ -69,6 +69,9 @@ export interface NarratorSeed {
     readonly polityName: string | null;
     readonly characterId: string | null;
     readonly characterName: string | null;
+    /** The other party, where the trouble is between two powers rather than in one. */
+    readonly otherPolityId: string | null;
+    readonly otherPolityName: string | null;
   };
   readonly inPlayerRealm: boolean;
   /** Offered once before and not taken up. */
@@ -177,6 +180,10 @@ interface Archetype {
   readonly oneShot: boolean;
   /** Chance in twelfths that this is kept from the world. */
   readonly secretTwelfths: number;
+  /** Needs a second power, and is not offered at all when the map has none to offer. */
+  readonly needsAdversary?: boolean;
+  /** Another enemy. A country already fighting one gets fewer of these; it gets no fewer harvests. */
+  readonly rival?: boolean;
   readonly brief: (target: NarratorSeed["target"], severity: SeedSeverity) => string;
 }
 
@@ -186,6 +193,7 @@ const magnitude = (severity: SeedSeverity, minor: string, serious: string, grave
 const person = (target: NarratorSeed["target"]): string => `${target.characterName} [${target.characterId}]`;
 const place = (target: NarratorSeed["target"]): string => `${target.provinceName} [${target.provinceId}]`;
 const power = (target: NarratorSeed["target"]): string => `${target.polityName} [${target.polityId}]`;
+const other = (target: NarratorSeed["target"]): string => `${target.otherPolityName} [${target.otherPolityId}]`;
 
 const PERSON_PROBLEM_TAIL =
   'Decide what it actually is. Put it on them with "character_pressure_set" and, where they now mean to do something about it, "character_intent_set"; record what has already happened as a fact naming them.';
@@ -220,14 +228,37 @@ const ARCHETYPES: readonly Archetype[] = [
   { kind: "world_event", name: "omen", weight: 6, oneShot: true, secretTwelfths: 0,
     brief: (t, s) => `An omen has been seen at ${place(t)}: ${magnitude(s, "a sign the priests argue over", "a portent the whole city has heard of", "a prodigy that has the people in the temples")}. Decide what was seen and how it is read. Record it as a public fact; move whoever reads it with "belief_set", and the province's temper with "province_material_shift" if the city is shaken.` },
 
-  { kind: "new_actor", name: "pirate_band", weight: 8, oneShot: false, secretTwelfths: 0,
+  { kind: "new_actor", name: "pirate_band", weight: 8, oneShot: false, secretTwelfths: 0, rival: true,
     brief: (t, s) => `A pirate squadron has appeared off ${place(t)}: ${magnitude(s, "a few hulls preying on coasters", "a fleet strong enough to close the strait", "a pirate king with a harbour of his own")}. ${
       s === "grave"
         ? `A pirate king with a harbour is a power: create them with "polity_create" taking ${place(t)} from ${power(t)}, with their captain under it.`
         : `Create their captain with "character_create" and their ships with "force_create" under ${power(t)} -- raiders who hold no ground are not a country.`
     } Record their arrival as a public fact, and give them a "character_intent_set". Their arrival is news; their existence is not, and gets no fact of its own.` },
-  { kind: "new_actor", name: "pretender", weight: 6, oneShot: false, secretTwelfths: 7,
+  { kind: "new_actor", name: "pretender", weight: 6, oneShot: false, secretTwelfths: 7, rival: true,
     brief: (t, s) => `A claimant has appeared in ${place(t)}: ${magnitude(s, "an exile with a grievance and a few followers", "a pretender with money behind him", "a rival for the rule of the whole power")}. Create them with "character_create" under ${power(t)} -- a claimant wants the power that exists, not a new one, so do not found a country for them -- record their appearance as a fact, and plant what they mean to do with "character_intent_set". Their arrival is news; their existence is not.` },
+  // Nothing in this table has ever started a war, and it showed: a world ran
+  // for years with exactly one war in it, between two British tribes, because
+  // the only way one could open was a rebellion seceding. Conquest, battles and
+  // the whole battle-account machinery were built and unreachable.
+  { kind: "world_event", name: "war", weight: 9, oneShot: false, secretTwelfths: 0, needsAdversary: true,
+    brief: (t, s) => `${power(t)} and ${other(t)} have come to the point over ${place(t)}: ${magnitude(s, "a border incident neither government ordered", "a cargo seized, a garrison turned back, and no apology offered", "a claim on the ground itself that neither will drop")}. Decide what the quarrel actually is, who struck first and who refused to give way. Open it with "agreement_open" of kind "war" between ${power(t)} and ${other(t)}, record the breaking as a public fact naming both powers and the province, and give whoever pushed for it a "character_intent_set". Do not fight it here: opening it is the whole of this.` },
+
+  // ── What a month is mostly made of ─────────────────────────────────────
+  //
+  // Everything above is trouble, and a record of nothing but trouble reads
+  // like a crisis rather than a place. These are the ordinary business of a
+  // province: cheap, one-shot, no thread, and half of them good news.
+  { kind: "world_event", name: "harvest", weight: 7, oneShot: true, secretTwelfths: 0,
+    brief: (t, s) => `The year has turned in ${place(t)}: ${magnitude(s, "a fair harvest and a quiet market", "a harvest better than anyone expected (food security +1200, stability +400)", "a glut -- granaries full, grain cheap, and the men who bought early ruined (food security +2500, stability +600)")}. Move it with "province_material_shift" and record it as a public fact naming the province. Nobody need do anything about it.` },
+  { kind: "world_event", name: "games", weight: 6, oneShot: true, secretTwelfths: 0,
+    brief: (t, s) => `${place(t)} is holding ${magnitude(s, "its usual festival", "games somebody paid a great deal for", "a spectacle the whole province has come in for")}. Decide who paid and what they got for it: a public fact naming the province, a "legitimacy_shift" or a "social_events" entry for whoever's name is on it, and a "province_material_shift" if the city is the better for it. Somebody's standing is bought here, cheaply or dearly.` },
+  { kind: "world_event", name: "building", weight: 6, oneShot: true, secretTwelfths: 0,
+    brief: (t, s) => `Work has finished in ${place(t)}: ${magnitude(s, "a cistern, a granary, a length of road", "a temple or a harbour mole", "a work the province will be known for")}. Decide what it is and whose name is on it. Record it as a public fact naming the province, move the province with "province_material_shift", and put the credit somewhere with "social_events" or a "legitimacy_shift".` },
+  { kind: "world_event", name: "market", weight: 6, oneShot: true, secretTwelfths: 0,
+    brief: (t, s) => `The price of something has moved in ${place(t)}: ${magnitude(s, "grain up a little and the bakers complaining", "silver or grain moving enough that fortunes turn on it", "a shortage the magistrates cannot talk their way out of")}. Decide what and why. Record it as a public fact naming the province, and move what it actually changes -- "income_source_upsert" for a trade that now pays differently, "province_material_shift" for a city going hungry, "money_transfer" for somebody who saw it coming.` },
+  { kind: "world_event", name: "strangers", weight: 5, oneShot: true, secretTwelfths: 0,
+    brief: (t, s) => `Strangers have come to ${place(t)}: ${magnitude(s, "a caravan from further off than usual", "a party of exiles asking to be let in", "a people on the move, with their carts and their herds")}. Decide who they are and how they are received. A public fact naming the province; "belief_set" for what the province makes of them; "province_material_shift" if they are fed or turned away.` },
+
   { kind: "new_actor", name: "cult", weight: 6, oneShot: false, secretTwelfths: 7,
     brief: (t, s) => `A prophet is drawing crowds in ${place(t)}: ${magnitude(s, "a preacher the magistrates are watching", "a movement with followers in every town", "a faith that answers to nobody but its leader")}. Create the leader with "character_create" under ${power(t)} and the movement with "generic_entity_create" (kind "faction"), record the stir as a fact, and plant what they mean to do with "character_intent_set".` },
 ];
@@ -251,6 +282,11 @@ export function livePressures(world: WorldState, pressures: readonly ScenarioHis
   return pressures.filter((pressure) => {
     if (spent.has(pressure.id)) return false;
     const when = pressure.when;
+    // A pressure that follows another waits for it. This is what makes a
+    // crisis a sequence: Messana asks for a protector, and only once it has
+    // asked is "and the other great power will not have it" a thing the age
+    // can reach for.
+    if (!when.afterPressureIds.every((id) => spent.has(id))) return false;
     if (world.instant.day < when.notBeforeDay) return false;
     if (when.notAfterDay !== null && world.instant.day > when.notAfterDay) return false;
     if (!when.politiesExist.every(exists)) return false;
@@ -287,13 +323,25 @@ function chooseSeverity(comfort: number, gameId: string, seedCount: number): See
 
 function chooseArchetype(input: NarratorInput, tension: TensionReading, seedCount: number): Archetype | null {
   const atWar = input.ownPolityId !== null && input.world.conflicts.wars.some((war) => war.polityAId === input.ownPolityId || war.polityBId === input.ownPolityId);
+  // Past half the ceiling only incidents that run their course; past the
+  // ceiling itself, still those. A world following twelve threads is a busy
+  // world, not a world where the harvest stops coming in.
   const eligible = ARCHETYPES.filter((archetype) => tension.openThreads < THREAD_CEILING / 2 || archetype.oneShot);
   if (eligible.length === 0) return null;
   const weighted = eligible.map((archetype) => {
     let weight = archetype.weight;
     // Things befall the comfortable; a country at war has enough new enemies.
+    //
+    // Only new *enemies*, though. This used to halve every `new_actor` and
+    // give world events their bonus only to a comfortable reign -- and war
+    // drives comfort down, so the moment a war started the table collapsed
+    // onto people's private troubles and the record became one man's defence,
+    // filed four times running. A country at war is still a country where the
+    // harvest comes in, a preacher draws a crowd and a price moves.
     if (archetype.kind === "world_event" && tension.comfort >= 0.75) weight += 3;
-    if (archetype.kind === "new_actor" && atWar) weight = Math.max(1, Math.round(weight / 2));
+    if (archetype.rival === true && atWar) weight = Math.max(1, Math.round(weight / 2));
+    // And a war is not a reason to start a second one in the same place.
+    if (archetype.needsAdversary === true && atWar) weight = Math.max(1, Math.round(weight / 2));
     return { archetype, weight };
   });
   const total = weighted.reduce((sum, entry) => sum + entry.weight, 0);
@@ -352,6 +400,56 @@ function chooseProvince(input: NarratorInput, tension: TensionReading, seedCount
   return top[stableChoice([input.gameId, "narrator", "province", seedCount], top.length)]!.province;
 }
 
+/**
+ * The power on the other side of a border, for trouble that takes two.
+ *
+ * Adjacency, because a war needs somewhere the two of them can actually reach
+ * each other, and the map already stores every crossing as an edge. Powers
+ * already at war with this one are skipped -- a second war between the same two
+ * is the same war -- and so is a power that holds nothing, which is a power
+ * that has already lost.
+ */
+function chooseAdversary(
+  input: NarratorInput,
+  provinceId: string,
+  polityId: string,
+  seedCount: number,
+): WorldState["map"]["polities"][number] | null {
+  const { world } = input;
+  const controllerOf = new Map(world.map.provinces.map((province) => [province.id, province.controllerPolityId]));
+  const alreadyFighting = new Set(
+    world.conflicts.wars
+      .filter((war) => war.polityAId === polityId || war.polityBId === polityId)
+      .map((war) => (war.polityAId === polityId ? war.polityBId : war.polityAId)),
+  );
+
+  const neighbours = new Set<string>();
+  for (const edge of world.map.edges) {
+    const side = edge.from === provinceId ? edge.to : edge.to === provinceId ? edge.from : null;
+    if (side === null) continue;
+    const controller = controllerOf.get(side) ?? null;
+    if (controller === null || controller === polityId || alreadyFighting.has(controller)) continue;
+    neighbours.add(controller);
+  }
+  // Nothing across this particular border: take any power that borders the
+  // power itself, so an inland province does not make a war impossible.
+  if (neighbours.size === 0) {
+    const ownProvinceIds = new Set(world.map.provinces.filter((province) => province.controllerPolityId === polityId).map((province) => province.id));
+    for (const edge of world.map.edges) {
+      const outward = ownProvinceIds.has(edge.from) ? edge.to : ownProvinceIds.has(edge.to) ? edge.from : null;
+      if (outward === null) continue;
+      const controller = controllerOf.get(outward) ?? null;
+      if (controller === null || controller === polityId || alreadyFighting.has(controller)) continue;
+      neighbours.add(controller);
+    }
+  }
+  if (neighbours.size === 0) return null;
+
+  const candidates = [...neighbours].sort();
+  const picked = candidates[stableChoice([input.gameId, "narrator", "adversary", seedCount], candidates.length)]!;
+  return world.map.polities.find((polity) => polity.id === picked) ?? null;
+}
+
 function chooseCharacter(input: NarratorInput, tension: TensionReading, seedCount: number, archetype: Archetype): WorldState["characters"][number] | null {
   const { world } = input;
   const home = landsAtHome(tension.comfort, input.gameId, seedCount);
@@ -388,29 +486,89 @@ function chooseCharacter(input: NarratorInput, tension: TensionReading, seedCoun
  * before the orchestrator, which is what caps it at one seed per order.
  */
 export function decideNarratorSeed(input: NarratorInput): NarratorSeed | null {
+  const tension = readTension(input.world, input.ownPolityId);
+  if (!cadenceHasRun(input, tension)) return null;
+  const ledger = input.world.narrator;
+  return seedAt(input, tension, ledger.seedCount, !ledger.consumed && ledger.lastSeedKey !== null, new Set());
+}
+
+/**
+ * Everything that stirs this burst, not merely the one thing.
+ *
+ * A burst covers a season, and for a long time it carried exactly one seed --
+ * so a record of three months came back with two entries, both of them the
+ * player's own business, and the world it was supposed to be set in did
+ * nothing at all. The count is the span since the world last stirred, at
+ * roughly one stirring per ten days: three in an ordinary month, more after a
+ * long silence, never more than a handful, because a prompt carrying nine
+ * briefs gets none of them done properly.
+ *
+ * Distinct ordinals, so each is a different archetype in a different place;
+ * the cadence gate is asked once, for the batch.
+ */
+export function decideNarratorSeeds(input: NarratorInput): NarratorSeed[] {
+  const tension = readTension(input.world, input.ownPolityId);
+  if (!cadenceHasRun(input, tension)) return [];
+  const ledger = input.world.narrator;
+
+  const since = ledger.lastSeedDay === null ? SEED_EVERY_DAYS * MIN_SEEDS_PER_BURST : input.world.instant.day - ledger.lastSeedDay;
+  const wanted = Math.max(MIN_SEEDS_PER_BURST, Math.min(MAX_SEEDS_PER_BURST, Math.round(since / SEED_EVERY_DAYS)));
+
+  const seeds: NarratorSeed[] = [];
+  const keys = new Set<string>();
+  const taken = new Set<string>();
+  for (let index = 0; index < wanted; index += 1) {
+    // Only the first carries the repeat: a batch of six re-offered whole
+    // because one of them went unread would be the same month twice.
+    const repeated = index === 0 && !ledger.consumed && ledger.lastSeedKey !== null;
+    const seed = seedAt(input, tension, ledger.seedCount + index, repeated, taken);
+    if (seed === null) continue;
+    if (keys.has(seed.key)) continue;
+    keys.add(seed.key);
+    // The ledger is not written until the whole batch has been offered, so
+    // without this the same pressure is reachable twice in one season -- and a
+    // chain whose second link waits on the first would be handed both at once.
+    if (seed.pressureId !== null) taken.add(seed.pressureId);
+    seeds.push(seed);
+  }
+  return seeds;
+}
+
+/** One stirring per this many days: three in a month. */
+const SEED_EVERY_DAYS = 10;
+const MIN_SEEDS_PER_BURST = 3;
+const MAX_SEEDS_PER_BURST = 6;
+
+/**
+ * Whether the world is due to stir at all.
+ *
+ * The thread ceiling no longer silences it outright: past the ceiling only
+ * incidents that run their course are eligible (`chooseArchetype`), and a
+ * world already following twelve threads is still a world where the harvest
+ * comes in and the price of grain moves.
+ */
+function cadenceHasRun(input: NarratorInput, tension: TensionReading): boolean {
   const { world } = input;
   const ledger = world.narrator;
-  const tension = readTension(world, input.ownPolityId);
-  if (tension.openThreads >= THREAD_CEILING) return null;
-
   // A seed offered and not taken up is offered once more, then dropped. Same
   // ordinal, so the same key: the orchestrator is being asked the same thing.
-  const repeated = !ledger.consumed && ledger.lastSeedKey !== null;
-  if (!repeated) {
-    const gap = cadenceDays(tension.comfort, input.gameId, ledger.seedCount);
-    // A fresh world waits half a cadence before its first stirring: the
-    // opening orders are the ruler's, not the world's.
-    const since = ledger.lastSeedDay === null ? world.instant.day + Math.floor(gap / 2) : world.instant.day - ledger.lastSeedDay;
-    if (since < gap) return null;
-  }
+  if (!ledger.consumed && ledger.lastSeedKey !== null) return true;
+  const gap = cadenceDays(tension.comfort, input.gameId, ledger.seedCount);
+  // A fresh world waits half a cadence before its first stirring: the
+  // opening orders are the ruler's, not the world's.
+  const since = ledger.lastSeedDay === null ? world.instant.day + Math.floor(gap / 2) : world.instant.day - ledger.lastSeedDay;
+  return since >= gap;
+}
 
-  const seedCount = ledger.seedCount;
+/** The seed at one ordinal. Every choice in it hashes on that ordinal and nothing else. */
+function seedAt(input: NarratorInput, tension: TensionReading, seedCount: number, repeated: boolean, alreadyTaken: ReadonlySet<string>): NarratorSeed | null {
+  const { world } = input;
 
   // What the age is pulling toward, where the world still looks like it. These
   // compete with the ordinary archetypes on the same weights rather than
   // pre-empting them: a pressure is a heavier-than-usual candidate, never a
   // scheduled event, so a reign can run its whole course and meet none of them.
-  const live = livePressures(world, input.pressures ?? []);
+  const live = livePressures(world, input.pressures ?? []).filter((pressure) => !alreadyTaken.has(pressure.id));
   const liveWeight = live.reduce((sum, pressure) => sum + pressure.weight, 0);
   if (liveWeight > 0 && stableChoice([input.gameId, "narrator", "pressure", seedCount], liveWeight + ORDINARY_TROUBLE_WEIGHT) < liveWeight) {
     let roll = stableHash([input.gameId, "narrator", "which-pressure", seedCount]) % liveWeight;
@@ -436,14 +594,23 @@ export function decideNarratorSeed(input: NarratorInput): NarratorSeed | null {
       provinceId: character.locationProvinceId, provinceName: provinceName(character.locationProvinceId),
       polityId: character.polityId, polityName: polityName(character.polityId ?? controller),
       characterId: character.id, characterName: character.name,
+      otherPolityId: null, otherPolityName: null,
     };
   } else {
-    const province = chooseProvince(input, tension, seedCount, archetype.kind === "new_actor");
+    const province = chooseProvince(input, tension, seedCount, archetype.kind === "new_actor" || archetype.needsAdversary === true);
     if (province === null) return null;
+    // Trouble that takes two is not offered at all where the map has only one
+    // to offer: an island power with no reachable neighbour cannot go to war
+    // with anybody, and a brief naming "null" would be carried out anyway.
+    const adversary = archetype.needsAdversary !== true || province.controllerPolityId === null
+      ? null
+      : chooseAdversary(input, province.id, province.controllerPolityId, seedCount);
+    if (archetype.needsAdversary === true && adversary === null) return null;
     target = {
       provinceId: province.id, provinceName: province.name,
       polityId: province.controllerPolityId, polityName: polityName(province.controllerPolityId),
       characterId: null, characterName: null,
+      otherPolityId: adversary?.id ?? null, otherPolityName: adversary?.name ?? null,
     };
   }
 
@@ -479,6 +646,7 @@ function seedFromPressure(world: WorldState, pressure: ScenarioHistoricalPressur
   const province = pressure.target.provinceId === null ? undefined : world.map.provinces.find((candidate) => candidate.id === pressure.target.provinceId);
   const polityId = pressure.target.polityId ?? province?.controllerPolityId ?? null;
   const polity = polityId === null ? undefined : world.map.polities.find((candidate) => candidate.id === polityId);
+  const other = pressure.target.otherPolityId === null ? undefined : world.map.polities.find((candidate) => candidate.id === pressure.target.otherPolityId);
   if (pressure.kind !== "person_problem" && province === undefined && polity === undefined) return null;
 
   return {
@@ -495,6 +663,8 @@ function seedFromPressure(world: WorldState, pressure: ScenarioHistoricalPressur
       polityName: polity?.name ?? null,
       characterId: null,
       characterName: null,
+      otherPolityId: other?.id ?? null,
+      otherPolityName: other?.name ?? null,
     },
     inPlayerRealm: polityId !== null && polityId === input.ownPolityId,
     repeated: false,
@@ -519,6 +689,36 @@ export function recordSeedOffered(world: WorldState, seed: NarratorSeed): WorldS
       spentPressureIds: seed.pressureId === null
         ? world.narrator.spentPressureIds
         : [...world.narrator.spentPressureIds, seed.pressureId].slice(-200),
+    },
+  };
+}
+
+/**
+ * The ledger, once a whole burst's worth of stirrings has been put to the
+ * orchestrator.
+ *
+ * Unlike the single-seed path this never leaves a seed pending. The repeat --
+ * offer it once more, then drop it -- existed because one seed a month was
+ * precious and losing it to a distracted answer cost the world its only
+ * movement. With three to six a month an ignored one is simply replaced by
+ * next month's, and re-offering a batch of six because one of them went
+ * unread would be the same season narrated twice.
+ */
+export function recordSeedsOffered(world: WorldState, seeds: readonly NarratorSeed[]): WorldState {
+  if (seeds.length === 0) return world;
+  const spent = seeds.map((seed) => seed.pressureId).filter((id): id is string => id !== null);
+  return {
+    ...world,
+    narrator: {
+      ...world.narrator,
+      lastSeedDay: world.instant.day,
+      lastSeedKey: seeds[0]!.key,
+      seedCount: world.narrator.seedCount + seeds.length,
+      consumed: true,
+      // Spent on being offered, not on being taken up. A pressure the world
+      // declined to act on is one the age pulled toward and did not get;
+      // offering it again until it lands is what makes a rail.
+      spentPressureIds: [...world.narrator.spentPressureIds, ...spent].slice(-200),
     },
   };
 }

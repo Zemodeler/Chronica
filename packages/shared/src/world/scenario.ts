@@ -93,17 +93,29 @@ export const ScenarioHistoricalPressureSchema = z
         /** Days from the scenario epoch, so an age can arrive and pass. */
         notBeforeDay: z.number().int().min(0).max(3_660_000).default(0),
         notAfterDay: z.number().int().min(0).max(3_660_000).nullable().default(null),
+        /**
+         * Pressures that must already have been put to the world.
+         *
+         * What makes a crisis a chain rather than a list. Messana asking for a
+         * protector is one event; a great power answering and the other one
+         * objecting is what it turns into, and it is only available once the
+         * asking has happened. Without this every pressure of an age is
+         * independently available from day one and the age has no order to it.
+         */
+        afterPressureIds: z.array(z.string().trim().min(1)).max(8).default([]),
       })
       .strict()
-      .default({ politiesExist: [], polityHolds: [], atWar: [], atPeace: [], notBeforeDay: 0, notAfterDay: null }),
+      .default({ politiesExist: [], polityHolds: [], atWar: [], atPeace: [], notBeforeDay: 0, notAfterDay: null, afterPressureIds: [] }),
     /** Where it lands, when the pressure names a place or a power itself. */
     target: z
       .object({
         polityId: z.string().trim().min(1).nullable().default(null),
         provinceId: z.string().trim().min(1).nullable().default(null),
+        /** The other party, where the pressure is about two powers rather than one. */
+        otherPolityId: z.string().trim().min(1).nullable().default(null),
       })
       .strict()
-      .default({ polityId: null, provinceId: null }),
+      .default({ polityId: null, provinceId: null, otherPolityId: null }),
   })
   .strict();
 export type ScenarioHistoricalPressure = z.infer<typeof ScenarioHistoricalPressureSchema>;
