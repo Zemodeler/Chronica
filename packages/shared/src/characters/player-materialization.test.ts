@@ -132,3 +132,30 @@ describe("a declared consul at game start", () => {
     expect(materializePlayerCharacter(projected, PLAYER, knowledgebase(), government)).toBe(projected);
   });
 });
+
+describe("a declared soldier", () => {
+  const LEGATE_ROLE = "Legate of the Sicilian legions, commanding Roman troops in the field";
+
+  it("is given men to command, because command authority comes from a force and never from a title", () => {
+    // `findOfficeSeatForRole` was the only path from a declared character to
+    // real power, and it only ever found an office -- so a player who declared
+    // himself a legate got nothing at all, and the world was never told he was
+    // a soldier.
+    const after = materializePlayerCharacter(world(), PLAYER, knowledgebase({ role: LEGATE_ROLE }), government);
+    const commanded = after.material.forces.filter(
+      (force) => force.commanderCharacterId === PLAYER || force.controllerCharacterId === PLAYER,
+    );
+    expect(commanded.length).toBeGreaterThan(0);
+  });
+
+  it("leaves a man who commands nothing commanding nothing", () => {
+    const after = materializePlayerCharacter(world(), PLAYER, knowledgebase({ role: "Grain merchant of Ostia, shipping to the southern ports" }), government);
+    expect(after.material.forces.some((force) => force.commanderCharacterId === PLAYER)).toBe(false);
+  });
+
+  it("makes the same world every time, being a projection re-run by read paths", () => {
+    const once = materializePlayerCharacter(world(), PLAYER, knowledgebase({ role: LEGATE_ROLE }), government);
+    const twice = materializePlayerCharacter(once, PLAYER, knowledgebase({ role: LEGATE_ROLE }), government);
+    expect(twice.material.forces.length).toBe(once.material.forces.length);
+  });
+});

@@ -108,6 +108,51 @@ export function findOfficeSeatForRole(
 }
 
 /**
+ * Words in a role that mean the person commands men.
+ *
+ * A default rather than a rule: a scenario may say what its own period calls a
+ * command, and this is what a scenario that says nothing gets. The codebase has
+ * a standing objection to hardcoded government assumptions, and this is one --
+ * a small, overridable one, shipped because blocking on scenario authoring
+ * would mean no declared soldier ever holds anything at all.
+ */
+const COMMAND_ROLE_WORDS = [
+  "legate", "commander", "captain", "general", "prefect", "tribune", "centurion",
+  "admiral", "navarch", "chieftain", "warlord", "soldier", "officer", "strategos",
+];
+
+/**
+ * A force for somebody whose role says they command one.
+ *
+ * `findOfficeSeatForRole` was the only path from a declared character to real
+ * power, and it only ever found an *office* -- so a player who declared himself
+ * a legate of the Sicilian legions got nothing, because "legate" matched no
+ * authored office, and command authority is derived from a force rather than a
+ * seat. He commanded nothing, and the world was never told he was a soldier.
+ *
+ * Prefers a force of his own power that has lost its commander. Otherwise mints
+ * a small one: retainers, at his own charge, which is what a man without an
+ * office actually brings.
+ */
+export function findCommandForRole(
+  world: WorldState,
+  polityId: string | null,
+  role: string,
+  provinceId: string | null,
+  commandWords: readonly string[] = COMMAND_ROLE_WORDS,
+): { readonly kind: "existing"; readonly forceId: string } | { readonly kind: "new" } | undefined {
+  if (polityId === null) return undefined;
+  const tokens = labelTokens(role);
+  if (![...tokens].some((token) => commandWords.includes(token))) return undefined;
+
+  const living = new Set(world.characters.filter((character) => character.alive).map((character) => character.id));
+  const orphaned = world.material.forces
+    .filter((force) => force.polityId === polityId && !living.has(force.commanderCharacterId))
+    .sort((a, b) => Number(b.locationId === provinceId) - Number(a.locationId === provinceId) || a.id.localeCompare(b.id))[0];
+  return orphaned === undefined ? { kind: "new" } : { kind: "existing", forceId: orphaned.id };
+}
+
+/**
  * The world as it stands with the declared player character in it.
  *
  * A no-op — returning the same object — once the character is in the snapshot,
@@ -178,6 +223,43 @@ export function materializePlayerCharacter(
     nextLifeReviewAtStep: null,
   };
 
+  // Fixed id and fixed numbers: `materializePlayerCharacter` is a pure
+  // projection re-run by read paths, so anything it creates must be the same
+  // thing every time it is called.
+  const command = findCommandForRole(world, location.controllerPolityId, knowledgebase.role, location.id);
+  const retinueId = `force-${actorCharacterId}`;
+  const commandedForces = command === undefined || world.material.forces.some((force) => force.id === retinueId)
+    ? command?.kind === "existing"
+      ? world.material.forces.map((force) => (force.id === command.forceId
+        ? { ...force, commanderCharacterId: actorCharacterId, controllerCharacterId: actorCharacterId }
+        : force))
+      : world.material.forces
+    : command.kind === "existing"
+      ? world.material.forces.map((force) => (force.id === command.forceId
+        ? { ...force, commanderCharacterId: actorCharacterId, controllerCharacterId: actorCharacterId }
+        : force))
+      : [...world.material.forces, {
+        id: retinueId,
+        name: `${knowledgebase.canonicalName}'s retinue`,
+        polityId: location.controllerPolityId ?? "",
+        commanderCharacterId: actorCharacterId,
+        controllerCharacterId: actorCharacterId,
+        locationId: location.id,
+        positionId: null,
+        authorizedStrength: 400,
+        personnel: [{ categoryId: "infantry", label: "Retainers", fit: 400, unavailable: [] }],
+        moraleBps: 5_000,
+        cohesionBps: 5_000,
+        fatigueBps: 0,
+        provisionStatus: "provisioned" as const,
+        provisionedThroughStep: world.elapsedStep + 30,
+        // Retainers at his own charge: no pay obligation on a treasury he has
+        // no office over.
+        payObligationId: null,
+        payArrearsPeriods: 0,
+        history: [],
+      }];
+
   const officeSeats = matched === undefined
     ? world.material.officeSeats
     : matched.vacantSeatId !== null
@@ -203,6 +285,11 @@ export function materializePlayerCharacter(
     characters: [...world.characters, playerCharacter],
     material: {
       ...world.material,
+      // A role that says they command men gives them men to command. Nothing
+      // else in declaration ever produced a force, so a declared legate held
+      // no command -- and command authority is derived from a force, never
+      // from a title.
+      forces: commandedForces,
       officeSeats,
       accounts: existingAccount ? world.material.accounts : [...world.material.accounts, personalAccount],
       accountAccess: world.material.accountAccess.some((access) => access.accountId === accountId && access.characterId === actorCharacterId)
