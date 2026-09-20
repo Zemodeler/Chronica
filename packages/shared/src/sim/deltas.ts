@@ -668,6 +668,34 @@ const CharacterPressureSetSchema = z.object({
 }).strict();
 
 /**
+ * What a person's body and standing have come to (VISION §12, slice 9).
+ *
+ * Nothing in this union could change `healthBps`, so illness could not impair
+ * anybody and the narrator's own `illness` archetype had nowhere to land: a man
+ * "fell ill" in a fact and went on doing everything he had done the day before.
+ * `disqualifyingStatuses` was the same -- a generic status array checked by the
+ * eligibility system and writable by nothing.
+ *
+ * **It can never set `alive: false`, and there is deliberately no field for it.**
+ * The engine kills, in `mortality.ts`, through one door, after a peril has been
+ * open long enough for the player to have acted against it. That is what makes
+ * "no character is killed off without it being made a thing of" a property of
+ * the code rather than a rule in a prompt that a model may or may not read.
+ */
+const CharacterStateSetSchema = z.object({
+  op: z.literal("character_state_set"),
+  characterRef: RefSchema,
+  /** Signed, and clamped to the basis-point range on the way in. */
+  healthDeltaBps: z.number().int().min(-10_000).max(10_000).default(0),
+  /** Status tags to set and to lift -- "incapacitated", "captured", "wounded". */
+  addStatuses: z.array(z.string().trim().min(1).max(40)).max(6).default([]),
+  removeStatuses: z.array(z.string().trim().min(1).max(40)).max(6).default([]),
+  /** Who they now mean to leave it all to. Null leaves the named heir alone. */
+  heirRef: RefSchema.nullable().default(null),
+  reason: ReasonSchema,
+}).strict();
+
+/**
  * One power writing to another (VISION §24).
  *
  * `world/diplomacy.ts` described a letter years ago and nothing could make one,
@@ -780,6 +808,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   StorylineOpenSchema,
   StorylineAdvanceSchema,
   CharacterPressureSetSchema,
+  CharacterStateSetSchema,
   DiplomaticMessageSendSchema,
   DiplomaticMessageAnswerSchema,
   AgreementOpenSchema,
@@ -822,6 +851,7 @@ export const WORLD_DELTA_OPS = [
   "storyline_open",
   "storyline_advance",
   "character_pressure_set",
+  "character_state_set",
   "diplomatic_message_send",
   "diplomatic_message_answer",
   "agreement_open",
@@ -867,6 +897,7 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   storyline_open: "civil",
   storyline_advance: "civil",
   character_pressure_set: "social",
+  character_state_set: "social",
   diplomatic_message_send: "diplomatic",
   diplomatic_message_answer: "diplomatic",
   agreement_open: "diplomatic",

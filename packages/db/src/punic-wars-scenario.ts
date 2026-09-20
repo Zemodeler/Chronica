@@ -101,6 +101,37 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
     ],
     provinceCount: { min: 779, max: 779 },
   },
+  /**
+   * How long people live in the third century BCE, and what shortens it.
+   *
+   * The rates are per year in basis points and are for adults who survived
+   * childhood -- which every named person in this scenario has. Roman
+   * epigraphic and skeletal evidence gives an adult male of twenty-five
+   * something like a 1 to 1.5 percent chance of dying in the next year, rising
+   * steeply from the mid-fifties; a consul of sixty-five is on borrowed time
+   * and knew it. The engine multiplies all of this by what a person actually
+   * exposes themselves to (`mortality.ts`), so a general in a camp in a plague
+   * province is several times a senator at home, which is the historical
+   * pattern and not a penalty for playing boldly.
+   *
+   * Reviewed every thirty days, staggered across the cast by id, because a
+   * world that holds one great review a year for everybody at once produces
+   * years in which nobody dies and years in which half the Senate does.
+   */
+  life: {
+    lifeStages: [
+      { id: "childhood", label: "childhood", minAgeYears: 0, maxAgeYears: 14, mortalityRatePerYearBps: 200, incapacityRatePerYearBps: 20, recoveryRatePerYearBps: 5_000 },
+      { id: "young", label: "youth", minAgeYears: 15, maxAgeYears: 29, mortalityRatePerYearBps: 120, incapacityRatePerYearBps: 60, recoveryRatePerYearBps: 5_000 },
+      { id: "prime", label: "prime", minAgeYears: 30, maxAgeYears: 44, mortalityRatePerYearBps: 180, incapacityRatePerYearBps: 90, recoveryRatePerYearBps: 4_000 },
+      { id: "late", label: "later years", minAgeYears: 45, maxAgeYears: 54, mortalityRatePerYearBps: 330, incapacityRatePerYearBps: 160, recoveryRatePerYearBps: 3_000 },
+      { id: "elder", label: "old age", minAgeYears: 55, maxAgeYears: 64, mortalityRatePerYearBps: 700, incapacityRatePerYearBps: 320, recoveryRatePerYearBps: 2_000 },
+      { id: "great-age", label: "great age", minAgeYears: 65, maxAgeYears: null, mortalityRatePerYearBps: 1_400, incapacityRatePerYearBps: 600, recoveryRatePerYearBps: 1_200 },
+    ],
+    inheritanceRules: [
+      { id: "roman-household", kind: "primogeniture", institutionId: null, debtsTransfer: true },
+    ],
+    reviewIntervalSteps: 30,
+  },
   // What this age was pulling toward, each offered only while the world still
   // looks like the condition it names -- and each offered once. None of these
   // is an event: nothing here makes Mylae or the mercenary war happen. They

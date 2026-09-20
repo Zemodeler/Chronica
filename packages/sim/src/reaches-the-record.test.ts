@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldStateSchema, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
+import { ScenarioDefinitionSchema, WorldStateSchema, type Office, type ScenarioClock, type ScenarioLifeRules, type WorldState } from "@chronica/shared";
 import { runSimulationBurst, type BurstInput } from "./burst";
 import { composeChronicle } from "./chronicle";
 import type { SimModelPort, SimOperation } from "./ports";
@@ -183,5 +183,125 @@ describe("acting beyond your place is something a person finds out", () => {
     const knowers = breach.discovery.discoveredBy.map((entry) => entry.observerRef.id);
     expect(knowers).toContain("quintus-fabius");
     expect(knowers).toContain("marcus-atilius");
+  });
+});
+
+// ── Slice 9: illness impairs, and death asks who follows ────────────────────
+
+/**
+ * A scenario whose old men are very likely to die, so the plumbing is what is
+ * under test rather than the dice. The peril rule still applies in full: a
+ * roll cannot kill anybody who matters until a thread has been open on them
+ * for forty-five days and reached crisis, so this still needs several bursts.
+ * The real rates, and the rule itself, are tested in `mortality.test.ts`.
+ */
+const life: ScenarioLifeRules = {
+  lifeStages: [
+    { id: "adult", label: "adulthood", minAgeYears: 0, maxAgeYears: 64, mortalityRatePerYearBps: 100, incapacityRatePerYearBps: 50, recoveryRatePerYearBps: 4_000 },
+    { id: "great-age", label: "great age", minAgeYears: 65, maxAgeYears: null, mortalityRatePerYearBps: 9_000, incapacityRatePerYearBps: 500, recoveryRatePerYearBps: 500 },
+  ],
+  inheritanceRules: definition.life.inheritanceRules,
+  reviewIntervalSteps: 30,
+};
+
+const BURY_HIM = JSON.stringify({
+  intent: { summary: "Carry on.", domains: ["military"] },
+  narrativeSummary: "The camp goes about its business.",
+  frictions: [], deltas: [],
+  facts: [{
+    localId: "carry-on", kind: "routine", summary: "The legion holds its ground.",
+    affectedRefs: [{ kind: "polity", id: "rome" }], visibility: "public", discoveryState: "public",
+    knowableInDays: 0, significance: 20,
+  }],
+  delegations: [], schedule: [], cognitionCandidates: [], outcome: "chronicle", playerDecision: null,
+});
+
+describe("what a battle does to the man commanding it", () => {
+  it("takes a captured or wounded commander out of circulation, which the resolver computed and nothing read", async () => {
+    const port = capturingPort({ simulate_orchestrate: [GIVE_BATTLE], simulate_cognition: Array.from({ length: 6 }, () => NOBODY) });
+    const result = await runSimulationBurst(input(port, { world: armiesFacing() }));
+    const account = result.battleAccounts[0]!;
+    for (const commander of account.commanders) {
+      if (commander.outcome === "unharmed") continue;
+      const person = result.world.characters.find((character) => character.name === commander.name);
+      if (person === undefined) continue;
+      if (commander.outcome === "killed") {
+        expect(person.alive).toBe(false);
+        // Through the same door as every other death: no army left under a
+        // dead man, because `commanderCharacterId` cannot be null.
+        for (const force of result.world.material.forces) {
+          const holder = result.world.characters.find((candidate) => candidate.id === force.commanderCharacterId);
+          if (holder !== undefined) expect(holder.alive).toBe(true);
+        }
+      } else {
+        expect(person.disqualifyingStatuses.length).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
+describe("illness impairs and never blocks", () => {
+  it("gives a player at the end of his strength a full burst, and applies what he ordered", async () => {
+    // The order box always works. A player who cannot act is a player with
+    // nothing to do about the thing that is happening to him, which is the one
+    // dead end this branch forbids outright.
+    const failing = world();
+    const sick: WorldState = {
+      ...failing,
+      characters: failing.characters.map((character) => (character.id === "marcus-atilius"
+        ? { ...character, healthBps: 1_500, disqualifyingStatuses: ["incapacitated"] }
+        : character)),
+    };
+    const port = capturingPort({
+      simulate_orchestrate: [SPEND_WITHOUT_LEAVE],
+      simulate_cognition: [NOBODY, NOBODY, NOBODY, NOBODY, NOBODY, NOBODY],
+    });
+    const result = await runSimulationBurst(input(port, { world: sick, life, orderText: "Pay the shipwrights." }));
+
+    expect(result.parseFailures).toEqual([]);
+    // His money moved. Being ill is not being vetoed.
+    const purse = result.world.material.accounts.find((account) => account.id === "marcus-purse")!;
+    expect(purse.balance).toBeLessThan(failing.material.accounts.find((account) => account.id === "marcus-purse")!.balance);
+  });
+});
+
+describe("the player dies, and the world asks whose eyes you see through now", () => {
+  it("pre-empts whatever else was being asked, and always names somebody", async () => {
+    const old = world();
+    const dying: WorldState = {
+      ...old,
+      // Ninety, commanding in the field, at the end of his health: as exposed
+      // as this engine gets. Reviewed every interval across a long burst.
+      characters: old.characters.map((character) => (character.id === "marcus-atilius"
+        ? { ...character, ageYearsAtStart: 92, birthStep: null, healthBps: 600 }
+        : character)),
+    };
+
+    // Several bursts, because a peril must stand 45 days before it can take
+    // anybody -- which is the point, and what this asserts by needing them.
+    let state = dying;
+    let decision: { prompt: string; options: readonly { id: string }[] } | null = null;
+    for (let burst = 0; burst < 8 && decision === null; burst += 1) {
+      const port = capturingPort({
+        simulate_orchestrate: [BURY_HIM],
+        simulate_cognition: Array.from({ length: 8 }, () => NOBODY),
+      });
+      const result = await runSimulationBurst(input(port, {
+        world: state, life, burstId: `b${burst}`, orderText: "Carry on.",
+        // A season a burst, so eight of them are two years -- long enough for
+        // a peril to open, worsen into crisis, and stand its forty-five days.
+        clock: { ...clock, minSpanDays: 90 },
+      }));
+      state = result.world;
+      decision = result.playerDecision;
+      if (!state.characters.find((character) => character.id === "marcus-atilius")!.alive) break;
+    }
+
+    // He dies, and the burst he dies in is the burst that asks.
+    expect(state.characters.find((character) => character.id === "marcus-atilius")!.alive).toBe(false);
+    expect(decision).not.toBeNull();
+    expect(decision!.prompt).toContain("Marcus Atilius");
+    expect(decision!.options.length).toBeGreaterThanOrEqual(1);
+    for (const option of decision!.options) expect(option.id.startsWith("succeed-")).toBe(true);
   });
 });

@@ -24,9 +24,12 @@ describe("orchestrator prompt", () => {
     // hands and a rising could not become a country, so a war could be fought
     // for a generation and leave the map exactly as it began; and now a person
     // being able to refuse, which the prompt previously forbade outright and
-    // which nothing in the engine had ever recorded happening.
+    // which nothing in the engine had ever recorded happening; and now what a
+    // person's body has come to, which no arm could express either -- illness
+    // could not impair anybody, so a man "fell ill" in a fact and went on
+    // doing everything he had done the day before.
     console.log("system prompt chars:", ORCHESTRATOR_SYSTEM_PROMPT.length, "~tokens:", Math.round(ORCHESTRATOR_SYSTEM_PROMPT.length / 4));
-    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(57_500);
+    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(59_000);
   });
 });
 

@@ -1,5 +1,4 @@
 import {
-  vacateOfficesOf,
   resolveBattle,
   summarizeBattleResult,
   type BattlePosture,
@@ -11,6 +10,7 @@ import {
   type TacticalModifierProposal,
   type WorldState,
 } from "@chronica/shared";
+import { killCharacter } from "./mortality";
 
 /**
  * Battle (VISION §3, §12, §29).
@@ -131,12 +131,20 @@ function applyResult(world: WorldState, result: BattleResult, atStep: number): W
     };
   });
 
-  // Death is final, and a commander who dies in the field dies for good
-  // (VISION §12's consequences are not reversible).
+  // Being taken, and being carried off the field alive, were both computed by
+  // the resolver and both thrown away: a captured consul went on sitting in
+  // the Senate and a wounded one was as fit next week as the week before.
   const characters = world.characters.map((character) => {
     const change = result.commanderChanges.find((candidate) => candidate.characterId === character.id);
-    if (change === undefined || change.outcome !== "killed") return character;
-    return { ...character, alive: false, diedAtStep: atStep };
+    if (change === undefined || change.outcome === "killed" || change.outcome === "unharmed") return character;
+    const status = change.outcome === "captured" ? "captured" : "wounded";
+    return {
+      ...character,
+      healthBps: Math.max(500, character.healthBps - (change.outcome === "captured" ? 1_000 : 3_000)),
+      disqualifyingStatuses: character.disqualifyingStatuses.includes(status)
+        ? character.disqualifyingStatuses
+        : [...character.disqualifyingStatuses, status].slice(0, 8),
+    };
   });
   const killed = result.commanderChanges.filter((change) => change.outcome === "killed").map((change) => change.characterId);
 
@@ -146,12 +154,18 @@ function applyResult(world: WorldState, result: BattleResult, atStep: number): W
     return { ...province, controllerPolityId: change.newControllerPolityId };
   });
 
-  // A seat is not held by a corpse. `vacateOfficeSeatsFor` has existed since the
-  // character system was written and has never been called from anywhere, so a
-  // consul killed in the field went on holding the consulship -- and went on
-  // conferring its authority, since office grants are derived from the seat.
+  // Death in battle is the one death the engine takes at once -- for the
+  // player too -- because the battle is its own foreshadowing. It goes through
+  // the same door as every other death, so the seat is vacated, the army is
+  // handed to somebody living, and the estate is settled. Letting it write
+  // `alive: false` itself left a dead man commanding his own legion, because
+  // `commanderCharacterId` is not nullable and nothing here reassigned it.
   let next: WorldState = { ...world, characters, map: { ...world.map, provinces }, material: { ...world.material, forces } };
-  for (const characterId of killed) next = vacateOfficesOf(next, characterId, "death", atStep);
+  for (const characterId of killed) {
+    // The facts are `factsFor`'s: a commander killed at Agrigentum is written
+    // as that and not as "died of natural causes".
+    next = killCharacter(next, characterId, "Killed in the field.", atStep).world;
+  }
   return next;
 }
 
