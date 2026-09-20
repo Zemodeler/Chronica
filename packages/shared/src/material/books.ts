@@ -48,7 +48,7 @@ export interface Books {
 
 /** §7's own categories, which the engine's kinds already very nearly are. */
 const INCOME_LABELS: Readonly<Record<string, string>> = {
-  tax: "Taxes", trade: "Trade", land: "Estates and land", office: "Offices", pension: "Pensions received",
+  tax: "Taxes", trade: "Trade", tribute: "Tribute", land: "Estates and land", office: "Offices", pension: "Pensions received",
 };
 const EXPENSE_LABELS: Readonly<Record<string, string>> = {
   army_pay: "Army pay", army_upkeep: "Army upkeep", salary: "Administration",

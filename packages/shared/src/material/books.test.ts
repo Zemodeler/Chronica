@@ -65,6 +65,10 @@ describe("the books, as the person holding them can read them", () => {
     expect(books.totalIncome).toBeGreaterThan(0);
     expect(books.totalExpenditure).toBeGreaterThan(0);
     expect(books.income.map((line) => line.label)).toContain("Taxes");
+    // Every heading is a word a reader would use, including the one added to
+    // the income enum last: an unlabelled kind falls through as its own id and
+    // "tribute" appeared in the panel in lowercase beside "Taxes".
+    for (const line of [...books.income, ...books.expenditure]) expect(line.label[0]).toBe(line.label[0]!.toUpperCase());
     expect(books.expenditure.map((line) => line.label)).toContain("Army pay");
   });
 });
