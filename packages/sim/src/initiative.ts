@@ -51,7 +51,22 @@ export function whoSeeksThePlayer(input: InitiativeInput): ContactInitiation[] {
     add(
       attempt.recipientRef.id,
       "owes an answer to an order from the ruler",
-      `About the charge you laid on me — ${attempt.authorityCheck.reason} — I should speak with you.`,
+      `About the charge you laid on me — ${attempt.instruction} — I should speak with you.`,
+    );
+  }
+
+  // Someone who refused them, or quietly did otherwise. A refusal reaches the
+  // ruler as an entry in the record; the man who made it may also come and say
+  // why, which is the difference between a report and a reign.
+  for (const attempt of world.orderAttempts) {
+    if (attempt.issuerRef.id !== playerId) continue;
+    if (attempt.status !== "refused" && attempt.status !== "ignored") continue;
+    if (attempt.decidedAtStep === null || world.elapsedStep - attempt.decidedAtStep > 30) continue;
+    if (attempt.recipientRef.kind !== "character") continue;
+    add(
+      attempt.recipientRef.id,
+      "did not do as they were asked",
+      `You asked me to ${attempt.instruction}. I did not, and you should hear why from me.`,
     );
   }
 

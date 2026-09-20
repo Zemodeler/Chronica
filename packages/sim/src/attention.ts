@@ -296,6 +296,18 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
       score += thread.phase === "escalating" || thread.phase === "crisis" ? 20 : 12;
       reasons.push(`is caught up in ${thread.title}: ${thread.nextDevelopment}`);
     }
+    // Somebody has asked them to do something and is waiting. The ambient
+    // router had no clause for this at all, so an officeless, threadless
+    // quartermaster who had just been given an order scored nothing in either
+    // router and could never answer it -- which made "an order is always
+    // answered" unreachable for exactly the people orders are given to.
+    if (world.orderAttempts.some(
+      (attempt) => attempt.recipientRef.id === character.id
+        && (attempt.status === "issued" || attempt.status === "received" || attempt.status === "delayed"),
+    )) {
+      score += 32;
+      reasons.push("has an order to answer");
+    }
     if (world.diplomacy.some(
       (message) =>
         message.status === "awaiting_reply" &&

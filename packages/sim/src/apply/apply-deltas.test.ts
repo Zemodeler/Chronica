@@ -1500,3 +1500,92 @@ describe("offices that actually move", () => {
     expect(index.grants.some((grant) => grant.holder.id === holderId && grant.source === "office")).toBe(false);
   });
 });
+
+describe("answering an order", () => {
+  /** An order already on the record, put to somebody by somebody. */
+  function withOrder(state: WorldState, issuerId: string, recipientId: string, standing: "binding" | "requested" | "presumptuous" = "binding"): WorldState {
+    return {
+      ...state,
+      orderAttempts: [{
+        id: "order-1",
+        actionId: "action-1",
+        issuerRef: { kind: "character", id: issuerId },
+        recipientRef: { kind: "character", id: recipientId },
+        claimedAuthorityGrantId: null,
+        authorityCheck: { authorized: standing === "binding", grant: null, standing: null, reason: "The consul, under whom you serve." },
+        instruction: "Hold the strait and let nothing cross.",
+        standing,
+        status: "issued" as const,
+        recipientDecisionReason: null,
+        issuedAtStep: 0,
+        decidedAtStep: null,
+        consequenceFactRefs: [],
+      }],
+    };
+  }
+
+  const pair = (state: WorldState): [string, string] => {
+    const alive = state.characters.filter((character) => character.alive);
+    return [alive[0]!.id, alive[1]!.id];
+  };
+
+  it("records no breach for the act of replying", () => {
+    // The eighth way this check has found to manufacture insubordination.
+    // `order_attempt_decide` fell through to the decider's own polity, so
+    // every refusal AND every acceptance would have been recorded as the
+    // recipient exceeding their authority over their own republic. It has
+    // never fired only because no order attempt has ever been decided.
+    const [issuer, recipient] = pair(world());
+    for (const decision of ["accept", "refuse", "ignore", "delay"] as const) {
+      const result = applyDeltas(
+        withOrder(world(), issuer, recipient),
+        [{ op: "order_attempt_decide", orderAttemptRef: "order-1", decision, reason: "As I judged best." }],
+        context({ actorRef: { kind: "character", id: recipient } }),
+      );
+      expect(result.rejected, decision).toHaveLength(0);
+      expect(result.breaches, decision).toHaveLength(0);
+    }
+  });
+
+  it("makes a refusal an event somebody can read", () => {
+    const [issuer, recipient] = pair(world());
+    const result = applyDeltas(
+      withOrder(world(), issuer, recipient, "binding"),
+      [{ op: "order_attempt_decide", orderAttemptRef: "order-1", decision: "refuse", reason: "The strait cannot be held with the ships I have." }],
+      context({ actorRef: { kind: "character", id: recipient } }),
+    );
+
+    expect(result.world.orderAttempts[0]!.status).toBe("refused");
+    const fact = result.factProposals.find((candidate) => candidate.kind === "order_refused")!;
+    expect(fact).toBeDefined();
+    expect(fact.summary).toContain("cannot be held");
+    // Defying a man who could command you is a headline; it must clear the bar.
+    expect(fact.significance).toBeGreaterThanOrEqual(45);
+    expect(fact.affectedRefs!.map((ref) => ref.id).sort()).toEqual([issuer, recipient].sort());
+  });
+
+  it("weighs a declined request below a defied command", () => {
+    const [issuer, recipient] = pair(world());
+    const refusal = (standing: "binding" | "requested") => applyDeltas(
+      withOrder(world(), issuer, recipient, standing),
+      [{ op: "order_attempt_decide", orderAttemptRef: "order-1", decision: "refuse", reason: "No." }],
+      context({ actorRef: { kind: "character", id: recipient } }),
+    ).factProposals.find((candidate) => candidate.kind === "order_refused")!;
+
+    expect(refusal("requested").significance).toBeLessThan(refusal("binding").significance);
+  });
+
+  it("keeps quiet compliance quiet, and known only to the man who did it", () => {
+    const [issuer, recipient] = pair(world());
+    const result = applyDeltas(
+      withOrder(world(), issuer, recipient, "presumptuous"),
+      [{ op: "order_attempt_decide", orderAttemptRef: "order-1", decision: "accept", reason: "He pays better than Rome." }],
+      context({ actorRef: { kind: "character", id: recipient } }),
+    );
+    // Obeying a man with no standing to command you is not acceptance.
+    expect(result.world.orderAttempts[0]!.status).toBe("subverted");
+    const fact = result.factProposals.find((candidate) => candidate.kind === "order_subverted")!;
+    expect(fact.visibility).toBe("private");
+    expect(fact.knownToRefs!.map((ref) => ref.id)).toEqual([recipient]);
+  });
+});

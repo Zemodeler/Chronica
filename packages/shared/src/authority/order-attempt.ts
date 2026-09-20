@@ -47,6 +47,20 @@ export const TERMINAL_ORDER_ATTEMPT_STATUSES = [
 export const isTerminalOrderAttemptStatus = (status: OrderAttemptStatus): boolean =>
   (TERMINAL_ORDER_ATTEMPT_STATUSES as readonly string[]).includes(status);
 
+/**
+ * What standing the person giving the order actually had over the person
+ * receiving it.
+ *
+ * The whole of the model, in one field. A subordinate given a *binding* order
+ * who refuses has committed insubordination and it reads as such; one given a
+ * *requested* order who declines has simply answered; and a *presumptuous*
+ * order -- from a foreigner, or a private man to a magistrate -- is one the
+ * recipient had no business being given at all, so obeying it is the private
+ * chain of command that `subvert` exists to record.
+ */
+export const OrderStandingSchema = z.enum(["binding", "requested", "presumptuous"]);
+export type OrderStanding = z.infer<typeof OrderStandingSchema>;
+
 export const OrderAttemptSchema = z
   .object({
     id: EntityIdSchema,
@@ -58,6 +72,17 @@ export const OrderAttemptSchema = z
     claimedAuthorityGrantId: EntityIdSchema.nullable().default(null),
     /** Snapshot of `checkAuthority`'s result at issue time -- never recomputed after the fact, so a later grant change cannot retroactively legalize or void a past attempt. */
     authorityCheck: AuthorityCheckResultSchema,
+    /**
+     * What was actually asked, in the issuer's words.
+     *
+     * It had no field, so `recordDelegations` smuggled it through
+     * `authorityCheck.reason` -- a field documented as a snapshot of the
+     * authority check, carrying instead the text of the instruction. Defaulted
+     * so archived snapshots still parse.
+     */
+    instruction: z.string().trim().max(400).default(""),
+    /** Whether the issuer had standing to command this person. See `OrderStandingSchema`. */
+    standing: OrderStandingSchema.default("requested"),
     status: OrderAttemptStatusSchema,
     /** The recipient's own stated reason for their decision, once they have made one. */
     recipientDecisionReason: z.string().trim().max(400).nullable().default(null),
@@ -116,7 +141,15 @@ export function decideOrderAttempt(attempt: OrderAttempt, decision: OrderAttempt
   if (attempt.status !== "received" && attempt.status !== "delayed") {
     throw new Error(`Only a received or delayed order attempt can be decided; "${attempt.id}" is ${attempt.status}.`);
   }
-  const effectiveDecision: OrderAttemptDecision = decision === "accept" && !attempt.authorityCheck.authorized ? "subvert" : decision;
+  // Coerced only where the issuer had no business commanding them at all.
+  //
+  // This used to fire on `!authorityCheck.authorized`, which under the standing
+  // model is *every willingly granted request* -- so a quartermaster who agreed
+  // to a merchant's perfectly reasonable ask would be recorded as subverting
+  // the chain of command. Granting a request from somebody who was asking is
+  // agreement. Obeying a man with no standing to command you is the thing this
+  // rule is actually for.
+  const effectiveDecision: OrderAttemptDecision = decision === "accept" && attempt.standing === "presumptuous" ? "subvert" : decision;
   const status = DECISION_TO_STATUS[effectiveDecision];
   const decided = isTerminalOrderAttemptStatus(status);
   return {

@@ -243,6 +243,14 @@ function actorIsAnswerableFor(delta: WorldDelta, scope: AuthorityScope, world: W
   // own provinces, which is the seventh way this check has found to manufacture
   // insubordination out of the world simply moving.
   if (delta.op === "polity_create") return false;
+  // Answering an order put to *you* is not an exercise of authority over your
+  // own power. Scoped to the decider's polity -- which is where it falls
+  // through to -- every refusal and every acceptance would have recorded a
+  // breach for the act of replying. It has never fired only because no order
+  // attempt has ever been decided; fixing that without this would make
+  // insubordination the ordinary consequence of answering your post, and is
+  // the eighth way this check has found to manufacture it.
+  if (delta.op === "order_attempt_decide") return false;
 
   if (context.actsForTheWorld !== true) return true;
 
@@ -1686,6 +1694,31 @@ function applyOne(
       // private one.
       const received = attempt.status === "issued" ? receiveOrderAttempt(attempt) : attempt;
       const decided = decideOrderAttempt(received, delta.decision, delta.reason, atStep);
+
+      // A refusal is an event. The person who gave the order will hear of it,
+      // and the Chronicle now treats somebody's decision as history even where
+      // nothing moved. The model is asked to write its own account of this in
+      // the recipient's voice; this guarantees the event exists even when it
+      // does not, which is how it was possible for an order to be refused and
+      // for nobody, anywhere, to learn that it had been.
+      if (decided.status === "refused" || decided.status === "ignored" || decided.status === "subverted") {
+        const who = (ref: typeof decided.issuerRef): string => world.characters.find((character) => character.id === ref.id)?.name ?? ref.id;
+        const verb = decided.status === "refused" ? "would not do as" : decided.status === "ignored" ? "gave no answer to" : "seemed to agree with, and did otherwise than";
+        const subverted = decided.status === "subverted";
+        emitFact({
+          localId: `order_${attemptId}`,
+          kind: `order_${decided.status}`,
+          summary: `${who(decided.recipientRef)} ${verb} ${who(decided.issuerRef)} asked: ${delta.reason}`.slice(0, 600),
+          affectedRefs: [decided.issuerRef, decided.recipientRef],
+          visibility: subverted ? "private" : "polity",
+          discoveryState: subverted ? "private" : "polity",
+          knowableInDays: 0,
+          knownToRefs: subverted ? [decided.recipientRef] : [decided.issuerRef, decided.recipientRef],
+          // A legate defying a consul is a headline. A declined request joins
+          // its thread without becoming one.
+          significance: subverted ? 60 : attempt.standing === "binding" ? 55 : 40,
+        });
+      }
       return { ...world, orderAttempts: world.orderAttempts.map((candidate) => (candidate.id === attemptId ? decided : candidate)) };
     }
 
