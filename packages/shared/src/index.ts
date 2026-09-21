@@ -14,6 +14,7 @@ export * from "./material/forces";
 export * from "./material/in-words";
 export * from "./material/legitimacy";
 export * from "./material/province-material";
+export * from "./material/who-pays";
 export * from "./sim/index";
 export * from "./warfare/index";
 export * from "./web";

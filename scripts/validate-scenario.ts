@@ -9,7 +9,7 @@
  */
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { ScenarioDefinitionSchema, WorldStateSchema, type ScenarioDefinition, type WorldState } from "@chronica/shared";
+import { findPayProblems, ScenarioDefinitionSchema, WorldStateSchema, type ScenarioDefinition, type WorldState } from "@chronica/shared";
 
 export interface Problem {
   readonly level: "error" | "warning";
@@ -66,6 +66,12 @@ export function customChecks(definition: ScenarioDefinition, world: WorldState |
       if (!officeIds.has(office.id)) problems.push({ level: "error", message: `Office "${office.id}" is unreachable.` });
     }
   }
+  // Who has undertaken to pay whom. A force with no pay obligation is invisible
+  // to the arrears rules entirely, so a scenario can switch off morale loss and
+  // desertion for its whole order of battle without a single schema error --
+  // which is what the Punic Wars scenario did for eight forces at once.
+  if (world !== null) problems.push(...findPayProblems(world));
+
   void characterIds;
   void institutionIds;
   void groupIds;

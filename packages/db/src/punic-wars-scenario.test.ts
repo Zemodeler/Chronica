@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { findPayProblems, WorldStateSchema } from "@chronica/shared";
+import { firstPunicWarScenario } from "./built-in-scenarios";
 import { punicWarsScenario } from "./punic-wars-scenario";
 
 describe("Punic Wars built-in scenario", () => {
@@ -182,5 +184,31 @@ describe("the age arrives in an order", () => {
     expect(war.brief).toContain("agreement_open");
     // And it is unreachable once they are already fighting.
     expect(war.when.atPeace).toEqual([{ polityId: "rome", otherPolityId: "carthage" }]);
+  });
+});
+
+/**
+ * Every built-in scenario, checked against the rule the validator checks.
+ *
+ * This lives here rather than only in `validate-scenario.ts` because that
+ * script runs against authored JSON on demand and has never once been pointed
+ * at the built-in scenarios -- which is how eight forces went eight versions
+ * with nobody undertaking to pay any of them.
+ */
+describe("every power's armies have someone answering for their wages", () => {
+  for (const [name, scenario] of [["Punic Wars", punicWarsScenario], ["First Punic War", firstPunicWarScenario]] as const) {
+    it(`leaves no army of the ${name} scenario outside the arrears rules`, () => {
+      expect(findPayProblems(WorldStateSchema.parse(structuredClone(scenario.initialWorld)))).toEqual([]);
+    });
+  }
+
+  it("leaves the Campanian legion at Rhegium unpaid, because nobody is paying them", () => {
+    const legion = punicWarsScenario.initialWorld.material.forces.find((force) => force.id === "campanian-legion")!;
+    expect(legion.payObligationId).toBeNull();
+    // Not an omission: their own power keeps no chest to pay from, which is
+    // what makes "nobody has undertaken to pay them" the true reading.
+    expect(punicWarsScenario.initialWorld.material.accounts.some(
+      (account) => account.owner.kind === "polity" && account.owner.id === legion.polityId,
+    )).toBe(false);
   });
 });
