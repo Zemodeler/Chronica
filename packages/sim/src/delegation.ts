@@ -120,3 +120,37 @@ export function daysInHand(days: number, hand: ExecutionHand | null): number {
   if (hand === null || days <= 0) return Math.max(0, days);
   return Math.max(1, Math.round(days * (1 + hand.delayBps / 10_000)));
 }
+
+/**
+ * How this person answers an instruction somebody else has given them.
+ *
+ * The cognition prompt already tells everybody that refuse, delay, ignore and
+ * subvert are real answers. It tells them generically, so the answer that
+ * comes back is whichever one the situation makes sensible -- and an honest
+ * man and a treacherous one, handed the same order by the same authority,
+ * answer it identically. A temperament nobody acts differently on is
+ * decoration.
+ *
+ * Null for the middle of the range, which is most people, and deliberately:
+ * this is carried in every portrait of anybody with an order outstanding, so
+ * it has to cost nothing for the ordinary case. Somebody unremarkable answers
+ * as the situation suggests, which is correct.
+ *
+ * The nemesis gets a longer version of this in `conductInWords`, built on this
+ * same line so the two cannot drift apart.
+ */
+export function answersAnOrder(character: Character): string | null {
+  const { honesty, caution } = character.mind.temperament;
+  const { duty } = character.mind.drives;
+
+  if (honesty >= 60 || duty >= 70) {
+    return 'This one refuses outright when they will not do a thing -- "order_attempt_decide" with "refuse" and the reason in their own words -- or carries it out properly. They do not take "subvert": appearing to comply and doing otherwise is not in them.';
+  }
+  if (honesty <= 35) {
+    return 'This one takes "subvert" where refusing would cost them: they appear to comply and do otherwise. Open refusal is for when they are strong enough that it is safe.';
+  }
+  if (caution >= 60) {
+    return 'This one delays rather than refuses where they can -- "delay", with a reason that sounds like diligence.';
+  }
+  return null;
+}

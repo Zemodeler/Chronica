@@ -2,14 +2,9 @@ import { findPolityGaps } from "./population";
 import type { NarratorSeed } from "./narrator";
 import { renderCharacterPortrait } from "./cognition";
 
-/** A figure a bystander would quote: coarse, and never a casualty count read backwards. */
-function bandStrength(men: number): number {
-  if (men < 100) return Math.round(men / 10) * 10;
-  if (men < 1_000) return Math.round(men / 100) * 100;
-  return Math.round(men / 500) * 500;
-}
 import {
   allOffices,
+  bandStrength,
   buildStation,
   currentAgeYears,
   describeAuthority,

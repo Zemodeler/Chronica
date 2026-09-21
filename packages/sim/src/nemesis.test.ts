@@ -174,7 +174,7 @@ describe("two rivals who want the same thing and are not the same antagonist", (
 
     expect(stalwart).toContain("will not conspire");
     expect(stalwart).toContain("in the open");
-    expect(stalwart).not.toContain("subvert\" -- they appear to comply");
+    expect(stalwart).toContain("They do not take \"subvert\"");
     expect(stalwart).toContain("will not reach Marcus through his family");
 
     expect(treacherous).toContain("belief_set");
@@ -200,9 +200,9 @@ describe("two rivals who want the same thing and are not the same antagonist", (
     const liar = conductInWords(person(state, { temperament: temperament({ honesty: 20 }) }), "Marcus");
     const careful = conductInWords(person(state, { temperament: temperament({ honesty: 50, caution: 70 }) }), "Marcus");
 
-    expect(honest).toContain("refused outright");
+    expect(honest).toContain("refuses outright");
     expect(liar).toContain("appear to comply and do otherwise");
-    expect(careful).toContain("more often delayed than refused");
+    expect(careful).toContain("delays rather than refuses");
   });
 
   it("closes ranks or takes the opening, on the same war", () => {
