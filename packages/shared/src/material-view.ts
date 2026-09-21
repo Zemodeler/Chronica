@@ -56,7 +56,15 @@ export const GovernmentViewSchema = z.object({
   blocs: z.array(VotingBlocViewSchema),
 });
 
-export const ForceViewSchema = z
+/**
+ * Split out from `ForceViewSchema` so it can be extended.
+ *
+ * The refinement below makes the exported schema a `ZodEffects`, and a
+ * `ZodEffects` has no `.extend()`. The player-facing muster needs every field
+ * here plus where the force is, where it is going and who leads it, and the
+ * alternative to this split was a second, drifting copy of the ten fields.
+ */
+export const ForceViewBaseSchema = z
   .object({
     id: EntityIdSchema,
     name: z.string().trim().min(1),
@@ -69,11 +77,21 @@ export const ForceViewSchema = z
     provisionedThroughLabel: z.string().trim().min(1),
     payStatus: z.string().trim().min(1),
     changeExplanation: z.string().trim().min(1),
-  })
-  .refine((force) => force.fitStrength + force.unavailable === force.totalHeadcount, {
-    message: "Total headcount must equal fit plus unavailable personnel.",
-    path: ["totalHeadcount"],
   });
+
+/** The headcount has to add up: a man is either fit or he is not. */
+export const forceHeadcountAddsUp = (force: {
+  readonly fitStrength: number;
+  readonly unavailable: number;
+  readonly totalHeadcount: number;
+}): boolean => force.fitStrength + force.unavailable === force.totalHeadcount;
+
+const HEADCOUNT_REFINEMENT = {
+  message: "Total headcount must equal fit plus unavailable personnel.",
+  path: ["totalHeadcount"],
+};
+
+export const ForceViewSchema = ForceViewBaseSchema.refine(forceHeadcountAddsUp, HEADCOUNT_REFINEMENT);
 
 export const OrderReadbackSchema = z.object({
   payerLabel: z.string().trim().min(1),
