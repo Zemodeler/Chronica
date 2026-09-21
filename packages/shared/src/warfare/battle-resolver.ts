@@ -223,6 +223,36 @@ function garrisonOvercrowdingBps(participant: ResolveBattleParticipant, province
   return -Math.min(2_000, Math.round(overRatio * 2_000));
 }
 
+/**
+ * What the men present are worth before anyone weighs the ground.
+ *
+ * Fit heads counted at their category's combat weight: a hundred cavalry and
+ * a hundred levies are not a hundred each.
+ */
+export function paperWeightedStrength(force: Force, rules: ScenarioWarfareRules | undefined): number {
+  return force.personnel.reduce((sum, category) => {
+    const definition = categoryDefinition(rules, category.categoryId);
+    return sum + category.fit * (definition.combatWeightBps / 10_000);
+  }, 0);
+}
+
+/**
+ * What a force is worth standing where it is, before a battle is anywhere
+ * near it -- weighted heads discounted by morale, cohesion and fatigue.
+ *
+ * Extracted so the muster a commander reads and the number a battle actually
+ * opens with are the same computation rather than two that agree today. The
+ * battle multiplies this by everything that belongs to a particular field:
+ * terrain, position, structures, supply, the commander, posture, tactics and
+ * the day's variance. None of that exists until there is a field.
+ */
+export function standingEffectiveStrength(force: Force, rules: ScenarioWarfareRules | undefined): number {
+  const moraleFactor = force.moraleBps / 10_000;
+  const cohesionFactor = force.cohesionBps / 10_000;
+  const fatiguePenalty = 1 - (force.fatigueBps / 10_000) * 0.5;
+  return Math.max(0, paperWeightedStrength(force, rules) * moraleFactor * cohesionFactor * fatiguePenalty);
+}
+
 function computeForceContribution(
   participant: ResolveBattleParticipant,
   province: Province,
@@ -234,13 +264,7 @@ function computeForceContribution(
   adjacentProvinceIds: readonly string[],
 ): ForceContribution {
   const { force } = participant;
-  const baseStrength = force.personnel.reduce((sum, category) => {
-    const definition = categoryDefinition(rules, category.categoryId);
-    return sum + category.fit * (definition.combatWeightBps / 10_000);
-  }, 0);
-  const moraleFactor = force.moraleBps / 10_000;
-  const cohesionFactor = force.cohesionBps / 10_000;
-  const fatiguePenalty = 1 - (force.fatigueBps / 10_000) * 0.5;
+  const baseStrength = paperWeightedStrength(force, rules);
   const position = resolveForcePosition(province, force.positionId);
   // Terrain and position favor the defender; an attacker is, by definition, on the move.
   const positionBps = participant.side === "defender" ? position.combatModifierBps : 0;
@@ -260,7 +284,7 @@ function computeForceContribution(
     + varianceBps
     + tacticBps;
   const modifierFactor = Math.max(0.2, 1 + modifierBps / 10_000);
-  const effectiveStrength = Math.max(0, baseStrength * moraleFactor * cohesionFactor * fatiguePenalty * modifierFactor);
+  const effectiveStrength = Math.max(0, standingEffectiveStrength(force, rules) * modifierFactor);
   return { participant, baseStrength, modifierBps, effectiveStrength };
 }
 

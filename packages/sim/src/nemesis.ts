@@ -228,10 +228,9 @@ export function nemesisMethod(character: Character): NemesisMethod {
  */
 export function conductInWords(character: Character, ruler: string): string {
   const lines: string[] = [];
-  const { boldness, caution, sociability, discipline, cruelty } = character.mind.temperament;
-  const { status, wealth, family, faith, duty, revenge, security } = character.mind.drives;
+  const { boldness, caution, sociability, discipline } = character.mind.temperament;
+  const { status, family, duty, revenge, security } = character.mind.drives;
   const risk = character.mind.riskTolerance;
-  const skill = (name: keyof typeof character.skills): number => (typeof character.skills[name] === "number" ? character.skills[name] : 50);
 
   // ── The spine: whether a thing is done in front of him or behind him ──
   switch (nemesisMethod(character)) {
@@ -259,19 +258,10 @@ export function conductInWords(character: Character, ruler: string): string {
   if (boldness >= 65 || risk >= 70) lines.push("They will not wait for certainty: where there is an opening now they take it, and mend what it breaks afterwards.");
   else if (caution >= 65 || risk <= 30) lines.push("They move only when they can see how it ends. An opening that might be a trap is left alone.");
 
-  // ── What they reach for ───────────────────────────────────────────────
-  //
-  // A drive that never changes what somebody does is decoration. Each of these
-  // names the operation the drive actually reaches for.
-  const instruments: string[] = [];
-  if (wealth >= 60 || skill("stewardship") >= 65) instruments.push('money -- "money_transfer" to whoever can be bought, "loan_open" to whoever can be obliged');
-  if (skill("martial") >= 65) instruments.push('the men they command, and what an army lets a man ask for');
-  if (skill("intrigue") >= 65) instruments.push('what other people would rather was not known');
-  if (skill("diplomacy") >= 65) instruments.push('other powers, written to directly with "diplomatic_message_send"');
-  if (sociability >= 60) instruments.push('other people -- they build a following, and put their weight behind them with "political_support_set"');
-  if (faith >= 65 || skill("piety") >= 65) instruments.push("the gods, the priesthoods, and what an oath is held to mean here");
-  if (instruments.length > 0) lines.push(`What they reach for first: ${instruments.join("; ")}.`);
-  if (sociability <= 35) lines.push("They work alone. They do not build a following and would not trust one.");
+  // What he reaches for, and what he will not do, are in every portrait now
+  // (`describeMind`), so they are deliberately not repeated here. What stays
+  // is what is only true of the man who is somebody's antagonist: how he
+  // fights, how patient he is, what is driving him at somebody in particular.
 
   // ── What moves them ───────────────────────────────────────────────────
   if (revenge >= 65) lines.push(`They do not let a slight go. Anything ${ruler} has done to them personally is still owed, and being owed is itself a reason to act.`);
@@ -295,12 +285,6 @@ export function conductInWords(character: Character, ruler: string): string {
     lines.push("When this matter turns on something, they are the one who says so out loud. Give them the line in \"utterance\".");
   }
 
-  // ── What they will not do ─────────────────────────────────────────────
-  if (cruelty <= 35) {
-    lines.push(`Whatever lies between them, they will not reach ${ruler} through his family or through people who have done nothing. That is not squeamishness; it is the line they keep.`);
-  } else if (cruelty >= 65) {
-    lines.push(`They see no reason to spare what is near ${ruler} -- his household, his people, whoever depends on him -- if that is where he is reachable.`);
-  }
   if (character.mind.taboos.length > 0 || duty >= 65) {
     lines.push("What is listed above under \"Will not\" is not negotiable for them, and neither is their own standing with the people who matter to them. Winning by a means they despise is losing.");
   }

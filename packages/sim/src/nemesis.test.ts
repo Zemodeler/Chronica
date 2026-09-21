@@ -175,23 +175,38 @@ describe("two rivals who want the same thing and are not the same antagonist", (
     expect(stalwart).toContain("will not conspire");
     expect(stalwart).toContain("in the open");
     expect(stalwart).toContain("They do not take \"subvert\"");
-    expect(stalwart).toContain("will not reach Marcus through his family");
 
     expect(treacherous).toContain("belief_set");
     expect(treacherous).toContain("subvert");
-    expect(treacherous).toContain("no reason to spare what is near Marcus");
     expect(treacherous).not.toContain("will not conspire");
   });
 
-  it("gives them different instruments, from what they are actually good at", () => {
+  it("gives every person their own instruments, from what they are good at", () => {
+    // These are in the ordinary portrait rather than in the antagonist's block:
+    // a treasurer who reaches for money and a general who reaches for his army
+    // are worth distinguishing whoever they are quarrelling with.
     const state = world();
     const base = state.characters.find((character) => character.alive)!;
-    const soldier = { ...base, skills: { ...base.skills, martial: 80, stewardship: 20, diplomacy: 20 } };
-    const banker = { ...base, mind: { ...base.mind, drives: drives({ wealth: 80 }) }, skills: { ...base.skills, martial: 20, stewardship: 80 } };
+    const soldier = { ...base, skills: { ...base.skills, martial: 80, stewardship: 20, diplomacy: 20, intrigue: 20 } };
+    const banker = { ...base, mind: { ...base.mind, drives: drives({ wealth: 80 }) }, skills: { ...base.skills, martial: 20, stewardship: 80, intrigue: 20, diplomacy: 20 } };
+    const portrait = (character: typeof base): string =>
+      renderCharacterPortrait(character.id, character.name, { ...state, characters: [character] }, clock);
 
-    expect(conductInWords(soldier, "Marcus")).toContain("the men they command");
-    expect(conductInWords(banker, "Marcus")).toContain("money_transfer");
-    expect(conductInWords(banker, "Marcus")).not.toContain("the men they command");
+    expect(portrait(soldier)).toContain("the men they command");
+    expect(portrait(banker)).toContain("money_transfer");
+    expect(portrait(banker)).not.toContain("the men they command");
+  });
+
+  it("says what each of them will not do", () => {
+    const state = world();
+    const base = state.characters.find((character) => character.alive)!;
+    const merciful = { ...base, mind: { ...base.mind, temperament: temperament({ cruelty: 15 }) } };
+    const ruthless = { ...base, mind: { ...base.mind, temperament: temperament({ cruelty: 85 }) } };
+    const portrait = (character: typeof base): string =>
+      renderCharacterPortrait(character.id, character.name, { ...state, characters: [character] }, clock);
+
+    expect(portrait(merciful)).toContain("will not get at a man through his family");
+    expect(portrait(ruthless)).toContain("no reason to spare a man's household");
   });
 
   it("answers the same order three different ways", () => {
