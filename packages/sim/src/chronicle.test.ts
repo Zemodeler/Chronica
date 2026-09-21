@@ -797,9 +797,29 @@ describe("a matter that is only continuing", () => {
 
     const moved = await compose(capturingPort(), [marched], {
       recentSubjects: told,
-      changes: [{ kind: "force_moved", id: "syracusan-army", label: "Syracusan army", detail: "marched to the shore" }],
+      changes: [{ kind: "force", id: "syracusan-army", label: "Syracusan army", detail: "marched to the shore" }],
     });
     expect(moved.entries).toHaveLength(1);
+  });
+
+  it("shows the historian what it wrote last time, and says not to write it again", async () => {
+    // The set comparison catches the clear cases and keeps leaking the unclear
+    // ones, because "the same matter" drifts by an id at a time. This puts the
+    // judgment where judgment belongs and keeps the bookkeeping where a model
+    // cannot be asked to do it.
+    const port = capturingPort();
+    await compose(port, [siege("Hieron II tightened the cordon again.")], {
+      recentTitles: ["Hieron II Tightens the Investment of Messana", "Rome Places Messana Under Protection"],
+    });
+    expect(port.lastUserMessage).toContain("WHAT THE LAST REPORT ALREADY SAID");
+    expect(port.lastUserMessage).toContain("Hieron II Tightens the Investment of Messana");
+    expect(port.lastUserMessage).toContain("Do not write any of these again");
+  });
+
+  it("says nothing about a previous report when there was none", async () => {
+    const port = capturingPort();
+    await compose(port, [siege("Hieron II tightened the cordon again.")]);
+    expect(port.lastUserMessage).not.toContain("WHAT THE LAST REPORT ALREADY SAID");
   });
 
   it("never holds back the reader's own business, however slowly it goes", async () => {
