@@ -2,7 +2,7 @@ import type { WorldState } from "../world/world-state";
 import type { Character, DirectedRelation, RelationCause } from "./character";
 import type { CharacterProfile } from "./character-profile";
 import type { CharacterSocialEvent } from "./social-events";
-import type { SocialLink } from "./relationship-dimensions";
+import { listSocialLinks, type SocialLink } from "./relationship-dimensions";
 import type { CharacterBelief } from "./beliefs";
 import { KNOWLEDGE_CHANNEL_DEFAULTS, resolveRecipients } from "./beliefs";
 import { createPressure, refreshPressure, resolvePressure } from "./pressures";
@@ -232,13 +232,27 @@ export function applySocialEvents(
     }
 
     // Beliefs: resolve recipients per channel and grant/reinforce a belief for each.
+    //
+    // A rumour travels along the source's own social links -- resolveRecipients
+    // takes at most four of them, sorted, so the spread stays bounded and
+    // deterministic. This argument was [] from the day it was written, which
+    // meant ordinary_rumour resolved to nobody and the one broad channel in
+    // the knowledge model never moved a thing. The other channels name their
+    // recipients outright and do not read it.
+    const rumourSource = event.participantCharacterIds[0] ?? null;
+    const sourceSocialLinkTargetIds = rumourSource === null
+      ? []
+      : listSocialLinks({ socialLinks }, rumourSource)
+        .map((link) => (link.subjectCharacterId === rumourSource ? link.targetCharacterId : link.subjectCharacterId))
+        .filter((id) => id !== rumourSource);
+
     for (const [beliefIndex, beliefProposal] of event.proposedBeliefs.entries()) {
       const recipients = resolveRecipients({
         channel: beliefProposal.channel,
         participantCharacterIds: event.participantCharacterIds,
         witnessCharacterIds: event.knownByCharacterIds,
-        sourceCharacterId: event.participantCharacterIds[0] ?? null,
-        sourceSocialLinkTargetIds: [],
+        sourceCharacterId: rumourSource,
+        sourceSocialLinkTargetIds,
         explicitRecipientIds: beliefProposal.explicitRecipientCharacterIds,
       });
       const defaults = KNOWLEDGE_CHANNEL_DEFAULTS[beliefProposal.channel];

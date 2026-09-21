@@ -127,6 +127,39 @@ describe("applySocialEvents — character-sim phase 2 extensions", () => {
     expect(secondPass.world.characterBeliefs).toHaveLength(outcome.world.characterBeliefs.length);
   });
 
+  it("carries a rumour along the source's social links, which it never used to", () => {
+    // resolveRecipients has always spread ordinary_rumour to up to four of the
+    // source's social links. The one callsite passed [], so the only broad
+    // channel in the knowledge model reached nobody at all.
+    const state = world();
+    const linked = {
+      ...state,
+      socialLinks: [
+        { id: "l1", subjectCharacterId: "marcus-atilius", targetCharacterId: "quintus-ogulnius", kind: "friend" as const, visibility: "public" as const, sourceEventId: null, createdAtStep: 0 },
+        { id: "l2", subjectCharacterId: "manius-curius", targetCharacterId: "marcus-atilius", kind: "client" as const, visibility: "public" as const, sourceEventId: null, createdAtStep: 0 },
+      ],
+    };
+    const event = baseEvent({
+      relationCauses: [],
+      proposedBeliefs: [{
+        subjectEntityId: "hanno",
+        claim: "Hanno is short on funds.",
+        kind: "rumour",
+        channel: "ordinary_rumour",
+        explicitRecipientCharacterIds: [],
+        expiresInSteps: null,
+      }],
+    });
+    const holders = applySocialEvents(linked, [event], 5, "turn-1").world.characterBeliefs
+      .map((b) => b.holderCharacterId).sort();
+    expect(holders.length).toBeGreaterThan(0);
+    // Both directions of a link count: the source's friend and the source's client.
+    expect(holders).toContain("quintus-ogulnius");
+    expect(holders).toContain("manius-curius");
+    // Never back to the person it came from.
+    expect(holders).not.toContain("marcus-atilius");
+  });
+
   it("rejects a belief proposal naming a recipient outside the event", () => {
     const event = baseEvent({
       relationCauses: [],
