@@ -23,17 +23,19 @@ interface MessageView {
 interface ChatPanelProps {
   readonly gameId: string;
   readonly playerCharacterId: string;
+  /** Opened from the Office, so the panel no longer owns the answer to whether it is. */
+  readonly open: boolean;
+  readonly onClose: () => void;
   /** Set to open this panel directly on a specific session -- e.g. a conversation a character initiated. */
   readonly openSessionId?: string | null;
   readonly onOpenSessionConsumed?: () => void;
 }
 
-export function ChatPanel({ gameId, playerCharacterId, openSessionId, onOpenSessionConsumed }: ChatPanelProps) {
+export function ChatPanel({ gameId, playerCharacterId, open, onClose, openSessionId, onOpenSessionConsumed }: ChatPanelProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const discoverDialogRef = useRef<HTMLDialogElement>(null);
   const groupDialogRef = useRef<HTMLDialogElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
   const [contacts, setContacts] = useState<readonly ContactView[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<readonly MessageView[]>([]);
@@ -81,8 +83,6 @@ export function ChatPanel({ gameId, playerCharacterId, openSessionId, onOpenSess
 
   useEffect(() => {
     if (!openSessionId) return;
-    setOpen(true);
-    dialogRef.current?.showModal();
     void fetchContacts();
     void selectContact(openSessionId);
     onOpenSessionConsumed?.();
@@ -90,17 +90,18 @@ export function ChatPanel({ gameId, playerCharacterId, openSessionId, onOpenSess
     // re-running when fetchContacts/selectContact identity changes.
   }, [openSessionId]);
 
-  function openPanel() {
-    setOpen(true);
-    dialogRef.current?.showModal();
-    void fetchContacts();
-  }
+  useEffect(() => {
+    if (open) { dialogRef.current?.showModal(); void fetchContacts(); }
+    else { dialogRef.current?.close(); }
+    // Deliberately keyed on `open` alone: fetchContacts is re-created every
+    // render and re-running it while the panel is already open would be a
+    // second identical request.
+  }, [open]);
 
   function closePanel() {
-    setOpen(false);
     setActiveSessionId(null);
     setMessages([]);
-    dialogRef.current?.close();
+    onClose();
   }
 
   async function selectContact(sessionId: string) {
@@ -203,7 +204,6 @@ export function ChatPanel({ gameId, playerCharacterId, openSessionId, onOpenSess
 
   return (
     <>
-      <button className="chat-open-button" onClick={openPanel} aria-label="Open chat panel">💬</button>
 
       <dialog ref={dialogRef} className="chat-panel-dialog" onClose={closePanel}>
         <div className="chat-panel-layout">

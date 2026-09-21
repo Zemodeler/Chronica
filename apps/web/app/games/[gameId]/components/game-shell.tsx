@@ -16,7 +16,12 @@ import { MapTooltip } from "./map-tooltip";
 import { MapControls } from "./map-controls";
 import { CharacterPanel, type CharacterPanelProps } from "./character-panel";
 import { ChatPanel } from "./chat-panel";
-import { SimulationPanel } from "./simulation-panel";
+import { CouncilPanel } from "./council-panel";
+import { ChroniclePanel } from "./chronicle-panel";
+import { BooksPanel } from "./books-panel";
+import { Office, type OfficeSurface } from "./office";
+import { MapOrderBar } from "./map-order-bar";
+import { unreadCount, useGameView } from "./use-game-view";
 
 type ZoomBand = "far" | "medium" | "close";
 
@@ -145,7 +150,56 @@ export function GameShell({
   const [flagCatalogForce, setFlagCatalogForce] = useState<ForceMapDetails | null>(null);
   const [coins, setCoins] = useState<string | null>(null);
   const [openChatSessionId, setOpenChatSessionId] = useState<string | null>(null);
+  /**
+   * Which of the game's two places the player is in.
+   *
+   * One route, and the map never unmounts: its pan/zoom lives in this
+   * component, and `derivePoliticalMapState` is memoised against a ref that a
+   * remount would throw away, so every return from the Office would pay the
+   * label-curve search again.
+   *
+   * The Office is where you land. A decision waiting on your word and the
+   * record of what happened while you were away are both in there.
+   */
+  const [place, setPlace] = useState<"map" | "office">("office");
+  const [surface, setSurface] = useState<OfficeSurface | null>(null);
+  const controller = useGameView(gameId);
   const zoomBand = deriveZoomBand(viewport.scale);
+
+  const openSurface = useCallback((next: OfficeSurface) => {
+    setSurface(next);
+    // Opening the record is what marks it read; the badge clears as the shelf
+    // comes off the wall rather than after a round trip.
+    if (next === "chronicle") void controller.markRead();
+  }, [controller]);
+  const closeSurface = useCallback(() => setSurface(null), []);
+  const goToDesk = useCallback(() => { setPlace("office"); setSurface("council"); }, []);
+
+  const { view } = controller;
+  const unread = unreadCount(view.chronicle);
+
+  /**
+   * What is in the room, and what is not.
+   *
+   * An object appears only when the thing it stands for is true. A private
+   * citizen's room is nearly bare, and the first time an arms rack shows up
+   * because somebody gave him a legion is a moment the game has had no way to
+   * express.
+   */
+  const things = useMemo(() => [
+    ...(orderingCharacterId === undefined ? [] : [{
+      id: "council" as const, name: "The writing desk", does: "Give an order.",
+      marked: view.decision !== null,
+    }]),
+    { id: "chronicle" as const, name: "The shelf of annals", does: "Turn back through the record.", badge: unread },
+    ...(playerCharacterId === undefined ? [] : [{
+      id: "people" as const, name: "The letter tray", does: "Read and answer your correspondence.",
+    }]),
+    { id: "books" as const, name: "The ledger stand", does: "Read the books." },
+    ...(characterPanel === undefined ? [] : [{
+      id: "self" as const, name: "The bronze mirror", does: "Consider yourself.",
+    }]),
+  ], [orderingCharacterId, playerCharacterId, characterPanel, view.decision, unread]);
 
   // --- Geometry shared between canvas terrain layer and lightweight SVG overlay ---
 
@@ -231,7 +285,9 @@ export function GameShell({
   // active combat costs nothing extra.
   const hasActiveConflict = Boolean(overlay && (overlay.conflicts.battles.length > 0 || overlay.conflicts.sieges.length > 0));
   useEffect(() => {
-    if (!hasActiveConflict) return;
+    // Not while the Office is over it: an opaque layer with a repainting
+    // canvas behind it is pure heat.
+    if (!hasActiveConflict || place !== "map") return;
     let raf: number;
     const tick = () => {
       mapViewportRef.current?.redrawCanvas();
@@ -239,7 +295,7 @@ export function GameShell({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [hasActiveConflict]);
+  }, [hasActiveConflict, place]);
 
   const allianceLabels = useMemo(() => {
     const names = new Map(overlay?.polities.map((polity) => [polity.polityId, polity.name]) ?? []);
@@ -429,6 +485,25 @@ export function GameShell({
         <a className="shell-top-bar-exit" href="/">
           Exit
         </a>
+        <div className="shell-place-switch" role="tablist" aria-label="Where you are">
+          <button
+            type="button" role="tab" id="place-map-tab" aria-controls="place-map"
+            aria-selected={place === "map"} className="shell-place"
+            onClick={() => setPlace("map")}
+          >The Map</button>
+          <button
+            type="button" role="tab" id="place-office-tab" aria-controls="place-office"
+            aria-selected={place === "office"} className="shell-place"
+            onClick={() => setPlace("office")}
+          >
+            The Office
+            {/* The decision mark is not polish. With the Council behind a door,
+                a player standing on the map has nothing else telling them the
+                world is waiting on their word. */}
+            {controller.view.decision !== null && <span className="shell-place__mark" aria-label="Something needs your word">•</span>}
+            {unread > 0 && <span className="shell-place__badge">{unread}</span>}
+          </button>
+        </div>
         <div className="shell-top-bar-center">
           <span className="shell-game-title">{gameTitle}</span>
         </div>
@@ -442,7 +517,14 @@ export function GameShell({
         </div>
       </header>
       <div className="game-shell">
-        <div className="game-shell-map">
+        <div
+          className="game-shell-map"
+          id="place-map"
+          role="tabpanel"
+          aria-labelledby="place-map-tab"
+          data-scale={viewport.scale.toFixed(2)}
+          {...(place === "map" ? {} : { inert: "" as unknown as boolean })}
+        >
           <MapViewport ref={mapViewportRef} transform={viewport} onTransformChange={setViewport} onDrawCanvas={onDrawCanvas} onPanStart={clearMapHover}>
             {world && political && (
               <GeoMap
@@ -491,18 +573,31 @@ export function GameShell({
             <strong>Political ties</strong>
             <span>{allianceLabels.join(" · ")}</span>
           </aside>}
+          {orderingCharacterId && <MapOrderBar controller={controller} onGoToDesk={goToDesk} />}
         </div>
+        {place === "office" && <Office things={things} onOpen={openSurface} onLeave={() => setPlace("map")} />}
       </div>
-      {characterPanel && <CharacterPanel {...characterPanel} />}
+
+      {characterPanel && (
+        <CharacterPanel {...characterPanel} open={surface === "self"} onClose={closeSurface} />
+      )}
       {playerCharacterId && (
         <ChatPanel
           gameId={gameId}
           playerCharacterId={playerCharacterId}
+          open={surface === "people"}
+          onClose={closeSurface}
           openSessionId={openChatSessionId}
           onOpenSessionConsumed={() => setOpenChatSessionId(null)}
         />
       )}
-      {orderingCharacterId && <SimulationPanel gameId={gameId} />}
+      {surface === "council" && orderingCharacterId && (
+        <CouncilPanel controller={controller} onClose={closeSurface} onOpenChronicle={() => openSurface("chronicle")} />
+      )}
+      {surface === "chronicle" && <ChroniclePanel controller={controller} onClose={closeSurface} />}
+      {surface === "books" && (
+        <BooksPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} />
+      )}
     </>
   );
 }
