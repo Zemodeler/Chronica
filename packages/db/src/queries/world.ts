@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNotNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import {
   ScenarioDefinitionSchema,
   WorldStateSchema,
@@ -437,6 +437,26 @@ export async function listChronicle(db: ChronicaDatabase, gameId: string, limit 
     .orderBy(desc(chronicleCheckpoints.toInstantSortKey), desc(chronicleCheckpoints.ordinal))
     .limit(limit);
   return newestFirst.reverse();
+}
+
+/**
+ * Mark everything written so far as read.
+ *
+ * `read_at` has been on the checkpoint row since the table was written and
+ * nothing has ever set it or looked at it, so the Chronicle's badge counted
+ * the length of the record and called it unopened -- a number that only ever
+ * went up and told the player nothing. It matters more now that the record
+ * lives behind a door in the Office: a badge is the only thing that says
+ * there is something in there worth turning back through.
+ *
+ * Only the unread rows are touched, so the timestamp keeps saying when a
+ * report was first read rather than when it was last looked at.
+ */
+export async function markChronicleRead(db: ChronicaDatabase, gameId: string, atTime = new Date()): Promise<void> {
+  await db
+    .update(chronicleCheckpoints)
+    .set({ readAt: atTime })
+    .where(and(eq(chronicleCheckpoints.gameId, gameId), isNull(chronicleCheckpoints.readAt)));
 }
 
 /**

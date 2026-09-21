@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { BooksPanel } from "./books-panel";
 import { ChroniclePanel } from "./chronicle-panel";
-import { latestReport, useGameView } from "./use-game-view";
+import { latestReport, unreadCount, useGameView } from "./use-game-view";
 
 /**
  * The player's three surfaces onto the simulation, and the tabs that open them.
@@ -31,7 +31,12 @@ export function SimulationPanel({ gameId }: { readonly gameId: string }) {
 
   const { view, busy, progress, error } = controller;
   const latest = latestReport(view.chronicle);
-  const unopened = view.chronicle.length;
+  // Genuinely unread, not the length of the record. read_at has been on the
+  // checkpoint row since the table was written and nothing ever set it, so
+  // this number only ever went up.
+  const unopened = unreadCount(view.chronicle);
+
+  const openChronicle = () => { setOpen("chronicle"); void controller.markRead(); };
 
   const send = async () => {
     const text = order.trim();
@@ -51,7 +56,7 @@ export function SimulationPanel({ gameId }: { readonly gameId: string }) {
         <button type="button" className="sim-tab" onClick={() => setOpen("council")} aria-label="Open the council">
           Council{view.decision === null ? "" : " •"}
         </button>
-        <button type="button" className="sim-tab" onClick={() => setOpen("chronicle")} aria-label="Open the chronicle">
+        <button type="button" className="sim-tab" onClick={openChronicle} aria-label="Open the chronicle">
           Chronicle{unopened === 0 ? "" : ` (${unopened})`}
         </button>
         <button type="button" className="sim-tab" onClick={() => setOpen("books")} aria-label="Open the treasury">
@@ -72,7 +77,7 @@ export function SimulationPanel({ gameId }: { readonly gameId: string }) {
         <h2>Council</h2>
         <div className="sim-panel__header-actions">
           <button type="button" onClick={() => setOpen("books")}>Treasury</button>
-          <button type="button" onClick={() => setOpen("chronicle")}>Chronicle</button>
+          <button type="button" onClick={openChronicle}>Chronicle</button>
           <button type="button" onClick={() => setOpen("none")} aria-label="Close the council">×</button>
         </div>
       </header>
@@ -115,7 +120,7 @@ export function SimulationPanel({ gameId }: { readonly gameId: string }) {
               {latest.map((entry) => (
                 <li key={entry.id}>
                   {entry.date !== null && <span>{entry.date}</span>}
-                  <button type="button" onClick={() => setOpen("chronicle")}>{entry.title}</button>
+                  <button type="button" onClick={openChronicle}>{entry.title}</button>
                 </li>
               ))}
             </ul>

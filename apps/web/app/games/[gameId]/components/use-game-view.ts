@@ -50,6 +50,8 @@ export interface ChronicleEntry {
   readonly tags: readonly EntryTag[];
   readonly changes: readonly MapChange[];
   readonly quote: EntryQuote | null;
+  /** Whether the player has yet opened the record since this was written. */
+  readonly unread: boolean;
 }
 
 export interface DecisionOption {
@@ -93,6 +95,13 @@ export interface GameViewController {
   readonly send: (orderText: string) => Promise<boolean>;
   readonly choose: (decisionId: string, optionId: string) => Promise<void>;
   readonly refresh: () => Promise<void>;
+  /**
+   * The player has opened the record.
+   *
+   * Marks server-side and locally in the same breath, so the badge clears as
+   * the panel opens rather than after a round trip.
+   */
+  readonly markRead: () => Promise<void>;
 }
 
 export function useGameView(gameId: string): GameViewController {
@@ -177,6 +186,15 @@ export function useGameView(gameId: string): GameViewController {
     }
   }, [gameId, refresh]);
 
+  const markRead = useCallback(async () => {
+    setView((current) => (current.chronicle.some((entry) => entry.unread)
+      ? { ...current, chronicle: current.chronicle.map((entry) => ({ ...entry, unread: false })) }
+      : current));
+    // A badge that fails to clear is a small thing; an error dialog over a
+    // panel the player has just opened is not. Swallowed on purpose.
+    await fetch(`/api/games/${gameId}/chronicle/read`, { method: "POST" }).catch(() => undefined);
+  }, [gameId]);
+
   const choose = useCallback(async (decisionId: string, optionId: string) => {
     setBusy(true);
     setError(null);
@@ -194,8 +212,12 @@ export function useGameView(gameId: string): GameViewController {
     }
   }, [gameId, refresh]);
 
-  return { view, busy, progress, error, send, choose, refresh };
+  return { view, busy, progress, error, send, choose, refresh, markRead };
 }
+
+/** How many entries the player has not yet turned back to. */
+export const unreadCount = (chronicle: readonly ChronicleEntry[]): number =>
+  chronicle.reduce((n, entry) => n + (entry.unread ? 1 : 0), 0);
 
 /** Everything the newest report produced -- not merely its last passage. */
 export function latestReport(chronicle: readonly ChronicleEntry[]): readonly ChronicleEntry[] {
