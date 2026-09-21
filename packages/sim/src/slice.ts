@@ -10,7 +10,7 @@ import {
   describeAuthority,
   factsKnownToStation,
   holdsPolityStanding,
-  knowsPerson,
+  reachesPerson,
   seesAccount,
   seesForce,
   factsKnownTo,
@@ -316,7 +316,10 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   const speaksForTheGovernment = station !== null && holdsPolityStanding(station);
   const reachesAccount = (accountId: string): boolean => station === null || seesAccount(station, accountId);
   const reachesForce = (forceId: string): boolean => station === null || seesForce(station, forceId);
-  const knowsThem = (characterId: string): boolean => station === null || knowsPerson(station, characterId);
+  // reachesPerson, not knowsPerson: someone who speaks for a whole power is
+  // briefed on its figures whether or not he has dealt with them. Sight, not
+  // acquaintance.
+  const knowsThem = (characterId: string): boolean => station === null || reachesPerson(station, characterId);
 
   // Money the actor's side actually holds, biggest first: a slice that leads
   // with a pauper's purse tells the model nothing about whether an order is

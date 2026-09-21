@@ -232,8 +232,29 @@ export const seesForce = (station: Station, forceId: string): boolean =>
 export const seesProvince = (station: Station, provinceId: string): boolean =>
   station.provinceIds.has(provinceId) || holdsPolityStanding(station);
 
+/**
+ * Whether these two have had anything to do with each other.
+ *
+ * No polity hatch, deliberately. `reachesPerson` below has one and is the
+ * right answer to "may this person be shown that figure"; it is the wrong
+ * answer to "do they know each other", because under it a consul knows every
+ * character in the world -- including a Gallic chieftain he has never heard
+ * of. Anything that lists people, or says what the viewer knows of them,
+ * wants this one.
+ */
 export const knowsPerson = (station: Station, characterId: string): boolean =>
-  station.knownCharacterIds.has(characterId) || station.characterId === characterId || holdsPolityStanding(station);
+  station.knownCharacterIds.has(characterId) || station.characterId === characterId;
+
+/**
+ * Whether this person's station reaches that figure at all.
+ *
+ * The hatch is real and deliberate for the world slice: someone who speaks
+ * for a whole power is briefed on its figures whether or not he has dealt
+ * with them personally. It is sight, not acquaintance, and the two were one
+ * predicate until something needed to ask the other question.
+ */
+export const reachesPerson = (station: Station, characterId: string): boolean =>
+  knowsPerson(station, characterId) || holdsPolityStanding(station);
 
 /**
  * What a person knows, narrowed from what their government knows.

@@ -6,6 +6,8 @@ import {
   CLAIMED_OFFICE_SOURCE_REF,
   buildStation,
   authorityInWords,
+  knowsPerson,
+  reachesPerson,
   describeAuthority,
   factsKnownToStation,
   holdsPolityStanding,
@@ -141,6 +143,32 @@ describe("a person's station", () => {
       expect(phrase.overLabel).not.toContain("[");
       expect(phrase.powers.join(" ")).not.toContain("[");
     }
+  });
+});
+
+describe("knowing a person, as against being briefed on them", () => {
+  it("does not let a consul claim acquaintance with everyone alive", () => {
+    // reachesPerson has a polity hatch and should: a man who speaks for a
+    // whole power is briefed on its figures. It is the wrong answer to "do
+    // these two know each other" -- under it a consul knows a Gallic
+    // chieftain he has never heard of.
+    const state = world();
+    const station = buildStation({ world: state, characterId: seatedConsul(state), offices });
+    const strangers = state.characters.filter(
+      (c) => c.id !== station.characterId && !station.knownCharacterIds.has(c.id),
+    );
+    expect(strangers.length).toBeGreaterThan(0);
+    for (const stranger of strangers) {
+      expect(reachesPerson(station, stranger.id)).toBe(true);
+      expect(knowsPerson(station, stranger.id)).toBe(false);
+    }
+  });
+
+  it("still counts the people they have actually dealt with, and themselves", () => {
+    const state = world();
+    const station = buildStation({ world: state, characterId: seatedConsul(state), offices });
+    expect(knowsPerson(station, station.characterId)).toBe(true);
+    for (const id of station.knownCharacterIds) expect(knowsPerson(station, id)).toBe(true);
   });
 });
 
