@@ -27,7 +27,10 @@ export interface PlayerWorld {
   readonly world: WorldState;
   /** Null when the viewer has no character in this game -- a spectator, or a save mid-declaration. */
   readonly characterId: string | null;
+  /** The player row, which the dialogue layer keys its contacts and knowledgebases by. */
+  readonly playerId: string | null;
   readonly view: WorldView;
+  readonly db: ChronicaDatabase;
 }
 
 /**
@@ -82,7 +85,7 @@ export async function withPlayerWorld<T>(
   const { db, close } = createDatabase(requiredDatabaseUrl());
   try {
     const [player] = await db
-      .select({ characterId: schema.players.characterId })
+      .select({ id: schema.players.id, characterId: schema.players.characterId })
       .from(schema.players)
       .where(and(eq(schema.players.gameId, gameId), eq(schema.players.userId, userId), eq(schema.players.status, "active")))
       .limit(1);
@@ -94,7 +97,7 @@ export async function withPlayerWorld<T>(
       ? view.world
       : await materializeDeclaredPlayer(db, gameId, view.world, characterId, view.scenarioGovernment, view.mapAssetId);
 
-    return await read({ world, characterId, view });
+    return await read({ world, characterId, playerId: player?.id ?? null, view, db });
   } finally {
     await close();
   }
