@@ -11,6 +11,7 @@ import {
   type NemesisStance,
   type WorldState,
 } from "@chronica/shared";
+import { answersAnOrder } from "./delegation";
 
 /**
  * Choosing the ruler's antagonist, and reading where he stands this season.
@@ -227,7 +228,7 @@ export function nemesisMethod(character: Character): NemesisMethod {
  */
 export function conductInWords(character: Character, ruler: string): string {
   const lines: string[] = [];
-  const { boldness, caution, honesty, sociability, discipline, cruelty } = character.mind.temperament;
+  const { boldness, caution, sociability, discipline, cruelty } = character.mind.temperament;
   const { status, wealth, family, faith, duty, revenge, security } = character.mind.drives;
   const risk = character.mind.riskTolerance;
   const skill = (name: keyof typeof character.skills): number => (typeof character.skills[name] === "number" ? character.skills[name] : 50);
@@ -281,14 +282,11 @@ export function conductInWords(character: Character, ruler: string): string {
   // ── How they answer an instruction ────────────────────────────────────
   //
   // The one place where two antagonists most visibly differ: the same order,
-  // the same man's authority behind it, three different answers.
-  if (honesty >= 60) {
-    lines.push('An order put to them is refused outright with "order_attempt_decide" and the reason given in their own words, or it is carried out properly. They do not take "subvert".');
-  } else if (honesty <= 35) {
-    lines.push('An order put to them is accepted where refusing would cost them, and answered with "subvert" -- they appear to comply and do otherwise. A refusal is for when they are strong enough that it is safe.');
-  } else if (caution >= 60) {
-    lines.push('An order put to them is more often delayed than refused: "delay" with a reason that sounds like diligence.');
-  }
+  // the same man's authority behind it, three different answers. Shared with
+  // every other character who has one outstanding, so the antagonist's rule
+  // and everybody else's cannot drift apart.
+  const answers = answersAnOrder(character);
+  if (answers !== null) lines.push(answers);
 
   // Almost every answer leaves `utterance` null, and it should. But a man of
   // this temperament is the one who does say something, and saying so here is

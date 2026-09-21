@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { punicWarsScenario } from "@chronica/db";
 import { WorldStateSchema, type Character, type WorldState } from "@chronica/shared";
-import { assessExecution, daysInHand, throughHand } from "./delegation";
+import { answersAnOrder, assessExecution, daysInHand, throughHand } from "./delegation";
 
 const base = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
 
@@ -72,5 +72,48 @@ describe("whose hands an order passes through", () => {
     expect(assessExecution(base(), "nobody-at-all", "fiscal")).toBeNull();
     expect(throughHand(500, null)).toEqual({ cost: 500, skimmed: 0 });
     expect(daysInHand(30, null)).toBe(30);
+  });
+});
+
+describe("how a person answers somebody else's order", () => {
+  const withMind = (over: Partial<WorldState["characters"][number]["mind"]["temperament"]>, drives?: Partial<WorldState["characters"][number]["mind"]["drives"]>) => {
+    const character = base().characters[0]!;
+    return {
+      ...character,
+      mind: {
+        ...character.mind,
+        temperament: { boldness: 50, caution: 50, honesty: 50, sociability: 50, discipline: 50, cruelty: 50, ...over },
+        drives: { security: 50, status: 50, wealth: 50, family: 50, faith: 50, duty: 50, revenge: 50, ...drives },
+      },
+    };
+  };
+
+  it("says nothing at all about an unremarkable person", () => {
+    // This is carried in the portrait of everybody with an order outstanding,
+    // so the ordinary case has to cost nothing. Somebody middling answers as
+    // the situation suggests, which is right.
+    expect(answersAnOrder(withMind({}))).toBeNull();
+  });
+
+  it("will not let an honest man appear to comply", () => {
+    const said = answersAnOrder(withMind({ honesty: 75 }))!;
+    expect(said).toContain("refuses outright");
+    expect(said).toContain('They do not take "subvert"');
+  });
+
+  it("hands the treacherous man exactly what it denies the honest one", () => {
+    const said = answersAnOrder(withMind({ honesty: 20 }))!;
+    expect(said).toContain("subvert");
+    expect(said).toContain("appear to comply and do otherwise");
+  });
+
+  it("lets a dutiful man refuse even where he is not especially honest", () => {
+    // Duty carries it on its own: a man who holds the office sacred does not
+    // quietly sabotage what he was told to do, whatever else he is.
+    expect(answersAnOrder(withMind({ honesty: 45 }, { duty: 80 }))!).toContain("refuses outright");
+  });
+
+  it("has the careful man delay rather than refuse", () => {
+    expect(answersAnOrder(withMind({ caution: 70 }))!).toContain("delays rather than refuses");
   });
 });

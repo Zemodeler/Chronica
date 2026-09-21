@@ -17,7 +17,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { RoutedActor } from "./attention";
-import { assessExecution } from "./delegation";
+import { answersAnOrder, assessExecution } from "./delegation";
 import { dropMalformedEntries, extractJson } from "./json";
 import { salvageAgainst } from "./salvage";
 import type { SimModelPort } from "./ports";
@@ -587,10 +587,15 @@ export function renderCharacterPortrait(
       const field = assessExecution(world, characterId, "military");
       const each = [hand, field].filter((entry): entry is NonNullable<typeof entry> => entry !== null);
       if (each.length > 0) {
+        const answers = answersAnOrder(character);
         lines.push(
           "Carrying out somebody else's business, they are:",
           `  - with money and administration: ${each[0]!.words}`,
           ...(each[1] === undefined ? [] : [`  - with soldiers and campaigns: ${each[1].words}`]),
+          // What sort of answer this particular man gives, where his
+          // temperament decides it. Silent for the middle of the range, which
+          // is most people: they answer as the situation suggests.
+          ...(answers === null ? [] : [`  ${answers}`]),
           "  Answer as that man. Doing it badly, slowly, or partly is a real answer, and so is doing it your own way.",
         );
       }
