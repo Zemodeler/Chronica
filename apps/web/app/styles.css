@@ -633,8 +633,6 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .shell-date-arrow { opacity: 0.4; font-size: 0.85rem; line-height: 1; }
 
 /* ─── Character sheet master/detail ─────────────────────────────── */
-.character-avatar-button { position: fixed; top: 4.5rem; left: 1rem; z-index: 30; display: grid; width: 44px; height: 44px; place-items: center; border: 2px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--text-title); box-shadow: 0 2px 8px rgb(0 0 0 / 40%); cursor: pointer; font-size: 1.1rem; }
-.character-avatar-button:hover { border-color: var(--accent); }
 .character-sheet-dialog { position: fixed; top: 4.5rem; left: 1rem; width: min(22rem, calc(100vw - 2rem)); max-height: calc(100dvh - 6rem); margin: 0; padding: 0; overflow: visible; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--text); box-shadow: 0 8px 32px rgb(0 0 0 / 55%); }
 .character-sheet-dialog::backdrop { background: rgb(6 8 13 / 72%); backdrop-filter: blur(3px); }
 .character-sheet-scroll { max-height: calc(100dvh - 6rem); overflow-y: auto; padding: 1.25rem; }
@@ -696,8 +694,6 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 @media (max-width: 760px) { .character-detail-panel { position: fixed; top: 5rem; left: 1rem; width: calc(100vw - 2rem); max-height: calc(100dvh - 6rem); z-index: 1; } }
 
 /* ─── Chat panel ─────────────────────────────────────────────────── */
-.chat-open-button { position: fixed; top: 8rem; left: 1rem; z-index: 30; display: grid; width: 44px; height: 44px; place-items: center; border: 2px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--text-title); box-shadow: 0 2px 8px rgb(0 0 0 / 40%); cursor: pointer; font-size: 1.1rem; }
-.chat-open-button:hover { border-color: var(--accent); }
 .chat-panel-dialog { position: fixed; top: 4.5rem; left: 1rem; width: min(52rem, calc(100vw - 2rem)); height: calc(100dvh - 6rem); margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--text); box-shadow: 0 8px 32px rgb(0 0 0 / 55%); overflow: hidden; }
 .chat-panel-dialog[open] { display: flex; flex-direction: column; }
 .chat-panel-dialog::backdrop { background: rgb(6 8 13 / 72%); backdrop-filter: blur(3px); }
@@ -750,17 +746,11 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 
 /* ── The council: the player's whole interface to the simulation ────────── */
 
-.sim-tab { position: fixed; top: calc(8rem + 44px + 0.75rem); left: 1rem; z-index: 30; padding: 0 0.9rem; height: 44px; border: 2px solid var(--border); border-radius: 22px; background: var(--surface); color: var(--text-title); box-shadow: 0 2px 8px rgb(0 0 0 / 40%); cursor: pointer; font: 600 0.85rem system-ui, sans-serif; }
-.sim-tab:hover { border-color: var(--accent); }
-
 .sim-panel { position: fixed; top: 4.5rem; right: 1rem; z-index: 31; display: flex; flex-direction: column; width: min(30rem, calc(100vw - 2rem)); max-height: calc(100dvh - 6rem); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--text); box-shadow: 0 8px 32px rgb(0 0 0 / 55%); overflow: hidden; }
 .sim-panel__header { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
 .sim-panel__header h2 { margin: 0; font: 700 1rem system-ui, sans-serif; color: var(--text-title); }
 .sim-panel__header button { display: grid; place-items: center; width: 28px; height: 28px; border: none; border-radius: 50%; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.1rem; }
 .sim-panel__header button:hover { background: var(--surface-raised); color: var(--text); }
-
-.sim-tabs { position: fixed; top: calc(8rem + 44px + 0.75rem); left: 1rem; z-index: 30; display: flex; gap: 0.5rem; }
-.sim-tabs .sim-tab { position: static; }
 .sim-panel__header-actions { display: flex; align-items: center; gap: 0.4rem; }
 .sim-panel__header-actions button:first-child { width: auto; padding: 0 0.7rem; height: 28px; border: 1px solid var(--border); border-radius: 14px; font: 600 0.75rem system-ui, sans-serif; }
 
@@ -856,3 +846,83 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .books__surplus th, .books__surplus td { border-top: 2px solid var(--border); font-weight: 700; padding-top: .5rem; }
 .books__deficit th, .books__deficit td { border-top: 2px solid color-mix(in srgb, red 45%, var(--border)); font-weight: 700; padding-top: .5rem; color: color-mix(in srgb, red 65%, var(--text)); }
 .books__arrears { margin: .2rem 0 0; font-size: .82rem; color: color-mix(in srgb, red 55%, var(--text)); }
+
+/* ─── The Office ─────────────────────────────────────────────────────────── */
+
+/* Screen-reader-only. Swept out with the turn system's dead rules and needed
+   again the moment a control's label stopped being visible text. */
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* The two places, as a switch in the top bar. Styled off .relation-tabs
+   rather than as a new idiom. */
+.shell-place-switch { display: flex; gap: .25rem; margin-left: .75rem; }
+.shell-place {
+  position: relative; padding: .3rem .7rem; border: 1px solid transparent;
+  border-radius: var(--radius-pill); background: none; color: var(--text-muted);
+  font: 600 .8rem system-ui, sans-serif; cursor: pointer;
+}
+.shell-place:hover { color: var(--text); }
+.shell-place[aria-selected="true"] {
+  border-color: var(--border); background: var(--surface-raised); color: var(--text-title);
+}
+.shell-place__mark { margin-left: .3rem; color: var(--accent-avatar); }
+.shell-place__badge {
+  margin-left: .35rem; padding: 0 .35rem; border-radius: var(--radius-pill);
+  background: var(--accent); color: #fff; font-size: .7rem; font-variant-numeric: tabular-nums;
+}
+
+/* The room itself. An opaque sibling of the map, which stays mounted behind
+   it so its pan, zoom and label geometry survive the round trip. */
+.office {
+  position: absolute; inset: 0; z-index: 2; overflow: auto;
+  min-width: 60rem; background: var(--background); color: var(--text);
+}
+.office__room {
+  position: relative; aspect-ratio: 16 / 9; margin: auto;
+  width: min(100%, calc((100dvh - 52px - 3rem) * 16 / 9));
+  display: grid; place-items: center;
+}
+.office__objects {
+  display: grid; gap: .6rem; margin: 0; padding: 1.5rem;
+  list-style: none; width: min(34rem, 100%);
+}
+.office-object {
+  display: grid; grid-template-columns: 1fr auto auto; align-items: baseline;
+  gap: .5rem 1rem; width: 100%; padding: .85rem 1.1rem; text-align: left;
+  border: 1px solid var(--border); border-radius: var(--radius-card);
+  background: var(--surface); color: var(--text-title); cursor: pointer;
+}
+.office-object:hover { border-color: var(--accent); background: var(--surface-raised); }
+.office-object__name { font: 600 .95rem system-ui, sans-serif; }
+.office-object__does { grid-column: 1 / -1; color: var(--text-muted); font-size: .82rem; }
+.office-object__mark { color: var(--accent-avatar); font-size: 1.1rem; }
+.office-object__badge {
+  padding: 0 .4rem; border-radius: var(--radius-pill); background: var(--accent);
+  color: #fff; font-size: .72rem; font-variant-numeric: tabular-nums;
+}
+
+/* One line, and a door. What is paid back for moving the order box indoors. */
+.map-order-bar {
+  position: absolute; left: 50%; bottom: 1rem; transform: translateX(-50%);
+  z-index: 25; display: flex; gap: .5rem; align-items: center;
+  width: min(44rem, calc(100% - 2rem)); padding: .5rem .6rem;
+  border: 1px solid var(--border); border-radius: var(--radius-pill);
+  background: var(--surface-overlay); box-shadow: 0 8px 32px rgb(0 0 0 / 55%);
+}
+.map-order-bar input {
+  flex: 1; min-width: 0; padding: .45rem .8rem; border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill); background: var(--surface); color: var(--text);
+  font: 400 .9rem system-ui, sans-serif;
+}
+.map-order-bar button {
+  padding: .45rem .9rem; border: 1px solid var(--border); border-radius: var(--radius-pill);
+  background: var(--accent); color: #fff; font: 600 .82rem system-ui, sans-serif; cursor: pointer;
+}
+.map-order-bar button:disabled { background: var(--surface-raised); color: var(--text-muted); cursor: default; }
+.map-order-bar__desk { background: none !important; color: var(--text-muted) !important; }
+.map-order-bar__desk:hover { color: var(--text) !important; border-color: var(--accent); }
+.map-order-bar--waiting { justify-content: center; }
+.map-order-bar--waiting button { background: var(--accent-avatar); }

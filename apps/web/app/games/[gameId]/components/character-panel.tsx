@@ -67,9 +67,8 @@ function originLabel(origin: CharacterPanelProps["origin"]): string {
 
 function formatYear(year: number | null): string { return year === null ? "Unknown" : year < 0 ? `${Math.abs(year)} BCE` : `${year} CE`; }
 
-export function CharacterPanel(props: CharacterPanelProps) {
-  const { characterName, role, locationLabel, culture, relations, origin, moneyLabel, moneyBalance, moneyChanges, birthYearApprox, ageAtStart, authority } = props;
-  const [open, setOpen] = useState(false);
+export function CharacterPanel(props: CharacterPanelProps & { readonly open: boolean; readonly onClose: () => void }) {
+  const { characterName, role, locationLabel, culture, relations, origin, moneyLabel, moneyBalance, moneyChanges, birthYearApprox, ageAtStart, authority, open, onClose } = props;
   const [detail, setDetail] = useState<DetailKey | null>(null);
   const [relationsTab, setRelationsTab] = useState<RelationCategory>("family");
   const [familyView, setFamilyView] = useState<FamilyView>("tree");
@@ -82,12 +81,17 @@ export function CharacterPanel(props: CharacterPanelProps) {
   const family = relations.filter((relation) => inferredCategory(relation) === "family");
   const others = relations.filter((relation) => inferredCategory(relation) === "other");
 
-  function openPanel() { setOpen(true); setDetail(null); dialogRef.current?.showModal(); }
-  function closePanel() { setOpen(false); setDetail(null); dialogRef.current?.close(); }
+  // Opened from the Office now, not from a button floating over the map, so
+  // the dialog follows a prop rather than owning the answer itself.
+  useEffect(() => {
+    if (open) { setDetail(null); dialogRef.current?.showModal(); }
+    else { dialogRef.current?.close(); }
+  }, [open]);
+
+  function closePanel() { setDetail(null); onClose(); }
   function openDetail(next: DetailKey) { if (next === "relations") setRelationsTab(family.length > 0 ? "family" : "other"); setDetail(next); }
 
   return <>
-    <button className="character-avatar-button" onClick={openPanel} aria-label={`Open character panel for ${characterName}`}>⚔</button>
     <dialog ref={dialogRef} onClose={closePanel} className="character-sheet-dialog" aria-label={`${characterName} character sheet`}>
       <div className="character-sheet-scroll">
         <header className="character-sheet-header"><div><h2>{characterName}</h2><p>{role}</p></div><button onClick={closePanel} aria-label="Close character panel" className="character-sheet-close">✕</button></header>
