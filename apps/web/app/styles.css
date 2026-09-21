@@ -29,6 +29,22 @@
   --danger:            #f87171;
   --success:           #34d399;
 
+  /* Focus. The ring below has always been white; the map controls asked for
+     var(--focus), which nobody ever defined, so those two buttons alone fell
+     back to currentColor and showed no ring at all. One definition, so the
+     Office -- which must be operable by keyboard alone -- cannot repeat it. */
+  --focus:             #ffffff;
+
+  /* The Office. A study is lamplit wood and plaster, and the palette above is
+     a dashboard's -- drawn in it, the room reads as furniture-shaped divs.
+     These are pitched in value against the surfaces above so the room sits in
+     the same world as the rest of the app, and it can be re-lit in one diff. */
+  --room-wood:         #3a2a1d;
+  --room-plaster:      #2b2622;
+  --room-bronze:       #8a6a3f;
+  --room-lamp:         #f2c66d;
+  --room-ink:          #17120e;
+
   /* Radii */
   --radius-pill:       9999px;
   --radius-card:       11px;
@@ -119,7 +135,7 @@ body {
 
 a { color: var(--accent); }
 a:focus-visible, button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, [tabindex="0"]:focus-visible {
-  outline: 3px solid #fff;
+  outline: 3px solid var(--focus);
   outline-offset: 3px;
 }
 
