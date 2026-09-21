@@ -100,7 +100,17 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
   if (stored === undefined) return undefined;
 
   const world = WorldStateSchema.safeParse(stored.world);
-  if (!world.success) return undefined;
+  if (!world.success) {
+    // Not "no state yet": there is state, and it will not load. Swallowing
+    // this reported a three-year campaign as an empty world because one
+    // standing order had a payer and a recipient that were the same account,
+    // and nothing anywhere said so.
+    const [first] = world.error.issues;
+    throw new Error(
+      `The stored world for game ${gameId} no longer satisfies the world schema`
+      + `${first === undefined ? "" : `: ${first.path.join(".")}: ${first.message}`}`,
+    );
+  }
 
   const definition = ScenarioDefinitionSchema.safeParse(context.definition);
   return {
