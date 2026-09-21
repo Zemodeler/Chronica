@@ -55,7 +55,8 @@ const EXPENSE_LABELS: Readonly<Record<string, string>> = {
   tribute: "Tribute", pension: "Pensions", debt_service: "Debt service",
 };
 
-const perMonth = (amount: number, cadenceSteps: number): number => (cadenceSteps <= 0 ? 0 : (amount / cadenceSteps) * 30);
+/** A cadence stated in days, said per month, which is the unit §7 is written in. */
+export const perMonth = (amount: number, cadenceSteps: number): number => (cadenceSteps <= 0 ? 0 : (amount / cadenceSteps) * 30);
 
 function fold(
   entries: readonly { readonly kind: string; readonly label: string; readonly monthly: number }[],

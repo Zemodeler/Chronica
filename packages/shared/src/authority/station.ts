@@ -274,6 +274,32 @@ export function factsKnownToStation(facts: readonly Fact[], station: Station, at
  * nothing a reader would recognise.
  */
 export function describeAuthority(station: Station, world: WorldState): string[] {
+  // One derivation, two renderings. The player must not be shown the id, and
+  // the model must not lose it, so the split is at the rendering rather than
+  // in a second copy of the walk.
+  return authorityInWords(station, world).map(
+    (phrase) => `${phrase.powers.join(", ")} in ${phrase.domain} matters, over ${phrase.overLabel} [${phrase.scopeId}].`,
+  );
+}
+
+/** One grant, taken apart so it can be said to a person or to a prompt. */
+export interface AuthorityPhrase {
+  readonly powers: readonly string[];
+  readonly domain: string;
+  /** The scope as a reader would name it: "Rome", "the Rome treasury". */
+  readonly overLabel: string;
+  /** The id the model needs and the player must never be shown. */
+  readonly scopeId: string;
+}
+
+/**
+ * What their grants permit, taken apart.
+ *
+ * `describeAuthority` renders these for a prompt, id and all. The character
+ * panel renders them for a person, who has no use for `[account-rome]` and
+ * should not be handed one. Both walk this.
+ */
+export function authorityInWords(station: Station, world: WorldState): AuthorityPhrase[] {
   const nameOf = (scope: AuthorityGrant["scope"]): string => {
     switch (scope.kind) {
       case "polity": return world.map.polities.find((polity) => polity.id === scope.id)?.name ?? scope.id;
@@ -292,12 +318,12 @@ export function describeAuthority(station: Station, world: WorldState): string[]
   };
 
   const seen = new Set<string>();
-  const lines: string[] = [];
+  const phrases: AuthorityPhrase[] = [];
   for (const grant of [...station.grants].sort((a, b) => a.domain.localeCompare(b.domain) || a.scope.id.localeCompare(b.scope.id))) {
-    const line = `${grant.powers.join(", ")} in ${grant.domain} matters, over ${nameOf(grant.scope)} [${grant.scope.id}].`;
-    if (seen.has(line)) continue;
-    seen.add(line);
-    lines.push(line);
+    const key = `${grant.powers.join(", ")} in ${grant.domain} matters, over ${nameOf(grant.scope)} [${grant.scope.id}].`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    phrases.push({ powers: grant.powers, domain: grant.domain, overLabel: nameOf(grant.scope), scopeId: grant.scope.id });
   }
-  return lines;
+  return phrases;
 }
