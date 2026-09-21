@@ -5,6 +5,7 @@ import { buildAuthorityIndex } from "./authority-grant";
 import {
   CLAIMED_OFFICE_SOURCE_REF,
   buildStation,
+  authorityInWords,
   describeAuthority,
   factsKnownToStation,
   holdsPolityStanding,
@@ -118,6 +119,28 @@ describe("a person's station", () => {
     // The section exists to tell the world who it is speaking for; "over
     // polity:rome" tells it nothing a reader would recognise.
     expect(lines.some((line) => /over [A-Z]/.test(line))).toBe(true);
+  });
+
+  it("says the same thing to the prompt after the split as it did before", () => {
+    // describeAuthority is now a rendering of authorityInWords. The prompt is
+    // written against its exact wording, so the two must not drift.
+    const state = world();
+    const station = buildStation({ world: state, characterId: seatedConsul(state), offices });
+    const rebuilt = authorityInWords(station, state).map(
+      (p) => `${p.powers.join(", ")} in ${p.domain} matters, over ${p.overLabel} [${p.scopeId}].`,
+    );
+    expect(rebuilt).toEqual(describeAuthority(station, state));
+  });
+
+  it("gives a person the same grant without the id the model needs", () => {
+    const state = world();
+    const station = buildStation({ world: state, characterId: seatedConsul(state), offices });
+    const phrases = authorityInWords(station, state);
+    expect(phrases.length).toBeGreaterThan(0);
+    for (const phrase of phrases) {
+      expect(phrase.overLabel).not.toContain("[");
+      expect(phrase.powers.join(" ")).not.toContain("[");
+    }
   });
 });
 
