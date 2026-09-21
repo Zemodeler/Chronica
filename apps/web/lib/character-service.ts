@@ -32,7 +32,7 @@ import { getAuthentication, isAuthenticationConfigured } from "./authentication"
 import { headers } from "next/headers";
 import { relationshipLabelForScore, scoreForDeclaredConnection } from "./relationship-score";
 import { canvasRegions, materializeCanvasProvince } from "./canvas-world";
-import { materializeDeclaredPlayer } from "./player-world";
+import { materializeDeclaredPlayer, withPlayerWorld } from "./player-world";
 
 // The fixture demo game uses a plain string ID, not a UUID, so no DB queries
 // are valid against it. All service functions return early for this ID.
@@ -613,6 +613,14 @@ export async function getCharacterPanelData(gameId: string): Promise<CharacterKn
  *
  * Traits and standing come from canonical world state rather than from the
  * declaration, because both are now things other people decide.
+ *
+ * Only ever about the viewer's own character. It took a characterId and had
+ * no session check of any kind, so it would happily have read any NPC in the
+ * world -- full skills, no gate on whether the player had ever met them.
+ * Nobody pointed it at one, and nothing stopped them. Now it answers for the
+ * signed-in player and returns nothing for anybody else; what the player may
+ * learn about *other* people goes through `readPerson`, which is built for
+ * exactly that question and answers it in hearsay.
  */
 export async function getCharacterReputation(
   gameId: string,
@@ -620,21 +628,17 @@ export async function getCharacterReputation(
 ): Promise<{ readonly traits: readonly string[]; readonly standing: string | null; readonly skills: readonly string[] }> {
   const empty = { traits: [], standing: null, skills: [] };
   if (gameId === DEMO_GAME_ID) return empty;
-  const { db, close } = createDatabase(requiredDatabaseUrl());
-  try {
-    const view = await getWorldView(db, gameId);
-    if (view === undefined) return empty;
-    const world = await materializeDeclaredPlayer(db, gameId, view.world, characterId, view.scenarioGovernment, view.mapAssetId);
-    const character = world.characters.find((candidate) => candidate.id === characterId);
+  const read = await withPlayerWorld(gameId, ({ world, characterId: viewerId }) => {
+    if (viewerId === null || viewerId !== characterId) return empty;
+    const character = world.characters.find((candidate) => candidate.id === viewerId);
     if (character === undefined) return empty;
     return {
       traits: traitsInWords(character.traits),
       standing: standingInWords(character.prestigeBps),
       skills: skillsInWords(character.skills),
     };
-  } finally {
-    await close();
-  }
+  });
+  return read ?? empty;
 }
 
 /**

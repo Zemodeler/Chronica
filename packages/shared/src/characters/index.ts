@@ -18,6 +18,8 @@ export * from "./life-events";
 export * from "./mind";
 export * from "./opinion";
 export * from "./access";
+export * from "./acquaintance";
+export * from "./beliefs-in-words";
 export * from "./skills-in-words";
 export * from "./wealth";
 export * from "./office-powers";

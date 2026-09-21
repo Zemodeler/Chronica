@@ -75,7 +75,14 @@ export interface AccessInput {
 /** How much standing separates two people before one of them needs an introduction. */
 const PEER_PRESTIGE_BAND_BPS = 2_500;
 
-function knowsAlready(world: WorldState, reacherId: string, targetId: string): boolean {
+/**
+ * Whether these two have actually had anything to do with each other: a
+ * directed relation with at least one cause, either way round, or a family
+ * link. Stricter than `station.knownCharacterIds`, which also counts open
+ * order attempts and commitments, and it is the honest answer to "does this
+ * person know that one".
+ */
+export function knowsAlready(world: WorldState, reacherId: string, targetId: string): boolean {
   const reacher = world.characters.find((character) => character.id === reacherId);
   const target = world.characters.find((character) => character.id === targetId);
   const named = (character: Character | undefined, otherId: string): boolean =>
