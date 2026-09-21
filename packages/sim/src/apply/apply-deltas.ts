@@ -582,6 +582,15 @@ function applyOne(
       const payerId = required(delta.payerAccountRef, "The paying account");
       if (!world.material.accounts.some((account) => account.id === payerId)) reject(`No account "${payerId}" exists to carry this obligation.`, "reference");
       const recipientId = delta.recipientAccountRef === null ? undefined : required(delta.recipientAccountRef, "The receiving account");
+      // A man does not owe himself. Allowed through, the tick pays it every
+      // cadence by moving money from an account to itself, and writes a
+      // transaction the world schema rejects -- so the *next* load of that
+      // save fails entirely and the game reports "This world has no state to
+      // act on yet". One standing order of forty a month bricked a campaign
+      // that had been running for three years.
+      if (recipientId !== undefined && recipientId === payerId) {
+        reject(`"${delta.label}" would have ${payerId} paying itself; an obligation needs somebody else to owe.`);
+      }
       const base = {
         kind: delta.kind,
         label: delta.label,

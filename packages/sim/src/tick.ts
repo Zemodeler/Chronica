@@ -193,7 +193,14 @@ export function runDeterministicTick(input: TickInput): TickResult {
           kind: obligation.kind === "army_pay" || obligation.kind === "army_upkeep" ? "upkeep" : "transfer",
           amount: owed,
           sourceAccountId: obligation.payerAccountId,
-          ...(obligation.recipientAccountId === undefined ? {} : { destinationAccountId: obligation.recipientAccountId }),
+          // Never to itself. An obligation whose payer and recipient are the
+          // same account is refused at creation now, but one already standing
+          // in a live world would otherwise write a transaction the schema
+          // rejects -- and a world that will not parse is a world that cannot
+          // be loaded at all.
+          ...(obligation.recipientAccountId === undefined || obligation.recipientAccountId === obligation.payerAccountId
+            ? {}
+            : { destinationAccountId: obligation.recipientAccountId }),
           cause: { kind: "obligation", id: obligation.id, explanation: obligation.label },
           visibility: "polity",
         });

@@ -1723,3 +1723,45 @@ describe("answering an order", () => {
     expect(fact.knownToRefs!.map((ref) => ref.id)).toEqual([recipient]);
   });
 });
+
+describe("an obligation that pays itself", () => {
+  it("is refused, because a man does not owe himself", () => {
+    // From a live game, and it bricked a three-year campaign. Allowed
+    // through, the tick pays it every cadence by moving money from an account
+    // to itself, and writes a transaction the world schema rejects -- so the
+    // next load of that save fails entirely and the game reports "This world
+    // has no state to act on yet". One standing order of forty a month.
+    const before = world();
+    const purse = before.material.accounts[0]!.id;
+    const result = applyDeltas(
+      before,
+      [{
+        op: "obligation_upsert", obligationRef: null, localId: "self", kind: "debt_service",
+        label: "Interest on an advance", payerAccountRef: purse, recipientAccountRef: purse,
+        amount: 40, cadenceDays: 30, priority: 500, active: true,
+        reason: "A standing order nobody should be able to write.",
+      }],
+      context(),
+    );
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.reason).toContain("paying itself");
+    expect(result.world.material.obligations.some((obligation) => obligation.payerAccountId === obligation.recipientAccountId)).toBe(false);
+  });
+
+  it("still allows an obligation owed to somebody else", () => {
+    const before = world();
+    const [payer, recipient] = before.material.accounts;
+    if (payer === undefined || recipient === undefined || payer.id === recipient.id) return;
+    const result = applyDeltas(
+      before,
+      [{
+        op: "obligation_upsert", obligationRef: null, localId: "proper", kind: "debt_service",
+        label: "Interest on an advance", payerAccountRef: payer.id, recipientAccountRef: recipient.id,
+        amount: 40, cadenceDays: 30, priority: 500, active: true,
+        reason: "Money genuinely owed.",
+      }],
+      context(),
+    );
+    expect(result.rejected).toHaveLength(0);
+  });
+});
