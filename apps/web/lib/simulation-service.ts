@@ -12,6 +12,7 @@ import {
   listPendingEvents,
   listRecentFacts,
   subjectsOfRecentReports,
+  titlesOfRecentReports,
   resolveDecision,
   schema,
   startBurst,
@@ -202,6 +203,8 @@ export async function submitOrder(
       // continuing is not given a fresh headline. Read before this one is
       // written.
       recentSubjects: await subjectsOfRecentReports(db, gameId),
+      // And what it actually said, so the historian is not asked to remember.
+      recentTitles: await titlesOfRecentReports(db, gameId),
     });
 
     // And the books close because the calendar turned, not because anybody

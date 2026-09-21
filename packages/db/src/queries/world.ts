@@ -418,6 +418,26 @@ export async function listChronicle(db: ChronicaDatabase, gameId: string, limit 
  */
 const REPORTS_REMEMBERED = 2;
 
+/** What the last reports were headlined, so the historian is not asked to remember. */
+export async function titlesOfRecentReports(db: ChronicaDatabase, gameId: string): Promise<string[]> {
+  const recent = await db
+    .selectDistinct({ burstId: chronicleCheckpoints.burstId, at: chronicleCheckpoints.toInstantSortKey })
+    .from(chronicleCheckpoints)
+    .where(and(eq(chronicleCheckpoints.gameId, gameId), isNotNull(chronicleCheckpoints.burstId)))
+    .orderBy(desc(chronicleCheckpoints.toInstantSortKey))
+    .limit(REPORTS_REMEMBERED);
+  const burstIds = recent.map((row) => row.burstId).filter((id): id is string => id !== null);
+  if (burstIds.length === 0) return [];
+
+  const rows = await db
+    .select({ title: chronicleCheckpoints.title, kind: chronicleCheckpoints.kind })
+    .from(chronicleCheckpoints)
+    .where(and(eq(chronicleCheckpoints.gameId, gameId), inArray(chronicleCheckpoints.burstId, burstIds)));
+  // The books close themselves every year and are not a matter anybody is
+  // continuing, so they are not something to be told off for repeating.
+  return rows.filter((row) => row.kind !== "recorded").map((row) => row.title);
+}
+
 export async function subjectsOfRecentReports(db: ChronicaDatabase, gameId: string): Promise<string[][]> {
   const recent = await db
     .selectDistinct({ burstId: chronicleCheckpoints.burstId, at: chronicleCheckpoints.toInstantSortKey })

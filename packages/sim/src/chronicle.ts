@@ -360,6 +360,17 @@ export interface ChronicleInput {
    */
   readonly recentSubjects?: readonly (readonly string[])[];
   /**
+   * What the last reports were headlined, in their own words.
+   *
+   * The subject-set guard above catches the clear cases and keeps leaking the
+   * unclear ones, because "the same matter" drifts by an id at a time and no
+   * set comparison survives that for long. This puts the judgment where
+   * judgment belongs: the historian is shown what they wrote last time and
+   * told not to write it again. The engine still supplies the bookkeeping --
+   * it is the one thing a model cannot be asked to remember.
+   */
+  readonly recentTitles?: readonly string[];
+  /**
    * Everything the observer's own side answers for: their polity, its people,
    * its provinces, themselves. A secret touching any of it stays dark; a secret
    * touching none of it may travel as distant news.
@@ -860,7 +871,24 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   if (threads.length === 0) return { entries: [], calls: 0 };
 
   const period = `${formatWorldDate(input.from, input.clock)} – ${formatWorldDate(input.to, input.clock)}`;
-  const userMessage = [`Period: ${period}.`, "", ...threads.map((thread, index) => renderThread(thread, index))].join("\n\n");
+  const alreadySaid = (input.recentTitles ?? []).slice(0, 16);
+  const userMessage = [
+    `Period: ${period}.`,
+    ...(alreadySaid.length === 0 ? [] : [
+      [
+        "WHAT THE LAST REPORT ALREADY SAID:",
+        ...alreadySaid.map((title) => `  - ${title}`),
+        "",
+        "Do not write any of these again. A matter that has only gone on is not",
+        "news: if a thread below says the same thing one of those said, leave it",
+        "out entirely rather than rephrasing it. Write it only when something in",
+        "it has actually changed -- ground taken, a man dead, a decision made,",
+        "an army broken -- and then write the change, not the situation.",
+      ].join("\n"),
+    ]),
+    "",
+    ...threads.map((thread, index) => renderThread(thread, index)),
+  ].join("\n\n");
 
   const changes = input.changes ?? [];
   const entryOf = (thread: Thread, title: string, body: string): ChronicleEntry => {
