@@ -306,7 +306,7 @@ describe("what the world is following, and what stirs", () => {
         orderText: "Invade the Boii lands", facts: [], dueEvents: [], pendingEvents: [],
         narratorSeed: {
           key: "seed-abc", kind: "world_event", archetype: "plague", severity: "serious", secret: false, oneShot: false, repeated: false, pressureId: null,
-          target: { provinceId: "punic-italy-latium", provinceName: "Latium", polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null, otherPolityId: null, otherPolityName: null },
+          target: { provinceId: "punic-italy-latium", provinceName: "Latium", polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null, otherPolityId: null, otherPolityName: null, forceId: null, forceName: null, forceIsNaval: false },
           inPlayerRealm: true, why: "The world has been quiet at home for a while.", brief: "Sickness has come to Latium [punic-italy-latium].",
         },
       }),

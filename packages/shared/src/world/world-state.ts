@@ -12,6 +12,7 @@ import { GenericEntitySchema } from "./generic-entity";
 import { PolityOutlookSchema } from "./outlook";
 import { ProvinceGraphSchema } from "./map";
 import { MapConflictsOverlaySchema } from "./map-presentation";
+import { NemesisSchema } from "./nemesis";
 import { WorldStorylineSchema } from "./storylines";
 import { CharacterPressureSchema } from "../characters/pressures";
 import { CharacterBeliefSchema } from "../characters/beliefs";
@@ -115,6 +116,12 @@ export const WorldStateSchema = z
     encounters: z.array(EncounterMemorySchema),
     /** Threads of history the world is following -- see `world/storylines.ts`. */
     storylines: z.array(WorldStorylineSchema).default([]),
+    /**
+     * The rulers' antagonists, live and retired (VISION §19's exception).
+     * One live entry per ruler; the retired ones are kept because who a reign
+     * was against is part of what it was.
+     */
+    nemeses: z.array(NemesisSchema).default([]),
     /** The narrator's own bookkeeping -- see `NarratorLedgerSchema`. */
     narrator: NarratorLedgerSchema.default(EMPTY_NARRATOR_LEDGER),
     /**

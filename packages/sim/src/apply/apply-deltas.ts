@@ -102,6 +102,8 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       return { kind: "polity", id: delta.polityId };
     case "force_modify":
       return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
+    case "force_attrition":
+      return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
     case "force_engage":
       return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
     case "polity_stance_shift":
@@ -224,6 +226,7 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   project_milestone_update: "propose",
   force_create: "command",
   force_modify: "command",
+  force_attrition: "command",
   character_create: "appoint",
   character_intent_set: "propose",
   social_events: "propose",
@@ -832,6 +835,80 @@ function applyOne(
             if (escortId !== null && candidate.id === escortId && delta.locationId !== undefined) return { ...candidate, locationId: delta.locationId };
             return candidate;
           }),
+        },
+      };
+    }
+
+    case "force_attrition": {
+      const forceId = required(delta.forceRef, "The force");
+      const force = world.material.forces.find((candidate) => candidate.id === forceId);
+      if (force === undefined) reject(`No force "${forceId}" exists.`, "reference");
+
+      // A share of the men actually present, not a number somebody chose. The
+      // author says "one in twenty" and this works out what that is -- which is
+      // also why a storm cannot drown more men than are aboard.
+      let lost = 0;
+      const personnel = force.personnel.map((category) => {
+        const gone = Math.min(category.fit, Math.floor((category.fit * delta.lossBps) / 10_000));
+        lost += gone;
+        return { ...category, fit: category.fit - gone };
+      });
+
+      const moraleBps = Math.min(10_000, Math.max(0, force.moraleBps + (delta.moraleBpsDelta ?? 0)));
+      if (lost === 0) {
+        // Too few men for the share to take one. The morale still goes: a camp
+        // that has been sickening is a worse camp even where nobody died.
+        return {
+          ...world,
+          material: { ...world.material, forces: world.material.forces.map((candidate) => (candidate.id === forceId ? { ...candidate, moraleBps } : candidate)) },
+        };
+      }
+
+      const WORD: Readonly<Record<typeof delta.cause, string>> = {
+        sickness: "to sickness",
+        storm: "in the storm",
+        starvation: "to hunger",
+        exposure: "to the cold",
+        desertion: "by desertion",
+      };
+      // The engine's own count, not the author's. A loss nobody can read in
+      // the record is a loss that did not happen.
+      emitFact({
+        localId: `attrition_${forceId}`,
+        kind: "force_attrition",
+        summary: `${force.name} lost ${lost === 1 ? "a man" : `${lost} men`} ${WORD[delta.cause]}.`,
+        affectedRefs: [{ kind: "force", id: forceId }],
+        visibility: "polity",
+        discoveryState: "polity",
+        knowableInDays: 0,
+        knownToRefs: [],
+        significance: delta.cause === "desertion" ? 70 : 60,
+      });
+
+      return {
+        ...world,
+        material: {
+          ...world.material,
+          forces: world.material.forces.map((candidate) =>
+            candidate.id !== forceId
+              ? candidate
+              : {
+                ...candidate,
+                personnel,
+                moraleBps,
+                authorizedStrength: Math.max(1, personnel.reduce((sum, category) => sum + category.fit, 0)),
+                history: [
+                  ...candidate.history,
+                  {
+                    id: context.ids.next("personnel"),
+                    atStep: context.now.day,
+                    kind: delta.cause === "desertion" ? ("desertion" as const) : ("attrition_death" as const),
+                    categoryId: personnel[0]?.categoryId ?? "infantry",
+                    count: lost,
+                    causeId: forceId,
+                  },
+                ].slice(-64),
+              }),
         },
       };
     }

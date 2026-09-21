@@ -4,6 +4,7 @@ import {
   LOOSE_COHESION_BPS,
   TRAIT_REGISTRY,
   cohesionInWords,
+  isTimeout,
   deriveRelationDimension,
   formatWorldDate,
   openStorylines,
@@ -17,7 +18,8 @@ import {
 } from "@chronica/shared";
 import type { RoutedActor } from "./attention";
 import { assessExecution } from "./delegation";
-import { extractJson } from "./json";
+import { dropMalformedEntries, extractJson } from "./json";
+import { salvageAgainst } from "./salvage";
 import type { SimModelPort } from "./ports";
 
 /**
@@ -45,12 +47,25 @@ const PROPOSAL_LISTS = ["deltas", "facts", "delegations", "schedule", "discoveri
 /**
  * Ops a model writes as a key of the proposal rather than as a delta in it.
  *
- * `social_events` is the one that actually happens: it reads like a field
- * because every other thing named in the same breath -- `relationCauses`,
- * `observedTraits` -- *is* a field. A batch of four people's answers was lost
- * to it in a live game, all four of them correct in substance.
+ * `social_events` was the first: it reads like a field because every other
+ * thing named in the same breath -- `relationCauses`, `observedTraits` -- *is*
+ * a field. A batch of four people's answers was lost to it in a live game, all
+ * four of them correct in substance.
+ *
+ * `storyline_advance` is the same mistake and was measured making it: two
+ * bursts in a row, four people each, every one of them rejected over
+ * `Unrecognized key: "storyline_advance"` and every one repaired at full price.
+ * The prompt asks for it in the same breath as `storylineRef`, which really is
+ * a field on a fact, so the confusion is the prompt's own doing.
+ *
+ * The flag says whether the op carries a list of its own: `social_events`
+ * wraps its contents in `events`, and everything else is a plain delta whose
+ * fields sit at the top level.
  */
-const MISPLACED_OPS = ["social_events"] as const;
+const MISPLACED_OPS: Readonly<Record<string, { readonly wrapsEvents: boolean }>> = {
+  social_events: { wrapsEvents: true },
+  storyline_advance: { wrapsEvents: false },
+};
 
 /**
  * Puts a proposal's own lists back inside the proposal.
@@ -83,8 +98,12 @@ export function foldStrayProposalKeys(value: unknown): unknown {
     }
   };
 
-  const actors = (root.actors as unknown[]).map((entry): unknown => {
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return entry;
+  // A person written as a bare sentence is not a person. Before this, one such
+  // entry failed `actors.1: expected object, received string` and took the
+  // other five people's answers with it.
+  const people = (root.actors as unknown[]).filter((entry) => typeof entry === "object" && entry !== null && !Array.isArray(entry));
+
+  const actors = people.map((entry): unknown => {
     const actor = { ...(entry as Record<string, unknown>) };
     const proposal = typeof actor.proposal === "object" && actor.proposal !== null && !Array.isArray(actor.proposal)
       ? { ...(actor.proposal as Record<string, unknown>) }
@@ -92,7 +111,7 @@ export function foldStrayProposalKeys(value: unknown): unknown {
     drain(actor, proposal);
     // An op written as a key of the proposal is still that op. Put it back in
     // the deltas where it belongs rather than losing the whole answer to it.
-    for (const op of MISPLACED_OPS) {
+    for (const [op, shape] of Object.entries(MISPLACED_OPS)) {
       const stray = proposal[op] ?? actor[op];
       if (stray === undefined || stray === null) continue;
       delete proposal[op];
@@ -102,12 +121,26 @@ export function foldStrayProposalKeys(value: unknown): unknown {
       for (const entry of entries) {
         if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
         const asDelta = entry as Record<string, unknown>;
+        if (!shape.wrapsEvents) { deltas.push({ op, ...asDelta }); continue; }
         // Either "{events: [...]}" or a bare list of events; both are meant.
         deltas.push(Array.isArray(asDelta.events) ? { op, ...asDelta } : { op, events: [asDelta] });
       }
       proposal.deltas = deltas;
     }
-    actor.proposal = proposal;
+    // The actor's own "reasoning", written one level down inside the proposal
+    // -- either under that name or as "reason". The proposal schema is strict,
+    // so four people's complete answers were rejected, twice in one evening's
+    // play, over the placement of a field that is kept for inspection and
+    // never applied to anything.
+    const strayReason = proposal.reasoning ?? proposal.reason ?? actor.reason;
+    delete proposal.reasoning;
+    delete proposal.reason;
+    delete actor.reason;
+    if (actor.reasoning === undefined && typeof strayReason === "string") actor.reasoning = strayReason;
+
+    // And a delta, fact or scheduled event written as a bare line is not one.
+    // Dropping it keeps everything the same answer got right.
+    actor.proposal = dropMalformedEntries(proposal, PROPOSAL_LISTS);
     return actor;
   });
 
@@ -240,6 +273,8 @@ export interface CognitionResult {
   readonly output: CognitionOutput;
   readonly calls: number;
   readonly parseFailure: string | null;
+  /** What was dropped to make an otherwise good answer parse, without a call. */
+  readonly salvaged: readonly string[];
 }
 
 /**
@@ -592,6 +627,7 @@ function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock
     knownFacts: actor.knownFacts,
     impetus: { why: actor.why, ownBusiness: actor.impetus === "own_business" },
     others,
+    ...(actor.note === undefined ? {} : { extra: [actor.note] }),
     closeWithDate: true,
   });
 }
@@ -599,27 +635,90 @@ function renderActor(actor: RoutedActor, world: WorldState, clock: ScenarioClock
 
 const EMPTY: CognitionOutput = { actors: [] };
 
-export async function runCognition(
+/**
+ * How many people one call answers for before the batch is split in two.
+ *
+ * The batch is one generation, and generation is serial: ten people's
+ * proposals come back one after another in a single stream, so the round takes
+ * as long as the whole cast's output put together. Nothing about that is
+ * required -- each person's section is built only from what that person knows
+ * and never refers to another's -- so past this size the cast is dealt onto two
+ * calls that run at once, and the round costs the longer half instead of the
+ * sum.
+ *
+ * This buys wall time, not tokens: the same portraits go out and the same
+ * proposals come back. The only duplication is a second copy of the system
+ * prompt, which is the one part of the request that is cached.
+ */
+const BATCH_SPLIT_THRESHOLD = 6;
+
+/**
+ * Roughly how many people one call should answer for once the cast is split.
+ *
+ * A round costs the slowest of its calls, so the shorter each one's answer the
+ * sooner the round is done. Not smaller than this, though: every call repeats
+ * the whole cast's context, and past a point the fixed cost of another request
+ * outweighs the shorter answer it produces.
+ */
+const ACTORS_PER_CALL = 4;
+
+/** Not wider than the database pool is prepared to hold coin holds open. */
+const MAX_BATCHES = 3;
+
+/** The cast, dealt into the calls that will answer for it, in the router's order. */
+function deal(actors: readonly RoutedActor[]): readonly (readonly RoutedActor[])[] {
+  if (actors.length < BATCH_SPLIT_THRESHOLD) return [actors];
+  const batches = Math.min(MAX_BATCHES, Math.ceil(actors.length / ACTORS_PER_CALL));
+  const size = Math.ceil(actors.length / batches);
+  return Array.from({ length: batches }, (_, index) => actors.slice(index * size, (index + 1) * size))
+    .filter((batch) => batch.length > 0);
+}
+
+/** One call's worth: the actors it answers for, against the whole cast's context. */
+async function runOneBatch(
   port: SimModelPort,
   actors: readonly RoutedActor[],
   world: WorldState,
   clock: ScenarioClock,
+  inBatch: readonly string[],
 ): Promise<CognitionResult> {
-  if (actors.length === 0) return { output: EMPTY, calls: 0, parseFailure: null };
-
-  const inBatch = actors.map((actor) => actor.characterId);
   const userMessage = actors.map((actor) => renderActor(actor, world, clock, inBatch)).join("\n\n");
   const complain = (issues: readonly { path: readonly PropertyKey[]; message: string }[]): string =>
     issues.slice(0, 4).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
 
+  const salvaged: string[] = [];
+  /** Parses, and if that fails drops what the schema named and parses again. */
+  const read = (raw: string) => {
+    const prepared = foldStrayProposalKeys(extractJson(raw));
+    const parsed = CognitionOutputSchema.safeParse(prepared);
+    if (parsed.success) return parsed;
+    // A bad reference inside one person's fact should cost that reference, not
+    // the other five people's answers.
+    const rescued = salvageAgainst(prepared, parsed.error.issues);
+    if (rescued === null) return parsed;
+    const retried = CognitionOutputSchema.safeParse(rescued.value);
+    if (!retried.success) return parsed;
+    salvaged.push(...rescued.dropped);
+    return retried;
+  };
+
   let failure: string;
   try {
-    const raw = await port.complete("simulate_cognition", COGNITION_SYSTEM_PROMPT, userMessage);
-    const parsed = CognitionOutputSchema.safeParse(foldStrayProposalKeys(extractJson(raw)));
-    if (parsed.success) return { output: parsed.data, calls: 1, parseFailure: null };
+    const parsed = read(await port.complete("simulate_cognition", COGNITION_SYSTEM_PROMPT, userMessage));
+    if (parsed.success) return { output: parsed.data, calls: 1, parseFailure: null, salvaged };
     failure = complain(parsed.error.issues);
   } catch (error) {
-    return { output: EMPTY, calls: 1, parseFailure: error instanceof Error ? error.message : String(error) };
+    const reason = error instanceof Error ? error.message : String(error);
+    // A deadline is not a complaint about the answer's shape, so the repair
+    // below would re-send a prompt that was never wrong and wait all over
+    // again for the same nothing.
+    if (isTimeout(error)) return { output: EMPTY, calls: 1, parseFailure: reason, salvaged };
+    // Anything else is an answer that could not be read -- most often one cut
+    // off mid-object, which is not JSON at all and so throws here rather than
+    // failing the schema. That used to skip the repair and lose the whole
+    // half-round in silence, which is precisely the case the repair exists
+    // for: the model had something to say and the engine could not hear it.
+    failure = reason;
   }
 
   // One repair attempt, the same one orchestration gets.
@@ -638,10 +737,59 @@ export async function runCognition(
       COGNITION_SYSTEM_PROMPT,
       `${userMessage}\n\nYour previous answer was rejected. Fix exactly these problems and answer again with the whole object:\n${failure}`,
     );
-    const repaired = CognitionOutputSchema.safeParse(foldStrayProposalKeys(extractJson(raw)));
-    if (repaired.success) return { output: repaired.data, calls: 2, parseFailure: null };
-    return { output: EMPTY, calls: 2, parseFailure: complain(repaired.error.issues) };
+    const repaired = read(raw);
+    if (repaired.success) return { output: repaired.data, calls: 2, parseFailure: null, salvaged };
+    return { output: EMPTY, calls: 2, parseFailure: complain(repaired.error.issues), salvaged };
   } catch (error) {
-    return { output: EMPTY, calls: 2, parseFailure: error instanceof Error ? error.message : String(error) };
+    return { output: EMPTY, calls: 2, parseFailure: error instanceof Error ? error.message : String(error), salvaged };
   }
+}
+
+/**
+ * NPC cognition for one round (VISION §28).
+ *
+ * Every actor the router selected is answered for, from their own knowledge
+ * and nobody else's. A large cast is dealt onto two concurrent calls rather
+ * than one long one -- see `BATCH_SPLIT_THRESHOLD` -- and the answers are put
+ * back in the order the router chose, so the deltas are applied in the same
+ * sequence whether the round took one call or two.
+ */
+export async function runCognition(
+  port: SimModelPort,
+  actors: readonly RoutedActor[],
+  world: WorldState,
+  clock: ScenarioClock,
+): Promise<CognitionResult> {
+  if (actors.length === 0) return { output: EMPTY, calls: 0, parseFailure: null, salvaged: [] };
+
+  // The whole cast, whichever call a given person travels in. This is what
+  // `renderActor` uses for the relations block, so every portrait comes out
+  // byte-identical to the unsplit batch -- the split changes which request
+  // carries a person, and nothing about what is said of them.
+  const inBatch = actors.map((actor) => actor.characterId);
+
+  const chunks = deal(actors);
+  const results = await Promise.all(chunks.map((chunk) => runOneBatch(port, chunk, world, clock, inBatch)));
+
+  if (results.length === 1) return results[0]!;
+
+  // Back into the router's order. A model may answer for its people in any
+  // order it likes, and one half finishing first must not reorder the other's
+  // deltas: what the attention router decided mattered most is applied first,
+  // exactly as it was before the split.
+  const rank = new Map(inBatch.map((characterId, index) => [characterId, index]));
+  const merged = results
+    .flatMap((result) => result.output.actors)
+    .sort((a, b) => (rank.get(a.actorRef.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.actorRef.id) ?? Number.MAX_SAFE_INTEGER));
+
+  // One half failing is half a round lost, not a whole one. Both complaints
+  // are kept: a shape the model keeps getting wrong should be legible here.
+  const failures = results.map((result) => result.parseFailure).filter((failure): failure is string => failure !== null);
+
+  return {
+    output: { actors: merged },
+    calls: results.reduce((sum, result) => sum + result.calls, 0),
+    parseFailure: failures.length === 0 ? null : failures.join(" | "),
+    salvaged: results.flatMap((result) => result.salvaged),
+  };
 }

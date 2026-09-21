@@ -29,11 +29,15 @@ function fact(overrides: Partial<FactDraft>): Fact {
 }
 
 /** Captures what the historian was actually shown, and writes every thread it was given. */
-function capturingPort(): SimModelPort & { lastUserMessage: string } {
+function capturingPort(): SimModelPort & { lastUserMessage: string; userMessages: string[] } {
   const port = {
     lastUserMessage: "",
+    // One per call. A report is now written a passage at a time, so "what the
+    // historian was shown" is a list rather than a string.
+    userMessages: [] as string[],
     complete(_operation: Parameters<SimModelPort["complete"]>[0], _system: string, user: string) {
       port.lastUserMessage = user;
+      port.userMessages.push(user);
       const threads = [...user.matchAll(/^THREAD (\d+)$/gm)].map((match) => Number(match[1]));
       return Promise.resolve(JSON.stringify({
         entries: threads.map((thread) => ({ thread, title: `Thread ${thread}`, body: "In the spring, Rome began to raise new legions." })),
@@ -111,9 +115,19 @@ describe("chronicle", () => {
     expect(own!.factIds).toHaveLength(1);
     expect(own!.subjects.map((subject) => subject.id)).toContain("boii");
     expect(elsewhere!.subjects.map((subject) => subject.id)).toEqual(["carthage"]);
-    // Each thread is rendered on its own, so neither can borrow the other's news.
-    expect(port.lastUserMessage).toContain("THREAD 1");
-    expect(port.lastUserMessage).toContain("THREAD 2");
+    // Each thread is written on its own, so neither can borrow the other's
+    // news -- now because each one is a separate request holding a single
+    // matter, rather than because the prompt asked the model to keep them
+    // apart within one.
+    expect(port.userMessages).toHaveLength(2);
+    for (const message of port.userMessages) {
+      expect([...message.matchAll(/^THREAD \d+$/gm)]).toHaveLength(1);
+    }
+    const [marching, weighing] = port.userMessages;
+    expect(marching).toContain("The legions march north into Boii country.");
+    expect(marching).not.toContain("Messana");
+    expect(weighing).toContain("Carthage weighs the strait at Messana.");
+    expect(weighing).not.toContain("Boii country");
   });
 
   it("tells one war once, however many sides it has", async () => {
@@ -835,5 +849,41 @@ describe("a matter that is only continuing", () => {
     });
     const told = [["polity:rome"]];
     expect((await compose(capturingPort(), [ours], { recentSubjects: told })).entries).toHaveLength(1);
+  });
+});
+
+describe("a passage that could not be written", () => {
+  it("costs its own matter its prose and nothing else", async () => {
+    // A report is written a passage at a time, so an answer the engine cannot
+    // read is now local damage. It used to be total: one unreadable answer
+    // dropped every entry in the report to bare fact summaries.
+    const port: SimModelPort = {
+      complete(_operation, _system, user) {
+        if (user.includes("Messana")) return Promise.resolve("The historian sends his regrets.");
+        return Promise.resolve(JSON.stringify({ entries: [{ thread: 1, title: "The legions go north", body: "In the spring, Rome began to raise new legions." }] }));
+      },
+    };
+
+    const result = await composeChronicle({
+      port,
+      clock,
+      observer: { kind: "character", id: "marcus-atilius" },
+      observerPolityId: "rome",
+      facts: [
+        fact({ summary: "The legions march north into Boii country.", affectedEntities: [{ kind: "polity", id: "rome" }, { kind: "polity", id: "boii" }] }),
+        fact({ summary: "Carthage weighs the strait at Messana.", affectedEntities: [{ kind: "polity", id: "carthage" }] }),
+      ],
+      from: { day: 0, minute: 0 },
+      to: { day: 30, minute: 0 },
+      narrative: [],
+      frictions: [],
+    });
+
+    expect(result.entries).toHaveLength(2);
+    const written = result.entries.find((entry) => entry.subjects.some((subject) => subject.id === "boii"))!;
+    const unwritten = result.entries.find((entry) => entry.subjects.some((subject) => subject.id === "carthage"))!;
+    expect(written.title).toBe("The legions go north");
+    // The one that failed keeps its facts, under the period as a title.
+    expect(unwritten.body).toContain("Carthage weighs the strait at Messana.");
   });
 });

@@ -2,6 +2,7 @@ import {
   addMinutes,
   assessOrderStanding,
   advanceWorldTo,
+  formatWorldDate,
   ScheduledEventPayloadSchema,
   type Fact,
   type FactProposalDraft,
@@ -17,6 +18,7 @@ import {
   type ScenarioWarfareRules,
   type TerrainDefinition,
   type StopReason,
+  nemesisOf,
   type WatchProposal,
   type WorldState,
 } from "@chronica/shared";
@@ -27,6 +29,7 @@ import { routeAmbientActors, routeAttention, type RoutedActor } from "./attentio
 import { runCognition } from "./cognition";
 import { materializeFacts } from "./facts";
 import { decideNarratorSeeds, recordSeedsOffered, seedParticipants, seedWasTaken, type NarratorSeed } from "./narrator";
+import { chooseNemesis, conductInWords, nemesisStance, recordNemesis, retireNemesis, shouldRetire, stanceInWords } from "./nemesis";
 import { orchestrate } from "./orchestrate";
 import { describeBreach, findWhoWouldNotice, noticersAsRefs } from "./oversight";
 import { createIdFactory, type SimModelPort } from "./ports";
@@ -68,7 +71,15 @@ export const DEFAULT_BUDGET: SimulationBudget = {
   // look after the calendar has jumped, not only two days after the order,
   // which is when a foreign king has anything to do that is worth recording.
   maxIterations: 4,
-  maxModelCalls: 6,
+  // Twenty calls rather than six, and not a single extra thing asked of the
+  // world. A round's cast is dealt onto up to three calls that run at once
+  // instead of one that generates ten people's answers end to end, so a round
+  // costs three calls and the same tokens. Counted in calls, six would end the
+  // burst after its first round; `maxIterations` is the budget that actually
+  // bounds the work, and this is only the guard against a loop that will not
+  // stop -- set above the worst honest case, three rounds of three calls each
+  // with a repair apiece, rather than at it.
+  maxModelCalls: 20,
   maxSimulatedDays: 90,
   maxCausalDepth: 3,
   // Ten people to a round rather than six. A month in which four people in the
@@ -100,6 +111,26 @@ export interface PendingEvent {
   /** As stored; parsed with `ScheduledEventPayloadSchema` when it fires. */
   readonly payload?: unknown;
 }
+
+/**
+ * What the world is doing, while it is doing it.
+ *
+ * A burst is several model calls long and says nothing until it has finished
+ * all of them, so the player watches a still button for minutes. None of this
+ * is the record -- the record is written at the end, from the finished burst,
+ * and cannot honestly exist before then. This is the engine saying where it
+ * has got to, and the most interesting thing it can say is the date: a season
+ * visibly passing is what the waiting is actually for.
+ *
+ * Structured rather than phrased, so the words belong to the client and the
+ * engine keeps knowing nothing about who is reading.
+ */
+export type BurstProgress =
+  | { readonly kind: "orchestrating" }
+  /** The calendar moved. `date` is already formatted for this scenario's clock. */
+  | { readonly kind: "advanced"; readonly date: string }
+  | { readonly kind: "answering"; readonly date: string; readonly people: readonly string[] }
+  | { readonly kind: "settled"; readonly date: string };
 
 export interface BurstInput {
   readonly world: WorldState;
@@ -139,6 +170,11 @@ export interface BurstInput {
   readonly narratorSeed?: NarratorSeed | null | undefined;
   /** Everything that stirs, for a test that wants to fix the whole batch. */
   readonly narratorSeeds?: readonly NarratorSeed[] | undefined;
+  /**
+   * Told where the burst has got to, as it gets there. Never awaited and never
+   * allowed to fail the burst: this reports on the work, it is not part of it.
+   */
+  readonly onProgress?: ((progress: BurstProgress) => void) | undefined;
 }
 
 export interface BurstResult {
@@ -190,6 +226,13 @@ export interface BurstResult {
   readonly breaches: readonly AuthorityBreach[];
   readonly playerDecision: PlayerDecision | null;
   readonly parseFailures: readonly string[];
+  /**
+   * What the engine dropped out of otherwise good answers to spare a repair
+   * call, in the schema's own words. Worth surfacing rather than swallowing:
+   * a field that keeps appearing here is a prompt or a schema at fault, and
+   * the whole point of salvaging is that it should be visible when it happens.
+   */
+  readonly salvaged: readonly string[];
 }
 
 /** How long a reaction takes to form, when nothing scheduled says otherwise. */
@@ -201,6 +244,19 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const startDay = input.world.instant.day;
 
   let world = input.world;
+  /**
+   * Says where the burst has got to. Never allowed to fail the burst: a player
+   * watching is a convenience, and a convenience that can lose an order is not
+   * one.
+   */
+  const report = (progress: BurstProgress): void => {
+    try {
+      input.onProgress?.(progress);
+    } catch {
+      /* a listener's problem is never the world's */
+    }
+  };
+  const today = (): string => formatWorldDate(world.instant, input.clock);
   let modelCalls = 0;
   let iterations = 0;
   let significance = 0;
@@ -213,6 +269,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const battleAccounts: BattleAccount[] = [];
   const breaches: AuthorityBreach[] = [];
   const parseFailures: string[] = [];
+  const salvaged: string[] = [];
   /** Who the passage of time took, so the burst can end on the question of who follows. */
   const deadThisBurst = new Set<string>();
   let playerDecision: PlayerDecision | null = null;
@@ -554,6 +611,42 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   tickTo(world.instant.day);
   fireDueEvents();
 
+  // ── The ruler's antagonist ──────────────────────────────────────────────
+  //
+  // Asked before the order, so the man is in the room for the whole burst. The
+  // choice is the engine's and the campaign is his: all this does is decide
+  // that somebody has become the ruler's problem, open the thread it will be
+  // told in, and make sure he is heard every round instead of whenever the
+  // week's facts happen to reach him.
+  const playerId = input.actorRef.kind === "character" ? input.actorRef.id : null;
+  let nemesis = nemesisOf(world.nemeses, playerId);
+  if (nemesis !== undefined && shouldRetire(world, nemesis)) {
+    world = retireNemesis(world, nemesis);
+    nemesis = undefined;
+  }
+  if (nemesis === undefined && playerId !== null) {
+    const chosen = chooseNemesis({ world, gameId: input.gameId, playerCharacterId: playerId, ownPolityId: input.actorPolityId });
+    if (chosen !== null) {
+      world = recordNemesis(world, chosen, playerId, ids);
+      nemesis = nemesisOf(world.nemeses, playerId);
+    }
+  }
+  /**
+   * How he fights, and where he stands this season.
+   *
+   * Two halves on purpose: the first is a fact about the man, read off his
+   * temperament and his drives, and the second is a fact about the situation.
+   * A stalwart rival and a treacherous one holding the same office against the
+   * same ruler should not be handed the same brief, and before this they were.
+   */
+  const antagonistNote = (): string | undefined => {
+    if (nemesis === undefined || playerId === null) return undefined;
+    const rival = world.characters.find((character) => character.id === nemesis.characterId);
+    if (rival === undefined) return undefined;
+    const ruler = world.characters.find((character) => character.id === playerId)?.name ?? "the ruler";
+    return `${conductInWords(rival, ruler)} ${stanceInWords(nemesisStance(world, nemesis, input.actorPolityId), ruler)}`;
+  };
+
   // ── Iteration 0: the player's order ────────────────────────────────────
   const threadOf = (event: PendingEvent): string | undefined => {
     const payload = ScheduledEventPayloadSchema.safeParse(event.payload ?? {});
@@ -587,6 +680,9 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         // What this order may carry the world through, so the batch is the
         // season's and not the morning's.
         spanDays: Math.min(budget.maxSimulatedDays, input.clock.maxSpanDays),
+        // What tells a fleet from an army, so a storm at sea catches ships and
+        // never a legion in the open field.
+        warfare: input.warfare,
         ...(input.historicalPressures === undefined ? {} : { pressures: input.historicalPressures }),
       });
   world = recordSeedsOffered(world, seeds, world.instant.day + Math.min(budget.maxSimulatedDays, input.clock.maxSpanDays));
@@ -605,10 +701,12 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     narratorSeeds: seeds,
   });
 
+  report({ kind: "orchestrating" });
   const orchestration = await orchestrate(input.port, slice);
   modelCalls += orchestration.calls;
   iterations += 1;
   if (orchestration.parseFailure !== null) parseFailures.push(orchestration.parseFailure);
+  salvaged.push(...orchestration.salvaged);
   const factsBefore = newFacts.length;
   applyProposal(orchestration.output, input.actorRef, 0, true);
   const orderFactIds = newFacts.slice(factsBefore).map((fact) => fact.id);
@@ -678,6 +776,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     world = advanceWorldTo(world, addMinutes(world.instant, Math.max(0, targetKey - nowKey())));
     tickTo(world.instant.day);
     fireDueEvents();
+    report({ kind: "advanced", date: today() });
 
     const playerCharacterIds = input.actorRef.kind === "character" ? [input.actorRef.id] : [];
     const attention = routeAttention({
@@ -711,9 +810,18 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       // The first round only: whoever the narrator just handed a problem to is
       // asked what they do about it before the rotation has its say.
       priorityCharacterIds: hops === 1 ? priorityCharacterIds : [],
+      // Every round, not only the first: a quarrel that goes quiet whenever the
+      // week is busy is not a quarrel, it is a coincidence.
+      nemesisCharacterId: nemesis?.characterId ?? null,
     });
 
-    const cast = [...attention.focused, ...ambient];
+    // Where the antagonist stands is the world's to know and his to act on, so
+    // it is said in his own section and nowhere else. Nothing tells him what he
+    // is; he is told what his situation is, which is what anybody knows.
+    const note = antagonistNote();
+    const cast = [...attention.focused, ...ambient].map((actor) =>
+      nemesis !== undefined && actor.characterId === nemesis.characterId && note !== undefined ? { ...actor, note } : actor,
+    );
     const wantsAnswering = cast.length > 0 && causalDepth <= budget.maxCausalDepth;
     if (wantsAnswering) {
       // Somebody has something to say and there is nothing left to pay them
@@ -722,10 +830,12 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         stopReason = "budget_exhausted";
         break;
       }
+      report({ kind: "answering", date: today(), people: cast.map((actor) => actor.name) });
       const cognition = await runCognition(input.port, cast, world, input.clock);
       modelCalls += cognition.calls;
       iterations += 1;
       if (cognition.parseFailure !== null) parseFailures.push(cognition.parseFailure);
+      salvaged.push(...cognition.salvaged);
       for (const actor of cognition.output.actors) applyProposal(actor.proposal, actor.actorRef, causalDepth);
       causalDepth += 1;
     }
@@ -750,12 +860,12 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // a world that asks "shall we winter in Sicily?" of a corpse is not asking
   // anybody anything -- and there is always at least one name on it, because a
   // dead end is the one thing this branch's constraints forbid outright.
-  const playerId = input.actorRef.kind === "character" ? input.actorRef.id : null;
   if (playerId !== null && deadThisBurst.has(playerId)) {
     playerDecision = successionDecision(world, playerId, world.instant.day);
   }
 
   if (playerDecision !== null) stopReason = "player_decision";
+  report({ kind: "settled", date: today() });
 
   // VISION §23: a decision interrupts, accumulated history earns a Chronicle,
   // and a quiet burst simply continues -- still committed, just not narrated.
@@ -782,6 +892,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     breaches,
     playerDecision,
     parseFailures,
+    salvaged,
   };
 }
 

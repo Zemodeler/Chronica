@@ -29,15 +29,20 @@ export function SimulationPanel({ gameId }: { readonly gameId: string }) {
   const [open, setOpen] = useState<"none" | "council" | "chronicle" | "books">("none");
   const [order, setOrder] = useState("");
 
-  const { view, busy, error } = controller;
+  const { view, busy, progress, error } = controller;
   const latest = latestReport(view.chronicle);
   const unopened = view.chronicle.length;
 
   const send = async () => {
     const text = order.trim();
     if (text.length === 0 || busy) return;
-    await controller.send(text);
+    const reported = await controller.send(text);
     setOrder("");
+    // Straight into the Chronicle when there is one. The report is the answer
+    // to the order, and making the player find it themselves -- in the panel
+    // next door, behind a tab -- was asking them to go and look for the thing
+    // they had just spent three minutes waiting for.
+    if (reported) setOpen("chronicle");
   };
 
   if (open === "none") {
@@ -87,6 +92,19 @@ export function SimulationPanel({ gameId }: { readonly gameId: string }) {
         </section>
       )}
 
+      {busy && progress.length > 0 && (
+        // What the world is doing, while it is still doing it. None of this is
+        // the record: it is not kept, and it goes when the next order is given.
+        <section className="sim-panel__progress" aria-live="polite">
+          <h3>The world is moving</h3>
+          <ol>
+            {progress.map((line, index) => (
+              <li key={`${index}-${line}`} className={index === progress.length - 1 ? "sim-panel__progress-now" : undefined}>{line}</li>
+            ))}
+          </ol>
+        </section>
+      )}
+
       <section className="sim-panel__report">
         {latest.length === 0 ? (
           <p className="sim-panel__empty">Nothing has been recorded yet. Give an order and the world will answer.</p>
@@ -121,7 +139,7 @@ export function SimulationPanel({ gameId }: { readonly gameId: string }) {
             onChange={(event) => setOrder(event.target.value)}
           />
           <button type="submit" disabled={busy || order.trim().length === 0}>
-            {busy ? "The world is moving…" : "Send"}
+            {busy ? (progress[progress.length - 1] ?? "The world is moving…") : "Send"}
           </button>
         </form>
       )}

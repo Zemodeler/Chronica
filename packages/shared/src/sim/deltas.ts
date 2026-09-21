@@ -177,6 +177,37 @@ const ForceCreateSchema = z.object({
   reason: ReasonSchema,
 }).strict();
 
+/**
+ * Men lost to something other than a battle.
+ *
+ * Disease, storm, hunger and cold have always killed more soldiers than
+ * fighting has, and until now the engine had no way to say so: `force_modify`
+ * moves the *authorized* strength, which is the establishment on paper, while
+ * the men who are actually there live in `personnel`. Only a battle, and
+ * desertion over unpaid wages, ever touched those -- so a plague in a camp
+ * could lower morale and change nothing about how many men stood up
+ * afterwards. `attrition_death` has been a personnel-event kind since the
+ * force model was written and nothing has ever produced one.
+ *
+ * The loss is a *share*, not a count, for the reason every other delta states
+ * a change rather than a total: the author says "one in twenty", and the
+ * engine works out what that is of the men actually present. It is also the
+ * guard against a thousand casualties in a force of four hundred.
+ *
+ * This is not the battle rule being relaxed. Casualties in a fight stay the
+ * engine's alone because there is an enemy there to be favoured; a storm has
+ * nobody's side to take.
+ */
+const ForceAttritionSchema = z.object({
+  op: z.literal("force_attrition"),
+  forceRef: RefSchema,
+  cause: z.enum(["sickness", "storm", "starvation", "exposure", "desertion"]),
+  /** Of the men still fit, the share this takes, in basis points. 500 is one in twenty. */
+  lossBps: z.number().int().min(1).max(6_000),
+  moraleBpsDelta: z.number().int().min(-10_000).max(0).optional(),
+  reason: ReasonSchema,
+}).strict();
+
 const ForceModifySchema = z.object({
   op: z.literal("force_modify"),
   forceRef: RefSchema,
@@ -839,6 +870,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   ProjectMilestoneUpdateSchema,
   ForceCreateSchema,
   ForceModifySchema,
+  ForceAttritionSchema,
   CharacterCreateSchema,
   CharacterIntentSetSchema,
   SocialEventsSchema,
@@ -882,6 +914,7 @@ export const WORLD_DELTA_OPS = [
   "project_milestone_update",
   "force_create",
   "force_modify",
+  "force_attrition",
   "character_create",
   "character_intent_set",
   "social_events",
@@ -928,6 +961,7 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   project_milestone_update: "civil",
   force_create: "military",
   force_modify: "military",
+  force_attrition: "military",
   character_create: "civil",
   character_intent_set: "social",
   social_events: "social",

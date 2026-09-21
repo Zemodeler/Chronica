@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { OrchestratorOutputSchema, type OrchestratorOutput } from "@chronica/shared";
-import { extractJson } from "./json";
+import { OrchestratorOutputSchema, isTimeout, type OrchestratorOutput } from "@chronica/shared";
+import { dropMalformedEntries, extractJson } from "./json";
+import { salvageAgainst } from "./salvage";
 import type { SimModelPort } from "./ports";
 import { renderWorldSlice, type WorldSlice } from "./slice";
 
@@ -296,6 +297,12 @@ export interface OrchestrateResult {
   /** Set when the model could not produce a valid proposal even after a repair attempt. */
   readonly parseFailure: string | null;
   /**
+   * What was dropped to make an otherwise good answer parse, without spending
+   * a call on it. Kept for the same reason `repairedFrom` is: if the same
+   * field keeps appearing here, the schema or the prompt is at fault.
+   */
+  readonly salvaged: readonly string[];
+  /**
    * Why the first attempt was rejected, when a repair then succeeded. Kept
    * because a repair costs a whole extra call: if the same complaint keeps
    * appearing here, the prompt or the schema is at fault, not the model.
@@ -344,7 +351,10 @@ const OUTPUT_CAPS: Readonly<Record<string, number>> = {
 
 export function trimToCaps(value: unknown): unknown {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
-  const output = { ...(value as Record<string, unknown>) };
+  // A delta or fact written as a bare line is not one, and the schema is
+  // strict, so a single stray sentence rejected the whole proposal. The same
+  // trade as the ceilings below: lose the malformed entry, never the answer.
+  const output = { ...(dropMalformedEntries(value, Object.keys(OUTPUT_CAPS)) as Record<string, unknown>) };
   for (const [key, cap] of Object.entries(OUTPUT_CAPS)) {
     const list = output[key];
     if (Array.isArray(list) && list.length > cap) output[key] = list.slice(0, cap);
@@ -355,20 +365,39 @@ export function trimToCaps(value: unknown): unknown {
 export async function orchestrate(port: SimModelPort, slice: WorldSlice): Promise<OrchestrateResult> {
   const userMessage = renderWorldSlice(slice);
   let calls = 0;
+  const salvaged: string[] = [];
 
   const attempt = async (message: string) => {
     calls += 1;
     const raw = await port.complete("simulate_orchestrate", ORCHESTRATOR_SYSTEM_PROMPT, message);
-    return OrchestratorOutputSchema.safeParse(trimToCaps(extractJson(raw)));
+    const prepared = trimToCaps(extractJson(raw));
+    const parsed = OrchestratorOutputSchema.safeParse(prepared);
+    if (parsed.success) return parsed;
+
+    // Before paying for a second call: drop exactly what the schema named and
+    // try again. Sixteen deltas were once thrown away over a misspelt enum in
+    // the sixteenth.
+    const rescued = salvageAgainst(prepared, parsed.error.issues);
+    if (rescued === null) return parsed;
+    const retried = OrchestratorOutputSchema.safeParse(rescued.value);
+    if (!retried.success) return parsed;
+    salvaged.push(...rescued.dropped);
+    return retried;
   };
 
   let failure: string;
   try {
     const first = await attempt(userMessage);
-    if (first.success) return { output: first.data, calls, parseFailure: null, repairedFrom: null };
+    if (first.success) return { output: first.data, calls, parseFailure: null, salvaged, repairedFrom: null };
     failure = first.error.issues.slice(0, 6).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
+    // A repair answers a complaint about the shape of the answer. A deadline is
+    // not a complaint: the prompt was not wrong, so re-sending it whole buys a
+    // second full-price wait that ends the same way. Give up and say so.
+    if (isTimeout(error)) {
+      return { output: inertOutput("The order reached the palace, but no answer came back in time."), calls, parseFailure: failure, salvaged, repairedFrom: null };
+    }
   }
 
   // One repair attempt, carrying the exact complaints back. Two is not worth the
@@ -377,11 +406,11 @@ export async function orchestrate(port: SimModelPort, slice: WorldSlice): Promis
   try {
     const firstFailure = failure;
     const repaired = await attempt(`${userMessage}\n\nYour previous answer was rejected. Fix exactly these problems and answer again with the whole object:\n${failure}`);
-    if (repaired.success) return { output: repaired.data, calls, parseFailure: null, repairedFrom: firstFailure };
+    if (repaired.success) return { output: repaired.data, calls, parseFailure: null, salvaged, repairedFrom: firstFailure };
     failure = repaired.error.issues.slice(0, 6).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
   }
 
-  return { output: inertOutput("The order reached the palace, but no workable instruction came back out of it."), calls, parseFailure: failure, repairedFrom: null };
+  return { output: inertOutput("The order reached the palace, but no workable instruction came back out of it."), calls, parseFailure: failure, salvaged, repairedFrom: null };
 }

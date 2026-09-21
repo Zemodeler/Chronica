@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario, punicWarsScenario } from "@chronica/db";
-import { WorldStateSchema, ensureProvinceMaterial, type WorldState } from "@chronica/shared";
+import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, isNavalForce, type WorldState } from "@chronica/shared";
 import { decideNarratorSeed, decideNarratorSeeds, livePressures, readTension, recordSeedOffered, recordSeedOutcome, recordSeedsOffered, seedWasTaken, type NarratorInput } from "./narrator";
 
 const small = (): WorldState => WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
@@ -308,5 +308,57 @@ describe("an age that arrives in order", () => {
     expect(livePressures(world, [first, second]).map((pressure) => pressure.id)).toEqual(["the-asking"]);
     const asked: WorldState = { ...world, narrator: { ...world.narrator, spentPressureIds: ["the-asking"] } };
     expect(livePressures(asked, [first, second]).map((pressure) => pressure.id)).toEqual(["the-answering"]);
+  });
+});
+
+describe("trouble that lands on an army", () => {
+  /** Runs the whole deck deterministically by walking the seed ordinal. */
+  function everySeed(world: WorldState, overrides: Partial<NarratorInput> = {}): ReturnType<typeof decideNarratorSeeds> {
+    const seeds = [];
+    for (let day = 40; day < 4_000; day += 40) {
+      const at = later(world, day);
+      seeds.push(...decideNarratorSeeds(input({ ...at, narrator: { ...at.narrator, lastSeedDay: null, seedCount: day } }, overrides)));
+    }
+    return seeds;
+  }
+
+  it("can reach a force at all, which it never could before", () => {
+    // Trouble could name a province, a power or a person and nothing else, so
+    // an army was the one thing in the world only a battle could touch.
+    const world = large();
+    expect(world.material.forces.length).toBeGreaterThan(0);
+    const onForces = everySeed(world).filter((seed) => seed.target.forceId !== null);
+    expect(onForces.length).toBeGreaterThan(0);
+    for (const seed of onForces) {
+      // Named with its id, so the brief can be carried out against it.
+      expect(seed.brief).toContain(seed.target.forceId!);
+      expect(world.material.forces.some((force) => force.id === seed.target.forceId)).toBe(true);
+    }
+  });
+
+  it("puts the commander in the way of it, so somebody has to answer", () => {
+    const world = large();
+    for (const seed of everySeed(world).filter((entry) => entry.target.forceId !== null)) {
+      const force = world.material.forces.find((candidate) => candidate.id === seed.target.forceId)!;
+      expect(seed.target.characterId).toBe(force.commanderCharacterId);
+      expect(seed.target.provinceId).toBe(force.locationId);
+    }
+  });
+
+  it("never catches a legion in a storm at sea", () => {
+    const world = large();
+    const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
+    for (const seed of everySeed(world, { warfare: definition.warfare })) {
+      if (seed.archetype !== "storm_at_sea") continue;
+      const force = world.material.forces.find((candidate) => candidate.id === seed.target.forceId)!;
+      expect(isNavalForce(force, definition.warfare)).toBe(true);
+    }
+  });
+
+  it("offers no storm at all when nothing on the map floats", () => {
+    // Told no rules of war, nothing is naval -- and a brief about a fleet that
+    // does not exist would be carried out anyway, on nobody.
+    const world = large();
+    expect(everySeed(world, { warfare: undefined }).some((seed) => seed.archetype === "storm_at_sea")).toBe(false);
   });
 });

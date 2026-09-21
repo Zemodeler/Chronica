@@ -1,11 +1,13 @@
 import {
   LOOSE_COHESION_BPS,
   agreementsBetween,
+  isNavalForce,
   openStorylines,
   stableChoice,
   stableHash,
   type Fact,
   type ScenarioHistoricalPressure,
+  type ScenarioWarfareRules,
   type WorldState,
 } from "@chronica/shared";
 import { findPolityGaps } from "./population";
@@ -72,6 +74,20 @@ export interface NarratorSeed {
     /** The other party, where the trouble is between two powers rather than in one. */
     readonly otherPolityId: string | null;
     readonly otherPolityName: string | null;
+    /**
+     * The army or fleet this befalls, where it befalls one.
+     *
+     * Trouble could land on a province, a power or a person and on nothing
+     * else, so nothing the world did of its own accord could ever touch an
+     * army -- and `chooseProvince` scores ground *without* a garrison higher,
+     * so it actively steered around them. Disease, storms and hunger have
+     * always killed more soldiers than fighting has, and none of it could
+     * happen here.
+     */
+    readonly forceId: string | null;
+    readonly forceName: string | null;
+    /** What the force is: an army or a fleet, so a brief can say which. */
+    readonly forceIsNaval: boolean;
   };
   readonly inPlayerRealm: boolean;
   /** Offered once before and not taken up. */
@@ -107,6 +123,11 @@ export interface NarratorInput {
    * all in them, because the previous order had stirred it that same morning.
    */
   readonly spanDays?: number | undefined;
+  /**
+   * The scenario's rules of war, which are what say a fleet from an army.
+   * Left out, nothing is naval and a storm at sea is never offered.
+   */
+  readonly warfare?: ScenarioWarfareRules | undefined;
 }
 
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
@@ -192,6 +213,10 @@ interface Archetype {
   readonly secretTwelfths: number;
   /** Needs a second power, and is not offered at all when the map has none to offer. */
   readonly needsAdversary?: boolean;
+  /** Befalls an army or a fleet, and is not offered when there is none to befall. */
+  readonly needsForce?: boolean;
+  /** Of those, the ones that only make sense at sea. */
+  readonly needsFleet?: boolean;
   /** Another enemy. A country already fighting one gets fewer of these; it gets no fewer harvests. */
   readonly rival?: boolean;
   readonly brief: (target: NarratorSeed["target"], severity: SeedSeverity) => string;
@@ -204,6 +229,19 @@ const person = (target: NarratorSeed["target"]): string => `${target.characterNa
 const place = (target: NarratorSeed["target"]): string => `${target.provinceName} [${target.provinceId}]`;
 const power = (target: NarratorSeed["target"]): string => `${target.polityName} [${target.polityId}]`;
 const other = (target: NarratorSeed["target"]): string => `${target.otherPolityName} [${target.otherPolityId}]`;
+const host = (target: NarratorSeed["target"]): string => `${target.forceName} [${target.forceId}]`;
+
+/**
+ * What an army lost, and how the engine is told.
+ *
+ * `force_attrition` takes a share of the men actually present rather than a
+ * number, so a brief says "one in twenty" and cannot drown more men than are
+ * aboard. Every one of these ends with the reminder that the count belongs to
+ * the engine: the author who writes the casualties into a fact of their own
+ * has written them twice.
+ */
+const ATTRITION_TAIL =
+  'Take the men with "force_attrition" -- its "lossBps" is the share of those still fit, so 500 is one in twenty -- and let it lower their morale in the same delta. The engine counts the dead and records them; do not write the number into a fact of your own.';
 
 const PERSON_PROBLEM_TAIL =
   'Decide what it actually is. Put it on them with "character_pressure_set" and, where they now mean to do something about it, "character_intent_set"; record what has already happened as a fact naming them.';
@@ -238,6 +276,27 @@ const ARCHETYPES: readonly Archetype[] = [
   { kind: "world_event", name: "omen", weight: 6, oneShot: true, secretTwelfths: 0,
     brief: (t, s) => `An omen has been seen at ${place(t)}: ${magnitude(s, "a sign the priests argue over", "a portent the whole city has heard of", "a prodigy that has the people in the temples")}. Decide what was seen and how it is read. Record it as a public fact; move whoever reads it with "belief_set", and the province's temper with "province_material_shift" if the city is shaken.` },
 
+  // ── The rest of what a reign is made of ────────────────────────────────
+  //
+  // Widening the deck, so a long reign does not learn its shape. These ask for
+  // nothing the engine could not already do; they ask for it about things the
+  // table had no entry for -- the law, the roads, the gods, a frontier, and
+  // somebody's good name.
+  { kind: "person_problem", name: "accusation", weight: 7, oneShot: false, secretTwelfths: 0,
+    brief: (t, s) => `${person(t)} stands accused: ${magnitude(s, "a rumour that will not quite die", "a charge somebody means to press", "an accusation that will have to be answered before a court or a council")}. Decide what of, and whether it is true -- if it is, the act itself is a private fact known to them. ${s === "minor" ? "" : 'Open it with "political_procedure_open" where there is a body to hear it, and let people take sides with "political_support_set". '}${PERSON_PROBLEM_TAIL}` },
+  { kind: "person_problem", name: "inheritance", weight: 5, oneShot: true, secretTwelfths: 0,
+    brief: (t, s) => `Property has come to ${person(t)}: ${magnitude(s, "a modest legacy", "an estate worth having, and a cousin who disputes it", "a fortune, and everybody who ever knew the dead man at the door")}. Move the money with "money_transfer" into their own purse, name the other claimant from PEOPLE or create them, and let it change what they can afford to do. ${PERSON_PROBLEM_TAIL}` },
+  { kind: "world_event", name: "border_raid", weight: 8, oneShot: false, secretTwelfths: 0, needsAdversary: true,
+    brief: (t, s) => `Raiders out of ${other(t)} have come over the border into ${place(t)}: ${magnitude(s, "cattle driven off and a farm burned", "a season's harvest taken and villages emptied", "a raid in force, with the countryside stripped and people carried off")}. This is not a war and does not open one: no government ordered it, and ${power(t)} must decide whether to treat it as an act of ${other(t)} or as brigandage. Move the province with "province_material_shift", record it as a public fact naming both powers and the province, and put it on whoever holds that frontier with "character_pressure_set".` },
+  { kind: "world_event", name: "fire", weight: 6, oneShot: true, secretTwelfths: 0,
+    brief: (t, s) => `Fire has taken part of ${place(t)}: ${magnitude(s, "a street of workshops", "a quarter of the city, granaries with it", "the heart of the place, and the records in it")}. Decide what burned and whether anybody is blamed for it. Move the province with "province_material_shift", record it as a public fact naming the province, and where a public building goes up again make it a project with "project_create".` },
+  { kind: "world_event", name: "sacrilege", weight: 5, oneShot: false, secretTwelfths: 0,
+    brief: (t, s) => `Something has gone wrong with the rites at ${place(t)}: ${magnitude(s, "an offering refused or a festival botched", "a temple robbed, or a priest accused of selling the office", "a sacrilege the whole province believes will be answered for")}. Decide what was done and who is held responsible. A public fact naming the province; "belief_set" on those who take it hard; a "legitimacy_shift" against whoever is blamed, and a "political_procedure_open" where a priesthood must rule on it.` },
+  { kind: "world_event", name: "road_or_pass", weight: 5, oneShot: true, secretTwelfths: 0,
+    brief: (t, s) => `The way through ${place(t)} has changed: ${magnitude(s, "a bridge down and a ford in use instead", "a pass shut by weather or by men, and the traffic going round", "the route closed for the season, and everything that moved on it stopped")}. Decide what closed it. Record it as a public fact naming the province, cut what no longer arrives with "income_source_upsert", and move the province that went without with "province_material_shift".` },
+  { kind: "new_actor", name: "envoy", weight: 6, oneShot: false, secretTwelfths: 0, needsAdversary: true,
+    brief: (t, s) => `${other(t)} has sent to ${power(t)} over ${place(t)}: ${magnitude(s, "a herald with a complaint", "an embassy with terms", "an ultimatum, and a date by which it expects an answer")}. Create the envoy with "character_create" under ${other(t)} if nobody suitable exists, and send the letter itself with "diplomatic_message_send" -- what is actually being proposed goes in "terms", and how long they will wait in the days. Do not answer it: the answer belongs to whoever receives it. Record the arrival as a public fact naming both powers.` },
+
   { kind: "new_actor", name: "pirate_band", weight: 8, oneShot: false, secretTwelfths: 0, rival: true,
     brief: (t, s) => `A pirate squadron has appeared off ${place(t)}: ${magnitude(s, "a few hulls preying on coasters", "a fleet strong enough to close the strait", "a pirate king with a harbour of his own")}. ${
       s === "grave"
@@ -268,6 +327,21 @@ const ARCHETYPES: readonly Archetype[] = [
     brief: (t, s) => `The price of something has moved in ${place(t)}: ${magnitude(s, "grain up a little and the bakers complaining", "silver or grain moving enough that fortunes turn on it", "a shortage the magistrates cannot talk their way out of")}. Decide what and why. Record it as a public fact naming the province, and move what it actually changes -- "income_source_upsert" for a trade that now pays differently, "province_material_shift" for a city going hungry, "money_transfer" for somebody who saw it coming.` },
   { kind: "world_event", name: "strangers", weight: 5, oneShot: true, secretTwelfths: 0,
     brief: (t, s) => `Strangers have come to ${place(t)}: ${magnitude(s, "a caravan from further off than usual", "a party of exiles asking to be let in", "a people on the move, with their carts and their herds")}. Decide who they are and how they are received. A public fact naming the province; "belief_set" for what the province makes of them; "province_material_shift" if they are fed or turned away.` },
+
+  // ── What happens to armies ─────────────────────────────────────────────
+  //
+  // None of this could happen before: trouble had no way to name a force, and
+  // the ground-picker preferred provinces with no garrison in them. An army
+  // was the one thing in the world that only a battle could touch, in a period
+  // when disease and hunger emptied more camps than battles did.
+  { kind: "world_event", name: "camp_sickness", weight: 9, oneShot: false, secretTwelfths: 0, needsForce: true,
+    brief: (t, s) => `Sickness has broken out among ${host(t)}, in camp at ${place(t)}: ${magnitude(s, "a fever running through the lines (one in fifty gone, morale -600)", "a serious outbreak the surgeons cannot hold (one in sixteen gone, morale -1500)", "a camp emptying faster than it can bury its dead (one in seven gone, morale -2500)")}. ${ATTRITION_TAIL} Record it as a fact naming the force and where it stands; it will run for weeks, so schedule its next turn citing that fact.` },
+  { kind: "world_event", name: "storm_at_sea", weight: 8, oneShot: true, secretTwelfths: 0, needsForce: true, needsFleet: true,
+    brief: (t, s) => `Weather has caught ${host(t)} off ${place(t)}: ${magnitude(s, "a blow that scatters the squadron and drowns a few crews (one in fifty gone, morale -500)", "a gale that puts ships on the rocks (one in twelve gone, morale -1800)", "a storm that breaks the fleet -- hulls lost with all aboard (one in five gone, morale -3000)")}. ${ATTRITION_TAIL} Record it as a public fact naming the fleet and the waters; a fleet this broken may also need "force_modify" to put it into a harbour it can refit in.` },
+  { kind: "world_event", name: "supply_failure", weight: 7, oneShot: false, secretTwelfths: 0, needsForce: true,
+    brief: (t, s) => `The supply of ${host(t)} at ${place(t)} has failed: ${magnitude(s, "short rations and grumbling", "the convoys are not arriving and the men are on half", "nothing has come through for weeks and they are eating the baggage animals")}. Set "provisionStatus" with "force_modify" -- "shortage" or, if it is grave, "critical" -- and lower their morale. ${s === "grave" ? `Men are dying of it: ${ATTRITION_TAIL}` : ""} Record it as a fact naming the force, and say whose business it is to fix -- a "character_pressure_set" on whoever feeds them.` },
+  { kind: "world_event", name: "mutiny", weight: 6, oneShot: false, secretTwelfths: 0, needsForce: true,
+    brief: (t, s) => `${host(t)} at ${place(t)} has turned on its own discipline: ${magnitude(s, "an officer defied in front of the men", "companies refusing to march until they are paid", "the camp in open mutiny, with a ringleader")}. Decide what they want -- their arrears are the usual answer, and PAY tells you whether they are owed. Lower their morale with "force_modify"; ${s === "grave" ? `create the ringleader with "character_create" and give him a "character_intent_set", and take the men who walk away with "force_attrition" (cause "desertion").` : `put it on their commander with "character_pressure_set".`} Record it as a fact naming the force and its commander.` },
 
   { kind: "new_actor", name: "cult", weight: 6, oneShot: false, secretTwelfths: 7,
     brief: (t, s) => `A prophet is drawing crowds in ${place(t)}: ${magnitude(s, "a preacher the magistrates are watching", "a movement with followers in every town", "a faith that answers to nobody but its leader")}. Create the leader with "character_create" under ${power(t)} and the movement with "generic_entity_create" (kind "faction"), record the stir as a fact, and plant what they mean to do with "character_intent_set".` },
@@ -460,6 +534,56 @@ function chooseAdversary(
   return world.map.polities.find((polity) => polity.id === picked) ?? null;
 }
 
+/** Whether this force fights at sea, by the scenario's own reckoning. */
+const isNaval = (force: WorldState["material"]["forces"][number], input: NarratorInput): boolean =>
+  isNavalForce(force, input.warfare);
+
+/**
+ * The army or fleet something happens to.
+ *
+ * Trouble prefers the force least able to shrug it off -- far from home, badly
+ * fed, already unpaid, already unhappy -- because that is where sickness and
+ * hunger actually take hold, and because it is where the player has something
+ * to decide. The exact opposite of `chooseProvince`, which steers around
+ * garrisons: this is looking for them.
+ */
+function chooseForce(
+  input: NarratorInput,
+  tension: TensionReading,
+  seedCount: number,
+  mustBeFleet: boolean,
+): WorldState["material"]["forces"][number] | null {
+  const { world } = input;
+  const busy = recentlyNamed(input.facts, world.instant.day);
+  const home = landsAtHome(tension.comfort, input.gameId, seedCount);
+
+  const eligible = world.material.forces
+    .filter((force) => force.personnel.reduce((sum, category) => sum + category.fit, 0) > 0)
+    .filter((force) => !mustBeFleet || isNaval(force, input));
+  if (eligible.length === 0) return null;
+
+  const side = eligible.filter((force) => (force.polityId === input.ownPolityId) === home);
+  const scored = (side.length === 0 ? eligible : side)
+    .map((force) => {
+      let score = 0;
+      if (force.provisionStatus === "critical") score += 3;
+      else if (force.provisionStatus === "shortage") score += 2;
+      if (force.payArrearsPeriods > 0) score += 2;
+      if (force.moraleBps < 5_000) score += 2;
+      // Away from its own country is where a camp gets into trouble and stays
+      // in it: nobody nearby is obliged to feed it.
+      const province = world.map.provinces.find((candidate) => candidate.id === force.locationId);
+      if (province !== undefined && province.controllerPolityId !== force.polityId) score += 2;
+      // And not the thing everybody is already talking about.
+      if (!busy.has(force.id)) score += 1;
+      return { force, score };
+    })
+    .sort((a, b) => b.score - a.score || a.force.id.localeCompare(b.force.id));
+
+  const top = scored.filter((entry) => entry.score === scored[0]!.score);
+  return top[stableChoice([input.gameId, "narrator", "force", seedCount], top.length)]!.force;
+}
+
 function chooseCharacter(input: NarratorInput, tension: TensionReading, seedCount: number, archetype: Archetype): WorldState["characters"][number] | null {
   const { world } = input;
   const home = landsAtHome(tension.comfort, input.gameId, seedCount);
@@ -601,8 +725,22 @@ function seedAt(input: NarratorInput, tension: TensionReading, seedCount: number
   const provinceName = (id: string | null): string | null => (id === null ? null : world.map.provinces.find((province) => province.id === id)?.name ?? id);
   const polityName = (id: string | null): string | null => (id === null ? null : world.map.polities.find((polity) => polity.id === id)?.name ?? id);
 
+  const noForce = { forceId: null, forceName: null, forceIsNaval: false };
+
   let target: NarratorSeed["target"];
-  if (archetype.kind === "person_problem") {
+  if (archetype.needsForce === true) {
+    const force = chooseForce(input, tension, seedCount, archetype.needsFleet === true);
+    // An army for it to happen to, or it does not happen. A brief naming
+    // "null" would be carried out anyway, on nobody.
+    if (force === null) return null;
+    target = {
+      provinceId: force.locationId, provinceName: provinceName(force.locationId),
+      polityId: force.polityId, polityName: polityName(force.polityId),
+      characterId: force.commanderCharacterId, characterName: world.characters.find((character) => character.id === force.commanderCharacterId)?.name ?? null,
+      otherPolityId: null, otherPolityName: null,
+      forceId: force.id, forceName: force.name, forceIsNaval: isNaval(force, input),
+    };
+  } else if (archetype.kind === "person_problem") {
     const character = chooseCharacter(input, tension, seedCount, archetype);
     if (character === null) return null;
     const controller = world.map.provinces.find((province) => province.id === character.locationProvinceId)?.controllerPolityId ?? character.polityId;
@@ -611,6 +749,7 @@ function seedAt(input: NarratorInput, tension: TensionReading, seedCount: number
       polityId: character.polityId, polityName: polityName(character.polityId ?? controller),
       characterId: character.id, characterName: character.name,
       otherPolityId: null, otherPolityName: null,
+      ...noForce,
     };
   } else {
     const province = chooseProvince(input, tension, seedCount, archetype.kind === "new_actor" || archetype.needsAdversary === true);
@@ -627,6 +766,7 @@ function seedAt(input: NarratorInput, tension: TensionReading, seedCount: number
       polityId: province.controllerPolityId, polityName: polityName(province.controllerPolityId),
       characterId: null, characterName: null,
       otherPolityId: adversary?.id ?? null, otherPolityName: adversary?.name ?? null,
+      ...noForce,
     };
   }
 
@@ -681,6 +821,10 @@ function seedFromPressure(world: WorldState, pressure: ScenarioHistoricalPressur
       characterName: null,
       otherPolityId: other?.id ?? null,
       otherPolityName: other?.name ?? null,
+      // A scenario pressure names ground and powers, never a particular army.
+      forceId: null,
+      forceName: null,
+      forceIsNaval: false,
     },
     inPlayerRealm: polityId !== null && polityId === input.ownPolityId,
     repeated: false,

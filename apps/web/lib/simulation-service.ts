@@ -6,6 +6,7 @@ import {
   commitBurst,
   createDatabase,
   failBurst,
+  findRunningBurst,
   getOpenDecision,
   getWorldView,
   listChronicle,
@@ -20,7 +21,7 @@ import {
   type ChronicaDatabase,
 } from "@chronica/db";
 import { FactSchema, PlayerDecisionSchema, buildStation, diffWorlds, formatWorldDate, holdsPolityStanding, type Fact, type Office, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
-import { closeTheBooks, composeChronicle, runSimulationBurst, whoSeeksThePlayer, type AnsweredDecision, type ChronicleEntry, type SimModelPort } from "@chronica/sim";
+import { closeTheBooks, composeChronicle, runSimulationBurst, whoSeeksThePlayer, type AnsweredDecision, type BurstProgress, type ChronicleEntry, type SimModelPort } from "@chronica/sim";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { requiredDatabaseUrl } from "./database-url";
 import { openInitiatedDialogue } from "./dialogue-service";
@@ -33,6 +34,16 @@ import { openInitiatedDialogue } from "./dialogue-service";
  * it loads the world, wraps the AI adapter in the coin gate to build the
  * `SimModelPort` the loop asks for, and commits the result in one transaction.
  */
+
+/**
+ * How long a burst may be `running` before it is treated as abandoned.
+ *
+ * A row is only ever moved off `running` by the process that opened it, so a
+ * server killed mid-turn leaves one behind. Generous on purpose: this is the
+ * line between "somebody is playing" and "nobody is coming back", and putting
+ * it too close to a normal turn would refuse a player their own game.
+ */
+const ABANDONED_BURST_MS = 15 * 60 * 1000;
 
 export interface SimulationContext {
   readonly db: ChronicaDatabase;
@@ -62,14 +73,42 @@ async function resolveContext(gameId: string): Promise<SimulationContext | null>
   return { db, close, userId, playerId: player.id, characterId: player.characterId };
 }
 
-/** The loop's model port: every call metered and charged like any other. */
-function createModelPort(db: ChronicaDatabase, userId: string, gameId: string): SimModelPort {
+/**
+ * The loop's model port: every call metered, charged, and timed.
+ *
+ * The timing is kept here rather than in `@chronica/sim` because the engine is
+ * deliberately ignorant of everything but the port. It answers the question a
+ * call count cannot: six calls is forty seconds or four minutes depending on
+ * which stage is slow, and until this existed there was no way to know which.
+ */
+interface TimedModelPort {
+  readonly port: SimModelPort;
+  /** Per operation, how many calls it made and how long they took in total. */
+  summary(): string;
+}
+
+function createModelPort(db: ChronicaDatabase, userId: string, gameId: string): TimedModelPort {
   const adapter = createAiAdapter();
+  const stages = new Map<string, { calls: number; totalMs: number }>();
   return {
-    async complete(operation, systemPrompt, userMessage) {
-      const result = await callWithCoinGate(db, userId, gameId, operation, adapter, { system: systemPrompt, user: userMessage });
-      return result.content;
+    port: {
+      async complete(operation, systemPrompt, userMessage) {
+        const startedAt = performance.now();
+        try {
+          const result = await callWithCoinGate(db, userId, gameId, operation, adapter, { system: systemPrompt, user: userMessage });
+          return result.content;
+        } finally {
+          // In `finally`, so a call that threw still shows up: a stage that is
+          // slow because it times out is exactly the one worth seeing.
+          const so_far = stages.get(operation) ?? { calls: 0, totalMs: 0 };
+          stages.set(operation, { calls: so_far.calls + 1, totalMs: so_far.totalMs + (performance.now() - startedAt) });
+        }
+      },
     },
+    summary: () =>
+      [...stages.entries()]
+        .map(([operation, stage]) => `${operation} ×${stage.calls} ${(stage.totalMs / 1000).toFixed(1)}s`)
+        .join(", "),
   };
 }
 
@@ -78,6 +117,39 @@ function parseFacts(rows: readonly { fact: unknown }[]): Fact[] {
     const parsed = FactSchema.safeParse(row.fact);
     return parsed.success ? [parsed.data] : [];
   });
+}
+
+/**
+ * A line for the player while the world is still moving.
+ *
+ * The record itself is written at the end, from the finished burst, and this
+ * is not it -- nothing here is history and none of it is kept. It exists
+ * because a turn is minutes long and a button that says "The world is moving"
+ * for all of them tells the player nothing about whether it still is.
+ */
+export interface SimulationProgress {
+  readonly stage: "orchestrating" | "advanced" | "answering" | "settled" | "chronicling" | "committing";
+  readonly line: string;
+}
+
+/** Turns what the engine reports into something worth reading. */
+function phrase(progress: BurstProgress): SimulationProgress {
+  switch (progress.kind) {
+    case "orchestrating":
+      return { stage: "orchestrating", line: "Your order reaches the palace." };
+    case "advanced":
+      return { stage: "advanced", line: `The world turns to ${progress.date}.` };
+    case "answering": {
+      // Names, because "four people are considering it" is a progress bar and
+      // "Hanno and Hamilcar are considering it" is the game.
+      const named = progress.people.slice(0, 3).join(", ");
+      const rest = progress.people.length - Math.min(3, progress.people.length);
+      const who = rest > 0 ? `${named} and ${rest} other${rest === 1 ? "" : "s"}` : named;
+      return { stage: "answering", line: who.length === 0 ? `${progress.date}: the world goes about its business.` : `${progress.date}: ${who} decide what to do.` };
+    }
+    case "settled":
+      return { stage: "settled", line: `The season closes on ${progress.date}.` };
+  }
 }
 
 export type SimulationOutcome =
@@ -111,6 +183,7 @@ export async function submitOrder(
   gameId: string,
   orderText: string,
   answeredDecision?: AnsweredDecision,
+  onProgress?: (progress: SimulationProgress) => void,
 ): Promise<SimulationOutcome> {
   const context = await resolveContext(gameId);
   if (context === null) return { status: "error", message: "You are not playing in this game." };
@@ -129,20 +202,35 @@ export async function submitOrder(
       if (open !== undefined) return { status: "error", message: "A decision is waiting on you before the world can move on." };
     }
 
+    // One burst at a time, and refused at the door rather than at the commit.
+    // Two orders in flight for one world both run to the end, and then the
+    // second one loses the revision check -- several minutes of model calls
+    // paid for, and an apology.
+    const running = await findRunningBurst(db, gameId, new Date(Date.now() - ABANDONED_BURST_MS));
+    if (running !== undefined) return { status: "error", message: "The world is already moving on an earlier order. Wait for it to settle." };
+
     // Offices are scenario data, not world state, and authority derivation needs them.
     const offices = view.scenarioGovernment?.offices ?? [];
 
     // The whole pending queue, not just what is due: the burst decides how far
     // to carry the world, and it needs to see what is waiting ahead to do it.
-    const [factRows, queueRows] = await Promise.all([
+    // Everything the turn reads, in one round of the database rather than four.
+    // The last two used to be awaited inside `composeChronicle`'s own argument
+    // list, which put two sequential queries between the burst finishing and
+    // the historian starting.
+    const [factRows, queueRows, recentSubjects, recentTitles] = await Promise.all([
       listRecentFacts(db, gameId),
       listPendingEvents(db, gameId),
+      subjectsOfRecentReports(db, gameId),
+      titlesOfRecentReports(db, gameId),
     ]);
 
     const actorRef: OrderPartyRef = { kind: "character", id: characterId };
     const actorPolityId = view.world.characters.find((character) => character.id === characterId)?.polityId ?? null;
     const burstId = await startBurst(db, { gameId, playerUserId: userId, orderText });
-    const port = createModelPort(db, userId, gameId);
+    const timed = createModelPort(db, userId, gameId);
+    const port = timed.port;
+    const turnStartedAt = performance.now();
     const from = view.world.instant;
 
     let result;
@@ -163,6 +251,7 @@ export async function submitOrder(
         actorRef,
         actorPolityId,
         orderText,
+        ...(onProgress === undefined ? {} : { onProgress: (progress: BurstProgress) => onProgress(phrase(progress)) }),
         ...(answeredDecision === undefined ? {} : { answeredDecision }),
         knownFacts: parseFacts(factRows),
         queue: queueRows.map((row) => ({ id: row.id, dueInstantSortKey: row.dueInstantSortKey, kind: row.kind, summary: row.summary, payload: row.payload })),
@@ -179,6 +268,7 @@ export async function submitOrder(
     // receipt; this one is written whenever a matter reached a moment worth
     // recording, the player's own among them, and costs nothing when no matter
     // did. What still gates it is weight, inside `composeChronicle`.
+    onProgress?.({ stage: "chronicling", line: "The historian sits down to write." });
     const chronicle = await composeChronicle({
       port,
       clock: view.scenarioClock,
@@ -202,9 +292,9 @@ export async function submitOrder(
       // What the last reports were already about, so a matter that is merely
       // continuing is not given a fresh headline. Read before this one is
       // written.
-      recentSubjects: await subjectsOfRecentReports(db, gameId),
+      recentSubjects,
       // And what it actually said, so the historian is not asked to remember.
-      recentTitles: await titlesOfRecentReports(db, gameId),
+      recentTitles,
     });
 
     // And the books close because the calendar turned, not because anybody
@@ -222,7 +312,15 @@ export async function submitOrder(
     if (result.parseFailures.length > 0) {
       console.warn(`[burst ${burstId}] the model's answer could not be read (${result.parseFailures.length}): ${result.parseFailures.join(" | ")}`);
     }
+    // A salvage is work saved rather than work lost -- the answer parsed after
+    // the engine dropped what the schema named, and no second call was paid
+    // for. It is still said out loud: a field that keeps showing up here is a
+    // prompt or a schema that wants fixing, not a model that wants forgiving.
+    if (result.salvaged.length > 0) {
+      console.warn(`[burst ${burstId}] dropped ${result.salvaged.length} thing(s) to keep the answer: ${result.salvaged.join(", ")}`);
+    }
 
+    onProgress?.({ stage: "committing", line: "The record is entered." });
     try {
       await commitBurst(db, {
         gameId,
@@ -269,6 +367,16 @@ export async function submitOrder(
       }
       throw error;
     }
+
+    // What the turn actually cost in seconds, per stage.
+    //
+    // The budget in `DEFAULT_BUDGET` is denominated in model calls, and so is
+    // every performance note in the documentation -- which says nothing about
+    // whether a player waited forty seconds or four minutes. This line is the
+    // only place the two are written down together.
+    console.log(
+      `[burst ${burstId}] ${((performance.now() - turnStartedAt) / 1000).toFixed(1)}s total | ${timed.summary()} | ${result.iterations} rounds, ${result.modelCalls + chronicle.calls} calls, stopped on ${result.stopReason}${result.parseFailures.length === 0 ? "" : `, ${result.parseFailures.length} unreadable`}`,
+    );
 
     // Now that the world has settled, let anyone with real reason to seek the
     // ruler out open a conversation. Free, and outside the burst: this reports
