@@ -190,7 +190,15 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     // cost nobody anything, no office could confer fiscal reach because there
     // was nothing to reach, and VISION §7 had no subject.
     await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 24, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Gives each power a treasury, what it takes in and what it owes, and gives each office the chest it answers for -- so a war costs money, an unpaid army can go unpaid, and the ruler can read his own books." }).onConflictDoNothing();
-    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 24, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
+    // Version 25 connects the armies to the money. Version 24 authored what
+    // each power owed and never said which army any of it paid: all eight
+    // forces carried a null pay obligation, so the tick's arrears rules --
+    // and with them the scenario's own `arrearsMoralePeriods` and
+    // `arrearsDesertionPeriods` -- could not reach a single one of them. The
+    // Mamertines run out of money in the eleventh month and the garrison
+    // holding Messana never noticed.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 25, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Names the army behind every wage bill, and pays Hieron's hoplites and Rome's allied hulls at all -- so an unpaid army loses its morale and then its men, instead of a treasury going broke while the men holding the city never hear of it." }).onConflictDoNothing();
+    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 25, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
   });
 }
 
