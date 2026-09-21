@@ -1314,6 +1314,18 @@ A possible normal flow:
 > already making, so a living world is paid for in prompt tokens rather than
 > in calls. Raising the number of them costs almost nothing; raising the
 > number of rounds is what costs money.
+>
+> **Amendment (2026-09-21).** A call is no longer a good unit for any of this.
+> A round's cast is dealt onto two calls issued at once, so a round is two
+> calls and the same tokens, and the ceiling is twelve where it was six --
+> which buys nothing new and costs nothing new. The measure that was always
+> meant here is rounds, and that is still four.
+>
+> The reason for the change is that a call count says nothing about how long a
+> player waits. Measured against the record the engine already keeps, a burst
+> in September ran from seventeen seconds to eleven minutes on the same number
+> of calls. What the player waits for is one cast's answers generated end to
+> end, so the fix was to stop generating them end to end.
 
 Exceptionally consequential situations may justify additional calls:
 

@@ -49,6 +49,13 @@ export interface RoutedActor {
   /** The facts this actor can actually see -- what their cognition prompt is built from. */
   readonly knownFacts: readonly Fact[];
   readonly why: string;
+  /**
+   * Something true about this person's situation that the router did not work
+   * out, appended to their own section of the prompt. Used for the one thing
+   * the world knows and the router has no business knowing: where the ruler's
+   * antagonist stands this season.
+   */
+  readonly note?: string | undefined;
 }
 
 export interface AttentionResult {
@@ -241,6 +248,18 @@ export interface AmbientInput {
    * in the burst that planted it rather than waiting on the rotation.
    */
   readonly priorityCharacterIds?: readonly string[];
+  /**
+   * The ruler's antagonist, who is asked every round whatever the week's facts
+   * happen to say.
+   *
+   * This is the one standing exception to a router that is otherwise fair, and
+   * it exists because fairness was the problem: a man working against the
+   * ruler for two years was heard only in the weeks he happened to score, so
+   * a reign read as unrelated difficulties rather than as a struggle with
+   * somebody. He is not told he is anybody's nemesis -- he is simply always in
+   * the room, and his own thread is in his section like anyone else's.
+   */
+  readonly nemesisCharacterId?: string | null | undefined;
 }
 
 /**
@@ -331,6 +350,12 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
       reasons.push("has a letter to answer");
     }
     if (priority.has(character.id)) reasons.unshift("something has just come to them");
+    // Always worth hearing, and never told why. The reason given is the true
+    // one a man would give himself: he has something of his own running.
+    if (character.id === input.nemesisCharacterId) {
+      score += 40;
+      reasons.unshift("has a matter of their own that will not keep");
+    }
     if (character.polityId !== null && polityHasAims.has(character.polityId)) {
       score += 15;
       reasons.push("their government is pursuing something");
@@ -354,7 +379,12 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
   }
 
   scored.sort((a, b) => b.score - a.score || stableHash([a.characterId]) - stableHash([b.characterId]));
-  const reserved = scored.filter((actor) => priority.has(actor.characterId)).slice(0, 1);
-  const rest = scored.filter((actor) => !reserved.includes(actor)).slice(0, Math.max(0, input.max - reserved.length));
-  return [...reserved, ...rest];
+  // The antagonist first, then whoever the narrator has just handed something
+  // to, then the rotation. Both are reservations against the same cast size:
+  // a busy week must not be the reason the quarrel goes quiet.
+  const antagonist = scored.filter((actor) => actor.characterId === input.nemesisCharacterId).slice(0, 1);
+  const reserved = scored.filter((actor) => priority.has(actor.characterId) && !antagonist.includes(actor)).slice(0, 1);
+  const held = [...antagonist, ...reserved];
+  const rest = scored.filter((actor) => !held.includes(actor)).slice(0, Math.max(0, input.max - held.length));
+  return [...held, ...rest];
 }

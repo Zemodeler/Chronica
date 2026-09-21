@@ -1765,3 +1765,69 @@ describe("an obligation that pays itself", () => {
     expect(result.rejected).toHaveLength(0);
   });
 });
+
+describe("men lost to something other than a battle", () => {
+  const fit = (state: WorldState, forceId: string): number =>
+    state.material.forces.find((force) => force.id === forceId)!.personnel.reduce((sum, category) => sum + category.fit, 0);
+
+  it("takes a share of the men actually there, and the engine counts them", () => {
+    // Before this, a plague in a camp could lower morale and change nothing
+    // about how many men stood up afterwards: `force_modify` moves the
+    // authorized establishment, while the men live in `personnel`, and only a
+    // battle ever touched those.
+    const before = world();
+    const force = before.material.forces[0]!;
+    const strength = fit(before, force.id);
+    expect(strength).toBeGreaterThan(0);
+
+    const result = applyDeltas(before, [{
+      op: "force_attrition", forceRef: force.id, cause: "sickness", lossBps: 1_000, moraleBpsDelta: -1_500,
+      reason: "Fever ran through the camp.",
+    }] as WorldDelta[], context());
+
+    expect(result.rejected).toEqual([]);
+    expect(fit(result.world, force.id)).toBe(strength - Math.floor(strength / 10));
+    // The establishment follows the men, so the force is not left claiming
+    // soldiers it does not have.
+    expect(result.world.material.forces.find((entry) => entry.id === force.id)!.authorizedStrength).toBe(fit(result.world, force.id));
+    expect(result.world.material.forces.find((entry) => entry.id === force.id)!.moraleBps).toBe(Math.max(0, force.moraleBps - 1_500));
+
+    // The count is the engine's, and it reaches the record.
+    const told = result.factProposals.find((fact) => fact.kind === "force_attrition")!;
+    expect(told.summary).toContain(String(strength - fit(result.world, force.id)));
+    expect(told.summary).toContain("to sickness");
+    // It reaches the Chronicle as prose, so it has to read like prose.
+    expect(told.summary).not.toContain("1 men");
+    expect(result.world.material.forces.find((entry) => entry.id === force.id)!.history.at(-1)!.kind).toBe("attrition_death");
+  });
+
+  it("files desertion as desertion rather than as death", () => {
+    const before = world();
+    const force = before.material.forces[0]!;
+    const result = applyDeltas(before, [{
+      op: "force_attrition", forceRef: force.id, cause: "desertion", lossBps: 2_000, reason: "They had not been paid in months.",
+    }] as WorldDelta[], context());
+    expect(result.world.material.forces.find((entry) => entry.id === force.id)!.history.at(-1)!.kind).toBe("desertion");
+    expect(result.factProposals.find((fact) => fact.kind === "force_attrition")!.summary).toContain("by desertion");
+  });
+
+  it("cannot drown more men than are aboard", () => {
+    // The share is of those still fit, which is the whole reason it is a share
+    // and not a number somebody chose.
+    const before = world();
+    const force = before.material.forces[0]!;
+    const result = applyDeltas(before, [{
+      op: "force_attrition", forceRef: force.id, cause: "storm", lossBps: 6_000, reason: "The fleet was broken on a lee shore.",
+    }] as WorldDelta[], context());
+    expect(fit(result.world, force.id)).toBeGreaterThanOrEqual(0);
+    expect(fit(result.world, force.id)).toBeLessThan(fit(before, force.id));
+  });
+
+  it("refuses to befall a force that does not exist", () => {
+    const result = applyDeltas(world(), [{
+      op: "force_attrition", forceRef: "no-such-army", cause: "storm", lossBps: 500, reason: "A storm at sea.",
+    }] as WorldDelta[], context());
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.kind).toBe("reference");
+  });
+});

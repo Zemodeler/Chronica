@@ -92,6 +92,7 @@ export type AuthorityGrant = z.infer<typeof AuthorityGrantSchema>;
 export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = {
   force_create: "command",
   force_modify: "command",
+  force_attrition: "command",
   money_transfer: "spend",
   income_source_upsert: "spend",
   obligation_upsert: "spend",

@@ -76,7 +76,13 @@ export async function callWithCoinGate(
   options?: { maxRetries?: number },
 ): Promise<AiCallResult> {
   // Fast pre-check: refuse immediately if wallet is empty (before touching holds).
+  // Timed with everything else we do around the call: three database round
+  // trips per model call is a number worth being able to see next to the
+  // provider's own latency rather than guessing at.
+  let ledgerMs = 0;
+  const openedAt = performance.now();
   const snapshot = await getCoinWalletSnapshot(db, userId);
+  ledgerMs += performance.now() - openedAt;
   if (snapshot.availableMicroUnits === 0n) throw new InsufficientCoinsError();
 
   const maxHold = calculateCoinUsage(HOLD_RATE, {
@@ -93,20 +99,24 @@ export async function callWithCoinGate(
     const idempotencyKey = `${operation}:${gameId}:${workId}`;
 
     let holdId: string;
+    const heldAt = performance.now();
     try {
       const hold = await authorizeCoinHold(db, { gameId, workId, maximumMicroUnits: maxHold, idempotencyKey });
       holdId = hold.holdId;
     } catch {
       throw new InsufficientCoinsError();
     }
+    ledgerMs += performance.now() - heldAt;
 
     let result: AiCallResult;
+    const calledAt = performance.now();
     try {
       result = await adapter.call(operation, prompts.system, prompts.user);
     } catch (error) {
       await releaseCoinHold(db, holdId).catch(() => { /* best effort */ });
       throw error;
     }
+    const providerMs = performance.now() - calledAt;
 
     if (validate !== undefined && !validate(result.content)) {
       await releaseCoinHold(db, holdId).catch(() => { /* best effort */ });
@@ -125,6 +135,7 @@ export async function callWithCoinGate(
       cacheWriteTokens: result.cacheWriteTokens,
     });
 
+    const settledAt = performance.now();
     await settleCoinHold(db, {
       holdId,
       callId: `${workId}:settled`,
@@ -139,8 +150,9 @@ export async function callWithCoinGate(
       providerCostMicroUnits,
       coinChargeMicroUnits,
     });
+    ledgerMs += performance.now() - settledAt;
 
-    logDevAiCost(operation, result, { providerCostMicroUnits, coinChargeMicroUnits });
+    logDevAiCost(operation, result, { providerCostMicroUnits, coinChargeMicroUnits }, { providerMs, ledgerMs });
     return result;
   }
 
@@ -170,7 +182,10 @@ export async function callWithToolsAndCoinGate(
   messages: readonly AiConversationMessage[],
   tools: readonly AiToolDefinition[],
 ): Promise<AiToolCallResult> {
+  let ledgerMs = 0;
+  const openedAt = performance.now();
   const snapshot = await getCoinWalletSnapshot(db, userId);
+  ledgerMs += performance.now() - openedAt;
   if (snapshot.availableMicroUnits === 0n) throw new InsufficientCoinsError();
 
   const maxHold = calculateCoinUsage(HOLD_RATE, {
@@ -182,6 +197,7 @@ export async function callWithToolsAndCoinGate(
 
   const workId = randomUUID();
   let holdId: string;
+  const heldAt = performance.now();
   try {
     const hold = await authorizeCoinHold(db, {
       gameId,
@@ -193,14 +209,17 @@ export async function callWithToolsAndCoinGate(
   } catch {
     throw new InsufficientCoinsError();
   }
+  ledgerMs += performance.now() - heldAt;
 
   let result: AiToolCallResult;
+  const calledAt = performance.now();
   try {
     result = await adapter.callWithTools(operation, systemPrompt, messages, tools);
   } catch (error) {
     await releaseCoinHold(db, holdId).catch(() => { /* best effort */ });
     throw error;
   }
+  const providerMs = performance.now() - calledAt;
 
   const actualRate = MODEL_TOKEN_RATES[result.model] ?? MODEL_TOKEN_RATES["gpt-5.6-sol"]!;
   const { providerCostMicroUnits, coinChargeMicroUnits } = calculateCoinUsage(actualRate, {
@@ -210,6 +229,7 @@ export async function callWithToolsAndCoinGate(
     cacheWriteTokens: result.cacheWriteTokens,
   });
 
+  const settledAt = performance.now();
   await settleCoinHold(db, {
     holdId,
     callId: `${workId}:settled`,
@@ -224,7 +244,8 @@ export async function callWithToolsAndCoinGate(
     providerCostMicroUnits,
     coinChargeMicroUnits,
   });
+  ledgerMs += performance.now() - settledAt;
 
-  logDevAiCost(operation, result, { providerCostMicroUnits, coinChargeMicroUnits });
+  logDevAiCost(operation, result, { providerCostMicroUnits, coinChargeMicroUnits }, { providerMs, ledgerMs });
   return result;
 }

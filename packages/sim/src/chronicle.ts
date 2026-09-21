@@ -872,7 +872,10 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
 
   const period = `${formatWorldDate(input.from, input.clock)} – ${formatWorldDate(input.to, input.clock)}`;
   const alreadySaid = (input.recentTitles ?? []).slice(0, 16);
-  const userMessage = [
+  // Everything the historian is told before the matter itself. Repeated into
+  // each call below: the titles are from earlier reports, not from this one,
+  // so every passage needs them equally.
+  const head = [
     `Period: ${period}.`,
     ...(alreadySaid.length === 0 ? [] : [
       [
@@ -886,9 +889,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
         "an army broken -- and then write the change, not the situation.",
       ].join("\n"),
     ]),
-    "",
-    ...threads.map((thread, index) => renderThread(thread, index)),
-  ].join("\n\n");
+  ];
 
   const changes = input.changes ?? [];
   const entryOf = (thread: Thread, title: string, body: string): ChronicleEntry => {
@@ -914,25 +915,77 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
 
   // A failed narration must not cost the player the record itself: fall back to
   // the plain facts, under the period as a title, rather than losing the span.
-  const withQuote = (entries: readonly ChronicleEntry[]): ChronicleEntry[] => attachQuote(entries, utterances, threads);
-  const fallback = (): ChronicleResult => ({
-    entries: withQuote(threads.map((thread) => entryOf(thread, period, thread.facts.map((fact) => readable(fact.summary)).join("\n\n")))),
-    calls: 1,
+  const plainly = (thread: Thread): ChronicleEntry =>
+    entryOf(thread, period, thread.facts.map((fact) => readable(fact.summary)).join("\n\n"));
+
+  // One matter to a call.
+  //
+  // The selection above -- what is visible, what belongs with what, what
+  // weighs enough to tell -- stays a single pass over the whole burst, because
+  // every one of those judgements is made across the finished record: threads
+  // are unioned over all the facts at once, a thread's weight is the sum of
+  // its own, and what the reader knows is settled as of one instant. Only the
+  // *writing* is split, and a passage was already required to be written from
+  // its own thread and nothing else ("Keep the threads apart"), so a call that
+  // holds one thread is being asked for exactly what it was always asked for.
+  //
+  // What this buys is wall time. One call generating every passage end to end
+  // takes as long as the whole report; three at a time take as long as the
+  // longest of them. Three because each call holds a coin hold, and the
+  // database pool is three connections wide.
+  //
+  // It also makes a failure local: a thread whose narration cannot be read
+  // falls back to its own plain facts, where before one unreadable answer
+  // dropped the entire report to plain facts.
+  const written = await mapWithLimit(threads, CHRONICLE_CONCURRENCY, async (thread): Promise<ChronicleEntry> => {
+    const userMessage = [...head, "", renderThread(thread, 0)].join("\n\n");
+    try {
+      const raw = await input.port.complete("compose_chronicle", CHRONICLE_SYSTEM_PROMPT, userMessage);
+      const parsed = ChronicleOutputSchema.safeParse(extractJson(raw));
+      if (!parsed.success) return plainly(thread);
+      const passage = parsed.data.entries.find((entry) => entry.thread === 1);
+      return passage === undefined ? plainly(thread) : entryOf(thread, passage.title, passage.body.trim());
+    } catch {
+      return plainly(thread);
+    }
   });
 
-  try {
-    const raw = await input.port.complete("compose_chronicle", CHRONICLE_SYSTEM_PROMPT, userMessage);
-    const parsed = ChronicleOutputSchema.safeParse(extractJson(raw));
-    if (!parsed.success) return fallback();
+  return { entries: attachQuote(written.map((entry, index) => ({ entry, thread: threads[index]! })), utterances), calls: threads.length };
+}
 
-    const entries = threads.flatMap((thread, index) => {
-      const written = parsed.data.entries.find((entry) => entry.thread === index + 1);
-      return written === undefined ? [] : [entryOf(thread, written.title, written.body.trim())];
-    });
-    return entries.length === 0 ? fallback() : { entries: withQuote(entries), calls: 1 };
-  } catch {
-    return fallback();
-  }
+/**
+ * How many passages are written at once. See the note above.
+ *
+ * Six rather than three: a ten-thread report was four waves of three and is
+ * now two of six. The old number was not chosen for the historian's sake, it
+ * was the database pool, which has since been widened.
+ */
+const CHRONICLE_CONCURRENCY = 6;
+
+/**
+ * Runs `work` over `items`, at most `limit` at a time, answering in input order.
+ *
+ * Ordering is the point as much as the limit is: the entries come back in the
+ * order the bands put the threads in, whatever order the provider answered in.
+ */
+async function mapWithLimit<T, R>(
+  items: readonly T[],
+  limit: number,
+  work: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      for (;;) {
+        const index = next;
+        next += 1;
+        if (index >= items.length) return;
+        results[index] = await work(items[index]!);
+      }
+    }),
+  );
+  return results;
 }
 
 /**
@@ -944,23 +997,27 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
  * nothing else does.
  */
 function attachQuote(
-  entries: readonly ChronicleEntry[],
+  written: readonly { readonly entry: ChronicleEntry; readonly thread: Thread }[],
   utterances: readonly UtteranceLine[],
-  threads: readonly Thread[],
 ): ChronicleEntry[] {
-  if (utterances.length === 0 || entries.length === 0) return [...entries];
+  const entries = written.map((pair) => pair.entry);
+  if (utterances.length === 0 || entries.length === 0) return entries;
 
+  // Each entry is carried with the thread it was written from, rather than
+  // looked up by position. The two used to be matched by index against a list
+  // the narration could shorten, so a declined passage shifted every entry
+  // after it onto somebody else's weight and the quotation could land on the
+  // wrong matter.
   let best: { index: number; weight: number; utterance: UtteranceLine } | null = null;
-  entries.forEach((entry, index) => {
-    const ids = new Set(entry.factIds);
+  written.forEach((pair, index) => {
+    const ids = new Set(pair.entry.factIds);
     const spoken = utterances
       .filter((utterance) => utterance.factIds.some((factId) => ids.has(factId)))
       .sort((a, b) => a.actorRef.id.localeCompare(b.actorRef.id))[0];
     if (spoken === undefined) return;
-    const weight = threads[index]?.weight ?? 0;
-    if (best === null || weight > best.weight) best = { index, weight, utterance: spoken };
+    if (best === null || pair.thread.weight > best.weight) best = { index, weight: pair.thread.weight, utterance: spoken };
   });
-  if (best === null) return [...entries];
+  if (best === null) return entries;
 
   const chosen: { index: number; utterance: UtteranceLine } = best;
   return entries.map((entry, index) =>

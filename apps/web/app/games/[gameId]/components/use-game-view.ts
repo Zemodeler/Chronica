@@ -69,17 +69,35 @@ export interface GameView {
   readonly decision: OpenDecision | null;
 }
 
+/** One frame of the order stream. Mirrors the route's own `Frame`. */
+type Frame =
+  | { readonly kind: "progress"; readonly progress: { readonly stage: string; readonly line: string } }
+  | {
+    readonly kind: "done";
+    readonly result:
+    | { readonly status: "ok"; readonly outcome: string; readonly entries: readonly { readonly title: string }[]; readonly decision: unknown }
+    | { readonly status: "error"; readonly message: string };
+  }
+  | { readonly kind: "error"; readonly error: string };
+
 export interface GameViewController {
   readonly view: GameView;
   readonly busy: boolean;
+  /**
+   * What the world is doing, newest last, while an order is being carried out.
+   * Cleared when the next order is given; never part of the record.
+   */
+  readonly progress: readonly string[];
   readonly error: string | null;
-  readonly send: (orderText: string) => Promise<void>;
+  /** Resolves true when a report was committed, so the caller can go and read it. */
+  readonly send: (orderText: string) => Promise<boolean>;
   readonly choose: (decisionId: string, optionId: string) => Promise<void>;
   readonly refresh: () => Promise<void>;
 }
 
 export function useGameView(gameId: string): GameViewController {
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<readonly string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<GameView>({ chronicle: [], decision: null });
 
@@ -92,25 +110,68 @@ export function useGameView(gameId: string): GameViewController {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  const send = useCallback(async (orderText: string) => {
+  const send = useCallback(async (orderText: string): Promise<boolean> => {
     const text = orderText.trim();
-    if (text.length === 0) return;
+    if (text.length === 0) return false;
     setBusy(true);
     setError(null);
+    setProgress([]);
     try {
       const response = await fetch(`/api/games/${gameId}/simulate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orderText: text }),
       });
-      const body = (await response.json()) as { error?: string };
-      if (!response.ok) {
+      // A refusal is still a plain JSON body: nothing was started, so there is
+      // nothing to stream.
+      if (!response.ok || response.body === null) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
         setError(body.error ?? "The order could not be carried out.");
-        return;
+        return false;
       }
+
+      // Newline-delimited JSON, a frame at a time. The burst is minutes long
+      // and each frame is the world saying where it has got to.
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = "";
+      let told = false;
+      let reported = false;
+
+      const take = (frame: Frame): void => {
+        if (frame.kind === "progress") { setProgress((lines) => [...lines, frame.progress.line]); return; }
+        told = true;
+        if (frame.kind === "error") { setError(frame.error); return; }
+        if (frame.result.status === "error") { setError(frame.result.message); return; }
+        reported = frame.result.entries.length > 0;
+      };
+
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        pending += decoder.decode(value, { stream: true });
+        const lines = pending.split("\n");
+        // Whatever follows the last newline is half a frame; keep it.
+        pending = lines.pop() ?? "";
+        for (const line of lines) {
+          if (line.trim().length === 0) continue;
+          try { take(JSON.parse(line) as Frame); } catch { /* a frame we cannot read tells us nothing */ }
+        }
+      }
+      if (pending.trim().length > 0) {
+        try { take(JSON.parse(pending) as Frame); } catch { /* ditto */ }
+      }
+
+      // The stream ended without saying how it went: the connection dropped
+      // mid-burst. The order is still being carried out on the server and will
+      // commit, so a refresh is the honest thing to do rather than an error.
+      if (!told) setError("The connection dropped while the world was moving. Your order is still being carried out.");
+
       await refresh();
+      return reported;
     } catch {
       setError("The order could not be sent.");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -133,7 +194,7 @@ export function useGameView(gameId: string): GameViewController {
     }
   }, [gameId, refresh]);
 
-  return { view, busy, error, send, choose, refresh };
+  return { view, busy, progress, error, send, choose, refresh };
 }
 
 /** Everything the newest report produced -- not merely its last passage. */

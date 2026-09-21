@@ -13,6 +13,7 @@ export * from "./map";
 export * from "./map-bindings";
 export * from "./agreements";
 export * from "./movement";
+export * from "./nemesis";
 export * from "./storylines";
 export * from "./map-presentation";
 export * from "./references";

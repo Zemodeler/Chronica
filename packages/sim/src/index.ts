@@ -12,6 +12,7 @@ export * from "./conversation";
 export * from "./initiative";
 export * from "./population";
 export * from "./narrator";
+export * from "./nemesis";
 export * from "./ledger";
 export * from "./oversight";
 export * from "./mortality";

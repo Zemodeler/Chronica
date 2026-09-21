@@ -298,15 +298,21 @@ their own is not nothing.
 Significance is still scored **by the actors, as a field on each fact they emit**, and accumulated by
 code: it decides whether there is a Chronicle to write and orders the threads within it.
 
-`DEFAULT_BUDGET`: `maxIterations 4`, `maxModelCalls 6`, `maxSimulatedDays 90`, `maxCausalDepth 3`,
-`maxFocusedActors 3`, `maxAmbientActors 3`, `maxHops 64`, plus the scenario's own `maxSpanDays`.
+`DEFAULT_BUDGET`: `maxIterations 4`, `maxModelCalls 20`, `maxSimulatedDays 90`, `maxCausalDepth 3`,
+`maxFocusedActors 4`, `maxAmbientActors 6`, `maxHops 64`, plus the scenario's own `maxSpanDays`.
 Anything unresolved at the stop becomes a scheduled event — stable pending state, never dropped.
 
-The numbers that matter for how alive the world feels are `maxIterations` and `maxModelCalls`: they
-decide how many rounds the world gets per order, and therefore how many times the people elsewhere
-are asked what they are doing. Four and six buys a round after the calendar has jumped, which is when
-a foreign king has anything worth recording; three and four only ever asked him two days after the
-order, when the honest answer was that nothing had changed yet.
+The number that matters for how alive the world feels is `maxIterations`: it decides how many rounds
+the world gets per order, and therefore how many times the people elsewhere are asked what they are
+doing. Four buys a round after the calendar has jumped, which is when a foreign king has anything
+worth recording; three only ever asked him two days after the order, when the honest answer was that
+nothing had changed yet.
+
+`maxModelCalls` is no longer the same measure, and is now a runaway guard rather than a budget. A
+round's cast is dealt onto up to three calls that run at once rather than one that generates ten
+people's answers end to end, so a round costs three calls and the same tokens — six would have ended
+the burst after its first round and lost the rest for no saving at all. The Chronicle is written the
+same way, a passage per call, six at a time.
 
 ### The Chronicle (`chronicle.ts`)
 

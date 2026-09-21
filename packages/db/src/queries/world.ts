@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import {
   ScenarioDefinitionSchema,
   WorldStateSchema,
@@ -336,6 +336,33 @@ export async function startBurst(
 
 export async function failBurst(db: ChronicaDatabase, burstId: string, error: string): Promise<void> {
   await db.update(simulationBursts).set({ status: "failed", error, endedAt: new Date() }).where(eq(simulationBursts.id, burstId));
+}
+
+/**
+ * A burst for this game that is still running, if there is one.
+ *
+ * Two orders can be in flight for one world at once, and the loser finds out
+ * at the very end: `commitBurst` takes its advisory lock inside the commit
+ * transaction, so the revision check is the first thing that notices, by which
+ * time several minutes of model calls have been paid for and thrown away.
+ *
+ * `startedBefore` is what keeps a crashed process from wedging a game forever.
+ * A row only reaches `committed` or `failed` if the process that opened it
+ * lived long enough to say so; one older than any turn could possibly be is
+ * not running, it is abandoned.
+ */
+export async function findRunningBurst(
+  db: ChronicaDatabase,
+  gameId: string,
+  startedAfter: Date,
+): Promise<{ id: string; startedAt: Date } | undefined> {
+  const [row] = await db
+    .select({ id: simulationBursts.id, startedAt: simulationBursts.startedAt })
+    .from(simulationBursts)
+    .where(and(eq(simulationBursts.gameId, gameId), eq(simulationBursts.status, "running"), gt(simulationBursts.startedAt, startedAfter)))
+    .orderBy(desc(simulationBursts.startedAt))
+    .limit(1);
+  return row;
 }
 
 /**
