@@ -3,7 +3,6 @@ import "server-only";
 import { createAiAdapter, callWithCoinGate, InsufficientCoinsError, AiParseError } from "@chronica/ai";
 import {
   createDatabase,
-  type ChronicaDatabase,
   getCharacterKnowledgebase,
   getOrCreateNpcKnowledgebase,
   getWorldView,
@@ -25,9 +24,7 @@ import {
   linkCanonicalCharacters,
   materializePlayerCharacter,
   type CharacterKnowledgebase,
-  type ScenarioGovernmentRules,
   type ScenarioWealthRules,
-  type WorldState,
 } from "@chronica/shared";
 import { eq, and, isNull } from "drizzle-orm";
 import { schema } from "@chronica/db";
@@ -35,6 +32,7 @@ import { getAuthentication, isAuthenticationConfigured } from "./authentication"
 import { headers } from "next/headers";
 import { relationshipLabelForScore, scoreForDeclaredConnection } from "./relationship-score";
 import { canvasRegions, materializeCanvasProvince } from "./canvas-world";
+import { materializeDeclaredPlayer } from "./player-world";
 
 // The fixture demo game uses a plain string ID, not a UUID, so no DB queries
 // are valid against it. All service functions return early for this ID.
@@ -665,35 +663,3 @@ export async function getPlayerAuthoritySummary(gameId: string, characterId: str
   }
 }
 
-/**
- * The world with this player's declared character projected into it.
- *
- * Falls back to the world as-is whenever the projection cannot be made — an
- * unconfirmed draft, a knowledgebase for somebody else, a starting location
- * the scenario does not have. A read path must never fail because a character
- * is half-created.
- */
-async function materializeDeclaredPlayer(
-  db: ChronicaDatabase,
-  gameId: string,
-  world: WorldState,
-  characterId: string,
-  scenarioGovernment: ScenarioGovernmentRules | undefined,
-  mapAssetId: string | null,
-): Promise<WorldState> {
-  if (world.characters.some((character) => character.id === characterId)) return world;
-  const playerId = characterId.startsWith("declared-") ? characterId.slice("declared-".length) : null;
-  if (playerId === null) return world;
-  const knowledgebase = await getCharacterKnowledgebase(db, gameId, playerId).catch(() => null);
-  if (knowledgebase === null || !knowledgebase.confirmedByPlayer) return world;
-  try {
-    return materializePlayerCharacter(
-      materializeCanvasProvince(world, mapAssetId, knowledgebase.locationProvinceId),
-      characterId,
-      knowledgebase,
-      scenarioGovernment,
-    );
-  } catch {
-    return world;
-  }
-}
