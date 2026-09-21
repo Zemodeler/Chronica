@@ -374,6 +374,28 @@ function describeMind(character: Character): string[] {
     .map(([skill]) => SKILL_WORDS[skill] ?? skill);
   if (skills.length > 0) lines.push(`Capable at: ${skills.join(", ")}.`);
 
+  // What they actually reach for, which is not the same as what they are good
+  // at. "Capable at: intrigue" is a fact about a man; naming the operation it
+  // reaches for is what makes him use it. Two at most, and only where
+  // something is clearly dominant, because this is carried for every person in
+  // the batch and most people have no signature instrument at all.
+  const instruments: string[] = [];
+  if (mind.drives.wealth >= 65 || (character.skills.stewardship ?? 0) >= 70) {
+    instruments.push('money, moved where it obliges somebody -- "money_transfer", "loan_open"');
+  }
+  if ((character.skills.intrigue ?? 0) >= 70) instruments.push('what others would rather was not known -- agents, "discoveries", "belief_set"');
+  if ((character.skills.diplomacy ?? 0) >= 70) instruments.push('other powers, written to directly with "diplomatic_message_send"');
+  if ((character.skills.martial ?? 0) >= 70) instruments.push("the men they command, and what an army lets a man ask for");
+  if (instruments.length > 0) lines.push(`What they reach for first: ${instruments.slice(0, 2).join("; ")}.`);
+
+  // And what they will not do, which is most of what makes somebody a person
+  // in particular rather than a competent actor.
+  if (mind.temperament.cruelty <= 30) {
+    lines.push("They will not get at a man through his family, or through people who have done nothing. That is a line they keep, not squeamishness.");
+  } else if (mind.temperament.cruelty >= 70) {
+    lines.push("They see no reason to spare a man's household or the people who depend on him, if that is where he is reachable.");
+  }
+
   const ambitions = character.ambitions.filter((ambition) => ambition.status === "active").slice(0, ACTOR_CAPS.ambitions);
   if (ambitions.length > 0) lines.push("They want:", ...ambitions.map((ambition) => `  - ${ambition.label}`));
 
