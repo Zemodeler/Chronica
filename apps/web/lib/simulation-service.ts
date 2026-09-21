@@ -10,6 +10,7 @@ import {
   getOpenDecision,
   getWorldView,
   listChronicle,
+  markChronicleRead,
   listPendingEvents,
   listRecentFacts,
   subjectsOfRecentReports,
@@ -516,9 +517,33 @@ export async function getGameView(gameId: string) {
         tags: namedTags(view.world, entry.tags),
         changes: entry.changes,
         quote: entry.quote,
+        // read_at has been on the row since the table was written and nothing
+        // ever set it, so the badge counted the length of the record and
+        // called it unopened.
+        unread: entry.readAt === null,
       })),
       decision: decision === undefined ? null : { id: decision.id, prompt: decision.prompt, options: decision.options },
     };
+  } finally {
+    await close();
+  }
+}
+
+/**
+ * Mark the record as read, as far as it has been written.
+ *
+ * Called when the player opens the Chronicle. Deliberately marks everything
+ * rather than up to a particular entry: the panel shows the whole record at
+ * once, oldest first, and pretending to track a scroll position would be a
+ * more precise lie than the one it replaces.
+ */
+export async function markTheRecordRead(gameId: string): Promise<boolean> {
+  const context = await resolveContext(gameId);
+  if (context === null) return false;
+  const { db, close } = context;
+  try {
+    await markChronicleRead(db, gameId);
+    return true;
   } finally {
     await close();
   }
