@@ -108,6 +108,37 @@ describe("the muster, as the man responsible for it can read it", () => {
     expect(musterTheForces(old, null, offices).forces[0]!.changeExplanation).toBe("Nothing has changed since you last looked.");
   });
 
+  it("does not let a consul read the enemy's morale off his own muster roll", () => {
+    // seesForce ends in speaksForPolity, which on its own is true for every
+    // force in the world. The hatch widens sight within your own power; the
+    // polity filter is what keeps it there, exactly as slice.ts does it.
+    const state = world();
+    const consul = state.material.officeSeats.find((x) => x.status === "held" && x.holderCharacterId !== null)!.holderCharacterId!;
+    const ownPolity = state.characters.find((c) => c.id === consul)!.polityId;
+    expect(state.material.forces.some((f) => f.polityId !== ownPolity)).toBe(true);
+
+    const read = musterTheForces(state, consul, offices);
+    expect(read.forces.length).toBeGreaterThan(0);
+    const byId = new Map(state.material.forces.map((f) => [f.id, f]));
+    for (const force of read.forces) {
+      expect(byId.get(force.id)!.polityId, force.name).toBe(ownPolity);
+    }
+  });
+
+  it("still counts a force you command under somebody else's flag", () => {
+    const state = world();
+    const consul = state.material.officeSeats.find((x) => x.status === "held" && x.holderCharacterId !== null)!.holderCharacterId!;
+    const foreign = state.material.forces.find((f) => f.polityId !== state.characters.find((c) => c.id === consul)!.polityId)!;
+    const handed: WorldState = {
+      ...state,
+      material: {
+        ...state.material,
+        forces: state.material.forces.map((f) => (f.id === foreign.id ? { ...f, commanderCharacterId: consul, controllerCharacterId: consul } : f)),
+      },
+    };
+    expect(musterTheForces(handed, consul, offices).forces.some((f) => f.id === foreign.id)).toBe(true);
+  });
+
   it("does not hand a private man the state's armies", () => {
     // The same seesForce the world slice uses.
     const state = world();

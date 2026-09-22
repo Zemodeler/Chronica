@@ -169,16 +169,52 @@ export function GameShell({
    */
   const [place, setPlace] = useState<"map" | "office">("office");
   const [surface, setSurface] = useState<OfficeSurface | null>(null);
+  /**
+   * What is actually in this player's room.
+   *
+   * Whether a man commands anyone or holds anything is a question only the
+   * server can answer. Guessing it from "holds a character" put an arms rack
+   * in a private citizen's room. Null until it answers, and an object is not
+   * drawn on a guess.
+   */
+  const [room, setRoom] = useState<{ forces: boolean; standing: boolean; books: boolean; purse: boolean } | null>(null);
   const controller = useGameView(gameId);
   const zoomBand = deriveZoomBand(viewport.scale);
 
   const openSurface = useCallback((next: OfficeSurface) => {
+    lastPickedUp.current = next;
     setSurface(next);
     // Opening the record is what marks it read; the badge clears as the shelf
     // comes off the wall rather than after a round trip.
     if (next === "chronicle") void controller.markRead();
   }, [controller]);
-  const closeSurface = useCallback(() => setSurface(null), []);
+  /**
+   * What was picked up last, so putting it down returns focus to it.
+   *
+   * A <dialog> restores focus by itself; the working panels are asides and do
+   * not, so closing one dropped focus to the body and a keyboard player lost
+   * their place in the room.
+   */
+  const lastPickedUp = useRef<OfficeSurface | null>(null);
+  const closeSurface = useCallback(() => {
+    const id = lastPickedUp.current;
+    setSurface(null);
+    if (id === null) return;
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(`[data-object="${id}"]`)?.focus();
+    });
+  }, []);
+
+  useEffect(() => {
+    let live = true;
+    void fetch(`/api/games/${encodeURIComponent(gameId)}/room`, { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((contents: typeof room) => { if (live && contents !== null) setRoom(contents); })
+      .catch(() => undefined);
+    return () => { live = false; };
+    // Re-read when simulated time has moved: a man given a legion should find
+    // an arms rack in his room next time he walks in.
+  }, [gameId, controller.view.chronicle.length]);
 
   // Somebody has come to find the player. The wiring for this has been
   // plumbed through the shell since the chat panel was written and nothing
@@ -210,11 +246,12 @@ export function GameShell({
     }]),
     { id: "chronicle" as const, badge: unread },
     ...(playerCharacterId === undefined ? [] : [{ id: "people" as const }]),
-    { id: "books" as const },
-    { id: "purse" as const },
-    ...(orderingCharacterId === undefined ? [] : [{ id: "forces" as const }, { id: "standing" as const }]),
+    ...(room?.books === true ? [{ id: "books" as const }] : []),
+    ...(room?.purse === true ? [{ id: "purse" as const }] : []),
+    ...(room?.forces === true ? [{ id: "forces" as const }] : []),
+    ...(room?.standing === true ? [{ id: "standing" as const }] : []),
     ...(characterPanel === undefined ? [] : [{ id: "self" as const }]),
-  ], [orderingCharacterId, playerCharacterId, characterPanel, view.decision, unread]);
+  ], [orderingCharacterId, playerCharacterId, characterPanel, room, view.decision, unread]);
 
   // --- Geometry shared between canvas terrain layer and lightweight SVG overlay ---
 
@@ -538,7 +575,7 @@ export function GameShell({
           role="tabpanel"
           aria-labelledby="place-map-tab"
           data-scale={viewport.scale.toFixed(2)}
-          {...(place === "map" ? {} : { inert: "" as unknown as boolean })}
+          inert={place !== "map"}
         >
           <MapViewport ref={mapViewportRef} transform={viewport} onTransformChange={setViewport} onDrawCanvas={onDrawCanvas} onPanStart={clearMapHover}>
             {world && political && (
@@ -584,7 +621,10 @@ export function GameShell({
             canZoomIn={viewport.scale < MAX_SCALE}
             canZoomOut={viewport.scale > MIN_SCALE}
           />
-          {orderingCharacterId && <MapOrderBar controller={controller} onGoToDesk={goToDesk} />}
+          {/* Only while the player is actually looking at the map: inert hides
+              it from the keyboard but not from the eye, and its own stacking
+              put it over the Office. */}
+          {place === "map" && orderingCharacterId && <MapOrderBar controller={controller} onGoToDesk={goToDesk} />}
         </div>
         {place === "office" && <Office things={things} style={roomStyle} onOpen={openSurface} onLeave={() => setPlace("map")} />}
       </div>

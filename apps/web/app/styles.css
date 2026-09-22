@@ -884,6 +884,9 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
   display: grid; place-items: center;
 }
 .office__objects {
+  /* Positioned, or the absolutely-placed scenery paints over the controls and
+     the room is a picture of an empty room. */
+  position: relative; z-index: 1;
   display: grid; gap: .6rem; margin: 0; padding: 1.5rem;
   list-style: none; width: min(34rem, 100%);
 }
