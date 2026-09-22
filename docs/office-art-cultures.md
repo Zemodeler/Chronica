@@ -1,6 +1,10 @@
 # Office art — culture variants
 
-Carthaginian, Greek, Gallic and neutral rooms use the same flat-art approach as the Roman room. All nine objects are painted into each image, with rectangular interactive highlights. The furniture layout is shared across these four variants and configured in `office-scenery.ts`.
+Carthaginian, Greek, Gallic and neutral rooms now have unfurnished layered room
+plates. Eight shared transparent furniture cut-outs are rendered only when an
+office function exists; the open window remains part of each plate so its view
+stays culture-specific. The furniture layout is shared and configured in
+`office-scenery.ts`.
 
 Generated using the built-in OpenAI image generation tool, with `apps/web/public/office/roman-room.webp` as the composition and style reference. Each output was resized to 1600 × 900 and encoded as WebP at quality 90.
 
