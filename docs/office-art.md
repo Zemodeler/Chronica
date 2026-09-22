@@ -16,8 +16,16 @@ background. More to make and much better to use: each object is its own
 element, so hovering traces the edge of *the thing itself* rather than a box
 around it, and any one object can be redrawn without touching the room.
 
-Layered is what the prompts below are for. Mixed is fine — any object with no
-cut-out falls back to the rectangle.
+The five rooms in `public/office/` are **flat**: the first generation run
+ignored "empty" and painted the furniture in. The prompts below are the flat
+brief they came from.
+
+**For layered art, use `docs/office-art-layered.md` instead** — it carries the
+lesson from that run: attach an existing room as a style anchor so ten
+separately generated images agree, and fight the model's instinct to furnish
+a room it has been told is empty.
+
+Mixed is fine — any object with no cut-out falls back to the rectangle.
 
 ---
 

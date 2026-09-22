@@ -1,7 +1,18 @@
 import { test } from "@playwright/test";
 import { enterTheWorld, placeTab, waitForTheOffice } from "./fixture";
 
-/** Not an assertion: pictures of the room, so somebody can look at it. */
+/**
+ * Pictures of the room, so somebody can look at it. Not an assertion.
+ *
+ * Off by default: it opens every panel across three worlds, and on a loaded
+ * dev server the routes it waits on are slow enough to time out -- a
+ * screenshot-taker has no business failing the suite over that. Run it on
+ * its own with:
+ *
+ *   CHRONICA_E2E_SHOTS=1 npx playwright test office-look
+ */
+test.skip(process.env.CHRONICA_E2E_SHOTS !== "1", "screenshots are taken on request");
+
 test("what the room looks like", async ({ page }) => {
   // Five screenshots across three worlds, each opening a panel whose route
   // compiles on its first hit.
