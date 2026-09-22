@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createDatabase, getCharacterKnowledgebase, getWorldView, schema, type ChronicaDatabase, type WorldView } from "@chronica/db";
+import { getCharacterKnowledgebase, getSharedDatabase, getWorldView, schema, type ChronicaDatabase, type WorldView } from "@chronica/db";
 import { materializePlayerCharacter, type ScenarioGovernmentRules, type WorldState } from "@chronica/shared";
 import { materializeCanvasProvince } from "./canvas-world";
 import { and, eq } from "drizzle-orm";
@@ -82,8 +82,24 @@ export async function withPlayerWorld<T>(
   const userId = session?.user?.id ?? null;
   if (userId === null) return null;
 
-  const { db, close } = createDatabase(requiredDatabaseUrl());
-  try {
+  /**
+   * One pool for every read, not one per request.
+   *
+   * `createDatabase` opens a fresh pool of up to ten connections each time it
+   * is called, and the Office opens five of these endpoints while a game page
+   * is loading -- room, books, forces, standing, people -- on top of
+   * everything the page itself reads. Under a test run that was enough
+   * concurrent pools to exhaust Postgres, and the page came back as an
+   * Internal Server Error whose cause was `write CONNECT_TIMEOUT
+   * localhost:5432`.
+   *
+   * `getSharedDatabase` was written for exactly this and had no callers. It
+   * is safe here because nothing on this path writes: it reads the player,
+   * reads the world, and projects a declared character in memory. Nothing to
+   * close, either -- the pool outlives the request on purpose.
+   */
+  const db = getSharedDatabase(requiredDatabaseUrl());
+  {
     const [player] = await db
       .select({ id: schema.players.id, characterId: schema.players.characterId })
       .from(schema.players)
@@ -98,7 +114,5 @@ export async function withPlayerWorld<T>(
       : await materializeDeclaredPlayer(db, gameId, view.world, characterId, view.scenarioGovernment, view.mapAssetId);
 
     return await read({ world, characterId, playerId: player?.id ?? null, view, db });
-  } finally {
-    await close();
   }
 }
