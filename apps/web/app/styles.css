@@ -889,6 +889,43 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
   display: grid; gap: .6rem; margin: 0; padding: 1.5rem;
   list-style: none; width: min(34rem, 100%);
 }
+
+/* The picture, and nothing else. aria-hidden, inert, no text: everything
+   interactive is in the control layer above it, which is why a new picture
+   can be dropped in without re-testing the room. */
+.office__scenery {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; pointer-events: none; user-select: none;
+}
+
+/* What renders until there is art: lamplight on plaster, a wooden floor. */
+.office__scenery--drawn {
+  background:
+    radial-gradient(120% 90% at 50% 12%, color-mix(in srgb, var(--room-lamp) 22%, transparent), transparent 60%),
+    linear-gradient(to bottom, var(--room-plaster) 0%, var(--room-plaster) 62%, var(--room-wood) 62%, var(--room-ink) 100%);
+}
+
+/* Placed over a picture: each control sits on the thing it names. */
+.office__objects--placed {
+  display: block; position: absolute; inset: 0; width: 100%; padding: 0;
+}
+.office__objects--placed > li { position: absolute; margin: 0; }
+.office__objects--placed .office-object {
+  width: 100%; height: 100%; align-content: end;
+  border-color: transparent; border-radius: var(--radius-card);
+  background: linear-gradient(to top, rgb(6 8 13 / 82%), rgb(6 8 13 / 10%));
+}
+.office__objects--placed .office-object__does { opacity: 0; transition: opacity .12s ease; }
+.office__objects--placed .office-object:hover,
+.office__objects--placed .office-object[data-hot="true"] {
+  border-color: var(--room-lamp);
+  background: linear-gradient(to top, rgb(6 8 13 / 88%), color-mix(in srgb, var(--room-lamp) 18%, transparent));
+}
+.office__objects--placed .office-object:hover .office-object__does,
+.office__objects--placed .office-object:focus-visible .office-object__does { opacity: 1; }
+
+/* A thing the room is trying to tell you about. */
+.office-object[data-state="sealed"] { border-color: var(--accent-avatar); }
 .office-object {
   display: grid; grid-template-columns: 1fr auto auto; align-items: baseline;
   gap: .5rem 1rem; width: 100%; padding: .85rem 1.1rem; text-align: left;

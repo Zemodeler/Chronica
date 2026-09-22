@@ -20,6 +20,9 @@ import { CouncilPanel } from "./council-panel";
 import { ChroniclePanel } from "./chronicle-panel";
 import { BooksPanel } from "./books-panel";
 import { Office, type OfficeSurface } from "./office";
+import type { RoomStyle } from "./office-objects";
+import { ForcesPanel } from "./forces-panel";
+import { StandingPanel } from "./standing-panel";
 import { MapOrderBar } from "./map-order-bar";
 import { unreadCount, useGameView } from "./use-game-view";
 
@@ -111,6 +114,8 @@ interface GameShellProps {
   readonly playerCharacterId?: string | undefined;
   /** Drives the council: giving orders only needs a character held in the world. */
   readonly orderingCharacterId?: string | undefined;
+  /** Which culture's room the player works in. */
+  readonly roomStyle: RoomStyle;
 }
 
 export function GameShell({
@@ -124,6 +129,7 @@ export function GameShell({
   characterPanel,
   playerCharacterId,
   orderingCharacterId,
+  roomStyle,
 }: GameShellProps) {
   const [geoJson, setGeoJson] = useState<GeoJsonMap | undefined>(
     () => initialGeoJson ?? _geoJsonCache.get(gameId),
@@ -188,17 +194,16 @@ export function GameShell({
    */
   const things = useMemo(() => [
     ...(orderingCharacterId === undefined ? [] : [{
-      id: "council" as const, name: "The writing desk", does: "Give an order.",
-      marked: view.decision !== null,
+      // A sealed document lies on the desk when the world wants an answer.
+      id: "council" as const, marked: view.decision !== null,
+      state: view.decision !== null ? "sealed" : undefined,
     }]),
-    { id: "chronicle" as const, name: "The shelf of annals", does: "Turn back through the record.", badge: unread },
-    ...(playerCharacterId === undefined ? [] : [{
-      id: "people" as const, name: "The letter tray", does: "Read and answer your correspondence.",
-    }]),
-    { id: "books" as const, name: "The ledger stand", does: "Read the books." },
-    ...(characterPanel === undefined ? [] : [{
-      id: "self" as const, name: "The bronze mirror", does: "Consider yourself.",
-    }]),
+    { id: "chronicle" as const, badge: unread },
+    ...(playerCharacterId === undefined ? [] : [{ id: "people" as const }]),
+    { id: "books" as const },
+    { id: "purse" as const },
+    ...(orderingCharacterId === undefined ? [] : [{ id: "forces" as const }, { id: "standing" as const }]),
+    ...(characterPanel === undefined ? [] : [{ id: "self" as const }]),
   ], [orderingCharacterId, playerCharacterId, characterPanel, view.decision, unread]);
 
   // --- Geometry shared between canvas terrain layer and lightweight SVG overlay ---
@@ -575,7 +580,7 @@ export function GameShell({
           </aside>}
           {orderingCharacterId && <MapOrderBar controller={controller} onGoToDesk={goToDesk} />}
         </div>
-        {place === "office" && <Office things={things} onOpen={openSurface} onLeave={() => setPlace("map")} />}
+        {place === "office" && <Office things={things} style={roomStyle} onOpen={openSurface} onLeave={() => setPlace("map")} />}
       </div>
 
       {characterPanel && (
@@ -595,8 +600,14 @@ export function GameShell({
         <CouncilPanel controller={controller} onClose={closeSurface} onOpenChronicle={() => openSurface("chronicle")} />
       )}
       {surface === "chronicle" && <ChroniclePanel controller={controller} onClose={closeSurface} />}
-      {surface === "books" && (
+      {(surface === "books" || surface === "purse") && (
         <BooksPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} />
+      )}
+      {surface === "forces" && (
+        <ForcesPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} />
+      )}
+      {surface === "standing" && (
+        <StandingPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} />
       )}
     </>
   );
