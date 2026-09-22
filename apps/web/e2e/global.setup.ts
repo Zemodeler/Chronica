@@ -52,4 +52,17 @@ setup("sign up once and seed two worlds", async ({ page }) => {
 
   fs.writeFileSync(WORLDS_FILE, JSON.stringify({ consul, citizen, carthaginian } satisfies SeededWorlds), "utf8");
   await page.context().storageState({ path: STATE_FILE });
+
+  // Warm the routes the specs open.
+  //
+  // `next dev` compiles a route the first time it is asked for, and the
+  // Office opens six of its own. Paid inside a spec that has 120 seconds for
+  // everything, a cold compile is the whole budget -- which is what a run
+  // against a cleared .next/cache spends it on, failing tests that are not
+  // wrong about anything. Paid here once, it costs the setup and nobody else.
+  for (const route of ["room", "forces", "standing", "books", "people", "simulate"]) {
+    await page.request.get(`/api/games/${consul}/${route}`, { timeout: 180_000 }).catch(() => undefined);
+  }
+  await page.goto(`/games/${consul}`);
+  await page.locator(".office-object").first().waitFor({ timeout: 180_000 });
 });
