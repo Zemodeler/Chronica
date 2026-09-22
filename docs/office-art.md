@@ -1,184 +1,111 @@
 # Art for the Office
 
 The Office is the player's own room: one of the game's two places, and where
-every surface about their own position lives. It ships with a plain drawn
-background and is built so that background can be replaced by real art
-without touching a single component.
+every surface about their own position lives. The art is replaceable without
+touching a single component.
 
-There are two ways to dress it.
-
-**Flat** — one picture with the furniture painted in. Simple, and what a
-single generated image gives you. Pointing at a thing can then only be a
-rectangle over the part of the picture it sits in.
-
-**Layered** — an empty room, plus one cut-out per object on a transparent
-background. More to make and much better to use: each object is its own
-element, so hovering traces the edge of *the thing itself* rather than a box
-around it, and any one object can be redrawn without touching the room.
-
-The five rooms in `public/office/` are **flat**: the first generation run
-ignored "empty" and painted the furniture in. The prompts below are the flat
-brief they came from.
-
-**For layered art, use `docs/office-art-layered.md` instead** — it carries the
-lesson from that run: attach an existing room as a style anchor so ten
-separately generated images agree, and fight the model's instinct to furnish
-a room it has been told is empty.
-
-Mixed is fine — any object with no cut-out falls back to the rectangle.
+**The prompts live in [`office-art-layered.md`](office-art-layered.md).** This
+file is the contract they have to satisfy: how the room is put together, where
+each thing goes, and how to install a replacement.
 
 ---
 
-## The brief
+## How a room is put together
 
-A room belonging to a person of consequence, seen from a fixed point near the
-doorway, looking in. Nobody is in it. It is their working room, not a hall:
-where letters are read, orders written, accounts gone through, and the seal
-kept.
+Three layers, deliberately separable.
 
-- 16:9 for the room. One fixed viewpoint, roughly eye height, looking
-  slightly down.
-- No people, no animals, no motion.
-- **No text anywhere.** No labels, no signage, no writing on the papers. The
-  room is read in the player's own language by the layer above.
-- Lamplit and warm, dim at the edges. Light falls from the upper left.
-- Lived in and in use — papers where somebody left them, a chair pushed back.
-  Not a museum set, not a throne room, not a fantasy study.
-
----
-
-## Prompt 1 — the empty room
-
-Paste this, substituting the culture line from the table below. Ask for
-**1536 × 1024** (the nearest landscape size; it is cropped to 16:9 on the
-way in, or extend it yourself to 1600 × 900).
-
-> A wide interior view of an empty private working room in the ancient
-> Mediterranean world, seen from a fixed point near the doorway looking in,
-> at roughly eye height and angled very slightly downward. Painterly, warm,
-> muted, semi-realistic — like a background plate from a hand-painted
-> adventure game.
->
-> **CULTURE LINE GOES HERE**
->
-> The room is completely empty of furniture: bare walls, a bare floor, and an
-> empty window opening in the upper right with soft daylight coming through
-> it. No desk, no shelves, no chest, no chair, no racks, no objects of any
-> kind — only the room itself.
->
-> Lit by warm lamplight from the upper left, falling off into shadow at the
-> edges and corners. Deep shadow along the bottom edge. Quiet, lived-in,
-> slightly worn. No people, no animals, no text, no lettering, no writing, no
-> signage, no watermark, no border, no UI. Flat even composition with nothing
-> competing for attention in the centre.
-
-| Style key | Culture line |
+| Layer | What it is |
 |---|---|
-| `roman` | A Roman room of senatorial rank: plastered walls in faded red and ochre, a simple mosaic or tiled floor, plain stone and timber. |
-| `carthaginian` | A Carthaginian room of standing: pale stucco walls with Punic geometric borders, patterned floor tiles, a coastal Mediterranean feel, richer and more decorated than a Roman one. |
-| `greek` | A Sicilian Greek room: painted plaster walls with a simple meander border, a pale stone floor, restrained Hellenistic decoration. |
-| `gallic` | A Gallic chieftain's room: timber walls and posts, woven hangings, a packed earth floor, a hearth's soot on the beams. No plaster, no mosaic, no stonework. |
-| `neutral` | An old room of no particular century: plain rendered walls, a worn wooden floor, no ornament that fixes a date. |
+| **scenery** | A picture. `aria-hidden`, no pointer events, no text, no handlers. |
+| **boxes** | Where each object sits in that picture — data, in `office-scenery.ts`. |
+| **controls** | The real buttons, positioned from the boxes. The only interactive layer. |
 
-## Prompt 2 — one cut-out per object
+Nothing about the controls depends on the picture. The tab order, the focus
+ring, the labels and what a screen reader says all come from
+`office-objects.ts`, identically whether the room is drawn, flat or layered.
+That is what makes art safe to swap: a picture cannot break the room.
 
-Nine of these, one per object. Keep the same culture line and the same light
-direction in every one, or they will not look like they belong to the room.
+**Flat** — one image with the furniture painted in. Pointing at a thing is a
+rectangle over the part of the picture it occupies.
 
-> **OBJECT DESCRIPTION GOES HERE**
->
-> **CULTURE LINE GOES HERE**
->
-> A single object, alone, centred, on a fully transparent background.
-> Painterly, warm, muted, semi-realistic, matching a hand-painted adventure
-> game background. Lit by warm lamplight from the upper left with soft shadow
-> on its lower right; no cast shadow on the ground, no floor, no wall, no
-> backdrop of any kind. Seen at roughly eye height, angled very slightly
-> downward, as it would sit in a room viewed from the doorway. Nothing
-> touching or overlapping it. No people, no text, no lettering, no writing,
-> no watermark, no border. Transparent PNG.
+**Layered** — an empty room plate, plus one cut-out per object on a
+transparent background. Each object is its own element, so hovering traces the
+edge of *the thing itself*, an object can be redrawn alone, and an object the
+player has no claim on is simply not in the room. This is what ships.
 
-| Object | Ask for | Object description |
-|---|---|---|
-| `council` | 1536 × 1024 | A low writing desk with a wax tablet and a stylus on it, and a scroll left unrolled at one end. |
-| `chronicle` | 1024 × 1024 | A set of open shelves filled with rolled scrolls and stacked bound volumes. |
-| `books` | 1024 × 1536 | A tall reading stand with a large open ledger resting on it, and counting tokens beside it. |
-| `purse` | 1024 × 1024 | A heavy banded wooden money chest, closed, with an iron lock. |
-| `people` | 1536 × 1024 | A shallow tray or set of pigeonholes holding folded letters and sealed correspondence. |
-| `forces` | 1024 × 1536 | A wooden arms rack holding spears, a shield and a helmet, stored rather than worn. |
-| `standing` | 1536 × 1024 | A small open document case holding a seal ring, a stick of wax and rolled documents of office. |
-| `self` | 1024 × 1536 | A polished bronze hand mirror on a small stand. |
-| `window` | 1536 × 1024 | A shuttered window frame with its shutters open and bright daylight beyond. |
-
-The sizes are what image models actually offer; they need not match the boxes
-below, because each cut-out is fitted inside its box without distortion.
+Mixed is fine: any object without a cut-out falls back to a rectangle over the
+plate. The `window` has no cut-out on purpose — it is painted into the plate.
 
 ---
 
-## Installing it
+## Where the boxes are
 
-1. Put the files in `apps/web/public/office/` — e.g. `roman-room.webp` and
-   `roman-desk.png`.
+Coordinates in a 1600 × 900 space, `x, y` from the top-left. These are the
+live values from `CULTURE_ROOM_RECTS` in
+`apps/web/app/games/[gameId]/components/office-scenery.ts`.
 
-2. Edit the entry in
-   `apps/web/app/games/[gameId]/components/office-scenery.ts`:
+| Object | Box (x, y, w, h) |
+|---|---|
+| `council` — the writing desk | 550, 489, 580, 326 |
+| `chronicle` — the shelf of annals | 115, 111, 275, 199 |
+| `books` — the ledger stand | 125, 430, 270, 315 |
+| `purse` — the strongbox | 400, 546, 145, 124 |
+| `people` — the letter tray | 1158, 450, 129, 100 |
+| `forces` — the arms rack | 1320, 367, 270, 323 |
+| `standing` — the seal case | 1110, 265, 180, 120 |
+| `self` — the bronze mirror | 465, 106, 170, 139 |
+| `window` — the window | 1060, 15, 425, 240 |
+
+### Boxes have to match the art
+
+Each cut-out is placed with `object-fit: contain`, so a sprite is never
+distorted — but it is never *larger* than its box either. A box whose
+proportions differ from the art's leaves dead space the object does not fill,
+while the hotspot still covers all of it: the arms rack first rendered at half
+its height, floating off the floor, because its box was twice as tall as the
+art was.
+
+So each box above is cut to its own cut-out's proportions. **A replacement
+cut-out of a different shape needs its box re-proportioned**: keep the centre
+line and the surface the thing stands on, and shrink the other dimension to
+match.
+
+Measure the file. The generated cut-outs came back **trimmed to their
+content**, not at the canvas size the prompt asked for — `roman-forces.png` is
+1147 × 1371, not the 1024 × 1536 requested — so their proportions are the
+object's own, not the model's.
+
+---
+
+## Installing a room
+
+1. Put the files in `apps/web/public/office/`. The plate is 16:9, 1600 × 900
+   or an exact multiple. Cut-outs are transparent PNG or WebP.
+
+2. Add or edit the entry in `office-scenery.ts`:
 
    ```ts
    roman: {
      kind: "image",
-     src: "/office/roman-room.webp",
+     src: "/office/roman-room-empty.webp",
      alt: "A Roman working room, lamplit",
      objects: {
-       council: "/office/roman-desk.png",
-       forces: "/office/roman-arms.png",
+       council: "/office/roman-council.png",
+       forces: "/office/roman-forces.png",
        // …any subset. Anything left out falls back to a rectangle.
      },
    },
    ```
 
-3. If a thing does not sit where the default boxes say, override the ones
-   that moved — and only those:
-
-   ```ts
-   rects: { forces: { x: 1280, y: 400, w: 220, h: 320 } },
-   ```
+3. Re-proportion any box whose art changed shape, per the rule above.
 
 There is no step 4. No component, handler or stylesheet changes.
 
-### Where the boxes are
-
-Coordinates in a 1600 × 900 space, `x, y` from the top-left.
-
-| Object | Box (x, y, w, h) |
-|---|---|
-| `council` — the writing desk | 560, 470, 480, 260 |
-| `chronicle` — the shelf of annals | 90, 120, 300, 300 |
-| `books` — the ledger stand | 90, 470, 240, 260 |
-| `purse` — the strongbox | 370, 560, 150, 170 |
-| `people` — the letter tray | 1080, 560, 220, 170 |
-| `forces` — the arms rack | 1340, 430, 180, 300 |
-| `standing` — the seal case | 1080, 380, 200, 140 |
-| `self` — the bronze mirror | 420, 130, 180, 220 |
-| `window` | 1120, 90, 380, 240 |
-
-Each cut-out is placed with `object-fit: contain`, anchored to the bottom of
-its box, so a sprite's own proportions do not have to match the box's.
-
----
-
-## Why the layers stay apart
-
-The picture is `aria-hidden`, has no pointer events, and carries no text.
-Every button, label, focus ring and the whole tab order come from
-`office-objects.ts` and are identical whether the room is drawn, flat or
-layered. A picture cannot break them, which is why art can be swapped without
-anyone re-testing the room.
-
-The white edge on hover is four hard drop-shadows following the cut-out's own
-alpha, so it traces the object's silhouette rather than its bounding box.
-That only works if the PNG really is transparent around the object — a white
-or checkered background will outline a rectangle and look wrong.
-
-`arrangementProblems` holds any arrangement, default or overridden, to the
+`arrangementProblems` holds any arrangement — default or overridden — to the
 room's bounds, to no two objects overlapping, and to a size that can actually
-be hit.
+be hit. `office-objects.test.ts` runs it over every room in the manifest.
+
+**The one way this fails:** a PNG that is not really transparent. The white
+edge on hover is drawn from the image's alpha, so a white or checkered
+background outlines a rectangle. Open a file over a dark background before
+wiring it in.

@@ -1,11 +1,14 @@
 # Roman office art
 
-The first installed office illustration uses the flat option in `office-art.md`.
-It is a single painted room with all nine objects, served from
-`apps/web/public/office/roman-room.webp` at 1600 × 900. Its hotspot overrides
-are in `office-scenery.ts`. Flat art uses rectangular hover highlights;
-transparent object layers remain a possible future upgrade. The other culture
-variants are documented in `office-art-cultures.md`.
+The Roman room now uses the layered option in `office-art.md`: an unfurnished
+1600 × 900 room plate plus transparent object cut-outs. The window stays part
+of the room plate so each culture can retain its own view; the other eight
+objects are separate PNGs. Their manifest is in `office-scenery.ts`.
+
+The cut-outs are intentionally plain Roman timber and bronze furnishings that
+can sit in every culture's room while culture-specific furniture sets are
+painted later. A missing object is omitted entirely when the player has no
+claim on it.
 
 Created with the built-in OpenAI image generation tool. The generated image
 was resized and encoded as WebP for delivery.

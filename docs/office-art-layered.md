@@ -131,3 +131,71 @@ rectangle over the plate, so a half-finished set still runs.
 edge is drawn from the image's alpha, so a white or checkered background
 outlines a rectangle. Check a file by opening it over a dark background
 before wiring it in.
+
+---
+
+## Prompt 3 — the same eight objects, in another culture
+
+All five rooms currently share the **Roman** cut-outs, so a Carthaginian sits
+at a Roman desk under a Roman helmet. The plates are per-culture; the objects
+are not, and that is the largest thing still missing.
+
+Eight per culture, for Carthaginian, Greek, Gallic and neutral. `window` needs
+none — it is painted into the plate.
+
+The trick that makes this cheap and consistent: **give it the Roman cut-out it
+is replacing, and the empty room it has to sit in.** Attach both. Asking for a
+fresh object from a text description will not match the set; asking for *this
+object, re-made for that room* will.
+
+> Attached are two images: an object cut out on a transparent background, and
+> the room it belongs in.
+>
+> Re-make **the same object, serving the same purpose, at the same size, angle
+> and lighting**, as it would have been made for the second room's culture
+> instead. Same viewpoint, same warm lamplight from the upper left, same soft
+> shadow on its own lower right, same painterly semi-realistic style.
+>
+> **CULTURE LINE GOES HERE**
+>
+> Keep its silhouette close to the original so it stands in the same place:
+> the same proportions, the same footprint, the same overall height and width.
+> Change the materials, the ornament and the craft, not the shape or the
+> scale.
+>
+> The object alone, centred, complete, nothing cut off at any edge. **The
+> background is fully transparent** — no floor, no wall, no ground, no cast
+> shadow on any surface, no backdrop, no gradient, no colour, no checkerboard,
+> no white. Transparent PNG with a real alpha channel.
+>
+> No people, no text, no lettering, no watermark, no border.
+
+| Style key | Culture line |
+|---|---|
+| `carthaginian` | Carthaginian work: dark imported hardwood, bronze and ivory inlay, Punic geometric and palmette ornament, a merchant city's finish — richer and more decorated than the Roman original. |
+| `greek` | Sicilian Greek work: lighter turned wood, restrained Hellenistic detail, a painted meander or palmette band, slimmer and more elegant than the Roman original. |
+| `gallic` | Gallic work: heavy rough-hewn timber, iron bands and rivets, carved spiral and knotwork ornament, no marble and no fine turning — plainer and stronger than the Roman original. |
+| `neutral` | Plain old work of no particular century: worn wood, simple iron fittings, no ornament that fixes a date or a place. |
+
+Keeping the silhouette close is what lets all five cultures share one set of
+boxes. If a replacement does come back a different shape, re-proportion its
+box — see **Boxes have to match the art** in `office-art.md`.
+
+Then add a per-culture object map in `office-scenery.ts` instead of the shared
+`OFFICE_CUT_OUTS`:
+
+```ts
+const CUT_OUTS = (style: string): Partial<Record<OfficeObjectId, string>> => ({
+  council: `/office/${style}-council.png`,
+  chronicle: `/office/${style}-chronicle.png`,
+  books: `/office/${style}-books.png`,
+  purse: `/office/${style}-purse.png`,
+  people: `/office/${style}-people.png`,
+  forces: `/office/${style}-forces.png`,
+  standing: `/office/${style}-standing.png`,
+  self: `/office/${style}-self.png`,
+});
+```
+
+They can arrive one culture at a time: keep `OFFICE_CUT_OUTS` for the ones
+not yet drawn.
