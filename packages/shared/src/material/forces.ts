@@ -18,11 +18,18 @@ import { moraleInWords, payInWords, provisionInWords } from "./in-words";
  * thousand strong, and the slice's own comment says so: the paper figure
  * diverges from fit personnel the moment anybody fights.
  *
- * Station-filtered like the books, and with the same filter the slice uses.
- * `seesForce` is already exactly right without extra rules: it returns the
- * forces you command or control, plus the whole polity's when you speak for
- * it in military matters. A legate reads his legion and a consul reads the
- * army, and what the player is shown cannot drift from what the model is told.
+ * Station-filtered like the books, and filtered the way the slice filters --
+ * which is two steps, not one. `seesForce` ends in `speaksForPolity`, so on
+ * its own it answers true for every force in the world once you speak for a
+ * power in military matters: a consul was reading Carthage's morale, supply
+ * and pay status off his own muster roll. The hatch is meant to widen your
+ * sight *within* your own power, so the polity filter comes first and
+ * `seesForce` decides only what you may read of what is yours. `slice.ts`
+ * does exactly this, and a player and the model must not be told different
+ * things.
+ *
+ * A force you personally command is yours whatever flag it is under, so it
+ * survives the polity filter on its own account.
  *
  * Every reading is in words. A commander knows his men are sullen and short
  * of supply; he does not know they are at 3,500 of 10,000.
@@ -138,8 +145,22 @@ export function musterTheForces(
   const provinceName = (id: string): string => world.map.provinces.find((p) => p.id === id)?.name ?? id;
   const obligationOf = (id: string | null) =>
     id === null ? undefined : world.material.obligations.find((o) => o.id === id);
+  /** Whether an army's wages are drawn on its own chest. */
+  const paysItself = (forceId: string, obligationId: string | null): boolean => {
+    const payer = obligationOf(obligationId)?.payerAccountId;
+    if (payer === undefined) return false;
+    const account = world.material.accounts.find((candidate) => candidate.id === payer);
+    return account?.owner.kind === "force" && account.owner.id === forceId;
+  };
+
+  const ownPolity = characterId === null
+    ? null
+    : world.characters.find((character) => character.id === characterId)?.polityId ?? null;
 
   const forces = world.material.forces
+    .filter((force) => ownPolity === null
+      || force.polityId === ownPolity
+      || station?.forceIds.has(force.id) === true)
     .filter((force) => reaches(force.id))
     .map((force): ForceReading => {
       const fitStrength = fitOf(force.personnel);
@@ -159,7 +180,11 @@ export function musterTheForces(
         provisionedThroughLabel: clock === undefined
           ? `Day ${force.provisionedThroughStep}`
           : formatWorldDate({ day: force.provisionedThroughStep, minute: 0 }, clock),
-        payStatus: payInWords(obligationOf(force.payObligationId), force.payArrearsPeriods),
+        payStatus: payInWords(
+          obligationOf(force.payObligationId),
+          force.payArrearsPeriods,
+          paysItself(force.id, force.payObligationId),
+        ),
         changeExplanation: explainChange(force, world.elapsedStep),
         locationLabel: provinceName(force.locationId),
         ...bound,

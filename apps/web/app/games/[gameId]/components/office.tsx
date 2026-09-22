@@ -115,7 +115,7 @@ export function Office({
                 >
                   <span className="office-object__name">{object.name}</span>
                   <span className="office-object__does">{object.does}</span>
-                  {thing?.marked === true && <span className="office-object__mark" aria-label="Waiting on your word">•</span>}
+                  {thing?.marked === true && <span className="office-object__mark"><span className="visually-hidden">Waiting on your word</span><span aria-hidden="true">•</span></span>}
                   {thing?.badge !== undefined && thing.badge > 0 && (
                     <span className="office-object__badge">{thing.badge}</span>
                   )}
