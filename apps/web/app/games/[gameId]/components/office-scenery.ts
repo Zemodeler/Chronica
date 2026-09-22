@@ -77,17 +77,68 @@ export type Scenery = SceneryImage | SceneryDrawn;
 
 const DRAWN: SceneryDrawn = { kind: "drawn" };
 
+/** The culture variants were painted with the same furniture arrangement. */
+const CULTURE_ROOM_RECTS: Readonly<Record<OfficeObjectId, Rect>> = {
+  council: { x: 550, y: 480, w: 580, h: 335 },
+  chronicle: { x: 115, y: 80, w: 275, h: 230 },
+  books: { x: 125, y: 325, w: 270, h: 420 },
+  purse: { x: 400, y: 515, w: 145, h: 155 },
+  people: { x: 1135, y: 450, w: 175, h: 100 },
+  forces: { x: 1360, y: 260, w: 190, h: 430 },
+  standing: { x: 1090, y: 265, w: 220, h: 120 },
+  self: { x: 465, y: 75, w: 170, h: 170 },
+  window: { x: 1060, y: 15, w: 425, h: 240 },
+};
+
 /**
- * One entry per culture. All drawn until real art exists -- which is the
- * point: the room works, and swapping a picture in is a one-line edit rather
- * than a rewrite.
+ * One entry per culture. Cultures without finished art use the drawn room.
  */
 export const SCENERY: Readonly<Record<RoomStyle, Scenery>> = {
-  roman: DRAWN,
-  carthaginian: DRAWN,
-  greek: DRAWN,
-  gallic: DRAWN,
-  neutral: DRAWN,
+  roman: {
+    kind: "image",
+    src: "/office/roman-room.webp",
+    alt: "A lamplit Roman working room with red plaster walls and a view of the Mediterranean",
+    credit: "Generated with OpenAI image generation; prompt in docs/office-art-roman.md",
+    rects: {
+      council: { x: 550, y: 480, w: 580, h: 325 },
+      chronicle: { x: 115, y: 80, w: 275, h: 230 },
+      books: { x: 125, y: 330, w: 275, h: 410 },
+      purse: { x: 405, y: 520, w: 140, h: 145 },
+      people: { x: 1135, y: 455, w: 175, h: 100 },
+      forces: { x: 1370, y: 275, w: 180, h: 400 },
+      standing: { x: 1090, y: 270, w: 220, h: 120 },
+      self: { x: 465, y: 75, w: 170, h: 170 },
+      window: { x: 1060, y: 15, w: 425, h: 240 },
+    },
+  },
+  carthaginian: {
+    kind: "image",
+    src: "/office/carthaginian-room.webp",
+    alt: "A lamplit Carthaginian working room with decorated stucco, patterned tiles and a harbor view",
+    credit: "Generated with OpenAI image generation; prompt in docs/office-art-cultures.md",
+    rects: CULTURE_ROOM_RECTS,
+  },
+  greek: {
+    kind: "image",
+    src: "/office/greek-room.webp",
+    alt: "A warm Sicilian Greek working room with blue meander borders, pale stone floors and a coastal view",
+    credit: "Generated with OpenAI image generation; prompt in docs/office-art-cultures.md",
+    rects: CULTURE_ROOM_RECTS,
+  },
+  gallic: {
+    kind: "image",
+    src: "/office/gallic-room.webp",
+    alt: "A lamplit Gallic working room with timber walls, woven hangings, an earth floor and wooded hills outside",
+    credit: "Generated with OpenAI image generation; prompt in docs/office-art-cultures.md",
+    rects: CULTURE_ROOM_RECTS,
+  },
+  neutral: {
+    kind: "image",
+    src: "/office/neutral-room.webp",
+    alt: "A quiet lamplit working room with plain plaster, worn wooden floors and a countryside view",
+    credit: "Generated with OpenAI image generation; prompt in docs/office-art-cultures.md",
+    rects: CULTURE_ROOM_RECTS,
+  },
 };
 
 export const sceneryFor = (style: RoomStyle): Scenery => SCENERY[style] ?? DRAWN;

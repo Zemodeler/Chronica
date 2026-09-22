@@ -18,6 +18,8 @@ const DATABASE_URL = process.env.DATABASE_URL?.trim() || "postgres://chronica:ch
 export const CONSUL = "gaius-genucius";
 /** A man with no office, no command and no land. His room is nearly bare. */
 export const PRIVATE_CITIZEN = "manius-curius";
+/** Carthage's commander, for the room that is not the Roman one. */
+export const CARTHAGINIAN = "hanno-carthage";
 
 export const extractGameId = (url: string): string => {
   const match = /\/games\/([0-9a-fA-F-]{36})/.exec(url);
@@ -62,7 +64,7 @@ export async function beThisCharacter(gameId: string, characterId: string): Prom
  * The signing-up and save-making happen once, in global.setup.ts: doing them
  * per test cost more than the tests did.
  */
-export async function enterTheWorld(page: Page, who: "consul" | "citizen" = "consul"): Promise<string> {
+export async function enterTheWorld(page: Page, who: "consul" | "citizen" | "carthaginian" = "consul"): Promise<string> {
   const gameId = seededWorlds()[who];
   await page.goto(`/games/${gameId}`);
   await expect(page).toHaveURL(new RegExp(`/games/${gameId}$`), { timeout: 60_000 });

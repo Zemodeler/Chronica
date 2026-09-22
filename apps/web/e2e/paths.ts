@@ -17,6 +17,8 @@ export interface SeededWorlds {
   readonly consul: string;
   /** No office, no command, no land. His room is nearly bare. */
   readonly citizen: string;
+  /** A Carthaginian, so the room that furnishes itself for him is not the Roman one. */
+  readonly carthaginian: string;
 }
 
 export const seededWorlds = (): SeededWorlds =>

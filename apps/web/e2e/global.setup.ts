@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { expect, test as setup } from "@playwright/test";
-import { beThisCharacter, CONSUL, extractGameId, PRIVATE_CITIZEN } from "./fixture";
+import { beThisCharacter, CARTHAGINIAN, CONSUL, extractGameId, PRIVATE_CITIZEN } from "./fixture";
 import { STATE_FILE, WORLDS_FILE, type SeededWorlds } from "./paths";
 
 /**
@@ -47,6 +47,9 @@ setup("sign up once and seed two worlds", async ({ page }) => {
   const citizen = await startASave();
   await beThisCharacter(citizen, PRIVATE_CITIZEN);
 
-  fs.writeFileSync(WORLDS_FILE, JSON.stringify({ consul, citizen } satisfies SeededWorlds), "utf8");
+  const carthaginian = await startASave();
+  await beThisCharacter(carthaginian, CARTHAGINIAN);
+
+  fs.writeFileSync(WORLDS_FILE, JSON.stringify({ consul, citizen, carthaginian } satisfies SeededWorlds), "utf8");
   await page.context().storageState({ path: STATE_FILE });
 });
