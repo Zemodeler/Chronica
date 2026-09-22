@@ -5,7 +5,7 @@ import {
   OFFICE_OBJECTS, ROOM_HEIGHT, ROOM_WIDTH,
   type OfficeObjectId, type RoomStyle,
 } from "./office-objects";
-import { rectFor, sceneryFor } from "./office-scenery";
+import { rectFor, sceneryFor, spriteFor } from "./office-scenery";
 
 /**
  * The Office: the player's own room.
@@ -88,6 +88,7 @@ export function Office({
           {shown.map((object) => {
             const thing = present.get(object.id);
             const rect = rectFor(scenery, object.id, object.rect);
+            const sprite = spriteFor(scenery, object.id);
             return (
               <li
                 key={object.id}
@@ -102,7 +103,7 @@ export function Office({
               >
                 <button
                   type="button"
-                  className="office-object"
+                  className={sprite === null ? "office-object" : "office-object office-object--cut-out"}
                   data-object={object.id}
                   data-hot={hot === object.id ? "true" : undefined}
                   data-state={thing?.state}
@@ -113,6 +114,9 @@ export function Office({
                   onBlur={() => setHot((current) => (current === object.id ? null : current))}
                   onClick={() => (object.id === "window" ? onLeave() : onOpen(object.id))}
                 >
+                  {/* The thing itself. Its own element so the edge that lights
+                      up is the object's, not a box drawn round it. */}
+                  {sprite !== null && <img className="office-object__cut-out" src={sprite} alt="" aria-hidden="true" draggable={false} />}
                   <span className="office-object__name">{object.name}</span>
                   <span className="office-object__does">{object.does}</span>
                   {thing?.marked === true && <span className="office-object__mark"><span className="visually-hidden">Waiting on your word</span><span aria-hidden="true">•</span></span>}

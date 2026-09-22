@@ -55,6 +55,11 @@ describe("which room a culture gets", () => {
   it("reads a cultureId that is half enum and half free text", () => {
     // Scenario NPCs carry "roman"; a declared player's is built from prose.
     expect(roomStyleFor("roman", "rome")).toBe("roman");
+    // A player with no declared culture still belongs to a power, and the
+    // polity id is the bare place name rather than the adjective.
+    expect(roomStyleFor("", "rome")).toBe("roman");
+    expect(roomStyleFor("", "carthage")).toBe("carthaginian");
+    expect(roomStyleFor("", "syracuse")).toBe("greek");
     expect(roomStyleFor("culture-roman-patrician", null)).toBe("roman");
     expect(roomStyleFor("culture-carthaginian-merchant", null)).toBe("carthaginian");
     expect(roomStyleFor("culture-local", "syracuse")).toBe("greek");
