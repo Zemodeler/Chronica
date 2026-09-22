@@ -179,6 +179,16 @@ export function GameShell({
     if (next === "chronicle") void controller.markRead();
   }, [controller]);
   const closeSurface = useCallback(() => setSurface(null), []);
+
+  // Somebody has come to find the player. The wiring for this has been
+  // plumbed through the shell since the chat panel was written and nothing
+  // ever set it, because there was nowhere for a conversation to arrive. Now
+  // there is a letter tray for it to arrive in.
+  useEffect(() => {
+    if (openChatSessionId === null) return;
+    setPlace("office");
+    setSurface("people");
+  }, [openChatSessionId]);
   const goToDesk = useCallback(() => { setPlace("office"); setSurface("council"); }, []);
 
   const { view } = controller;
@@ -574,10 +584,6 @@ export function GameShell({
             canZoomIn={viewport.scale < MAX_SCALE}
             canZoomOut={viewport.scale > MIN_SCALE}
           />
-          {allianceLabels.length > 0 && <aside className="map-political-context" aria-label="Political relationships">
-            <strong>Political ties</strong>
-            <span>{allianceLabels.join(" · ")}</span>
-          </aside>}
           {orderingCharacterId && <MapOrderBar controller={controller} onGoToDesk={goToDesk} />}
         </div>
         {place === "office" && <Office things={things} style={roomStyle} onOpen={openSurface} onLeave={() => setPlace("map")} />}
@@ -607,7 +613,7 @@ export function GameShell({
         <ForcesPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} />
       )}
       {surface === "standing" && (
-        <StandingPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} />
+        <StandingPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} allianceLabels={allianceLabels} />
       )}
     </>
   );

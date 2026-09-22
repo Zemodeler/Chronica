@@ -53,7 +53,13 @@ function sentence(power: PowerReading): string {
   return `${said.charAt(0).toUpperCase()}${said.slice(1)}.`;
 }
 
-export function StandingPanel({ gameId, revision, onClose }: { readonly gameId: string; readonly revision: number; readonly onClose: () => void }) {
+export function StandingPanel({ gameId, revision, onClose, allianceLabels }: {
+  readonly gameId: string;
+  readonly revision: number;
+  readonly onClose: () => void;
+  /** Who stands with whom. Moved off the map, which is now only the map. */
+  readonly allianceLabels: readonly string[];
+}) {
   const [standing, setStanding] = useState<Standing | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -103,6 +109,15 @@ export function StandingPanel({ gameId, revision, onClose }: { readonly gameId: 
                 {standing.powers.map((power) => (
                   <li key={`${power.domain}-${power.overLabel}`}>{sentence(power)}</li>
                 ))}
+              </ul>
+            </section>
+          )}
+
+          {allianceLabels.length > 0 && (
+            <section className="standing__section">
+              <h3>Who stands with whom</h3>
+              <ul className="standing__ties">
+                {allianceLabels.map((label) => <li key={label}>{label}</li>)}
               </ul>
             </section>
           )}
