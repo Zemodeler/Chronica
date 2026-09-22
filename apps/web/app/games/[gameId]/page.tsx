@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { gameRepository } from "../../../lib/game-repository";
 import { ageAtScenarioStart, getCharacterPanelData, getCharacterReputation, getPlayerAuthoritySummary, getScenarioTimelineStartYear } from "../../../lib/character-service";
 import { GameShell } from "./components/game-shell";
+import { roomStyleFor } from "./components/office-objects";
 import type { CharacterPanelProps } from "./components/character-panel";
 
 export async function generateMetadata({
@@ -86,6 +87,10 @@ export default async function GamePage({
   const chatCharacterId = knowledgebase?.confirmedByPlayer ? knowledgebase.characterId : undefined;
   const orderingCharacterId = world.viewerCharacterId ?? undefined;
 
+  // Which room the player works in. The knowledgebase's culture is free text
+  // ("Roman Patrician"), which is exactly what roomStyleFor is written to read.
+  const roomStyle = roomStyleFor(knowledgebase?.culture ?? "", world.viewerPolityId ?? null);
+
   return (
     <GameShell
       gameId={world.gameId}
@@ -97,6 +102,7 @@ export default async function GamePage({
       characterPanel={characterPanel}
       playerCharacterId={chatCharacterId}
       orderingCharacterId={orderingCharacterId}
+      roomStyle={roomStyle}
     />
   );
 }

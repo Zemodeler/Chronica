@@ -49,6 +49,8 @@ export interface GameWorldView {
    * simulation can accept orders from.
    */
   readonly viewerCharacterId: string | null;
+  /** Which power they belong to. Public by nature, and what furnishes their room. */
+  readonly viewerPolityId: string | null;
   /** The world's own date, e.g. "1 March 264 BC". Replaces the old turn counter. */
   readonly dateLabel: string;
   readonly provinces: readonly ProvinceView[];
@@ -154,6 +156,7 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
     gameId: meta.gameId,
     gameTitle: meta.gameTitle,
     viewerCharacterId: viewer?.id ?? null,
+    viewerPolityId: viewer?.polityId ?? null,
     dateLabel: meta.clock === undefined ? `Day ${world.elapsedStep}` : formatWorldDate(world.instant, meta.clock),
     provinces,
     mapOverlay: projectOverlay(world),
