@@ -911,14 +911,14 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
   display: block; position: absolute; inset: 0; width: 100%; padding: 0;
 }
 .office__objects--placed > li { position: absolute; margin: 0; }
-.office__objects--placed .office-object {
+.office__objects--placed .office-object:not(.office-object--cut-out) {
   width: 100%; height: 100%; align-content: end;
   border-color: transparent; border-radius: var(--radius-card);
   background: linear-gradient(to top, rgb(6 8 13 / 82%), rgb(6 8 13 / 10%));
 }
 .office__objects--placed .office-object__does { opacity: 0; transition: opacity .12s ease; }
-.office__objects--placed .office-object:hover,
-.office__objects--placed .office-object[data-hot="true"] {
+.office__objects--placed .office-object:not(.office-object--cut-out):hover,
+.office__objects--placed .office-object:not(.office-object--cut-out)[data-hot="true"] {
   border-color: var(--room-lamp);
   background: linear-gradient(to top, rgb(6 8 13 / 88%), color-mix(in srgb, var(--room-lamp) 18%, transparent));
 }
@@ -946,15 +946,69 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .muster__where { margin: 0 0 .3rem; color: var(--text-muted); font-size: .82rem; }
 .muster__change { margin: 0; color: var(--text-meta); font-size: .82rem; font-style: italic; }
 
+/* ── Objects that are cut out of the room ─────────────────────────────────
+   Given a transparent PNG of the thing itself, the button becomes the thing:
+   no box, no panel, no gradient. Pointing at it traces the edge of the
+   object, because four hard drop-shadows follow the sprite's alpha rather
+   than its bounding rectangle -- which is the whole difference between a
+   room you can touch and a picture with hotspots on it. */
+.office__objects--placed .office-object--cut-out {
+  display: block; padding: 0; border: 0; background: none;
+}
+.office-object__cut-out {
+  width: 100%; height: 100%; object-fit: contain; object-position: center bottom;
+  pointer-events: none; user-select: none;
+  transition: filter .12s ease, transform .12s ease;
+}
+.office-object--cut-out .office-object__name,
+.office-object--cut-out .office-object__does { display: none; }
+
+/* The white edge. Zero blur and one-pixel offsets in four directions: a
+   silhouette copy behind the sprite, showing only where the art does not. */
+.office__objects--placed .office-object--cut-out:hover .office-object__cut-out,
+.office__objects--placed .office-object--cut-out[data-hot="true"] .office-object__cut-out,
+.office__objects--placed .office-object--cut-out:focus-visible .office-object__cut-out {
+  filter:
+    drop-shadow(2px 0 0 #fff) drop-shadow(-2px 0 0 #fff)
+    drop-shadow(0 2px 0 #fff) drop-shadow(0 -2px 0 #fff)
+    drop-shadow(0 0 10px rgb(255 255 255 / 45%));
+  transform: translateY(-2px);
+}
+/* The outline is the focus ring here; a rectangle round a cut-out is noise. */
+.office__objects--placed .office-object--cut-out:focus-visible { outline: none; }
+
+/* Its name, on a plate beside it, only while it is being pointed at. */
+.office__objects--placed .office-object--cut-out::after {
+  content: attr(aria-description);
+  position: absolute; left: 50%; bottom: -1.6rem; transform: translateX(-50%);
+  padding: .2rem .6rem; border-radius: var(--radius-pill);
+  background: rgb(6 8 13 / 88%); color: var(--text);
+  font: 600 .78rem system-ui, sans-serif; white-space: nowrap;
+  opacity: 0; transition: opacity .12s ease; pointer-events: none;
+}
+.office__objects--placed .office-object--cut-out:hover::after,
+.office__objects--placed .office-object--cut-out[data-hot="true"]::after,
+.office__objects--placed .office-object--cut-out:focus-visible::after { opacity: 1; }
+
 /* A thing the room is trying to tell you about. */
 .office-object[data-state="sealed"] { border-color: var(--accent-avatar); }
+.office-object--cut-out[data-state="sealed"] .office-object__cut-out {
+  filter: drop-shadow(0 0 6px var(--accent-avatar)) drop-shadow(0 0 14px rgb(249 115 22 / 45%));
+}
+
+/* Badges sit on the object rather than in a row of text. */
+.office__objects--placed .office-object--cut-out .office-object__badge,
+.office__objects--placed .office-object--cut-out .office-object__mark {
+  position: absolute; top: -.4rem; right: -.4rem; z-index: 1;
+}
 .office-object {
+  position: relative;
   display: grid; grid-template-columns: 1fr auto auto; align-items: baseline;
   gap: .5rem 1rem; width: 100%; padding: .85rem 1.1rem; text-align: left;
   border: 1px solid var(--border); border-radius: var(--radius-card);
   background: var(--surface); color: var(--text-title); cursor: pointer;
 }
-.office-object:hover { border-color: var(--accent); background: var(--surface-raised); }
+.office-object:not(.office-object--cut-out):hover { border-color: var(--accent); background: var(--surface-raised); }
 .office-object__name { font: 600 .95rem system-ui, sans-serif; }
 .office-object__does { grid-column: 1 / -1; color: var(--text-muted); font-size: .82rem; }
 .office-object__mark { color: var(--accent-avatar); font-size: 1.1rem; }

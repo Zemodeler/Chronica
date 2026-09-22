@@ -84,7 +84,9 @@ export const officeObject = (id: OfficeObjectId): OfficeObjectDefinition => {
 export type RoomStyle = "roman" | "carthaginian" | "greek" | "gallic" | "neutral";
 
 const STYLE_WORDS: readonly (readonly [RoomStyle, readonly string[]])[] = [
-  ["roman", ["roman", "latin", "italic", "sabine", "etruscan"]],
+  // "rome" as well as "roman": the culture arrives as prose and the polity as
+  // an id, and the id is the bare place name.
+  ["roman", ["roman", "rome", "latin", "italic", "sabine", "etruscan"]],
   ["carthaginian", ["carthag", "punic", "phoenic", "numid", "libyan"]],
   ["greek", ["greek", "hellen", "syracus", "achaean", "macedon", "spartan", "athen"]],
   ["gallic", ["gaul", "gallic", "celt", "boii", "insubr", "briton"]],
