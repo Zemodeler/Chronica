@@ -9,6 +9,7 @@ import {
   forwardRef,
   type ReactNode,
   type WheelEvent,
+  type MouseEvent,
   type PointerEvent,
   type KeyboardEvent,
 } from "react";
@@ -17,6 +18,9 @@ const MIN_SCALE = 1;
 const MAX_SCALE = 80;
 const ZOOM_STEP = 1.35;
 const PAN_PX = 40;
+// How far a pressed pointer travels before it is a drag rather than a click.
+// Below it the map stays put, so a hand's tremor still selects a province.
+const DRAG_THRESHOLD_PX = 4;
 const MEDIUM_THRESHOLD = 2.5;
 const CLOSE_THRESHOLD = 5;
 // Wheel deltas vary dramatically between a mouse wheel and a trackpad.  An
@@ -100,6 +104,10 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
       centerY: number;
       hasPanned: boolean;
     } | null>(null);
+
+    // Set when a gesture panned, so the click the browser fires at the end of
+    // it does not also select whatever province the pointer came to rest on.
+    const swallowClickRef = useRef(false);
 
     const scheduleCanvasDraw = useCallback((t: ViewportTransform) => {
       if (!drawCanvasRef.current || !canvasRef.current || !containerRef.current) return;
@@ -238,6 +246,8 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
     const handlePointerDown = useCallback((e: PointerEvent) => {
       const container = containerRef.current;
       if (!container) return;
+      // A pan whose click never came must not eat the next real one.
+      swallowClickRef.current = false;
 
       if (pinchRef.current) {
         pinchRef.current.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -268,7 +278,6 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
           centerY: e.clientY,
           hasPanned: false,
         };
-        container.setPointerCapture(e.pointerId);
         return;
       }
 
@@ -281,7 +290,9 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
         startTy: live.ty,
         hasPanned: false,
       };
-      container.setPointerCapture(e.pointerId);
+      // No pointer capture yet. Captured to the frame, the click that ends a
+      // press is dispatched to the frame and never reaches the map's own
+      // click handler, so capture waits until the press becomes a drag.
     }, []);
 
     const handlePointerMove = useCallback((e: PointerEvent) => {
@@ -291,6 +302,7 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
         if (pinch.pointers.size === 2 && pinch.initialDistance > 0) {
           if (!pinch.hasPanned) {
             pinch.hasPanned = true;
+            for (const id of pinch.pointers.keys()) containerRef.current?.setPointerCapture(id);
             setPanning(true);
             onPanStart?.();
           }
@@ -321,7 +333,9 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
       if (!dragRef.current || dragRef.current.pointerId !== e.pointerId) return;
       // Panning never changes zoom band — apply to DOM only, no React re-render
       if (!dragRef.current.hasPanned) {
+        if (Math.hypot(e.clientX - dragRef.current.startX, e.clientY - dragRef.current.startY) < DRAG_THRESHOLD_PX) return;
         dragRef.current.hasPanned = true;
+        containerRef.current?.setPointerCapture(e.pointerId);
         setPanning(true);
         onPanStart?.();
       }
@@ -336,6 +350,7 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
       if (pinchRef.current) {
         pinchRef.current.pointers.delete(e.pointerId);
         if (pinchRef.current.pointers.size === 0) {
+          swallowClickRef.current = pinchRef.current.hasPanned;
           pinchRef.current = null;
           setPanning(false);
           onTransformChange(liveRef.current);
@@ -343,11 +358,18 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
         return;
       }
       if (dragRef.current?.pointerId === e.pointerId) {
+        swallowClickRef.current = dragRef.current.hasPanned;
         dragRef.current = null;
         setPanning(false);
         onTransformChange(liveRef.current);
       }
     }, [onTransformChange, setPanning]);
+
+    const handleClickCapture = useCallback((e: MouseEvent) => {
+      if (!swallowClickRef.current) return;
+      swallowClickRef.current = false;
+      e.stopPropagation();
+    }, []);
 
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
       let next: ViewportTransform | null = null;
@@ -376,6 +398,7 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        onClickCapture={handleClickCapture}
         onKeyDown={handleKeyDown}
         tabIndex={0}
         role="application"

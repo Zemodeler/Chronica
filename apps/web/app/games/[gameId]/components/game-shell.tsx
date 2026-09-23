@@ -575,6 +575,7 @@ export function GameShell({
           role="tabpanel"
           aria-labelledby="place-map-tab"
           data-scale={viewport.scale.toFixed(2)}
+          data-selected-province={selectedProvinceId ?? undefined}
           inert={place !== "map"}
         >
           <MapViewport ref={mapViewportRef} transform={viewport} onTransformChange={setViewport} onDrawCanvas={onDrawCanvas} onPanStart={clearMapHover}>
