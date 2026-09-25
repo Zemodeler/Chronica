@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ScenarioClockSchema, emitFacts, factsKnownTo, type Fact, type FactDraft, type WorldStoryline } from "@chronica/shared";
-import { composeChronicle } from "./chronicle";
+import { OWN_BUSINESS_FLOOR, composeChronicle } from "./chronicle";
 import type { SimModelPort } from "./ports";
 
 const clock = ScenarioClockSchema.parse({ epoch: { year: 264, month: 3, day: 1, era: "BCE" }, minSpanDays: 7, maxSpanDays: 365 });
@@ -38,7 +38,7 @@ function capturingPort(): SimModelPort & { lastUserMessage: string; userMessages
     complete(_operation: Parameters<SimModelPort["complete"]>[0], _system: string, user: string) {
       port.lastUserMessage = user;
       port.userMessages.push(user);
-      const threads = [...user.matchAll(/^THREAD (\d+)$/gm)].map((match) => Number(match[1]));
+      const threads = [...user.matchAll(/^THREAD (\d+)/gm)].map((match) => Number(match[1]));
       return Promise.resolve(JSON.stringify({
         entries: threads.map((thread) => ({ thread, title: `Thread ${thread}`, body: "In the spring, Rome began to raise new legions." })),
       }));
@@ -559,21 +559,45 @@ describe("what makes two things one matter", () => {
     expect(result.entries[0]!.factIds).toHaveLength(2);
   });
 
-  it("gives the reign's own separate affairs an entry each, whatever they weigh", async () => {
-    // The old rule fused everything naming the ruler's side into one passage,
-    // so a reign doing four things read as one thing.
-    const facts = [
-      fact({ summary: "The garrison at Rhegium is reinforced.", affectedEntities: [{ kind: "province", id: "rhegium" }] }),
-      fact({ summary: "The Senate rewards the loyal cohort.", affectedEntities: [{ kind: "institution", id: "roman-senate" }] }),
-      fact({ summary: "An envoy departs for Syracuse.", affectedEntities: [{ kind: "character", id: "falto" }, { kind: "polity", id: "syracuse" }] }),
-    ];
-    const result = await composeChronicle({
+  const separateAffairs = () => [
+    fact({ summary: "The garrison at Rhegium is reinforced.", affectedEntities: [{ kind: "province", id: "rhegium" }] }),
+    fact({ summary: "The Senate rewards the loyal cohort.", affectedEntities: [{ kind: "institution", id: "roman-senate" }] }),
+    fact({ summary: "An envoy departs for Syracuse.", affectedEntities: [{ kind: "character", id: "falto" }, { kind: "polity", id: "syracuse" }] }),
+  ];
+  const composeOwn = (facts: Fact[], weight: number) =>
+    composeChronicle({
       port: capturingPort(), clock, observer: OBSERVER, observerPolityId: "rome", facts,
       from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
       ownEntityIds: new Set(["marcus-atilius", "rome", "rhegium", "roman-senate", "falto"]),
-      significanceByFactId: new Map(facts.map((candidate) => [candidate.id, 5])),
+      significanceByFactId: new Map(facts.map((candidate) => [candidate.id, weight])),
     });
+
+  it("gives the reign's own separate affairs an entry each", async () => {
+    // The old rule fused everything naming the ruler's side into one passage,
+    // so a reign doing four things read as one thing.
+    const result = await composeOwn(separateAffairs(), OWN_BUSINESS_FLOOR);
     expect(result.entries).toHaveLength(3);
+    expect(result.carried).toHaveLength(0);
+  });
+
+  it("holds the reign's slight affairs for the matter they belong to, rather than telling each the moment it happens", async () => {
+    // Written window by window, "whatever they weigh" meant an entry for
+    // every remittance as it landed. Under the floor they are carried, and a
+    // span that told nothing else still tells the weightiest of them.
+    const result = await composeOwn(separateAffairs(), OWN_BUSINESS_FLOOR - 1);
+    expect(result.entries).toHaveLength(1);
+    expect(result.carried).toHaveLength(2);
+    const facts = separateAffairs();
+    const withoutFallback = await composeChronicle({
+      port: capturingPort(), clock, observer: OBSERVER, observerPolityId: "rome", facts,
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+      ownEntityIds: new Set(["marcus-atilius", "rome", "rhegium", "roman-senate", "falto"]),
+      significanceByFactId: new Map(facts.map((candidate) => [candidate.id, OWN_BUSINESS_FLOOR - 1])),
+      fallback: false,
+    });
+    expect(withoutFallback.entries).toHaveLength(0);
+    expect(withoutFallback.calls).toBe(0);
+    expect(withoutFallback.carried).toHaveLength(3);
   });
 });
 

@@ -119,7 +119,7 @@ export async function repairDeltas(input: DeltaRepairInput): Promise<DeltaRepair
   const message = `${input.worldText}\n\nThese changes were refused:\n\n${complaints}\n\nWrite them again, corrected.`;
 
   try {
-    const raw = await input.port.complete("simulate_orchestrate", DELTA_REPAIR_SYSTEM_PROMPT, message);
+    const raw = await input.port.complete("repair_deltas", DELTA_REPAIR_SYSTEM_PROMPT, message);
     const envelope = RepairEnvelopeSchema.safeParse(extractJson(raw));
     if (!envelope.success) {
       return nothing(envelope.error.issues.slice(0, 4).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; "), 1);
@@ -142,4 +142,16 @@ export async function repairDeltas(input: DeltaRepairInput): Promise<DeltaRepair
     const failure = error instanceof Error ? error.message : String(error);
     return nothing(isTimeout(error) ? `The correction did not come back in time: ${failure}` : failure, 1);
   }
+}
+
+/**
+ * Refusals a corrected answer cannot cure, so no call is spent on them. Grown
+ * only from `audit:deltas` evidence: a reason shape that shows up refused
+ * first and refused again after every repair is one the repair never fixes.
+ * The first entry is a rule of the world dressed as a reference error.
+ */
+const BEYOND_REPAIR = [/is the player's own purse, and the world does not spend it for him/];
+
+export function worthRepairing(rejection: { readonly reason: string }): boolean {
+  return !BEYOND_REPAIR.some((pattern) => pattern.test(rejection.reason));
 }

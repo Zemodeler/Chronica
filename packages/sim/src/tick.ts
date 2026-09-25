@@ -788,7 +788,7 @@ export function runDeterministicTick(input: TickInput): TickResult {
             // Declared a product and could not deliver it: worth knowing, and
             // not the same as having promised nothing.
             ? `${project.label} is complete, but produced nothing it was meant to.`
-            : `${project.label} is complete: ${produced.summary}`,
+            : `${project.label} is complete: ${produced.summary}`.slice(0, 600),
           affectedRefs: [{ kind: "project", id: project.id }],
           visibility: "public",
           discoveryState: "public",

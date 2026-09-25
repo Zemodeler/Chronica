@@ -781,6 +781,9 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .chronicle-panel__filter button { border: 1px solid var(--border); border-radius: 12px; padding: 0.15rem 0.6rem; background: transparent; color: var(--text); font: 600 0.72rem system-ui, sans-serif; cursor: pointer; }
 .chronicle-panel__scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0.5rem 1rem 1rem; }
 .chronicle-panel__empty { color: var(--text-muted); font-style: italic; }
+.chronicle-panel__unfolding { margin: 0.75rem 0 0.25rem; padding: 0.5rem 0.75rem; border-left: 3px solid var(--accent, #b08d57); color: var(--text-muted); font-style: italic; font-size: 0.85rem; }
+.chronicle-entry.is-unfolding { opacity: 0.88; }
+.chronicle-entry.is-unfolding h3::after { content: " · being written"; font: italic 0.72rem system-ui, sans-serif; color: var(--text-muted); }
 
 .chronicle-entry { padding: 1rem 0; border-bottom: 1px solid var(--border-subtle); }
 .chronicle-entry:last-child { border-bottom: none; }

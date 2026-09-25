@@ -12,6 +12,7 @@ import type {
 import { parseToolArguments } from "../adapter";
 import { getConfiguredApiKey, getSelectedLocalAiModel } from "../local-key-selection";
 import { watchForDegeneration } from "../degeneration";
+import { effortOverrideFor, modelOverrideFor } from "../operation-overrides";
 import { AiTimeoutError, aiMaxMs, aiMaxRetries, aiRequestTimeoutMs, stallWatchdog } from "../timeouts";
 
 const JSON_MODE_OPERATIONS = new Set<AiOperation>([
@@ -29,6 +30,8 @@ const JSON_MODE_OPERATIONS = new Set<AiOperation>([
   // the whole report to the plain-facts fallback.
   "compose_chronicle",
   "reconcile_facts",
+  "repair_deltas",
+  "write_mechanic",
 ]);
 
 /**
@@ -52,6 +55,8 @@ const LOW_EFFORT_OPERATIONS = new Set<AiOperation>([
   "simulate_orchestrate",
   "simulate_cognition",
   "reconcile_facts",
+  "repair_deltas",
+  "write_mechanic",
 ]);
 
 type ReasoningEffort = "low" | "medium" | "high";
@@ -69,6 +74,8 @@ type ReasoningEffort = "low" | "medium" | "high";
 const CHRONICLE_EFFORT = process.env.CHRONICA_AI_CHRONICLE_EFFORT?.trim() as ReasoningEffort | undefined;
 
 function reasoningEffortFor(operation: AiOperation): ReasoningEffort | undefined {
+  const override = effortOverrideFor(operation);
+  if (override !== undefined) return override;
   if (operation === "compose_chronicle") return CHRONICLE_EFFORT;
   return LOW_EFFORT_OPERATIONS.has(operation) ? "low" : undefined;
 }
@@ -88,6 +95,7 @@ const TIER_MODELS: Record<AiTier, string> = {
 // cognition roleplays several actors from their own knowledge. Both are the
 // judgment the design rests on, so neither runs on the cheapest tier.
 const STANDARD_TIER_OPERATIONS = new Set<AiOperation>(["simulate_orchestrate", "simulate_cognition"]);
+
 
 // These are ceilings, not targets: a runaway guard, deliberately well above
 // what a full answer needs. On a reasoning model the hidden reasoning is drawn
@@ -111,6 +119,8 @@ const MAX_COMPLETION_TOKENS: Partial<Record<AiOperation, number>> = {
   simulate_orchestrate: 8_000,
   simulate_cognition: 8_000,
   compose_chronicle: 4_000,
+  repair_deltas: 4_000,
+  write_mechanic: 2_000,
 };
 
 // Responses-API budget for the tool loop: one step, not the whole turn. Set
@@ -120,6 +130,8 @@ const MAX_COMPLETION_TOKENS: Partial<Record<AiOperation, number>> = {
 const MAX_OUTPUT_TOKENS: Partial<Record<AiOperation, number>> = {};
 
 function resolveModel(operation: AiOperation): string {
+  const override = modelOverrideFor(operation);
+  if (override !== undefined) return override;
   const selectedModel = getSelectedLocalAiModel("openai");
   if (selectedModel !== null) return selectedModel;
   const tier: AiTier = STANDARD_TIER_OPERATIONS.has(operation) ? "standard" : "basic";
@@ -355,3 +367,5 @@ export function createOpenAiLocalAdapter(): AiAdapter {
 function mentionsJson(systemPrompt: string, userMessage: string): string {
   return /json/i.test(systemPrompt) || /json/i.test(userMessage) ? systemPrompt : `${systemPrompt}\n\nAnswer in JSON.`;
 }
+/** The adapter's operation tables, for the test that iterates the enum against them. */
+export const OPENAI_OPERATION_TABLES = { jsonMode: JSON_MODE_OPERATIONS, lowEffort: LOW_EFFORT_OPERATIONS, outputTokens: MAX_COMPLETION_TOKENS, standardTier: STANDARD_TIER_OPERATIONS } as const;

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, type ScenarioClock, type WorldState } from "@chronica/shared";
 import type { RoutedActor } from "./attention";
-import { foldStrayProposalKeys, renderCharacterPortrait, runCognition } from "./cognition";
+import { foldStrayProposalKeys, renderCharacterPortrait, deal, runCognition } from "./cognition";
 import type { SimModelPort } from "./ports";
 
 const definition = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition);
@@ -29,6 +29,7 @@ function actorFor(world: WorldState, characterId: string): RoutedActor {
     name: character.name,
     level: "focused",
     impetus: "reaction",
+    pressing: true,
     score: 60,
     knownFacts: [],
     why: "directly affected",
@@ -486,5 +487,18 @@ describe("the actor's reasoning, written one level down", () => {
       expect(folded.actors[0]!.proposal[key]).toBeUndefined();
       expect(folded.actors[0]!.reasoning).toBe("He waits for the harvest.");
     }
+  });
+});
+
+describe("how a cast is dealt onto calls", () => {
+  it("keeps a small cast in one call, and deals a large one onto as many as asked, evenly", () => {
+    const state = baseWorld();
+    const cast = state.characters.filter((character) => character.alive).slice(0, 5).map((character) => actorFor(state, character.id));
+    const ten = [...cast, ...cast].map((actor, index) => ({ ...actor, characterId: `${actor.characterId}-${index}` }));
+    expect(deal(cast)).toHaveLength(1);
+    expect(deal(ten).map((batch) => batch.length)).toEqual([4, 4, 2]);
+    expect(deal(ten, { maxBatches: 2, actorsPerCall: 5 }).map((batch) => batch.length)).toEqual([5, 5]);
+    expect(deal(ten, { maxBatches: 4, actorsPerCall: 3 }).map((batch) => batch.length)).toEqual([3, 3, 3, 1]);
+    expect(deal(ten.slice(0, 7), { maxBatches: 4, actorsPerCall: 2 }).map((batch) => batch.length)).toEqual([2, 2, 2, 1]);
   });
 });

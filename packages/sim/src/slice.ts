@@ -1,6 +1,7 @@
 import { findPolityGaps } from "./population";
 import type { NarratorSeed } from "./narrator";
 import { renderCharacterPortrait } from "./cognition";
+import { ruleInWords } from "./mechanics/mechanic-words";
 
 import {
   allOffices,
@@ -294,6 +295,8 @@ export interface WorldSlice {
     /** What it goes on doing, in words, and whether it has stopped. */
     readonly effects: readonly string[];
     readonly lapsed: boolean;
+    /** The rule behind it, in words, for the actor's own only; NPC-owned rules are theirs to know. */
+    readonly rule: string | null;
   }[];
   readonly outlooks: readonly {
     readonly polityId: string;
@@ -823,6 +826,9 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
         ...(entity.upkeep == null ? [] : [`kept at ${entity.upkeep.band} cost from [${entity.upkeep.fromAccountId}]`]),
       ],
       lapsed: entity.lapsedAtStep != null,
+      rule: entity.mechanic === undefined || entity.mechanic.endedAtStep !== null || entity.ownerRef?.kind !== input.actorRef.kind || entity.ownerRef.id !== input.actorRef.id
+        ? null
+        : ruleInWords(entity.mechanic, world, entity.id),
     }));
 
   // Ours first: the order the model reads them in is the order it weighs them.
@@ -1200,7 +1206,8 @@ export function renderWorldSlice(slice: WorldSlice): string {
       const owner = entity.owner === null ? "" : `, under ${entity.owner}`;
       const detail = entity.attributes.length === 0 ? "" : ` — ${entity.attributes.join(", ")}`;
       const does = entity.effects.length === 0 ? "" : `; ${entity.effects.join(", ")}`;
-      return `${entity.label} [${entity.id}] (${entity.kind}${owner})${entity.retired ? ", repealed" : ""}${entity.lapsed ? ", fallen into disuse" : ""}${detail}${does}`;
+      const rule = entity.rule === null ? "" : `; rule: ${entity.rule}`;
+      return `${entity.label} [${entity.id}] (${entity.kind}${owner})${entity.retired ? ", repealed" : ""}${entity.lapsed ? ", fallen into disuse" : ""}${detail}${does}${rule}`;
     }),
   );
   section("LANDS AND HOLDINGS", slice.holdings.map((holding) =>

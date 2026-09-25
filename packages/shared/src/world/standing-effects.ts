@@ -93,9 +93,9 @@ const MANPOWER_SHIFT: Record<EffectBand, number> = { slight: 0.1, marked: 0.25, 
 /** Once, while it stands, on the owner's legitimacy. */
 const LEGITIMACY_BPS: Record<EffectBand, number> = { slight: 200, marked: 500, great: 1_000 };
 /** Of the province's tax capacity, each month. */
-const INCOME_SHARE: Record<EffectBand, number> = { slight: 0.03, marked: 0.08, great: 0.15 };
+export const INCOME_SHARE: Record<EffectBand, number> = { slight: 0.03, marked: 0.08, great: 0.15 };
 /** Of the province's tax capacity, each month. Cheaper than what a thing yields, dearer than nothing. */
-const UPKEEP_SHARE: Record<EffectBand, number> = { slight: 0.02, marked: 0.05, great: 0.1 };
+export const UPKEEP_SHARE: Record<EffectBand, number> = { slight: 0.02, marked: 0.05, great: 0.1 };
 /** Added to the skills of people made there. */
 const RECRUIT_SKILL: Record<EffectBand, number> = { slight: 5, marked: 10, great: 15 };
 /** The same scale the resolver already uses for walls and passes. */

@@ -11,6 +11,8 @@ import {
   type Office,
   type WorldState,
   allOffices,
+  buildStation,
+  holdsPolityStanding,
 } from "@chronica/shared";
 import { extractJson } from "./json";
 import type { SimModelPort } from "./ports";
@@ -79,8 +81,36 @@ import type { SimModelPort } from "./ports";
  * A reign that had a busy month should read like one. Six was chosen when a
  * single entry swallowed the reader's whole side of the world; now that each
  * matter stands on its own, six is a ceiling an ordinary month hits.
+ *
+ * This is the ceiling for a report written in one piece over a whole span.
+ * The live record is no longer written that way: it is written window by
+ * window as the burst walks forward (`WINDOW_MAX_ENTRIES`), and a burst of
+ * four hops that told three things a hop would run to twelve.
  */
 const MAX_ENTRIES = 10;
+
+/**
+ * How many entries one window of a burst may carry, beyond the answer to the
+ * order and any battle, which are never cut.
+ *
+ * Publishing as you go means you cannot wait to see whether something heavier
+ * comes later, so the global top-ten is replaced by a bar per window: what
+ * clears it is told now, what does not rolls forward into the next window's
+ * candidates and may clear it there, once the matter has grown.
+ */
+export const WINDOW_MAX_ENTRIES = 3;
+
+/**
+ * What the reader's own business must weigh to be told, when it neither
+ * answers the order nor holds a battle.
+ *
+ * Their own business used to be told whatever it weighed. Told window by
+ * window that meant an entry for every small thing the moment it happened;
+ * the floor is the home band's, low enough that a reign's own doings still
+ * outrank the world's, high enough that a routine remittance waits for the
+ * matter it belongs to.
+ */
+export const OWN_BUSINESS_FLOOR = 25;
 
 /**
  * What a thread must weigh before it is written up at all.
@@ -425,6 +455,25 @@ export interface ChronicleInput {
   readonly changes?: readonly WorldChange[];
   /** What a thread must weigh to be written up. */
   readonly entryThreshold?: number;
+  /**
+   * How many entries this call may write beyond the order's answer and any
+   * battle. A whole span written at once takes `MAX_ENTRIES`; one window of a
+   * burst takes `WINDOW_MAX_ENTRIES`.
+   */
+  readonly maxEntries?: number;
+  /**
+   * Whether to write the weightiest thread anyway when nothing clears the bar,
+   * so a report is not blank when something happened. On for a whole span;
+   * off for a window, whose leftovers roll forward instead of being forced.
+   */
+  readonly fallback?: boolean;
+  /**
+   * Handed each entry as soon as it and every entry before it are written,
+   * in the report's order, so the first passage reaches the reader while the
+   * later ones are still being composed. Awaited in order. The returned
+   * entries are the same ones, complete.
+   */
+  readonly onEntry?: ((entry: ChronicleEntry) => Promise<void>) | undefined;
 }
 
 export interface ChronicleEntry {
@@ -448,6 +497,12 @@ export interface ChronicleEntry {
 export interface ChronicleResult {
   readonly entries: readonly ChronicleEntry[];
   readonly calls: number;
+  /**
+   * The facts this call did not tell: not yet knowable, under the bar, or
+   * held as a repeat. The next window of the same burst offers them again,
+   * beside its own, so a matter that builds slowly is told once it has built.
+   */
+  readonly carried: readonly Fact[];
 }
 
 interface Thread {
@@ -461,12 +516,14 @@ interface Thread {
   /** A fight, where this thread holds one. Written at length, and never cut. */
   readonly battle: BattleAccountLine | null;
   readonly weight: number;
-  /** The reader's own business, which is told whatever it weighs. */
+  /** The reader's own business, told for less than the world's (`OWN_BUSINESS_FLOOR`) and never held as a repeat. */
   readonly ours: boolean;
   /** Their country's business, which is told for less than the wider world's. */
   readonly home: boolean;
-  /** The answer to the order this report follows. Told first. */
+  /** Holds part of the answer to the order this report follows, and names the reader's side. */
   readonly answersTheOrder: boolean;
+  /** How many of the order's own facts it holds: the thread holding most is the answer. */
+  readonly orderFacts: number;
   /** Who is who among the people in it, so two of them cannot become one. */
   readonly people: readonly string[];
 }
@@ -752,7 +809,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   // bar is treated as met rather than as failed.
   const weightOf = (fact: Fact): number => input.significanceByFactId?.get(fact.id) ?? threshold;
   const selected = selectFacts(input.facts, input.observer, input.observerPolityId, input.ownEntityIds ?? null, input.to, weightOf);
-  if (selected.length === 0) return { entries: [], calls: 0 };
+  if (selected.length === 0) return { entries: [], calls: 0, carried: [...input.facts] };
 
   const visible = selected.map((entry) => entry.fact);
   const reportedIds = new Set(selected.filter((entry) => entry.reported).map((entry) => entry.fact.id));
@@ -839,7 +896,14 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
       battle: (input.battleAccounts ?? []).find(
         (account) => account.factIds.some((factId) => ids.has(factId) && !reportedIds.has(factId)),
       ) ?? null,
-      answersTheOrder: facts.some((fact) => input.orderFactIds?.has(fact.id) ?? false),
+      // The order's answer is what the order did, not everything the world did
+      // in the same breath: the orchestrator's facts include the world's own
+      // business beside the order's, and a landslip in the Apennines is not an
+      // answer to "send ten galleys". A thread answers the order when it holds
+      // an order fact and names the reader's side, or names nobody at all.
+      answersTheOrder: facts.some((fact) => input.orderFactIds?.has(fact.id) ?? false)
+        && facts.some((fact) => fact.affectedEntities.length === 0 || fact.affectedEntities.some((entity) => ownKeys.has(keyOf(entity)) || (personal?.has(entity.id) ?? false))),
+      orderFacts: facts.filter((fact) => input.orderFactIds?.has(fact.id) ?? false).length,
       people: [...new Set(facts.flatMap((fact) => fact.affectedEntities.filter((entity) => entity.kind === "character").map((entity) => entity.id)))]
         .flatMap((id) => {
           const described = input.describePerson?.(id) ?? null;
@@ -899,14 +963,24 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   const hearsay = built.filter((thread) => !thread.ours && thread.reported && thread.weight >= threshold && !echoing(thread)).sort(byWeight);
 
   const banded = [...ours, ...home.slice(0, MAX_HOME_THREADS), ...seen.slice(0, MAX_SEEN_THREADS), ...hearsay.slice(0, MAX_REPORTED_THREADS)];
-  // The answer to the order first -- it is what the reader opened the report
-  // to find -- then any battle, which is never the entry dropped for room,
-  // then the rest by band. The order's answer is never cut: the cap is for
-  // the world's business, and the order is not the world's.
-  const answer = banded.filter((thread) => thread.answersTheOrder);
-  const fights = banded.filter((thread) => !thread.answersTheOrder && thread.battle !== null);
-  const rest = banded.filter((thread) => !thread.answersTheOrder && thread.battle === null);
-  let threads = [...answer, ...[...fights, ...rest].slice(0, Math.max(0, MAX_ENTRIES - answer.length))];
+  // The answer to the order and any battle are never cut: the cap is for the
+  // world's business, and neither of those is the world's. The rest fill what
+  // room is left, by band and then by weight; the reader's own business among
+  // them has to weigh something (`OWN_BUSINESS_FLOOR`), since a record written
+  // window by window would otherwise carry every small thing the moment it
+  // happened. What is cut is not lost: it is carried into the next window.
+  const maxEntries = input.maxEntries ?? MAX_ENTRIES;
+  // One thread is the answer: the one holding most of the order's facts. The
+  // orchestrator writes the world's own doings beside the order's, and they
+  // name the reader's power as readily as the order does, so "holds an order
+  // fact" alone made a harvest in Picenum an answer to "send ten galleys".
+  // The rest of the order's matters compete on weight like anything else, and
+  // are carried into the next window when cut.
+  const answering = banded.filter((thread) => thread.answersTheOrder);
+  const answer = answering.length === 0 ? [] : [answering.reduce((best, thread) => (thread.orderFacts > best.orderFacts ? thread : best))];
+  const fights = banded.filter((thread) => !answer.includes(thread) && thread.battle !== null);
+  const rest = banded.filter((thread) => !answer.includes(thread) && thread.battle === null && (!thread.ours || thread.weight >= OWN_BUSINESS_FLOOR));
+  let threads = [...answer, ...fights, ...rest.slice(0, Math.max(0, maxEntries - answer.length - fights.length))];
   // A record that goes blank teaches the reader to stop opening it. This fires
   // only when the bands would have produced nothing at all, which is a
   // different thing from the weight floor that was tried and reverted -- that
@@ -916,11 +990,22 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   // A report whose only candidate is the same people doing the same thing is
   // better blank: the floor exists so a reader is not met with nothing when
   // something happened, not so they are met with the same thing twice.
-  if (threads.length === 0) {
+  if (threads.length === 0 && (input.fallback ?? true)) {
     const worthTelling = built.filter((thread) => !echoing(thread)).sort(byWeight);
     if (worthTelling.length > 0) threads = [worthTelling[0]!];
   }
-  if (threads.length === 0) return { entries: [], calls: 0 };
+  if (threads.length === 0) return { entries: [], calls: 0, carried: [...input.facts] };
+  // In the order the reader could have come to know them, never in the order
+  // of weight: the record reads forward in time, and a fact that reached the
+  // court on the twentieth is told on the twentieth however early it happened.
+  // The order's own answer is dated the day it was given, and so comes first
+  // without being put first.
+  const knowableKey = (fact: Fact): number =>
+    Math.max(sortKeyOf(fact.time), fact.discovery.knowableAtInstant === null ? 0 : sortKeyOf(fact.discovery.knowableAtInstant));
+  const firstKnowable = (thread: Thread): number => Math.min(...thread.facts.map(knowableKey));
+  threads.sort((a, b) => firstKnowable(a) - firstKnowable(b) || a.facts[0]!.id.localeCompare(b.facts[0]!.id));
+  const toldIds = new Set(threads.flatMap((thread) => thread.facts.map((fact) => fact.id)));
+  const carried = input.facts.filter((fact) => !toldIds.has(fact.id));
 
   const period = `${formatWorldDate(input.from, input.clock)} – ${formatWorldDate(input.to, input.clock)}`;
   const alreadySaid = (input.recentTitles ?? []).slice(0, 16);
@@ -989,20 +1074,51 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   // It also makes a failure local: a thread whose narration cannot be read
   // falls back to its own plain facts, where before one unreadable answer
   // dropped the entire report to plain facts.
-  const written = await mapWithLimit(threads, CHRONICLE_CONCURRENCY, async (thread): Promise<ChronicleEntry> => {
+  // The one quotation this report may print is decided before the writing,
+  // on the threads themselves, so a passage can be handed out the moment it
+  // is written rather than held until every passage is in and compared.
+  const quoted = chooseQuote(threads, utterances);
+  const results: (ChronicleEntry | null | undefined)[] = threads.map(() => undefined);
+  let handedOut = 0;
+  let handing: Promise<void> = Promise.resolve();
+  const handOut = (): void => {
+    // Everything written up to the first gap, in order, once.
+    while (handedOut < results.length && results[handedOut] !== undefined) {
+      const entry = results[handedOut];
+      handedOut += 1;
+      if (entry !== null && entry !== undefined && input.onEntry !== undefined) {
+        const give = input.onEntry;
+        handing = handing.then(() => give(entry)).catch(() => undefined);
+      }
+    }
+  };
+  await mapWithLimit(threads, CHRONICLE_CONCURRENCY, async (thread, index): Promise<void> => {
     const userMessage = [...head, "", renderThread(thread, 0)].join("\n\n");
+    let entry: ChronicleEntry | null;
     try {
       const raw = await input.port.complete("compose_chronicle", CHRONICLE_SYSTEM_PROMPT, userMessage);
       const parsed = ChronicleOutputSchema.safeParse(extractJson(raw));
-      if (!parsed.success) return plainly(thread);
-      const passage = parsed.data.entries.find((entry) => entry.thread === 1);
-      return passage === undefined ? plainly(thread) : entryOf(thread, passage.title, passage.body.trim());
+      if (!parsed.success) entry = plainly(thread);
+      else {
+        const passage = parsed.data.entries.find((candidate) => candidate.thread === 1);
+        // An answer that parsed and holds no passage is the historian declining
+        // -- told what the last report said, she judged this the same thing.
+        // That is a decision, not a failure, and the record honours it: the
+        // thread is dropped, not printed as bare facts under a period title.
+        entry = passage === undefined ? null : entryOf(thread, passage.title, passage.body.trim());
+      }
     } catch {
-      return plainly(thread);
+      entry = plainly(thread);
     }
+    if (entry !== null && quoted !== null && quoted.index === index) {
+      entry = { ...entry, quote: { line: quoted.utterance.line, speaker: quoted.utterance.speaker, occasion: quoted.utterance.occasion } };
+    }
+    results[index] = entry;
+    handOut();
   });
+  await handing;
 
-  return { entries: attachQuote(written.map((entry, index) => ({ entry, thread: threads[index]! })), utterances), calls: threads.length };
+  return { entries: results.flatMap((entry) => (entry === null || entry === undefined ? [] : [entry])), calls: threads.length, carried };
 }
 
 /**
@@ -1023,7 +1139,7 @@ const CHRONICLE_CONCURRENCY = 6;
 async function mapWithLimit<T, R>(
   items: readonly T[],
   limit: number,
-  work: (item: T) => Promise<R>,
+  work: (item: T, index: number) => Promise<R>,
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
   let next = 0;
@@ -1033,7 +1149,7 @@ async function mapWithLimit<T, R>(
         const index = next;
         next += 1;
         if (index >= items.length) return;
-        results[index] = await work(items[index]!);
+        results[index] = await work(items[index]!, index);
       }
     }),
   );
@@ -1041,41 +1157,25 @@ async function mapWithLimit<T, R>(
 }
 
 /**
- * At most one quotation per report, on the entry that earned it.
+ * At most one quotation per report, on the matter that earned it.
  *
- * Rarity is the whole effect. Two epigrams in twelve entries reads as a
- * chronicler preserving what was worth preserving; one per entry reads as a
- * feature. So the heaviest matter with something said in it gets the line, and
- * nothing else does.
+ * Decided on the threads before any passage is written, so a passage can be
+ * handed out the moment it exists. Each thread is judged on its own facts
+ * rather than looked up by position, so a declined passage cannot shift the
+ * quotation onto somebody else's matter.
  */
-function attachQuote(
-  written: readonly { readonly entry: ChronicleEntry; readonly thread: Thread }[],
-  utterances: readonly UtteranceLine[],
-): ChronicleEntry[] {
-  const entries = written.map((pair) => pair.entry);
-  if (utterances.length === 0 || entries.length === 0) return entries;
-
-  // Each entry is carried with the thread it was written from, rather than
-  // looked up by position. The two used to be matched by index against a list
-  // the narration could shorten, so a declined passage shifted every entry
-  // after it onto somebody else's weight and the quotation could land on the
-  // wrong matter.
+function chooseQuote(threads: readonly Thread[], utterances: readonly UtteranceLine[]): { readonly index: number; readonly utterance: UtteranceLine } | null {
+  if (utterances.length === 0 || threads.length === 0) return null;
   let best: { index: number; weight: number; utterance: UtteranceLine } | null = null;
-  written.forEach((pair, index) => {
-    const ids = new Set(pair.entry.factIds);
+  threads.forEach((thread, index) => {
+    const ids = new Set(thread.facts.map((fact) => fact.id));
     const spoken = utterances
       .filter((utterance) => utterance.factIds.some((factId) => ids.has(factId)))
       .sort((a, b) => a.actorRef.id.localeCompare(b.actorRef.id))[0];
     if (spoken === undefined) return;
-    if (best === null || pair.thread.weight > best.weight) best = { index, weight: pair.thread.weight, utterance: spoken };
+    if (best === null || thread.weight > best.weight) best = { index, weight: thread.weight, utterance: spoken };
   });
-  if (best === null) return entries;
-
-  const chosen: { index: number; utterance: UtteranceLine } = best;
-  return entries.map((entry, index) =>
-    index === chosen.index
-      ? { ...entry, quote: { line: chosen.utterance.line, speaker: chosen.utterance.speaker, occasion: chosen.utterance.occasion } }
-      : entry);
+  return best;
 }
 
 /**
@@ -1092,4 +1192,66 @@ export function whoIsWho(world: WorldState, offices: readonly Office[] = []): (c
     const where = world.map.provinces.find((province) => province.id === person.locationProvinceId)?.name ?? null;
     return [person.name, office, polity === null ? null : `of ${polity}`, where === null ? null : `in ${where}`].filter((part) => part !== null).join(", ");
   };
+}
+
+/**
+ * What a subject is called, so a tag reads "Roman Senate" rather than
+ * "institution-62af32f4-4cf3-417e-9b0f-f67345bbce84".
+ *
+ * The Chronicle works in refs because refs are what facts carry and what the
+ * record is searched by. Names live in the world, and every caller that hands
+ * the composer a world needs the same lookup, so it lives beside the composer.
+ */
+export function nameOfSubject(world: WorldState, ref: OrderPartyRef): string | null {
+  switch (ref.kind) {
+    case "polity": return world.map.polities.find((polity) => polity.id === ref.id)?.name ?? null;
+    case "province": return world.map.provinces.find((province) => province.id === ref.id)?.name ?? null;
+    case "character": return world.characters.find((character) => character.id === ref.id)?.name ?? null;
+    case "force": return world.material.forces.find((force) => force.id === ref.id)?.name ?? null;
+    case "institution": return world.material.institutions.find((institution) => institution.id === ref.id)?.name ?? null;
+    default: return null;
+  }
+}
+
+/**
+ * Everything the reader's own side answers for.
+ *
+ * The Chronicle's middle tier turns on it: a secret touching any of this stays
+ * dark, because a plot against the ruler is not colour, while a secret touching
+ * none of it may reach them as distant news. Read from the world after the
+ * burst, so a province taken this very span counts as theirs.
+ */
+export function ownSideOf(world: WorldState, characterId: string, polityId: string | null): Set<string> {
+  const own = new Set<string>([characterId]);
+  if (polityId === null) return own;
+  own.add(polityId);
+  for (const character of world.characters) if (character.polityId === polityId) own.add(character.id);
+  for (const province of world.map.provinces) if (province.controllerPolityId === polityId) own.add(province.id);
+  for (const force of world.material.forces) if (force.polityId === polityId) own.add(force.id);
+  return own;
+}
+
+/**
+ * What the reader personally touches, as against what their government does.
+ *
+ * A consul's realm and a consul's business are the same thing, so somebody with
+ * standing over their whole power gets the polity-wide set unchanged and their
+ * record reads exactly as it did. For everybody else it is their money, their
+ * people, their ground and the matters they are party to -- their country's
+ * doings still reach them, as news competing on weight like anything else.
+ */
+export function personallyTouchedBy(world: WorldState, characterId: string, polityId: string | null, offices: readonly Office[]): Set<string> {
+  const station = buildStation({ world, characterId, offices });
+  if (holdsPolityStanding(station)) return ownSideOf(world, characterId, polityId);
+  return new Set<string>([
+    characterId,
+    ...station.accountIds,
+    ...station.forceIds,
+    ...station.provinceIds,
+    ...station.institutionIds,
+    ...station.procedureIds,
+    ...station.holdingIds,
+    ...station.knownCharacterIds,
+    ...station.storylineIds,
+  ]);
 }

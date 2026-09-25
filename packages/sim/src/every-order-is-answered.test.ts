@@ -68,7 +68,7 @@ async function recordOf(result: BurstResult, port: SimModelPort) {
 describe("an order the engine could not carry out", () => {
   it("still reaches the record, saying what was ordered and what stood in the way", async () => {
     const port = scripted({
-      simulate_orchestrate: [ATTACK_A_GHOST, JSON.stringify({ deltas: [] })],
+      simulate_orchestrate: [ATTACK_A_GHOST], repair_deltas: [JSON.stringify({ deltas: [] })],
       simulate_cognition: Array.from({ length: 8 }, () => NOBODY),
     });
     const result = await runSimulationBurst(input(port, "March on the Macedonians at the Aoos and break their phalanx."));
@@ -88,6 +88,33 @@ describe("an order the engine could not carry out", () => {
     expect(outcome.malformed.length).toBeGreaterThan(0);
     expect(outcome.answeredOnly).toBe(true);
     expect(outcome.inChronicle).toBe(true);
+  });
+});
+
+describe("an order every act of which was refused", () => {
+  it("still reaches the record when the world's other doings were written beside it", async () => {
+    // The embassy the engine refused to send once left no trace: a fire and a
+    // quarrel written in the same answer counted as the order being seen.
+    const port = scripted({
+      simulate_orchestrate: [JSON.stringify({
+        intent: { summary: "Meet the Macedonians at the Aoos.", domains: ["military"] },
+        narrativeSummary: "The legion marches to meet the phalanx while Rome burns.",
+        frictions: [],
+        deltas: [{ op: "force_engage", forceRef: "legio-i", targetForceRef: "macedonian-army", posture: "offer_battle", tactic: null, reason: "The Aoos." }],
+        facts: [{
+          localId: "fire", kind: "fire", summary: "A fire consumes granaries in Latium; Marcus Atilius watches from the Capitol.",
+          affectedRefs: [{ kind: "character", id: "marcus-atilius" }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 40,
+        }],
+        delegations: [], schedule: [], cognitionCandidates: [], outcome: "continue", playerDecision: null,
+      })],
+      repair_deltas: [JSON.stringify({ deltas: [] })],
+      simulate_cognition: Array.from({ length: 8 }, () => NOBODY),
+    });
+    const result = await runSimulationBurst(input(port, "March on the Macedonians at the Aoos and break their phalanx."));
+    const answer = result.newFacts.find((fact) => fact.kind === "order_given")!;
+    expect(answer).toBeDefined();
+    expect(answer.summary).toContain("March on the Macedonians");
+    expect(answer.summary).toContain("could not be done");
   });
 });
 

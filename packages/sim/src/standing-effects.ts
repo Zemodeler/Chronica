@@ -149,7 +149,7 @@ function scaleOf(world: WorldState, carrier: Carrier): number {
 }
 
 /** The monthly figure a made thing's effects are shares of: its province's tax capacity, or its owner's average. */
-function arrangementScale(world: WorldState, provinceId: string | null, ownerPolityId: string | null): number {
+export function arrangementScale(world: WorldState, provinceId: string | null, ownerPolityId: string | null): number {
   const capacity = (id: string) => world.material.provinceMaterial.find((row) => row.provinceId === id)?.taxCapacity ?? 0;
   if (provinceId !== null) return Math.max(1, capacity(provinceId));
   const held = world.map.provinces.filter((province) => province.controllerPolityId === ownerPolityId);

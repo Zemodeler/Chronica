@@ -170,3 +170,14 @@ describe("the world slice", () => {
     expect(Math.round(text.length / 4)).toBeLessThan(6_000);
   });
 });
+
+describe("the writer of mechanics", () => {
+  it("has a prompt and a schema small enough that a rule costs a small call, not an orchestration", async () => {
+    const { WRITE_MECHANIC_SYSTEM_PROMPT, WriteMechanicOutputSchema } = await import("./mechanics/write-mechanic");
+    const { z } = await import("zod");
+    const schema = JSON.stringify(z.toJSONSchema(WriteMechanicOutputSchema, { io: "input" }));
+    console.log(`write_mechanic prompt: ${WRITE_MECHANIC_SYSTEM_PROMPT.length} chars, of which schema ${schema.length}`);
+    expect(WRITE_MECHANIC_SYSTEM_PROMPT.length - schema.length).toBeLessThan(3_000);
+    expect(schema.length).toBeLessThan(12_000);
+  });
+});

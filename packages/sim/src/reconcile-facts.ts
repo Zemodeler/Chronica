@@ -89,3 +89,41 @@ export async function reconcileFacts<F extends { readonly localId: string; reado
     return { facts: input.facts, calls: 1, failure: error instanceof Error ? error.message : String(error) };
   }
 }
+
+/**
+ * The facts that describe a refused act, and so are worth asking about.
+ *
+ * Reconciliation used to run on any refusal beside any fact: a letter refused
+ * as already answered sent every fact of the round to be reconsidered, at a
+ * call apiece. A fact is about a refusal when it names something the refused
+ * delta names -- a handle, an id, a local handle it minted -- or repeats a
+ * name the delta carries. Anything else stands without asking.
+ */
+export function factsNamingRefusals<F extends { readonly affectedRefs: readonly { readonly id: string }[]; readonly summary: string; readonly storylineRef?: string | null }>(
+  facts: readonly F[],
+  refused: readonly { readonly delta: unknown }[],
+  /** Ids that count as named beside the deltas' own: the owners of accounts they name, and for the order's own refusals the actor and their power. */
+  also: Iterable<string> = [],
+): F[] {
+  const handles = new Set<string>(also);
+  const names: string[] = [];
+  const strip = (id: string): string => id.replace(/^local:/, "");
+  const walk = (value: unknown, key: string): void => {
+    if (typeof value === "string") {
+      if (/(Ref|Refs|Id|Ids)$/.test(key) || key === "localId") handles.add(strip(value));
+      if ((key === "label" || key === "name" || key === "title") && value.trim().length >= 4) names.push(value.trim().toLowerCase());
+      return;
+    }
+    if (Array.isArray(value)) { for (const item of value) walk(item, key); return; }
+    if (typeof value === "object" && value !== null) {
+      const record = value as Record<string, unknown>;
+      if (typeof record.kind === "string" && typeof record.id === "string") handles.add(strip(record.id));
+      for (const [childKey, child] of Object.entries(record)) walk(child, childKey);
+    }
+  };
+  for (const rejection of refused) walk(rejection.delta, "");
+  return facts.filter((fact) =>
+    fact.affectedRefs.some((ref) => handles.has(strip(ref.id)))
+    || (fact.storylineRef !== null && fact.storylineRef !== undefined && handles.has(strip(fact.storylineRef)))
+    || names.some((name) => fact.summary.toLowerCase().includes(name)));
+}

@@ -66,7 +66,7 @@ function input(port: SimModelPort, overrides: Partial<BurstInput> = {}): BurstIn
 describe("a refused change gets one corrected attempt", () => {
   it("carries the refusal back and applies what comes of it", async () => {
     const { port, seen } = recordingPort({
-      simulate_orchestrate: [A_GOOD_ORDER_AND_A_BAD_ONE, THE_CORRECTION],
+      simulate_orchestrate: [A_GOOD_ORDER_AND_A_BAD_ONE], repair_deltas: [THE_CORRECTION],
       simulate_cognition: [NOTHING_HAPPENS],
     });
     const result = await runSimulationBurst(input(port));
@@ -85,7 +85,7 @@ describe("a refused change gets one corrected attempt", () => {
   it("leaves the change that was right alone", async () => {
     const before = world();
     const { port } = recordingPort({
-      simulate_orchestrate: [A_GOOD_ORDER_AND_A_BAD_ONE, THE_CORRECTION],
+      simulate_orchestrate: [A_GOOD_ORDER_AND_A_BAD_ONE], repair_deltas: [THE_CORRECTION],
       simulate_cognition: [NOTHING_HAPPENS],
     });
     const result = await runSimulationBurst(input(port));
@@ -109,7 +109,7 @@ describe("a refused change gets one corrected attempt", () => {
 
   it("survives a repair that comes back unusable", async () => {
     const { port } = recordingPort({
-      simulate_orchestrate: [A_GOOD_ORDER_AND_A_BAD_ONE, "not json at all"],
+      simulate_orchestrate: [A_GOOD_ORDER_AND_A_BAD_ONE], repair_deltas: ["not json at all"],
       simulate_cognition: [NOTHING_HAPPENS],
     });
     const result = await runSimulationBurst(input(port));
@@ -170,7 +170,7 @@ describe("a refused id that was cut short", () => {
     // the correction because nothing said what else to write.
     const { punicWarsScenario } = await import("@chronica/db");
     const punic = WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
-    const { port, seen } = recordingPort({ simulate_orchestrate: [JSON.stringify({ deltas: [] })] });
+    const { port, seen } = recordingPort({ repair_deltas: [JSON.stringify({ deltas: [] })] });
     await repairDeltas({
       port,
       worldText: "",
@@ -191,7 +191,7 @@ describe("a correction written as a patch", () => {
     // From a live run: asked to write a refused creation again, the model wrote
     // only the field it fixed, and the repair was refused for every field it
     // had never meant to change.
-    const { port } = recordingPort({ simulate_orchestrate: [JSON.stringify({ deltas: [{ op: "character_create", localId: "herald", provinceId: "punic-italy-latium" }] })] });
+    const { port } = recordingPort({ repair_deltas: [JSON.stringify({ deltas: [{ op: "character_create", localId: "herald", provinceId: "punic-italy-latium" }] })] });
     const original = {
       op: "character_create" as const, localId: "herald", name: "Cingetorix", polityId: "rome", provinceId: "nowhere-at-all", age: 40,
       officeLabel: null, officeAuthorises: [], traits: [], standing: null, wealth: 0, generatedBecause: "A herald.",
@@ -202,7 +202,7 @@ describe("a correction written as a patch", () => {
   });
 
   it("keeps the good corrections when one of them is bad", async () => {
-    const { port } = recordingPort({ simulate_orchestrate: [JSON.stringify({ deltas: [
+    const { port } = recordingPort({ repair_deltas: [JSON.stringify({ deltas: [
       { op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: null, amount: 10, reason: "Good." },
       { op: "not_a_thing_at_all" },
     ] })] });

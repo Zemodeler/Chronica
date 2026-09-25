@@ -127,5 +127,7 @@ yields more than its land can give.
 
 ## Not in the game yet
 
-Combat resolution, diplomacy as a system, espionage and intrigue, and deep economic modelling.
-The engine they will plug into exists; the systems themselves do not. Multiplayer is out of scope.
+Combat, diplomacy and espionage exist now: battles are resolved phase by phase, letters and
+agreements pass between powers, and plots are laid and discovered. What is still missing is deeper
+economic modelling beyond incomes, estates, ventures and the tax ceiling, and mechanics the world
+invents for itself rather than picks from a list. Multiplayer is out of scope.

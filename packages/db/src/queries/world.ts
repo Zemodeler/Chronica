@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, sql } from "dr
 import {
   ScenarioDefinitionSchema,
   WorldStateSchema,
+  type Fact,
   type ScenarioClock,
   type ScenarioDefinition,
   type WorldState,
@@ -9,6 +10,7 @@ import {
 import type { ChronicaDatabase } from "../database";
 import { games, players, scenarioVersions, scenarios } from "../schema/game";
 import {
+  burstProgress,
   chronicleCheckpoints,
   deltaAudit,
   gameWorlds,
@@ -203,6 +205,23 @@ export interface BurstFactRow {
   readonly fact: unknown;
 }
 
+/** One fact as the row `commitBurst` stores, with the weight its author gave it. */
+export function factRowOf(fact: Fact, significance: number): BurstFactRow {
+  return {
+    id: fact.id,
+    instantSortKey: fact.time.day * 1440 + fact.time.minute,
+    kind: fact.kind,
+    summary: fact.summary,
+    visibility: fact.visibility,
+    discoveryState: fact.discovery.state,
+    knowableAtSortKey:
+      fact.discovery.knowableAtInstant === null ? null : fact.discovery.knowableAtInstant.day * 1440 + fact.discovery.knowableAtInstant.minute,
+    significance,
+    causalDepth: fact.causalDepth,
+    fact,
+  };
+}
+
 export interface BurstEventRow {
   readonly id: string;
   readonly dueInstantSortKey: number;
@@ -267,6 +286,14 @@ export interface BurstCommit {
     readonly reason: string;
     readonly delta: unknown;
   }[];
+  /**
+   * The decision this burst was the answer to, closed in the same transaction
+   * as the world that heard the answer. It used to be closed afterwards, by the
+   * request that had waited for the burst; there is no such request any more,
+   * and a question closed before its world is saved is an answer spent on
+   * nothing.
+   */
+  readonly resolvesDecision?: { readonly id: string; readonly optionId: string };
 }
 
 /**
@@ -367,6 +394,13 @@ export async function commitBurst(db: ChronicaDatabase, commit: BurstCommit): Pr
       });
     }
 
+    if (commit.resolvesDecision !== undefined) {
+      await tx
+        .update(playerDecisions)
+        .set({ status: "resolved", chosenOptionId: commit.resolvesDecision.optionId, resolvedAt: new Date() })
+        .where(eq(playerDecisions.id, commit.resolvesDecision.id));
+    }
+
     return nextRevision;
   });
 }
@@ -377,13 +411,18 @@ export async function startBurst(
 ): Promise<string> {
   const [row] = await db
     .insert(simulationBursts)
-    .values({ gameId: input.gameId, playerUserId: input.playerUserId, orderText: input.orderText })
+    .values({ gameId: input.gameId, playerUserId: input.playerUserId, orderText: input.orderText, heartbeatAt: new Date() })
     .returning({ id: simulationBursts.id });
   return row!.id;
 }
 
 export async function failBurst(db: ChronicaDatabase, burstId: string, error: string): Promise<void> {
   await db.update(simulationBursts).set({ status: "failed", error, endedAt: new Date() }).where(eq(simulationBursts.id, burstId));
+}
+
+/** The process running a burst says it is still here. A no-op once the burst has ended. */
+export async function heartbeatBurst(db: ChronicaDatabase, burstId: string): Promise<void> {
+  await db.update(simulationBursts).set({ heartbeatAt: new Date() }).where(and(eq(simulationBursts.id, burstId), eq(simulationBursts.status, "running")));
 }
 
 /**
@@ -394,23 +433,70 @@ export async function failBurst(db: ChronicaDatabase, burstId: string, error: st
  * transaction, so the revision check is the first thing that notices, by which
  * time several minutes of model calls have been paid for and thrown away.
  *
- * `startedBefore` is what keeps a crashed process from wedging a game forever.
- * A row only reaches `committed` or `failed` if the process that opened it
- * lived long enough to say so; one older than any turn could possibly be is
- * not running, it is abandoned.
+ * "Running" is judged by the heartbeat, not the row's age. A row only reaches
+ * `committed` or `failed` if the process that opened it lived long enough to
+ * say so; one that has stopped beating is not running, it is abandoned, and
+ * `reapStaleBursts` says so on the row.
  */
 export async function findRunningBurst(
   db: ChronicaDatabase,
   gameId: string,
-  startedAfter: Date,
+  aliveAfter: Date,
 ): Promise<{ id: string; startedAt: Date } | undefined> {
   const [row] = await db
     .select({ id: simulationBursts.id, startedAt: simulationBursts.startedAt })
     .from(simulationBursts)
-    .where(and(eq(simulationBursts.gameId, gameId), eq(simulationBursts.status, "running"), gt(simulationBursts.startedAt, startedAfter)))
+    .where(and(eq(simulationBursts.gameId, gameId), eq(simulationBursts.status, "running"), gt(simulationBursts.heartbeatAt, aliveAfter)))
     .orderBy(desc(simulationBursts.startedAt))
     .limit(1);
   return row;
+}
+
+/** Marks every running burst of a game whose heartbeat is older than `aliveBefore` as failed, and returns how many. */
+export async function reapStaleBursts(db: ChronicaDatabase, gameId: string, aliveBefore: Date, error: string): Promise<number> {
+  const reaped = await db
+    .update(simulationBursts)
+    .set({ status: "failed", error, endedAt: new Date() })
+    .where(and(eq(simulationBursts.gameId, gameId), eq(simulationBursts.status, "running"), lte(simulationBursts.heartbeatAt, aliveBefore)))
+    .returning({ id: simulationBursts.id });
+  return reaped.length;
+}
+
+export async function getBurst(db: ChronicaDatabase, gameId: string, burstId: string) {
+  const [row] = await db
+    .select({
+      id: simulationBursts.id,
+      status: simulationBursts.status,
+      error: simulationBursts.error,
+      orderText: simulationBursts.orderText,
+      startedAt: simulationBursts.startedAt,
+      heartbeatAt: simulationBursts.heartbeatAt,
+      endedAt: simulationBursts.endedAt,
+    })
+    .from(simulationBursts)
+    .where(and(eq(simulationBursts.id, burstId), eq(simulationBursts.gameId, gameId)))
+    .limit(1);
+  return row;
+}
+
+export async function appendBurstProgress(
+  db: ChronicaDatabase,
+  input: { gameId: string; burstId: string; kind: "progress" | "chronicle_entry"; payload: unknown },
+): Promise<number> {
+  const [row] = await db
+    .insert(burstProgress)
+    .values({ gameId: input.gameId, burstId: input.burstId, kind: input.kind, payload: input.payload })
+    .returning({ id: burstProgress.id });
+  return row!.id;
+}
+
+/** Everything a burst has said since `afterId`, oldest first. */
+export async function listBurstProgress(db: ChronicaDatabase, burstId: string, afterId = 0) {
+  return db
+    .select({ id: burstProgress.id, kind: burstProgress.kind, payload: burstProgress.payload, createdAt: burstProgress.createdAt })
+    .from(burstProgress)
+    .where(and(eq(burstProgress.burstId, burstId), gt(burstProgress.id, afterId)))
+    .orderBy(asc(burstProgress.id));
 }
 
 /**
@@ -577,12 +663,6 @@ export async function getOpenDecision(db: ChronicaDatabase, gameId: string) {
   return row;
 }
 
-export async function resolveDecision(db: ChronicaDatabase, decisionId: string, optionId: string): Promise<void> {
-  await db
-    .update(playerDecisions)
-    .set({ status: "resolved", chosenOptionId: optionId, resolvedAt: new Date() })
-    .where(eq(playerDecisions.id, decisionId));
-}
 
 /** The single player driving a game, for the single-player loop v1. */
 export async function getPrimaryPlayer(db: ChronicaDatabase, gameId: string) {

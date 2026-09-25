@@ -8,6 +8,7 @@ export * from "./orchestrate";
 export * from "./cognition";
 export * from "./burst";
 export * from "./chronicle";
+export * from "./chronicle-windows";
 export * from "./conversation";
 export * from "./initiative";
 export * from "./population";

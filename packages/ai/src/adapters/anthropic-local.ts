@@ -10,6 +10,7 @@ import type {
   AiToolDefinition,
 } from "../adapter";
 import { getConfiguredApiKey, getSelectedLocalAiModel } from "../local-key-selection";
+import { modelOverrideFor } from "../operation-overrides";
 import { AiTimeoutError, aiMaxMs, aiMaxRetries, aiRequestTimeoutMs, stallWatchdog } from "../timeouts";
 
 // Operations that must return raw JSON — we use an assistant prefill of "{" to
@@ -27,6 +28,8 @@ const JSON_MODE_OPERATIONS = new Set<AiOperation>([
   // prose preamble dropped the whole report to the plain-facts fallback.
   "compose_chronicle",
   "reconcile_facts",
+  "repair_deltas",
+  "write_mechanic",
 ]);
 
 /**
@@ -58,7 +61,10 @@ const TIER_MODELS: Record<AiTier, string> = {
 // judgment the design rests on, so neither runs on the cheapest tier.
 const STANDARD_TIER_OPERATIONS = new Set<AiOperation>(["simulate_orchestrate", "simulate_cognition"]);
 
+
 function resolveModel(operation: AiOperation): string {
+  const override = modelOverrideFor(operation);
+  if (override !== undefined) return override;
   const selectedModel = getSelectedLocalAiModel("anthropic");
   if (selectedModel !== null) return selectedModel;
   const tier: AiTier = STANDARD_TIER_OPERATIONS.has(operation) ? "standard" : "basic";
@@ -234,3 +240,5 @@ export function createAnthropicLocalAdapter(): AiAdapter {
     },
   };
 }
+/** The adapter's operation tables, for the test that iterates the enum against them. */
+export const ANTHROPIC_OPERATION_TABLES = { jsonMode: JSON_MODE_OPERATIONS, outputTokens: MAX_OUTPUT_TOKENS, standardTier: STANDARD_TIER_OPERATIONS } as const;

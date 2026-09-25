@@ -186,3 +186,16 @@ describe("the world elsewhere", () => {
     expect(closed.find((actor) => actor.characterId === "quintus-fabius")?.why ?? "").not.toContain("Over");
   });
 });
+
+describe("who is pressing", () => {
+  it("a reaction always is; the rotation alone never is; a priority is", () => {
+    const state = world();
+    const reacting = route([fact({ affectedEntities: [{ kind: "character", id: "quintus-fabius" }], summary: "Quintus is named." })], state);
+    for (const actor of reacting.focused) expect(actor.pressing).toBe(true);
+    const rotation = routeAmbientActors({ world: state, facts: [], offices, excludeCharacterIds: ["marcus-atilius"], max: 4, priorityCharacterIds: [] });
+    expect(rotation.length).toBeGreaterThan(0);
+    expect(rotation.every((actor) => !actor.pressing)).toBe(true);
+    const handed = routeAmbientActors({ world: state, facts: [], offices, excludeCharacterIds: ["marcus-atilius"], max: 2, priorityCharacterIds: ["marcus-atilius-minor"] });
+    expect(handed.find((actor) => actor.characterId === "marcus-atilius-minor")?.pressing).toBe(true);
+  });
+});

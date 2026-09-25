@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, bigserial, boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { games } from "./game";
 import { users } from "./auth";
 
@@ -97,8 +97,25 @@ export const simulationBursts = pgTable("simulation_bursts", {
   accumulatedSignificance: integer("accumulated_significance").notNull().default(0),
   error: text("error"),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  /** Last sign of life from the process running it. A running row that stops beating is abandoned, whatever its age. */
+  heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
   endedAt: timestamp("ended_at", { withTimezone: true }),
 }, (table) => [index("simulation_bursts_game_idx").on(table.gameId, table.startedAt)]);
+
+/**
+ * What a running burst has to say for itself, in order: where the world has
+ * got to (`progress`) and the passages of the record written so far
+ * (`chronicle_entry`). The client polls this by id; nothing here is the
+ * record, which is committed with the burst.
+ */
+export const burstProgress = pgTable("burst_progress", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  burstId: uuid("burst_id").notNull().references(() => simulationBursts.id, { onDelete: "cascade" }),
+  gameId: uuid("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  payload: jsonb("payload").notNull().$type<unknown>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [index("burst_progress_burst_idx").on(table.burstId, table.id)]);
 
 /**
  * Every act a burst did not carry out as the model wrote it: refused by the

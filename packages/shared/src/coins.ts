@@ -27,6 +27,10 @@ export const AiOperationSchema = z.enum([
   "compose_chronicle",
   /** Withdraws what an answer said happened, where the engine refused the act it described. */
   "reconcile_facts",
+  /** Writes again the changes the engine refused over how they were written. Billed as orchestration until 2026-09-25, which hid every repair in the timing line. */
+  "repair_deltas",
+  /** Writes the standing rule behind an arrangement somebody set going, once; the engine runs it thereafter (`world/mechanic.ts`). */
+  "write_mechanic",
 ]);
 export type AiOperation = z.infer<typeof AiOperationSchema>;
 

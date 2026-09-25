@@ -530,3 +530,33 @@ describe("what a person's station lets them read", () => {
     expect(text).toContain("have been told none of what");
   });
 });
+
+describe("the rules the actor's arrangements run by", () => {
+  it("adds one clause of bounded length per arrangement, and only for the actor's own", () => {
+    const base = ensureProvinceMaterial(world(), 0);
+    const actor = base.characters.find((character) => character.id === "gaius-genucius")!;
+    const rule = {
+      trigger: { kind: "monthly" as const }, conditions: [{ kind: "province_level_above" as const, provinceId: actor.locationProvinceId, level: "stability" as const, bps: 3_000 }],
+      effects: [{ op: "money_transfer" as const, fromAccountId: "gaius-purse", toAccountId: null, amount: { kind: "band" as const, band: "slight" as const } }],
+      end: { kind: "owner_death" as const }, price: { setup: 10, upkeepPerMonth: 1 }, why: "A toll while the province is orderly, and this is a very long explanation meant to test that the clause is cut to length rather than printed whole.",
+      attachedAtStep: 0, origin: "written" as const, shapeKey: "abcd1234", debitWarrants: [], nextDueStep: 30, armedReading: null, endArmedReading: null, endsAtStep: null,
+      setupPaid: 10, firedCount: 3, changedCount: 3, lastFiredStep: 0, emptyFirings: 0, endedAtStep: null, endedReason: null,
+    };
+    const entities = Array.from({ length: 9 }, (_, index) => ({
+      id: `toll-${index}`, kind: "toll", label: `Toll-house ${index}`, ownerRef: index === 8 ? { kind: "character" as const, id: "hanno-carthage" } : { kind: "character" as const, id: actor.id },
+      attributes: {}, linkedEntityIds: [], createdAtStep: 0, provenanceEventIds: [], provinceId: actor.locationProvinceId, effects: [], upkeep: null, mechanic: rule,
+    }));
+    const ruled: WorldState = { ...base, genericEntities: [...base.genericEntities, ...entities] };
+    const plain = renderWorldSlice(slice({ ...ruled, genericEntities: ruled.genericEntities.map((entity) => ({ ...entity, mechanic: undefined })) }));
+    const withRules = renderWorldSlice(slice(ruled));
+    const own = entities.filter((entity) => entity.ownerRef.id === actor.id).length;
+    // Twice per arrangement: once in STANDING ARRANGEMENTS, once in the actor's
+    // own portrait, which the slice carries and cognition reads alone.
+    expect(withRules.length - plain.length).toBeLessThan(own * 2 * 170);
+    expect(withRules).toContain("rule: each month while stability");
+    expect(withRules).toContain("fired 3 times");
+    // Hanno's rule is his to know, not the consul's.
+    const hannoLine = withRules.split("\n").find((line) => line.includes("Toll-house 8"));
+    expect(hannoLine === undefined || !hannoLine.includes("rule:")).toBe(true);
+  });
+});

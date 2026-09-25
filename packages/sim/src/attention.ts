@@ -51,6 +51,14 @@ export interface RoutedActor {
   readonly knownFacts: readonly Fact[];
   readonly why: string;
   /**
+   * Whether asking them this round is more than routine: they are reacting to
+   * something, were handed a problem by the narrator, are the antagonist, owe
+   * an order or a letter an answer, or are in a thread that is escalating. A
+   * round in which nobody is pressing is the rotation alone, and a burst pays
+   * for only so many of those (`maxAmbientOnlyRounds`).
+   */
+  readonly pressing: boolean;
+  /**
    * Something true about this person's situation that the router did not work
    * out, appended to their own section of the prompt. Used for the one thing
    * the world knows and the router has no business knowing: where the ruler's
@@ -241,6 +249,7 @@ export function routeAttention(input: AttentionInput): AttentionResult {
       name: character.name,
       level: "relevant",
       impetus: "reaction",
+      pressing: true,
       score,
       knownFacts,
       why: reasons.join(", "),
@@ -344,6 +353,7 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
 
     const reasons: string[] = [];
     let score = 0;
+    let pressing = false;
     if (holdsAuthority.has(character.id) || character.officeId !== null || commanders.has(character.id)) {
       score += 25;
       reasons.push("has a command or an office to run");
@@ -365,6 +375,7 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
     const thread = threadOf.get(character.id);
     if (thread !== undefined) {
       score += thread.phase === "escalating" || thread.phase === "crisis" ? 20 : 12;
+      if (thread.phase === "escalating" || thread.phase === "crisis") pressing = true;
       reasons.push(`is caught up in ${thread.title}: ${thread.nextDevelopment}`);
     }
     // Somebody has asked them to do something and is waiting. The ambient
@@ -377,6 +388,7 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
         && (attempt.status === "issued" || attempt.status === "received" || attempt.status === "delayed"),
     )) {
       score += 32;
+      pressing = true;
       reasons.push("has an order to answer");
     }
     if (world.diplomacy.some(
@@ -385,6 +397,7 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
         (message.toCharacterId === character.id || (message.toCharacterId === null && character.polityId !== null && message.toPolityId === character.polityId)),
     )) {
       score += 28;
+      pressing = true;
       reasons.push("has a letter to answer");
     }
     // Asked because something just landed on them. It counts for itself: a man
@@ -392,12 +405,14 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
     // purse was counted as authority.
     if (priority.has(character.id)) {
       score += 20;
+      pressing = true;
       reasons.unshift("something has just come to them");
     }
     // Always worth hearing, and never told why. The reason given is the true
     // one a man would give himself: he has something of his own running.
     if (character.id === input.nemesisCharacterId) {
       score += 40;
+      pressing = true;
       reasons.unshift("has a matter of their own that will not keep");
     }
     if (character.polityId !== null && polityHasAims.has(character.polityId)) {
@@ -420,6 +435,7 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
       level: "focused",
       impetus: "own_business",
       score,
+      pressing,
       knownFacts: factsKnownTo(input.facts, { kind: "character", id: character.id }, character.polityId, world.instant).slice(-(input.maxFactsEach ?? 6)),
       why: reasons.join(", "),
     });

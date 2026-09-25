@@ -87,6 +87,13 @@ short — and the player should hear about it. **"reference"** means the proposa
 does not exist, which is the engine catching a malformed payload. The distinction exists because
 without it, "no province called Latium existed" appeared in a Chronicle as though it were history.
 
+An order none of whose acts stood is answered by the engine itself: a private `order_given` fact
+saying what was ordered and what stood in the way. It fires when nothing of the order reached its
+giver, and also when every act of the order was refused whatever else the answer said -- the
+orchestrator writes the world's doings in the same breath as the order's, and an embassy the engine
+refused to send once left no trace because a fire in Latium and a quarrel between the consuls were
+written beside it and counted as the order being seen.
+
 ### Why lack of authority does not block an act
 
 `applyDeltas` runs `checkAuthority` on every delta and then **applies it anyway**, recording a
@@ -319,7 +326,47 @@ people's answers end to end, so a round costs three calls and the same tokens �
 the burst after its first round and lost the rest for no saving at all. The Chronicle is written the
 same way, a passage per call, six at a time.
 
-### The Chronicle (`chronicle.ts`)
+### Calls the burst decides not to make (`burst.ts`, plan §1 E)
+
+Three, each logged in `BurstResult.skipped` and on the `[burst]` line as `skipped: cognition ×n,
+reconcile ×n, repair ×n`, never silent (2026-09-25). A cognition round in which nobody is *pressing*
+— no reaction, no narrator priority, no antagonist, no order or letter to answer, no thread in
+crisis (`RoutedActor.pressing`) — is the rotation alone, and a burst pays for `maxAmbientOnlyRounds`
+of those (one); past that the round is skipped and counts as nobody asked, so a quiet span stops at
+its minimum rather than at `maxIterations`. Fact reconciliation is asked only about facts that name
+what was refused (`factsNamingRefusals`: a handle or id the refused delta carries, a name it
+repeats, the owner of an account it names, and for the order's own refusals the ruler and his
+power); a letter refused as already answered no longer sends the whole round's facts back at a call
+apiece. A repair is not spent on a refusal no correction can cure (`worthRepairing`, a deny-list
+grown only from `audit:deltas` evidence, starting with the player's-purse rule). Two measuring knobs
+live beside them: `CHRONICA_COGNITION_SHARDS` (how many calls a large cast is dealt onto) and
+`CHRONICA_AI_MODEL_<OPERATION>` / `CHRONICA_AI_EFFORT_<OPERATION>` (one operation's model or effort,
+ahead of the selected local model), with `createTimedPort` printing each operation's wall span beside
+its summed seconds.
+
+### The Chronicle (`chronicle.ts`, `chronicle-windows.ts`)
+
+**Written in time order, while the burst runs** (2026-09-25). A burst walks time forward in hops and
+the clock never moves backwards, so everything written before the clock moves is dated at or before
+that instant, and nothing written afterwards can land before it. The burst hands out a
+`WindowSnapshot` each time the clock is about to leave a window — the order is a window of its own,
+and after that a window is cut only once a cognition round has happened, so a run of quiet hops is
+one window — and `createWindowWriter` composes each window as it closes, side by side, and publishes
+the passages in window order. The page shows them as they land; the commit writes the same passages
+in the same order, followed by the ledger entries, and nothing already shown is ever reordered or
+edited. A fact belongs to the window in which the reader could first know it, so a battle on day 5
+that reaches the court on day 20 is told on day 20, as news. Each window has its own bar: the
+order's answer (the one thread holding most of the order's facts and naming the reader's side) and
+any battle always pass, the reader's own business must weigh at least `OWN_BUSINESS_FLOOR`, the
+other bands keep their thresholds, and at most `WINDOW_MAX_ENTRIES` (three) pass beyond the answer
+and the battles. What a window does not tell is carried into the next window's candidates; the last
+window, which closes when the world settles, has room for six and takes whatever the pool carried to
+it, and only a record that would otherwise be blank gets a closing pass. The last window waits for
+nothing: a matter left by a window still being written when the burst ended stays untold, since a
+second compose after the last window ran in series with it and was most of the turn's tail. A thread
+the historian declines as a repeat is dropped, not printed as bare facts. The first passage reaches the player once the order has been
+applied and its window composed — about thirty-five seconds on gpt-6-luna, most of it the
+orchestration call — rather than when the whole turn is over.
 
 Written only from what the player could know. The constraint is enforced by **what the historian is
 handed**, not by an instruction in the prompt: a prompt asking the model not to mention secrets would
@@ -470,7 +517,7 @@ pending rather than that something is — and hinted to the historian as part of
 the observer could know of it. A thread untouched for half a year closes in the tick. The scenario's
 two frozen storylines are real threads again.
 
-**Played** (four orders, 198 days, live model, through `scripts/narrator-play.mts`): three seeds. A
+**Played** (four orders, 198 days, live model, through the terminal driver, now `scripts/play-turn.mts`): three seeds. A
 minor outbreak in the Marsian highlands on day 18 — province shifted, public fact, a reassessment
 scheduled and fired. A grave rivalry against Manius Curius Dentatus on day 108 — the orchestrator
 invented Marcus Fulvius Luscus, opened the thread under the seed key, planted a 90-point pressure,
@@ -1108,6 +1155,56 @@ Per *bugs only play finds*, each phase is also played live once as its role befo
 
 ---
 
+## 5d. The world invents mechanics, and the engine runs them
+
+Built 2026-09-25 (plan §2 of `docs/plans/what-the-engine-cannot-do-yet.md`). VISION §1 says the AI
+"can dynamically create mechanics or entities when the evolving world requires them". It could create
+entities; an act that fitted no op was kept as an arrangement whose effects came from a closed list
+of ten quantities, and a pursuit did nothing. Now an arrangement can carry a **rule**
+(`GenericEntity.mechanic`, `packages/shared/src/world/mechanic.ts`): a trigger (each month, on a
+kind of fact, or when a condition first becomes true), up to three conditions, one to four effects
+and an end (a term, a condition, the owner's death, or never). Conditions are the watch's own arms
+plus a mechanic's (a province's level, a purse, a relation, a power's trust, a war, an army's
+strength), in one union read by one evaluator (`sim/watch.ts`); the orchestrator's `WatchPredicate`
+is untouched, so the prompt does not grow. Effects are templates over five ops the applier already
+runs — money moves, a province's level, legitimacy, a power's trust, a relation — with every sum a
+band of the arrangement's scale or a share of a value the engine reads at firing, clamped per firing
+(`mechanicWorth`), per purse (a tenth) and per burst (`MECHANIC_MAX_DEBIT_PER_BURST_BPS`, fifteen
+percent of what a purse held when the burst began).
+
+**Written once, by a separate call.** Every arrangement set going that is not a law — kept,
+floored as a pursuit, or authored — is a candidate (audit `mechanic_candidate`). While the burst's
+`maxMechanicCalls` allows (two by default, counted apart from `maxModelCalls`), `write_mechanic`
+asks for the rule with the act, the owner's slice or portrait, and the list of ids the engine can
+read for that arrangement (`mechanics/refs.ts`), which is also exactly what the validator accepts.
+The engine validates it (`validate-mechanic.ts`), prices it — the model names a setup and a keep,
+the engine clamps them into bands of the province's tax capacity and folds the keep into the
+entity's own upkeep so `settleStandingEffects` charges and lapses it as before — and attaches it
+with nothing due at once. A refused rule leaves the plain arrangement (`mechanic_refused`).
+
+**Debits need a warrant.** A rule may take from an account its owner does not control only on a
+basis found when it is attached and stored on it: the owner's authority over the treasury
+(`checkAuthority`), an active contract in which the payer pays him, or the purse being his own. At
+every firing the warrant is checked again (`mechanic_warrant_lapsed` when it no longer stands), and
+`ApplyContext.firingMechanic` — settable by no schema the model writes — is what lets a warranted
+debit past the player's-purse rule and the authority gate, and nothing else.
+
+**Run by code.** `runMechanics` runs from the burst's `tickTo` after the deterministic tick, in
+entity-id order, through `applyDeltas` with the full context the tick lacks. A monthly rule keeps
+its next due day and never catches up a period whose conditions failed; a `when` rule keeps its last
+reading and fires on the edge, as a contingency does; an `on_fact` rule sees each fact once. Every
+firing writes a `mechanic_fired` fact private to the owner and to anyone whose purse it touched, and
+a transaction row with `cause.kind "mechanic"` that the character panel shows. A rule that fires and
+does nothing three times running is retired with a fact. A reuse path was built with it -- a rule
+whose ids all cut to slots, stored by the arrangement's normalised kind and the rule's `stableKey`
+and refilled for the next arrangement of that kind at no call -- and removed the same day: over the
+corpus and a played campaign no two arrangements of one kind shared a rule (0 of 8 written), under
+the plan's five percent line. `shapeKey` stays on a rule as its fingerprint.
+
+Measured by `scripts/mechanic-rate.mts` (a played game) and `scripts/eval-orders/let-time-pass.mts`
+(two years of nothing on an eval chain's world); the eval corpus gained a toll, a dole, a school, a
+racket and a tithe.
+
 ## 6. Conversations are part of the record
 
 A proposed `CharacterSocialEvent` used to wait for a turn to apply it. Turns were deleted, so nothing
@@ -1447,6 +1544,15 @@ every prompt question here, only provable by play. The system prompt ceiling mov
 48,000 characters for the three new arms, under the test's own rule that it moves for a genuinely new
 capability and for nothing else.
 
-**Burst duration against request scope.** A burst with a live model can exceed 45 seconds. A client
-that gives up leaves a `simulation_bursts` row at `running` — harmless today, since nothing reads it,
-but the row exists partly so that moving bursts to a background job later is cheap.
+**Burst duration against request scope.** A burst no longer runs inside the request that carried the
+order (2026-09-25). The request prepares it — loads the world, checks the guards, opens the
+`simulation_bursts` row — and hands the job to `apps/web/lib/burst-runner.ts`, which finishes it
+after the response has gone (`after()` from `next/server`), in the same process, with its own pool.
+The route answers `202 {burstId}` and the page polls `/api/games/<id>/bursts/<burstId>?after=<n>`,
+which returns progress lines and the passages of the record written so far from `burst_progress`
+(migration 0039). A running burst heartbeats every 20 s; a row that has not beaten for 90 s is
+abandoned, reaped by the next order's preparation together with any coin hold older than six minutes
+(`expireStaleHolds`), so a dev server killed mid-turn frees the game and the coins without waiting
+fifteen minutes. A decision is closed in the same transaction as the world that heard the answer.
+`scripts/play-turn.mts` runs the same two functions from a terminal, which is how turns are timed
+without a browser session (`docs/plans/simulation-speed-baseline.md`).

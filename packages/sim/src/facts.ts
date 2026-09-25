@@ -9,6 +9,9 @@ import {
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
 
+/** The longest summary `FactSchema` admits. */
+const FACT_SUMMARY_MAX = 600;
+
 /**
  * Turns the model's fact proposals into canonical `Fact`s.
  *
@@ -58,7 +61,12 @@ export function materializeFacts(input: MaterializeFactsInput): MaterializedFact
       time: input.now,
       atStep: input.atStep,
       kind: proposal.kind,
-      summary: proposal.summary,
+      // The record's cap on a summary is the schema's, and a model's proposal
+      // arrives already within it; an engine-made one -- a project completed
+      // with a long account of what it produced -- once ran past it and
+      // failed the whole burst. The engine's facts are cut to fit, never
+      // refused: nothing the tick says may end a turn.
+      summary: proposal.summary.length > FACT_SUMMARY_MAX ? `${proposal.summary.slice(0, FACT_SUMMARY_MAX - 1).trimEnd()}…` : proposal.summary,
       affectedEntities: (proposal.affectedRefs ?? []).map(resolveParty),
       resourceChanges: [],
       authorityChange: undefined,

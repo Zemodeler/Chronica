@@ -1,6 +1,6 @@
 import type { NormalizedPaymentEvent, ProductCatalogEntry } from "@chronica/billing";
 import type { AiOperation, TokenUsage } from "@chronica/shared";
-import { and, asc, count, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 import type { ChronicaDatabase } from "../database";
 import { users } from "../schema/auth";
 import { games } from "../schema/game";
@@ -286,6 +286,25 @@ export async function settleCoinHold(db: ChronicaDatabase, input: Readonly<{
 }
 
 export async function releaseCoinHold(db: ChronicaDatabase, holdId: string): Promise<void> {
+  await giveBackHold(db, holdId, "released", "AI request did not produce a usable response");
+}
+
+/**
+ * Holds nobody is coming back for.
+ *
+ * A hold is released or settled by the process that took it, when its call
+ * ends. A process killed mid-call -- the dev server restarted, the machine put
+ * to sleep -- leaves the hold `active` for good, and the coins it reserved
+ * stay unspendable. Anything older than the longest a call can possibly run
+ * is not in flight; it is abandoned, and the coins come back.
+ */
+export async function expireStaleHolds(db: ChronicaDatabase, olderThan: Date): Promise<number> {
+  const stale = await db.select({ id: creditHolds.id }).from(creditHolds).where(and(eq(creditHolds.status, "active"), lt(creditHolds.createdAt, olderThan)));
+  for (const hold of stale) await giveBackHold(db, hold.id, "expired", "AI call abandoned: the process that reserved the coins did not come back");
+  return stale.length;
+}
+
+async function giveBackHold(db: ChronicaDatabase, holdId: string, status: "released" | "expired", reason: string): Promise<void> {
   await db.transaction(async (tx) => {
     const [hold] = await tx.select().from(creditHolds).where(eq(creditHolds.id, holdId)).for("update").limit(1);
     if (hold === undefined || hold.status !== "active") return;
@@ -298,8 +317,8 @@ export async function releaseCoinHold(db: ChronicaDatabase, holdId: string): Pro
     }
     const availableAfter = wallet.availableMicrocredits + hold.maximumMicrocredits;
     await tx.update(creditWallets).set({ availableMicrocredits: availableAfter, heldMicrocredits: wallet.heldMicrocredits - hold.maximumMicrocredits, version: wallet.version + 1 }).where(eq(creditWallets.id, wallet.id));
-    await tx.update(creditHolds).set({ status: "released" }).where(eq(creditHolds.id, hold.id));
-    await tx.insert(creditLedgerEntries).values({ walletId: wallet.id, kind: "release", signedMicrocredits: hold.maximumMicrocredits, idempotencyKey: `release:hold:${hold.id}`, gameId: hold.gameId, workId: hold.workId, holdId: hold.id, balanceAfterMicrocredits: availableAfter, reason: "AI request did not produce a usable response" });
+    await tx.update(creditHolds).set({ status }).where(eq(creditHolds.id, hold.id));
+    await tx.insert(creditLedgerEntries).values({ walletId: wallet.id, kind: "release", signedMicrocredits: hold.maximumMicrocredits, idempotencyKey: `release:hold:${hold.id}`, gameId: hold.gameId, workId: hold.workId, holdId: hold.id, balanceAfterMicrocredits: availableAfter, reason });
   });
 }
 

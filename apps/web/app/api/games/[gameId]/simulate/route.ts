@@ -1,24 +1,14 @@
-import { TIME_SPANS, getGameView, submitOrder, type SimulationProgress } from "../../../../../lib/simulation-service";
+import { TIME_SPANS, getGameView, startDetachedBurst } from "../../../../../lib/simulation-service";
 
 /**
  * The order box: one natural-language instruction, one simulation burst.
  *
- * The answer is streamed as newline-delimited JSON rather than sent in one
- * piece at the end. The burst is unchanged and still runs inside this request
- * -- what changes is that it stops being silent for the several minutes it
- * takes. Frames are `{kind: "progress"}` while the world moves, then exactly
- * one terminal `{kind: "done"}` or `{kind: "error"}`.
- *
- * The record is not streamed. It is written from the finished burst and
- * committed in one piece, because a report composed from half a burst would
- * split a matter in two and lose anything whose weight only adds up across the
- * whole of it.
+ * The burst does not run inside this request. The request checks the order,
+ * opens the burst, and answers with its id at once; the burst carries on in
+ * the server after the response has gone, and the page follows it at
+ * `/bursts/<id>`. A tab closed is not a burst nobody can watch, and a turn is
+ * no longer bounded by how long a connection may stay open.
  */
-type Frame =
-  | { readonly kind: "progress"; readonly progress: SimulationProgress }
-  | { readonly kind: "done"; readonly result: Awaited<ReturnType<typeof submitOrder>> }
-  | { readonly kind: "error"; readonly error: string };
-
 export async function POST(request: Request, { params }: { params: Promise<{ gameId: string }> }) {
   const { gameId } = await params;
   const body: unknown = await request.json().catch(() => null);
@@ -32,38 +22,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ gam
   const spanDays = typeof requestedSpan === "number" && (TIME_SPANS as readonly number[]).includes(requestedSpan) ? requestedSpan : undefined;
   if (waiting && spanDays === undefined) return Response.json({ error: "Say how long to wait." }, { status: 400 });
 
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const send = (frame: Frame): void => {
-        try {
-          controller.enqueue(encoder.encode(`${JSON.stringify(frame)}\n`));
-        } catch {
-          // The player closed the tab. The burst finishes and commits anyway:
-          // their order was given, and it is not undone by their not watching.
-        }
-      };
-      try {
-        const text = orderText.trim();
-        const result = await submitOrder(gameId, text.length === 0 ? null : text, undefined, (progress) => send({ kind: "progress", progress }), spanDays);
-        send({ kind: "done", result });
-      } catch (error) {
-        send({ kind: "error", error: error instanceof Error ? error.message : String(error) });
-      } finally {
-        controller.close();
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "application/x-ndjson; charset=utf-8",
-      "Cache-Control": "private, no-store",
-      // Nothing between here and the browser may hold the frames back and
-      // deliver them together at the end, which is the state this replaces.
-      "X-Accel-Buffering": "no",
-    },
-  });
+  const text = orderText.trim();
+  const outcome = await startDetachedBurst(gameId, text.length === 0 ? null : text, { spanDays });
+  if (outcome.status === "error") {
+    const busy = outcome.message.startsWith("The world is already moving");
+    return Response.json({ error: outcome.message }, { status: busy ? 409 : 400 });
+  }
+  return Response.json({ burstId: outcome.burstId }, { status: 202, headers: { "Cache-Control": "private, no-store" } });
 }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ gameId: string }> }) {
