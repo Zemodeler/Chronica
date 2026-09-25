@@ -246,6 +246,41 @@
       "when": 1788400500000,
       "tag": "0034_simulation_loop",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1788400600000,
+      "tag": "0035_chronicle_threads",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1788400700000,
+      "tag": "0036_chronicle_as_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1788400800000,
+      "tag": "0037_delta_audit",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1788400900000,
+      "tag": "0038_drop_player_game_ui_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1788401000000,
+      "tag": "0039_burst_progress",
+      "breakpoints": true
     }
   ]
 }
