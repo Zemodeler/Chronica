@@ -1,5 +1,5 @@
 import { calculateCoinUsage } from "@chronica/billing";
-import { authorizeCoinHold, settleCoinHold, releaseCoinHold, getCoinWalletSnapshot, type ChronicaDatabase } from "@chronica/db";
+import { authorizeCoinHold, settleCoinHold, releaseCoinHold, getCoinWalletSnapshot, CoinHoldRefusedError, type ChronicaDatabase } from "@chronica/db";
 import type { AiOperation } from "@chronica/shared";
 import { randomUUID } from "node:crypto";
 import type {
@@ -77,6 +77,25 @@ export class AiParseError extends Error {
   }
 }
 
+/**
+ * Settles a hold, and gives the coins back if settlement itself fails.
+ *
+ * The call succeeded, so the fair outcome is a charge; but a hold whose
+ * settlement died is a hold nobody is coming back for, and the coins it
+ * reserves stay unspendable until the stale sweep finds them. Releasing it
+ * forgoes one call's charge to keep the wallet honest now. The failure is
+ * still thrown, with its own name, so the caller sees what happened.
+ */
+async function settleOrGiveBack(db: ChronicaDatabase, operation: AiOperation, holdId: string, settlement: Parameters<typeof settleCoinHold>[1]): Promise<void> {
+  try {
+    await settleCoinHold(db, settlement);
+  } catch (error) {
+    console.error(`[ai] settling the ${operation} hold failed; releasing it instead:`, error);
+    await releaseCoinHold(db, holdId).catch(() => { /* best effort */ });
+    throw error;
+  }
+}
+
 export async function callWithCoinGate(
   db: ChronicaDatabase,
   userId: string,
@@ -115,8 +134,12 @@ export async function callWithCoinGate(
     try {
       const hold = await authorizeCoinHold(db, { gameId, workId, maximumMicroUnits: maxHold, idempotencyKey });
       holdId = hold.holdId;
-    } catch {
-      throw new InsufficientCoinsError();
+    } catch (error) {
+      // Only a refusal is "out of coins". Anything else the ledger throws is
+      // its own kind of failure and keeps its own name: a database deadlock
+      // once wore this message in front of a player with a full wallet.
+      if (error instanceof CoinHoldRefusedError) throw new InsufficientCoinsError();
+      throw error;
     }
     ledgerMs += performance.now() - heldAt;
 
@@ -148,7 +171,7 @@ export async function callWithCoinGate(
     });
 
     const settledAt = performance.now();
-    await settleCoinHold(db, {
+    await settleOrGiveBack(db, operation, holdId, {
       holdId,
       callId: `${workId}:settled`,
       operation,
@@ -218,8 +241,9 @@ export async function callWithToolsAndCoinGate(
       idempotencyKey: `${operation}:${gameId}:${workId}`,
     });
     holdId = hold.holdId;
-  } catch {
-    throw new InsufficientCoinsError();
+  } catch (error) {
+    if (error instanceof CoinHoldRefusedError) throw new InsufficientCoinsError();
+    throw error;
   }
   ledgerMs += performance.now() - heldAt;
 
@@ -242,7 +266,7 @@ export async function callWithToolsAndCoinGate(
   });
 
   const settledAt = performance.now();
-  await settleCoinHold(db, {
+  await settleOrGiveBack(db, operation, holdId, {
     holdId,
     callId: `${workId}:settled`,
     operation,

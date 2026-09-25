@@ -29,8 +29,8 @@ These were earned the hard way; ignore them and the work will look finished and 
   was mutated first. Never swallow a schema-parse failure of persisted state.
 - **The checkout is shared.** Another session may be editing `apply-deltas.ts` and `deltas.ts`. Make
   targeted edits; never rewrite those files wholesale.
-- **Migrations past 0034 are applied by hand.** `0038_drop_player_game_ui_state.sql` is written and
-  not yet applied.
+- **Migrations 0035 to 0039 are in the journal again** (2026-09-25), so `npm run migrate -w @chronica/db`
+  applies them; they are idempotent, and a database that had them by hand is only re-registered.
 - **The test machine overloads.** Rerun a package alone before believing a red timeout.
 - **Scenario rules are versioned (v27).** A running save pins its version and must be repinned to see
   new scenario data. Prefer engine constants to scenario data where old saves should benefit.

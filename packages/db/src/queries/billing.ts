@@ -198,6 +198,50 @@ export async function redeemDeveloperGiftCode(
   });
 }
 
+/**
+ * A hold the ledger would not grant: the wallet cannot cover it, or the game
+ * is already paused for that reason. Named so the coin gate can tell a player
+ * who is out of coins from a transaction that merely failed.
+ */
+export class CoinHoldRefusedError extends Error {
+  constructor(readonly reason: "insufficient_coins" | "payment_paused") {
+    super(reason === "payment_paused" ? "Game payment is paused." : "Insufficient coins for the complete AI work unit.");
+    this.name = "CoinHoldRefusedError";
+  }
+}
+
+/** Postgres's code for a deadlock it broke by aborting this transaction. */
+const DEADLOCK_DETECTED = "40P01";
+
+function isDeadlock(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const named = error as { code?: unknown; cause?: unknown };
+  if (named.code === DEADLOCK_DETECTED) return true;
+  return typeof named.cause === "object" && named.cause !== null && (named.cause as { code?: unknown }).code === DEADLOCK_DETECTED;
+}
+
+/**
+ * Runs a ledger transaction again if Postgres aborted it to break a deadlock.
+ *
+ * Every ledger transaction below takes its row locks in the same order --
+ * game, wallet, lots -- so they cannot deadlock among themselves. Anything
+ * else that locks a game row for its own reasons still can, and a deadlock is
+ * a transient the database resolved by choosing a victim: run it once more
+ * and it goes through. Once was a live turn ending in "You have run out of
+ * coins" with three coins in the wallet.
+ */
+async function withDeadlockRetry<T>(work: () => Promise<T>, attempts = 3): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await work();
+    } catch (error) {
+      if (!isDeadlock(error) || attempt >= attempts) throw error;
+      console.warn(`[ledger] deadlock broken by the database; retrying (${attempt}/${attempts - 1})`);
+      await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
+    }
+  }
+}
+
 export async function authorizeCoinHold(db: ChronicaDatabase, input: Readonly<{
   gameId: string;
   workId: string;
@@ -205,13 +249,15 @@ export async function authorizeCoinHold(db: ChronicaDatabase, input: Readonly<{
   idempotencyKey: string;
 }>): Promise<{ holdId: string; replayed?: boolean }> {
   if (input.maximumMicroUnits < 0n) throw new RangeError("Hold cannot be negative.");
-  const result = await db.transaction(async (tx) => {
+  // Lock order: game, then wallet, then lots. Settlement and release take
+  // theirs in the same order.
+  const result = await withDeadlockRetry(() => db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${input.idempotencyKey}))`);
     const [existing] = await tx.select({ id: creditHolds.id, status: creditHolds.status }).from(creditHolds).where(eq(creditHolds.idempotencyKey, input.idempotencyKey)).limit(1);
     if (existing !== undefined) return { holdId: existing.id, replayed: existing.status !== "active" };
     const [game] = await tx.select().from(games).where(eq(games.id, input.gameId)).for("update").limit(1);
     if (game === undefined) throw new Error("Game not found for coin authorization.");
-    if (game.paymentStatus !== "active") throw new Error("Game payment is paused.");
+    if (game.paymentStatus !== "active") throw new CoinHoldRefusedError("payment_paused");
     await tx.insert(creditWallets).values({ userId: game.payerUserId }).onConflictDoNothing({ target: creditWallets.userId });
     const [wallet] = await tx.select().from(creditWallets).where(eq(creditWallets.userId, game.payerUserId)).for("update").limit(1);
     const [reserved] = await tx.select({ value: sql<bigint>`coalesce(sum(${creditHolds.maximumMicrocredits}), 0)` }).from(creditHolds).where(and(eq(creditHolds.gameId, game.id), eq(creditHolds.status, "active")));
@@ -238,8 +284,8 @@ export async function authorizeCoinHold(db: ChronicaDatabase, input: Readonly<{
     await tx.update(creditWallets).set({ availableMicrocredits: wallet.availableMicrocredits - input.maximumMicroUnits, heldMicrocredits: wallet.heldMicrocredits + input.maximumMicroUnits, version: wallet.version + 1 }).where(eq(creditWallets.id, wallet.id));
     await tx.insert(creditLedgerEntries).values({ walletId: wallet.id, kind: "hold", signedMicrocredits: -input.maximumMicroUnits, idempotencyKey: `ledger:${input.idempotencyKey}`, gameId: game.id, workId: input.workId, holdId: hold.id, balanceAfterMicrocredits: wallet.availableMicrocredits - input.maximumMicroUnits, reason: "AI work authorized" });
     return { holdId: hold.id };
-  });
-  if (result === null) throw new Error("Insufficient coins for the complete AI work unit.");
+  }));
+  if (result === null) throw new CoinHoldRefusedError("insufficient_coins");
   return result;
 }
 
@@ -254,13 +300,17 @@ export async function settleCoinHold(db: ChronicaDatabase, input: Readonly<{
 }>): Promise<void> {
   if (input.providerCostMicroUnits < 0n || input.coinChargeMicroUnits < 0n) throw new RangeError("AI costs cannot be negative.");
   for (const value of Object.values(input.usage)) if (!Number.isSafeInteger(value) || value < 0) throw new RangeError("Token usage must contain non-negative safe integers.");
-  await db.transaction(async (tx) => {
+  await withDeadlockRetry(() => db.transaction(async (tx) => {
     const [hold] = await tx.select().from(creditHolds).where(eq(creditHolds.id, input.holdId)).for("update").limit(1);
     const [duplicate] = await tx.select({ id: aiCalls.id }).from(aiCalls).where(eq(aiCalls.idempotencyKey, input.callId)).limit(1);
     if (duplicate !== undefined) return;
     if (hold === undefined || hold.gameId === null || hold.status !== "active" || input.coinChargeMicroUnits > hold.maximumMicrocredits) throw new Error("Coin hold cannot settle this call.");
-    const [wallet] = await tx.select().from(creditWallets).where(eq(creditWallets.id, hold.walletId)).for("update").limit(1);
+    // The game row before the wallet row, the order authorization takes them
+    // in. Taken the other way round, a settlement and an authorization running
+    // at once each held the row the other wanted, and the database broke the
+    // tie by killing both.
     const [game] = await tx.select().from(games).where(eq(games.id, hold.gameId)).for("update").limit(1);
+    const [wallet] = await tx.select().from(creditWallets).where(eq(creditWallets.id, hold.walletId)).for("update").limit(1);
     if (wallet === undefined || game === undefined) throw new Error("Coin settlement owner disappeared.");
     const allocation = hold.lotAllocation as LotAllocation[];
     let chargeRemaining = input.coinChargeMicroUnits;
@@ -282,7 +332,7 @@ export async function settleCoinHold(db: ChronicaDatabase, input: Readonly<{
     await tx.insert(aiCalls).values({ gameId: game.id, payerUserId: game.payerUserId, operation: input.operation, routingProfileVersion: input.routingProfileVersion, rateCardVersion: game.creditRateCardVersion, ...input.usage, providerCostMicroUnits: input.providerCostMicroUnits, coinChargeMicroUnits: input.coinChargeMicroUnits, holdId: hold.id, workId: hold.workId, outcome: "settled", idempotencyKey: input.callId });
     await tx.insert(creditLedgerEntries).values({ walletId: wallet.id, kind: "settle", signedMicrocredits: 0n, idempotencyKey: `settle:${input.callId}`, gameId: game.id, workId: hold.workId, holdId: hold.id, balanceAfterMicrocredits: availableAfter, reason: `AI ${input.operation} settled` });
     if (released > 0n) await tx.insert(creditLedgerEntries).values({ walletId: wallet.id, kind: "release", signedMicrocredits: released, idempotencyKey: `release:${input.callId}`, gameId: game.id, workId: hold.workId, holdId: hold.id, balanceAfterMicrocredits: availableAfter, reason: "Unused AI authorization released" });
-  });
+  }));
 }
 
 export async function releaseCoinHold(db: ChronicaDatabase, holdId: string): Promise<void> {
@@ -305,7 +355,7 @@ export async function expireStaleHolds(db: ChronicaDatabase, olderThan: Date): P
 }
 
 async function giveBackHold(db: ChronicaDatabase, holdId: string, status: "released" | "expired", reason: string): Promise<void> {
-  await db.transaction(async (tx) => {
+  await withDeadlockRetry(() => db.transaction(async (tx) => {
     const [hold] = await tx.select().from(creditHolds).where(eq(creditHolds.id, holdId)).for("update").limit(1);
     if (hold === undefined || hold.status !== "active") return;
     const [wallet] = await tx.select().from(creditWallets).where(eq(creditWallets.id, hold.walletId)).for("update").limit(1);
@@ -319,7 +369,7 @@ async function giveBackHold(db: ChronicaDatabase, holdId: string, status: "relea
     await tx.update(creditWallets).set({ availableMicrocredits: availableAfter, heldMicrocredits: wallet.heldMicrocredits - hold.maximumMicrocredits, version: wallet.version + 1 }).where(eq(creditWallets.id, wallet.id));
     await tx.update(creditHolds).set({ status }).where(eq(creditHolds.id, hold.id));
     await tx.insert(creditLedgerEntries).values({ walletId: wallet.id, kind: "release", signedMicrocredits: hold.maximumMicrocredits, idempotencyKey: `release:hold:${hold.id}`, gameId: hold.gameId, workId: hold.workId, holdId: hold.id, balanceAfterMicrocredits: availableAfter, reason });
-  });
+  }));
 }
 
 export async function listPaymentPausedGames(db: ChronicaDatabase, userId: string) {
