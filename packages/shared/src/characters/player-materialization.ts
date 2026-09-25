@@ -1,7 +1,9 @@
+import { boundedId } from "../determinism";
 import type { WorldState } from "../world/world-state";
 import type { CharacterKnowledgebase } from "./knowledgebase";
 import type { Office, ScenarioGovernmentRules } from "./character";
 import { deriveDefaultMind } from "./mind";
+import { faithNamed } from "../world/faith";
 
 // Placing a declared player character into the world.
 //
@@ -71,13 +73,21 @@ export function findOfficeForRole(
   role: string,
 ): Office | undefined {
   if (polityId === null) return undefined;
-  const roleTokens = labelTokens(role);
-  if (roleTokens.size === 0) return undefined;
-  return offices.find((office) => {
-    if (office.polityId !== polityId) return false;
-    const officeTokens = labelTokens(office.label);
-    return officeTokens.size > 0 && [...officeTokens].every((token) => roleTokens.has(token));
-  });
+  if (labelTokens(role).size === 0) return undefined;
+  return offices.find((office) => office.polityId === polityId && labelNamesOffice(role, office.label));
+}
+
+/**
+ * Whether a piece of text names an office: every meaningful word of the
+ * office's label appears in it. "Elect a consul for the year" names "Roman
+ * consul" only if it says Roman too, so a Roman office is never matched by a
+ * Carthaginian question that happens to share a word.
+ */
+export function labelNamesOffice(text: string, officeLabel: string): boolean {
+  const officeTokens = labelTokens(officeLabel);
+  if (officeTokens.size === 0) return false;
+  const textTokens = labelTokens(text);
+  return [...officeTokens].every((token) => textTokens.has(token));
 }
 
 export function findOfficeSeatForRole(
@@ -92,10 +102,7 @@ export function findOfficeSeatForRole(
 
   for (const office of scenarioGovernment.offices) {
     if (office.polityId !== polityId) continue;
-    const officeTokens = labelTokens(office.label);
-    if (officeTokens.size === 0) continue;
-    const named = [...officeTokens].every((token) => roleTokens.has(token));
-    if (!named) continue;
+    if (!labelNamesOffice(role, office.label)) continue;
 
     const seats = world.material.officeSeats.filter((seat) => seat.officeId === office.id);
     const vacant = seats.find((seat) => seat.status !== "held" && seat.holderCharacterId === null);
@@ -103,6 +110,8 @@ export function findOfficeSeatForRole(
     // No authored seat at all: the office exists but nobody has ever been
     // seated in it, so the player may take the first one.
     if (seats.length === 0) return { office, vacantSeatId: null };
+    // A college bigger than the men it names has places nobody holds on record.
+    if (office.seatCount !== undefined && seats.filter((seat) => seat.status === "held").length < office.seatCount) return { office, vacantSeatId: null };
   }
   return undefined;
 }
@@ -118,8 +127,45 @@ export function findOfficeSeatForRole(
  */
 const COMMAND_ROLE_WORDS = [
   "legate", "commander", "captain", "general", "prefect", "tribune", "centurion",
-  "admiral", "navarch", "chieftain", "warlord", "soldier", "officer", "strategos",
+  "admiral", "navarch", "chieftain", "warlord", "strategos",
 ];
+
+/**
+ * Words in a role that mean the person serves in the ranks.
+ *
+ * "Soldier" used to be a command word, so a player who declared himself a
+ * legionary was handed a retinue of four hundred men and made their commander
+ * -- the one thing a legionary is not. A role in this list enlists him in an
+ * army of his own power instead (`findEnlistmentForRole`); a role that also
+ * names a command ("a veteran centurion") still commands.
+ */
+const RANKS_ROLE_WORDS = [
+  "soldier", "legionary", "legionnaire", "ranker", "hoplite", "spearman", "infantryman",
+  "archer", "slinger", "horseman", "cavalryman", "trooper", "rower", "oarsman", "sailor",
+  "marine", "mercenary", "veteran", "recruit", "conscript", "warrior", "levy",
+];
+
+/**
+ * The army a man in the ranks serves in: one of his own power's, the one where
+ * he stands if there is one, else the largest. Undefined for a role that names
+ * a command (that is `findCommandForRole`'s), one that names no soldiering, or
+ * a power with no army at all.
+ */
+export function findEnlistmentForRole(
+  world: WorldState,
+  polityId: string | null,
+  role: string,
+  provinceId: string | null,
+): string | undefined {
+  if (polityId === null) return undefined;
+  const tokens = [...labelTokens(role)];
+  if (tokens.some((token) => COMMAND_ROLE_WORDS.includes(token))) return undefined;
+  if (!tokens.some((token) => RANKS_ROLE_WORDS.includes(token))) return undefined;
+  const strength = (force: WorldState["material"]["forces"][number]) => force.personnel.reduce((sum, category) => sum + category.fit, 0);
+  return world.material.forces
+    .filter((force) => force.polityId === polityId && strength(force) > 0)
+    .sort((a, b) => Number(b.locationId === provinceId) - Number(a.locationId === provinceId) || strength(b) - strength(a) || a.id.localeCompare(b.id))[0]?.id;
+}
 
 /**
  * The power a stated role and culture actually name.
@@ -182,6 +228,9 @@ export function findCommandForRole(
   if (polityId === null) return undefined;
   const tokens = labelTokens(role);
   if (![...tokens].some((token) => commandWords.includes(token))) return undefined;
+  // A tribune of the plebs is a magistrate of the people, not an officer: he
+  // commands no men, and was handed four hundred of them.
+  if (tokens.has("tribune") && (tokens.has("plebs") || tokens.has("plebeian") || tokens.has("people")) && ![...tokens].some((token) => token !== "tribune" && commandWords.includes(token))) return undefined;
 
   const living = new Set(world.characters.filter((character) => character.alive).map((character) => character.id));
   const orphaned = world.material.forces
@@ -253,22 +302,29 @@ export function materializePlayerCharacter(
   // projection (characters/authority-projection.ts); a role that names no
   // office, or one whose seats are all filled, leaves officeId null rather
   // than granting power the scenario did not actually have to give.
-  const matched = findOfficeSeatForRole(world, scenarioGovernment, declaredPolityId, knowledgebase.role);
+  // A slave holds no office and commands nobody, whatever his role says.
+  const legalStatus = knowledgebase.legalStatus ?? "free";
+  const unfree = legalStatus === "enslaved";
+  const matched = unfree ? undefined : findOfficeSeatForRole(world, scenarioGovernment, declaredPolityId, knowledgebase.role);
+  // What he believes and how old he is, as he declared them. Both used to be
+  // thrown away -- every player was thirty-five and believed in nothing.
+  const believes = knowledgebase.faith === null ? null : faithNamed(world, knowledgebase.faith, world.elapsedStep);
+  const ageYears = Math.max(14, Math.min(80, knowledgebase.ageYearsAtOpening ?? 35));
   const officeId = matched?.office.id ?? null;
   const playerCharacter: WorldState["characters"][number] = {
     id: actorCharacterId,
     name: knowledgebase.canonicalName,
     cultureId,
-    faithId: null,
+    faithId: believes?.faithId ?? null,
     dynastyId: null,
     locationProvinceId: location.id,
     polityId: declaredPolityId,
-    ageYearsAtStart: 35,
+    ageYearsAtStart: ageYears,
     officeId,
     personalAccountId: accountId,
     skills: knowledgebase.skills,
     traits: [],
-    mind: deriveDefaultMind({ officeId, skills: knowledgebase.skills, ageYears: 35, cultureId }),
+    mind: deriveDefaultMind({ officeId, skills: knowledgebase.skills, ageYears, cultureId }),
     healthBps: 10_000,
     prestigeBps: 3_000,
     relations: [],
@@ -277,6 +333,12 @@ export function materializePlayerCharacter(
     alive: true,
     diedAtStep: null,
     disqualifyingStatuses: [],
+    officesHeld: [],
+    eligibilityWaivers: [],
+    legalStatus,
+    gender: knowledgebase.gender ?? "male",
+    ownerCharacterId: null,
+    peculium: false,
     birthStep: null,
     nextLifeReviewAtStep: null,
   };
@@ -284,7 +346,11 @@ export function materializePlayerCharacter(
   // Fixed id and fixed numbers: `materializePlayerCharacter` is a pure
   // projection re-run by read paths, so anything it creates must be the same
   // thing every time it is called.
-  const command = findCommandForRole(world, declaredPolityId, knowledgebase.role, location.id);
+  const command = unfree ? undefined : findCommandForRole(world, declaredPolityId, knowledgebase.role, location.id);
+  // A man in the ranks serves in an army, and stands where it stands.
+  const enlistedIn = command === undefined && !unfree ? findEnlistmentForRole(world, declaredPolityId, knowledgebase.role, location.id) : undefined;
+  const enlistedForce = enlistedIn === undefined ? undefined : world.material.forces.find((force) => force.id === enlistedIn);
+  if (enlistedForce !== undefined) playerCharacter.locationProvinceId = enlistedForce.locationId;
   const retinueId = `force-${actorCharacterId}`;
   const commandedForces = command === undefined || world.material.forces.some((force) => force.id === retinueId)
     ? command?.kind === "existing"
@@ -316,6 +382,7 @@ export function materializePlayerCharacter(
         payObligationId: null,
         payArrearsPeriods: 0,
         history: [],
+        memberCharacterIds: [],
       }];
 
   const officeSeats = matched === undefined
@@ -325,7 +392,7 @@ export function materializePlayerCharacter(
         ? { ...seat, holderCharacterId: actorCharacterId, status: "held" as const, vacancyCause: "none" as const, termStartedAtStep: world.elapsedStep }
         : seat))
       : [...world.material.officeSeats, {
-        id: `${matched.office.id}:seat:0`,
+        id: boundedId(matched.office.id, "seat", 0),
         officeId: matched.office.id,
         seatIndex: 0,
         holderCharacterId: actorCharacterId,
@@ -340,6 +407,7 @@ export function materializePlayerCharacter(
 
   return {
     ...world,
+    ...(believes === null ? {} : { faiths: believes.world.faiths }),
     characters: [...world.characters, playerCharacter],
     material: {
       ...world.material,
@@ -347,7 +415,11 @@ export function materializePlayerCharacter(
       // else in declaration ever produced a force, so a declared legate held
       // no command -- and command authority is derived from a force, never
       // from a title.
-      forces: commandedForces,
+      forces: enlistedIn === undefined
+        ? commandedForces
+        : commandedForces.map((force) => (force.id === enlistedIn && !force.memberCharacterIds.includes(actorCharacterId)
+          ? { ...force, memberCharacterIds: [...force.memberCharacterIds, actorCharacterId].slice(-40) }
+          : force)),
       officeSeats,
       accounts: existingAccount ? world.material.accounts : [...world.material.accounts, personalAccount],
       accountAccess: world.material.accountAccess.some((access) => access.accountId === accountId && access.characterId === actorCharacterId)

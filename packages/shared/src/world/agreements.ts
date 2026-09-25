@@ -29,16 +29,57 @@ export const PolityAgreementKindSchema = z.enum([
   "non_aggression",
   "tributary",
   "trade_pact",
+  /**
+   * One power keeps its own government and another answers for it abroad.
+   *
+   * The kind this scenario is actually about and the only one it had no word
+   * for. A city offered its own laws under somebody else's protection is not
+   * an ally -- it is not an equal and has promised no army -- and it is not a
+   * tributary, because it pays nothing. `messana-invites-a-protector` gates
+   * the war that follows it, and what Messana was offered could be written in
+   * a letter, accepted in a reply, and then recorded nowhere: the arrangement
+   * that started the First Punic War left nothing standing in the world.
+   *
+   * Ordered like tribute, and for the same reason: the protected power is
+   * named first, because which of the two is which is the whole of the terms.
+   */
+  "protectorate",
+  /**
+   * Leave to march an army across somebody else's land.
+   *
+   * Ordered like tribute: the power granted passage is named first, the host
+   * second. It changes nothing a battle computes. What it changes is whether
+   * the host has been wronged -- an army that crosses a border without it is
+   * trespassing, the host hears of it, and the host may do something about it.
+   */
+  "military_access",
 ]);
 export type PolityAgreementKind = z.infer<typeof PolityAgreementKindSchema>;
+
+/**
+ * Each kind as a noun a sentence can carry: "the military_access between Rome
+ * and the Ardiaei" is what a raw id reads like when it reaches a Chronicle.
+ */
+export const AGREEMENT_KIND_IN_WORDS: Record<PolityAgreementKind, string> = {
+  war: "war",
+  truce: "truce",
+  peace: "peace",
+  alliance: "alliance",
+  non_aggression: "pact of non-aggression",
+  tributary: "tributary arrangement",
+  trade_pact: "trade pact",
+  protectorate: "protectorate",
+  military_access: "grant of passage for armies",
+};
 
 export const PolityAgreementSchema = z
   .object({
     id: EntityIdSchema,
     kind: PolityAgreementKindSchema,
     /**
-     * The two parties. Unordered for every kind but one: a tributary agreement
-     * runs from the tributary to the power it pays, so the order is the terms.
+     * The two parties. Unordered for every kind but two: a tributary agreement
+     * runs from the tributary to the power it pays, and a protectorate from
+     * the protected power to its protector, so the order is the terms.
      */
     polityId: EntityIdSchema,
     otherPolityId: EntityIdSchema,
@@ -106,4 +147,23 @@ export function expireDatedAgreements(agreements: readonly PolityAgreement[], at
       ? { ...agreement, status: "ended" as const, endedAtStep: atStep, endedReason: "Its term ran out." }
       : agreement,
   );
+}
+
+/**
+ * Whether `moverPolityId`'s armies may stand on `hostPolityId`'s ground without
+ * wronging it: at war (it is enemy ground, and trespass is the least of it),
+ * allied, protecting or protected, or granted passage. Anything else is a
+ * border crossed without leave.
+ */
+export function mayEnterWithoutLeave(
+  agreements: readonly PolityAgreement[],
+  moverPolityId: string,
+  hostPolityId: string,
+): boolean {
+  if (moverPolityId === hostPolityId) return true;
+  return agreementsBetween(agreements, moverPolityId, hostPolityId).some((agreement) =>
+    agreement.kind === "war"
+    || agreement.kind === "alliance"
+    || agreement.kind === "protectorate"
+    || (agreement.kind === "military_access" && agreement.polityId === moverPolityId));
 }

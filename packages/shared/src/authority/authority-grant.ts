@@ -92,6 +92,7 @@ export type AuthorityGrant = z.infer<typeof AuthorityGrantSchema>;
 export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = {
   force_create: "command",
   force_modify: "command",
+  force_reinforce: "command",
   force_attrition: "command",
   money_transfer: "spend",
   income_source_upsert: "spend",
@@ -109,6 +110,7 @@ export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = 
   storyline_advance: "propose",
   character_pressure_set: "propose",
   character_state_set: "propose",
+  force_raid: "command",
   // The rest of the union. An op an office listed but this map lacked derived
   // no power at all, so a consul resolving a Senate procedure his office
   // plainly authorised was recorded as overreach -- the same power names the
@@ -116,6 +118,7 @@ export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = 
   generic_entity_update: "propose",
   belief_set: "propose",
   force_engage: "command",
+  force_membership_set: "command",
   polity_outlook_set: "propose",
   legitimacy_shift: "propose",
   province_material_shift: "propose",
@@ -129,10 +132,26 @@ export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = 
   // all, and an office that listed it would derive nothing -- so it derives the
   // highest power there is, and an office that has not been given it breaches.
   province_control_set: "command",
+  settlement_control_set: "command",
   polity_create: "override",
   office_seat_set: "appoint",
   agreement_open: "negotiate",
   agreement_close: "negotiate",
+  // An office may list it, and none ever should: "punish" is the power a plot
+  // helps itself to -- deciding a man has forfeited something, with no court
+  // and no hearing. Mapped so that a government which really does authorise
+  // its spymaster to do this can say so, and so that everyone who has not been
+  // authorised breaches the moment they try.
+  covert_plot_open: "punish",
+  contingency_arm: "command",
+  contingency_disarm: "command",
+  family_tie_set: "propose",
+  // A government that really does give its magistrates the power of life and
+  // death says so by listing this; everybody else breaches when they use it.
+  character_death: "punish",
+  legal_status_set: "punish",
+  service_contract_open: "spend",
+  service_contract_close: "spend",
 };
 
 function officeIdToDomainPowers(office: Office): { readonly domain: AuthorityDomain; readonly powers: readonly AuthorityPower[] }[] {
@@ -249,10 +268,18 @@ export function deriveCommandGrants(forces: MaterialWorldState["forces"], atStep
  * breach -- which made every privately-funded act look like embezzlement.
  * Ownership is not an office, and does not expire.
  */
+/**
+ * Whether a grant is only a man's say over what is his: his purse, and the men
+ * it pays. Everybody holds those, so counting them made every private citizen
+ * a figure of the state -- in who the world asks what they are doing, in who
+ * counts as a man's peer, and in who is offered a dead man's house.
+ */
+export const isOwnPurseGrant = (grant: Pick<AuthorityGrant, "id">): boolean => grant.id.startsWith("owner:");
+
 export function deriveOwnerGrants(accounts: MaterialWorldState["accounts"], atStep: number): AuthorityGrant[] {
   return accounts
     .filter((account) => account.owner.kind === "character" && account.status === "active")
-    .map((account) =>
+    .flatMap((account) => [
       AuthorityGrantSchema.parse({
         id: `owner:${account.id}`,
         holder: { kind: "character", id: account.owner.id },
@@ -264,7 +291,22 @@ export function deriveOwnerGrants(accounts: MaterialWorldState["accounts"], atSt
         standing: "lawful",
         grantedAtStep: atStep,
       }),
-    );
+      // Command of men his own money pays: a merchant's armed ship, a noble's
+      // clients under arms. Only a force raised against this purse is weighed
+      // against it (sim `scopeOf`, "force_create"), so this reaches nothing
+      // the state pays for.
+      AuthorityGrantSchema.parse({
+        id: `owner:${account.id}:company`,
+        holder: { kind: "character", id: account.owner.id },
+        source: "custom",
+        sourceRef: account.id,
+        domain: "military",
+        scope: { kind: "account", id: account.id },
+        powers: ["command"],
+        standing: "lawful",
+        grantedAtStep: atStep,
+      }),
+    ]);
 }
 
 /** A prebuilt lookup over every currently-active grant (derived from offices, commands and ownership, plus persisted `WorldState.authorityGrants`). */

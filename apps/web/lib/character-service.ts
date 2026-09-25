@@ -24,6 +24,7 @@ import {
   linkCanonicalCharacters,
   materializePlayerCharacter,
   type CharacterKnowledgebase,
+  type FamilyLinkKind,
   type ScenarioWealthRules,
 } from "@chronica/shared";
 import { eq, and, isNull } from "drizzle-orm";
@@ -178,6 +179,8 @@ Output ONLY a valid JSON object matching this schema (no markdown fences, no com
   "locationProvinceId": "string — required exact opening-map region id",
   "culture": "string — e.g. 'Roman Patrician'",
   "faith": "string | null",
+  "gender": "male | female",
+  "legalStatus": "free | freed | enslaved — what the law says they are",
   "biography": "string — 200–500 words, dense prose optimised for AI re-reads",
   "notableEvents": ["array of short strings, key life events"],
   "role": "string — current position/job, using the historically accurate title for the era (e.g. 'Consul of the Roman Republic, commanding the Roman field army' rather than 'General of the Roman Army' in the Republican era)",
@@ -326,7 +329,10 @@ function parseAiKnowledgebase(
     return null;
   }
 
-  const knowledgebase = result.data;
+  // How old they are on the opening day, worked out once here, so every later
+  // reading of the declaration puts the same man in the world.
+  const openingAge = ageAtScenarioStart(result.data.birthYearApprox, context.timelineStartYear);
+  const knowledgebase = openingAge === null ? result.data : { ...result.data, ageYearsAtOpening: Math.min(120, openingAge) };
 
   if (knowledgebase.origin !== "invented") {
     // Birth year must be known and before the scenario start.
@@ -541,6 +547,7 @@ export async function confirmDeclaredCharacter(gameId: string): Promise<Characte
       const relationScore = scoreForDeclaredConnection(relation.relationship, relation.notes);
       const player = canonicalWorld.characters.find((candidate) => candidate.id === characterId);
       if (player === undefined) return { status: "error", message: "The confirmed player could not enter canonical world state." };
+      const kin = relation.familyRole === null ? null : FAMILY_LINK_BY_ROLE[relation.familyRole] ?? null;
       const created = createCanonicalNpc(canonicalWorld, {
         characterId: npcId,
         name: relation.name,
@@ -549,10 +556,33 @@ export async function confirmDeclaredCharacter(gameId: string): Promise<Characte
         startingMoney: 0,
         createdAtStep: canonicalWorld.elapsedStep,
         creationReason: `Declared ${relation.relationship} of ${existing.canonicalName}.`,
+        // A father a generation older, a son a generation younger. Everybody
+        // was thirty-five, so the player's parents were his own age.
+        ageYearsAtStart: kin === null ? player.ageYearsAtStart : Math.max(1, player.ageYearsAtStart + (KIN_AGE_OFFSET[kin] ?? 0)),
+        gender: declaredGender(kin, relation.relationship, player.gender),
       });
       if (created === null) return { status: "error", message: `Could not materialise ${relation.name} in canonical world state.` };
       canonicalWorld = linkCanonicalCharacters(created.world, characterId, npcId, relation.relationship, relationScore, canonicalWorld.elapsedStep);
       canonicalWorld = linkCanonicalCharacters(canonicalWorld, npcId, characterId, relation.relationship, relationScore, canonicalWorld.elapsedStep);
+      // Kin as the family graph records it, and not only as a feeling. The
+      // declared wife and son were made, and liked him, and were nobody's
+      // wife and son: succession reads family links, found none, and offered
+      // the dead man's heirs from among strangers of standing.
+      if (kin !== null) {
+        canonicalWorld = {
+          ...canonicalWorld,
+          familyLinks: [...canonicalWorld.familyLinks, {
+            id: `family-${npcId}`,
+            characterId: npcId,
+            relatedCharacterId: characterId,
+            kind: kin,
+            startedAtStep: canonicalWorld.elapsedStep,
+            endedAtStep: null,
+            visibility: "public",
+            provenanceEventId: null,
+          }],
+        };
+      }
       const kb = await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcId, {
         canonicalName: relation.name,
         personalitySummary: relation.notes ?? "",
@@ -583,6 +613,33 @@ export async function confirmDeclaredCharacter(gameId: string): Promise<Characte
     await close();
   }
 }
+
+/** A declared relative's role, read from the relative's side: a declared "parent" is the player's parent. */
+const FAMILY_LINK_BY_ROLE: Readonly<Record<string, FamilyLinkKind>> = {
+  parent: "parent",
+  partner: "spouse_or_partner",
+  sibling: "sibling",
+  child: "child",
+  other_relative: "other_relative",
+};
+
+/** Roughly how much older than the player each kind of kin is. */
+/**
+ * A declared wife was made a man, like everybody, and so could never bear the
+ * player a child. A partner is taken to be of the other sex; anyone else is a
+ * woman where the relationship says so in as many words.
+ */
+function declaredGender(kin: FamilyLinkKind | null, relationship: string, playerGender: "male" | "female"): "male" | "female" {
+  if (kin === "spouse_or_partner") return playerGender === "male" ? "female" : "male";
+  return /\b(mother|sister|wife|daughter|aunt|niece|grandmother|widow|matron|mistress|concubine|consort|queen|priestess)\b/i.test(relationship) ? "female" : "male";
+}
+
+const KIN_AGE_OFFSET: Readonly<Partial<Record<FamilyLinkKind, number>>> = {
+  parent: 25,
+  child: -25,
+  sibling: -2,
+  spouse_or_partner: -5,
+};
 
 export async function getCharacterPanelData(gameId: string): Promise<CharacterKnowledgebase | null> {
   if (gameId === DEMO_GAME_ID) return null;

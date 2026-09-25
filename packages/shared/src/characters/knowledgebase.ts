@@ -58,6 +58,11 @@ export const CharacterKnowledgebaseSchema = z
     locationProvinceId: EntityIdSchema.nullable().default(null),
     culture: z.string().trim().min(1).max(120),
     faith: z.string().trim().min(1).max(120).nullable(),
+    /** Optional, so a declaration from before these existed still parses as a free man. */
+    gender: z.enum(["male", "female"]).optional(),
+    legalStatus: z.enum(["free", "freed", "enslaved"]).optional(),
+    /** Worked out from the birth year and the scenario's opening when the declaration is made. */
+    ageYearsAtOpening: z.number().int().min(0).max(120).optional(),
     /** 200–600 words. Dense prose, optimised for repeated AI reads. */
     biography: z.string().trim().min(50).max(3000),
     notableEvents: z.array(z.string().trim().min(1).max(300)),

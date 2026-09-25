@@ -1,4 +1,4 @@
-import { getGameView, submitOrder, type SimulationProgress } from "../../../../../lib/simulation-service";
+import { TIME_SPANS, getGameView, submitOrder, type SimulationProgress } from "../../../../../lib/simulation-service";
 
 /**
  * The order box: one natural-language instruction, one simulation burst.
@@ -22,9 +22,15 @@ type Frame =
 export async function POST(request: Request, { params }: { params: Promise<{ gameId: string }> }) {
   const { gameId } = await params;
   const body: unknown = await request.json().catch(() => null);
-  const orderText = typeof body === "object" && body !== null && "orderText" in body ? String(body.orderText) : "";
-  if (orderText.trim().length === 0) return Response.json({ error: "An order is required." }, { status: 400 });
+  const field = (key: string): unknown => (typeof body === "object" && body !== null && key in body ? (body as Record<string, unknown>)[key] : undefined);
+  const orderText = typeof field("orderText") === "string" ? String(field("orderText")) : "";
+  // Letting time pass is an order of its own, and the only one with no words.
+  const waiting = field("wait") === true;
+  if (!waiting && orderText.trim().length === 0) return Response.json({ error: "An order is required." }, { status: 400 });
   if (orderText.length > 2_000) return Response.json({ error: "That order is too long." }, { status: 400 });
+  const requestedSpan = field("spanDays");
+  const spanDays = typeof requestedSpan === "number" && (TIME_SPANS as readonly number[]).includes(requestedSpan) ? requestedSpan : undefined;
+  if (waiting && spanDays === undefined) return Response.json({ error: "Say how long to wait." }, { status: 400 });
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -38,7 +44,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ gam
         }
       };
       try {
-        const result = await submitOrder(gameId, orderText.trim(), undefined, (progress) => send({ kind: "progress", progress }));
+        const text = orderText.trim();
+        const result = await submitOrder(gameId, text.length === 0 ? null : text, undefined, (progress) => send({ kind: "progress", progress }), spanDays);
         send({ kind: "done", result });
       } catch (error) {
         send({ kind: "error", error: error instanceof Error ? error.message : String(error) });

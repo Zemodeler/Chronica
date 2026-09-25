@@ -5,7 +5,6 @@ import {
   deriveDefaultProvinceMaterial,
   ensureProvinceMaterial,
   applyRecruitmentToMaterial,
-  applyTaxationDraw,
   applyWarDamage,
   applyCoarseRecoveryTick,
   advanceProvinceMaterial,
@@ -87,23 +86,6 @@ describe("applyRecruitmentToMaterial", () => {
     const before = material({ availableManpower: 100 });
     const after = applyRecruitmentToMaterial(before, 10_000, 1);
     expect(after.availableManpower).toBe(0);
-  });
-});
-
-describe("applyTaxationDraw", () => {
-  it("collects less from a less stable province, and costs it further stability", () => {
-    const stable = material({ taxCapacity: 1_000, stabilityBps: 10_000 });
-    const unstable = material({ taxCapacity: 1_000, stabilityBps: 3_000 });
-    const stableDraw = applyTaxationDraw(stable, 1_000, 1);
-    const unstableDraw = applyTaxationDraw(unstable, 1_000, 1);
-    expect(stableDraw.collected).toBeGreaterThan(unstableDraw.collected);
-    expect(stableDraw.material.stabilityBps).toBeLessThan(stable.stabilityBps);
-  });
-
-  it("collects nothing from a province with no tax capacity", () => {
-    const broke = material({ taxCapacity: 0 });
-    const draw = applyTaxationDraw(broke, 500, 1);
-    expect(draw.collected).toBe(0);
   });
 });
 

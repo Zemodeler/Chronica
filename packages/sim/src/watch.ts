@@ -40,6 +40,12 @@ function holdsIn(predicate: WatchPredicate, world: WorldState): boolean {
           force.locationId === predicate.provinceId &&
           (predicate.polityId === undefined ? true : force.polityId === predicate.polityId),
       );
+    case "force_enters_position":
+      return world.material.forces.some(
+        (force) =>
+          force.positionId === predicate.positionId &&
+          (predicate.polityId === undefined ? true : force.polityId === predicate.polityId),
+      );
     case "polity_strength_above": {
       const headcount = world.material.forces
         .filter((force) => force.polityId === predicate.polityId)
@@ -67,22 +73,55 @@ function holdsIn(predicate: WatchPredicate, world: WorldState): boolean {
       if (seats.length === 0) return false;
       return seats.some((seat) => seat.holderCharacterId === null) === predicate.vacant;
     }
-    // Not a state anybody can hold: it is the comparison itself.
+    // Not states anybody can hold: they are the comparison itself.
     case "province_control_changes":
+    case "settlement_control_changes":
       return false;
     default:
       return false;
   }
 }
 
-export function isWatchSatisfied(predicate: WatchPredicate, opening: WorldState, now: WorldState): boolean {
-  // Its own kind of change, and the only one that cannot be phrased as a
-  // state: who holds the ground now against who held it then.
+/**
+ * What the predicate reads as, right now, as one stable string.
+ *
+ * Split out from the comparison because a *durable* watcher cannot hold two
+ * worlds. A ruler's watch compares the start of the burst with the end of it,
+ * and that is all it ever needs; a contingency is armed in March and springs in
+ * August, and the world it was armed against is long gone. So it keeps this
+ * reading instead, and fires when the reading changes in the right direction.
+ *
+ * Two shapes, because the union has two shapes. Most predicates are states a
+ * world either holds or does not. Two of them -- who holds a province, who
+ * holds a city -- are not states anybody can hold: the event *is* the change,
+ * so the reading is the holder itself and any difference is the event.
+ */
+export function watchReading(predicate: WatchPredicate, world: WorldState): string {
   if (predicate.kind === "province_control_changes") {
-    const controllerIn = (world: WorldState): string | null | undefined =>
-      world.map.provinces.find((province) => province.id === predicate.provinceId)?.controllerPolityId;
-    return controllerIn(now) !== controllerIn(opening);
+    return world.map.provinces.find((province) => province.id === predicate.provinceId)?.controllerPolityId ?? "none";
   }
-  // Everything else: it has to have *become* true.
-  return holdsIn(predicate, now) && !holdsIn(predicate, opening);
+  if (predicate.kind === "settlement_control_changes") {
+    return world.map.provinces
+      .flatMap((province) => province.settlements)
+      .find((settlement) => settlement.id === predicate.settlementId)?.controllerPolityId ?? "none";
+  }
+  return holdsIn(predicate, world) ? "yes" : "no";
+}
+
+/**
+ * Whether the thing watched for has happened, between two readings.
+ *
+ * For a state, it has to have *become* true: a condition already true when the
+ * order was given has not happened, and waking for it ends the order in the act
+ * of giving it. For a change, any difference is the whole event.
+ */
+export function firedBetween(predicate: WatchPredicate, armedReading: string, nowReading: string): boolean {
+  if (predicate.kind === "province_control_changes" || predicate.kind === "settlement_control_changes") {
+    return nowReading !== armedReading;
+  }
+  return nowReading === "yes" && armedReading !== "yes";
+}
+
+export function isWatchSatisfied(predicate: WatchPredicate, opening: WorldState, now: WorldState): boolean {
+  return firedBetween(predicate, watchReading(predicate, opening), watchReading(predicate, now));
 }

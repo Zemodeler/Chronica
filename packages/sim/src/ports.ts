@@ -9,7 +9,7 @@
  */
 
 /** Model calls the loop makes. Mirrors the `AiOperation` ids registered in `@chronica/shared`'s `coins.ts`. */
-export type SimOperation = "simulate_orchestrate" | "simulate_cognition" | "compose_chronicle";
+export type SimOperation = "simulate_orchestrate" | "simulate_cognition" | "compose_chronicle" | "reconcile_facts";
 
 export interface SimModelPort {
   complete(operation: SimOperation, systemPrompt: string, userMessage: string): Promise<string>;

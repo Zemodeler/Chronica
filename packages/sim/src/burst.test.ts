@@ -272,17 +272,28 @@ describe("the future queue", () => {
 });
 
 describe("friction the player hears about", () => {
-  /** An order whose spending the treasury genuinely cannot cover. */
+  /**
+   * An order whose spending the purse genuinely cannot cover. A payment larger
+   * than the purse now pays what is in it, so it is the second, from a purse
+   * already emptied, that the world refuses.
+   */
   const UNAFFORDABLE = JSON.stringify({
     ...JSON.parse(RAISE_TWO_LEGIONS),
-    deltas: [{ op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: null, amount: 999_999, reason: "An impossible levy." }],
+    deltas: [
+      { op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: null, amount: 999_999, reason: "Everything he has." },
+      { op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: null, amount: 500, reason: "An impossible levy." },
+    ],
     facts: [],
   });
 
-  /** An order naming an official the same answer never created. */
+  /**
+   * An order naming an army nobody raised. (A person named and never made is
+   * made now -- the world's lists are open -- so the malformed reference that
+   * stands for the whole class is one the engine cannot fill in: an army.)
+   */
   const PHANTOM = JSON.stringify({
     ...JSON.parse(RAISE_TWO_LEGIONS),
-    deltas: [{ op: "character_intent_set", actorCharacterRef: "publius_scutarius", actionType: "prepare", targetRefs: [], rationale: "Preparing the levy.", priority: 50, visibility: "private" }],
+    deltas: [{ op: "force_modify", forceRef: "legio-phantasma", name: "The Phantom Legion", reason: "Renaming an army nobody raised." }],
     facts: [],
   });
 
@@ -296,8 +307,8 @@ describe("friction the player hears about", () => {
   });
 
   it("keeps a malformed proposal out of the ruler's sight", async () => {
-    // "No character publius_scutarius exists" is the engine catching a bad
-    // payload, not a thing that happened in the world.
+    // "No force legio-phantasma exists" is the engine catching a bad payload,
+    // not a thing that happened in the world.
     const port = scriptedPort({ simulate_orchestrate: [PHANTOM], simulate_cognition: [JSON.stringify({ actors: [] })] });
     const result = await runSimulationBurst(input(port));
 
@@ -677,7 +688,7 @@ describe("the world stirs: a secret plot", () => {
     // The plotter's own account travels with his private facts and is not
     // his ruler's to read; the thread's title is known to its participants
     // alone. The orchestrator's summary is the one thing code cannot gate --
-    // it describes the visible order too -- which is what rule 21 is for.
+    // it describes the visible order too -- which is what the secrecy principle (7) is for.
     const historian = capturingScriptedPort({ compose_chronicle: [JSON.stringify({ entries: [] })] });
     await composeChronicle({
       port: historian, clock, observer: player, observerPolityId: "rome", facts: result.newFacts, from: { day: 0, minute: 0 }, to: result.world.instant,
@@ -804,5 +815,80 @@ describe("an irregularity somebody comes across", () => {
       expect(breach.discovery.knowableAtInstant).not.toBeNull();
       expect(others.length).toBeLessThanOrEqual(2);
     }
+  });
+});
+
+describe("the order, and the world beside it", () => {
+  const ANSWER = (lists: { deltas?: unknown[]; worldDeltas?: unknown[] }) => JSON.stringify({
+    intent: { summary: "Nothing much.", domains: [] },
+    narrativeSummary: "The world goes on.",
+    frictions: [],
+    deltas: lists.deltas ?? [],
+    worldDeltas: lists.worldDeltas ?? [],
+    facts: [], delegations: [], schedule: [], cognitionCandidates: [], outcome: "continue", playerDecision: null,
+  });
+  const RENAME = { op: "force_modify", forceRef: "carthaginian-army", name: "The Army of Sicily", reason: "Hanno renames his army." };
+  const quiet = JSON.stringify({ actors: [] });
+  const named = (result: Awaited<ReturnType<typeof runSimulationBurst>>) =>
+    result.world.material.forces.find((force) => force.id === "carthaginian-army")!.name;
+
+  it("will not have a Roman's order rename a Carthaginian army", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [ANSWER({ deltas: [RENAME] })], simulate_cognition: [quiet, quiet, quiet, quiet] });
+    const result = await runSimulationBurst(input(port, { orderText: "Have the Carthaginians call their army the Army of Sicily." }));
+    expect(named(result)).not.toBe("The Army of Sicily");
+    expect(result.newFacts.some((fact) => fact.kind === "order_ignored")).toBe(true);
+  });
+
+  it("lets the world rename it, when it is Carthage's own business", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [ANSWER({ worldDeltas: [RENAME] })], simulate_cognition: [quiet, quiet, quiet, quiet] });
+    const result = await runSimulationBurst(input(port));
+    expect(named(result)).toBe("The Army of Sicily");
+    expect(result.breaches).toEqual([]);
+  });
+});
+
+describe("the player says how long", () => {
+  const NOTHING = JSON.stringify({
+    intent: { summary: "Wait.", domains: [] }, narrativeSummary: "Time passes.", frictions: [],
+    deltas: [], facts: [], delegations: [], schedule: [], cognitionCandidates: [], outcome: "continue", playerDecision: null,
+  });
+  const quiet = JSON.stringify({ actors: [] });
+
+  it("lets a month pass with no order, in a world with nothing on its calendar", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [NOTHING], simulate_cognition: [quiet, quiet, quiet, quiet] });
+    const before = world().instant.day;
+    const result = await runSimulationBurst(input(port, { orderText: null, spanDays: 30 }));
+    expect(result.world.instant.day - before).toBeGreaterThanOrEqual(30);
+  });
+
+  it("carries a year when asked for one, past the ordinary ceiling of a season", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [NOTHING], simulate_cognition: [quiet, quiet, quiet, quiet] });
+    const before = world().instant.day;
+    const result = await runSimulationBurst(input(port, { orderText: null, spanDays: 365 }));
+    expect(result.world.instant.day - before).toBe(Math.min(365, clock.maxSpanDays));
+  });
+});
+
+describe("the audit", () => {
+  const ORDER = JSON.stringify({
+    ...JSON.parse(QUIET),
+    narrativeSummary: "The consul pays his steward and takes on a clerk.",
+    deltas: [
+      // No such account: the consul's own purse is the obvious payer.
+      { op: "obligation_upsert", obligationRef: null, localId: "clerk", kind: "salary", label: "A clerk's wage", payerAccountRef: "marcus-strongbox", recipientAccountRef: null, amount: 2, cadenceDays: 30, priority: 500, active: true, reason: "He takes on a clerk." },
+      // No such legion, and which army he meant is not the engine's to guess.
+      { op: "force_modify", forceRef: "the-stewards-guard", authorizedStrengthDelta: 10, reason: "He adds men to his guard." },
+    ],
+  });
+  const REPAIRED = JSON.stringify({ deltas: [{ op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: null, amount: 5, reason: "He pays his steward." }] });
+
+  it("keeps what was filled in and what the repair had to put right, which the merged result forgets", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [ORDER, REPAIRED], simulate_cognition: [] });
+    const result = await runSimulationBurst(input(port, { spanDays: 7 }));
+    const ofTheOrder = result.audit.filter((entry) => entry.ofTheOrder);
+    expect(ofTheOrder.find((entry) => entry.kind === "assumed")).toMatchObject({ op: "obligation_upsert", attempt: "first" });
+    expect(ofTheOrder.find((entry) => entry.kind === "reference")).toMatchObject({ op: "force_modify", attempt: "first" });
+    // The repair carried it out, so nothing of the order's is refused the second time.
+    expect(ofTheOrder.filter((entry) => entry.attempt === "repair" && entry.kind !== "assumed")).toEqual([]);
   });
 });

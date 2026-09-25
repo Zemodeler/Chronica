@@ -213,6 +213,27 @@ export const CharacterSchema = z
      * requirement kind (character-sim phase 4).
      */
     disqualifyingStatuses: z.array(EntityIdSchema).default([]),
+
+    /**
+     * Every office this person has held, and when they last held it: the
+     * ladder a career climbs, and the gap before the same office again. Kept
+     * by the engine from the seats (sim `recordTenures`); nobody writes it.
+     */
+    officesHeld: z.array(z.object({ officeId: EntityIdSchema, lastHeldAtStep: ElapsedStepSchema }).strict()).default([]),
+    /**
+     * What the law says a person is (VISION §12; roles plan phase 4). A slave's
+     * purse, movements and bargains are his owner's; a freedman keeps his old
+     * master as patron, and cannot hold high office. Defaulted, so every
+     * character from before this existed is free.
+     */
+    legalStatus: z.enum(["free", "freed", "enslaved"]).default("free"),
+    gender: z.enum(["male", "female"]).default("male"),
+    /** A slave's owner, or a freedman's patron. */
+    ownerCharacterId: EntityIdSchema.nullable().default(null),
+    /** A slave allowed a purse of his own to spend: the peculium his owner grants, and can take back. */
+    peculium: z.boolean().default(false),
+    /** Requirements a law or a dictator set aside for this person, for one office, until a day. */
+    eligibilityWaivers: z.array(z.object({ officeId: EntityIdSchema, untilStep: ElapsedStepSchema }).strict()).default([]),
   })
   .strict()
   .superRefine((character, context) => {
@@ -262,9 +283,40 @@ export const OfficeSchema = z
      * Defaulted so every pre-phase-4 office stays valid unchanged.
      */
     eligibilityRequirementIds: z.array(EntityIdSchema).default([]),
+    /**
+     * How long one holding lasts, in days: a consulship's year. Null for an
+     * office held until death or removal. An elective office with a term is
+     * refilled by election when it runs out (sim `holdElections`).
+     */
+    termDays: z.number().int().positive().max(36_600).nullable().optional(),
+    /**
+     * What sort of holding it is. A man holds one magistracy at a time, and
+     * laying one down for another is what rising means; a seat in a council
+     * or a priesthood is held alongside whatever else he holds, usually for
+     * life. Absent means a magistracy, which is what every office was before.
+     */
+    kind: z.enum(["magistracy", "membership", "priesthood"]).optional(),
+    /**
+     * How many hold it at once, where that is more than the world names. Only
+     * named people have seats; the rest of a college of eight quaestors or a
+     * Senate of three hundred is implied, and a college is elected whole once
+     * a term rather than seat by seat (sim `holdElections`).
+     */
+    seatCount: z.number().int().positive().max(1_000).optional(),
+    /** How often a college is elected, where less often than its term runs: censors held office eighteen months in every five years. */
+    cycleDays: z.number().int().positive().max(36_600).optional(),
+    /** Its place on the ladder, lowest first: a man is not elected to what is beneath him. */
+    rank: z.number().int().min(0).max(20).optional(),
+    /** Its holder may forbid a measure. Friction only: the veto is said, and the world is left to honour it. */
+    vetoes: z.boolean().optional(),
+    /** A council every former magistrate of its power takes a seat in when his term ends. */
+    enrolsFormerMagistrates: z.boolean().optional(),
   })
   .strict();
 export type Office = z.infer<typeof OfficeSchema>;
+
+/** Whether holding this office means laying down any other magistracy. */
+export const isMagistracy = (office: Pick<Office, "kind"> | undefined): boolean => (office?.kind ?? "magistracy") === "magistracy";
 
 export const SuccessionRuleSchema = z
   .object({
@@ -282,9 +334,11 @@ export type SuccessionRule = z.infer<typeof SuccessionRuleSchema>;
  * world has made since.
  *
  * Called everywhere offices are read, so an office a government invented for
- * one war confers authority exactly as an authored one does. Scenario offices
- * win a collision, because a match already running is pinned to its scenario
- * version and a world that redefined `roman-consul` would be rewriting history.
+ * one war confers authority exactly as an authored one does. The world's copy
+ * wins a collision: the only way the world comes to hold an authored office's
+ * id is a measure that reformed it (`enactment.ts`), and a consulship the
+ * Senate has since given a two-year term has a two-year term. Its order is
+ * the scenario's, so the offices a reader lists come out as they always did.
  */
 export function allOffices(
   world: { readonly offices?: readonly Office[] },
@@ -292,8 +346,9 @@ export function allOffices(
 ): readonly Office[] {
   const made = world.offices ?? [];
   if (made.length === 0) return scenarioOffices;
+  const byId = new Map(made.map((office) => [office.id, office]));
   const authored = new Set(scenarioOffices.map((office) => office.id));
-  return [...scenarioOffices, ...made.filter((office) => !authored.has(office.id))];
+  return [...scenarioOffices.map((office) => byId.get(office.id) ?? office), ...made.filter((office) => !authored.has(office.id))];
 }
 
 export const ScenarioGovernmentRulesSchema = z

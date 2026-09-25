@@ -12,7 +12,7 @@ import { computeViewBox } from "./geo-projection";
 import { prepareStaticWorldGeometry, type StaticWorldGeometry } from "./world-geometry";
 import { derivePoliticalMapState, deriveWarBorderPaths, type PoliticalMapState, type PoliticalOverlayInput } from "./political-geometry";
 import { drawTerrainToCanvas } from "./map-canvas-terrain";
-import { MapTooltip } from "./map-tooltip";
+import { MapTooltip, type MapTooltipHandle } from "./map-tooltip";
 import { MapControls } from "./map-controls";
 import { CharacterPanel, type CharacterPanelProps } from "./character-panel";
 import { ChatPanel } from "./chat-panel";
@@ -118,6 +118,31 @@ interface GameShellProps {
   readonly roomStyle: RoomStyle;
 }
 
+/**
+ * Loads a map raster into `target` as an ImageBitmap and asks for a repaint.
+ * Returns the effect cleanup, which drops a load that finishes too late.
+ */
+function loadMapBitmap(url: string | undefined, target: { current: ImageBitmap | null }, onReady: () => void): () => void {
+  target.current = null;
+  if (!url) return () => {};
+  let cancelled = false;
+  const img = new Image();
+  img.src = url;
+  img.decode()
+    .then(() => createImageBitmap(img))
+    .then((bitmap) => {
+      if (cancelled) { bitmap.close(); return; }
+      target.current = bitmap;
+      onReady();
+    })
+    .catch(() => { /* no raster: the map draws water and fills alone */ });
+  return () => {
+    cancelled = true;
+    target.current?.close();
+    target.current = null;
+  };
+}
+
 export function GameShell({
   gameId,
   gameTitle,
@@ -140,12 +165,6 @@ export function GameShell({
   const [selectedProvinceId, setSelectedProvinceId] = useState<string | null>(
     null,
   );
-  const [hoveredProvinceId, setHoveredProvinceId] = useState<string | null>(null);
-  const [tooltip, setTooltip] = useState<{
-    x: number;
-    y: number;
-    name: string;
-  } | null>(null);
   const [viewport, setViewport] = useState<ViewportTransform>({
     scale: 1,
     tx: 0,
@@ -285,69 +304,61 @@ export function GameShell({
     [political, overlay?.conflicts.wars],
   );
 
-  // Raster images for the canvas — loaded once per URL, trigger a redraw on load
+  // Raster images for the canvas — loaded once per URL and turned into an
+  // ImageBitmap, so it is decoded and on the GPU before the first frame needs
+  // it rather than during one (that first draw of a raw <img> took ~180ms).
   const mapViewportRef = useRef<MapViewportHandle>(null);
-  const baseImageRef = useRef<HTMLImageElement | null>(null);
-  const detailImageRef = useRef<HTMLImageElement | null>(null);
+  const baseImageRef = useRef<ImageBitmap | null>(null);
+  const detailImageRef = useRef<ImageBitmap | null>(null);
+  const requestRedraw = useCallback(() => mapViewportRef.current?.requestRedraw(), []);
 
-  useEffect(() => {
-    if (!baseImageUrl) { baseImageRef.current = null; return; }
-    const img = new Image();
-    img.onload = () => { baseImageRef.current = img; mapViewportRef.current?.redrawCanvas(); };
-    img.src = baseImageUrl;
-    return () => { img.onload = null; };
-  }, [baseImageUrl]);
+  useEffect(() => loadMapBitmap(baseImageUrl, baseImageRef, requestRedraw), [baseImageUrl, requestRedraw]);
+  useEffect(() => loadMapBitmap(detailImageUrl, detailImageRef, requestRedraw), [detailImageUrl, requestRedraw]);
 
-  useEffect(() => {
-    if (!detailImageUrl) { detailImageRef.current = null; return; }
-    const img = new Image();
-    img.onload = () => { detailImageRef.current = img; mapViewportRef.current?.redrawCanvas(); };
-    img.src = detailImageUrl;
-    return () => { img.onload = null; };
-  }, [detailImageUrl]);
+  // Hover lives in a ref, not state: moving the pointer across provinces
+  // repaints the canvas and, for unclaimed land, the tooltip — never the
+  // whole shell and every panel in it.
+  const hoveredProvinceRef = useRef<string | null>(null);
+  const tooltipRef = useRef<MapTooltipHandle>(null);
 
   // The draw function reference is updated during render (safe ref mutation) so
   // the RAF inside MapViewport always calls the latest version without needing
   // the callback itself to change (which would cause extra renders).
-  const requestRedraw = useCallback(() => mapViewportRef.current?.redrawCanvas(), []);
   const drawCanvasFnRef = useRef<DrawCanvasFn>(() => { /* awaiting world data */ });
   if (world && political && viewBox) {
     const w = world; const p = political; const vb = viewBox; const cbp = countryBorderPath; const ov = overlay; const flags = forceFlagUrls;
-    drawCanvasFnRef.current = (canvas, transform, containerW, containerH) => {
-      drawTerrainToCanvas(canvas, containerW, containerH, transform, vb, w, p, cbp, baseImageRef.current, detailImageRef.current, ov, flags, selectedProvinceId, hoveredProvinceId, requestRedraw);
+    drawCanvasFnRef.current = (canvas, transform, containerW, containerH, interacting) => {
+      drawTerrainToCanvas(canvas, containerW, containerH, transform, vb, w, p, cbp, baseImageRef.current, detailImageRef.current, ov, flags, selectedProvinceId, hoveredProvinceRef.current, interacting, requestRedraw);
     };
   }
 
   // Stable callback — MapViewport stores this in a ref internally, so it never
   // triggers re-renders even when drawCanvasFnRef.current changes.
-  const onDrawCanvas = useCallback<DrawCanvasFn>((canvas, transform, w, h) => {
-    drawCanvasFnRef.current(canvas, transform, w, h);
+  const onDrawCanvas = useCallback<DrawCanvasFn>((canvas, transform, w, h, interacting) => {
+    drawCanvasFnRef.current(canvas, transform, w, h, interacting);
   }, []);
 
   // Trigger canvas redraw whenever the underlying data changes (new overlay, etc.)
   useEffect(() => {
-    mapViewportRef.current?.redrawCanvas();
-  }, [world, political, countryBorderPath, overlay, forceFlagUrls, selectedProvinceId, hoveredProvinceId]);
+    requestRedraw();
+  }, [world, political, countryBorderPath, overlay, forceFlagUrls, selectedProvinceId, requestRedraw]);
 
   // Settlement-siege and army-conflict frames pulse (see map-canvas-entities.ts's
   // pulseOpacity) — that animation used to be a free CSS `animation` on the SVG
   // shapes, but a canvas paint only ever reflects the moment it was drawn, so
   // driving it here keeps the pulse visible even while the map sits idle.
   // Only runs while something is actually pulsing, so an idle map with no
-  // active combat costs nothing extra.
+  // active combat costs nothing extra. 30 repaints a second are plenty for a
+  // 1.8s fade, and each one is only a request: during a pan it folds into
+  // the frame the gesture is painting anyway instead of painting twice.
   const hasActiveConflict = Boolean(overlay && (overlay.conflicts.battles.length > 0 || overlay.conflicts.sieges.length > 0));
   useEffect(() => {
     // Not while the Office is over it: an opaque layer with a repainting
     // canvas behind it is pure heat.
     if (!hasActiveConflict || place !== "map") return;
-    let raf: number;
-    const tick = () => {
-      mapViewportRef.current?.redrawCanvas();
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [hasActiveConflict, place]);
+    const interval = setInterval(requestRedraw, 1000 / 30);
+    return () => clearInterval(interval);
+  }, [hasActiveConflict, place, requestRedraw]);
 
   const allianceLabels = useMemo(() => {
     const names = new Map(overlay?.polities.map((polity) => [polity.polityId, polity.name]) ?? []);
@@ -429,10 +440,16 @@ export function GameShell({
     return names;
   }, [geoJson]);
 
+  const setHoveredProvince = useCallback((provinceId: string | null) => {
+    if (hoveredProvinceRef.current === provinceId) return;
+    hoveredProvinceRef.current = provinceId;
+    requestRedraw();
+  }, [requestRedraw]);
+
   const clearMapHover = useCallback(() => {
-    setHoveredProvinceId(null);
-    setTooltip(null);
-  }, []);
+    setHoveredProvince(null);
+    tooltipRef.current?.hide();
+  }, [setHoveredProvince]);
 
   const handleProvinceHover = useCallback(
     (provinceId: string | null, event?: PointerEvent) => {
@@ -440,20 +457,20 @@ export function GameShell({
         clearMapHover();
         return;
       }
-      setHoveredProvinceId(provinceId);
+      setHoveredProvince(provinceId);
       // A province with a known owner is already named by its curved
       // territory label (e.g. "ROMAN REPUBLIC") -- a second, redundant name
       // tooltip stacked on top of it is just clutter. Only pop up the raw
       // region name for genuinely unclaimed territory, which has no label.
       const owner = political?.ownerByProvince.get(provinceId);
       if (owner != null) {
-        setTooltip(null);
+        tooltipRef.current?.hide();
         return;
       }
       const name = regionNames.get(provinceId) ?? provinceId;
-      setTooltip({ x: event.clientX, y: event.clientY, name });
+      tooltipRef.current?.show(event.clientX, event.clientY, name);
     },
-    [clearMapHover, regionNames, political],
+    [clearMapHover, setHoveredProvince, regionNames, political],
   );
 
   const handleProvinceClick = useCallback(
@@ -464,6 +481,9 @@ export function GameShell({
     },
     [],
   );
+
+  // GeoMap renders inside MapViewport, so the handle is there whenever this is called.
+  const liveTransform = useCallback(() => mapViewportRef.current?.liveTransform() ?? { scale: 1, tx: 0, ty: 0 }, []);
 
   const clearSelectedForce = useCallback(() => setSelectedForce(null), []);
 
@@ -585,9 +605,7 @@ export function GameShell({
                 viewBox={viewBox}
                 overlay={overlay}
                 zoomBand={zoomBand}
-                scale={viewport.scale}
-                tx={viewport.tx}
-                ty={viewport.ty}
+                liveTransform={liveTransform}
                 forceFlagUrls={forceFlagUrls}
                 onProvinceHover={handleProvinceHover}
                 onProvinceClick={handleProvinceClick}
@@ -613,9 +631,7 @@ export function GameShell({
               <div className="map-flag-options">{flagsForPolity(flagCatalogForce.ownerPolityId).map((flag) => <button key={flag.id} type="button" className="map-flag-option" onClick={() => selectForceFlag(flag.id)}><img src={flag.url} alt="" decoding="sync" /><span><strong>{flag.name}</strong><small>{flag.description}</small></span></button>)}</div>
             </section>
           </div>}
-          {tooltip && (
-            <MapTooltip x={tooltip.x} y={tooltip.y} name={tooltip.name} />
-          )}
+          <MapTooltip ref={tooltipRef} />
           <MapControls
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}

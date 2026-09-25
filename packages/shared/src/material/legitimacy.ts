@@ -1,3 +1,4 @@
+import { boundedId } from "../determinism";
 import type { PolityLegitimacy } from "../material-state";
 
 // Shared polity-legitimacy adjustment (docs/14 Phase 6): battles and
@@ -14,7 +15,7 @@ export function adjustPolityLegitimacy(
   causeSourceId: string,
 ): PolityLegitimacy[] {
   const cause = {
-    id: `${causeSourceId}:${polityId}`,
+    id: boundedId(causeSourceId, polityId),
     label: causeLabel,
     score: Math.max(-100, Math.min(100, Math.round(deltaBps / 10))),
     sourceId: causeSourceId,

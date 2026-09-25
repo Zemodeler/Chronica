@@ -36,7 +36,10 @@ describe("what a person holds", () => {
   });
 
   it("says so when a scenario has not written you into the seat you claim", () => {
-    const state = world();
+    // The councils seat almost everyone the scenario names; take them out, so
+    // somebody holds nothing at all.
+    const opening = world();
+    const state: WorldState = { ...opening, material: { ...opening.material, officeSeats: opening.material.officeSeats.filter((s) => s.officeId !== "roman-senator") } };
     const citizen = state.characters.find(
       (c) => c.alive && !state.material.officeSeats.some((s) => s.status === "held" && s.holderCharacterId === c.id),
     )!;
@@ -51,14 +54,19 @@ describe("what a person holds", () => {
   });
 
   it("gives a man with nothing a true answer rather than an empty panel", () => {
-    const state = world();
-    const seated = new Set(state.material.officeSeats.filter((s) => s.status === "held").map((s) => s.holderCharacterId));
-    const priv = state.characters.find(
-      (c) => c.alive && c.officeId === null && !seated.has(c.id)
-        && !state.material.holdings.some((h) => h.legalHolderCharacterId === c.id),
-    );
-    if (priv === undefined) return;
-    const standing = readYourStanding(state, priv.id, offices);
+    // Manius Curius holds no office and commands nothing; take away the Sabine
+    // farm the scenario gives him and he has nothing written down at all.
+    const opening = world();
+    const state: WorldState = {
+      ...opening,
+      material: {
+        ...opening.material,
+        holdings: opening.material.holdings.filter((h) => h.legalHolderCharacterId !== "manius-curius"),
+        // And his seat in the Senate.
+        officeSeats: opening.material.officeSeats.filter((s) => s.holderCharacterId !== "manius-curius"),
+      },
+    };
+    const standing = readYourStanding(state, "manius-curius", offices);
     expect(standing.nothing).toBe("You hold no office, and no land that anyone has written down.");
   });
 

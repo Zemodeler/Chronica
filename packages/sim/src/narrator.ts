@@ -1,6 +1,8 @@
 import {
   LOOSE_COHESION_BPS,
   agreementsBetween,
+  deriveRelationDimension,
+  familyLinksOf,
   isNavalForce,
   openStorylines,
   stableChoice,
@@ -183,7 +185,7 @@ export function readTension(world: WorldState, ownPolityId: string | null): Tens
   const order = ownMaterial.length === 0 ? 1 : 1 - distressed / ownMaterial.length;
 
   const atWar = ownPolityId !== null && world.conflicts.wars.some((war) => war.polityAId === ownPolityId || war.polityBId === ownPolityId);
-  const ownForces = world.material.forces.filter((force) => force.polityId === ownPolityId);
+  const ownForces = world.material.forces.filter((force) => force.polityId === ownPolityId && force.outlaw !== true);
   const averageMorale = ownForces.length === 0 ? 10_000 : ownForces.reduce((sum, force) => sum + force.moraleBps, 0) / ownForces.length;
   const badly = averageMorale < 4_000 || ownForces.some((force) => force.provisionStatus === "critical");
   const war = !atWar ? 1 : badly ? 0.15 : 0.35;
@@ -217,6 +219,13 @@ interface Archetype {
   readonly needsForce?: boolean;
   /** Of those, the ones that only make sense at sea. */
   readonly needsFleet?: boolean;
+  /**
+   * Happens off a coast, and is not offered inland. A live run sank a grain
+   * fleet "off Hunedoara", in the Carpathians: the storm could land on any
+   * province, and the terrain could not tell -- the map calls most of Europe
+   * a coastal plain. The sea crossings and the ports can.
+   */
+  readonly needsCoast?: boolean;
   /** Another enemy. A country already fighting one gets fewer of these; it gets no fewer harvests. */
   readonly rival?: boolean;
   readonly brief: (target: NarratorSeed["target"], severity: SeedSeverity) => string;
@@ -262,7 +271,7 @@ const ARCHETYPES: readonly Archetype[] = [
 
   { kind: "world_event", name: "plague", weight: 10, oneShot: false, secretTwelfths: 0,
     brief: (t, s) => `Sickness has come to ${place(t)}, held by ${power(t)}: ${magnitude(s, "an outbreak (food security -800, stability -500, a few hundred dead)", "an epidemic (food security -1800, stability -1200, one in twenty dead)", "a plague (food security -3000, stability -2000, one in eight dead)")}. Change the province now with "province_material_shift"; record it as a public fact naming the province and its power; open its thread on the province alone (a thread's participants are people, and a sickness has none yet); and since it will run for weeks, schedule its next turn with a scheduled event citing that fact, so it can be carried on when it falls due.` },
-  { kind: "world_event", name: "grain_fleet_lost", weight: 8, oneShot: true, secretTwelfths: 0,
+  { kind: "world_event", name: "grain_fleet_lost", weight: 8, oneShot: true, secretTwelfths: 0, needsCoast: true,
     brief: (t, s) => `A storm off ${place(t)} has taken ${magnitude(s, "a few grain ships", "the season's grain convoy", "the grain fleet and the ships that guarded it")}. Move what it changes now -- "province_material_shift" on the province that was fed by it, "income_source_upsert" to cut a route that no longer arrives, "money_transfer" for cargo lost -- and record it as a public fact.` },
   { kind: "world_event", name: "revolt", weight: 8, oneShot: false, secretTwelfths: 0,
     brief: (t, s) => `${place(t)} has risen against ${power(t)}: ${magnitude(s, "riots in the towns", "an armed rising with a leader", "open rebellion holding the countryside")}. ${
@@ -447,14 +456,15 @@ function recentlyNamed(facts: readonly Fact[], today: number): Set<string> {
   return named;
 }
 
-function chooseProvince(input: NarratorInput, tension: TensionReading, seedCount: number, requireController: boolean): WorldState["map"]["provinces"][number] | null {
+function chooseProvince(input: NarratorInput, tension: TensionReading, seedCount: number, requireController: boolean, requireCoast = false): WorldState["map"]["provinces"][number] | null {
   const { world } = input;
+  const coastal = requireCoast ? coastalProvinceIds(world) : null;
   const home = landsAtHome(tension.comfort, input.gameId, seedCount);
   const busy = recentlyNamed(input.facts, world.instant.day);
   const garrisoned = new Set(world.material.forces.map((force) => force.locationId));
   const atWar = new Set(world.conflicts.wars.flatMap((war) => [war.polityAId, war.polityBId]));
   // Countries the orchestrator is being asked to people this very call get
-  // their leader under rule 6; a stranger arriving at the same moment would be
+  // their leader under the principle that countries are full of people; a stranger arriving at the same moment would be
   // two people invented for one country in one answer.
   const filling = requireController
     ? new Set(findPolityGaps({ world, ownPolityId: input.ownPolityId, facts: input.facts, limit: 2 }).map((gap) => gap.polityId))
@@ -462,10 +472,13 @@ function chooseProvince(input: NarratorInput, tension: TensionReading, seedCount
 
   const cohesionOf = new Map(world.map.polities.map((polity) => [polity.id, polity.cohesionBps]));
 
-  const candidates = world.map.provinces
+  const possible = coastal === null ? world.map.provinces : world.map.provinces.filter((province) => coastal.has(province.id));
+  // Nowhere a storm could reach is nowhere it happens.
+  if (possible.length === 0) return null;
+  const candidates = possible
     .filter((province) => (!requireController || province.controllerPolityId !== null) && !(province.controllerPolityId !== null && filling.has(province.controllerPolityId)))
     .filter((province) => (province.controllerPolityId === input.ownPolityId) === home);
-  const scored = (candidates.length === 0 ? world.map.provinces : candidates)
+  const scored = (candidates.length === 0 ? possible : candidates)
     .map((province) => {
       let score = 0;
       if (!busy.has(province.id) && (province.controllerPolityId === null || !busy.has(province.controllerPolityId))) score += 3;
@@ -653,7 +666,11 @@ export function decideNarratorSeeds(input: NarratorInput): NarratorSeed[] {
   const seeds: NarratorSeed[] = [];
   const keys = new Set<string>();
   const taken = new Set<string>();
-  for (let index = 0; index < wanted; index += 1) {
+  // The player's own troubles, beside the country's: measured on him, and
+  // landing on him and the people around him. Taken out of the same count, so
+  // a season is no busier than it was.
+  const personal = input.playerCharacterId === null ? [] : personalSeeds(input, ledger.seedCount + wanted, Math.max(1, Math.round(wanted / 3)));
+  for (let index = 0; index < wanted - personal.length; index += 1) {
     // Only the first carries the repeat: a batch of six re-offered whole
     // because one of them went unread would be the same month twice.
     const repeated = index === 0 && !ledger.consumed && ledger.lastSeedKey !== null;
@@ -666,6 +683,138 @@ export function decideNarratorSeeds(input: NarratorInput): NarratorSeed[] {
     // chain whose second link waits on the first would be handed both at once.
     if (seed.pressureId !== null) taken.add(seed.pressureId);
     seeds.push(seed);
+  }
+  return [...seeds, ...personal];
+}
+
+// ── The player's own life ────────────────────────────────────────────────────
+
+/**
+ * How comfortable the player is, as a person.
+ *
+ * The country's comfort is not his. A private citizen of a rich republic was
+ * handed trouble sized to its treasury, and none of it ever named him: the
+ * narrator never targeted the player at all. This reads what is his -- his
+ * purse and its debts, his health, his standing, the people who hate him --
+ * and, like the country's reading, makes more and worse trouble for a man
+ * whose life is going well.
+ */
+export function readPersonalTension(world: WorldState, playerCharacterId: string): TensionReading {
+  const player = world.characters.find((character) => character.id === playerCharacterId);
+  const purse = world.material.accounts.find((account) => account.id === player?.personalAccountId);
+  const obligations = world.material.obligations.filter((obligation) => obligation.active && obligation.payerAccountId === purse?.id);
+  const monthly = obligations.reduce((sum, obligation) => sum + (obligation.cadenceSteps <= 0 ? 0 : obligation.amount / obligation.cadenceSteps) * 30, 0);
+  const balance = purse?.balance ?? 0;
+  const runwayMonths = monthly <= 0 ? (balance > 0 ? 6 : 0) : balance / monthly;
+  const treasury = clamp01(runwayMonths / 6);
+  const missed = obligations.filter((obligation) => obligation.missedPeriods > 0).length
+    + world.material.loans.filter((loan) => loan.borrowerAccountId === purse?.id && loan.status === "defaulted").length;
+  const arrears = 1 - clamp01(missed / 2);
+  const legitimacy = (player?.prestigeBps ?? 3_000) / 10_000;
+  const order = (player?.healthBps ?? 10_000) / 10_000;
+  const enemies = world.characters.filter((character) => character.alive && character.id !== playerCharacterId
+    && deriveRelationDimension(character, playerCharacterId, "trust") + deriveRelationDimension(character, playerCharacterId, "affection") <= -40).length;
+  const war = 1 - clamp01(enemies / 3);
+  const comfort = clamp01(0.25 * treasury + 0.15 * arrears + 0.2 * legitimacy + 0.2 * order + 0.2 * war);
+  const name = player?.name ?? "he";
+  const parts = [
+    runwayMonths >= 6 ? `${name}'s purse is full` : runwayMonths >= 2 ? `${name}'s purse holds for now` : `${name}'s purse is nearly empty`,
+    missed > 0 ? "his debts are going unpaid" : null,
+    order < 0.5 ? "his health is poor" : null,
+    enemies > 0 ? `${enemies} ${enemies === 1 ? "man hates" : "men hate"} him` : "nobody wishes him harm",
+  ].filter((part): part is string => part !== null);
+  return { comfort, treasury, arrears, legitimacy, order, war, openThreads: openStorylines(world.storylines).length, summary: parts.join(", ") };
+}
+
+/**
+ * The people around a man: his family, those who feel strongly about him
+ * either way, and the men under his command. Trouble that lands near him is
+ * trouble he has to answer.
+ */
+function circleOf(world: WorldState, playerCharacterId: string): string[] {
+  const circle = new Set<string>();
+  for (const link of familyLinksOf(world, playerCharacterId, world.elapsedStep)) circle.add(link.counterpartCharacterId);
+  for (const character of world.characters) {
+    if (!character.alive || character.id === playerCharacterId) continue;
+    const felt = Math.abs(deriveRelationDimension(character, playerCharacterId, "trust")) + Math.abs(deriveRelationDimension(character, playerCharacterId, "affection"));
+    if (felt >= 20) circle.add(character.id);
+  }
+  for (const force of world.material.forces) {
+    if (force.commanderCharacterId !== playerCharacterId && force.controllerCharacterId !== playerCharacterId) continue;
+    for (const member of force.memberCharacterIds) circle.add(member);
+  }
+  return [...circle].filter((id) => world.characters.some((character) => character.id === id && character.alive)).sort();
+}
+
+/** What can befall a man and his house. The country's plagues and wars are the country's; these are his. */
+const PERSONAL_ARCHETYPES = new Set(["debt", "rivalry", "opportunity", "illness", "family_obligation", "accusation", "inheritance", "conspiracy"]);
+/** And what can befall the ground he lives off. */
+const ESTATE_ARCHETYPES = new Set(["fire", "harvest", "market"]);
+
+function personalSeeds(input: NarratorInput, firstOrdinal: number, count: number): NarratorSeed[] {
+  const { world } = input;
+  const playerId = input.playerCharacterId!;
+  const player = world.characters.find((character) => character.id === playerId && character.alive);
+  if (player === undefined) return [];
+  const tension = readPersonalTension(world, playerId);
+  const circle = circleOf(world, playerId);
+  const ownGround = [...new Set([
+    player.locationProvinceId,
+    ...world.material.holdings.filter((holding) => holding.legalHolderCharacterId === playerId).map((holding) => holding.territoryId),
+  ])].filter((id) => world.map.provinces.some((province) => province.id === id));
+  const provinceName = (id: string | null): string | null => (id === null ? null : world.map.provinces.find((province) => province.id === id)?.name ?? id);
+  const polityName = (id: string | null): string | null => (id === null ? null : world.map.polities.find((polity) => polity.id === id)?.name ?? id);
+  const archetypes = ARCHETYPES.filter((archetype) => PERSONAL_ARCHETYPES.has(archetype.name) || ESTATE_ARCHETYPES.has(archetype.name));
+  const total = archetypes.reduce((sum, archetype) => sum + archetype.weight, 0);
+
+  const seeds: NarratorSeed[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const ordinal = firstOrdinal + index;
+    let roll = stableHash([input.gameId, "narrator", "personal", ordinal]) % total;
+    const archetype = archetypes.find((candidate) => (roll -= candidate.weight) < 0) ?? archetypes[archetypes.length - 1]!;
+    if (seeds.some((seed) => seed.archetype === archetype.name)) continue;
+    const severity = chooseSeverity(tension.comfort, input.gameId, ordinal);
+    const secret = archetype.secretTwelfths > 0 && stableChoice([input.gameId, "narrator", "personal-secret", ordinal], 12) < archetype.secretTwelfths;
+    let target: NarratorSeed["target"];
+    let about: string;
+    if (ESTATE_ARCHETYPES.has(archetype.name)) {
+      const provinceId = ownGround[stableChoice([input.gameId, "narrator", "personal-ground", ordinal], Math.max(1, ownGround.length))] ?? null;
+      if (provinceId === null) continue;
+      const controller = world.map.provinces.find((province) => province.id === provinceId)?.controllerPolityId ?? null;
+      target = {
+        provinceId, provinceName: provinceName(provinceId), polityId: controller, polityName: polityName(controller),
+        characterId: playerId, characterName: player.name, otherPolityId: null, otherPolityName: null, forceId: null, forceName: null, forceIsNaval: false,
+      };
+      about = `It touches ${player.name} [${playerId}] and what he lives off there.`;
+    } else {
+      // Most of it lands on him; some on the people he would have to answer for.
+      const onHim = circle.length === 0 || stableChoice([input.gameId, "narrator", "personal-who", ordinal], 5) < 3;
+      const whoId = onHim ? playerId : circle[stableChoice([input.gameId, "narrator", "personal-circle", ordinal], circle.length)]!;
+      const who = world.characters.find((character) => character.id === whoId)!;
+      target = {
+        provinceId: who.locationProvinceId, provinceName: provinceName(who.locationProvinceId), polityId: who.polityId, polityName: polityName(who.polityId),
+        characterId: who.id, characterName: who.name, otherPolityId: null, otherPolityName: null, forceId: null, forceName: null, forceIsNaval: false,
+      };
+      about = onHim ? "" : `${who.name} is close to ${player.name} [${playerId}], and it will reach him.`;
+    }
+    // A conspiracy in his circle is aimed at him, not at the government.
+    const brief = archetype.name === "conspiracy" && target.characterId !== playerId
+      ? `${target.characterName} [${target.characterId}] has begun something against ${player.name} [${playerId}], and means to keep it hidden. Decide what. Plant what drives them with "character_intent_set" (private), a "character_pressure_set" or a "belief_set", and record what they have already done as a private fact known to them alone. Do not carry out their acts for them.`
+      : archetype.brief(target, severity);
+    seeds.push({
+      key: `seed-p-${stableHash([input.gameId, "narrator", "personal", ordinal]).toString(36)}`,
+      kind: archetype.kind,
+      archetype: archetype.name,
+      severity,
+      secret: archetype.name === "conspiracy" ? true : secret,
+      oneShot: archetype.oneShot,
+      target,
+      inPlayerRealm: target.polityId !== null && target.polityId === input.ownPolityId,
+      repeated: false,
+      why: `Life has been going ${tension.comfort >= 0.6 ? "well" : "hard"} for ${player.name}: ${tension.summary}.`,
+      brief: about === "" ? brief : `${brief} ${about}`,
+      pressureId: null,
+    });
   }
   return seeds;
 }
@@ -752,7 +901,7 @@ function seedAt(input: NarratorInput, tension: TensionReading, seedCount: number
       ...noForce,
     };
   } else {
-    const province = chooseProvince(input, tension, seedCount, archetype.kind === "new_actor" || archetype.needsAdversary === true);
+    const province = chooseProvince(input, tension, seedCount, archetype.kind === "new_actor" || archetype.needsAdversary === true, archetype.needsCoast === true);
     if (province === null) return null;
     // Trouble that takes two is not offered at all where the map has only one
     // to offer: an island power with no reachable neighbour cannot go to war
@@ -913,4 +1062,18 @@ export function seedParticipants(world: WorldState, seed: NarratorSeed): string[
   const opened = world.storylines.find((storyline) => storyline.seedKey === seed.key);
   if (opened !== undefined) return [...opened.participantIds];
   return seed.target.characterId === null ? [] : [seed.target.characterId];
+}
+
+/** Provinces on the sea: a sea lane or strait out of them, or a port in them. */
+export function coastalProvinceIds(world: WorldState): Set<string> {
+  const coastal = new Set<string>();
+  for (const edge of world.map.edges) {
+    if (edge.crossing !== "sea_lane" && edge.crossing !== "strait") continue;
+    coastal.add(edge.from);
+    coastal.add(edge.to);
+  }
+  for (const province of world.map.provinces) {
+    if (province.settlements.some((settlement) => settlement.kind === "port")) coastal.add(province.id);
+  }
+  return coastal;
 }

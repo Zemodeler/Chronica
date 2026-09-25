@@ -31,10 +31,22 @@ const MODEL_TOKEN_RATES: Record<string, ModelTokenRate> = {
     cacheReadMicroUnitsPerMillionTokens: 20_000n,
     cacheWriteMicroUnitsPerMillionTokens: 0n,
   },
+  "gpt-6-luna": {
+    inputMicroUnitsPerMillionTokens: 100_000n,
+    outputMicroUnitsPerMillionTokens: 500_000n,
+    cacheReadMicroUnitsPerMillionTokens: 10_000n,
+    cacheWriteMicroUnitsPerMillionTokens: 0n,
+  },
   "gpt-5.6-sol": {
     inputMicroUnitsPerMillionTokens: 4_000_000n,
     outputMicroUnitsPerMillionTokens: 20_000_000n,
     cacheReadMicroUnitsPerMillionTokens: 400_000n,
+    cacheWriteMicroUnitsPerMillionTokens: 0n,
+  },
+  "gpt-6-sol": {
+    inputMicroUnitsPerMillionTokens: 2_000_000n,
+    outputMicroUnitsPerMillionTokens: 10_000_000n,
+    cacheReadMicroUnitsPerMillionTokens: 200_000n,
     cacheWriteMicroUnitsPerMillionTokens: 0n,
   },
 };

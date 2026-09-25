@@ -8,6 +8,9 @@ import {
   type WorldChange,
   type WorldInstant,
   type WorldStoryline,
+  type Office,
+  type WorldState,
+  allOffices,
 } from "@chronica/shared";
 import { extractJson } from "./json";
 import type { SimModelPort } from "./ports";
@@ -97,13 +100,22 @@ export const DEFAULT_ENTRY_THRESHOLD = 45;
 const HOME_THRESHOLD = 25;
 
 /** How many of those one report may carry. */
-const MAX_HOME_THREADS = 4;
+const MAX_HOME_THREADS = 3;
 
 /** And what a *foreign secret* must weigh before word of it travels at all. */
 const DISTANT_NEWS_THRESHOLD = 40;
 
 /** How many threads of distant news one report may carry. The court is not a newspaper. */
-const MAX_REPORTED_THREADS = 3;
+const MAX_REPORTED_THREADS = 2;
+
+/**
+ * How many matters of the wider world, witnessed but not the reader's, one
+ * report may carry. This band had no ceiling at all: a live run answered
+ * "start a church" with nine entries about Carthaginian fleets, Balkan road
+ * works and a gale somewhere in Romania, and the church somewhere among them.
+ * The world should feel alive around the reader's business, not bury it.
+ */
+const MAX_SEEN_THREADS = 3;
 
 /** How many subjects an entry shows on its face. The rest stay on the record, unshown. */
 const MAX_TAGS = 3;
@@ -119,7 +131,7 @@ const MAX_TAGS = 3;
  * Declared Character". Insubordination belongs in the record -- as something a
  * person did, written by whoever noticed, not as the ledger line that caught it.
  */
-const NEVER_PUBLISHED = new Set(["engine_rejection", "authority_breach"]);
+export const NEVER_PUBLISHED: ReadonlySet<string> = new Set(["engine_rejection", "authority_breach"]);
 
 /** Ids are for the engine. A summary carrying one must not reach the prose. */
 const ID_IN_BRACKETS = /\s*\[[A-Za-z0-9][A-Za-z0-9._:-]*\]/g;
@@ -301,6 +313,8 @@ export interface BattleAccountLine {
   readonly refusedTactics: readonly string[];
   readonly losses: readonly { readonly name: string; readonly dead: number; readonly deserted: number; readonly wounded: number }[];
   readonly commanders: readonly { readonly name: string; readonly outcome: string }[];
+  /** Named men in the ranks; absent on accounts written before armies had any. */
+  readonly members?: readonly { readonly name: string; readonly force: string; readonly outcome: string }[];
   readonly retreats: readonly { readonly name: string; readonly to: string | null; readonly orderly: boolean }[];
   readonly outcome: string;
 }
@@ -347,6 +361,8 @@ export interface ChronicleInput {
   readonly polityOfCharacter?: (characterId: string) => string | null;
   /** What a subject is called, for the tags a reader sees. Unnamed subjects fall back to their id. */
   readonly nameOf?: (ref: OrderPartyRef) => string | null;
+  /** A person in a line: name, station, power, where they are. See `whoIsWho`. */
+  readonly describePerson?: (characterId: string) => string | null;
   /**
    * Who the last report was already about: one set of subject ids per entry.
    *
@@ -449,6 +465,10 @@ interface Thread {
   readonly ours: boolean;
   /** Their country's business, which is told for less than the wider world's. */
   readonly home: boolean;
+  /** The answer to the order this report follows. Told first. */
+  readonly answersTheOrder: boolean;
+  /** Who is who among the people in it, so two of them cannot become one. */
+  readonly people: readonly string[];
 }
 
 /**
@@ -569,7 +589,7 @@ function selectFacts(
  * actually did was fuse every separate thing their reign was doing into a single
  * entry, which is the same failure one level up.
  */
-function splitIntoThreads(facts: readonly Fact[], observerPolityId: string | null): Fact[][] {
+function splitIntoThreads(facts: readonly Fact[], observerPolityId: string | null, orderFactIds: ReadonlySet<string> = new Set()): Fact[][] {
   const hubKey = observerPolityId === null ? null : `polity:${observerPolityId}`;
 
   const parent = new Map<number, number>();
@@ -590,7 +610,13 @@ function splitIntoThreads(facts: readonly Fact[], observerPolityId: string | nul
     // A fact naming nobody came out of answering the ruler's order and has no
     // subject to find its thread by. Left alone each one became an entry of its
     // own, and a single pursuit fragmented into an entry per sentence.
-    if (fact.affectedEntities.length === 0) nameless.push(index);
+    //
+    // But only the order's own. A project finishing and a theft in a far
+    // temple name nobody either, and folding every nameless fact into one
+    // matter wrote Arvernian roadworks, a stolen temple treasure at Ghadamis
+    // and a raid in Lucania up as a single entry. A nameless fact that did not
+    // come from the order is its own matter.
+    if (fact.affectedEntities.length === 0 && orderFactIds.has(fact.id)) nameless.push(index);
     for (const entity of fact.affectedEntities) {
       const subject = keyOf(entity);
       if (subject === hubKey) continue;
@@ -687,6 +713,10 @@ function renderBattle(battle: BattleAccountLine): string[] {
     lines.push("What it cost:", ...battle.losses.map((loss) => `  - ${loss.name}: ${loss.dead} dead, ${loss.deserted} deserted, ${loss.wounded} wounded`));
   }
   if (battle.commanders.length > 0) lines.push("The commanders:", ...battle.commanders.map((commander) => `  - ${commander.name} was ${commander.outcome}`));
+  if ((battle.members ?? []).length > 0) {
+    lines.push("Named men in the ranks:", ...(battle.members ?? []).map((member) =>
+      `  - ${member.name}, with ${member.force}: ${member.outcome === "unharmed" ? "came through unhurt" : member.outcome === "killed" ? "was killed" : member.outcome === "wounded" ? "was wounded" : member.outcome}`));
+  }
   if (battle.retreats.length > 0) {
     lines.push("Who left the field:", ...battle.retreats.map((retreat) => `  - ${retreat.name} fell back ${retreat.orderly ? "in order" : "in rout"}${retreat.to === null ? ", with nowhere to go" : ` to ${retreat.to}`}`));
   }
@@ -696,6 +726,10 @@ function renderBattle(battle: BattleAccountLine): string[] {
 function renderThread(thread: Thread, index: number): string {
   const lines = [`THREAD ${index + 1}${thread.reported ? " (news reaching the court; nobody here witnessed it)" : ""}`];
   if (thread.matter !== null) lines.push(`Part of a longer matter: ${thread.matter}.`);
+  // Who is who, stated rather than inferred. A historian given "Furius" and
+  // "the Mamertine spokesman" in one matter wrote of "Mamertine spokesman
+  // Furius", two men made one; a line each keeps them apart.
+  if (thread.people.length > 0) lines.push("The people in it -- each a different person:", ...thread.people.map((person) => `  - ${person}`));
   lines.push(
     thread.reported ? "Reported to have happened:" : "Known to have happened:",
     ...thread.facts.map((fact) => `- ${readable(fact.summary)}`),
@@ -703,6 +737,12 @@ function renderThread(thread: Thread, index: number): string {
   if (thread.narrative.length > 0) lines.push("Accounts given at the time:", ...thread.narrative.map((line) => `- ${readable(line)}`));
   if (thread.frictions.length > 0) lines.push("Difficulties reported:", ...thread.frictions.map((line) => `- ${readable(line)}`));
   if (thread.battle !== null) lines.push(...renderBattle(thread.battle));
+  // How to tell it, carried with the matter rather than added to the
+  // historian's standing instructions: an order nobody obeyed is comedy, and
+  // told in the register of a campaign it reads as one.
+  if (thread.facts.some((fact) => fact.kind === "order_ignored")) {
+    lines.push("Register: somebody gave orders to people who did not have to take them. Tell it with a straight face and a dry wit; the joke is in the facts.");
+  }
   return lines.join("\n");
 }
 
@@ -736,7 +776,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   const frictions = input.frictions.filter(firsthand);
   const utterances = (input.utterances ?? []).filter((line) => publishable(line) && witnessed(line));
 
-  const grouped = splitIntoThreads(visible, input.observerPolityId);
+  const grouped = splitIntoThreads(visible, input.observerPolityId, input.orderFactIds);
   const polityOf = (characterId: string): string | null => input.polityOfCharacter?.(characterId) ?? null;
 
   /**
@@ -799,6 +839,13 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
       battle: (input.battleAccounts ?? []).find(
         (account) => account.factIds.some((factId) => ids.has(factId) && !reportedIds.has(factId)),
       ) ?? null,
+      answersTheOrder: facts.some((fact) => input.orderFactIds?.has(fact.id) ?? false),
+      people: [...new Set(facts.flatMap((fact) => fact.affectedEntities.filter((entity) => entity.kind === "character").map((entity) => entity.id)))]
+        .flatMap((id) => {
+          const described = input.describePerson?.(id) ?? null;
+          return described === null ? [] : [described];
+        })
+        .slice(0, 8),
     };
   });
 
@@ -851,10 +898,15 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   const seen = built.filter((thread) => !thread.ours && !thread.home && !thread.reported && thread.weight >= threshold && !echoing(thread)).sort(byWeight);
   const hearsay = built.filter((thread) => !thread.ours && thread.reported && thread.weight >= threshold && !echoing(thread)).sort(byWeight);
 
-  const banded = [...ours, ...home.slice(0, MAX_HOME_THREADS), ...seen, ...hearsay.slice(0, MAX_REPORTED_THREADS)];
-  // A battle is never the entry that gets dropped for room. Men died in it.
-  const fights = banded.filter((thread) => thread.battle !== null);
-  let threads = [...fights, ...banded.filter((thread) => thread.battle === null)].slice(0, MAX_ENTRIES);
+  const banded = [...ours, ...home.slice(0, MAX_HOME_THREADS), ...seen.slice(0, MAX_SEEN_THREADS), ...hearsay.slice(0, MAX_REPORTED_THREADS)];
+  // The answer to the order first -- it is what the reader opened the report
+  // to find -- then any battle, which is never the entry dropped for room,
+  // then the rest by band. The order's answer is never cut: the cap is for
+  // the world's business, and the order is not the world's.
+  const answer = banded.filter((thread) => thread.answersTheOrder);
+  const fights = banded.filter((thread) => !thread.answersTheOrder && thread.battle !== null);
+  const rest = banded.filter((thread) => !thread.answersTheOrder && thread.battle === null);
+  let threads = [...answer, ...[...fights, ...rest].slice(0, Math.max(0, MAX_ENTRIES - answer.length))];
   // A record that goes blank teaches the reader to stop opening it. This fires
   // only when the bands would have produced nothing at all, which is a
   // different thing from the weight floor that was tried and reverted -- that
@@ -1024,4 +1076,20 @@ function attachQuote(
     index === chosen.index
       ? { ...entry, quote: { line: chosen.utterance.line, speaker: chosen.utterance.speaker, occasion: chosen.utterance.occasion } }
       : entry);
+}
+
+/**
+ * How the historian is told who a person is: a name, what they are, whose
+ * they are and where. Built from the world the report describes.
+ */
+export function whoIsWho(world: WorldState, offices: readonly Office[] = []): (characterId: string) => string | null {
+  const known = allOffices(world, offices);
+  return (characterId) => {
+    const person = world.characters.find((character) => character.id === characterId);
+    if (person === undefined) return null;
+    const office = person.officeId === null ? null : known.find((candidate) => candidate.id === person.officeId)?.label ?? null;
+    const polity = person.polityId === null ? null : world.map.polities.find((candidate) => candidate.id === person.polityId)?.name ?? null;
+    const where = world.map.provinces.find((province) => province.id === person.locationProvinceId)?.name ?? null;
+    return [person.name, office, polity === null ? null : `of ${polity}`, where === null ? null : `in ${where}`].filter((part) => part !== null).join(", ");
+  };
 }

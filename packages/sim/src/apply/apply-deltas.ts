@@ -1,11 +1,24 @@
 import {
   DELTA_AUTHORITY_DOMAIN,
   adjustPolityLegitimacy,
+  AGREEMENT_KIND_IN_WORDS,
+  boundedId,
+  SKILL_BY_BAND,
+  faithNamed,
   agreementsBetween,
   applyDiplomaticAnswerToStance,
   canMoveTo,
   crossingAdmitted,
   allOffices,
+  allTroopCategories,
+  isPlotOpen,
+  type Settlement,
+  findPosition,
+  mintPosition,
+  provinceWithPosition,
+  labelFromCategoryId,
+  mintTroopCategory,
+  warfareWith,
   TRAIT_REGISTRY,
   canonicalTraitIds,
   clampWealth,
@@ -14,12 +27,17 @@ import {
   findOfficeSeatForRole,
   seatCharacterInOffice,
   vacateOfficesOf,
+  reciprocalFamilyLinkKind,
+  stableHash,
   fitStrengthOf,
   isNavalForce,
   isWaterCrossing,
   transportFor,
   ensureProvinceMaterial,
+  sackTheProvince,
+  settlementShareBps,
   WorldStateSchema,
+  type Province,
   buildAuthorityIndex,
   checkAuthority,
   CharacterSocialEventSchema,
@@ -38,15 +56,38 @@ import {
   type AuthorityPower,
   type AuthorityScope,
   type FactProposalDraft,
+  type Office,
   type OrderPartyRef,
   type OrderAttempt,
   type OrderStanding,
+  type ScenarioWarfareRules,
   type WorldDelta,
   type WorldState,
+  estateTerms,
+  hasPort,
+  ventureTerms,
+  VENTURE_PRICE_MONTHS,
+  type EffectBand,
+  type StandingEffect,
+  improvementTerms,
+  clampStandingShift,
+  TAX_EXTRACTION_BPS,
+  CUSTOMARY_TAX_BURDEN,
 } from "@chronica/shared";
 import { resolveEngagement, type BattleAccount } from "../battle";
+import { handOverForcesOf, killCharacter, mattersEnough } from "../mortality";
+import { carryOutEnactment } from "../enact";
+import { trespassOf } from "../trespass";
+import { fleesHisMaster, listensAnyway, nobodyListens, nobodyRises, notHisToSpend } from "./nobody-listens";
+import { isOwnBusiness } from "./own-business";
+import { endContract } from "../contracts";
+import { accountOf, normalizeRefs, peopleNamedButNeverMade } from "./normalize-refs";
+import { arrangementNetIncome, recruitSkillBiasIn } from "../standing-effects";
 import { assessExecution, daysInHand, throughHand } from "../delegation";
-import type { ApplyContext, ApplyResult, AppliedDelta, AuthorityBreach, RejectedDelta } from "./context";
+import { plotOdds, plotResolvesIn } from "../plots";
+import { watchReading } from "../watch";
+import type { ApplyContext, ApplyResult, AppliedDelta, AssumedDetail, AuthorityBreach, RejectedDelta } from "./context";
+import { fillGaps } from "./fill-gaps";
 
 /**
  * Applies a validated batch of deltas to the world.
@@ -75,6 +116,22 @@ class DeltaRejection extends Error {
   }
 }
 
+/**
+ * Refusing a delta, and saying whose fault it was.
+ *
+ * The kind decides where the refusal goes. "world" reaches the player as
+ * friction -- the order was well formed and the world would not have it, which
+ * is history and belongs in the record. "reference" does not: it is the engine
+ * catching a payload that named something that does not exist, or named one
+ * thing twice, and it goes to the debugging record instead.
+ *
+ * Getting that wrong is not cosmetic. A payload that put Rome's treasury on
+ * both sides of its own wage bill surfaced in a live game as "Rome cannot be
+ * both guarantor and debtor for Legio II" -- which reads as a law of the
+ * Republic, is nothing of the kind, and left the player believing an ordinary
+ * order was forbidden. Anything that is a mistake in the writing rather than a
+ * fact about the world is "reference".
+ */
 function reject(reason: string, kind: "world" | "reference" = "world"): never {
   throw new DeltaRejection(reason, kind);
 }
@@ -96,44 +153,118 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       return { kind: "account", id: resolve(delta.beneficiaryAccountRef) ?? delta.beneficiaryAccountRef };
     case "obligation_upsert":
       return { kind: "account", id: resolve(delta.payerAccountRef) ?? delta.payerAccountRef };
-    case "loan_open":
+    // A man lending his own money is spending his own purse, and it is his to
+    // lend: weighed against the borrower's account it made every private loan
+    // to a government a breach of that government's treasury by the lender.
+    // Taken by a government's official, it is the borrowing that is judged.
+    case "loan_open": {
+      const lenderId = delta.lenderKind === "character" && delta.lenderRef !== null ? resolve(delta.lenderRef) ?? delta.lenderRef : null;
+      const lenderPurse = lenderId === null ? null : world.characters.find((character) => character.id === lenderId)?.personalAccountId ?? null;
+      if (lenderId !== null && lenderPurse !== null && actorRef.kind === "character" && actorRef.id === lenderId) return { kind: "account", id: lenderPurse };
       return { kind: "account", id: resolve(delta.borrowerAccountRef) ?? delta.borrowerAccountRef };
-    case "force_create":
-      return { kind: "polity", id: delta.polityId };
+    }
+    // Raising men is the state's business -- unless a man pays for them out of
+    // his own purse, which is a private company and his own affair: a merchant
+    // fitting out a ship, a noble raising his clients. Weighed then against the
+    // purse that pays, through the obligation that says who does.
+    case "force_create": {
+      const obligationId = delta.payObligationRef == null ? undefined : resolve(delta.payObligationRef) ?? delta.payObligationRef;
+      const payer = obligationId === undefined ? undefined : world.material.obligations.find((obligation) => obligation.id === obligationId)?.payerAccountId;
+      const privately = payer !== undefined && world.material.accounts.find((account) => account.id === payer)?.owner.kind === "character";
+      return privately ? { kind: "account", id: payer } : { kind: "polity", id: resolve(delta.polityId) ?? delta.polityId };
+    }
     case "force_modify":
+      return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
+    case "force_reinforce":
       return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
     case "force_attrition":
       return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
     case "force_engage":
       return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
+    case "force_raid":
+      return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
     case "polity_stance_shift":
-      return { kind: "polity", id: delta.polityId };
+      return { kind: "polity", id: resolve(delta.polityId) ?? delta.polityId };
     // Writing in a power's name is that power's act. A senator who writes to
     // Carthage over Rome's name is scoped to Rome and breaches for it, which is
     // exactly what private correspondence with a foreign power should be.
     case "diplomatic_message_send":
-      return { kind: "polity", id: delta.fromPolityId };
+      return { kind: "polity", id: resolve(delta.fromPolityId) ?? delta.fromPolityId };
     case "agreement_open":
-      return { kind: "polity", id: delta.polityId };
+      return { kind: "polity", id: resolve(delta.polityId) ?? delta.polityId };
     case "polity_outlook_set":
-      return { kind: "polity", id: delta.polityId };
+      return { kind: "polity", id: resolve(delta.polityId) ?? delta.polityId };
     case "legitimacy_shift":
-      return { kind: delta.target === "polity" ? "polity" : "institution", id: delta.targetId };
+      return { kind: delta.target === "polity" ? "polity" : "institution", id: resolve(delta.targetId) ?? delta.targetId };
     case "province_material_shift":
       return { kind: "province", id: delta.provinceId };
-    case "office_seat_set":
+    case "office_seat_set": {
       // Scoped to the power whose office it is: seating a man is an act over a
       // government, and judging it against the office itself would let anybody
-      // who could name an office fill it.
-      return { kind: "institution", id: delta.officeId };
+      // who could name an office fill it. An office being made in this act has
+      // no power yet; it will be the new holder's, which is where it is made.
+      if (world.offices.some((office) => office.id === delta.officeId) || world.material.officeSeats.some((seat) => seat.officeId === delta.officeId)) {
+        return { kind: "institution", id: delta.officeId };
+      }
+      const holderId = delta.holderCharacterRef === null ? null : resolve(delta.holderCharacterRef) ?? delta.holderCharacterRef;
+      const holderPolity = world.characters.find((character) => character.id === holderId)?.polityId ?? null;
+      return holderPolity === null ? polityFallback : { kind: "polity", id: holderPolity };
+    }
     case "province_control_set":
       return { kind: "province", id: delta.provinceId };
+    case "settlement_control_set":
+      return { kind: "settlement", id: delta.settlementId };
     case "political_procedure_open":
       return delta.institutionRef === null
         ? polityFallback
         : { kind: "institution", id: resolve(delta.institutionRef) ?? delta.institutionRef };
     case "character_create":
-      return { kind: "polity", id: delta.polityId };
+      return { kind: "polity", id: resolve(delta.polityId) ?? delta.polityId };
+    // Buying land is spending one's own money: the purse it comes out of is
+    // what the act is weighed against, so a man buying a farm with his own
+    // silver needs nobody's leave. A grant out of the public land is disposing
+    // of the state's property, and is weighed like spending from its chest:
+    // whoever may spend from the treasury of the power holding the province
+    // may grant its land, and nobody else.
+    case "holding_create": {
+      if (delta.priceFromAccountRef !== null) return { kind: "account", id: resolve(delta.priceFromAccountRef) ?? delta.priceFromAccountRef };
+      const controller = world.map.provinces.find((province) => province.id === delta.provinceId)?.controllerPolityId ?? null;
+      if (controller === null) return polityFallback;
+      const treasury = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === controller);
+      return treasury === undefined ? { kind: "polity", id: controller } : { kind: "account", id: treasury.id };
+    }
+    // Improving land is paid for, and the purse paying is what answers for
+    // it: an owner improving his estate from his own money is his own
+    // business, and improving it out of the treasury is not.
+    case "holding_improve":
+      return { kind: "account", id: resolve(delta.paidFromAccountRef) ?? delta.paidFromAccountRef };
+    case "force_membership_set":
+      return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
+    // An arrangement kept at somebody's expense is weighed like the money that
+    // keeps it: a shrine a man endows from his purse is his to endow, and one
+    // kept out of the treasury is spending the treasury. Before, the account
+    // paying the upkeep was never asked, so anybody who could found anything
+    // could charge its keep to the state.
+    case "generic_entity_create":
+    case "generic_entity_update":
+      return delta.upkeep == null ? polityFallback : { kind: "account", id: resolve(delta.upkeep.fromAccountRef) ?? delta.upkeep.fromAccountRef };
+    // A man is hired by whoever pays him, and weighed like the money.
+    case "service_contract_open":
+      return { kind: "account", id: resolve(delta.employerAccountRef) ?? delta.employerAccountRef };
+    case "service_contract_close": {
+      const contract = world.material.contracts.find((candidate) => candidate.id === (resolve(delta.contractRef) ?? delta.contractRef));
+      return contract === undefined ? polityFallback : { kind: "account", id: contract.employerAccountId };
+    }
+    // Trade is paid for, and weighed like the money it is paid with.
+    case "trade_venture_open":
+      return { kind: "account", id: resolve(delta.paidFromAccountRef) ?? delta.paidFromAccountRef };
+    // Winding a venture up is its owner's business: weighed against the purse it pays into.
+    case "trade_venture_close": {
+      const ventureId = resolve(delta.ventureRef) ?? delta.ventureRef;
+      const venture = world.material.ventures.find((candidate) => candidate.id === ventureId);
+      const income = venture === undefined ? undefined : world.material.incomeSources.find((source) => source.id === venture.incomeSourceId);
+      return income === undefined ? polityFallback : { kind: "account", id: income.beneficiaryAccountId };
+    }
     default:
       return polityFallback;
   }
@@ -195,6 +326,38 @@ function orderAnswerCauses(
   }
 }
 
+/**
+ * One person's view of another, changed by something the engine did to them --
+ * freed by him, sold by him. Slow to fade: a man remembers who made him free.
+ */
+function addRelationCause(
+  world: WorldState,
+  cause: { subjectCharacterId: string; targetCharacterId: string; label: string; score: number; dimensions: Record<string, number> },
+  atStep: number,
+  context: ApplyContext,
+): WorldState {
+  return applySocialEvents(
+    world,
+    [CharacterSocialEventSchema.parse({
+      id: context.ids.next("social"),
+      gameId: context.gameId,
+      sourceTurnId: null, sourceSessionId: null, sourceMessageId: null,
+      participantCharacterIds: [cause.subjectCharacterId, cause.targetCharacterId],
+      kind: cause.score >= 0 ? "favour" : "insult",
+      visibility: "polity",
+      knownByCharacterIds: [cause.subjectCharacterId, cause.targetCharacterId],
+      relationCauses: [{ ...cause, decayPerYearBps: 500 }],
+      observedTraits: [],
+      knowledgeClaims: [], proposedBeliefs: [], pressureChanges: [],
+      commitmentProposal: null, introducedCharacter: null, introducedProfile: null,
+      createdAtStep: atStep, appliedAtStep: null, appliedInTurnId: null,
+      status: "proposed", rejectionReason: null,
+    })],
+    atStep,
+    context.ids.next("social-batch"),
+  ).world;
+}
+
 /** Puts the batch's handles back as they were, in place: callers hold this map. */
 function restoreHandles(handles: Map<string, string>, asTheyWere: ReadonlyMap<string, string>): void {
   handles.clear();
@@ -205,6 +368,15 @@ function restoreHandles(handles: Map<string, string>, asTheyWere: ReadonlyMap<st
 function withPressures(world: WorldState, next: { readonly characters: readonly WorldState["characters"][number][]; readonly characterPressures: readonly WorldState["characterPressures"][number][] }): WorldState {
   return { ...world, characters: [...next.characters], characterPressures: [...next.characterPressures] };
 }
+
+/** What a man recovers by resting, where nobody treats him. */
+const REST_RECOVERY_BPS = 500;
+
+/** What walking out on a paid contract costs a man's name. */
+const WALKED_OUT_STANDING_BPS = 300;
+
+/** Days an army takes to cross one province on the march: a legion's fifteen or twenty miles a day over a region. */
+const MARCH_DAYS_PER_PROVINCE = 8;
 
 /** How many threads the world follows at once before it must close one. */
 const MAX_OPEN_STORYLINES = 12;
@@ -218,6 +390,22 @@ const MAX_OPEN_STORYLINES = 12;
  */
 const MAX_SHOWN_BATTLES = 6;
 
+/**
+ * Words that assert a death, which `character_state_set` may not.
+ *
+ * Kept as a set rather than a single check because every one of these was a
+ * plausible thing for an author to write, and the one that got through was the
+ * plainest of them.
+ */
+const DEATH_CLAIMING_STATUSES = new Set(["dead", "deceased", "killed", "slain", "murdered", "assassinated", "executed"]);
+
+/** Statuses that mean a person is in somebody else's hands. */
+const CAPTIVE_STATUSES = new Set(["captured", "captive", "imprisoned", "prisoner", "hostage", "condemned", "arrested"]);
+
+/** One step of a skill, and the most shifts can ever make of one. */
+const SKILL_STEP = 10;
+const SKILL_CEILING = 90;
+
 const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   money_transfer: "spend",
   income_source_upsert: "spend",
@@ -226,6 +414,7 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   project_milestone_update: "propose",
   force_create: "command",
   force_modify: "command",
+  force_reinforce: "command",
   force_attrition: "command",
   character_create: "appoint",
   character_intent_set: "propose",
@@ -246,18 +435,47 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   political_support_set: "propose",
   political_procedure_resolve: "override",
   holding_transfer: "punish",
+  holding_create: "spend",
+  holding_improve: "spend",
+  force_membership_set: "command",
+  trade_venture_open: "spend",
+  trade_venture_close: "spend",
   storyline_open: "propose",
   storyline_advance: "propose",
   character_pressure_set: "propose",
   character_state_set: "propose",
+  force_raid: "command",
   diplomatic_message_send: "negotiate",
   diplomatic_message_answer: "negotiate",
   agreement_open: "negotiate",
   agreement_close: "negotiate",
   province_control_set: "command",
+  settlement_control_set: "command",
+  // "punish", because that is the power a plot arrogates: deciding that a man
+  // has forfeited something, without a court and without a hearing. Nobody's
+  // office grants it, so every plot is recorded as a breach by the man who
+  // laid it -- which is the thread an investigator later pulls.
+  covert_plot_open: "punish",
+  contingency_arm: "command",
+  contingency_disarm: "command",
   polity_create: "override",
   office_seat_set: "appoint",
+  // A family's own business: nobody's office grants it, and nobody's is needed.
+  family_tie_set: "propose",
+  // The power a court exercises, and the one a man with no court usurps.
+  character_death: "punish",
+  // Taking a man's freedom is the power of a court or a conqueror; giving it
+  // back is his owner's, and is judged as the household's own business.
+  legal_status_set: "punish",
+  service_contract_open: "spend",
+  service_contract_close: "spend",
 };
+
+/** The power an act needs: founding something is proposing it, and keeping it at an account's expense is spending from it. */
+function powerOf(delta: WorldDelta): AuthorityPower {
+  if ((delta.op === "generic_entity_create" || delta.op === "generic_entity_update") && delta.upkeep != null) return "spend";
+  return POWER_BY_OP[delta.op];
+}
 
 /**
  * Which polity an act falls in, where that can be told.
@@ -265,16 +483,25 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
  * Used to decide whether an act is the actor's at all -- not to decide whether
  * they may do it, which is `checkAuthority`'s business.
  */
-function polityOfScope(scope: AuthorityScope, world: WorldState): string | null {
+function polityOfScope(scope: AuthorityScope, world: WorldState, offices: readonly Office[] = []): string | null {
   switch (scope.kind) {
     case "polity":
       return scope.id;
     case "province":
       return world.map.provinces.find((province) => province.id === scope.id)?.controllerPolityId ?? null;
-    case "force":
-      return world.material.forces.find((force) => force.id === scope.id)?.polityId ?? null;
+    // An outlaw band belongs to no power, so no government's grant reaches it.
+    case "force": {
+      const force = world.material.forces.find((candidate) => candidate.id === scope.id);
+      return force === undefined || force.outlaw === true ? null : force.polityId;
+    }
+    // An office is scoped as an institution of the government that has it.
+    // Only the councils were looked in, so no seat of any office ever resolved
+    // to a power: a consul seating his own legate breached, and a Roman
+    // seating a Carthaginian was never asked whose office it was.
     case "institution":
-      return world.material.institutions.find((institution) => institution.id === scope.id)?.polityId ?? null;
+      return world.material.institutions.find((institution) => institution.id === scope.id)?.polityId
+        ?? allOffices(world, offices).find((office) => office.id === scope.id)?.polityId
+        ?? null;
     case "account": {
       const owner = world.material.accounts.find((account) => account.id === scope.id)?.owner;
       if (owner === undefined) return null;
@@ -302,7 +529,20 @@ function polityOfScope(scope: AuthorityScope, world: WorldState): string | null 
  * insubordination VISION §12 is about. It is only when the world itself is
  * speaking that an act inside another power is somebody else's business.
  */
-function actorIsAnswerableFor(delta: WorldDelta, scope: AuthorityScope, world: WorldState, context: ApplyContext): boolean {
+/** Whether an act falls inside a power other than the actor's own. */
+function actsInsideAnotherPower(scope: AuthorityScope, world: WorldState, context: ApplyContext): boolean {
+  const actorPolityId = actorPolityOf(world, context);
+  const scopePolityId = polityOfScope(scope, world, context.offices);
+  return actorPolityId !== null && scopePolityId !== null && scopePolityId !== actorPolityId;
+}
+
+function actorIsAnswerableFor(delta: WorldDelta, scope: AuthorityScope, world: WorldState, context: ApplyContext, ofTheOrder = false): boolean {
+  // The world's own business, said apart from the order: a seed carried out,
+  // a promise falling due, the Senate filling a post. None of it is the ruler
+  // acting, wherever it falls. Before the two were separated, this was
+  // judged against him whenever it happened at home -- and with authority now
+  // refusing rather than only recording, it would have been refused.
+  if (context.actsForTheWorld === true && context.orderDeltas !== undefined && !ofTheOrder) return false;
   // Meaning to do something is not doing it. An intention has no scope of its
   // own, so it fell back to the whole polity, and an official who merely
   // resolved to act was recorded as having exceeded his authority over the
@@ -319,6 +559,18 @@ function actorIsAnswerableFor(delta: WorldDelta, scope: AuthorityScope, world: W
   // falling ill would be recorded as insubordination by whoever wrote it down,
   // which is the ninth way this check has found to manufacture it.
   if (delta.op === "character_state_set") return false;
+  // A marriage or an adoption is two families' business, and nobody's office.
+  if (delta.op === "family_tie_set") return false;
+  // A duel or a suicide exercises no power over anyone. An execution does,
+  // unless a court has already condemned the man: a question about him that
+  // passed is the lawful form, and without one it is a killing the record
+  // will want explained.
+  if (delta.op === "character_death") {
+    if (delta.manner !== "execution") return false;
+    const doomedId = context.assignedIds?.get(delta.characterRef.replace(/^local:/, "")) ?? delta.characterRef;
+    return !world.material.politicalProcedures.some((procedure) =>
+      procedure.subjectKind === "character" && procedure.subjectId === doomedId && procedure.outcome === "passed");
+  }
   // A country coming apart is not an act of office. Scoped to the power it
   // breaks from -- which for a rising is usually the ruler's own -- it would
   // have recorded the ruler as personally insubordinate for a rebellion in his
@@ -333,8 +585,18 @@ function actorIsAnswerableFor(delta: WorldDelta, scope: AuthorityScope, world: W
   // insubordination the ordinary consequence of answering your post, and is
   // the eighth way this check has found to manufacture it.
   if (delta.op === "order_attempt_decide") return false;
+  // Joining an army is not an exercise of authority over it: any free man may
+  // take service. Walking away from one without leave is -- but only the man
+  // walking answers for it. Written by whoever is telling the world's story
+  // about somebody else's desertion, it would record the teller as the
+  // deserter, which is the tenth way this check could manufacture
+  // insubordination. A discharge is the commander's to give, and is judged.
+  if (delta.op === "force_membership_set" && delta.change !== "discharge") {
+    return delta.change === "desert" && context.actorRef.kind === "character" && delta.characterRef === context.actorRef.id;
+  }
 
   if (context.actsForTheWorld !== true) return true;
+
 
   // A polity's standing aims are nobody's personal act, whoever is speaking.
   if (delta.op === "polity_outlook_set") return false;
@@ -344,7 +606,7 @@ function actorIsAnswerableFor(delta: WorldDelta, scope: AuthorityScope, world: W
     : context.actorRef.kind === "polity" ? context.actorRef.id : null;
   if (actorPolityId === null) return true;
 
-  const scopePolityId = polityOfScope(scope, world);
+  const scopePolityId = polityOfScope(scope, world, context.offices);
   // Where the act belongs to nobody in particular, the actor still answers for
   // it: an unattributable act is exactly where overreach would hide.
   if (scopePolityId === null) return true;
@@ -352,9 +614,10 @@ function actorIsAnswerableFor(delta: WorldDelta, scope: AuthorityScope, world: W
 }
 
 export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], context: ApplyContext): ApplyResult {
-  const assignedIds = new Map<string, string>();
+  const assignedIds = new Map<string, string>(context.assignedIds ?? []);
   const applied: AppliedDelta[] = [];
   const rejected: RejectedDelta[] = [];
+  const assumptions: AssumedDetail[] = [];
   const breaches: AuthorityBreach[] = [];
   const factProposals: FactProposalDraft[] = [];
   const battleAccounts: BattleAccount[] = [];
@@ -366,11 +629,21 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
   const authorityIndex: AuthorityIndex = buildAuthorityIndex(
     { officeSeats: world.material.officeSeats, forces: world.material.forces, accounts: world.material.accounts },
     world.authorityGrants,
-    context.offices,
+    // Every office there is, and not only the scenario's: an office the world
+    // made -- a quaestorship for the war chest -- conferred nothing here, so
+    // its holder breached, or was ignored, every time he did his job.
+    allOffices(world, context.offices),
     world.elapsedStep,
   );
 
-  for (const delta of deltas) {
+  for (const written of deltas) {
+    // A reference off by a little -- a province id cut in half, a keep paid
+    // "from the temple" -- is put right before the act is judged; and a
+    // person named and never made is made, rather than refusing the act that
+    // named him.
+    // Captured before anybody is made for this act, so a refusal takes them
+    // back out with it: a person conjured for an act that never happened is
+    // exactly the state-surviving-a-rollback this loop exists to prevent.
     const previous = current;
     /**
      * The handles this batch has minted, as they stood before this delta.
@@ -387,6 +660,62 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
      * was never made.
      */
     const previousHandles = new Map(assignedIds);
+    // Everything here is a courtesy -- putting a reference right, making
+    // somebody named and never made -- and a courtesy must never be the thing
+    // that takes a batch down. Before this was guarded, an empty social event
+    // with no list of events in it threw from here, outside the per-act
+    // guard below, and would have lost every act in the batch.
+    let delta: WorldDelta = written;
+    const ofTheOrder = context.orderDeltas?.has(written) === true;
+    /** What the engine answered for the actor that the answer left out or got wrong. */
+    let assumed: readonly string[] = [];
+    try {
+      // An arrangement paid from, or paid into, as if it had an account -- the
+      // guild's fund, the church's collection -- is given one, empty. Paying
+      // out of it then meets the honest answer that there is nothing in it.
+      current = openFundsNamedIn(written, current, resolve);
+      current = splitDetachmentsNamedIn(written, current, assignedIds, context);
+      const named = peopleNamedButNeverMade(normalizeRefs(written, current, (handle) => assignedIds.has(handle), resolve), current, (handle) =>
+        assignedIds.has(handle)
+        // Somebody this batch tried to make and could not: the refusal of that
+        // creation already says why, and a stand-in under another name would be
+        // a different person pretending to be him.
+        || rejected.some((rejection) => "localId" in rejection.delta && rejection.delta.localId === handle), resolve);
+      for (const person of named.toMake) {
+        const actorPolity = context.actorRef.kind === "character"
+          ? current.characters.find((character) => character.id === context.actorRef.id)?.polityId ?? null
+          : context.actorRef.kind === "polity" ? context.actorRef.id : null;
+        const mentioned = named.delta as { polityId?: unknown; fromPolityId?: unknown; provinceId?: unknown; locationId?: unknown };
+        const polityId = [mentioned.polityId, mentioned.fromPolityId, actorPolity]
+          .find((candidate): candidate is string => typeof candidate === "string" && current.map.polities.some((polity) => polity.id === candidate));
+        const provinceId = [mentioned.provinceId, mentioned.locationId]
+          .find((candidate): candidate is string => typeof candidate === "string" && current.map.provinces.some((province) => province.id === candidate)) ?? null;
+        if (polityId === undefined) continue;
+        try {
+          current = applyOne(current, {
+            op: "character_create", localId: person.handle, name: person.name, polityId, provinceId, age: 40,
+            officeLabel: null, officeAuthorises: [], traits: [], standing: null, wealth: 0,
+            generatedBecause: "Named in an order before anybody had made them.",
+          }, context, assignedIds, resolve, () => undefined, () => undefined);
+        } catch {
+          // Leave the act to be refused on its own terms.
+        }
+      }
+      delta = named.delta;
+      // Who pays and where, when the answer named nothing that exists: the
+      // actor's own purse, the place he stands. Only for the actor's own acts --
+      // the world speaking for Carthage is not a Roman paying for it.
+      if (context.actsForTheWorld !== true || ofTheOrder) {
+        const filled = fillGaps(delta, current, context.actorRef, resolve);
+        delta = filled.delta;
+        assumed = filled.assumed;
+      }
+    } catch {
+      current = previous;
+      restoreHandles(assignedIds, previousHandles);
+      delta = written;
+      assumed = [];
+    }
     // Buffered per delta: a delta that is rolled back must not leave the world
     // asserting consequences that never happened.
     const emitted: FactProposalDraft[] = [];
@@ -403,43 +732,119 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
     let answerable = true;
     try {
       const scope = scopeOf(delta, current, resolve, context.actorRef);
-      answerable = actorIsAnswerableFor(delta, scope, current, context);
+      // The player's own money is spent by the player. The world moving beside
+      // an order may ruin him -- cut his trade, burn his stall, sue him -- but it
+      // may not decide what he pays for: asked who paid for a spectacle, it once
+      // answered "the merchant", and spent the purse his order needed.
+      if (context.actsForTheWorld === true && !ofTheOrder && context.playerCharacterId != null && scope.kind === "account") {
+        const account = current.material.accounts.find((candidate) => candidate.id === scope.id);
+        if (account?.owner.kind === "character" && account.owner.id === context.playerCharacterId) {
+          rejected.push({ delta, reason: `${account.id} is the player's own purse, and the world does not spend it for him: take it from somebody else, or leave it to his order.`, kind: "reference", ofTheOrder });
+          current = previous;
+          restoreHandles(assignedIds, previousHandles);
+          continue;
+        }
+      }
+      // A slave's purse is his master's. Asked first, because the owner's
+      // grant over a purse would otherwise say it is his to spend.
+      const unfree = context.actorRef.kind === "character" ? notHisToSpend(delta, current, context.actorRef.id, resolve) : null;
+      if (unfree !== null) {
+        rejected.push({ delta, reason: unfree, kind: "ignored", ofTheOrder });
+        continue;
+      }
+      const flight = context.actorRef.kind === "character" ? fleesHisMaster(delta, current, context.actorRef.id) : null;
+      if (flight !== null) {
+        emitted.push({
+          localId: `fled_${context.actorRef.id}`.slice(0, 60), kind: "runaway", summary: flight,
+          affectedRefs: [{ kind: "character", id: context.actorRef.id }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 35,
+        });
+      }
+      // His words, his letters, what he founds with his own money: nobody's
+      // authority is in question, at home or abroad.
+      const ownBusiness = context.actorRef.kind === "character" && isOwnBusiness(delta, current, context.actorRef.id, resolve);
+      answerable = !ownBusiness && actorIsAnswerableFor(delta, scope, current, context, ofTheOrder);
+      // The order reaching into another power: no breach, since a Roman owes
+      // Carthage no obedience to break, but no free pass either.
+      const reachesAbroad = !ownBusiness && ofTheOrder && !answerable && actsInsideAnotherPower(scope, current, context);
       authority = checkAuthority(
         authorityIndex,
         {
           holder: context.actorRef,
           domain: DELTA_AUTHORITY_DOMAIN[delta.op],
           scope,
-          power: POWER_BY_OP[delta.op],
+          power: powerOf(delta),
         },
         // Without this, `checkAuthority` matches scopes only exactly, so a
         // grant over Rome covered nothing *in* Rome: a consul with authority
         // over his own republic was recorded as insubordinate for putting a
         // motion to its own Senate.
-        (granted, wanted) => granted.kind === "polity" && polityOfScope(wanted, current) === granted.id,
+        (granted, wanted) => granted.kind === "polity" && polityOfScope(wanted, current, context.offices) === granted.id,
       );
+      // An act outside one's authority happens only if the men, money or
+      // ground it needs answer to the actor. Otherwise nobody moves.
+      if (context.actorRef.kind === "character") {
+        const unheard = delta.op === "polity_create"
+          ? nobodyRises(delta, current, context.actorRef.id)
+          : (answerable || reachesAbroad) && !authority.authorized
+            ? nobodyListens(delta, current, context.actorRef.id, resolve, new Set(assignedIds.values()), context.offices, reachesAbroad)
+            : null;
+        // Nobody had to -- but somebody might, for the man's sake or their own.
+        const willing = unheard === null || delta.op === "polity_create" ? null : listensAnyway(delta, current, context.actorRef.id, resolve, context.offices);
+        if (unheard !== null && willing === null) {
+          rejected.push({ delta, reason: unheard, kind: "ignored", ofTheOrder });
+          continue;
+        }
+        if (willing !== null) {
+          emitted.push({
+            localId: `willing_${willing.listenerId}_${delta.op}`.slice(0, 60),
+            kind: "done_unbidden",
+            summary: willing.why,
+            affectedRefs: [{ kind: "character", id: willing.listenerId }, { kind: "character", id: context.actorRef.id }],
+            visibility: "polity",
+            discoveryState: "polity",
+            knowableInDays: 0,
+            significance: 40,
+          });
+        }
+      }
       current = applyOne(current, delta, context, assignedIds, resolve, emitFact, emitAccount);
     } catch (error) {
       if (error instanceof DeltaRejection) {
-        rejected.push({ delta, reason: error.message, kind: error.kind });
+        rejected.push({ delta, reason: error.message, kind: error.kind, ofTheOrder });
         current = previous;
         restoreHandles(assignedIds, previousHandles);
         continue;
       }
-      throw error;
+      // One bad delta is one bad delta. Rethrown, it left `applyDeltas`
+      // entirely and took the whole burst with it: every other change in the
+      // batch was lost, and the player's order came back as a failure of the
+      // engine rather than of the one thing that went wrong. A handler can
+      // always be reached with something it did not expect -- a field a schema
+      // change made optional, a shape nobody anticipated -- and the worst that
+      // should cost is the delta that carried it.
+      rejected.push({
+        delta,
+        reason: `The engine could not carry out "${delta.op}": ${error instanceof Error ? error.message : String(error)}.`,
+        kind: "reference",
+        ofTheOrder,
+      });
+      current = previous;
+      restoreHandles(assignedIds, previousHandles);
+      continue;
     }
 
     const afterViolations = findWorldReferenceViolations(current);
     const introduced = afterViolations.filter((violation) => !violations.has(violation));
     if (introduced.length > 0) {
-      rejected.push({ delta, reason: `Would leave a reference to something that does not exist: ${introduced[0]}.`, kind: "reference" });
+      rejected.push({ delta, reason: `Would leave a reference to something that does not exist: ${introduced[0]}.`, kind: "reference", ofTheOrder });
       current = previous;
       restoreHandles(assignedIds, previousHandles);
       continue;
     }
     violations = new Set(afterViolations);
 
-    applied.push({ delta, authority });
+    applied.push({ delta, authority, ofTheOrder });
+    if (assumed.length > 0) assumptions.push({ delta, assumed, ofTheOrder });
     factProposals.push(...emitted);
     battleAccounts.push(...emittedAccounts);
     if (answerable && !authority.authorized) breaches.push({ delta, reason: authority.reason });
@@ -464,10 +869,11 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
       })),
       factProposals: [],
       assignedIds: new Map(),
+      assumptions: [],
     };
   }
 
-  return { world: parsed.data, applied, rejected, breaches, factProposals, battleAccounts, assignedIds };
+  return { world: parsed.data, applied, rejected, breaches, factProposals, battleAccounts, assignedIds, assumptions };
 }
 
 /** Basis points never leave 0..10 000, and the schema refuses anything that does. */
@@ -497,7 +903,19 @@ function applyOne(
   emitFact: (fact: FactProposalDraft) => void,
   emitAccount: (account: BattleAccount) => void,
 ): WorldState {
-  const required = (ref: string, label: string): string => {
+  /**
+   * A reference the handler cannot proceed without.
+   *
+   * Takes a possibly-absent ref rather than a string, because a handler
+   * reaching for a field the schema would have defaulted must refuse rather
+   * than throw. Every one of these is guaranteed present by the schema in the
+   * live pipeline -- and "guaranteed by something else" is exactly the
+   * assumption that turns one malformed delta into a crash the first time it
+   * is wrong. `force_create` was written that way this week and found by a
+   * test that fed it an unparsed payload.
+   */
+  const required = (ref: string | null | undefined, label: string): string => {
+    if (ref === undefined || ref === null) reject(`${label} was not named.`, "reference");
     const resolved = resolve(ref);
     if (resolved === undefined) reject(`${label} refers to "${ref}", which nothing in this batch created.`, "reference");
     return resolved;
@@ -533,16 +951,31 @@ function applyOne(
       const fromId = required(delta.fromAccountRef, "The paying account");
       const from = world.material.accounts.find((account) => account.id === fromId);
       if (from === undefined) reject(`No account "${fromId}" exists to pay from.`, "reference");
-      if (from.balance < delta.amount) {
-        reject(`Account "${fromId}" holds ${from.balance}, which cannot cover ${delta.amount}.`);
-      }
+      // What there is, if not all that was asked. A payment that could not be
+      // met in full was refused in full, so a man with nine hundred who owed a
+      // thousand paid nothing at all -- which is not how anybody short of
+      // money behaves. Only an empty chest pays nothing.
+      if (from.balance <= 0) reject(`Account "${fromId}" is empty, and ${delta.amount} could not be paid from it.`);
+      const paying = Math.min(delta.amount, from.balance);
       const toId = delta.toAccountRef === null ? null : required(delta.toAccountRef, "The receiving account");
       if (toId !== null && !world.material.accounts.some((account) => account.id === toId)) {
         reject(`No account "${toId}" exists to receive payment.`, "reference");
       }
+      if (paying < delta.amount) {
+        emitFact({
+          localId: `short_${fromId}_${delta.amount}`.slice(0, 60),
+          kind: "payment_short",
+          summary: `Of ${delta.amount} to be paid for ${delta.reason.slice(0, 160)}, only ${paying} could be found; ${delta.amount - paying} is still owed.`,
+          affectedRefs: [{ kind: "account", id: fromId }, ...(toId === null ? [] : [{ kind: "account" as const, id: toId }])],
+          visibility: "polity",
+          discoveryState: "polity",
+          knowableInDays: 0,
+          significance: 20,
+        });
+      }
       const accounts = world.material.accounts.map((account) => {
-        if (account.id === fromId) return { ...account, balance: account.balance - delta.amount };
-        if (toId !== null && account.id === toId) return { ...account, balance: account.balance + delta.amount };
+        if (account.id === fromId) return { ...account, balance: account.balance - paying };
+        if (toId !== null && account.id === toId) return { ...account, balance: account.balance + paying };
         return account;
       });
       return { ...world, material: { ...world.material, accounts } };
@@ -553,13 +986,35 @@ function applyOne(
       if (!world.material.accounts.some((account) => account.id === beneficiaryId)) {
         reject(`No account "${beneficiaryId}" exists to receive this income.`, "reference");
       }
+      // A government's revenue may be written as a figure: it is levied, and the
+      // tick bounds what its lands can bear. A person's or an army's may not.
+      // Written into a private purse, a figure came from nowhere, was lawful
+      // (the purse's owner holds authority over it), and bypassed everything
+      // the engine prices -- a merchant could be handed a thousand a month, and
+      // an estate's engine-set yield could be rewritten to anything.
+      const privatelyHeld = (accountId: string): boolean =>
+        world.material.accounts.find((account) => account.id === accountId)?.owner.kind !== "polity";
+      const FROM_SOMETHING = "A person's or an army's income comes from something that yields it -- an estate (holding_create, holding_improve), an office's pay, a venture standing in the world (generic_entity_create with an income effect) -- or is paid to him by somebody (obligation_upsert naming him as recipient).";
+      if (privatelyHeld(beneficiaryId)) reject(`"${delta.label}" would pay a figure into ${beneficiaryId}, which is not a government's treasury. ${FROM_SOMETHING}`, "reference");
       const existingId = delta.incomeSourceRef === null ? null : required(delta.incomeSourceRef, "The income source");
+      const existing = existingId === null ? undefined : world.material.incomeSources.find((source) => source.id === existingId);
+      if (existing !== undefined) {
+        if (existing.originKind === "holding" || privatelyHeld(existing.beneficiaryAccountId)) {
+          reject(`"${existing.label}" is a private income; what it yields is set by what yields it. ${FROM_SOMETHING}`, "reference");
+        }
+        // Moving somebody's revenue to somebody else is not changing it: it is
+        // taking whatever yields it, which is an act of its own.
+        if (existing.beneficiaryAccountId !== beneficiaryId) {
+          reject(`"${existing.label}" is paid to ${existing.beneficiaryAccountId}; an income is changed where it is paid. To take what yields it, take the land or the office.`, "reference");
+        }
+      }
       const base = {
         kind: delta.kind,
         label: delta.label,
         beneficiaryAccountId: beneficiaryId,
-        originKind: "polity" as const,
-        originId: beneficiaryId,
+        // What an income comes from does not change because its amount did.
+        originKind: existing?.originKind ?? ("polity" as const),
+        originId: existing?.originId ?? beneficiaryId,
         amount: delta.amount,
         cadenceSteps: delta.cadenceDays,
         nextDueStep: atStep + delta.cadenceDays,
@@ -592,7 +1047,15 @@ function applyOne(
       // act on yet". One standing order of forty a month bricked a campaign
       // that had been running for three years.
       if (recipientId !== undefined && recipientId === payerId) {
-        reject(`"${delta.label}" would have ${payerId} paying itself; an obligation needs somebody else to owe.`);
+        // Named as an engine rejection rather than a world one. It used to
+        // surface in the player's own record as friction -- "Rome cannot be
+        // both the one who owes and the one who is owed" -- which reads as a
+        // rule of the world and is nothing of the kind: it is a payload that
+        // put one account on both sides. The order was always possible.
+        reject(
+          `"${delta.label}" would have ${payerId} paying itself; wages and upkeep take no recipient at all, because the money goes to the men. Leave recipientAccountRef null, or name the army's own chest.`,
+          "reference",
+        );
       }
       const base = {
         kind: delta.kind,
@@ -642,11 +1105,22 @@ function applyOne(
           cadenceDays: outcome.cadenceDays,
           agreementKind: outcome.agreementKind,
           withPolityId: outcome.withPolityId,
+          ...(outcome.structureKind === undefined ? {} : { structureKind: outcome.structureKind }),
+          ...(outcome.effects === undefined ? {} : { effects: outcome.effects }),
+          ...(outcome.upkeep == null ? {} : { upkeep: upkeepFrom(world, outcome.upkeep, required) }),
         };
+      // The same rule as `income_source_upsert`: a finished work may pay a
+      // government's treasury, not a person's purse -- a man's income comes
+      // from something he owns, and a project that ends in a building he owns
+      // is a structure with an income effect, which the engine prices.
+      if (completionOutcome?.kind === "income_source" && completionOutcome.beneficiaryAccountId !== null
+        && world.material.accounts.find((account) => account.id === completionOutcome.beneficiaryAccountId)?.owner.kind !== "polity") {
+        reject(`"${delta.label}" would end paying a figure into ${completionOutcome.beneficiaryAccountId}, which is not a government's treasury. A private work that pays is a building with an income effect ("structure").`, "reference");
+      }
       // An embassy whose whole point is an understanding must name the power it
       // is with, or it completes and the world is exactly as it was.
       if (outcome !== null && outcome.kind === "agreement" && (outcome.agreementKind === null || outcome.withPolityId === null)) {
-        reject("A project that is to end in an agreement must say what the agreement is and which power it is with.");
+        reject("A project that is to end in an agreement must say what the agreement is and which power it is with.", "reference");
       }
       if (outcome !== null && outcome.withPolityId !== null && !world.map.polities.some((polity) => polity.id === outcome.withPolityId)) {
         reject(`No power "${outcome.withPolityId}" exists to come to terms with.`, "reference");
@@ -736,11 +1210,16 @@ function applyOne(
       const projectId = required(delta.projectRef, "The project");
       const project = world.projects.find((candidate) => candidate.id === projectId);
       if (project === undefined) reject(`No project "${projectId}" exists.`, "reference");
-      if (!project.milestones.some((milestone) => milestone.id === delta.milestoneId)) {
-        reject(`Project "${projectId}" has no milestone "${delta.milestoneId}".`, "reference");
-      }
+      // By id, or by the number or name it was written with: "milestone 0"
+      // and "the second stage" name a stage as surely as its id does.
+      const wanted = delta.milestoneId.trim();
+      const ordinal = /^\d+$/.test(wanted) ? Number(wanted) : null;
+      const stage = project.milestones.find((milestone) => milestone.id === wanted)
+        ?? (ordinal === null ? undefined : project.milestones[ordinal] ?? project.milestones[ordinal - 1])
+        ?? project.milestones.find((milestone) => milestone.label.toLowerCase() === wanted.toLowerCase());
+      if (stage === undefined) reject(`Project "${projectId}" has no milestone "${delta.milestoneId}".`, "reference");
       const milestones = project.milestones.map((milestone) =>
-        milestone.id === delta.milestoneId ? { ...milestone, status: delta.status, completedAtStep: atStep } : milestone,
+        milestone.id === stage.id ? { ...milestone, status: delta.status, completedAtStep: atStep } : milestone,
       );
       const allDone = milestones.every((milestone) => milestone.status !== "pending");
       const updated = { ...project, milestones, status: allDone ? ("completed" as const) : project.status, completedAtStep: allDone ? atStep : null };
@@ -752,27 +1231,68 @@ function applyOne(
       const controllerId = required(delta.controllerCharacterRef, "The controller");
       if (!world.characters.some((character) => character.id === commanderId)) reject(`No character "${commanderId}" exists to command this force.${nearestTo(commanderId)}`, "reference");
       if (!world.map.provinces.some((province) => province.id === delta.locationId)) reject(`No province "${delta.locationId}" exists to raise this force in.`, "reference");
+      const forcePolityId = required(delta.polityId, "The power this force answers to");
+      if (!world.map.polities.some((polity) => polity.id === forcePolityId)) {
+        reject(`No power "${forcePolityId}" exists for this force to answer to.`, "reference");
+      }
+      const payObligationId = delta.payObligationRef == null ? null : required(delta.payObligationRef, "The obligation that pays them");
+      if (payObligationId !== null && !world.material.obligations.some((obligation) => obligation.id === payObligationId)) {
+        reject(`No obligation "${payObligationId}" exists to pay this force.`, "reference");
+      }
+      const category = delta.categoryId === undefined
+        ? { id: "infantry", label: "Infantry" }
+        : warfareWith(world, context.warfare).troopCategories.find((candidate) => candidate.id === delta.categoryId);
+      if (category === undefined) reject(`No kind of troops "${delta.categoryId}" exists; the kinds are ${warfareWith(world, context.warfare).troopCategories.map((candidate) => candidate.id).join(", ")}.`, "reference");
+      // A band answering to no power is raised with somebody's own money, or it
+      // is simply a government's army that has been called something else.
+      if (delta.outlaw === true) {
+        const payer = world.material.obligations.find((obligation) => obligation.id === payObligationId)?.payerAccountId;
+        const owner = world.material.accounts.find((account) => account.id === payer)?.owner;
+        if (owner?.kind !== "character") reject(`${delta.name} would answer to no power, so a private purse has to pay it: name the obligation that does.`, "reference");
+      }
       const id = mint("force", delta.localId);
       const force = {
         id,
         name: delta.name,
-        polityId: delta.polityId,
+        polityId: forcePolityId,
+        ...(delta.outlaw === true ? { outlaw: true } : {}),
         commanderCharacterId: commanderId,
         controllerCharacterId: controllerId,
         locationId: delta.locationId,
         positionId: null,
         authorizedStrength: delta.authorizedStrength,
-        personnel: [{ categoryId: "infantry", label: "Infantry", fit: delta.authorizedStrength, unavailable: [] }],
+        personnel: [{ categoryId: category.id, label: category.label, fit: delta.authorizedStrength, unavailable: [] }],
         moraleBps: 6_000,
         cohesionBps: 5_000,
         fatigueBps: 0,
         provisionStatus: "provisioned" as const,
         provisionedThroughStep: atStep + 30,
-        payObligationId: null,
+        payObligationId,
         payArrearsPeriods: 0,
         history: [],
+        memberCharacterIds: [],
       };
-      return { ...world, material: { ...world.material, forces: [...world.material.forces, force] } };
+      // Every army carries a chest, empty until something fills it. It costs
+      // nothing to have and it is the only place plunder can go: without one,
+      // "they will be paid out of what they take" has nowhere to put what they
+      // take, and an order about an army's own money has to be routed through
+      // somebody's purse instead.
+      const chest = {
+        id: context.ids.next("account"),
+        owner: { kind: "force" as const, id },
+        currencyId: world.material.currency.id,
+        balance: 0,
+        status: "active" as const,
+        visibility: "polity" as const,
+      };
+      return {
+        ...world,
+        material: {
+          ...world.material,
+          forces: [...world.material.forces, force],
+          accounts: [...world.material.accounts, chest],
+        },
+      };
     }
 
     case "force_modify": {
@@ -788,10 +1308,10 @@ function applyOne(
       let escort: typeof force | null = null;
       if (delta.locationId !== undefined && delta.locationId !== force.locationId) {
         const verdict = canMoveTo(world, force.locationId, delta.locationId, context.terrains ?? []);
-        if (verdict.allowed && isWaterCrossing(verdict.edge.crossing) && !isNavalForce(force, context.warfare)) {
+        if (verdict.allowed && isWaterCrossing(verdict.edge.crossing) && !isNavalForce(force, warfareWith(world, context.warfare))) {
           // An army crossing water needs hulls to cross it in. This is the rule
           // that makes Sicily an island rather than another province of Italy.
-          escort = transportFor(force, world.material.forces, context.warfare);
+          escort = transportFor(force, world.material.forces, warfareWith(world, context.warfare));
           if (escort === null) {
             reject(
               `${force.name} cannot make the ${verdict.edge.crossing} crossing without ships: no fleet of its own power stands with it that could carry ${fitStrengthOf(force)} men.`,
@@ -804,30 +1324,179 @@ function applyOne(
             reject(`${force.name} cannot make the ${verdict.refusal.crossing} crossing from ${provinceName(force.locationId)} to ${provinceName(delta.locationId)}.`);
           }
           const hops = verdict.refusal.kind === "not_adjacent" ? verdict.refusal.hops : null;
-          const distance = hops === null ? "no road at all leads there" : `it is ${hops} province(s) away`;
-          reject(
-            `${force.name} stands in ${provinceName(force.locationId)} and cannot reach ${provinceName(delta.locationId)} in one move: ${distance}. March it to a neighbouring province, or make the journey a project whose outcome is "force_move".`,
-          );
+          if (hops === null) {
+            reject(`${force.name} stands in ${provinceName(force.locationId)} and cannot reach ${provinceName(delta.locationId)}: no road at all leads there.`);
+          }
+          // Far off, but there is a road: the order is a march, and a march
+          // takes days. It used to be refused, and the refusal was never put
+          // right -- "march on Rhegium" from Rome simply did not happen unless
+          // the model had thought to write a journey. Now the journey is made
+          // for it, the army sets out, and it arrives when the road is walked.
+          const days = hops * MARCH_DAYS_PER_PROVINCE;
+          const journey: WorldDelta = {
+            op: "project_create",
+            localId: `march-${forceId}`.slice(0, 60),
+            kind: "march",
+            label: `${force.name} marches on ${provinceName(delta.locationId)}`.slice(0, 160),
+            sponsorRef: context.actorRef,
+            fundingAccountRef: null,
+            milestones: [{ label: `Arrives in ${provinceName(delta.locationId)}`.slice(0, 160), dueInDays: days, costAmount: 0 }],
+            completionOutcome: {
+              kind: "force_move", label: `${force.name} arrives in ${provinceName(delta.locationId)}`.slice(0, 160), amount: 0,
+              provinceId: delta.locationId, polityId: null, commanderCharacterRef: null, forceRef: forceId,
+              beneficiaryAccountRef: null, cadenceDays: null, agreementKind: null, withPolityId: null,
+            },
+            reason: `Marching ${hops} provinces.`,
+          };
+          const setOut = applyOne(world, journey, context, assignedIds, resolve, emitFact, emitAccount);
+          emitFact({
+            localId: `march_${forceId}`.slice(0, 60),
+            kind: "march_begun",
+            summary: `${force.name} set out from ${provinceName(force.locationId)} for ${provinceName(delta.locationId)}, ${hops} provinces off: about ${days} days on the road.`,
+            affectedRefs: [{ kind: "force", id: forceId }, { kind: "province", id: delta.locationId }],
+            visibility: "polity",
+            discoveryState: "polity",
+            knowableInDays: 0,
+            significance: 25,
+          });
+          // Whatever else the order said -- a new commander, fresh rations -- still happens today.
+          return applyOne(setOut, { ...delta, locationId: undefined }, context, assignedIds, resolve, emitFact, emitAccount);
         }
       }
       const commanderId = delta.commanderCharacterRef === undefined ? undefined : required(delta.commanderCharacterRef, "The commander");
       if (commanderId !== undefined && !world.characters.some((character) => character.id === commanderId)) {
         reject(`No character "${commanderId}" exists to take command.${nearestTo(commanderId)}`, "reference");
       }
+      const controllerId = delta.controllerCharacterRef === undefined ? undefined : required(delta.controllerCharacterRef, "The controller");
+      if (controllerId !== undefined && !world.characters.some((character) => character.id === controllerId)) {
+        reject(`No character "${controllerId}" exists to answer for this force.${nearestTo(controllerId)}`, "reference");
+      }
+      const newForcePolityId = delta.polityId === undefined ? undefined : required(delta.polityId, "The power this force answers to");
+      if (newForcePolityId !== undefined && !world.map.polities.some((polity) => polity.id === newForcePolityId)) {
+        reject(`No power "${newForcePolityId}" exists for this force to answer to.`, "reference");
+      }
+      // Who pays them. Resolved here rather than in the object literal because
+      // `undefined` (leave it alone) and `null` (cut them loose) are different
+      // orders and a spread cannot tell them apart.
+      let payChange: { payObligationId: string | null; payArrearsPeriods: number } | null = null;
+      // An army that changes sides stops being the old power's charge. Left
+      // alone, a legion handed to Carthage would go on drawing Roman pay,
+      // which is not a subtlety anybody intended -- so the wages lapse with
+      // the allegiance unless this same order says who pays them now.
+      if (delta.payObligationRef === undefined && newForcePolityId !== undefined && newForcePolityId !== force.polityId) {
+        payChange = { payObligationId: null, payArrearsPeriods: 0 };
+      }
+      if (delta.payObligationRef !== undefined) {
+        const payObligationId = delta.payObligationRef === null
+          ? null
+          : required(delta.payObligationRef, "The obligation that pays them");
+        if (payObligationId !== null && !world.material.obligations.some((obligation) => obligation.id === payObligationId)) {
+          reject(`No obligation "${payObligationId}" exists to pay ${force.name}.`, "reference");
+        }
+        // Arrears are what the men have noticed, and they have noticed it
+        // about a paymaster who has now changed. A new one who is current
+        // stops the grievance growing; it does not give back the morale the
+        // old one cost, which stays where it fell until something lifts it.
+        payChange = { payObligationId, payArrearsPeriods: 0 };
+      }
+
+      // Where in the province they stand.
+      //
+      // A position belongs to the ground, so moving province clears it unless
+      // this same order says where they stand when they get there. A position
+      // the province has no record of is made rather than refused: the map is a
+      // drawing of the world and not the whole of it, and "hold the pass above
+      // the camp" is a real order about real ground whether or not anybody drew
+      // the pass.
+      const standingIn = delta.locationId ?? force.locationId;
+      const movedProvince = delta.locationId !== undefined && delta.locationId !== force.locationId;
+      let positionChange: { positionId: string | null } | null = movedProvince ? { positionId: null } : null;
+      let mintedInto: Province | null = null;
+      if (delta.positionId !== undefined) {
+        if (delta.positionId === null) {
+          positionChange = { positionId: null };
+        } else {
+          const province = world.map.provinces.find((candidate) => candidate.id === standingIn);
+          if (province === undefined) reject(`No province "${standingIn}" exists for ${force.name} to take up a position in.`, "reference");
+          if (findPosition(province, delta.positionId) === undefined) {
+            mintedInto = provinceWithPosition(province, mintPosition(
+              province.id,
+              delta.positionId,
+              delta.newPosition?.label ?? labelFromCategoryId(delta.positionId),
+              delta.newPosition?.type ?? "camp",
+            ));
+          }
+          positionChange = { positionId: delta.positionId };
+        }
+      }
+
       const strength = Math.max(0, force.authorizedStrength + (delta.authorizedStrengthDelta ?? 0));
       const updated = {
         ...force,
+        ...(delta.name === undefined ? {} : { name: delta.name }),
         ...(delta.locationId === undefined ? {} : { locationId: delta.locationId }),
+        ...(positionChange === null ? {} : positionChange),
         ...(commanderId === undefined ? {} : { commanderCharacterId: commanderId }),
+        ...(controllerId === undefined ? {} : { controllerCharacterId: controllerId }),
+        ...(newForcePolityId === undefined ? {} : { polityId: newForcePolityId }),
         ...(delta.provisionStatus === undefined ? {} : { provisionStatus: delta.provisionStatus }),
+        ...(delta.provisionedForDays === undefined ? {} : { provisionedThroughStep: atStep + delta.provisionedForDays }),
+        ...(payChange === null ? {} : payChange),
+        ...(delta.battlePlan === undefined ? {} : { battlePlan: delta.battlePlan }),
+        ...(delta.outlaw === undefined ? {} : { outlaw: delta.outlaw }),
         authorizedStrength: Math.max(1, strength),
-        moraleBps: Math.min(10_000, Math.max(0, force.moraleBps + (delta.moraleBpsDelta ?? 0))),
+        moraleBps: clampBps(force.moraleBps + (delta.moraleBpsDelta ?? 0)),
+        cohesionBps: clampBps(force.cohesionBps + (delta.cohesionBpsDelta ?? 0)),
+        fatigueBps: clampBps(force.fatigueBps + (delta.fatigueBpsDelta ?? 0)),
       };
+      // A garrison that has turned pirate is news everywhere it might land.
+      if (delta.outlaw !== undefined && delta.outlaw !== (force.outlaw === true)) {
+        const home = world.map.polities.find((polity) => polity.id === force.polityId)?.name ?? force.polityId;
+        emitFact({
+          localId: `outlaw_${forceId}`.slice(0, 60),
+          kind: delta.outlaw ? "gone_outlaw" : "come_in",
+          summary: delta.outlaw
+            ? `${force.name} has thrown off ${home} and answers to nobody now but the man who leads it.`
+            : `${force.name} has come back under ${home}.`,
+          affectedRefs: [{ kind: "force", id: forceId }, { kind: "polity", id: force.polityId }],
+          visibility: "public",
+          discoveryState: "public",
+          knowableInDays: 0,
+          significance: 55,
+        });
+      }
+      // Crossing somebody else's border is not refused -- it is noticed. See
+      // `trespassOf` for why a border is news and not a wall.
+      const trespass = movedProvince ? trespassOf(world, updated, delta.locationId!) : null;
+      if (trespass !== null) {
+        emitFact({
+          localId: `trespass_${forceId}`,
+          kind: "trespass",
+          summary: trespass.summary,
+          affectedRefs: [
+            { kind: "force", id: forceId },
+            { kind: "polity", id: trespass.hostPolityId },
+            { kind: "polity", id: updated.polityId },
+            { kind: "province", id: delta.locationId! },
+          ],
+          visibility: "public",
+          discoveryState: "public",
+          knowableInDays: 0,
+          knownToRefs: [],
+          significance: 55,
+        });
+      }
       // The ships go where the army they carried went. A fleet that ferries an
       // army and stays behind has not sailed anywhere.
       const escortId = escort?.id ?? null;
       return {
         ...world,
+        ...(mintedInto === null ? {} : {
+          map: {
+            ...world.map,
+            provinces: world.map.provinces.map((candidate) => (candidate.id === mintedInto.id ? mintedInto : candidate)),
+          },
+        }),
         material: {
           ...world.material,
           forces: world.material.forces.map((candidate) => {
@@ -835,6 +1504,113 @@ function applyOne(
             if (escortId !== null && candidate.id === escortId && delta.locationId !== undefined) return { ...candidate, locationId: delta.locationId };
             return candidate;
           }),
+        },
+      };
+    }
+
+    case "force_reinforce": {
+      const forceId = required(delta.forceRef, "The force");
+      const force = world.material.forces.find((candidate) => candidate.id === forceId);
+      if (force === undefined) reject(`No force "${forceId}" exists to reinforce.`, "reference");
+
+      // A kind of troops the world does not know yet is made, not refused.
+      //
+      // This used to reject, on the grounds that the resolver had no numbers
+      // for an unknown category -- but the resolver has always fallen back to
+      // an ordinary levy, so the refusal cost the order and bought nothing.
+      // Rome took Carthaginian elephants into its legions; a world that cannot
+      // be told so is missing a piece of the war, not guarding its arithmetic.
+      // The numbers are still never the caller's: `newCategory` says what sort
+      // of troops these are in bands, and `mintTroopCategory` says what those
+      // words are worth.
+      const known = allTroopCategories(world, context.warfare.troopCategories);
+      const minted = known.some((category) => category.id === delta.categoryId)
+        ? null
+        : mintTroopCategory(delta.categoryId, {
+          label: delta.newCategory?.label ?? labelFromCategoryId(delta.categoryId),
+          ...(delta.newCategory == null ? {} : {
+            weightBand: delta.newCategory.weightBand,
+            steadinessBand: delta.newCategory.steadinessBand,
+            mobilityBand: delta.newCategory.mobilityBand,
+            naval: delta.newCategory.naval,
+          }),
+        });
+
+      // Where they came from, if they came from somewhere. Men cannot be in
+      // two armies at once, and a draft that leaves the old force at its old
+      // strength has invented them.
+      let forces = world.material.forces;
+      let joining = delta.men;
+      if (delta.fromForceRef !== null) {
+        const sourceId = required(delta.fromForceRef, "The force they come from");
+        const source = forces.find((candidate) => candidate.id === sourceId);
+        if (source === undefined) reject(`No force "${sourceId}" exists for them to come from.`, "reference");
+        if (source.id === forceId) reject(`${force.name} cannot reinforce itself.`, "reference");
+        const available = fitStrengthOf(source);
+        if (available <= 0) reject(`${source.name} has no men left to give.`);
+        joining = Math.min(joining, available);
+
+        // Taken off the top of the source, category by category, so a draft of
+        // eight hundred from an army of two thousand leaves twelve hundred.
+        let owed = joining;
+        const drained = source.personnel.map((category) => {
+          const taken = Math.min(category.fit, owed);
+          owed -= taken;
+          return { ...category, fit: category.fit - taken };
+        });
+        forces = forces.map((candidate) => (candidate.id === source.id
+          ? {
+            ...candidate,
+            personnel: drained,
+            authorizedStrength: Math.max(1, drained.reduce((sum, category) => sum + category.fit, 0)),
+            history: [...candidate.history, {
+              id: context.ids.next("personnel"),
+              atStep,
+              kind: "unavailable" as const,
+              categoryId: drained[0]?.categoryId ?? delta.categoryId,
+              count: joining,
+              causeId: forceId,
+            }].slice(-64),
+          }
+          : candidate));
+      }
+
+      const existing = force.personnel.find((category) => category.categoryId === delta.categoryId && category.label === delta.label);
+      const personnel = existing === undefined
+        ? [...force.personnel, { categoryId: delta.categoryId, label: delta.label, fit: joining, unavailable: [] }]
+        : force.personnel.map((category) => (category === existing ? { ...category, fit: category.fit + joining } : category));
+      const strength = personnel.reduce((sum, category) => sum + category.fit, 0);
+
+      return {
+        ...world,
+        // A kind of troops the world had not heard of before now has. It is
+        // ordinary state from here on: merged with the scenario's own list
+        // wherever a category is read, so these men fight as what they are in
+        // every battle after this one.
+        troopCategories: minted === null ? world.troopCategories : [...world.troopCategories, minted],
+        material: {
+          ...world.material,
+          forces: forces.map((candidate) => (candidate.id === forceId
+            ? {
+              ...candidate,
+              personnel,
+              // The establishment follows the men, as it does when they are
+              // lost: an army of four thousand that takes in eight hundred is
+              // an army of four thousand eight hundred on the books.
+              authorizedStrength: Math.max(candidate.authorizedStrength, strength),
+              history: [...candidate.history, {
+                id: context.ids.next("personnel"),
+                atStep,
+                kind: "reinforcement" as const,
+                categoryId: delta.categoryId,
+                count: joining,
+                // Where they came from, or the army itself for men raised to
+                // it directly: `causeId` is not nullable, and a levy's cause
+                // is the force it was levied for.
+                causeId: (delta.fromForceRef === null ? undefined : resolve(delta.fromForceRef)) ?? forceId,
+              }].slice(-64),
+            }
+            : candidate)),
         },
       };
     }
@@ -921,8 +1697,18 @@ function applyOne(
       const defender = world.material.forces.find((force) => force.id === defenderId);
       if (defender === undefined) reject(`No force "${defenderId}" exists to be given battle.`, "reference");
 
-      if (attacker.id === defender.id) reject("A force cannot give battle to itself.");
-      if (attacker.polityId === defender.polityId) reject(`${attacker.name} and ${defender.name} answer to the same power and will not fight each other.`);
+      if (attacker.id === defender.id) reject("A force cannot give battle to itself.", "reference");
+      // Armies of one power can fight each other -- a mutiny put down, a
+      // consul marching on his colleague, a Rubicon -- so long as they answer
+      // to different men. It was refused outright, which made civil war the
+      // one kind of war this world could not have. One man's two armies still
+      // will not fight each other: that is not strife, it is a mistake.
+      // Whose side a force is on: its power's, or -- an outlaw band -- its own.
+      const sideOf = (force: typeof attacker): string => (force.outlaw === true ? `outlaw:${force.id}` : force.polityId);
+      const civilStrife = sideOf(attacker) === sideOf(defender);
+      if (civilStrife && (attacker.commanderCharacterId === defender.commanderCharacterId || attacker.controllerCharacterId === defender.controllerCharacterId)) {
+        reject(`${attacker.name} and ${defender.name} answer to the same man and will not fight each other.`);
+      }
       // Getting an army to where its enemy stands is movement, and movement is
       // somebody's decision. A battle is what happens once they are both there.
       if (attacker.locationId !== defender.locationId) {
@@ -933,7 +1719,7 @@ function applyOne(
       // Ships and armies do not fight each other. A fleet standing off a coast
       // blockades it; a legion on the shore cannot board it, and it cannot
       // storm the legion.
-      if (isNavalForce(attacker, context.warfare) !== isNavalForce(defender, context.warfare)) {
+      if (isNavalForce(attacker, warfareWith(world, context.warfare)) !== isNavalForce(defender, warfareWith(world, context.warfare))) {
         reject(`${attacker.name} and ${defender.name} do not fight on the same element; ships blockade a coast, they do not give battle to an army on it.`);
       }
       // Attacking a power you are at peace with is a thing armies do -- it is
@@ -941,11 +1727,45 @@ function applyOne(
       // must not slide into war without anybody having decided to. The attack
       // is refused until the peace is broken or a war declared, which are both
       // single deltas and both leave a record of who chose it.
-      const standing = agreementsBetween(world.polityAgreements, attacker.polityId, defender.polityId);
+      // Nobody makes peace with brigands: an outlaw band may be fought, and may
+      // fight, without a war being declared on anybody.
+      const standing = attacker.outlaw === true || defender.outlaw === true ? [] : agreementsBetween(world.polityAgreements, attacker.polityId, defender.polityId);
       const peaceBetween = standing.find((agreement) => agreement.kind === "peace" || agreement.kind === "truce" || agreement.kind === "alliance" || agreement.kind === "non_aggression");
       if (peaceBetween !== undefined && !standing.some((agreement) => agreement.kind === "war")) {
-        reject(`${attacker.polityId} and ${defender.polityId} stand in ${peaceBetween.kind}; break it or declare war before giving battle.`);
+        reject(`${attacker.polityId} and ${defender.polityId} stand in ${AGREEMENT_KIND_IN_WORDS[peaceBetween.kind]}; break it or declare war before giving battle.`);
       }
+
+      // Who else is on the field. One army against one was the whole of what a
+      // battle could be, so a flank attack by a second army was a second battle
+      // against an enemy that had to fight twice -- and always lost the second.
+      //
+      // Joining by themselves: the attacker's own power's armies in the province
+      // under the same commander or the same controller (one general's hammer
+      // and anvil), and every army of the defender's power standing there (a
+      // camp attacked is attacked whole). Anybody else comes in by name.
+      const rules = warfareWith(world, context.warfare);
+      const onTheSameElement = (force: typeof attacker): boolean => isNavalForce(force, rules) === isNavalForce(attacker, rules);
+      const here = world.material.forces.filter((force) =>
+        force.locationId === attacker.locationId && force.id !== attacker.id && force.id !== defender.id && living(force) > 0 && onTheSameElement(force));
+      const named = new Set((delta.alliedForceRefs ?? []).map((ref) => required(ref, "An army joining the attack")));
+      for (const id of named) {
+        const ally = world.material.forces.find((force) => force.id === id);
+        if (ally === undefined) reject(`No force "${id}" exists to join the attack.`, "reference");
+        if (ally.locationId !== attacker.locationId) {
+          reject(`${ally.name} is not on the field: it stands in ${ally.locationId}, and the battle is in ${attacker.locationId}.`);
+        }
+        const sameSideAsDefender = civilStrife
+          ? ally.commanderCharacterId === defender.commanderCharacterId || ally.controllerCharacterId === defender.controllerCharacterId
+          : sideOf(ally) === sideOf(defender);
+        if (sameSideAsDefender) reject(`${ally.name} stands with ${defender.name} and will not attack it.`);
+      }
+      const underTheSameMan = (force: typeof attacker, as: typeof attacker): boolean =>
+        sideOf(force) === sideOf(as) && (force.commanderCharacterId === as.commanderCharacterId || force.controllerCharacterId === as.controllerCharacterId);
+      const attackerAllies = here.filter((force) => named.has(force.id) || underTheSameMan(force, attacker));
+      // A camp attacked is attacked whole -- but in a civil war the camp is
+      // divided, and only the defender's own man's armies stand with him.
+      const defenderAllies = here.filter((force) => !attackerAllies.includes(force)
+        && (civilStrife ? underTheSameMan(force, defender) : sideOf(force) === sideOf(defender)));
 
       // The engine decides what happens. Everything the model chose -- who, and
       // how -- is already spent by this point.
@@ -955,34 +1775,69 @@ function applyOne(
           world,
           attacker,
           defender,
+          attackerAllies,
+          defenderAllies,
           posture: delta.posture,
-          tactic: delta.tactic,
-          warfare: context.warfare,
+          // The plan given with the order, or the one the army already had.
+          tactic: delta.tactic ?? attacker.battlePlan ?? null,
+          defenderTactic: defender.battlePlan ?? null,
+          warfare: warfareWith(world, context.warfare),
           battleId,
           seed: `${context.gameId}:${battleId}`,
         },
         world.material.forces.findIndex((force) => force.id === attackerId),
       );
       for (const fact of engagement.facts) emitFact(fact);
+      if (civilStrife) {
+        const polityName = world.map.polities.find((polity) => polity.id === attacker.polityId)?.name ?? attacker.polityId;
+        const commanderName = (force: typeof attacker): string => world.characters.find((character) => character.id === force.commanderCharacterId)?.name ?? force.name;
+        emitFact({
+          localId: `strife_${battleId}`,
+          kind: "civil_strife",
+          summary: `${polityName}'s own armies fought each other: ${commanderName(attacker)}'s ${attacker.name} fell upon ${commanderName(defender)}'s ${defender.name}.`,
+          affectedRefs: [{ kind: "polity", id: attacker.polityId }, { kind: "force", id: attacker.id }, { kind: "force", id: defender.id },
+            { kind: "character", id: attacker.commanderCharacterId }, { kind: "character", id: defender.commanderCharacterId }],
+          visibility: "public",
+          discoveryState: "public",
+          knowableInDays: 0,
+          significance: 85,
+        });
+      }
       if (engagement.account !== undefined) emitAccount(engagement.account);
       // The map has read `conflicts` from the beginning and nothing ever wrote
       // it, so a battle was fought, a province changed hands, and the map where
       // it happened showed nothing at all.
-      return {
+      // Romans killing Romans costs the Republic, whoever wins.
+      const afterStrife = !civilStrife ? engagement.world : {
         ...engagement.world,
+        material: {
+          ...engagement.world.material,
+          polityLegitimacy: adjustPolityLegitimacy(engagement.world.material.polityLegitimacy, attacker.polityId, -800, "Its own armies fought each other", context.ids.next("cause")),
+        },
+      };
+      return {
+        ...afterStrife,
         conflicts: {
-          ...engagement.world.conflicts,
+          ...afterStrife.conflicts,
           battles: [
-            ...engagement.world.conflicts.battles.filter((battle) => battle.battleId !== battleId),
-            { battleId, participantForceIds: [attacker.id, defender.id], attackerForceIds: [attacker.id] },
+            ...afterStrife.conflicts.battles.filter((battle) => battle.battleId !== battleId),
+            {
+              battleId,
+              participantForceIds: [attacker.id, ...attackerAllies.map((force) => force.id), defender.id, ...defenderAllies.map((force) => force.id)],
+              attackerForceIds: [attacker.id, ...attackerAllies.map((force) => force.id)],
+            },
           ].slice(-MAX_SHOWN_BATTLES),
         },
       };
     }
 
     case "character_create": {
+      const newCharacterPolityId = required(delta.polityId, "The power this person belongs to");
+      if (!world.map.polities.some((polity) => polity.id === newCharacterPolityId)) {
+        reject(`No power "${newCharacterPolityId}" exists for this person to belong to.`, "reference");
+      }
       const provinceId = delta.provinceId ?? world.map.provinces[0]?.id;
-      if (provinceId === undefined) reject("The world has no province to place a new character in.");
+      if (provinceId === undefined) reject("The world has no province to place a new character in.", "reference");
       const id = mint("character", delta.localId);
       // What the world says this person is worth, brought inside what somebody
       // of that description could plausibly have. Clamped, never rejected: a
@@ -994,26 +1849,65 @@ function applyOne(
         characterId: id,
         name: delta.name,
         locationProvinceId: provinceId,
-        polityId: delta.polityId,
+        polityId: newCharacterPolityId,
         officeId: null,
         createdAtStep: atStep,
         creationReason: delta.generatedBecause,
+        ageYearsAtStart: delta.age,
       });
-      if (created === null) reject(`Could not create "${delta.name}" at province "${provinceId}".`);
+      if (created === null) reject(`Could not create "${delta.name}" at province "${provinceId}".`, "reference");
       // The registry's own words, not the free text. A live world was holding
       // "hellenistic_governor", "cavalry leader" and "protective of tribal
       // autonomy" as traits -- none of which mean anything to the dialogue
       // guidance NPC prompts read or to the incompatibilities the observation
       // rule checks, because both live in `TRAIT_REGISTRY` and none of those
       // are in it.
-      const withTraits = created.world.characters.map((character) =>
-        character.id === id ? { ...character, traits: canonicalTraitIds(delta.traits) } : character,
-      );
+      // Raised where something trains people -- an academy, a war school --
+      // and it shows. Bands the world gave still win: it said what he is.
+      const trained = recruitSkillBiasIn(created.world, provinceId);
+      const faith = delta.faith === undefined ? null : faithNamed(created.world, delta.faith, atStep, id);
+      const withTraits = (faith?.world ?? created.world).characters.map((character) => {
+        if (character.id !== id) return character;
+        const skills = trained === 0
+          ? character.skills
+          : { ...character.skills, martial: clampSkill(character.skills.martial + trained), learning: clampSkill(character.skills.learning + Math.round(trained * 0.7)) };
+        return {
+          ...character,
+          traits: canonicalTraitIds(delta.traits),
+          skills: skillsFromBands(skills, delta.skills),
+          ...(faith === null ? {} : { faithId: faith.faithId }),
+          ...(delta.gender === undefined ? {} : { gender: delta.gender }),
+          ...(delta.legalStatus === undefined || delta.legalStatus === "free" ? {} : {
+            legalStatus: delta.legalStatus,
+            ownerCharacterId: context.actorRef.kind === "character" ? context.actorRef.id : null,
+          }),
+        };
+      });
+      const founded = faith?.world ?? created.world;
+      // Whose wife, whose son. Written as kinship the succession rules read,
+      // not as a sentence in a fact: an heir nobody recorded is nobody's heir.
+      let familyLinks = founded.familyLinks;
+      if (delta.kin != null) {
+        const kinId = required(delta.kin.ofCharacterRef, "The person they are kin to");
+        if (!founded.characters.some((character) => character.id === kinId)) {
+          reject(`No character "${kinId}" exists for ${delta.name} to be kin to.${nearestTo(kinId)}`, "reference");
+        }
+        familyLinks = [...familyLinks, {
+          id: context.ids.next("family"),
+          characterId: id,
+          relatedCharacterId: kinId,
+          kind: delta.kin.relation,
+          startedAtStep: atStep,
+          endedAtStep: null,
+          visibility: "public" as const,
+          provenanceEventId: null,
+        }];
+      }
       // The world says what it made this person: "Military Quaestor", "chief of
       // the Boii". That was parsed and thrown on the floor -- every generated
       // official came out holding no office, which is how the world's own
       // invented magistrates could never do anything a magistrate does.
-      const withOffice: WorldState = { ...created.world, characters: withTraits };
+      const withOffice: WorldState = { ...founded, characters: withTraits, familyLinks };
       if (delta.officeLabel === null) return withOffice;
 
       const known = allOffices(withOffice, context.offices);
@@ -1021,9 +1915,9 @@ function applyOne(
       // consulship whose seats are both filled is still a consulship, and
       // asked for another consul the world should enlarge the college rather
       // than invent a second consulship beside it.
-      const existing = findOfficeForRole(known, delta.polityId, delta.officeLabel);
+      const existing = findOfficeForRole(known, newCharacterPolityId, delta.officeLabel);
       if (existing !== undefined) {
-        const seat = findOfficeSeatForRole(withOffice, { offices: [existing] }, delta.polityId, delta.officeLabel);
+        const seat = findOfficeSeatForRole(withOffice, { offices: [existing] }, newCharacterPolityId, delta.officeLabel);
         return seatCharacterInOffice(withOffice, id, seat ?? { office: existing, vacantSeatId: null }, atStep);
       }
 
@@ -1033,27 +1927,7 @@ function applyOne(
       // leave the man holding no office at all, because there was no
       // quaestorship and no way to make one.
       const officeId = context.ids.next("office");
-      const opened: WorldState = {
-        ...withOffice,
-        offices: [...withOffice.offices, {
-          id: officeId,
-          label: delta.officeLabel,
-          polityId: delta.polityId,
-          // What the name of the office means, with whatever the caller said on
-          // top of it. Asked to state the powers, the model has never once
-          // done so -- every office the world has made came back authorising
-          // nothing, which is a title rather than an office and leaves the man
-          // it was created for in breach of it the first time he acts.
-          authorisedActionIds: deriveOfficeActions(delta.officeLabel, delta.officeAuthorises),
-          sponsorableCategories: [],
-          treasuryAccountId: null,
-          treasuryPermissions: [],
-          incomeSourceId: null,
-          expectedBlocId: null,
-          successionRuleId: "appointed-by-the-government",
-          eligibilityRequirementIds: [],
-        }],
-      };
+      const opened = openOffice(withOffice, officeId, delta.officeLabel, newCharacterPolityId, delta.officeAuthorises);
       return seatCharacterInOffice(opened, id, { office: { id: officeId, eligibilityRequirementIds: [] }, vacantSeatId: null }, atStep);
     }
 
@@ -1085,17 +1959,19 @@ function applyOne(
     }
 
     case "polity_stance_shift": {
-      if (delta.polityId === delta.towardPolityId) reject("A polity holds no stance toward itself.");
+      const stanceHolderId = required(delta.polityId, "The power holding the stance");
+      const stanceTowardId = required(delta.towardPolityId, "The power it is held toward");
+      if (stanceHolderId === stanceTowardId) reject("A polity holds no stance toward itself.", "reference");
       const known = new Set(world.map.polities.map((polity) => polity.id));
-      if (!known.has(delta.polityId) || !known.has(delta.towardPolityId)) reject("A stance must be between two polities that exist.");
-      const existing = world.polityStances.find((stance) => stance.polityId === delta.polityId && stance.towardPolityId === delta.towardPolityId);
+      if (!known.has(stanceHolderId) || !known.has(stanceTowardId)) reject("A stance must be between two polities that exist.", "reference");
+      const existing = world.polityStances.find((stance) => stance.polityId === stanceHolderId && stance.towardPolityId === stanceTowardId);
       const clamp = (value: number) => Math.max(-100, Math.min(100, value));
       if (existing === undefined) {
         return {
           ...world,
           polityStances: [
             ...world.polityStances,
-            { polityId: delta.polityId, towardPolityId: delta.towardPolityId, trustScore: clamp(delta.trustDelta), lastShiftReason: delta.reason, lastShiftAtStep: atStep },
+            { polityId: stanceHolderId, towardPolityId: stanceTowardId, trustScore: clamp(delta.trustDelta), lastShiftReason: delta.reason, lastShiftAtStep: atStep },
           ],
         };
       }
@@ -1110,11 +1986,12 @@ function applyOne(
     }
 
     case "polity_outlook_set": {
-      if (!world.map.polities.some((polity) => polity.id === delta.polityId)) {
-        reject(`No polity "${delta.polityId}" exists to hold an outlook.`, "reference");
+      const outlookPolityId = required(delta.polityId, "The power holding the outlook");
+      if (!world.map.polities.some((polity) => polity.id === outlookPolityId)) {
+        reject(`No polity "${outlookPolityId}" exists to hold an outlook.`, "reference");
       }
       const outlook = {
-        polityId: delta.polityId,
+        polityId: outlookPolityId,
         primaryObjective: delta.primaryObjective,
         concerns: delta.concerns,
         intentions: delta.intentions,
@@ -1124,26 +2001,27 @@ function applyOne(
       };
       // A country holds one outlook at a time. Keeping the old one beside the
       // new would leave the world unable to say what it currently wants.
-      const existing = world.polityOutlooks.some((candidate) => candidate.polityId === delta.polityId);
+      const existing = world.polityOutlooks.some((candidate) => candidate.polityId === outlookPolityId);
       return {
         ...world,
         polityOutlooks: existing
-          ? world.polityOutlooks.map((candidate) => (candidate.polityId === delta.polityId ? outlook : candidate))
+          ? world.polityOutlooks.map((candidate) => (candidate.polityId === outlookPolityId ? outlook : candidate))
           : [...world.polityOutlooks, outlook],
       };
     }
 
     case "legitimacy_shift": {
+      const legitimacyTargetId = required(delta.targetId, "The power or body whose standing moves");
       if (delta.target === "polity") {
-        if (!world.map.polities.some((polity) => polity.id === delta.targetId)) {
-          reject(`No polity "${delta.targetId}" exists to gain or lose standing.`, "reference");
+        if (!world.map.polities.some((polity) => polity.id === legitimacyTargetId)) {
+          reject(`No polity "${legitimacyTargetId}" exists to gain or lose standing.`, "reference");
         }
         // The shared helper already creates the record on first use, bounds the
         // result and records the cause. Reimplementing that here is how the two
         // would drift apart.
         const adjusted = adjustPolityLegitimacy(
           world.material.polityLegitimacy,
-          delta.targetId,
+          legitimacyTargetId,
           delta.legitimacyBpsDelta,
           delta.causeLabel,
           context.ids.next("cause"),
@@ -1152,22 +2030,22 @@ function applyOne(
         const withConfidence = confidenceDelta === 0
           ? adjusted
           : adjusted.map((entry) =>
-            entry.polityId === delta.targetId
+            entry.polityId === legitimacyTargetId
               ? { ...entry, institutionalConfidenceBps: clampBps(entry.institutionalConfidenceBps + confidenceDelta) }
               : entry,
           );
         return { ...world, material: { ...world.material, polityLegitimacy: withConfidence } };
       }
 
-      if (!world.material.institutions.some((institution) => institution.id === delta.targetId)) {
-        reject(`No institution "${delta.targetId}" exists to gain or lose standing.`, "reference");
+      if (!world.material.institutions.some((institution) => institution.id === legitimacyTargetId)) {
+        reject(`No institution "${legitimacyTargetId}" exists to gain or lose standing.`, "reference");
       }
-      const cause = { id: context.ids.next("cause"), label: delta.causeLabel, score: clampScore(Math.round(delta.legitimacyBpsDelta / 10)), sourceId: delta.targetId };
-      const existing = world.material.institutionLegitimacy.find((entry) => entry.institutionId === delta.targetId);
+      const cause = { id: context.ids.next("cause"), label: delta.causeLabel, score: clampScore(Math.round(delta.legitimacyBpsDelta / 10)), sourceId: legitimacyTargetId };
+      const existing = world.material.institutionLegitimacy.find((entry) => entry.institutionId === legitimacyTargetId);
       const institutionLegitimacy = existing === undefined
-        ? [...world.material.institutionLegitimacy, { institutionId: delta.targetId, legitimacyBps: clampBps(5_000 + delta.legitimacyBpsDelta), causes: [cause] }]
+        ? [...world.material.institutionLegitimacy, { institutionId: legitimacyTargetId, legitimacyBps: clampBps(5_000 + delta.legitimacyBpsDelta), causes: [cause] }]
         : world.material.institutionLegitimacy.map((entry) =>
-          entry.institutionId === delta.targetId
+          entry.institutionId === legitimacyTargetId
             ? { ...entry, legitimacyBps: clampBps(entry.legitimacyBps + delta.legitimacyBpsDelta), causes: [...entry.causes, cause] }
             : entry,
         );
@@ -1237,7 +2115,34 @@ function applyOne(
         sourceEventIds: [],
         resultingEventIds: [],
       };
-      return { ...world, material: { ...world.material, politicalProcedures: [...world.material.politicalProcedures, procedure] } };
+      const opened: WorldState = { ...world, material: { ...world.material, politicalProcedures: [...world.material.politicalProcedures, procedure] } };
+      if (delta.enacts == null) return opened;
+      // What it will do if carried, kept until then with every reference
+      // resolved now: an account named today is the one that pays.
+      const polityId = world.material.institutions.find((institution) => institution.id === institutionId)?.polityId
+        ?? world.characters.find((character) => character.id === sponsorId)?.polityId;
+      if (polityId == null) reject("A measure has to be some power's law; its sponsor belongs to none.", "reference");
+      const office = delta.enacts.office;
+      return {
+        ...opened,
+        enactments: [...opened.enactments, {
+          procedureId: id,
+          polityId,
+          effects: delta.enacts.effects ?? [],
+          upkeep: upkeepFrom(world, delta.enacts.upkeep, required),
+          office: office === undefined ? null : {
+            officeId: office.officeId,
+            officeLabel: office.officeLabel ?? null,
+            authorises: office.authorises ?? null,
+            ...(office.termDays === undefined ? {} : { termDays: office.termDays }),
+            seats: office.seats ?? null,
+            abolish: office.abolish,
+          },
+          body: delta.enacts.body ?? null,
+          waiver: delta.enacts.waiver === undefined ? null : { characterId: required(delta.enacts.waiver.characterRef, "The man excused"), officeId: delta.enacts.waiver.officeId },
+          enactedAtStep: null,
+        }],
+      };
     }
 
     case "political_support_set": {
@@ -1245,7 +2150,54 @@ function applyOne(
       if (!world.material.politicalProcedures.some((procedure) => procedure.id === procedureId)) {
         reject(`No open question "${procedureId}" exists to take a side on.`, "reference");
       }
-      const supporterId = required(delta.supporterRef, "The supporter");
+      let supporterId = required(delta.supporterRef, "The supporter");
+      // A faction the world made as an arrangement -- there is no other way to
+      // make one -- takes sides as the political group it is.
+      // An army backing a man's campaign -- "his influence with the Silver
+      // Shields" -- takes sides as the military faction it is, led by its
+      // commander.
+      const asForce = delta.supporterKind === "group" ? world.material.forces.find((force) => force.id === supporterId) : undefined;
+      if (asForce !== undefined) {
+        const groupId = boundedId(asForce.id, "group");
+        if (!world.material.politicalGroups.some((group) => group.id === groupId)) {
+          world = {
+            ...world,
+            material: {
+              ...world.material,
+              politicalGroups: [...world.material.politicalGroups, {
+                id: groupId, name: asForce.name.slice(0, 120), polityId: asForce.polityId, type: "military_command" as const,
+                leaderCharacterId: asForce.commanderCharacterId, platform: [], resourceAccountId: null, publicReputationBps: 5_000, active: true,
+              }],
+            },
+          };
+        }
+        supporterId = groupId;
+      }
+      const asArrangement = delta.supporterKind === "group" ? world.genericEntities.find((entity) => entity.id === supporterId) : undefined;
+      if (asArrangement !== undefined) {
+        const groupId = boundedId(asArrangement.id, "group");
+        if (!world.material.politicalGroups.some((group) => group.id === groupId)) {
+          const fund = world.material.accounts.find((account) => account.owner.kind === "entity" && account.owner.id === asArrangement.id);
+          world = {
+            ...world,
+            material: {
+              ...world.material,
+              politicalGroups: [...world.material.politicalGroups, {
+                id: groupId,
+                name: asArrangement.label.slice(0, 120),
+                polityId: asArrangement.ownerRef?.kind === "polity" ? asArrangement.ownerRef.id : actorPolityOf(world, context),
+                type: "faction" as const,
+                leaderCharacterId: asArrangement.ownerRef?.kind === "character" ? asArrangement.ownerRef.id : null,
+                platform: [],
+                resourceAccountId: fund?.id ?? null,
+                publicReputationBps: 5_000,
+                active: true,
+              }],
+            },
+          };
+        }
+        supporterId = groupId;
+      }
       // A voting bloc inside the body hearing the question is as real a
       // supporter as a faction outside it, and usually the one that decides.
       const supporterExists = delta.supporterKind === "character"
@@ -1269,6 +2221,29 @@ function applyOne(
         provenanceEventIds: [],
         changedAtStep: atStep,
       };
+      // A tribune against a measure of his own republic forbids it. Nothing
+      // here stops the vote -- the veto is said aloud, and a body that goes on
+      // over it has done something the whole city saw.
+      if (delta.supporterKind === "character" && delta.position === "oppose") {
+        const procedure = world.material.politicalProcedures.find((candidate) => candidate.id === procedureId)!;
+        const procedurePolity = world.material.institutions.find((institution) => institution.id === procedure.institutionId)?.polityId
+          ?? world.characters.find((character) => character.id === procedure.sponsorCharacterId)?.polityId;
+        const vetoing = allOffices(world, context.offices).find((office) => office.vetoes === true && office.polityId === procedurePolity
+          && world.material.officeSeats.some((seat) => seat.officeId === office.id && seat.holderCharacterId === supporterId && seat.status === "held"));
+        if (vetoing !== undefined) {
+          const who = world.characters.find((character) => character.id === supporterId)?.name ?? supporterId;
+          emitFact({
+            localId: `veto_${procedureId}_${supporterId}`.slice(0, 60),
+            kind: "veto",
+            summary: `${who}, as ${vetoing.label}, forbade "${procedure.label}". Whoever carries it now carries it over his veto.`,
+            affectedRefs: [{ kind: "character", id: supporterId }, { kind: "procedure", id: procedureId }, ...(procedurePolity === undefined || procedurePolity === null ? [] : [{ kind: "polity" as const, id: procedurePolity }])],
+            visibility: "public",
+            discoveryState: "public",
+            knowableInDays: 0,
+            significance: 55,
+          });
+        }
+      }
       return { ...world, material: { ...world.material, supportPositions: [...world.material.supportPositions, position] } };
     }
 
@@ -1278,6 +2253,13 @@ function applyOne(
       if (procedure === undefined) reject(`No question "${procedureId}" exists to settle.`, "reference");
       if (procedure.stage === "resolved" || procedure.stage === "withdrawn" || procedure.stage === "blocked") {
         reject(`The question "${procedureId}" has already been settled (${procedure.outcome ?? procedure.stage}).`);
+      }
+      // An election is decided by the count on its day (`holdElections`), not
+      // by whoever writes the outcome. Resolving it here seated nobody -- this
+      // handler only seats the subject of an appointment -- so the seat stayed
+      // empty and the engine called the same election again.
+      if (procedure.subjectKind === "office_seat" && procedure.resolutionMechanism === "vote" && (delta.outcome === "passed" || delta.outcome === "failed")) {
+        reject(`"${procedure.label}" is decided when the ${world.material.institutions.find((institution) => institution.id === procedure.institutionId)?.name ?? "assembly"} votes on its day; stand a man for it, or back or oppose one, instead.`);
       }
       // Stage and outcome move together: the schema refuses a resolved
       // procedure with no outcome, and an unresolved one that has one.
@@ -1289,13 +2271,20 @@ function applyOne(
         outcomeReason: delta.outcomeReason,
         resolvedAtStep: atStep,
       };
-      const resolved: WorldState = {
+      const settledWorld: WorldState = {
         ...world,
         material: {
           ...world.material,
           politicalProcedures: world.material.politicalProcedures.map((candidate) => (candidate.id === procedureId ? settled : candidate)),
         },
       };
+      // Carried, it does what it said it would.
+      let resolved = settledWorld;
+      if (delta.outcome === "passed") {
+        const enacted = carryOutEnactment(settledWorld, procedureId, atStep, context.ids, context.offices);
+        for (const fact of enacted.facts) emitFact(fact);
+        resolved = enacted.world;
+      }
       // A question about who holds an office has to move the office. This
       // settled the procedure's own row and touched no seat, so an appointment
       // that passed a vote changed nothing whatever: the man was appointed in
@@ -1319,6 +2308,223 @@ function applyOne(
       return resolved;
     }
 
+    case "holding_create": {
+      const holderId = required(delta.holderCharacterRef, "The holder");
+      const holder = world.characters.find((character) => character.id === holderId);
+      if (holder === undefined) reject(`No character "${holderId}" exists to hold this land.${nearestTo(holderId)}`, "reference");
+      if (!holder.alive) reject(`${holder.name} is dead and can hold no land.`);
+      const terms = estateTerms(world, delta.provinceId, delta.band);
+      if (terms === null) reject(`No province "${delta.provinceId}" exists for this land to lie in.`, "reference");
+      const purse = holder.personalAccountId === null ? undefined : world.material.accounts.find((account) => account.id === holder.personalAccountId);
+      if (purse === undefined) reject(`${holder.name} has no purse of his own for the land's yield to be paid into.`);
+
+      const holdingId = mint("holding", delta.localId);
+      const incomeId = mint("income", undefined);
+      // Bought outright, or on credit against the land itself.
+      const bought = delta.priceFromAccountRef === null
+        ? world
+        : payOrBorrow(world, required(delta.priceFromAccountRef, "The account paying for it"), terms.price, delta.title, holdingId, context, emitFact);
+      const inheritance = world.material.holdings[0]?.successionRuleId ?? "household";
+      return {
+        ...bought,
+        material: {
+          ...bought.material,
+          incomeSources: [...bought.material.incomeSources, {
+            id: incomeId,
+            kind: "land",
+            label: `Yield of ${delta.title}`,
+            beneficiaryAccountId: purse.id,
+            originKind: "holding",
+            originId: holdingId,
+            amount: terms.monthlyYield,
+            cadenceSteps: 30,
+            nextDueStep: atStep + 30,
+            collectionRateBps: 10_000,
+            counterpartyPolityId: null,
+            active: true,
+          }],
+          holdings: [...bought.material.holdings, {
+            id: holdingId,
+            title: delta.title,
+            territoryId: delta.provinceId,
+            legalHolderCharacterId: holderId,
+            incomeSourceId: incomeId,
+            successionRuleId: inheritance,
+            physicalControlBps: 10_000,
+          }],
+        },
+      };
+    }
+
+    case "holding_improve": {
+      const holdingId = required(delta.holdingRef, "The holding");
+      const holding = world.material.holdings.find((candidate) => candidate.id === holdingId);
+      if (holding === undefined) reject(`No holding "${holdingId}" exists to improve.`, "reference");
+      const income = world.material.incomeSources.find((source) => source.id === holding.incomeSourceId);
+      if (income === undefined) reject(`${holding.title} has no yield to improve.`, "reference");
+      const monthly = Math.round(income.amount * (30 / Math.max(1, income.cadenceSteps)));
+      const terms = improvementTerms(world, holding.territoryId, monthly, delta.band);
+      if (terms === null) reject(`${holding.title} lies in no province the map knows.`, "reference");
+      if (terms.added === 0) reject(`${holding.title} yields all its land can give; no more can be got out of it.`);
+      const payerId = required(delta.paidFromAccountRef, "The account paying for the works");
+      const payer = world.material.accounts.find((account) => account.id === payerId);
+      if (payer === undefined) reject(`No account "${payerId}" exists to pay for the works.`, "reference");
+      const addedPerCadence = Math.max(1, Math.round(terms.added * (Math.max(1, income.cadenceSteps) / 30)));
+      const paid = payOrBorrow(world, payerId, terms.cost, `the works on ${holding.title}`, holding.id, context, emitFact);
+      return {
+        ...paid,
+        material: {
+          ...paid.material,
+          incomeSources: paid.material.incomeSources.map((source) => (source.id === income.id ? { ...source, amount: source.amount + addedPerCadence } : source)),
+        },
+      };
+    }
+
+    case "force_membership_set": {
+      const characterId = required(delta.characterRef, "The man");
+      const person = world.characters.find((character) => character.id === characterId);
+      if (person === undefined) reject(`No character "${characterId}" exists to ${delta.change}.${nearestTo(characterId)}`, "reference");
+      if (!person.alive) reject(`${person.name} is dead.`);
+      const forceId = required(delta.forceRef, "The army");
+      const force = world.material.forces.find((candidate) => candidate.id === forceId);
+      if (force === undefined) reject(`No force "${forceId}" exists.`, "reference");
+
+      if (delta.change === "enlist") {
+        if (force.commanderCharacterId === characterId) reject(`${person.name} already commands ${force.name}.`);
+        if (force.memberCharacterIds.includes(characterId)) return world;
+        if (force.memberCharacterIds.length >= 40) reject(`${force.name} carries as many named men as it can.`);
+        // One army at a time: a man who takes service in one has left the other.
+        return {
+          ...world,
+          characters: world.characters.map((character) => (character.id === characterId ? { ...character, locationProvinceId: force.locationId } : character)),
+          material: {
+            ...world.material,
+            forces: world.material.forces.map((candidate) => {
+              if (candidate.id === forceId) return { ...candidate, memberCharacterIds: [...candidate.memberCharacterIds, characterId] };
+              return candidate.memberCharacterIds.includes(characterId)
+                ? { ...candidate, memberCharacterIds: candidate.memberCharacterIds.filter((id) => id !== characterId) }
+                : candidate;
+            }),
+          },
+        };
+      }
+
+      if (!force.memberCharacterIds.includes(characterId)) reject(`${person.name} is not in the ranks of ${force.name}.`);
+      const left: WorldState = {
+        ...world,
+        material: {
+          ...world.material,
+          forces: world.material.forces.map((candidate) => (candidate.id === forceId
+            ? { ...candidate, memberCharacterIds: candidate.memberCharacterIds.filter((id) => id !== characterId) }
+            : candidate)),
+        },
+      };
+      if (delta.change === "discharge") return left;
+
+      // A deserter is a marked man: his own side knows what he did, and his
+      // commander is the one it concerns -- the force is named in the fact, so
+      // the attention router brings its commander to it.
+      emitFact({
+        localId: `deserted_${characterId}_${forceId}`.slice(0, 80),
+        kind: "desertion",
+        summary: `${person.name} deserted from the ranks of ${force.name}.`,
+        // With the army's power named, or nobody at all could know of it.
+        affectedRefs: [{ kind: "character", id: characterId }, { kind: "force", id: forceId }, { kind: "polity", id: force.polityId }],
+        visibility: "polity",
+        discoveryState: "polity",
+        knowableInDays: 0,
+        significance: 45,
+      });
+      return {
+        ...left,
+        characters: left.characters.map((character) => (character.id === characterId && !character.disqualifyingStatuses.includes("deserter")
+          ? { ...character, disqualifyingStatuses: [...character.disqualifyingStatuses, "deserter"].slice(0, 8) }
+          : character)),
+      };
+    }
+
+    case "trade_venture_open": {
+      const ownerId = required(delta.ownerCharacterRef, "The owner");
+      const owner = world.characters.find((character) => character.id === ownerId);
+      if (owner === undefined) reject(`No character "${ownerId}" exists to own this venture.${nearestTo(ownerId)}`, "reference");
+      if (!owner.alive) reject(`${owner.name} is dead.`);
+      // One province named twice is trade in one market -- a stall in Rome's
+      // streets, a shop in Syracuse -- and is as much a venture as a cargo
+      // shipped between two.
+      const from = world.map.provinces.find((province) => province.id === delta.fromProvinceId);
+      const to = world.map.provinces.find((province) => province.id === delta.toProvinceId);
+      if (from === undefined) reject(`No province "${delta.fromProvinceId}" exists to trade from.`, "reference");
+      if (to === undefined) reject(`No province "${delta.toProvinceId}" exists to trade to.`, "reference");
+      // Somewhere to buy and somewhere to sell: a province with no town has no market.
+      if (from.settlements.length === 0 || to.settlements.length === 0) reject(`${from.settlements.length === 0 ? from.name : to.name} has no town to trade in.`);
+      const purse = owner.personalAccountId === null ? undefined : world.material.accounts.find((account) => account.id === owner.personalAccountId);
+      if (purse === undefined) reject(`${owner.name} has no purse of his own for the venture's return to be paid into.`);
+      const terms = ventureTerms(world, from.id, to.id, delta.band);
+      if (terms === null) reject("The venture's two places could not be found.", "reference");
+      const payerId = required(delta.paidFromAccountRef, "The account paying for it");
+      const payer = world.material.accounts.find((account) => account.id === payerId);
+      if (payer === undefined) reject(`No account "${payerId}" exists to pay for this venture.`, "reference");
+
+      // The power at the other end, if it is not his own: a war with it stops
+      // the trade, through the same counterparty every foreign revenue names.
+      const own = owner.polityId;
+      const counterpartyPolityId = to.controllerPolityId !== null && to.controllerPolityId !== own
+        ? to.controllerPolityId
+        : from.controllerPolityId !== null && from.controllerPolityId !== own ? from.controllerPolityId : null;
+      const ventureId = mint("venture", delta.localId);
+      const incomeId = mint("income", undefined);
+      // Goods can be had on credit from the merchants who sell them, against
+      // nothing but the man's name.
+      const funded = payOrBorrow(world, payerId, terms.price, delta.title, null, context, emitFact);
+      return {
+        ...funded,
+        material: {
+          ...funded.material,
+          incomeSources: [...funded.material.incomeSources, {
+            id: incomeId,
+            kind: "trade",
+            label: `Return of ${delta.title}`,
+            beneficiaryAccountId: purse.id,
+            originKind: "venture",
+            originId: ventureId,
+            amount: terms.monthlyReturn,
+            cadenceSteps: 30,
+            nextDueStep: atStep + 30,
+            collectionRateBps: 10_000,
+            counterpartyPolityId,
+            active: true,
+          }],
+          ventures: [...funded.material.ventures, {
+            id: ventureId,
+            title: delta.title,
+            ownerCharacterId: ownerId,
+            fromProvinceId: from.id,
+            toProvinceId: to.id,
+            bySea: hasPort(world, from.id) && hasPort(world, to.id),
+            incomeSourceId: incomeId,
+            openedAtStep: atStep,
+            interruptedBy: null,
+            status: "running",
+          }],
+        },
+      };
+    }
+
+    case "trade_venture_close": {
+      const ventureId = required(delta.ventureRef, "The venture");
+      const venture = world.material.ventures.find((candidate) => candidate.id === ventureId);
+      if (venture === undefined) reject(`No venture "${ventureId}" exists to wind up.`, "reference");
+      if (venture.status === "closed") return world;
+      return {
+        ...world,
+        material: {
+          ...world.material,
+          incomeSources: world.material.incomeSources.map((source) => (source.id === venture.incomeSourceId ? { ...source, active: false } : source)),
+          ventures: world.material.ventures.map((candidate) => (candidate.id === ventureId ? { ...candidate, status: "closed" as const } : candidate)),
+        },
+      };
+    }
+
     case "holding_transfer": {
       const holdingId = required(delta.holdingRef, "The holding");
       const holding = world.material.holdings.find((candidate) => candidate.id === holdingId);
@@ -1339,7 +2545,14 @@ function applyOne(
     }
 
     case "generic_entity_create": {
+      if (delta.provinceId != null && !world.map.provinces.some((province) => province.id === delta.provinceId)) {
+        reject(`No province "${delta.provinceId}" exists for ${delta.label} to stand in.`, "reference");
+      }
+      const written = upkeepFrom(world, delta.upkeep, required);
+      const priced = priceTheYield(world, null, { provinceId: delta.provinceId ?? null, ownerRef: delta.ownerRef, effects: delta.effects ?? [], upkeep: written }, delta.label, context, emitFact);
+      const upkeep = priced.upkeep;
       const id = mint("entity", delta.localId);
+      const founder = context.actorRef.kind === "character" ? context.actorRef.id : null;
       const entity = {
         id,
         kind: delta.kind,
@@ -1349,8 +2562,11 @@ function applyOne(
         linkedEntityIds: [],
         createdAtStep: atStep,
         provenanceEventIds: [],
+        ...(delta.provinceId == null ? {} : { provinceId: delta.provinceId }),
+        ...(delta.effects === undefined ? {} : { effects: delta.effects }),
+        ...(upkeep === null ? {} : { upkeep }),
       };
-      return { ...world, genericEntities: [...world.genericEntities, entity] };
+      return foundFaithsOf({ ...priced.world, genericEntities: [...priced.world.genericEntities, entity] }, delta.effects ?? [], atStep, founder);
     }
 
     case "generic_entity_update": {
@@ -1368,12 +2584,34 @@ function applyOne(
       }
       if (delta.retire) attributes["retiredAtStep"] = atStep;
 
+      const written = delta.upkeep === undefined ? undefined : upkeepFrom(world, delta.upkeep, required);
+      // Only what the update adds is paid for: an arrangement that paid
+      // nothing to found, from before founding had a price, keeps what it had.
+      const priced = delta.effects === undefined && written === undefined
+        ? { world, upkeep: written }
+        : priceTheYield(
+          world,
+          { effects: entity.effects ?? [], upkeep: entity.upkeep ?? null },
+          { provinceId: entity.provinceId ?? null, ownerRef: entity.ownerRef, effects: delta.effects ?? entity.effects ?? [], upkeep: written === undefined ? entity.upkeep ?? null : written },
+          delta.label ?? entity.label,
+          context,
+          emitFact,
+        );
+      const upkeep = priced.upkeep ?? undefined;
       const updated = {
         ...entity,
         ...(delta.label === undefined ? {} : { label: delta.label }),
         attributes,
+        ...(delta.effects === undefined ? {} : { effects: delta.effects }),
+        ...(upkeep === undefined ? {} : { upkeep }),
       };
-      return { ...world, genericEntities: world.genericEntities.map((candidate) => (candidate.id === entityId ? updated : candidate)) };
+      const founder = context.actorRef.kind === "character" ? context.actorRef.id : null;
+      return foundFaithsOf(
+        { ...priced.world, genericEntities: priced.world.genericEntities.map((candidate) => (candidate.id === entityId ? updated : candidate)) },
+        delta.effects ?? [],
+        atStep,
+        founder,
+      );
     }
 
     case "loan_open": {
@@ -1383,7 +2621,7 @@ function applyOne(
 
       const lenderId = delta.lenderRef === null ? null : required(delta.lenderRef, "The lender");
       if (delta.lenderKind !== "foreign" && lenderId === null) {
-        reject("A loan from someone in this world has to say who they are.");
+        reject("A loan from someone in this world has to say who they are.", "reference");
       }
       const collateralId = delta.collateralHoldingRef === null ? null : required(delta.collateralHoldingRef, "The collateral");
       if (collateralId !== null && !world.material.holdings.some((holding) => holding.id === collateralId)) {
@@ -1394,27 +2632,41 @@ function applyOne(
       // they have to actually have it. Money from outside does not: that is the
       // whole difference between a merchant of ours and a foreign banker.
       let accounts = world.material.accounts;
+      let principal = delta.principal;
       if (delta.lenderKind !== "foreign") {
         const lenderAccount = world.material.accounts.find(
           (account) => account.owner.kind === delta.lenderKind && account.owner.id === lenderId,
         );
+        // Nobody borrows from themselves. `obligation_upsert` has refused an
+        // account paying itself since it bricked a three-year campaign, and
+        // this door was left open beside it: a loan from Rome to Rome moved
+        // the principal out of the treasury and straight back into it, and
+        // left behind a debt-service obligation whose payer and recipient were
+        // the same account -- the exact object that guard exists to prevent.
+        if (lenderAccount !== undefined && lenderAccount.id === borrowerId) {
+          reject(
+            `${lenderId} cannot lend to its own account; a power funding something out of its own treasury spends from it, and does not borrow from itself.`,
+            "reference",
+          );
+        }
         // Named, not identified: this reaches the player as friction, and
         // "character-0a73c811 holds 0" tells a ruler nothing about anybody.
         const lenderName = world.characters.find((character) => character.id === lenderId)?.name ?? lenderId ?? "The lender";
         if (lenderAccount === undefined) reject(`${lenderName} keeps no account to lend from.`, "reference");
-        if (lenderAccount.balance < delta.principal) {
-          reject(`${lenderName} holds ${lenderAccount.balance}, which will not cover a loan of ${delta.principal}.`);
-        }
-        accounts = accounts.map((account) => (account.id === lenderAccount.id ? { ...account, balance: account.balance - delta.principal } : account));
+        // A lender who has less than was asked lends what he has; one who has
+        // nothing lends nothing.
+        if (lenderAccount.balance <= 0) reject(`${lenderName} has nothing to lend.`);
+        principal = Math.min(principal, lenderAccount.balance);
+        accounts = accounts.map((account) => (account.id === lenderAccount.id ? { ...account, balance: account.balance - principal } : account));
       }
-      accounts = accounts.map((account) => (account.id === borrowerId ? { ...account, balance: account.balance + delta.principal } : account));
+      accounts = accounts.map((account) => (account.id === borrowerId ? { ...account, balance: account.balance + principal } : account));
 
       const loanId = mint("loan", delta.localId);
       // Servicing goes through an ordinary obligation, so arrears, priority and
       // missed periods all behave as they do for army pay -- a debt crisis is
       // already modelled by whatever models an unpaid army.
       const serviceObligationId = context.ids.next("obligation");
-      const servicing = Math.max(1, Math.round((delta.principal * delta.interestBps) / 10_000));
+      const servicing = Math.max(1, Math.round((principal * delta.interestBps) / 10_000));
       const obligation = {
         id: serviceObligationId,
         kind: "debt_service" as const,
@@ -1437,8 +2689,8 @@ function applyOne(
         lenderKind: delta.lenderKind,
         lenderId,
         borrowerAccountId: borrowerId,
-        principal: delta.principal,
-        outstanding: delta.principal,
+        principal,
+        outstanding: principal,
         interestBps: delta.interestBps,
         cadenceSteps: delta.cadenceDays,
         serviceObligationId,
@@ -1502,11 +2754,12 @@ function applyOne(
         };
       }
 
-      const paying = Math.min(delta.amount, loan.outstanding);
-      if (paying <= 0) reject("A repayment has to pay something.");
+      if (delta.amount <= 0) reject("A repayment has to pay something.", "reference");
       const borrower = world.material.accounts.find((account) => account.id === loan.borrowerAccountId);
       if (borrower === undefined) reject(`No account "${loan.borrowerAccountId}" exists to repay from.`, "reference");
-      if (borrower.balance < paying) reject(`The account holds ${borrower.balance}, which cannot repay ${paying}.`);
+      // As much as there is: a debtor pays down what he can.
+      if (borrower.balance <= 0) reject(`The account is empty and can repay nothing.`);
+      const paying = Math.min(delta.amount, loan.outstanding, borrower.balance);
 
       const lenderAccount = loan.lenderKind === "foreign" || loan.lenderId === null
         ? undefined
@@ -1626,26 +2879,495 @@ function applyOne(
       if (heirId !== null && !world.characters.some((character) => character.id === heirId && character.alive)) {
         reject(`No living character "${heirId}" exists to inherit.`, "reference");
       }
+      // A status that claims a death the engine did not carry out.
+      //
+      // `addStatuses` takes any word at all, so "kill Fabius" was written as
+      // health to nothing and a tag reading `dead` -- and it worked, in the
+      // sense that nothing refused it. What it produced was a man at no
+      // health, marked dead, alive, and still commanding his army: the record
+      // said one thing and the world another. Death has one door and this is
+      // not it; an order to have somebody killed is `covert_plot_open`, which
+      // decides whether it actually happened.
+      // Getting better. Rest does a little, and a physician does what his
+      // learning lets him: the model says he treats the man, the engine rolls
+      // how it goes. A cure used to be whatever number was written.
+      let healthDeltaBps = delta.healthDeltaBps;
+      if (healthDeltaBps > 0) {
+        const physicianId = delta.physicianRef == null ? null : required(delta.physicianRef, "The physician");
+        const physician = physicianId === null ? undefined : world.characters.find((character) => character.id === physicianId && character.alive);
+        if (physicianId !== null && physician === undefined) reject(`No living physician "${physicianId}" exists.${nearestTo(physicianId)}`, "reference");
+        if (physician === undefined) {
+          healthDeltaBps = Math.min(healthDeltaBps, REST_RECOVERY_BPS);
+        } else {
+          const skill = physician.skills.learning;
+          const cured = stableHash([physician.id, characterId, atStep, "treatment"]) % 100 < Math.min(90, 25 + Math.round(skill * 0.6));
+          healthDeltaBps = cured ? 1_500 + skill * 30 : 0;
+          emitFact({
+            localId: `treated_${characterId}`.slice(0, 60),
+            kind: "treatment",
+            summary: cured
+              ? `${physician.name} treated ${person.name}, and he mended.`
+              : `${physician.name} treated ${person.name}, and it did no good.`,
+            affectedRefs: [{ kind: "character", id: characterId }, { kind: "character", id: physician.id }],
+            visibility: "polity",
+            discoveryState: "polity",
+            knowableInDays: 0,
+            significance: 15,
+          });
+        }
+      }
+      const claimsDeath = delta.addStatuses.filter((status) => DEATH_CLAIMING_STATUSES.has(status.trim().toLowerCase()));
+      if (claimsDeath.length > 0) {
+        reject(
+          `"${claimsDeath[0]}" is not a state a person can be put into: this cannot end a life. A death somebody brings about is "character_death"; a secret one is a plot.`,
+        );
+      }
+
+      // A journey to somewhere this map does not reach -- Egypt, from a map
+      // of the western Mediterranean -- is the world answering, not a bad
+      // reference: the traveller sets out and the record cannot follow him.
+      if (delta.moveToProvinceId != null && !world.map.provinces.some((province) => province.id === delta.moveToProvinceId)) {
+        const place = delta.moveToProvinceId.replace(/^punic-/, "").split(/[-_]+/).filter((word) => !/\d/.test(word)).map((word) => word[0]!.toUpperCase() + word.slice(1)).join(" ");
+        reject(`${person.name} set out for ${place || "a far country"}, which lies beyond the lands this world maps; nothing of the journey can be followed there.`);
+      }
+
+      // A conversion, or a faith founded by the man who now holds it.
+      const believes = delta.faith === undefined ? null : faithNamed(world, delta.faith, atStep, characterId);
+      if (believes !== null) world = believes.world;
+
       const lifted = new Set(delta.removeStatuses);
       const statuses = [
         ...person.disqualifyingStatuses.filter((status) => !lifted.has(status)),
         ...delta.addStatuses.filter((status) => !person.disqualifyingStatuses.includes(status)),
       ];
+
+      // Going over to another power. What he held in the old one he lays
+      // down: its offices, and command of its armies -- unless this same
+      // answer has already taken the army over with him.
+      const newPolityId = delta.polityId === undefined ? undefined : required(delta.polityId, "The power they now belong to");
+      if (newPolityId !== undefined && !world.map.polities.some((polity) => polity.id === newPolityId)) {
+        reject(`No power "${newPolityId}" exists for ${person.name} to go over to.`, "reference");
+      }
+      let changed = world;
+      if (newPolityId !== undefined && newPolityId !== person.polityId) {
+        changed = handOverForcesOf(vacateOfficesOf(changed, characterId, "resignation", atStep), characterId, newPolityId);
+      }
+
+      // What he got better or worse at, one step at a time. A step is years
+      // of a life, and nobody is made the best general in the world by one:
+      // the ceiling sits above the bands the world may invent people at and
+      // below the best the scenario authored.
+      const skills = { ...person.skills };
+      for (const shift of delta.skillShifts ?? []) {
+        const now = skills[shift.skill];
+        skills[shift.skill] = shift.direction === "better"
+          ? Math.max(now, Math.min(SKILL_CEILING, now + SKILL_STEP))
+          : Math.max(0, now - SKILL_STEP);
+      }
+
+      // What he wants. Taken up anew, or an ambition he already holds seen
+      // through or given up -- matched by what it is called, since the world
+      // names it the way he would.
+      let ambitions = person.ambitions;
+      for (const change of delta.ambitions ?? []) {
+        if (change.change === "take_up") {
+          if (ambitions.some((ambition) => ambition.status === "active" && ambition.label.toLowerCase() === change.label.toLowerCase())) continue;
+          ambitions = [...ambitions, { id: context.ids.next("ambition"), label: change.label, kind: change.kind, targetId: null, status: "active" as const }];
+          continue;
+        }
+        const wanted = change.label.toLowerCase();
+        const held = ambitions.find((ambition) => ambition.status === "active"
+          && (ambition.label.toLowerCase().includes(wanted) || wanted.includes(ambition.label.toLowerCase())));
+        if (held === undefined) continue;
+        ambitions = ambitions.map((ambition) => (ambition === held ? { ...ambition, status: change.change === "fulfil" ? "fulfilled" as const : "abandoned" as const } : ambition));
+      }
+
       return {
-        ...world,
+        ...changed,
         // `alive` is untouched here and has no field to touch it with. A
         // health of zero is a man who cannot get out of bed, not a corpse:
-        // only `killCharacter` ends a life, and only after a peril has stood
-        // open long enough to have been acted against.
-        characters: world.characters.map((character) => (character.id === characterId
+        // a life ends through `killCharacter`, by time or by `character_death`.
+        characters: changed.characters.map((character) => (character.id === characterId
           ? {
             ...character,
-            healthBps: Math.max(0, Math.min(10_000, character.healthBps + delta.healthDeltaBps)),
+            healthBps: Math.max(0, Math.min(10_000, character.healthBps + healthDeltaBps)),
+            prestigeBps: clampBps(character.prestigeBps + clampStandingShift(delta.standingDeltaBps ?? 0, delta.standingCause)),
             disqualifyingStatuses: statuses.slice(0, 8),
+            skills,
+            ambitions: ambitions.slice(-12),
             ...(heirId === null ? {} : { heirCharacterId: heirId }),
+            ...(delta.moveToProvinceId == null ? {} : { locationProvinceId: delta.moveToProvinceId }),
+            ...(believes === null ? {} : { faithId: believes.faithId }),
+            ...(newPolityId === undefined ? {} : { polityId: newPolityId }),
           }
           : character)),
       };
+    }
+
+    case "family_tie_set": {
+      const personId = required(delta.characterRef, "The person");
+      const relatedId = required(delta.relatedCharacterRef, "The person they are kin to");
+      const person = world.characters.find((character) => character.id === personId);
+      const related = world.characters.find((character) => character.id === relatedId);
+      if (person === undefined) reject(`No character "${personId}" exists.${nearestTo(personId)}`, "reference");
+      if (related === undefined) reject(`No character "${relatedId}" exists.${nearestTo(relatedId)}`, "reference");
+      if (personId === relatedId) reject(`${person.name} cannot be kin to himself.`, "reference");
+
+      // One row per tie, read from either side: "A is child of B" and "B is
+      // parent of A" are the same tie, and storing both would count an
+      // adopted son twice in every succession.
+      const reciprocal = reciprocalFamilyLinkKind(delta.relation);
+      const sameTie = (link: WorldState["familyLinks"][number]): boolean => link.endedAtStep === null && (
+        (link.characterId === personId && link.relatedCharacterId === relatedId && link.kind === delta.relation)
+        || (link.characterId === relatedId && link.relatedCharacterId === personId && link.kind === reciprocal));
+      const standing = world.familyLinks.find(sameTie);
+
+      if (delta.change === "end") {
+        if (standing === undefined) reject(`${person.name} and ${related.name} have no such tie to end.`);
+        return {
+          ...world,
+          familyLinks: world.familyLinks.map((link) => (link === standing ? { ...link, endedAtStep: atStep } : link)),
+        };
+      }
+      if (!person.alive || !related.alive) reject(`${!person.alive ? person.name : related.name} is dead; no new tie can be made with the dead.`);
+      if (standing !== undefined) return world;
+      return {
+        ...world,
+        familyLinks: [...world.familyLinks, {
+          id: context.ids.next("family"),
+          characterId: personId,
+          relatedCharacterId: relatedId,
+          kind: delta.relation,
+          startedAtStep: atStep,
+          endedAtStep: null,
+          visibility: "public" as const,
+          provenanceEventId: null,
+        }],
+      };
+    }
+
+    case "service_contract_open": {
+      const id = mint("contract", delta.localId);
+      const employerAccountId = required(delta.employerAccountRef, "The account that pays");
+      const employer = world.material.accounts.find((account) => account.id === employerAccountId);
+      if (employer === undefined) reject(`No account "${employerAccountId}" exists to pay for this.`, "reference");
+      const employeeId = required(delta.employeeRef, "The man hired");
+      const employee = world.characters.find((character) => character.id === employeeId && character.alive);
+      if (employee === undefined) reject(`No living person "${employeeId}" exists to hire.${nearestTo(employeeId)}`, "reference");
+      if (employer.owner.kind === "character" && employer.owner.id === employeeId) reject(`${employee.name} cannot hire himself.`, "reference");
+      const farming = delta.role === "tax_farmer";
+      if (farming && employer.owner.kind !== "polity") reject("A tax farm is let by a government's treasury, not by a private purse.", "reference");
+      // The farmer pays for the farm; everybody else is paid.
+      const payerId = farming ? employee.personalAccountId : employerAccountId;
+      const payeeId = farming ? employerAccountId : employee.personalAccountId;
+      const payer = world.material.accounts.find((account) => account.id === payerId);
+      if (payer === undefined || payer.balance < delta.advance) {
+        reject(`${delta.advance} cannot be paid up front for "${delta.label}": the account holds ${payer?.balance ?? 0}.`);
+      }
+      const endsAtStep = delta.termDays === null ? null : atStep + delta.termDays;
+      let next: WorldState = {
+        ...world,
+        material: {
+          ...world.material,
+          accounts: world.material.accounts.map((account) => (account.id === payerId
+            ? { ...account, balance: account.balance - delta.advance }
+            : account.id === payeeId ? { ...account, balance: account.balance + delta.advance } : account)),
+        },
+      };
+      const obligationId = delta.monthlyPay > 0 ? context.ids.next("obligation") : null;
+      if (obligationId !== null) {
+        next = { ...next, material: { ...next.material, obligations: [...next.material.obligations, {
+          id: obligationId, kind: "salary" as const, label: `${delta.label}`.slice(0, 120), payerAccountId: payerId, recipientAccountId: payeeId,
+          amount: delta.monthlyPay, cadenceSteps: 30, nextDueStep: atStep + 30, priority: 400, arrears: 0, missedPeriods: 0, active: true,
+        }] } };
+      }
+
+      // What the work needs, for as long as it is paid for.
+      let incomeSourceId: string | null = null;
+      let grantId: string | null = null;
+      let forceId: string | null = null;
+      let forceWas: { polityId: string; controllerCharacterId: string } | null = null;
+      const counterpartPolityId = delta.counterpartPolityId === null ? null : required(delta.counterpartPolityId, "The power he is sent to");
+      if (farming) {
+        if (delta.provinceId === null) reject("A tax farm is the tax of a province; name which.", "reference");
+        const province = world.map.provinces.find((candidate) => candidate.id === delta.provinceId);
+        if (province === undefined || province.controllerPolityId !== employer.owner.id) reject(`${delta.provinceId} is not a province of the power letting the farm.`, "reference");
+        const material = world.material.provinceMaterial.find((row) => row.provinceId === province.id);
+        // What the province bears at the customary rate: the farmer's take,
+        // counted against the province like the government's own tax.
+        const take = material === undefined ? 0 : Math.round(material.taxCapacity * material.stabilityBps / 10_000 * TAX_EXTRACTION_BPS / 10_000 * CUSTOMARY_TAX_BURDEN);
+        incomeSourceId = context.ids.next("income");
+        next = { ...next, material: { ...next.material, incomeSources: [...next.material.incomeSources, {
+          id: incomeSourceId, kind: "tax" as const, label: `The tax farm of ${province.name}`.slice(0, 120), beneficiaryAccountId: employee.personalAccountId,
+          originKind: "position" as const, originId: id, amount: take, cadenceSteps: 30, nextDueStep: atStep + 30, collectionRateBps: 10_000,
+          counterpartyPolityId: null, active: true,
+        }] } };
+      }
+      if (delta.role === "envoy" && employer.owner.kind === "polity") {
+        grantId = context.ids.next("grant");
+        next = { ...next, authorityGrants: [...next.authorityGrants, {
+          id: grantId, holder: { kind: "character" as const, id: employeeId }, source: "delegation" as const, sourceRef: id,
+          domain: "diplomatic" as const, scope: { kind: "polity" as const, id: employer.owner.id }, powers: ["negotiate" as const],
+          standing: "delegated" as const, legitimacyBps: 10_000, visibility: "public" as const, grantedAtStep: atStep,
+          expiresAtStep: endsAtStep, revokedAtStep: null, revocationReason: null, succeedsGrantId: null,
+        }] };
+      }
+      if (delta.forceRef !== null) {
+        forceId = required(delta.forceRef, "The company hired");
+        const force = world.material.forces.find((candidate) => candidate.id === forceId);
+        if (force === undefined) reject(`No force "${forceId}" exists to hire.`, "reference");
+        if (force.commanderCharacterId !== employeeId && force.controllerCharacterId !== employeeId) reject(`${force.name} is not ${employee.name}'s to hire out.`);
+        forceWas = { polityId: force.polityId, controllerCharacterId: force.controllerCharacterId };
+        const hirer = employer.owner.kind === "character" ? employer.owner.id : context.actorRef.kind === "character" ? context.actorRef.id : force.controllerCharacterId;
+        const hirerPolity = employer.owner.kind === "polity" ? employer.owner.id : world.characters.find((character) => character.id === hirer)?.polityId ?? force.polityId;
+        next = { ...next, material: { ...next.material, forces: next.material.forces.map((candidate) => (candidate.id === forceId
+          ? { ...candidate, controllerCharacterId: hirer, polityId: hirerPolity }
+          : candidate)) } };
+      }
+      next = { ...next, material: { ...next.material, contracts: [...next.material.contracts, {
+        id, role: delta.role, label: delta.label, employerAccountId, employeeCharacterId: employeeId, obligationId, incomeSourceId, grantId,
+        advance: delta.advance, monthlyPay: delta.monthlyPay, duties: delta.duties, openedAtStep: atStep, endsAtStep,
+        forceId, forceWas, provinceId: delta.provinceId, counterpartPolityId, status: "active" as const,
+      }] } };
+      emitFact({
+        localId: `hired_${id}`.slice(0, 60),
+        kind: "contract_opened",
+        summary: farming
+          ? `${employee.name} took the tax farm of ${world.map.provinces.find((province) => province.id === delta.provinceId)?.name ?? delta.provinceId}, paying ${delta.advance} for it${delta.monthlyPay > 0 ? ` and ${delta.monthlyPay} a month` : ""}.`
+          : `${employee.name} was hired: ${delta.label}${delta.advance > 0 ? `, ${delta.advance} paid down` : ""}${delta.monthlyPay > 0 ? `, ${delta.monthlyPay} a month` : ""}${endsAtStep === null ? "" : `, for ${delta.termDays} days`}.`,
+        affectedRefs: [{ kind: "character", id: employeeId }, { kind: "account", id: employerAccountId }],
+        visibility: delta.role === "assassin" ? "private" : "polity",
+        discoveryState: delta.role === "assassin" ? "private" : "polity",
+        knowableInDays: 0,
+        significance: 25,
+      });
+      return next;
+    }
+
+    case "service_contract_close": {
+      const contractId = required(delta.contractRef, "The contract");
+      const contract = world.material.contracts.find((candidate) => candidate.id === contractId);
+      if (contract === undefined) reject(`No contract "${contractId}" exists.`, "reference");
+      if (contract.status !== "active") reject(`"${contract.label}" has already ended.`);
+      const actorId = context.actorRef.kind === "character" ? context.actorRef.id : null;
+      const employerOwner = world.material.accounts.find((account) => account.id === contract.employerAccountId)?.owner;
+      const walking = actorId === contract.employeeCharacterId;
+      const early = contract.endsAtStep === null || contract.endsAtStep > atStep;
+      // Walking out before the term is up is breaking it. The world may end a
+      // contract of its own accord; a man ends only his own.
+      let next = endContract(world, contract, walking && early ? "broken" : "ended", atStep);
+      const employee = world.characters.find((character) => character.id === contract.employeeCharacterId);
+      if (walking && early && employee !== undefined) {
+        next = { ...next, characters: next.characters.map((character) => (character.id === employee.id
+          // A man known to walk out on the people who pay him.
+          ? { ...character, prestigeBps: clampBps(character.prestigeBps - WALKED_OUT_STANDING_BPS) }
+          : character)) };
+        if (employerOwner?.kind === "character") {
+          next = addRelationCause(next, { subjectCharacterId: employerOwner.id, targetCharacterId: employee.id, label: "He took my money and walked out on me.", score: -12, dimensions: { trust: -20, respect: -8 } }, atStep, context);
+        }
+      }
+      emitFact({
+        localId: `closed_${contract.id}`.slice(0, 60),
+        kind: walking && early ? "contract_broken" : "contract_ended",
+        summary: walking && early
+          ? `${employee?.name ?? "The man hired"} walked out on his contract before its term: ${contract.label}.`
+          : `The contract was ended: ${contract.label}.`,
+        affectedRefs: [{ kind: "character", id: contract.employeeCharacterId }, { kind: "account", id: contract.employerAccountId }],
+        visibility: "polity",
+        discoveryState: "polity",
+        knowableInDays: 0,
+        significance: 25,
+      });
+      return next;
+    }
+
+    case "legal_status_set": {
+      const personId = required(delta.characterRef, "Whose standing this is");
+      const person = world.characters.find((character) => character.id === personId && character.alive);
+      if (person === undefined) reject(`No living person "${personId}" exists.${nearestTo(personId)}`, "reference");
+      const actorId = context.actorRef.kind === "character" ? context.actorRef.id : null;
+      const newOwnerId = delta.ownerRef === null ? null : required(delta.ownerRef, "The new owner");
+      if (newOwnerId !== null && !world.characters.some((character) => character.id === newOwnerId && character.alive)) {
+        reject(`No living person "${newOwnerId}" exists to own ${person.name}.${nearestTo(newOwnerId)}`, "reference");
+      }
+      const named = (id: string | null): string => world.characters.find((character) => character.id === id)?.name ?? "somebody";
+      let changed: Partial<WorldState["characters"][number]>;
+      let summary: string;
+      let causes: { subjectCharacterId: string; targetCharacterId: string; label: string; score: number; dimensions: Record<string, number> }[] = [];
+
+      if (person.legalStatus === "enslaved") {
+        // Only his owner decides anything about him. The world telling its own
+        // story (no actor, or the owner himself) is let through.
+        if (actorId !== null && actorId !== person.ownerCharacterId) {
+          reject(`${person.name} belongs to ${named(person.ownerCharacterId)}, and only his owner can free, sell or indulge him.`);
+        }
+        if (delta.status === "enslaved") {
+          const to = newOwnerId ?? person.ownerCharacterId;
+          changed = { ownerCharacterId: to, ...(delta.peculium === undefined ? {} : { peculium: delta.peculium }), ...(to !== person.ownerCharacterId ? { peculium: false } : {}) };
+          summary = to !== person.ownerCharacterId
+            ? `${named(person.ownerCharacterId)} sold ${person.name} to ${named(to)}.`
+            : `${named(person.ownerCharacterId)} ${delta.peculium === true ? "allowed" : "took back"} ${person.name} a purse of his own.`;
+        } else {
+          // Freed, whatever the order called it: the old master is his patron for life.
+          changed = { legalStatus: "freed", peculium: false };
+          summary = `${named(person.ownerCharacterId)} set ${person.name} free. He is a freedman now, and ${named(person.ownerCharacterId)} his patron.`;
+          if (person.ownerCharacterId !== null) {
+            causes = [{ subjectCharacterId: person.id, targetCharacterId: person.ownerCharacterId, label: "He gave me my freedom.", score: 12, dimensions: { obligation: 30, affection: 10 } }];
+          }
+        }
+      } else if (delta.status === "enslaved") {
+        // Nobody is enslaved at large: he is already in somebody's hands.
+        const held = person.disqualifyingStatuses.some((status) => CAPTIVE_STATUSES.has(status.toLowerCase()));
+        if (!held) reject(`${person.name} is free and at large. He has to be taken -- captured, condemned -- before anybody can sell him.`);
+        const to = newOwnerId ?? actorId;
+        if (to === null) reject(`Somebody has to own ${person.name}; name who.`, "reference");
+        changed = { legalStatus: "enslaved", ownerCharacterId: to, peculium: false };
+        summary = `${person.name} was made a slave, the property of ${named(to)}.`;
+        causes = [{ subjectCharacterId: person.id, targetCharacterId: to, label: "He made me a slave.", score: -20, dimensions: { affection: -30, fear: 20 } }];
+      } else {
+        // A freedman's standing is what it is; only the law makes him a citizen outright.
+        reject(`${person.name} is already ${person.legalStatus === "freed" ? "a freedman" : "free"}. Only the law makes a freedman free-born.`);
+      }
+
+      emitFact({
+        localId: `status_${person.id}`.slice(0, 60),
+        kind: "legal_status",
+        summary,
+        affectedRefs: [{ kind: "character", id: person.id }, ...[person.ownerCharacterId, newOwnerId].filter((id): id is string => id !== null).map((id) => ({ kind: "character" as const, id }))],
+        visibility: "public",
+        discoveryState: "public",
+        knowableInDays: 0,
+        significance: 35,
+      });
+      let next: WorldState = { ...world, characters: world.characters.map((character) => (character.id === person.id ? { ...character, ...changed } : character)) };
+      for (const cause of causes) next = addRelationCause(next, cause, atStep, context);
+      return next;
+    }
+
+    case "character_death": {
+      const doomedId = required(delta.characterRef, "Whose life this is");
+      const doomed = world.characters.find((character) => character.id === doomedId);
+      if (doomed === undefined || !doomed.alive) reject(`No living person "${doomedId}" exists.${nearestTo(doomedId)}`, "reference");
+      const byId = delta.byCharacterRef === null ? null : required(delta.byCharacterRef, "Who did it");
+      const by = byId === null ? undefined : world.characters.find((character) => character.id === byId && character.alive);
+      if (byId !== null && by === undefined) reject(`No living person "${byId}" exists to do this.${nearestTo(byId)}`, "reference");
+      const player = context.playerCharacterId ?? null;
+      const actorId = context.actorRef.kind === "character" ? context.actorRef.id : null;
+      const held = doomed.disqualifyingStatuses.some((status) => CAPTIVE_STATUSES.has(status.toLowerCase()));
+      const where = world.map.provinces.find((province) => province.id === doomed.locationProvinceId);
+
+      if (delta.manner === "execution") {
+        if (by === undefined) reject(`Somebody has to order an execution; name who condemned ${doomed.name}.`, "reference");
+        if (by.id === doomed.id) reject(`${doomed.name} cannot execute himself; that is a suicide.`, "reference");
+        // Nobody is put to death at large. The condemned is in somebody's
+        // hands -- a prisoner, a captive -- or, for a man of no account, taken
+        // on the spot by soldiers who answer to whoever gave the word. A man
+        // whose death would be an event has to have been taken first, which is
+        // the warning: nobody who matters is executed out of a clear sky.
+        const menThere = world.material.forces.some((force) => force.locationId === doomed.locationProvinceId
+          && (force.commanderCharacterId === by.id || force.controllerCharacterId === by.id)
+          && force.personnel.some((category) => category.fit > 0));
+        const magistrateThere = by.officeId !== null && where?.controllerPolityId === by.polityId;
+        const reach = menThere || magistrateThere;
+        const matters = mattersEnough(world, doomed, player);
+        if (!reach || (matters && !held)) {
+          reject(matters && !held
+            ? `${doomed.name} is not in ${by.name}'s hands: he is at large, and has to be taken before he can be put to death.`
+            : `${doomed.name} is held where ${by.name} has neither men nor the power of a magistrate, and nobody there would carry out the sentence.`);
+        }
+        const killed = killCharacter(world, doomed.id, `He was put to death on the order of ${by.name}.`, atStep);
+        for (const fact of killed.facts) emitFact({ ...fact, kind: "execution" });
+        return killed.world;
+      }
+
+      if (delta.manner === "duel") {
+        if (by === undefined || by.id === doomed.id) reject("A duel is fought between two people; name the other.", "reference");
+        // The player fights only a duel he chose. Challenged, he is asked.
+        if (player !== null && (doomed.id === player || by.id === player) && actorId !== player) {
+          reject(`A challenge to ${doomed.id === player ? doomed.name : by.name} is his to accept or refuse; put it to him.`);
+        }
+        if (by.locationProvinceId !== doomed.locationProvinceId) reject(`${doomed.name} and ${by.name} are not in the same place, and cannot fight.`);
+        // The engine says who falls, from what each man is with a sword and
+        // what is left of his body; a roll hashed on the two of them and the
+        // day, so a replay fights the same fight.
+        const prowess = (man: typeof doomed): number => man.skills.martial * 2 + man.skills.body + man.healthBps / 100
+          + (stableHash([context.gameId, atStep, man.id, "duel"]) % 60);
+        const [winner, loser] = prowess(doomed) >= prowess(by) ? [doomed, by] : [by, doomed];
+        const killed = killCharacter(world, loser.id, `He fell to ${winner.name} in single combat.`, atStep);
+        for (const fact of killed.facts) emitFact({ ...fact, kind: "duel" });
+        return {
+          ...killed.world,
+          characters: killed.world.characters.map((character) => (character.id === winner.id
+            ? { ...character, healthBps: Math.max(500, character.healthBps - 1_500), prestigeBps: clampBps(character.prestigeBps + 500) }
+            : character)),
+        };
+      }
+
+      // A man's own hand. His own act always; otherwise only one who is held,
+      // or whose life is already in the balance, or who is ruined -- a
+      // beaten general, a captive king -- and never the player, whose death
+      // is his own to choose.
+      const ownAct = actorId === doomed.id;
+      if (doomed.id === player && !ownAct) reject(`${doomed.name}'s life is his own to end, and he has not chosen to.`);
+      const despairs = held
+        || world.storylines.some((storyline) => storyline.phase !== "closed" && storyline.seedKey === `peril:${doomed.id}`)
+        || world.characterPressures.some((pressure) => pressure.characterId === doomed.id && pressure.status === "active" && pressure.intensity >= 60 && (pressure.kind === "threat" || pressure.kind === "illness"));
+      if (!ownAct && !despairs) reject(`Nothing has brought ${doomed.name} to the point of taking his own life.`);
+      const killed = killCharacter(world, doomed.id, "He died by his own hand.", atStep);
+      for (const fact of killed.facts) emitFact({ ...fact, kind: "suicide" });
+      return killed.world;
+    }
+
+    case "force_raid": {
+      const forceId = required(delta.forceRef, "The raiding force");
+      const force = world.material.forces.find((candidate) => candidate.id === forceId);
+      if (force === undefined) reject(`No force "${forceId}" exists to raid with.${nearestTo(forceId)}`, "reference");
+      const province = world.map.provinces.find((candidate) => candidate.id === delta.provinceId);
+      if (province === undefined) reject(`No province "${delta.provinceId}" exists to raid.`, "reference");
+      if (force.locationId !== province.id) {
+        const where = world.map.provinces.find((candidate) => candidate.id === force.locationId)?.name ?? force.locationId;
+        reject(`${force.name} is in ${where}, not ${province.name}: it has to be there to raid it. March it in first.`);
+      }
+      const polityName = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
+      if (province.controllerPolityId === force.polityId && force.outlaw !== true) {
+        // Said as what did not happen, and who ordered it. Written as a maxim
+        // -- "burning its farms is not a raid" -- a historian turned the
+        // refusal into the man condemning the burning he had ordered.
+        reject(`${force.name} were ordered to raid ${province.name} and did not: it is ${polityName(force.polityId)}'s own land, and its farmers are ${polityName(force.polityId)}'s own people. No farm was burned and nothing was taken.`);
+      }
+      const intoAccountId = delta.toAccountRef === null ? undefined : required(delta.toAccountRef, "Where the loot is sent");
+      if (intoAccountId !== undefined && !world.material.accounts.some((account) => account.id === intoAccountId && account.status === "active")) {
+        reject(`No account "${intoAccountId}" exists to send the loot to.`, "reference");
+      }
+      const seized = sackTheProvince(world, {
+        provinceId: province.id,
+        takerPolityId: force.polityId,
+        takingForceId: force.id,
+        atStep,
+        cause: { kind: "action", id: forceId, explanation: delta.reason },
+        transactionId: context.ids.next("txn"),
+        shareBps: raidShareBps(force, warfareWith(world, context.warfare)),
+        ...(intoAccountId === undefined ? {} : { intoAccountId }),
+      });
+      const victims = province.controllerPolityId === null ? "its people" : `the ${polityName(province.controllerPolityId)}`;
+      emitFact({
+        localId: `raid_${forceId}`,
+        kind: "province_raided",
+        summary: seized.taken > 0
+          ? `${force.name} raided ${province.name}, burning farms and driving off what could be carried: ${seized.taken} taken from ${victims}.`
+          : `${force.name} raided ${province.name}, and found nothing left worth carrying off.`,
+        affectedRefs: [
+          { kind: "force", id: forceId },
+          { kind: "province", id: province.id },
+          ...(province.controllerPolityId === null ? [] : [{ kind: "polity" as const, id: province.controllerPolityId }]),
+          { kind: "polity", id: force.polityId },
+        ],
+        visibility: "public",
+        discoveryState: "public",
+        knowableInDays: 0,
+        significance: 60,
+      });
+      return seized.world;
     }
 
     case "character_pressure_set": {
@@ -1681,10 +3403,15 @@ function applyOne(
         reject(`No character "${senderId}" exists to send this.${nearestTo(senderId)}`, "reference");
       }
       const known = new Set(world.map.polities.map((polity) => polity.id));
-      if (!known.has(delta.fromPolityId) || !known.has(delta.toPolityId)) {
+      const letterFromId = required(delta.fromPolityId, "The power sending it");
+      const letterToId = required(delta.toPolityId, "The power it is sent to");
+      if (!known.has(letterFromId) || !known.has(letterToId)) {
         reject("A letter must be between two powers that exist.", "reference");
       }
-      if (delta.fromPolityId === delta.toPolityId) reject("A power does not write to itself.");
+      // A letter within one power is allowed: "Quintus writes to the Senate
+      // asking to be made tribune" is a subject petitioning his own
+      // government, which is most of what politics is. It was refused as "a
+      // power does not write to itself", and the petition was lost.
       const recipientId = delta.toCharacterRef === null ? null : required(delta.toCharacterRef, "The named recipient");
       if (recipientId !== null && !world.characters.some((character) => character.id === recipientId)) {
         reject(`No character "${recipientId}" exists to receive this.${nearestTo(recipientId)}`, "reference");
@@ -1700,9 +3427,9 @@ function applyOne(
           {
             id: mint("message", delta.localId),
             kind: delta.kind,
-            fromPolityId: delta.fromPolityId,
+            fromPolityId: letterFromId,
             fromCharacterId: senderId,
-            toPolityId: delta.toPolityId,
+            toPolityId: letterToId,
             toCharacterId: recipientId,
             subject: delta.subject,
             terms: delta.terms,
@@ -1740,45 +3467,56 @@ function applyOne(
 
     case "agreement_open": {
       const known = new Set(world.map.polities.map((polity) => polity.id));
-      if (!known.has(delta.polityId) || !known.has(delta.otherPolityId)) {
+      const partyId = required(delta.polityId, "The first party");
+      const otherPartyId = required(delta.otherPolityId, "The other party");
+      if (!known.has(partyId) || !known.has(otherPartyId)) {
         reject("An agreement must be between two powers that exist.", "reference");
       }
-      if (delta.polityId === delta.otherPolityId) reject("A power holds no agreement with itself.");
+      if (partyId === otherPartyId) reject("A power holds no agreement with itself.", "reference");
       const sourceMessageId = delta.sourceMessageRef === null ? null : required(delta.sourceMessageRef, "The letter this came from");
       if (sourceMessageId !== null && !world.diplomacy.some((message) => message.id === sourceMessageId)) {
         reject(`No letter "${sourceMessageId}" exists for this to come from.`, "reference");
       }
       // The same thing twice is not two agreements. Peace declared while peace
       // already stands is a restatement, and a second war is still one war.
-      if (agreementsBetween(world.polityAgreements, delta.polityId, delta.otherPolityId).some((agreement) => agreement.kind === delta.kind)) {
-        reject(`${delta.polityId} and ${delta.otherPolityId} already stand in ${delta.kind}.`);
+      if (agreementsBetween(world.polityAgreements, partyId, otherPartyId).some((agreement) => agreement.kind === delta.kind)) {
+        reject(`${partyId} and ${otherPartyId} already stand in ${delta.kind}.`);
       }
       // War and peace cannot both be true. Opening one closes the others, which
       // is what makes "accept the peace" a single act rather than a checklist.
       const opposed: Record<string, readonly string[]> = {
+        // A protectorate is not a peace, so a war does not end one: a protector
+        // at war with its own client has a revolt on its hands, which is a
+        // different and more interesting thing than a lapsed treaty.
         war: ["peace", "truce", "alliance", "non_aggression"],
         peace: ["war"],
         truce: ["war"],
         alliance: ["war"],
         non_aggression: ["war"],
+        // Nobody is protected by two powers at once. That is the quarrel the
+        // second protector is picking, and at Messana it was the war itself.
+        protectorate: ["protectorate"],
       };
       const closes = new Set(opposed[delta.kind] ?? []);
+      const agreementId = mint("agreement", delta.localId);
+      // What the treaty makes happen, carried out as it is made.
+      const bound = carryOutClauses(world, delta.clauses ?? [], agreementId, partyId, otherPartyId, required, context, emitFact);
       return {
-        ...world,
+        ...bound,
         polityAgreements: [
-          ...world.polityAgreements.map((agreement) =>
+          ...bound.polityAgreements.map((agreement) =>
             agreement.status === "active" &&
             closes.has(agreement.kind) &&
-            ((agreement.polityId === delta.polityId && agreement.otherPolityId === delta.otherPolityId) ||
-              (agreement.polityId === delta.otherPolityId && agreement.otherPolityId === delta.polityId))
+            ((agreement.polityId === partyId && agreement.otherPolityId === otherPartyId) ||
+              (agreement.polityId === otherPartyId && agreement.otherPolityId === partyId))
               ? { ...agreement, status: "ended" as const, endedAtStep: atStep, endedReason: delta.reason }
               : agreement,
           ),
           {
-            id: mint("agreement", delta.localId),
+            id: agreementId,
             kind: delta.kind,
-            polityId: delta.polityId,
-            otherPolityId: delta.otherPolityId,
+            polityId: partyId,
+            otherPolityId: otherPartyId,
             terms: delta.terms,
             sinceStep: atStep,
             untilStep: delta.forDays === null ? null : atStep + delta.forDays,
@@ -1802,15 +3540,203 @@ function applyOne(
         polityAgreements: world.polityAgreements.map((candidate) =>
           candidate.id === agreementId ? { ...candidate, status: "ended" as const, endedAtStep: atStep, endedReason: delta.reason } : candidate,
         ),
+        // A treaty torn up stops being paid on.
+        material: {
+          ...world.material,
+          obligations: world.material.obligations.map((obligation) => (obligation.consequenceRef === agreementId ? { ...obligation, active: false } : obligation)),
+        },
+      };
+    }
+
+    case "contingency_arm": {
+      const ownerId = required(delta.ownerCharacterRef, "Whose plan this is");
+      const owner = world.characters.find((character) => character.id === ownerId);
+      if (owner === undefined) reject(`No character "${ownerId}" exists to lay this plan.${nearestTo(ownerId)}`, "reference");
+      if (!world.map.provinces.some((province) => province.id === delta.provinceId)) {
+        reject(`No province "${delta.provinceId}" exists to lay ${delta.label} in.`, "reference");
+      }
+      if (delta.againstPolityId !== null && !world.map.polities.some((polity) => polity.id === delta.againstPolityId)) {
+        reject(`No power "${delta.againstPolityId}" exists for ${delta.label} to be laid against.`, "reference");
+      }
+      const ambushId = delta.ambushForceRef === null ? null : required(delta.ambushForceRef, "The force waiting to fall on them");
+      if (ambushId !== null && !world.material.forces.some((force) => force.id === ambushId)) {
+        reject(`No force "${ambushId}" exists to spring ${delta.label}.`, "reference");
+      }
+
+      // The money goes now, because that is what a trap is: pitch and timber
+      // bought and put in place months before anybody walks into it. Only as
+      // far as it actually goes -- a trap paid for out of an empty treasury is
+      // a trap nobody built.
+      let paid = world;
+      let spend = delta.spend;
+      const fundingId = delta.fundingAccountRef === null ? null : required(delta.fundingAccountRef, "The account this is paid from");
+      if (fundingId !== null && spend > 0) {
+        const account = world.material.accounts.find((candidate) => candidate.id === fundingId);
+        if (account === undefined) reject(`No account "${fundingId}" exists to pay for ${delta.label}.`, "reference");
+        spend = Math.min(spend, Math.max(0, account.balance));
+        paid = {
+          ...world,
+          material: {
+            ...world.material,
+            accounts: world.material.accounts.map((candidate) =>
+              candidate.id === fundingId ? { ...candidate, balance: candidate.balance - spend } : candidate),
+          },
+        };
+      }
+
+      return {
+        ...paid,
+        contingencies: [...paid.contingencies, {
+          id: context.ids.next("contingency"),
+          label: delta.label,
+          ownerCharacterId: ownerId,
+          ownerPolityId: owner.polityId,
+          trigger: delta.trigger,
+          effect: delta.effect,
+          provinceId: delta.provinceId,
+          positionId: delta.positionId,
+          againstPolityId: delta.againstPolityId,
+          preparationSpend: spend,
+          ambushForceId: ambushId,
+          armedReading: watchReading(delta.trigger, paid),
+          armedAtStep: atStep,
+          expiresAtStep: delta.expiresInDays === null ? null : atStep + delta.expiresInDays,
+          status: "armed" as const,
+          sprungAtStep: null,
+          tollBps: null,
+        }],
+      };
+    }
+
+    case "contingency_disarm": {
+      const planId = required(delta.contingencyRef, "The plan being called off");
+      const plan = world.contingencies.find((candidate) => candidate.id === planId);
+      if (plan === undefined) reject(`No plan "${planId}" exists to call off.`, "reference");
+      if (plan.status !== "armed") reject(`${plan.label} is not standing armed, and cannot be called off.`);
+      return {
+        ...world,
+        contingencies: world.contingencies.map((candidate) =>
+          candidate.id === planId ? { ...candidate, status: "disarmed" as const } : candidate),
+      };
+    }
+
+    case "covert_plot_open": {
+      const targetId = required(delta.targetCharacterRef, "The person this is laid against");
+      const target = world.characters.find((character) => character.id === targetId);
+      if (target === undefined || !target.alive) reject(`No living person "${targetId}" exists to move against.${nearestTo(targetId)}`, "reference");
+      const sponsorId = required(delta.sponsorCharacterRef, "The person who wants it done");
+      const sponsor = world.characters.find((character) => character.id === sponsorId);
+      if (sponsor === undefined) reject(`No person "${sponsorId}" exists to want this done.${nearestTo(sponsorId)}`, "reference");
+      if (sponsorId === targetId) reject(`${target.name} cannot be the one plotting against himself.`);
+
+      const agentId = delta.agentCharacterRef === null ? null : required(delta.agentCharacterRef, "The hand this is done by");
+      const agent = agentId === null ? null : world.characters.find((character) => character.id === agentId) ?? null;
+      if (agentId !== null && agent === null) reject(`No person "${agentId}" exists to carry this out.${nearestTo(agentId)}`, "reference");
+
+      // A plot already standing against the same man, from the same quarter, is
+      // that plot -- ordered twice, not doubled. Otherwise a player could stack
+      // ten of them in one answer and turn a 12% chance into a certainty, which
+      // is the whole thing the bounded odds exist to prevent.
+      const alreadyLaid = world.covertPlots.find((plot) =>
+        isPlotOpen(plot) && plot.targetCharacterId === targetId && plot.sponsorCharacterId === sponsorId);
+      if (alreadyLaid !== undefined) {
+        reject(`Something is already laid against ${target.name} on ${sponsor.name}'s account, and is not yet come to a head.`);
+      }
+
+      // The money goes first, and only as far as it actually goes: a plot paid
+      // for out of an empty treasury is a plot nobody was paid for.
+      let paid = world;
+      let spend = delta.spend;
+      const fundingId = delta.fundingAccountRef === null ? null : required(delta.fundingAccountRef, "The account this is paid from");
+      if (fundingId !== null && spend > 0) {
+        const account = world.material.accounts.find((candidate) => candidate.id === fundingId);
+        if (account === undefined) reject(`No account "${fundingId}" exists to pay for this.`, "reference");
+        spend = Math.min(spend, Math.max(0, account.balance));
+        paid = {
+          ...world,
+          material: {
+            ...world.material,
+            accounts: world.material.accounts.map((candidate) =>
+              candidate.id === fundingId ? { ...candidate, balance: candidate.balance - spend } : candidate),
+          },
+        };
+      }
+
+      // Settled here, once, and never rewritten. Neither this delta nor any
+      // later one can move it: a player who writes "25/75" in his order is
+      // telling the world how he rates his chances, not setting them.
+      const odds = plotOdds(paid, { kind: delta.kind, target, sponsor, agent, spend });
+      const plotId = context.ids.next("plot");
+
+      // The thread it runs in, so this is several chronicles rather than one
+      // line. Private: the world's own bookkeeping of a secret -- the people in
+      // it see it because they are in it, and nobody else does.
+      const storylineId = context.ids.next("storyline");
+
+      return {
+        ...paid,
+        storylines: [...paid.storylines, {
+          id: storylineId,
+          title: `Something laid against ${target.name}`,
+          participantIds: [sponsorId, ...(agentId === null ? [] : [agentId])],
+          provinceId: target.locationProvinceId,
+          phase: "brewing" as const,
+          stakes: `Whether ${target.name} lives out the year, and who is found to have wanted otherwise.`,
+          history: [`${sponsor.name} set something in motion, and told nobody who did not need to know.`],
+          nextDevelopment: "Whether the hand gets near enough, and whether anybody talks first.",
+          visibility: "private" as const,
+          origin: "world" as const,
+          openedByRef: { kind: "character" as const, id: sponsorId },
+          openedAtStep: atStep,
+          updatedAtStep: atStep,
+          closedAtStep: null,
+          causalFactIds: [],
+          seedKey: null,
+        }],
+        covertPlots: [...paid.covertPlots, {
+          id: plotId,
+          kind: delta.kind,
+          targetCharacterId: targetId,
+          sponsorCharacterId: sponsorId,
+          agentCharacterId: agentId,
+          spend,
+          cover: delta.cover,
+          successOddsBps: odds.successOddsBps,
+          secrecyBps: odds.secrecyBps,
+          openedAtStep: atStep,
+          resolvesAtStep: atStep + plotResolvesIn(delta.expectedInDays),
+          storylineId,
+          outcome: null,
+          resolvedAtStep: null,
+          stirred: false,
+          targetWarned: false,
+        }],
       };
     }
 
     case "office_seat_set": {
-      const office = allOffices(world, context.offices).find((candidate) => candidate.id === delta.officeId);
-      if (office === undefined) reject(`No office "${delta.officeId}" exists.`, "reference");
       const holderId = delta.holderCharacterRef === null ? null : required(delta.holderCharacterRef, "The person taking the office");
-      if (holderId !== null && !world.characters.some((character) => character.id === holderId && character.alive)) {
+      const holder = holderId === null ? undefined : world.characters.find((character) => character.id === holderId && character.alive);
+      if (holderId !== null && holder === undefined) {
         reject(`No living character "${holderId}" exists to hold an office.`, "reference");
+      }
+      const known = allOffices(world, context.offices);
+      let office = known.find((candidate) => candidate.id === delta.officeId);
+      // An office the government does not have is made, the way a person
+      // created holding one already made it. Looked for by name first, so that
+      // "roman-tribune" finds a tribunate the world opened last year under its
+      // own id instead of opening a second one beside it.
+      if (office === undefined) {
+        const label = delta.officeLabel ?? labelFromCategoryId(delta.officeId);
+        if (holder === undefined) reject(`There is no ${label} to empty: the office was never held.`);
+        const polityId = holder.polityId;
+        if (polityId === null) reject(`${holder.name} belongs to no power that could have a ${label}.`);
+        office = findOfficeForRole(known, polityId, label);
+        if (office === undefined) {
+          const officeId = context.ids.next("office");
+          world = openOffice(world, officeId, label, polityId, []);
+          office = allOffices(world, context.offices).find((candidate) => candidate.id === officeId)!;
+        }
       }
 
       // Emptying it.
@@ -1841,6 +3767,104 @@ function applyOne(
               : seat),
         },
       };
+    }
+
+    case "settlement_control_set": {
+      const drawn = world.map.provinces.find((candidate) =>
+        candidate.settlements.some((settlement) => settlement.id === delta.settlementId));
+
+      // A city the map never drew, in a province the map does have.
+      //
+      // Forty-one settlements are drawn across the whole Mediterranean, so any
+      // campaign that goes anywhere will name one of the thousands that are
+      // not: Hadrumentum, where an African landing actually happens, is not on
+      // this map. Refusing the siege for that is the engine failing the order
+      // over its own cartography. So the city is founded where it was said to
+      // be and then changes hands like any other -- modestly, because nothing
+      // is known about it beyond that it is there.
+      let founded: Settlement | null = null;
+      let province = drawn;
+      if (province === undefined && delta.inProvinceId != null) {
+        const ground = world.map.provinces.find((candidate) => candidate.id === delta.inProvinceId);
+        if (ground === undefined) reject(`No province "${delta.inProvinceId}" exists for ${delta.settlementId} to stand in.`, "reference");
+        founded = {
+          id: delta.settlementId,
+          name: delta.name ?? labelFromCategoryId(delta.settlementId),
+          kind: "town",
+          provinceId: ground.id,
+          controllerPolityId: ground.controllerPolityId,
+          size: 30,
+          fortificationLevel: 2,
+        };
+        province = { ...ground, settlements: [...ground.settlements, founded] };
+      }
+      if (province === undefined) {
+        reject(`No settlement "${delta.settlementId}" exists to change hands, and no province was named to found it in.`, "reference");
+      }
+      const settlement = province.settlements.find((candidate) => candidate.id === delta.settlementId)!;
+
+      const takerId = delta.toPolityRef === null ? null : required(delta.toPolityRef, "The power taking the city");
+      if (takerId !== null && !world.map.polities.some((polity) => polity.id === takerId)) {
+        reject(`No power "${takerId}" exists to hold a city.`, "reference");
+      }
+      if (settlement.controllerPolityId === takerId) {
+        reject(`${settlement.name} is already held by ${takerId ?? "nobody"}.`);
+      }
+
+      // Men at its walls, or the countryside around it. A city is taken by an
+      // army standing in its province -- which is also the only way a garrison
+      // can hold out in a place whose fields have already gone.
+      const besieging = takerId !== null && world.material.forces.some(
+        (force) => force.polityId === takerId && force.locationId === province.id,
+      );
+      if (takerId !== null && !besieging && province.controllerPolityId !== takerId) {
+        reject(`${takerId} has no army before ${settlement.name} and does not hold the country around it, so it cannot take the city.`);
+      }
+
+      const settlements = province.settlements.map((candidate) =>
+        candidate.id === settlement.id ? { ...candidate, controllerPolityId: takerId } : candidate);
+
+      // A province whose every city has gone has gone. Held loosely: the
+      // countryside has not been beaten, it has been left behind -- and this
+      // only follows where there were cities to take in the first place.
+      const allTaken = takerId !== null && settlements.length > 0
+        && settlements.every((candidate) => candidate.controllerPolityId === takerId);
+
+      let taken: WorldState = {
+        ...world,
+        map: {
+          ...world.map,
+          provinces: world.map.provinces.map((candidate) => (candidate.id === province.id
+            ? {
+              ...candidate,
+              settlements,
+              ...(allTaken ? { controllerPolityId: takerId, controlFirmnessBps: Math.min(candidate.controlFirmnessBps, 3_000) } : {}),
+            }
+            : candidate)),
+        },
+      };
+
+      // A city that surrenders is not a city that is stormed. Only a storm is
+      // plundered, and only for what that city was worth against the rest of
+      // its province.
+      if (delta.sacked && takerId !== null) {
+        const stormingForce = world.material.forces.find(
+          (force) => force.polityId === takerId && force.locationId === province.id,
+        );
+        taken = sackTheProvince(taken, {
+          provinceId: province.id,
+          takerPolityId: takerId,
+          takingForceId: stormingForce?.id ?? null,
+          atStep,
+          cause: { kind: "action", id: settlement.id, explanation: `The storming of ${settlement.name}` },
+          transactionId: context.ids.next("txn"),
+          // Read from `taken`, not `world`: a city founded by this very
+          // delta is not on the old map, and its share of the province would
+          // come back as nothing.
+          shareBps: settlementShareBps(taken, settlement.id),
+        }).world;
+      }
+      return taken;
     }
 
     case "province_control_set": {
@@ -1874,7 +3898,7 @@ function applyOne(
       const ceiling = loser === undefined ? 10_000 : Math.max(1_000, loser.cohesionBps);
       const firmness = Math.min(delta.firmnessBps, ceiling);
 
-      return {
+      const taken: WorldState = {
         ...world,
         map: {
           ...world.map,
@@ -1884,6 +3908,23 @@ function applyOne(
               : candidate),
         },
       };
+
+      // Ground that changes hands is ground somebody has just been over. The
+      // army standing in it takes what the place still has, into its own chest
+      // where it has one; taking it damages the province, so the same ground
+      // is worth less to whoever takes it next.
+      const takingForce = world.material.forces.find(
+        (force) => force.polityId === takerId && force.locationId === province.id,
+      );
+      const sack = sackTheProvince(taken, {
+        provinceId: province.id,
+        takerPolityId: takerId,
+        takingForceId: takingForce?.id ?? null,
+        atStep,
+        cause: { kind: "action", id: province.id, explanation: `The taking of ${province.name}` },
+        transactionId: context.ids.next("txn"),
+      });
+      return sack.world;
     }
 
     case "polity_create": {
@@ -1891,7 +3932,7 @@ function applyOne(
       if (world.map.polities.some((polity) => polity.name.toLowerCase() === delta.name.toLowerCase())) {
         reject(`A power called "${delta.name}" already exists.`);
       }
-      const parentId = delta.breaksFromPolityId;
+      const parentId = delta.breaksFromPolityId === null ? null : required(delta.breaksFromPolityId, "The power it breaks away from");
       const parent = parentId === null ? undefined : world.map.polities.find((polity) => polity.id === parentId);
       if (parentId !== null && parent === undefined) {
         reject(`No power "${parentId}" exists to break away from.`, "reference");
@@ -2177,4 +4218,454 @@ function applyOne(
       return outcome.world;
     }
   }
+}
+
+/**
+ * A new office in a government, made because somebody is being put in it.
+ *
+ * Both doors into an office come here -- a person created holding one, and a
+ * person seated in one -- so that "the Senate names a tribune" and "a tribune
+ * is created" cannot make two different kinds of tribune.
+ */
+function openOffice(world: WorldState, officeId: string, label: string, polityId: string, authorises: readonly string[]): WorldState {
+  return {
+    ...world,
+    offices: [...world.offices, {
+      id: officeId,
+      label,
+      polityId,
+      // What the name of the office means, with whatever the caller said on
+      // top of it. Asked to state the powers, the model has never once
+      // done so -- every office the world has made came back authorising
+      // nothing, which is a title rather than an office and leaves the man
+      // it was created for in breach of it the first time he acts.
+      authorisedActionIds: deriveOfficeActions(label, [...authorises]),
+      sponsorableCategories: [],
+      treasuryAccountId: null,
+      treasuryPermissions: [],
+      incomeSourceId: null,
+      expectedBlocId: null,
+      successionRuleId: "appointed-by-the-government",
+      eligibilityRequirementIds: [],
+    }],
+  };
+}
+
+/**
+ * The skills the world described, as numbers the engine chose.
+ *
+ * A band the world did not mention keeps what the canonical defaults gave --
+ * an ordinary person -- so describing a general as a gifted soldier does not
+ * also make him a gifted poet.
+ */
+function skillsFromBands(
+  skills: WorldState["characters"][number]["skills"],
+  bands: Extract<WorldDelta, { op: "character_create" }>["skills"],
+): WorldState["characters"][number]["skills"] {
+  if (bands == null) return skills;
+  const next = { ...skills };
+  for (const key of ["martial", "diplomacy"] as const) {
+    const band = bands[key];
+    if (band !== undefined) next[key] = SKILL_BY_BAND[band];
+  }
+  return next;
+}
+
+type TreatyClause = NonNullable<Extract<WorldDelta, { op: "agreement_open" }>["clauses"]>[number];
+
+/**
+ * A treaty's clauses, done.
+ *
+ * - An indemnity is owed from one party's treasury to the other's, period by
+ *   period, for as many periods as were agreed. It falls into arrears like any
+ *   debt, which is what makes a broken treaty something the world can see.
+ * - A province ceded changes hands, held firmly: it was given, not taken.
+ * - A hostage goes to live where the power holding him has its seat.
+ *
+ * A clause between powers who are not both parties to it, or about ground
+ * neither of them holds, is refused: a treaty binds the two who made it.
+ */
+function carryOutClauses(
+  world: WorldState,
+  clauses: readonly TreatyClause[],
+  agreementId: string,
+  partyId: string,
+  otherPartyId: string,
+  required: (ref: string, label: string) => string,
+  context: ApplyContext,
+  emitFact: (fact: FactProposalDraft) => void,
+): WorldState {
+  const parties = new Set([partyId, otherPartyId]);
+  const otherOf = (id: string): string => (id === partyId ? otherPartyId : partyId);
+  const treasuryOf = (polityId: string) => world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === polityId && account.status === "active");
+  const name = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
+  let next = world;
+  for (const clause of clauses) {
+    if (clause.kind === "indemnity") {
+      const payerId = required(clause.payerPolityId, "The power paying the indemnity");
+      if (!parties.has(payerId)) reject(`${name(payerId)} is not party to this treaty and cannot be bound to pay under it.`, "reference");
+      const from = treasuryOf(payerId);
+      const to = treasuryOf(otherOf(payerId));
+      if (from === undefined || to === undefined) reject(`An indemnity needs a treasury on each side; ${from === undefined ? name(payerId) : name(otherOf(payerId))} keeps none.`, "reference");
+      next = {
+        ...next,
+        material: {
+          ...next.material,
+          obligations: [...next.material.obligations, {
+            id: context.ids.next("obligation"),
+            kind: "tribute" as const,
+            label: `Indemnity owed by ${name(payerId)} to ${name(otherOf(payerId))}`.slice(0, 120),
+            payerAccountId: from.id,
+            recipientAccountId: to.id,
+            amount: clause.amount,
+            cadenceSteps: clause.cadenceDays,
+            nextDueStep: next.elapsedStep + clause.cadenceDays,
+            priority: 450,
+            arrears: 0,
+            missedPeriods: 0,
+            active: true,
+            consequenceRef: agreementId,
+            remainingPeriods: clause.periods,
+          }],
+        },
+      };
+      continue;
+    }
+    if (clause.kind === "cession") {
+      const toId = required(clause.toPolityId, "The power the province is ceded to");
+      const province = next.map.provinces.find((candidate) => candidate.id === clause.provinceId);
+      if (province === undefined) reject(`No province "${clause.provinceId}" exists to be ceded.`, "reference");
+      if (!parties.has(toId) || province.controllerPolityId === null || !parties.has(province.controllerPolityId) || province.controllerPolityId === toId) {
+        reject(`${province.name} is not ${name(otherOf(toId))}'s to cede to ${name(toId)} under this treaty.`);
+      }
+      next = {
+        ...next,
+        map: {
+          ...next.map,
+          provinces: next.map.provinces.map((candidate) => (candidate.id === province.id
+            ? {
+              ...candidate,
+              controllerPolityId: toId,
+              controlFirmnessBps: 6_000,
+              settlements: candidate.settlements.map((settlement) => (settlement.controllerPolityId === province.controllerPolityId ? { ...settlement, controllerPolityId: toId } : settlement)),
+            }
+            : candidate)),
+        },
+      };
+      emitFact({
+        localId: `ceded_${province.id}`.slice(0, 60),
+        kind: "province_ceded",
+        summary: `${province.name} was ceded to ${name(toId)} by treaty.`,
+        affectedRefs: [{ kind: "province", id: province.id }, { kind: "polity", id: toId }, { kind: "polity", id: otherOf(toId) }],
+        visibility: "public",
+        discoveryState: "public",
+        knowableInDays: 0,
+        significance: 70,
+      });
+      continue;
+    }
+    const hostageId = required(clause.characterRef, "The hostage");
+    const heldById = required(clause.heldByPolityId, "The power holding the hostage");
+    const hostage = next.characters.find((character) => character.id === hostageId && character.alive);
+    if (hostage === undefined) reject(`No living person "${hostageId}" exists to be given as a hostage.`, "reference");
+    if (!parties.has(heldById)) reject(`${name(heldById)} is not party to this treaty and holds no hostages under it.`, "reference");
+    const capital = next.map.polities.find((polity) => polity.id === heldById)?.capitalSettlementId;
+    const seat = next.map.provinces.find((province) => province.settlements.some((settlement) => settlement.id === capital))?.id ?? hostage.locationProvinceId;
+    next = {
+      ...next,
+      characters: next.characters.map((character) => (character.id === hostageId
+        ? {
+          ...character,
+          locationProvinceId: seat,
+          disqualifyingStatuses: character.disqualifyingStatuses.includes("hostage") ? character.disqualifyingStatuses : [...character.disqualifyingStatuses, "hostage"].slice(0, 8),
+        }
+        : character)),
+    };
+  }
+  return next;
+}
+
+/** Of a price, the share a buyer must have in hand to be given the rest on credit. */
+const DEPOSIT_SHARE = 0.25;
+/** What credit from a seller costs a month, in basis points of what is owed. */
+const SELLER_CREDIT_BPS = 100;
+
+/**
+ * Paying a price, in full if the money is there and on credit if a quarter of
+ * it is.
+ *
+ * A price that could not be met in full was refused in full, so the only way
+ * to buy land was to already have all of it in hand -- which is not how land,
+ * or anything else, was ever bought. Below the deposit it is still refused;
+ * above it the seller carries the rest as an ordinary debt, served monthly,
+ * pledged against what was bought where it can be, and unpaid in the same
+ * arrears as any other.
+ */
+function payOrBorrow(
+  world: WorldState,
+  payerId: string,
+  price: number,
+  what: string,
+  pledgedHoldingId: string | null,
+  context: ApplyContext,
+  emitFact: (fact: FactProposalDraft) => void,
+): WorldState {
+  const payer = world.material.accounts.find((account) => account.id === payerId);
+  if (payer === undefined) reject(`No account "${payerId}" exists to pay for ${what}.`, "reference");
+  if (payer.balance >= price) {
+    return { ...world, material: { ...world.material, accounts: world.material.accounts.map((account) => (account.id === payerId ? { ...account, balance: account.balance - price } : account)) } };
+  }
+  const deposit = Math.ceil(price * DEPOSIT_SHARE);
+  if (payer.balance < deposit) {
+    reject(`${what} costs ${price}; ${payerId} holds ${payer.balance}, and nobody sells on credit without ${deposit} down.`);
+  }
+  const down = payer.balance;
+  const owed = price - down;
+  const loanId = context.ids.next("loan");
+  const serviceId = context.ids.next("obligation");
+  const atStep = world.elapsedStep;
+  emitFact({
+    localId: `credit_${loanId}`.slice(0, 60),
+    kind: "bought_on_credit",
+    summary: `${what} was bought for ${price}: ${down} paid down, and ${owed} owed to the seller at interest.`,
+    affectedRefs: [{ kind: "account", id: payerId }],
+    visibility: "polity",
+    discoveryState: "polity",
+    knowableInDays: 0,
+    significance: 25,
+  });
+  return {
+    ...world,
+    material: {
+      ...world.material,
+      accounts: world.material.accounts.map((account) => (account.id === payerId ? { ...account, balance: 0 } : account)),
+      obligations: [...world.material.obligations, {
+        id: serviceId,
+        kind: "debt_service" as const,
+        label: `Interest on credit for ${what}`.slice(0, 120),
+        payerAccountId: payerId,
+        amount: Math.max(1, Math.round((owed * SELLER_CREDIT_BPS) / 10_000)),
+        cadenceSteps: 30,
+        nextDueStep: atStep + 30,
+        priority: 400,
+        arrears: 0,
+        missedPeriods: 0,
+        active: true,
+      }],
+      loans: [...world.material.loans, {
+        id: loanId,
+        lenderKind: "foreign" as const,
+        lenderId: null,
+        borrowerAccountId: payerId,
+        principal: owed,
+        outstanding: owed,
+        interestBps: SELLER_CREDIT_BPS,
+        cadenceSteps: 30,
+        serviceObligationId: serviceId,
+        terms: `Credit from the seller on ${what}`.slice(0, 300),
+        collateralHoldingId: pledgedHoldingId,
+        status: "active" as const,
+        openedAtStep: atStep,
+      }],
+    },
+  };
+}
+
+/**
+ * How much of a province one raid strips, in basis points of what is left.
+ *
+ * Men times how fast they move: a raid is what can be carried off before the
+ * country rises, so horse strip more than foot. A hundred horsemen take a few
+ * per cent of a province; a legion on the loose takes a quarter, and never
+ * more, because a raid that took everything would be a conquest.
+ */
+function raidShareBps(force: WorldState["material"]["forces"][number], rules: ScenarioWarfareRules): number {
+  const reach = force.personnel.reduce((sum, category) => {
+    const mobility = rules.troopCategories.find((definition) => definition.id === category.categoryId)?.mobilityBps ?? 5_000;
+    return sum + category.fit * (mobility / 5_000);
+  }, 0);
+  return Math.max(0, Math.min(2_500, Math.round(reach * 1.5)));
+}
+
+/**
+ * Who pays a made thing's keep, as the world will store it. An account that
+ * does not exist is refused as a malformed reference: a keep nobody can pay
+ * would lapse on its first month and look, to the player, like the world
+ * breaking what they built.
+ */
+function upkeepFrom(
+  world: WorldState,
+  upkeep: { readonly fromAccountRef: string; readonly band: "slight" | "marked" | "great" } | null | undefined,
+  required: (ref: string, what: string) => string,
+): { fromAccountId: string; band: "slight" | "marked" | "great" } | null {
+  if (upkeep == null) return null;
+  const fromAccountId = required(upkeep.fromAccountRef, "The account that pays its keep");
+  if (!world.material.accounts.some((account) => account.id === fromAccountId)) reject(`No account "${fromAccountId}" exists to pay for its keep.`, "reference");
+  return { fromAccountId, band: upkeep.band };
+}
+
+/**
+ * What it costs to set going something that pays its owner.
+ *
+ * An arrangement could be made with an income effect and no keep, and then
+ * paid its owner a share of the province every month for nothing -- a better
+ * business than any venture or estate, because it had no price. A thing that
+ * pays now costs what a venture of the same yield costs, in months of what it
+ * clears, and is kept at a cost from its owner's account unless somebody else
+ * was named to keep it. Paid down or bought on credit, like any other venture.
+ *
+ * `before` is what the thing already did, for an update: only the difference
+ * is paid for.
+ */
+function priceTheYield(
+  world: WorldState,
+  before: { readonly effects: readonly StandingEffect[]; readonly upkeep: { readonly band: EffectBand } | null } | null,
+  after: {
+    readonly provinceId: string | null;
+    readonly ownerRef: { readonly kind: string; readonly id: string } | null;
+    readonly effects: readonly StandingEffect[];
+    readonly upkeep: { fromAccountId: string; band: EffectBand } | null;
+  },
+  label: string,
+  context: ApplyContext,
+  emitFact: (fact: FactProposalDraft) => void,
+): { world: WorldState; upkeep: { fromAccountId: string; band: EffectBand } | null } {
+  const yields = after.effects.filter((effect) => effect.quantity === "income" && effect.direction === "raise");
+  const ownerAccount = after.ownerRef === null ? null : accountOf(world, after.ownerRef.id);
+  // Nobody to be paid, nothing to pay for: its income goes nowhere.
+  if (yields.length === 0 || ownerAccount === null) return { world, upkeep: after.upkeep };
+  const BANDS: readonly EffectBand[] = ["slight", "marked", "great"];
+  const strongest = yields.reduce<EffectBand>((band, effect) => (BANDS.indexOf(effect.band) > BANDS.indexOf(band) ? effect.band : band), "slight");
+  const upkeep = after.upkeep ?? { fromAccountId: ownerAccount, band: strongest };
+  const clears = arrangementNetIncome(world, { provinceId: after.provinceId, ownerRef: after.ownerRef, effects: after.effects, upkeepBand: upkeep.band });
+  const cleared = before === null ? 0 : Math.max(0, arrangementNetIncome(world, { provinceId: after.provinceId, ownerRef: after.ownerRef, effects: before.effects, upkeepBand: before.upkeep?.band ?? null }));
+  const added = clears - cleared;
+  if (added <= 0) return { world, upkeep };
+  return { world: payOrBorrow(world, upkeep.fromAccountId, added * VENTURE_PRICE_MONTHS, label, null, context, emitFact), upkeep };
+}
+
+/**
+ * Faiths a made thing preaches, founded as they are named, so a church
+ * founded this turn is listed with its faith this turn and not a month later.
+ */
+function foundFaithsOf(world: WorldState, effects: readonly { readonly quantity: string; readonly faith?: string | undefined }[], atStep: number, founderId: string | null): WorldState {
+  let next = world;
+  for (const effect of effects) {
+    if (effect.quantity === "conversion" && effect.faith !== undefined) next = faithNamed(next, effect.faith, atStep, founderId).world;
+  }
+  return next;
+}
+
+function clampSkill(value: number): number {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function actorPolityOf(world: WorldState, context: ApplyContext): string | null {
+  if (context.actorRef.kind === "polity") return context.actorRef.id;
+  if (context.actorRef.kind !== "character") return null;
+  return world.characters.find((character) => character.id === context.actorRef.id)?.polityId ?? null;
+}
+
+/** Opens an empty fund for any arrangement this act pays from or into that has none and no owner to pay for it. */
+function openFundsNamedIn(delta: WorldDelta, world: WorldState, resolve: (ref: string) => string | undefined): WorldState {
+  let next = world;
+  const visit = (node: unknown, key: string): void => {
+    if (typeof node === "string") {
+      if (!/account/i.test(key)) return;
+      const id = node.startsWith("local:") ? resolve(node) ?? node : node;
+      const entity = next.genericEntities.find((candidate) => candidate.id === id);
+      if (entity === undefined || accountOf(next, entity.id) !== null) return;
+      next = {
+        ...next,
+        material: {
+          ...next.material,
+          accounts: [...next.material.accounts, {
+            id: boundedId(entity.id, "fund"),
+            owner: { kind: "entity" as const, id: entity.id },
+            currencyId: next.material.currency.id,
+            balance: 0,
+            status: "active" as const,
+            visibility: "polity" as const,
+          }],
+        },
+      };
+      return;
+    }
+    if (Array.isArray(node)) node.forEach((item) => visit(item, key));
+    else if (node !== null && typeof node === "object") for (const [childKey, value] of Object.entries(node)) visit(value, childKey);
+  };
+  visit(delta, "");
+  return next;
+}
+
+/** Of the parent's men, what a detachment named but never made takes. */
+const DETACHMENT_SHARE = 0.2;
+
+/**
+ * A detachment an answer named and never made: "local:silver-shields-scouts"
+ * for scouts sent out from the Silver Shields.
+ *
+ * Nothing can raise an army from nothing, so a force handle nobody created is
+ * ordinarily refused. But a handle that begins with an army that exists names
+ * a part of it, and sending part of an army somewhere is the commonest order
+ * there is. A fifth of its men go, under the same commander and the same
+ * power; the parent is the smaller for it.
+ */
+function splitDetachmentsNamedIn(delta: WorldDelta, world: WorldState, assignedIds: Map<string, string>, context: ApplyContext): WorldState {
+  let next = world;
+  const visit = (node: unknown, key: string): void => {
+    if (typeof node === "string") {
+      if (!/force/i.test(key) || !node.startsWith("local:")) return;
+      const handle = node.slice("local:".length);
+      if (assignedIds.has(handle)) return;
+      const slug = handle.toLowerCase().replace(/_/g, "-");
+      const actorId = context.actorRef.kind === "character" ? context.actorRef.id : null;
+      const theirs = next.material.forces.filter((force) => actorId !== null && (force.commanderCharacterId === actorId || force.controllerCharacterId === actorId));
+      // Named after its parent -- "silver-shields-scouts" -- or, where the
+      // name says only what they are ("pass_scouts"), drawn from the one army
+      // the person giving the order leads.
+      const parent = next.material.forces
+        .filter((force) => slug.startsWith(`${force.id.toLowerCase()}-`) || slug.startsWith(`${force.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-`))
+        .sort((a, b) => b.id.length - a.id.length)[0]
+        ?? (theirs.length === 1 && /scout|detach|party|picket|patrol|guard|escort|squad|band/i.test(slug) ? theirs[0] : undefined);
+      if (parent === undefined) return;
+      const personnel = parent.personnel
+        .map((category) => ({ ...category, fit: Math.floor(category.fit * DETACHMENT_SHARE), unavailable: [] }))
+        .filter((category) => category.fit > 0);
+      if (personnel.length === 0) return;
+      const id = context.ids.next("force");
+      assignedIds.set(handle, id);
+      const taken = new Map(personnel.map((category) => [category.categoryId, category.fit]));
+      const name = handle.split(/[-_]+/).filter(Boolean).map((word) => word[0]!.toUpperCase() + word.slice(1)).join(" ");
+      next = {
+        ...next,
+        material: {
+          ...next.material,
+          forces: [
+            ...next.material.forces.map((force) => force.id !== parent.id ? force : {
+              ...force,
+              personnel: force.personnel.map((category) => ({ ...category, fit: category.fit - (taken.get(category.categoryId) ?? 0) })),
+              authorizedStrength: Math.max(1, force.authorizedStrength - personnel.reduce((sum, category) => sum + category.fit, 0)),
+            }),
+            {
+              ...structuredClone(parent),
+              id,
+              name: name.slice(0, 120),
+              personnel,
+              authorizedStrength: personnel.reduce((sum, category) => sum + category.fit, 0),
+              payObligationId: parent.payObligationId,
+              payArrearsPeriods: 0,
+              history: [],
+              memberCharacterIds: [],
+            },
+          ],
+        },
+      };
+      return;
+    }
+    if (Array.isArray(node)) node.forEach((item) => visit(item, key));
+    else if (node !== null && typeof node === "object") for (const [childKey, value] of Object.entries(node)) visit(value, childKey);
+  };
+  visit(delta, "");
+  return next;
 }

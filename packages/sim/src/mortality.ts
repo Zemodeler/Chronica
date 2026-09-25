@@ -6,12 +6,14 @@ import {
   settleEstate,
   stableHash,
   vacateOfficesOf,
+  deriveRelationDimension,
   type Character,
   type FactProposalDraft,
   type ScenarioLifeRules,
   type WorldState,
   type WorldStoryline,
 } from "@chronica/shared";
+import { bearChild, birthChance, CHILDBED_MORTALITY_BPS } from "./births";
 import type { IdFactory } from "./ports";
 
 /**
@@ -52,6 +54,13 @@ import type { IdFactory } from "./ports";
  * world you can replay.
  */
 
+/** The words a summary uses for this person. Everyone was "he" when everyone was a man. */
+function pronouns(character: Pick<Character, "gender">): { he: string; He: string; him: string; his: string } {
+  return character.gender === "female"
+    ? { he: "she", He: "She", him: "her", his: "her" }
+    : { he: "he", He: "He", him: "him", his: "his" };
+}
+
 /** How long a peril must stand before it can take somebody. Two bursts, at the least. */
 export const PERIL_MUST_STAND_DAYS = 45;
 /** Guards a jump of years from replaying one person's life thousands of times in one tick. */
@@ -84,7 +93,7 @@ export interface LifeReviewResult {
  * when the roll says so: a world where every farmhand's fever is foreshadowed
  * is a world that never gets to the point.
  */
-function mattersEnough(world: WorldState, character: Character, playerCharacterId: string | null): boolean {
+export function mattersEnough(world: WorldState, character: Character, playerCharacterId: string | null): boolean {
   if (character.id === playerCharacterId) return true;
   if (character.officeId !== null) return true;
   if (character.prestigeBps >= SIGNIFICANT_PRESTIGE_BPS) return true;
@@ -200,7 +209,7 @@ export function reviewLives(input: LifeReviewInput): LifeReviewResult {
         facts.push({
           localId: nextLocalId("life"),
           kind: "recovery",
-          summary: `${living.name} is on his feet again, and about his business.`,
+          summary: `${living.name} is on ${pronouns(living).his} feet again, and about ${pronouns(living).his} business.`,
           affectedRefs: [{ kind: "character", id: living.id }],
           visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 40,
         });
@@ -247,10 +256,37 @@ export function reviewLives(input: LifeReviewInput): LifeReviewResult {
         facts.push({
           localId: nextLocalId("life"),
           kind: "illness",
-          summary: `${living.name} has been taken ill and keeps to his house.`,
+          summary: `${living.name} has been taken ill and keeps to ${pronouns(living).his} house.`,
           affectedRefs: [{ kind: "character", id: living.id }],
           visibility: "public", discoveryState: "public", knowableInDays: 2, significance: 55,
         });
+      }
+
+      // Births ride the mother's own review, after the illness rolls, so a
+      // woman taken ill this review is not also delivered of a child in it.
+      const mother = world.characters.find((candidate) => candidate.id === living.id)!;
+      const chance = birthChance(world, mother, due, interval);
+      if (chance > 0 && roll("birth") < chance) {
+        const born = bearChild(world, mother, due, ids, (character) => mattersEnough(world, character, player));
+        if (born !== null) {
+          world = born.world;
+          facts.push(...born.facts);
+          // The child lives whatever becomes of her. Childbed takes her
+          // outright unless her death would be an event, which opens a peril
+          // first, like any other.
+          if (roll("childbed") < CHILDBED_MORTALITY_BPS * 100) {
+            if (!mattersEnough(world, mother, player)) {
+              const killed = killCharacter(world, mother.id, "She did not survive the birth.", due);
+              world = killed.world;
+              facts.push(...killed.facts);
+              died.push(mother.id);
+            } else {
+              const opened = openPeril(world, mother, stage.label, due, ids, openPerilFor(world, mother.id));
+              world = opened.world;
+              facts.push(...opened.facts);
+            }
+          }
+        }
       }
     }
   }
@@ -299,8 +335,8 @@ function openPeril(
         ...storyline,
         phase,
         updatedAtStep: atStep,
-        history: [...storyline.history, "He is worse, and those around him have stopped saying otherwise."].slice(-24),
-        nextDevelopment: "Whether he comes through it, and who is standing near if he does not.",
+        history: [...storyline.history, `${pronouns(character).He} is worse, and those around ${pronouns(character).him} have stopped saying otherwise.`].slice(-24),
+        nextDevelopment: `Whether ${pronouns(character).he} comes through it, and who is standing near if ${pronouns(character).he} does not.`,
       }
       : storyline))
     : [...world.storylines, {
@@ -309,7 +345,7 @@ function openPeril(
       participantIds: [character.id],
       provinceId: character.locationProvinceId,
       phase,
-      stakes: `Whether ${character.name} lives out the year, and what falls apart if he does not.`,
+      stakes: `Whether ${character.name} lives out the year, and what falls apart if ${pronouns(character).he} does not.`,
       history: [`${character.name} has been unwell since the turn of the season.`],
       nextDevelopment: "Whether anything is done about it, and by whom.",
       visibility: "polity" as const,
@@ -353,7 +389,7 @@ function openPeril(
       localId: `peril_${character.id}_${atStep}`,
       kind: worsening ? "failing_health" : "illness",
       summary: worsening
-        ? `${character.name} is worse, and his people have begun to speak of what comes after him.`
+        ? `${character.name} is worse, and ${pronouns(character).his} people have begun to speak of what comes after ${pronouns(character).him}.`
         : `${character.name} has fallen ill in the ${stageLabel} of life, and it has not passed as these things do.`,
       affectedRefs: [{ kind: "character", id: character.id }],
       visibility: "polity",
@@ -389,32 +425,7 @@ export function killCharacter(
       : character)),
   };
   next = vacateOfficesOf(next, characterId, "death", atStep);
-
-  // Somebody living has to hold the army. Preferring whoever is already in it,
-  // then any living countryman: an army with a dead commander is an army that
-  // cannot be ordered anywhere.
-  const successorFor = (polityId: string | null, exclude: string): string | null => {
-    const candidates = next.characters.filter(
-      (character) => character.alive && character.id !== exclude && (polityId === null || character.polityId === polityId),
-    );
-    return candidates.sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))[0]?.id ?? null;
-  };
-  next = {
-    ...next,
-    material: {
-      ...next.material,
-      forces: next.material.forces.map((force) => {
-        if (force.commanderCharacterId !== characterId && force.controllerCharacterId !== characterId) return force;
-        const heir = successorFor(force.polityId, characterId);
-        if (heir === null) return force;
-        return {
-          ...force,
-          ...(force.commanderCharacterId === characterId ? { commanderCharacterId: heir } : {}),
-          ...(force.controllerCharacterId === characterId ? { controllerCharacterId: heir } : {}),
-        };
-      }),
-    },
-  };
+  next = handOverForcesOf(next, characterId);
 
   const settled = settleEstate(next, characterId, atStep);
   next = {
@@ -444,6 +455,50 @@ export function killCharacter(
 }
 
 /**
+ * A man leaves the armies he served in: dead, or gone over to another power.
+ *
+ * Somebody still in the service has to hold what he commanded. Preferring
+ * whoever is already in its ranks, then any countryman of the army's own
+ * power: an army with a dead or departed commander is an army that cannot be
+ * ordered anywhere. `onlyOfOtherPowersThan` keeps the armies of the power he
+ * now serves -- a defector who brings his legion with him still leads it.
+ */
+export function handOverForcesOf(world: WorldState, characterId: string, onlyOfOtherPowersThan: string | null = null): WorldState {
+  const successorFor = (polityId: string | null): string | null => {
+    const candidates = world.characters.filter(
+      (character) => character.alive && character.id !== characterId && (polityId === null || character.polityId === polityId),
+    );
+    return candidates.sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))[0]?.id ?? null;
+  };
+  return {
+    ...world,
+    material: {
+      ...world.material,
+      forces: world.material.forces.map((force) => {
+        if (onlyOfOtherPowersThan !== null && force.polityId === onlyOfOtherPowersThan) return force;
+        const ranks = force.memberCharacterIds.filter((id) => id !== characterId);
+        if (force.commanderCharacterId !== characterId && force.controllerCharacterId !== characterId) {
+          return ranks.length === force.memberCharacterIds.length ? force : { ...force, memberCharacterIds: ranks };
+        }
+        // Promoted in the field: the man of most standing already in its ranks,
+        // before anybody from outside it.
+        const fromTheRanks = world.characters
+          .filter((character) => character.alive && character.id !== characterId && ranks.includes(character.id))
+          .sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))[0]?.id ?? null;
+        const heir = fromTheRanks ?? successorFor(force.polityId);
+        if (heir === null) return { ...force, memberCharacterIds: ranks };
+        return {
+          ...force,
+          ...(force.commanderCharacterId === characterId ? { commanderCharacterId: heir } : {}),
+          ...(force.controllerCharacterId === characterId ? { controllerCharacterId: heir } : {}),
+          memberCharacterIds: ranks.filter((id) => id !== heir),
+        };
+      }),
+    },
+  };
+}
+
+/**
  * Who the player takes up next, as the decision that pre-empts every other.
  *
  * There is always at least one option. A dead end is the one thing the branch's
@@ -465,21 +520,50 @@ export function successionDecision(
     return {
       id: `succeed-${id}`,
       label: person.name,
-      summary: `${person.name}, aged ${currentAgeYears(person, atStep)}${office}. What he inherits is what is left.`,
+      summary: `${person.name}, aged ${currentAgeYears(person, atStep)}${office}. What ${pronouns(person).he} inherits is what is left.`,
     };
   };
 
   const options = named.map(describe).filter((option): option is { id: string; label: string; summary: string } => option !== null);
 
-  // Anybody of the house, then anybody of the power at all. Two options are
-  // the schema's floor and a choice is the point of asking.
+  // Anybody of the house, then somebody near him. Two options are the
+  // schema's floor and a choice is the point of asking.
+  //
+  // "Near" used to mean "of most standing", so a dead private citizen was
+  // offered the sitting consul as his successor. Now it is the people he
+  // knew, the people where he lived, and men of his own station -- someone
+  // already holding an office is offered last, not first.
   if (options.length < 2) {
+    const closeness = (character: Character): number => {
+      const felt = dead === undefined ? 0
+        : Math.abs(deriveRelationDimension(character, dead.id, "trust") + deriveRelationDimension(character, dead.id, "affection"))
+          + Math.abs(deriveRelationDimension(dead, character.id, "trust") + deriveRelationDimension(dead, character.id, "affection"));
+      const here = dead !== undefined && character.locationProvinceId === dead.locationProvinceId ? 20 : 0;
+      const station = dead === undefined ? 0 : Math.abs(character.prestigeBps - dead.prestigeBps) / 200;
+      return felt + here - station;
+    };
+    const sitting = (character: Character): number =>
+      world.material.officeSeats.some((seat) => seat.status === "held" && seat.holderCharacterId === character.id) ? 1 : 0;
     const fallback = world.characters
       .filter((character) => character.alive && character.id !== deadCharacterId && character.polityId === dead?.polityId)
       .filter((character) => !options.some((option) => option.id === `succeed-${character.id}`))
-      .sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))
+      .sort((a, b) => sitting(a) - sitting(b) || closeness(b) - closeness(a) || a.id.localeCompare(b.id))
       .slice(0, 2 - options.length);
     for (const character of fallback) {
+      const option = describe(character.id);
+      if (option !== null) options.push(option);
+    }
+  }
+  // And past the power, when the power is gone: a house extinct in a dead
+  // state still leaves a world full of people, and the player is owed a pair
+  // of them to choose between rather than a question with one answer.
+  if (options.length < 2) {
+    const anyone = world.characters
+      .filter((character) => character.alive && character.id !== deadCharacterId)
+      .filter((character) => !options.some((option) => option.id === `succeed-${character.id}`))
+      .sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))
+      .slice(0, 2 - options.length);
+    for (const character of anyone) {
       const option = describe(character.id);
       if (option !== null) options.push(option);
     }

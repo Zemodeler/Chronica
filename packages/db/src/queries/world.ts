@@ -10,6 +10,7 @@ import type { ChronicaDatabase } from "../database";
 import { games, players, scenarioVersions, scenarios } from "../schema/game";
 import {
   chronicleCheckpoints,
+  deltaAudit,
   gameWorlds,
   playerDecisions,
   scheduledEvents,
@@ -51,6 +52,23 @@ export class WorldRevisionConflictError extends Error {
   constructor(readonly gameId: string, readonly expectedRevision: number, readonly actualRevision: number) {
     super(`World ${gameId} moved from revision ${expectedRevision} to ${actualRevision} during this burst.`);
     this.name = "WorldRevisionConflictError";
+  }
+}
+
+/**
+ * A world about to be saved that the next load would refuse.
+ *
+ * `getWorldView` rightly throws on a stored world that fails the schema, and
+ * nothing checked the other end: a tick that wrote an impossible transaction,
+ * a composite id past its length, a title past its cap -- each was saved, and
+ * the campaign could never be opened again. Refused here instead, the turn
+ * fails, the world stays at its last good revision, and the player can try
+ * again.
+ */
+export class WorldWouldNotLoadError extends Error {
+  constructor(readonly gameId: string, readonly issue: string) {
+    super(`This turn would have left game ${gameId} unable to load (${issue}); nothing was saved.`);
+    this.name = "WorldWouldNotLoadError";
   }
 }
 
@@ -238,6 +256,17 @@ export interface BurstCommit {
     readonly prompt: string;
     readonly options: unknown;
   };
+  /** What the engine refused or filled in while applying the burst (see `deltaAudit`). */
+  readonly audit?: readonly {
+    readonly actorKind: string;
+    readonly actorId: string;
+    readonly op: string;
+    readonly kind: string;
+    readonly ofTheOrder: boolean;
+    readonly attempt: string;
+    readonly reason: string;
+    readonly delta: unknown;
+  }[];
 }
 
 /**
@@ -250,6 +279,11 @@ export interface BurstCommit {
  * saved, are both unrecoverable by inspection afterwards.
  */
 export async function commitBurst(db: ChronicaDatabase, commit: BurstCommit): Promise<number> {
+  const loadable = WorldStateSchema.safeParse(commit.world);
+  if (!loadable.success) {
+    const [first] = loadable.error.issues;
+    throw new WorldWouldNotLoadError(commit.gameId, first === undefined ? "unknown" : `${first.path.join(".")}: ${first.message}`);
+  }
   return db.transaction(async (tx) => {
     // Serializes against the other writer of this world (the chat path), so a
     // slow burst and a fast conversation cannot interleave mid-commit.
@@ -276,6 +310,16 @@ export async function commitBurst(db: ChronicaDatabase, commit: BurstCommit): Pr
 
     if (commit.facts.length > 0) {
       await tx.insert(worldFacts).values(commit.facts.map((fact) => ({ ...fact, gameId: commit.gameId, burstId: commit.burstId })));
+    }
+
+    // A secret somebody found out. Accepted by this function since it was
+    // written and never stored, so every discovery a burst made -- an agent's
+    // report, an investigation that paid off -- was forgotten by the next one.
+    for (const fact of commit.rediscoveredFacts ?? []) {
+      await tx
+        .update(worldFacts)
+        .set({ discoveryState: fact.discoveryState, knowableAtSortKey: fact.knowableAtSortKey, fact: fact.fact })
+        .where(and(eq(worldFacts.gameId, commit.gameId), eq(worldFacts.id, fact.id)));
     }
 
     if (commit.scheduled.length > 0) {
@@ -308,6 +352,10 @@ export async function commitBurst(db: ChronicaDatabase, commit: BurstCommit): Pr
         quote: entry.quote ?? null,
         stopReason: commit.burst.stopReason,
       })));
+    }
+
+    if (commit.audit !== undefined && commit.audit.length > 0) {
+      await tx.insert(deltaAudit).values(commit.audit.map((entry) => ({ ...entry, gameId: commit.gameId, burstId: commit.burstId })));
     }
 
     if (commit.decision !== undefined) {

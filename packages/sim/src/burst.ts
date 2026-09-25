@@ -2,11 +2,14 @@ import {
   addMinutes,
   assessOrderStanding,
   advanceWorldTo,
+  factsKnownTo,
   formatWorldDate,
   ScheduledEventPayloadSchema,
+  WorldStateSchema,
   type Fact,
   type FactProposalDraft,
   type Office,
+  type SuccessionRule,
   type OrderPartyRef,
   type PlayerDecision,
   type Proposal,
@@ -20,11 +23,16 @@ import {
   type StopReason,
   nemesisOf,
   type WatchProposal,
+  type WorldDelta,
   type WorldState,
 } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { BattleAccount } from "./battle";
-import type { AuthorityBreach } from "./apply/context";
+import type { ApplyResult, AuthorityBreach, RejectedDelta } from "./apply/context";
+import { keepAsArrangement } from "./apply/keep-as-arrangement";
+import { whereTheActorIs } from "./apply/fill-gaps";
+import { kindsIn } from "./bare-refs";
+import { misfiledWorldActs } from "./apply/misfiled";
 import { routeAmbientActors, routeAttention, type RoutedActor } from "./attention";
 import { runCognition } from "./cognition";
 import { materializeFacts } from "./facts";
@@ -33,9 +41,11 @@ import { chooseNemesis, conductInWords, nemesisStance, recordNemesis, retireNeme
 import { orchestrate } from "./orchestrate";
 import { describeBreach, findWhoWouldNotice, noticersAsRefs } from "./oversight";
 import { createIdFactory, type SimModelPort } from "./ports";
-import type { NarrativeLine, UtteranceLine } from "./chronicle";
-import { buildWorldSlice, type AnsweredDecision, type SliceEvent } from "./slice";
+import { NEVER_PUBLISHED, type NarrativeLine, type UtteranceLine } from "./chronicle";
+import { buildWorldSlice, renderWorldSlice, type AnsweredDecision, type SliceEvent } from "./slice";
 import { successionDecision } from "./mortality";
+import { reconcileFacts } from "./reconcile-facts";
+import { repairDeltas } from "./repair-deltas";
 import { runDeterministicTick } from "./tick";
 import { isWatchSatisfied } from "./watch";
 
@@ -136,6 +146,8 @@ export interface BurstInput {
   readonly world: WorldState;
   readonly clock: ScenarioClock;
   readonly offices: readonly Office[];
+  /** How the scenario's offices are filled; with it, an elective office's vacancy is refilled by election. */
+  readonly successionRules?: readonly SuccessionRule[] | undefined;
   /** The scenario's warfare rules -- battle resolution is judged against them. */
   readonly warfare: ScenarioWarfareRules;
   /** The scenario's terrains, so an army is held to the crossings the map admits. */
@@ -154,6 +166,17 @@ export interface BurstInput {
   readonly actorRef: OrderPartyRef;
   readonly actorPolityId: string | null;
   readonly orderText: string | null;
+  /**
+   * How far the player means to let the world run: a week, a month, a season.
+   * Given, the world runs the whole of it unless something needs the player
+   * first -- a decision, a watch met, a trap sprung, a death. Omitted, the
+   * engine decides, stopping once nothing more is due.
+   *
+   * The engine alone used to choose how far each order carried the world, so
+   * a player who wanted a quiet winter to pass had to write an order to get
+   * it, and could not ask for less than a week or more than a season.
+   */
+  readonly spanDays?: number | undefined;
   /** Set when this burst is resuming a decision the world had put to the player. */
   readonly answeredDecision?: AnsweredDecision | undefined;
   /** History already on record, for the slice and for visibility checks. */
@@ -233,6 +256,58 @@ export interface BurstResult {
    * the whole point of salvaging is that it should be visible when it happens.
    */
   readonly salvaged: readonly string[];
+  /** Every act refused, ignored or filled in, pass by pass, for the audit (see `AuditEntry`). */
+  readonly audit: readonly AuditEntry[];
+}
+
+/**
+ * One act the engine did not carry out exactly as the model wrote it.
+ *
+ * A "reference" refusal never reaches the player -- by design, since "no
+ * account named merchant-purse exists" is not history -- and so, before this,
+ * nobody saw it at all: the order simply did less than it said. Kept per
+ * burst, these are what show which parts of the engine are refusing plain
+ * orders for want of a detail no player would ever know.
+ */
+export interface AuditEntry {
+  readonly actorRef: OrderPartyRef;
+  readonly op: string;
+  /**
+   * How the engine took it: refused by the world, unreadable, ignored by those
+   * ordered, carried out with a detail filled in, kept as an arrangement after
+   * it could not be read, or recorded as what the actor is now doing.
+   */
+  readonly kind: "world" | "reference" | "ignored" | "assumed" | "kept" | "pursuit" | "refiled";
+  readonly ofTheOrder: boolean;
+  /**
+   * "first" for the answer as written; "repair" for the corrected attempt at
+   * what the first refused; "keep" for an unreadable act kept as an
+   * arrangement; "floor" for an order that left nothing else in the world.
+   */
+  readonly attempt: "first" | "repair" | "keep" | "floor";
+  readonly reason: string;
+  readonly delta: WorldDelta;
+}
+
+/**
+ * What somebody is now doing, as an arrangement of kind "pursuit": the one
+ * they already have, relabelled, or a new one where they stand.
+ */
+function pursuitOf(world: WorldState, actorRef: OrderPartyRef, summary: string, orderText: string): WorldDelta {
+  const current = world.genericEntities.find((entity) => entity.kind === "pursuit" && entity.ownerRef?.kind === actorRef.kind
+    && entity.ownerRef.id === actorRef.id && !("retiredAtStep" in entity.attributes));
+  const label = summary.slice(0, 160);
+  const attributes = { order: orderText.trim().slice(0, 160), sinceDay: world.instant.day };
+  return current === undefined
+    ? { op: "generic_entity_create", localId: "pursuit", kind: "pursuit", label, ownerRef: actorRef, attributes, provinceId: whereTheActorIs(world, actorRef), reason: "What the order set him to doing." }
+    : { op: "generic_entity_update", entityRef: current.id, label, attributes, retire: false, reason: "What the order set him to doing now." };
+}
+
+/** What became of an order's own acts in one proposal. */
+interface OrderActs {
+  readonly carriedOut: number;
+  /** Refused because the world would not have it, or ignored by those ordered: the order was tried. */
+  readonly refusedByTheWorld: number;
 }
 
 /** How long a reaction takes to form, when nothing scheduled says otherwise. */
@@ -274,12 +349,54 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const deadThisBurst = new Set<string>();
   let playerDecision: PlayerDecision | null = null;
   let stopReason: StopReason = "no_due_events";
+  /** Whether a plan laid in advance sprang while this burst was running. */
+  let sprungThisBurst = false;
   /** What the ruler is waiting for, when the order was an open-ended one. */
   let watch: WatchProposal | null = null;
+  /**
+   * The world as the model was shown it, kept so a correction can be written
+   * against the same facts the original answer was. Empty until the slice is
+   * built, which is only before the first proposal there is anything to
+   * correct in.
+   */
+  let sliceText = "";
+
+  const audit: AuditEntry[] = [];
+  /**
+   * Every act the engine would not carry out as written, and every detail it
+   * answered itself, before anything decides what the player hears of it.
+   *
+   * Taken from each pass separately: the merged result drops a first-pass
+   * refusal the repair answered, and that refusal -- a whole model call spent
+   * to put right something the engine could not read -- is exactly the one
+   * worth counting.
+   */
+  const recordAudit = (pass: ApplyResult, actorRef: OrderPartyRef, attempt: AuditEntry["attempt"]): void => {
+    for (const rejection of pass.rejected) {
+      audit.push({ actorRef, op: rejection.delta.op, kind: rejection.kind, ofTheOrder: rejection.ofTheOrder === true, attempt, reason: rejection.reason, delta: rejection.delta });
+    }
+    for (const assumption of pass.assumptions) {
+      audit.push({ actorRef, op: assumption.delta.op, kind: "assumed", ofTheOrder: assumption.ofTheOrder, attempt, reason: assumption.assumed.join(" "), delta: assumption.delta });
+    }
+  };
 
   /** Applies one actor's proposal: deltas, then the facts and events it produced. */
-  const applyProposal = (proposal: Proposal, actorRef: OrderPartyRef, causalDepth: number, actsForTheWorld = false): void => {
-    const result = applyDeltas(world, proposal.deltas, {
+  const applyProposal = async (proposal: Proposal & { readonly worldDeltas?: readonly WorldDelta[] }, actorRef: OrderPartyRef, causalDepth: number, actsForTheWorld = false): Promise<OrderActs> => {
+    // The world's own business first, so the order is carried out in the world
+    // as it now stands -- a chieftain the world has just given the Boii is
+    // somebody the order may write to. Only the orchestrator has two lists; an
+    // actor thinking for himself has only his own acts.
+    const worldDeltas = proposal.worldDeltas ?? [];
+    // The world's own business written into the order is the world's, whichever
+    // list it arrived in (`misfiledWorldActs`). Left where it stands, so what
+    // it makes is made before whatever in the order names it.
+    const misfiled = actsForTheWorld && proposal.worldDeltas !== undefined ? misfiledWorldActs(proposal.deltas, world, actorRef) : new Set<WorldDelta>();
+    const orderDeltas = actsForTheWorld && proposal.worldDeltas !== undefined ? new Set<WorldDelta>(proposal.deltas.filter((delta) => !misfiled.has(delta))) : undefined;
+    for (const delta of misfiled) {
+      audit.push({ actorRef, op: delta.op, kind: "refiled", ofTheOrder: false, attempt: "first", reason: "Written into the order, but it makes something for another power with the actor nowhere in it: judged as the world's.", delta });
+    }
+    const aliveBefore = new Set(world.characters.filter((character) => character.alive).map((character) => character.id));
+    const applyContext = (assignedIds?: ReadonlyMap<string, string>, order: ReadonlySet<WorldDelta> | undefined = orderDeltas) => ({
       now: world.instant,
       actorRef,
       offices: input.offices,
@@ -289,9 +406,104 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       ids,
       gameId: input.gameId,
       actsForTheWorld,
+      playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
+      ...(order === undefined ? {} : { orderDeltas: order }),
+      ...(assignedIds === undefined ? {} : { assignedIds }),
     });
+
+    let result = applyDeltas(world, [...worldDeltas, ...proposal.deltas], applyContext());
+    recordAudit(result, actorRef, "first");
+    /** The order's own acts the engine could not read, as they stand after every attempt. */
+    const unreadable = (pass: ApplyResult) => pass.rejected.filter((rejection) => rejection.kind === "reference" && rejection.ofTheOrder === true);
+    let unkept: RejectedDelta[] = unreadable(result);
     world = result.world;
+
+    /**
+     * One corrected attempt at the changes the engine refused over how they
+     * were written. Nothing did this before: a delta that parsed and then
+     * failed on the world was dropped in silence, so a player's order came
+     * back half-done and the model was never told which half.
+     *
+     * Only engine rejections, and only while there is budget for the call --
+     * a repair is a model call the player waits for, and the burst's ceiling
+     * is what stops a bad answer costing an unbounded number of them.
+     */
+    const repairable = result.rejected.filter((rejection) => rejection.kind === "reference");
+    if (repairable.length > 0 && modelCalls < budget.maxModelCalls) {
+      const repair = await repairDeltas({ port: input.port, worldText: sliceText, rejected: repairable, world });
+      modelCalls += repair.calls;
+      if (repair.failure !== null) parseFailures.push(repair.failure);
+      if (repair.deltas.length > 0) {
+        // A corrected act of the order's is still the order's. Which rejection
+        // each correction answers is not kept, so a mixed batch is judged as
+        // the order: the stricter reading, and the one that cannot be used to
+        // launder a refusal.
+        const correctsTheOrder = orderDeltas !== undefined && repairable.some((rejection) => rejection.ofTheOrder === true);
+        const second = applyDeltas(world, repair.deltas, applyContext(result.assignedIds, correctsTheOrder ? new Set(repair.deltas) : undefined));
+        recordAudit(second, actorRef, "repair");
+        // The repair answers some of what was refused and says nothing of the
+        // rest; which correction answers which refusal is not kept, so an act
+        // counts as answered when the repair wrote one of the same kind.
+        const answered = [...second.applied, ...second.rejected].map((entry) => entry.delta.op);
+        unkept = [
+          ...unkept.filter((rejection) => {
+            const at = answered.indexOf(rejection.delta.op);
+            if (at < 0) return true;
+            answered.splice(at, 1);
+            return false;
+          }),
+          ...unreadable(second),
+        ];
+        world = second.world;
+        // The repaired batch replaces the rejections it was answering: what it
+        // fixed is applied, and what it still could not write is refused on
+        // its own terms rather than twice over.
+        result = {
+          world: second.world,
+          applied: [...result.applied, ...second.applied],
+          rejected: [...result.rejected.filter((rejection) => rejection.kind !== "reference"), ...second.rejected],
+          breaches: [...result.breaches, ...second.breaches],
+          factProposals: [...result.factProposals, ...second.factProposals],
+          battleAccounts: [...result.battleAccounts, ...second.battleAccounts],
+          assignedIds: second.assignedIds,
+          assumptions: [...result.assumptions, ...second.assumptions],
+        };
+      }
+    }
+
+    // What still cannot be read is kept in the one form that can hold anything:
+    // an arrangement, owned by whoever set it going, at the engine's price
+    // (`keepAsArrangement`). Each on its own, so one that cannot be afforded
+    // does not take the others with it.
+    for (const rejection of unkept) {
+      const arrangement = keepAsArrangement(rejection.delta, world, actorRef, rejection.reason);
+      if (arrangement === null) continue;
+      const kept = applyDeltas(world, [arrangement], applyContext(result.assignedIds, new Set([arrangement])));
+      world = kept.world;
+      if (kept.applied.length === 0) {
+        recordAudit(kept, actorRef, "keep");
+      } else {
+        audit.push({ actorRef, op: rejection.delta.op, kind: "kept", ofTheOrder: true, attempt: "keep", reason: `${rejection.reason} Kept as an arrangement: "${(arrangement as { label: string }).label}".`, delta: rejection.delta });
+      }
+      result = {
+        world: kept.world,
+        applied: [...result.applied, ...kept.applied],
+        rejected: [...result.rejected.filter((candidate) => kept.applied.length === 0 || candidate !== rejection), ...kept.rejected],
+        breaches: [...result.breaches, ...kept.breaches],
+        factProposals: [...result.factProposals, ...kept.factProposals],
+        battleAccounts: [...result.battleAccounts, ...kept.battleAccounts],
+        assignedIds: kept.assignedIds,
+        assumptions: [...result.assumptions, ...kept.assumptions],
+      };
+    }
+
     breaches.push(...result.breaches);
+    // Whoever this proposal killed -- in a battle it fought, on a scaffold, in
+    // a duel. Only deaths from the passage of time were counted, so a player
+    // killed in a battle of his own ordering went on being asked for orders.
+    for (const id of aliveBefore) {
+      if (world.characters.some((character) => character.id === id && !character.alive)) deadThisBurst.add(id);
+    }
 
     // A fact that belongs to a secret thread is secret, whatever the model
     // wrote in its visibility field: the thread's participants are the people
@@ -299,7 +511,26 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // eventually be answered with "polity", and the record is what must hold.
     const resolveId = (ref: string): string => result.assignedIds.get(ref.replace(/^local:/, "")) ?? ref;
     const resolveStrict = (ref: string): string | null => (ref.startsWith("local:") ? result.assignedIds.get(ref.slice("local:".length)) ?? null : ref);
-    const keptSecret = proposal.facts.map((fact) => {
+    // A fact about something that was never made did not happen. The model
+    // writes its facts beside its deltas and cannot know which the engine will
+    // refuse: "the Gauls flock to his banner" arrived with the army that was
+    // never raised, and stood in the record contradicting the refusal next to
+    // it. A fact naming a handle this batch never assigned goes with the thing
+    // it was about.
+    const madeReal = (ref: string): boolean => !ref.startsWith("local:") || resolveStrict(ref) !== null;
+    const aboutRealThings = proposal.facts.filter((fact) =>
+      fact.affectedRefs.every((ref) => madeReal(ref.id)) && (fact.storylineRef === null || madeReal(fact.storylineRef)));
+    // And a fact about a refused act on something that does exist -- "a sum
+    // left the consul's chest" beside a chest that stayed shut -- is taken
+    // back by its author, who alone can tell which sentences described what.
+    let happened = aboutRealThings;
+    if (result.rejected.length > 0 && aboutRealThings.length > 0 && modelCalls < budget.maxModelCalls) {
+      const reconciled = await reconcileFacts({ port: input.port, facts: aboutRealThings, refused: result.rejected });
+      modelCalls += reconciled.calls;
+      if (reconciled.failure !== null) parseFailures.push(`fact reconciliation: ${reconciled.failure}`);
+      happened = [...reconciled.facts];
+    }
+    const keptSecret = happened.map((fact) => {
       if (fact.storylineRef === null) return fact;
       const storyline = world.storylines.find((candidate) => candidate.id === resolveId(fact.storylineRef!));
       if (storyline === undefined || storyline.visibility !== "private" || fact.visibility === "private") return fact;
@@ -409,19 +640,24 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // was the obstacle: a proposal that named someone who does not exist is the
     // engine catching a malformed payload, and belongs in the record for
     // debugging rather than in the ruler's Chronicle.
+    //
+    // An order nobody obeyed is neither: it is a scene. Everybody who was
+    // there saw a man give orders to people who do not take them from him,
+    // and that travels.
     for (const rejection of result.rejected) {
       const isWorldFriction = rejection.kind === "world";
+      const ignored = rejection.kind === "ignored";
       const friction = materializeFacts({
         proposals: [{
           localId: `friction_${scheduled.length}_${newFacts.length}`,
-          kind: isWorldFriction ? "execution_friction" : "engine_rejection",
+          kind: ignored ? "order_ignored" : isWorldFriction ? "execution_friction" : "engine_rejection",
           summary: rejection.reason,
           affectedRefs: [actorRef],
-          visibility: isWorldFriction ? "polity" : "private",
-          discoveryState: isWorldFriction ? "polity" : "private",
+          visibility: ignored ? "public" : isWorldFriction ? "polity" : "private",
+          discoveryState: ignored ? "public" : isWorldFriction ? "polity" : "private",
           knowableInDays: 0,
-          significance: isWorldFriction ? 5 : 0,
-          knownToRefs: isWorldFriction ? [actorRef] : [],
+          significance: ignored ? 30 : isWorldFriction ? 5 : 0,
+          knownToRefs: isWorldFriction || ignored ? [actorRef] : [],
         }],
         now: world.instant,
         atStep: world.elapsedStep,
@@ -461,6 +697,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
 
     applyDiscoveries(proposal.discoveries, causalDepth);
     world = recordDelegations(world, proposal.delegations, ids, result.assignedIds, input.offices);
+    return {
+      carriedOut: result.applied.filter((entry) => entry.ofTheOrder === true).length,
+      refusedByTheWorld: result.rejected.filter((rejection) => rejection.ofTheOrder === true && rejection.kind !== "reference").length,
+    };
   };
 
   const firedEventIds: string[] = [];
@@ -515,9 +755,31 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const ticked = runDeterministicTick({
       world, toDay, ids, warfare: input.warfare,
       ...(input.life === undefined ? {} : { life: input.life }),
+      ...(input.successionRules === undefined ? {} : { government: { offices: input.offices, successionRules: input.successionRules } }),
       playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
     });
-    world = ticked.world;
+    // The tick writes the world directly, not through `applyDeltas`, so
+    // nothing checked what it wrote. One impossible row from it -- a transfer
+    // from an account to itself, an id past its length -- was then carried by
+    // every batch after it, and `applyDeltas` refuses a whole batch that ends
+    // in an invalid world: the player's order, and every reaction to it, were
+    // refused for a fault that was not theirs, and the bad world was saved
+    // anyway. A hop whose bookkeeping will not hold is dropped instead; the
+    // clock has already moved, and the next hop tries again from good state.
+    const holds = WorldStateSchema.safeParse(ticked.world);
+    if (!holds.success) {
+      const [issue] = holds.error.issues;
+      parseFailures.push(`the tick to day ${toDay} wrote a world that would not load and was set aside (${issue === undefined ? "unknown" : `${issue.path.join(".")}: ${issue.message}`})`);
+      return;
+    }
+    world = holds.data;
+    // A plan the ruler laid has sprung by itself. The burst stops at the end of
+    // this hop and hands him back the wheel: he prepared against exactly this
+    // moment, and reading about it in a month's Chronicle is no use to him.
+    // `watch_condition` is the honest name for it -- a condition he set, which
+    // fired -- rather than a tenth stop reason meaning the same thing.
+    if (ticked.sprungContingencies.length > 0) sprungThisBurst = true;
+    battleAccounts.push(...ticked.contingencyBattles);
     // A death the world produced, not one anybody ordered. Held until the
     // burst ends: the deltas of this hop are still being applied, and the
     // Chronicle writes the death before the player is asked who follows.
@@ -647,6 +909,59 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     return `${conductInWords(rival, ruler)} ${stanceInWords(nemesisStance(world, nemesis, input.actorPolityId), ruler)}`;
   };
 
+  /**
+   * No order goes unanswered, whatever became of it.
+   *
+   * The Chronicle's promise that an order is always answered rested on the
+   * order having produced something its giver could see. Three ways it did
+   * not: the model's answer could not be read at all; everything it wrote was
+   * refused over how it was written -- an office nobody had created, an army
+   * nobody had raised -- which is kept out of the record as the engine's own
+   * business; or all it did was private to other people. In every one of those
+   * the player wrote an order and the record said nothing, which reads as the
+   * game ignoring them.
+   *
+   * So when nothing of the order reached its giver, the order itself does:
+   * what they ordered, and what stood in the way where anything did. A
+   * military access nobody needed, a courtship that led nowhere, a bid for an
+   * office that failed -- each is still a thing that happened in the reign.
+   */
+  const answerTheOrder = (answer: readonly Fact[]): void => {
+    if (input.orderText === null || input.orderText.trim().length === 0) return;
+    const seen = factsKnownTo(answer, input.actorRef, input.actorPolityId, world.instant)
+      .filter((fact) => !NEVER_PUBLISHED.has(fact.kind));
+    if (seen.length > 0) return;
+    const who = world.characters.find((character) => character.id === input.actorRef.id)?.name ?? "The ruler";
+    const order = input.orderText.trim().replace(/\s+/g, " ");
+    const quoted = order.length > 300 ? `${order.slice(0, 297)}...` : order;
+    const obstacles = answer.filter((fact) => fact.kind === "engine_rejection").map((fact) => fact.summary);
+    const outcome = orchestration.parseFailure !== null && answer.length === 0
+      ? "Word of it went out, and nothing came back that anyone could make sense of."
+      : obstacles.length > 0
+        ? `It could not be done as given: ${obstacles.slice(0, 3).join(" ")}`
+        : "Nothing came of it that anyone could see.";
+    const answered = materializeFacts({
+      proposals: [{
+        localId: "order_answered",
+        kind: "order_given",
+        summary: `${who} ordered: "${quoted}" ${outcome}`.slice(0, 600),
+        affectedRefs: [input.actorRef],
+        visibility: "private",
+        discoveryState: "private",
+        knowableInDays: 0,
+        knownToRefs: [input.actorRef],
+        significance: 20,
+      }],
+      now: world.instant,
+      atStep: world.elapsedStep,
+      ids,
+      causalDepth: 0,
+      assignedIds: new Map(),
+    });
+    newFacts.push(...answered.facts);
+    for (const [factId, weight] of answered.significanceByFactId) significanceByFactId.set(factId, weight);
+  };
+
   // ── Iteration 0: the player's order ────────────────────────────────────
   const threadOf = (event: PendingEvent): string | undefined => {
     const payload = ScheduledEventPayloadSchema.safeParse(event.payload ?? {});
@@ -679,18 +994,19 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         facts: [...input.knownFacts, ...newFacts],
         // What this order may carry the world through, so the batch is the
         // season's and not the morning's.
-        spanDays: Math.min(budget.maxSimulatedDays, input.clock.maxSpanDays),
+        spanDays: Math.min(input.spanDays ?? budget.maxSimulatedDays, input.clock.maxSpanDays),
         // What tells a fleet from an army, so a storm at sea catches ships and
         // never a legion in the open field.
         warfare: input.warfare,
         ...(input.historicalPressures === undefined ? {} : { pressures: input.historicalPressures }),
       });
-  world = recordSeedsOffered(world, seeds, world.instant.day + Math.min(budget.maxSimulatedDays, input.clock.maxSpanDays));
+  world = recordSeedsOffered(world, seeds, world.instant.day + Math.min(input.spanDays ?? budget.maxSimulatedDays, input.clock.maxSpanDays));
 
   const slice = buildWorldSlice({
     world,
     clock: input.clock,
     offices: input.offices,
+    warfare: input.warfare,
     actorRef: input.actorRef,
     actorPolityId: input.actorPolityId,
     orderText: input.orderText,
@@ -701,14 +1017,41 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     narratorSeeds: seeds,
   });
 
+  sliceText = renderWorldSlice(slice);
   report({ kind: "orchestrating" });
-  const orchestration = await orchestrate(input.port, slice);
+  const orchestration = await orchestrate(input.port, slice, kindsIn(world));
   modelCalls += orchestration.calls;
   iterations += 1;
   if (orchestration.parseFailure !== null) parseFailures.push(orchestration.parseFailure);
   salvaged.push(...orchestration.salvaged);
   const factsBefore = newFacts.length;
-  applyProposal(orchestration.output, input.actorRef, 0, true);
+  const acts = await applyProposal(orchestration.output, input.actorRef, 0, true);
+  // An order that left nothing in the world -- no act carried out, none the
+  // world refused -- is still something the player is now doing. Without a
+  // trace, "I start selling cutlery in Rome" answered only in prose was
+  // forgotten by the next order: nothing in the world said he sold anything.
+  // One pursuit per person, the latest replacing the last; it does nothing and
+  // costs nothing, and it is what a later act can build on. A question asks
+  // for nothing to be done, and an unreadable answer is already its own fault.
+  if (
+    acts.carriedOut === 0 && acts.refusedByTheWorld === 0
+    && input.orderText !== null && input.answeredDecision === undefined
+    && orchestration.parseFailure === null && !/\?\s*$/.test(input.orderText.trim())
+    && input.actorRef.kind === "character"
+  ) {
+    const pursuing = pursuitOf(world, input.actorRef, orchestration.output.intent.summary, input.orderText);
+    const recorded = applyDeltas(world, [pursuing], {
+      now: world.instant, actorRef: input.actorRef, offices: input.offices, warfare: input.warfare, ids, gameId: input.gameId,
+      ...(input.terrains === undefined ? {} : { terrains: input.terrains }),
+    });
+    if (recorded.applied.length > 0) {
+      world = recorded.world;
+      audit.push({ actorRef: input.actorRef, op: pursuing.op, kind: "pursuit", ofTheOrder: true, attempt: "floor", reason: `The order left nothing in the world; recorded as a pursuit: "${orchestration.output.intent.summary}".`, delta: pursuing });
+    } else {
+      recordAudit(recorded, input.actorRef, "floor");
+    }
+  }
+  answerTheOrder(newFacts.slice(factsBefore));
   const orderFactIds = newFacts.slice(factsBefore).map((fact) => fact.id);
   if (orchestration.output.playerDecision !== null) playerDecision = orchestration.output.playerDecision;
 
@@ -743,7 +1086,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // So the stops are: a decision only the player can make, a reaction the call
   // budget cannot pay for, the calendar running out of anything to wake for, or
   // the scenario's own maximum span.
-  const maxDays = Math.min(budget.maxSimulatedDays, input.clock.maxSpanDays);
+  // The player's own span where he gave one, never past what the scenario's
+  // clock allows a single burst to cover.
+  const maxDays = Math.max(1, Math.min(input.spanDays ?? budget.maxSimulatedDays, input.clock.maxSpanDays));
+  const minDays = input.spanDays === undefined ? input.clock.minSpanDays : maxDays;
   let causalDepth = 1;
   let hops = 0;
 
@@ -771,7 +1117,11 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // recruitment actually mature instead of creeping forward two days an order.
     const reactionKey = nowKey() + REACTION_DELAY_DAYS * 1440;
     const ceilingKey = (startDay + maxDays) * 1440 + world.instant.minute;
-    const targetKey = Math.min(hops === 1 ? reactionKey : nextScheduled ?? reactionKey, ceilingKey);
+    // Asked to let a month pass, and nothing on the calendar: the rest of the
+    // month goes by in one step rather than two days at a time, each of which
+    // would stop to ask the world's people what they make of nothing.
+    const idle = input.spanDays === undefined ? reactionKey : ceilingKey;
+    const targetKey = Math.min(hops === 1 ? reactionKey : nextScheduled ?? idle, ceilingKey);
 
     world = advanceWorldTo(world, addMinutes(world.instant, Math.max(0, targetKey - nowKey())));
     tickTo(world.instant.day);
@@ -836,11 +1186,15 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       iterations += 1;
       if (cognition.parseFailure !== null) parseFailures.push(cognition.parseFailure);
       salvaged.push(...cognition.salvaged);
-      for (const actor of cognition.output.actors) applyProposal(actor.proposal, actor.actorRef, causalDepth);
+      for (const actor of cognition.output.actors) await applyProposal(actor.proposal, actor.actorRef, causalDepth);
       causalDepth += 1;
     }
 
     const spanned = world.instant.day - startDay;
+    if (sprungThisBurst) {
+      stopReason = "watch_condition";
+      break;
+    }
     if (watch !== null && isWatchSatisfied(watch.predicate, input.world, world)) {
       stopReason = "watch_condition";
       break;
@@ -849,7 +1203,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // as far as the order carries. An order still waiting on something keeps
     // going regardless -- that is what asking to be woken on arrival means, and
     // the maximum span is what bounds the waiting.
-    if (watch === null && nextScheduled === undefined && cast.length === 0 && spanned >= input.clock.minSpanDays) {
+    if (watch === null && nextScheduled === undefined && cast.length === 0 && spanned >= minDays) {
       stopReason = "no_due_events";
       break;
     }
@@ -893,6 +1247,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     playerDecision,
     parseFailures,
     salvaged,
+    audit,
   };
 }
 

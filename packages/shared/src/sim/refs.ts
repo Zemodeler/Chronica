@@ -25,10 +25,11 @@ export const LocalIdSchema = z
   // Hyphens too: every id the model reads in the slice is hyphenated, so it
   // writes "clepsina-continues-march" and lost whole cognition batches to a
   // rule that gained nothing.
-  .regex(/^[a-z0-9_-]+$/, "A localId is lowercase letters, digits, underscores and hyphens.");
+  .regex(/^[a-z0-9_-]+$/, "A localId is lowercase letters, digits, underscores and hyphens.")
+  .meta({ id: "LocalId" });
 
 /** Either an existing world entity id, or `local:<localId>` minted in this same payload. */
-export const RefSchema = z.string().trim().min(1).max(130);
+export const RefSchema = z.string().trim().min(1).max(130).meta({ id: "Ref" });
 export type Ref = z.infer<typeof RefSchema>;
 
 export function isLocalRef(ref: string): boolean {

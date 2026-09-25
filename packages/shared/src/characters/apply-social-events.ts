@@ -6,7 +6,7 @@ import { listSocialLinks, type SocialLink } from "./relationship-dimensions";
 import type { CharacterBelief } from "./beliefs";
 import { KNOWLEDGE_CHANNEL_DEFAULTS, resolveRecipients } from "./beliefs";
 import { createPressure, refreshPressure, resolvePressure } from "./pressures";
-import { stableHash } from "../determinism";
+import { boundedId, stableHash } from "../determinism";
 import { MAX_TRAITS, observeTraits, type TraitObservation } from "./traits";
 import type { Commitment } from "./commitments";
 import { createCommitment } from "./commitments";
@@ -257,7 +257,7 @@ export function applySocialEvents(
       });
       const defaults = KNOWLEDGE_CHANNEL_DEFAULTS[beliefProposal.channel];
       for (const holderCharacterId of recipients) {
-        const id = `${event.id}:belief:${beliefIndex}:${holderCharacterId}`;
+        const id = boundedId(event.id, "belief", beliefIndex, holderCharacterId);
         const existing = characterBeliefs.find((b) =>
           b.holderCharacterId === holderCharacterId && b.status === "active"
           && b.claim === beliefProposal.claim && b.subjectEntityId === beliefProposal.subjectEntityId,

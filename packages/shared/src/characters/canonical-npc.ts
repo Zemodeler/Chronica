@@ -1,6 +1,7 @@
 import type { Character, CharacterSkills } from "./character";
 import { deriveDefaultMind } from "./mind";
 import { stableHash } from "../determinism";
+import { DAYS_PER_YEAR } from "../world/clock";
 import { openCharacterAccount } from "../material/character-accounts";
 import type { WorldState } from "../world/world-state";
 
@@ -22,6 +23,15 @@ export function createCanonicalNpc(
     readonly startingMoney?: number;
     readonly createdAtStep: number;
     readonly creationReason: string;
+    /** How old they are. Everyone was thirty-five: the world's invented greybeards and the player's own children alike. */
+    readonly ageYearsAtStart?: number;
+    /** A wife or a daughter. Everybody was a man, so a declared wife could never bear a child. */
+    readonly gender?: Character["gender"];
+    /** Who they are born of: a child takes the culture, faith and house of the family it is born into. */
+    readonly cultureId?: string;
+    readonly faithId?: string | null;
+    readonly dynastyId?: string | null;
+    readonly prestigeBps?: number;
   },
 ): { readonly world: WorldState; readonly character: Character } | null {
   const existing = world.characters.find((character) => character.id === input.characterId);
@@ -35,25 +45,29 @@ export function createCanonicalNpc(
     stewardship: 45, diplomacy: 55, body: 45, subSkills: {},
   };
   const officeId = input.officeId ?? null;
+  const age = Math.max(0, Math.min(120, Math.round(input.ageYearsAtStart ?? 35)));
+  const cultureId = input.cultureId ?? "culture-local";
   const character: Character = {
     id: input.characterId,
     name: input.name,
-    cultureId: "culture-local",
-    faithId: null,
-    dynastyId: null,
+    cultureId,
+    faithId: input.faithId ?? null,
+    dynastyId: input.dynastyId ?? null,
     polityId: input.polityId,
     locationProvinceId: input.locationProvinceId,
-    ageYearsAtStart: 35,
-    birthStep: null,
+    ageYearsAtStart: age,
+    // Made mid-reign, a man of forty is forty now and not forty plus the
+    // years since the scenario opened.
+    birthStep: input.createdAtStep > 0 ? input.createdAtStep - age * DAYS_PER_YEAR : null,
     nextLifeReviewAtStep: null,
     officeId,
     personalAccountId: purse.accountId,
     skills,
     traits: [],
-    mind: deriveDefaultMind({ officeId, skills, ageYears: 35, cultureId: "culture-local" }),
+    mind: deriveDefaultMind({ officeId, skills, ageYears: age, cultureId }),
     alive: true,
     healthBps: 10_000,
-    prestigeBps: 3_000,
+    prestigeBps: input.prestigeBps ?? 3_000,
     relations: [],
     ambitions: [],
     heirCharacterId: null,
@@ -62,6 +76,12 @@ export function createCanonicalNpc(
     createdAtStep: input.createdAtStep,
     creationReason: input.creationReason,
     disqualifyingStatuses: [],
+    officesHeld: [],
+    eligibilityWaivers: [],
+    legalStatus: "free",
+    gender: input.gender ?? "male",
+    ownerCharacterId: null,
+    peculium: false,
   };
   const material = input.startingMoney === undefined ? purse.material : {
     ...purse.material,

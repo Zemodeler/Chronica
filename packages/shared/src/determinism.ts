@@ -31,3 +31,23 @@ export function stableChoice(parts: readonly (string | number)[], count: number)
   if (count <= 0) throw new Error("stableChoice requires count > 0");
   return stableHash(parts) % count;
 }
+
+/** The longest id the world schema accepts (`EntityIdSchema`). */
+const MAX_ID_LENGTH = 120;
+
+/**
+ * An id made of other ids, kept inside the length the schema accepts.
+ *
+ * `${battleId}:${forceId}:${categoryId}:deserted` is readable and unique, and
+ * with two generated ids and a category the model named it ran past 120
+ * characters -- a battle whose history row the schema refused, which lost the
+ * order that fought it, or bricked the save when an ambush fought it inside
+ * the tick. The readable join is kept whenever it fits; past that, a prefix of
+ * it and a hash of the whole, so the id stays unique and the same on replay.
+ */
+export function boundedId(...parts: readonly (string | number)[]): string {
+  const joined = parts.join(":");
+  if (joined.length <= MAX_ID_LENGTH) return joined;
+  const suffix = `~${stableHash(parts).toString(36)}${stableHash([joined, "second"]).toString(36)}`;
+  return `${joined.slice(0, MAX_ID_LENGTH - suffix.length)}${suffix}`;
+}

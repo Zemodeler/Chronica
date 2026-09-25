@@ -51,11 +51,39 @@ export interface ApplyContext {
    * everything they do is theirs to answer for.
    */
   readonly actsForTheWorld?: boolean | undefined;
+  /**
+   * Of the deltas passed, the ones that are the order itself rather than the
+   * world moving beside it (the orchestrator's `deltas`, as against its
+   * `worldDeltas`).
+   *
+   * The world speaking may move any power's men; the order may not. An act of
+   * the order's inside another power still records no breach -- a Roman is not
+   * insubordinate to Carthage -- but its men, money and offices have to answer
+   * to him, or nobody moves.
+   */
+  readonly orderDeltas?: ReadonlySet<WorldDelta> | undefined;
+  /**
+   * Whose life is the game. A duel or a death that would take the player has
+   * to be the player's own act, or follow from something they let happen --
+   * captivity -- and never another man's decision alone.
+   */
+  readonly playerCharacterId?: string | null | undefined;
+  /**
+   * Local ids already assigned by an earlier pass over the same proposal.
+   *
+   * A repaired delta may still say `local:new_pay`, because the obligation it
+   * names was minted successfully in the first pass and only the delta that
+   * referred to it was wrong. Without this the repair cannot see what the
+   * first pass created and has to mint everything a second time.
+   */
+  readonly assignedIds?: ReadonlyMap<string, string> | undefined;
 }
 
 export interface AppliedDelta {
   readonly delta: WorldDelta;
   readonly authority: AuthorityCheckResult;
+  /** Whether it was one of the order's own acts. */
+  readonly ofTheOrder?: boolean | undefined;
 }
 
 export interface RejectedDelta {
@@ -69,8 +97,27 @@ export interface RejectedDelta {
    * "reference" means the proposal named something that does not exist. That is
    * the engine catching a malformed payload, and belongs in the record for
    * debugging rather than in a Chronicle.
+   *
+   * "ignored" means nobody was obliged to do it: somebody gave an order to men,
+   * money or ground that answer to someone else (see `nobodyListens`). Not a
+   * failure of the world or of the writing -- a public embarrassment, and told
+   * as one.
    */
-  readonly kind: "world" | "reference";
+  readonly kind: "world" | "reference" | "ignored";
+  /** Whether it was one of the order's own acts, so a corrected version of it is judged as one. */
+  readonly ofTheOrder?: boolean | undefined;
+}
+
+/**
+ * An act the engine carried out after answering part of it itself: a payer
+ * that named no account, a place that named no province (see `fillGaps`).
+ * Kept so the audit can show what was assumed, and so an assumption that
+ * keeps being wrong can be found.
+ */
+export interface AssumedDetail {
+  readonly delta: WorldDelta;
+  readonly assumed: readonly string[];
+  readonly ofTheOrder: boolean;
 }
 
 /**
@@ -112,4 +159,6 @@ export interface ApplyResult {
   readonly battleAccounts: readonly BattleAccount[];
   /** `localId` → the id the engine assigned, for resolving references in facts and events. */
   readonly assignedIds: ReadonlyMap<string, string>;
+  /** Applied acts the engine filled a detail of. */
+  readonly assumptions: readonly AssumedDetail[];
 }

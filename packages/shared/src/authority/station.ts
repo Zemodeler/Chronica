@@ -152,6 +152,21 @@ export function buildStation(input: StationInput): Station {
       .map((force) => force.id),
   );
 
+  // The chest an army carries belongs to the man who commands it, not to
+  // whoever keeps the state's books: it is where plunder lands and what he
+  // pays his men out of when nobody else is paying them. Added after the
+  // forces because it is derived from them.
+  for (const account of world.material.accounts) {
+    if (account.owner.kind === "force" && forceIds.has(account.owner.id)) accountIds.add(account.id);
+  }
+
+  // The army a man serves in is his to see and his own business -- its
+  // strength, its morale, where it stands, who commands it -- as it is not his
+  // to command. Added after the chest, which stays the commander's.
+  for (const force of world.material.forces) {
+    if (force.memberCharacterIds.includes(characterId)) forceIds.add(force.id);
+  }
+
   // Voting blocs name interests, not people, so membership of a body is read
   // from holding an office of its polity -- a consul sits in the Senate --
   // together with any question they have actually been admitted to.
@@ -175,6 +190,11 @@ export function buildStation(input: StationInput): Station {
     ...(character?.locationProvinceId == null ? [] : [character.locationProvinceId]),
     ...holdings.map((holding) => holding.territoryId),
     ...world.material.forces.filter((force) => forceIds.has(force.id)).map((force) => force.locationId),
+    // A merchant's route: both ends of every venture still trading are places
+    // whose news is his business.
+    ...world.material.ventures
+      .filter((venture) => venture.ownerCharacterId === characterId && venture.status === "running")
+      .flatMap((venture) => [venture.fromProvinceId, venture.toProvinceId]),
   ]);
 
   const knownCharacterIds = new Set<string>([
@@ -341,6 +361,10 @@ export function authorityInWords(station: Station, world: WorldState): Authority
   const seen = new Set<string>();
   const phrases: AuthorityPhrase[] = [];
   for (const grant of [...station.grants].sort((a, b) => a.domain.localeCompare(b.domain) || a.scope.id.localeCompare(b.scope.id))) {
+    // Command of men one's own purse would pay is latent in owning a purse,
+    // not a command anybody holds today; said as a military power, a private
+    // citizen read as though he led men.
+    if (grant.id.endsWith(":company")) continue;
     const key = `${grant.powers.join(", ")} in ${grant.domain} matters, over ${nameOf(grant.scope)} [${grant.scope.id}].`;
     if (seen.has(key)) continue;
     seen.add(key);

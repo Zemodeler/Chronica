@@ -10,6 +10,9 @@ import {
 import { CharacterIntentActionTypeSchema } from "../characters/intents";
 import { CharacterPressureKindSchema } from "../characters/pressures";
 import { CharacterSocialEventKindSchema } from "../characters/social-events";
+import { FamilyLinkKindSchema } from "../characters/family";
+import { SkillBandSchema } from "../characters/skill-bands";
+import { STANDING_CAUSES } from "../characters/standing-causes";
 import { RelationDimensionScoresSchema } from "../characters/character";
 import {
   BasisPointsSchema,
@@ -26,6 +29,13 @@ import {
   VisibilitySchema,
 } from "../material-state";
 import { PolityAgreementKindSchema } from "../world/agreements";
+import { ContingencyEffectSchema } from "../world/contingency";
+import { CovertPlotKindSchema } from "../world/covert-plot";
+import { WatchPredicateSchema } from "../world/watch";
+import { TacticalPremiseSchema } from "../warfare/tactical-modifier";
+import { EffectBandSchema, StandingEffectSchema } from "../world/standing-effects";
+import { StructureKindSchema } from "../world/structure";
+import { PositionTypeSchema } from "../world/map";
 import { DiplomaticAnswerSchema, DiplomaticMessageKindSchema } from "../world/diplomacy";
 import { OrderPartyRefSchema } from "../world/party-ref";
 import { StorylinePhaseSchema } from "../world/storylines";
@@ -52,15 +62,33 @@ import { LocalIdSchema, RefSchema } from "./refs";
  * to do it will eventually schedule something in the past.
  */
 
-const ReasonSchema = z.string().trim().min(1).max(300);
+const ReasonSchema = z.string().trim().min(1).max(300).meta({ id: "Reason" });
+/**
+ * A sum of money. Named once for the reason `Ref` is: written out, it was the
+ * same forty characters of bounds a dozen times over in every prompt.
+ */
+const MoneySchema = MoneyAmountSchema.meta({ id: "Money" });
+/** A length of time in days, at least one: a term, a cadence, a wait. */
+const DaysSchema = z.number().int().positive().max(36_600).meta({ id: "Days" });
+/** A name or a short label: a person, a place, a thing. */
+const NameSchema = z.string().trim().min(1).max(120).meta({ id: "Name" });
+/** A change in basis points, either way: morale, stability, health. Named once, for the same reason. */
+const SignedBpsSchema = z.number().int().min(-10_000).max(10_000).meta({ id: "SignedBps" });
+
 const DayOffsetSchema = z.number().int().min(0).max(36_600);
+
+/**
+ * Who pays to keep a made thing going, and roughly how much. The engine sizes
+ * the sum to the province, and stops the thing when the money stops.
+ */
+const UpkeepRefSchema = z.object({ fromAccountRef: RefSchema, band: EffectBandSchema }).strict().meta({ id: "Upkeep" });
 
 /** Money moving between accounts. `toAccountRef: null` is money genuinely leaving the modelled world (a foreign shipwright, a bribe abroad). */
 const MoneyTransferSchema = z.object({
   op: z.literal("money_transfer"),
   fromAccountRef: RefSchema,
   toAccountRef: RefSchema.nullable(),
-  amount: MoneyAmountSchema,
+  amount: MoneySchema,
   reason: ReasonSchema,
 }).strict();
 
@@ -70,10 +98,10 @@ const IncomeSourceUpsertSchema = z.object({
   localId: LocalIdSchema.optional(),
   incomeSourceRef: RefSchema.nullable(),
   kind: z.enum(["land", "office", "trade", "pension", "tax"]),
-  label: z.string().trim().min(1).max(120),
+  label: NameSchema,
   beneficiaryAccountRef: RefSchema,
-  amount: MoneyAmountSchema,
-  cadenceDays: z.number().int().positive().max(36_600),
+  amount: MoneySchema,
+  cadenceDays: DaysSchema,
   collectionRateBps: BasisPointsSchema.optional(),
   /**
    * The *other* power this revenue depends on, so a war can cut this route.
@@ -91,11 +119,11 @@ const ObligationUpsertSchema = z.object({
   localId: LocalIdSchema.optional(),
   obligationRef: RefSchema.nullable(),
   kind: z.enum(["army_pay", "army_upkeep", "salary", "tribute", "pension", "debt_service"]),
-  label: z.string().trim().min(1).max(120),
+  label: NameSchema,
   payerAccountRef: RefSchema,
   recipientAccountRef: RefSchema.nullable(),
-  amount: MoneyAmountSchema,
-  cadenceDays: z.number().int().positive().max(36_600),
+  amount: MoneySchema,
+  cadenceDays: DaysSchema,
   priority: z.number().int().min(0).max(1000).default(500),
   active: z.boolean().default(true),
   reason: ReasonSchema,
@@ -118,8 +146,19 @@ const ProjectCreateSchema = z.object({
       z.object({
         label: z.string().trim().min(1).max(160),
         dueInDays: DayOffsetSchema,
-        costAmount: MoneyAmountSchema.default(0),
-      }),
+        /**
+         * What this stage costs when it falls due.
+         *
+         * `.strict()`, and the one place in the vocabulary where strictness is
+         * worth a whole delta: the obvious misspelling is `cost`, an unknown
+         * key was stripped in silence, and the milestone then fell due for
+         * nothing. A fortress, a fleet and four months of mercenary pay all
+         * came free, with no refusal, no friction, and nothing in the record to
+         * say the treasury had been spared. Better to lose the delta and be
+         * told than to keep it and be lied to.
+         */
+        costAmount: MoneySchema.default(0),
+      }).strict(),
     )
     .min(1)
     .max(20),
@@ -149,7 +188,11 @@ const ProjectCreateSchema = z.object({
       agreementKind: PolityAgreementKindSchema.nullable().default(null),
       withPolityId: EntityIdSchema.nullable().default(null),
       beneficiaryAccountRef: RefSchema.nullable().default(null),
-      cadenceDays: z.number().int().positive().max(36_600).nullable().default(null),
+      cadenceDays: DaysSchema.nullable().default(null),
+      /** For "structure": what kind of building, what it goes on doing, and who pays its keep. */
+      structureKind: StructureKindSchema.optional(),
+      effects: z.array(StandingEffectSchema).max(6).optional(),
+      upkeep: UpkeepRefSchema.nullable().optional(),
     })
     .strict()
     .nullable()
@@ -168,12 +211,30 @@ const ProjectMilestoneUpdateSchema = z.object({
 const ForceCreateSchema = z.object({
   op: z.literal("force_create"),
   localId: LocalIdSchema,
-  name: z.string().trim().min(1).max(120),
-  polityId: EntityIdSchema,
+  name: NameSchema,
+  polityId: RefSchema,
+  /** A band that answers to no power: only a private purse can raise one. "polityId" is where its men come from. */
+  outlaw: z.boolean().optional(),
   commanderCharacterRef: RefSchema,
   controllerCharacterRef: RefSchema,
   locationId: EntityIdSchema,
   authorizedStrength: z.number().int().positive().max(1_000_000),
+  /**
+   * Who has undertaken to pay them, if anybody has. An obligation that already
+   * stands, or one minted in this same answer -- "raise two legions and put
+   * them on the treasury" is one order and should be one exchange.
+   *
+   * Null is a real answer and not a default to fall back on: a force nobody
+   * has undertaken to pay is outside the arrears rules entirely, which is the
+   * right reading of a warband and the wrong reading of a legion.
+   */
+  payObligationRef: RefSchema.nullable().default(null),
+  /**
+   * What kind of fighting men, or ships, they are: one of the scenario's troop
+   * categories ("warship" for a vessel). Everything raised used to be infantry,
+   * so a merchant fitting out a ship raised four hundred foot soldiers.
+   */
+  categoryId: EntityIdSchema.optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -208,14 +269,196 @@ const ForceAttritionSchema = z.object({
   reason: ReasonSchema,
 }).strict();
 
+/**
+ * Men joining an army that already exists.
+ *
+ * `"reinforcement"` has been a personnel-event kind since the force model was
+ * written and nothing has ever produced one -- the exact position
+ * `attrition_death` was in before `force_attrition` was added. An army could
+ * lose men four ways and gain them in none: a legion that left half its
+ * strength at Agrigentum could never be brought back up to it, and "take the
+ * Gauls into the Thirteenth as auxiliaries" had no expression at all.
+ * `force_modify.authorizedStrengthDelta` is not it and says so -- that moves
+ * the establishment on paper, while the men who are actually there live in
+ * `personnel`.
+ *
+ * A named category, because auxiliaries are not legionaries. Gallic horse
+ * taken into a Roman army stays Gallic horse: the resolver reads categories
+ * for their combat weight, steadiness and mobility, and dissolving them into
+ * the line would make a cavalry wing fight like a maniple.
+ */
+const ForceReinforceSchema = z.object({
+  op: z.literal("force_reinforce"),
+  forceRef: RefSchema,
+  /**
+   * The kind of troops these are.
+   *
+   * A category the world does not yet know is *minted*, not refused. It used to
+   * be refused, on the grounds that the resolver had no numbers for it -- but
+   * the resolver's own fallback has always fought an unknown category as an
+   * ordinary levy, so the refusal bought nothing and cost the order. "Take the
+   * Carthaginian elephants into the legion" is a thing that happened in this
+   * war, and a scenario's list is where a world's armies start rather than all
+   * they may ever contain.
+   */
+  categoryId: EntityIdSchema,
+  /**
+   * What sort of troops they are, where the world is inventing the kind.
+   *
+   * Read only when `categoryId` names something that does not exist yet, and
+   * ignored entirely otherwise: the character of horse is not the next man's
+   * to rewrite because he happens to be recruiting some. Bands rather than
+   * numbers, for the reason `character_create.wealth` is banded by standing --
+   * the judgment is the world's and the arithmetic is the engine's, and a
+   * model allowed to set combat weight directly would set it high.
+   */
+  newCategory: z
+    .object({
+      label: z.string().trim().min(1).max(80),
+      /** What one of them is worth in a stand-up fight. Never more than an ordinary soldier of the period. */
+      weightBand: z.enum(["light", "standard", "heavy"]).default("standard"),
+      /** How they hold when it goes badly. Elephants and levies are brittle; veterans are stubborn. */
+      steadinessBand: z.enum(["brittle", "standard", "stubborn"]).default("standard"),
+      /** How fast they move, which decides pursuit and escape. */
+      mobilityBand: z.enum(["slow", "standard", "fast"]).default("standard"),
+      /** Whether they fight and travel on water. Hulls carry men; how many is the engine's figure. */
+      naval: z.boolean().default(false),
+    })
+    .strict()
+    .nullable()
+    .optional(),
+  /** What this body of men is called, where it is worth saying. */
+  label: z.string().trim().min(1).max(80),
+  men: z.number().int().positive().max(1_000_000),
+  /**
+   * Where they came from, when they came from an army rather than a levy.
+   * Taking them out of that force is the whole of what "integrate them" means,
+   * and leaving it standing at its old strength would double the men.
+   */
+  fromForceRef: RefSchema.nullable().default(null),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * A plan of battle: what the commander means to try, and what it rests on.
+ *
+ * `restsOn` is what the plan depends on. The engine checks each against the
+ * field: nothing true there and the plan is refused, one thing true and it is
+ * worth a little, two or more and it is worth what was asked. See
+ * `TacticalPremiseSchema`. Named once, because an attack and a standing plan
+ * are the same thing said at different times.
+ */
+const BattlePlanSchema = z
+  .object({
+    factor: z.enum(["deployment", "surprise", "effective_strength", "cohesion", "morale", "withdrawal"]),
+    magnitude: z.enum(["minor", "meaningful"]),
+    rationale: z.string().trim().min(1).max(600),
+    restsOn: z.array(TacticalPremiseSchema).max(6).optional(),
+  })
+  .strict()
+  .meta({ id: "BattlePlan" });
+
 const ForceModifySchema = z.object({
   op: z.literal("force_modify"),
   forceRef: RefSchema,
+  /** Gone outlaw -- a garrison turned pirate -- or come back under a power. */
+  outlaw: z.boolean().optional(),
+  /**
+   * What it is called now.
+   *
+   * "Rename the Roman field army to Legio I" is about as plain an order as a
+   * commander can give, and there was no field in the whole vocabulary that
+   * could carry it: a force's name was fixed at creation for the life of the
+   * world. An army is renamed when it is reorganised, when it is numbered,
+   * when a new consul takes it over, and when its old name becomes an
+   * embarrassment.
+   */
+  name: NameSchema.optional(),
   locationId: EntityIdSchema.optional(),
+  /**
+   * Where in that province they actually stand.
+   *
+   * `Force.positionId` has existed since the force model was written and the
+   * battle resolver has always read it -- a pass is worth holding, a coast is
+   * a bad place to be caught -- and nothing in the whole vocabulary could set
+   * it. So the Punic Wars scenario authored Mount Etna as a pass worth seven
+   * hundred basis points, a player spent a campaign fortifying it, and every
+   * order about it resolved as "somewhere in north-eastern Sicily".
+   *
+   * A position this province does not have yet is made, not refused (see
+   * `newPosition`): "camp above the ford" names a real place whether or not a
+   * cartographer wrote it down. Cleared automatically when the force moves,
+   * because a position belongs to the ground and the ground has changed.
+   */
+  positionId: EntityIdSchema.nullable().optional(),
+  /**
+   * What sort of place it is, where the world is naming one that has no record
+   * yet. Read only when `positionId` matches nothing, ignored otherwise.
+   *
+   * The engine decides what a pass or a siege line is worth to the men holding
+   * it; the world only says which of them this is. A caller who could set the
+   * modifier directly could fortify his way to a battle nobody could lose.
+   */
+  newPosition: z
+    .object({
+      label: NameSchema,
+      type: PositionTypeSchema.default("camp"),
+    })
+    .strict()
+    .nullable()
+    .optional(),
   commanderCharacterRef: RefSchema.optional(),
+  /**
+   * Who answers for it, as against who leads it in the field. A consul keeps
+   * control of an army he hands to a legate, and that distinction is the whole
+   * reason `controllerCharacterId` is a separate field from the commander.
+   */
+  controllerCharacterRef: RefSchema.optional(),
   authorizedStrengthDelta: z.number().int().min(-1_000_000).max(1_000_000).optional(),
-  moraleBpsDelta: z.number().int().min(-10_000).max(10_000).optional(),
+  moraleBpsDelta: SignedBpsSchema.optional(),
+  /**
+   * How well they hold together, and how spent they are.
+   *
+   * Only morale could be moved, so "rest the army" and "let them drill through
+   * the winter" changed the men's spirits and left them as ragged and as tired
+   * as they were -- and the resolver reads all three. An order to recover is
+   * one of the commonest a commander gives and it could not be carried out.
+   */
+  cohesionBpsDelta: SignedBpsSchema.optional(),
+  fatigueBpsDelta: SignedBpsSchema.optional(),
   provisionStatus: z.enum(["provisioned", "shortage", "critical"]).optional(),
+  /** How long they are victualled for from today. "Supply them through the winter" is 90. */
+  provisionedForDays: z.number().int().min(0).max(3_650).optional(),
+  /**
+   * Which power they answer to now.
+   *
+   * An army changes sides, is handed over by treaty, or is raised by one power
+   * and given to another. None of it could be said, so a legion was the
+   * property of whoever raised it for the life of the world.
+   */
+  polityId: RefSchema.optional(),
+  /**
+   * Who pays them now. Omit to leave the arrangement alone; null to cut them
+   * loose from whoever was paying.
+   *
+   * Until this existed nothing in the whole vocabulary could write
+   * `Force.payObligationId`: a scenario could author who paid an army and no
+   * order could ever change it, so "put the legions on the treasury", "these
+   * men are Carthage's to pay now" and "they will be paid out of what they
+   * take" were all sayable, all convincingly narrated, and all inert.
+   */
+  payObligationRef: RefSchema.nullable().optional(),
+  /**
+   * How this army means to fight when it is next brought to battle, whoever
+   * attacks. Null drops it.
+   *
+   * A plan could only be carried by the attack, so the side that was attacked
+   * never had one: a consul who had spent a month fortifying a ford and
+   * waiting for the Carthaginians to cross it fought them exactly as a camp
+   * surprised in its sleep would. The plan is judged on the day, against the
+   * field as it then stands, exactly as an attacker's is.
+   */
+  battlePlan: BattlePlanSchema.nullable().optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -226,8 +469,19 @@ const ForceModifySchema = z.object({
 const CharacterCreateSchema = z.object({
   op: z.literal("character_create"),
   localId: LocalIdSchema,
-  name: z.string().trim().min(1).max(120),
-  polityId: EntityIdSchema,
+  name: NameSchema,
+  /**
+   * A power that exists, or one created in this same answer.
+   *
+   * `polity_create` mints a power against a `localId` so that a rising can
+   * become a country -- and every field that named a power took a raw id, so
+   * nothing could be said about that country in the breath that made it. A
+   * secession could declare itself and then not be given a leader, an army, a
+   * war, a letter or an opinion until the next turn, which the player never
+   * took. `RefSchema` accepts a plain id exactly as before, so nothing that
+   * worked stops working.
+   */
+  polityId: RefSchema,
   provinceId: EntityIdSchema.nullable(),
   age: z.number().int().min(0).max(120),
   /**
@@ -262,9 +516,50 @@ const CharacterCreateSchema = z.object({
    * Clamped to `standing`'s band on the way in -- clamped, never rejected, so
    * the world's judgment inside a band still counts.
    */
-  wealth: MoneyAmountSchema.default(0),
+  wealth: MoneySchema.default(0),
+  /** A woman -- a Vestal, a matron, a queen -- or a man, who is what is assumed. */
+  gender: z.enum(["male", "female"]).optional(),
+  /** A slave belongs to the one who acts, a freedman is his patron's. Free is what is assumed. */
+  legalStatus: z.enum(["free", "freed", "enslaved"]).optional(),
+  /**
+   * How good they are at things, in words; the engine sets the numbers.
+   *
+   * Everyone the world made was given the same skills: martial 35. So the world
+   * could create Antigonus Gonatas, who had beaten the Gauls at Lysimachia, and
+   * he would take the field as a worse general than any consul in the
+   * scenario. Bands and not numbers for the reason troop categories are banded
+   * -- a model allowed to write a number would write it high for its friends.
+   */
+  skills: z
+    .object({ martial: SkillBandSchema.optional(), diplomacy: SkillBandSchema.optional() })
+    .strict()
+    .nullable()
+    .optional(),
+  /**
+   * Whose kin they are, where that is why they exist: the Egyptian wife, the
+   * hostage son, the heir. `relation` reads from the new person's side -- a
+   * wife is `spouse_or_partner` of her husband, a son is `child` of his father.
+   */
+  kin: z
+    .object({ ofCharacterRef: RefSchema, relation: FamilyLinkKindSchema })
+    .strict()
+    .nullable()
+    .optional(),
+  /** What they believe, by name. A faith nobody has heard of is founded, with them as its founder. */
+  faith: NameSchema.optional(),
   /** VISION §5 keeps the reason a generated person exists, because it is often why they matter later. */
   generatedBecause: ReasonSchema,
+  /**
+   * Tolerated, and otherwise ignored.
+   *
+   * Thirty-seven of the forty ops take a `reason`, and this one says the same
+   * thing under its own name. `.strict()` made the habit fatal: an answer that
+   * wrote `reason` here alongside everything else lost the whole delta at
+   * parse time, silently, before any repair could see it -- and a model that
+   * has written `reason` thirty-seven times will write it the thirty-eighth.
+   * Accepting it costs nothing and stops the drop.
+   */
+  reason: ReasonSchema.optional(),
 }).strict();
 
 const CharacterIntentSetSchema = z.object({
@@ -275,6 +570,17 @@ const CharacterIntentSetSchema = z.object({
   rationale: z.string().trim().min(1).max(400),
   priority: z.number().int().min(0).max(100).default(50),
   visibility: VisibilitySchema.default("private"),
+  /**
+   * Tolerated, and otherwise ignored.
+   *
+   * Thirty-seven of the forty ops take a `reason`, and this one says the same
+   * thing under its own name. `.strict()` made the habit fatal: an answer that
+   * wrote `reason` here alongside everything else lost the whole delta at
+   * parse time, silently, before any repair could see it -- and a model that
+   * has written `reason` thirty-seven times will write it the thirty-eighth.
+   * Accepting it costs nothing and stops the drop.
+   */
+  reason: ReasonSchema.optional(),
 }).strict();
 
 /**
@@ -338,6 +644,17 @@ const SocialEventsSchema = z.object({
     )
     .min(1)
     .max(8),
+  /**
+   * Tolerated, and otherwise ignored.
+   *
+   * Thirty-seven of the forty ops take a `reason`, and this one says the same
+   * thing under its own name. `.strict()` made the habit fatal: an answer that
+   * wrote `reason` here alongside everything else lost the whole delta at
+   * parse time, silently, before any repair could see it -- and a model that
+   * has written `reason` thirty-seven times will write it the thirty-eighth.
+   * Accepting it costs nothing and stops the drop.
+   */
+  reason: ReasonSchema.optional(),
 }).strict();
 
 /** VISION §9's escape hatch: a novel institution no typed schema fits, recorded rather than invented in place. */
@@ -348,6 +665,11 @@ const GenericEntityCreateSchema = z.object({
   label: z.string().trim().min(1).max(160),
   ownerRef: OrderPartyRefSchema.nullable(),
   attributes: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).default({}),
+  /** Where it stands, if anywhere: a church's seat, a school's town. */
+  provinceId: EntityIdSchema.nullable().optional(),
+  /** What it goes on doing, every month, while it is paid for (see `world/standing-effects.ts`). */
+  effects: z.array(StandingEffectSchema).max(6).optional(),
+  upkeep: UpkeepRefSchema.nullable().optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -366,6 +688,9 @@ const GenericEntityUpdateSchema = z.object({
   attributes: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).default({}),
   /** Repealed, dissolved, wound up. The record stays; it simply no longer applies. */
   retire: z.boolean().default(false),
+  /** What it does now, replacing what it did. */
+  effects: z.array(StandingEffectSchema).max(6).optional(),
+  upkeep: UpkeepRefSchema.nullable().optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -393,8 +718,8 @@ const OrderAttemptDecideSchema = z.object({
 
 const PolityStanceShiftSchema = z.object({
   op: z.literal("polity_stance_shift"),
-  polityId: EntityIdSchema,
-  towardPolityId: EntityIdSchema,
+  polityId: RefSchema,
+  towardPolityId: RefSchema,
   trustDelta: SignedScoreSchema,
   reason: ReasonSchema,
 }).strict();
@@ -406,7 +731,7 @@ const PolityStanceShiftSchema = z.object({
  */
 const PolityOutlookSetSchema = z.object({
   op: z.literal("polity_outlook_set"),
-  polityId: EntityIdSchema,
+  polityId: RefSchema,
   primaryObjective: z.string().trim().min(1).max(240),
   concerns: z
     .array(z.object({ label: z.string().trim().min(1).max(160), level: z.enum(["low", "medium", "high"]) }).strict())
@@ -428,10 +753,10 @@ const PolityOutlookSetSchema = z.object({
 const LegitimacyShiftSchema = z.object({
   op: z.literal("legitimacy_shift"),
   target: z.enum(["polity", "institution"]),
-  targetId: EntityIdSchema,
-  legitimacyBpsDelta: z.number().int().min(-10_000).max(10_000),
+  targetId: RefSchema,
+  legitimacyBpsDelta: SignedBpsSchema,
   /** Only meaningful for a polity: how far the institutions themselves are still trusted. */
-  institutionalConfidenceBpsDelta: z.number().int().min(-10_000).max(10_000).optional(),
+  institutionalConfidenceBpsDelta: SignedBpsSchema.optional(),
   causeLabel: z.string().trim().min(1).max(160),
   reason: ReasonSchema,
 }).strict();
@@ -447,14 +772,50 @@ const ProvinceMaterialShiftSchema = z.object({
   provinceId: EntityIdSchema,
   availableManpowerDelta: z.number().int().min(-10_000_000).max(10_000_000).optional(),
   populationDelta: z.number().int().min(-10_000_000).max(10_000_000).optional(),
-  stabilityBpsDelta: z.number().int().min(-10_000).max(10_000).optional(),
-  foodSecurityBpsDelta: z.number().int().min(-10_000).max(10_000).optional(),
-  productiveCapacityBpsDelta: z.number().int().min(-10_000).max(10_000).optional(),
-  warDamageBpsDelta: z.number().int().min(-10_000).max(10_000).optional(),
+  stabilityBpsDelta: SignedBpsSchema.optional(),
+  foodSecurityBpsDelta: SignedBpsSchema.optional(),
+  productiveCapacityBpsDelta: SignedBpsSchema.optional(),
+  warDamageBpsDelta: SignedBpsSchema.optional(),
   taxCapacityDelta: z.number().int().min(-10_000_000).max(10_000_000).optional(),
   displacedPopulationDelta: z.number().int().min(-10_000_000).max(10_000_000).optional(),
   reason: ReasonSchema,
 }).strict();
+
+/**
+ * What a measure does once it is carried.
+ *
+ * - `effects`/`upkeep`: a law that goes on doing something, every month, over
+ *   the whole of the power's ground unless it says "here" -- the same closed
+ *   verbs a building has, because a grain law and a granary do the same thing.
+ * - `office`: an office reformed -- what it may do, how long it is held, how
+ *   many hold it -- or abolished, or made.
+ * - `body`: a council or assembly that did not exist, with one bloc of members
+ *   to begin with.
+ */
+const EnactmentProposalSchema = z
+  .object({
+    effects: z.array(StandingEffectSchema).max(6).optional(),
+    upkeep: UpkeepRefSchema.nullable().optional(),
+    office: z
+      .object({
+        officeId: EntityIdSchema,
+        /** What it is called, where it is being made. */
+        officeLabel: NameSchema.nullable().optional(),
+        /** What it may do now, in the vocabulary of the world's ops. Replaces what it did. */
+        authorises: z.array(z.string().trim().min(1).max(60)).max(16).optional(),
+        termDays: DaysSchema.nullable().optional(),
+        /** How many hold it at once. */
+        seats: z.number().int().min(1).max(12).optional(),
+        abolish: z.boolean().default(false),
+      })
+      .strict()
+      .optional(),
+    body: z.object({ name: NameSchema }).strict().optional(),
+    /** One man excused the ladder -- age, the rung below, the gap -- for one office, for a year. */
+    waiver: z.object({ characterRef: RefSchema, officeId: EntityIdSchema }).strict().optional(),
+  })
+  .strict()
+  .meta({ id: "Enactment" });
 
 /**
  * VISION §6's "senate support 63/100", as the thing it actually is: a question
@@ -475,6 +836,16 @@ const PoliticalProcedureOpenSchema = z.object({
   resolutionMechanism: PoliticalResolutionMechanismSchema,
   deadlineInDays: DayOffsetSchema.nullable().default(null),
   visibility: VisibilitySchema.default("polity"),
+  /**
+   * What it does if it passes: a law, a reform, a new body. Null for a question
+   * whose answer is only an answer -- a censure, a vote of thanks.
+   *
+   * A motion that passed changed nothing by itself, so a law had to be passed
+   * and then carried out a second time by hand, and a government's own
+   * offices and councils could not be reformed by anything at all. The engine
+   * carries this out on the day it passes, and only then.
+   */
+  enacts: EnactmentProposalSchema.nullable().optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -507,11 +878,74 @@ const PoliticalProcedureResolveSchema = z.object({
  * actually control, and the gap between the two is most of what makes land
  * political -- so both are movable here.
  */
+/**
+ * An estate: land a person owns and draws a living from.
+ *
+ * Bought with somebody's money (`priceFromAccountRef`), or granted out of the
+ * public land by a government (null). The engine sets what it yields and what
+ * it costs from the band and the province it lies in -- a model allowed to
+ * write the rent would write it high -- and pays the yield to the holder's own
+ * purse every month.
+ */
+const HoldingCreateSchema = z.object({
+  op: z.literal("holding_create"),
+  localId: LocalIdSchema,
+  title: NameSchema,
+  provinceId: EntityIdSchema,
+  holderCharacterRef: RefSchema,
+  /** How much land, and how good: a smallholding, a proper estate, a great one. */
+  band: EffectBandSchema.default("slight"),
+  /** Who pays for it. Null for a grant of public land, which is the government's act. */
+  priceFromAccountRef: RefSchema.nullable(),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * Improving an estate: draining, planting, building, stocking. Paid now, from
+ * the account named, and repaid by a larger yield every month after. The owner
+ * needs nobody's leave to improve his own land.
+ */
+const HoldingImproveSchema = z.object({
+  op: z.literal("holding_improve"),
+  holdingRef: RefSchema,
+  band: EffectBandSchema.default("slight"),
+  /** What is being done to the land, in words: "drain the lower fields and plant olives". */
+  works: z.string().trim().min(1).max(200),
+  paidFromAccountRef: RefSchema,
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * Putting money into trade between two places. The engine sets what it
+ * returns and costs from the two provinces; a war with the power at the other
+ * end, or an enemy fleet off either port, stops it until they are gone.
+ */
+const TradeVentureOpenSchema = z.object({
+  op: z.literal("trade_venture_open"),
+  localId: LocalIdSchema,
+  title: NameSchema,
+  ownerCharacterRef: RefSchema,
+  fromProvinceId: EntityIdSchema,
+  /** The same province as `fromProvinceId` for trade in one market: a shop, a stall in the streets. */
+  toProvinceId: EntityIdSchema,
+  /** How much is put into it: a single cargo, a regular trade, a great house's business. */
+  band: EffectBandSchema.default("slight"),
+  paidFromAccountRef: RefSchema,
+  reason: ReasonSchema,
+}).strict();
+
+/** Winding a venture up. Nothing is returned: the capital is in ships and goods already sold. */
+const TradeVentureCloseSchema = z.object({
+  op: z.literal("trade_venture_close"),
+  ventureRef: RefSchema,
+  reason: ReasonSchema,
+}).strict();
+
 const HoldingTransferSchema = z.object({
   op: z.literal("holding_transfer"),
   holdingRef: RefSchema,
   toCharacterRef: RefSchema.nullable(),
-  physicalControlBpsDelta: z.number().int().min(-10_000).max(10_000).optional(),
+  physicalControlBpsDelta: SignedBpsSchema.optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -531,10 +965,10 @@ const LoanOpenSchema = z.object({
   /** Omitted only for "foreign" money, which comes from outside the modelled world. */
   lenderRef: RefSchema.nullable(),
   borrowerAccountRef: RefSchema,
-  principal: MoneyAmountSchema,
+  principal: MoneySchema,
   /** Interest per servicing period, in basis points of the principal. */
   interestBps: BasisPointsSchema,
-  cadenceDays: z.number().int().positive().max(36_600),
+  cadenceDays: DaysSchema,
   /** What was agreed, in words. Often the politically expensive part. */
   terms: z.string().trim().min(1).max(300),
   collateralHoldingRef: RefSchema.nullable().default(null),
@@ -547,9 +981,9 @@ const LoanSettleSchema = z.object({
   loanRef: RefSchema,
   action: z.enum(["repay", "default", "renegotiate"]),
   /** For "repay": how much of the outstanding principal is being paid off now. */
-  amount: MoneyAmountSchema.default(0),
+  amount: MoneySchema.default(0),
   newInterestBps: BasisPointsSchema.optional(),
-  newCadenceDays: z.number().int().positive().max(36_600).optional(),
+  newCadenceDays: DaysSchema.optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -594,16 +1028,22 @@ const ForceEngageSchema = z.object({
   forceRef: RefSchema,
   targetForceRef: RefSchema,
   posture: z.enum(["offer_battle", "avoid_battle", "defend", "hold"]),
-  /** An unusual thing to try, within bounds the engine checks. Omit for an ordinary engagement. */
-  tactic: z
-    .object({
-      factor: z.enum(["deployment", "surprise", "effective_strength", "cohesion", "morale", "withdrawal"]),
-      magnitude: z.enum(["minor", "meaningful"]),
-      rationale: z.string().trim().min(1).max(600),
-    })
-    .strict()
-    .nullable()
-    .default(null),
+  /**
+   * An unusual thing to try, within bounds the engine checks. Omit for an
+   * ordinary engagement, or for the army's own standing plan where it has one
+   * (`force_modify.battlePlan`); the side attacked fights by its own.
+   */
+  tactic: BattlePlanSchema.nullable().default(null),
+  /**
+   * Other armies coming in on the attacking side, in the same province.
+   *
+   * A battle was always one army against one, so "the Gauls fall on their
+   * flank from the valley" could only be fought as a second, separate battle
+   * against the same enemy -- which, since the enemy fought twice, won every
+   * time. Armies of the attacker's own power under the same commander join by
+   * themselves; this names anybody else's, or an ally's.
+   */
+  alliedForceRefs: z.array(RefSchema).max(8).optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -668,7 +1108,17 @@ const StorylineOpenSchema = z.object({
  */
 const OfficeSeatSetSchema = z.object({
   op: z.literal("office_seat_set"),
+  /**
+   * The office. One the government does not have yet is *made*, not refused:
+   * "Quintus stands for tribune" in a Rome whose scenario authored only the
+   * consulship was refused as "No office exists", and a refusal of that kind
+   * never reached the player at all. A scenario's list is where a government
+   * starts, exactly as `character_create.officeLabel` already treats it.
+   */
   officeId: EntityIdSchema,
+  /** What the office is called, where it is being made now. Read only when `officeId` matches nothing. */
+  officeLabel: NameSchema.nullable().optional(),
+
   /** The seat, when an existing one is meant. Null takes the first free seat, or opens one. */
   seatId: EntityIdSchema.nullable().default(null),
   /** Who holds it now. Null empties it. */
@@ -676,7 +1126,41 @@ const OfficeSeatSetSchema = z.object({
   /** Why it fell vacant, when it did. */
   cause: OfficeSeatVacancyCauseSchema.default("none"),
   /** How long they hold it, in days. Null for a term that ends when somebody ends it. */
-  termDays: z.number().int().positive().max(36_600).nullable().default(null),
+  termDays: DaysSchema.nullable().default(null),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * A city changes hands, which a province changing hands is not.
+ *
+ * `Settlement.controllerPolityId` has carried the comment "a siege may change
+ * a city before its province changes hands" since the map was written, and no
+ * op in the vocabulary could set it. So taking Messana -- the single act this
+ * whole scenario is pointed at -- could only be said as taking the whole of
+ * north-eastern Sicily, and a garrison holding out in a city whose countryside
+ * had gone was not a state the world could be in at all.
+ */
+const SettlementControlSetSchema = z.object({
+  op: z.literal("settlement_control_set"),
+  settlementId: EntityIdSchema,
+  /**
+   * The province it stands in, where the map has no record of this city.
+   *
+   * The map is a drawing of the world and not the whole of it. The Punic Wars
+   * scenario draws forty-one settlements across the Mediterranean, so a
+   * campaign that lands at Hadrumentum is naming a real city the cartographer
+   * skipped -- and "besiege Hadrumentum" may not fail because of that. Given a
+   * province, the city is founded on the record and then changes hands like any
+   * other; left null, an unknown city is still refused, because a city with no
+   * ground under it is a spelling mistake rather than a place.
+   */
+  inProvinceId: EntityIdSchema.nullable().optional(),
+  /** What it is called, for a city being put on the record. Falls back to the id read as words. */
+  name: NameSchema.nullable().optional(),
+  /** Who holds it now. Null for a city that answers to nobody -- sacked, abandoned, or its own. */
+  toPolityRef: RefSchema.nullable(),
+  /** Whether the taking was a storm rather than a surrender. A stormed city is plundered. */
+  sacked: z.boolean().default(false),
   reason: ReasonSchema,
 }).strict();
 
@@ -708,9 +1192,9 @@ const ProvinceControlSetSchema = z.object({
 const PolityCreateSchema = z.object({
   op: z.literal("polity_create"),
   localId: LocalIdSchema,
-  name: z.string().trim().min(1).max(120),
+  name: NameSchema,
   /** The power it is breaking from, when it is breaking from one. Null for a power that was always there. */
-  breaksFromPolityId: EntityIdSchema.nullable().default(null),
+  breaksFromPolityId: RefSchema.nullable().default(null),
   /** What it holds at birth. Each must be controlled by `breaksFromPolityId` and connected to the rest. */
   provinceIds: z.array(EntityIdSchema).min(1).max(12),
   capitalSettlementId: EntityIdSchema.nullable().default(null),
@@ -761,23 +1245,220 @@ const CharacterPressureSetSchema = z.object({
  * eligibility system and writable by nothing.
  *
  * **It can never set `alive: false`, and there is deliberately no field for it.**
- * The engine kills, in `mortality.ts`, through one door, after a peril has been
- * open long enough for the player to have acted against it. That is what makes
- * "no character is killed off without it being made a thing of" a property of
- * the code rather than a rule in a prompt that a model may or may not read.
+ * Time and illness kill in `mortality.ts`, after a peril has been open long
+ * enough to be acted against; a person's act kills through `character_death`,
+ * which checks that the act was possible. Neither is a status to be written.
  */
 const CharacterStateSetSchema = z.object({
   op: z.literal("character_state_set"),
   characterRef: RefSchema,
-  /** Signed, and clamped to the basis-point range on the way in. */
-  healthDeltaBps: z.number().int().min(-10_000).max(10_000).default(0),
+  /**
+   * Signed, and clamped to the basis-point range on the way in. A gain is
+   * rest, and small; a real recovery is a physician's ("physicianRef"), and
+   * the engine rolls how well he does.
+   */
+  healthDeltaBps: SignedBpsSchema.default(0),
+  physicianRef: RefSchema.nullable().optional(),
   /** Status tags to set and to lift -- "incapacitated", "captured", "wounded". */
   addStatuses: z.array(z.string().trim().min(1).max(40)).max(6).default([]),
   removeStatuses: z.array(z.string().trim().min(1).max(40)).max(6).default([]),
   /** Who they now mean to leave it all to. Null leaves the named heir alone. */
   heirRef: RefSchema.nullable().default(null),
+  /**
+   * Where they are now, when they have gone somewhere.
+   *
+   * Nothing in the vocabulary could move a person. Armies march and fleets
+   * sail, but "Marcus travels to Egypt seeking a wife" left Marcus in Latium
+   * with a status tag saying he was travelling, and every slice after that
+   * showed him at home. A journey that takes real time is a project whose end
+   * sets this; a short one is set directly.
+   */
+  moveToProvinceId: EntityIdSchema.nullable().optional(),
+  /** What they believe now, by name: a conversion, or a faith they have just founded. */
+  faith: NameSchema.optional(),
+  /**
+   * How far their standing rose or fell: a triumph, games that bought the
+   * city, a scandal, a defeat. Signed, a fifth of the whole scale at most.
+   *
+   * Standing is what an election is counted on and who is offered the house
+   * when its head dies, and nothing any person did could move it: a consul who
+   * won the war stood exactly where the day's most forgettable senator did.
+   */
+  standingDeltaBps: z.number().int().min(-2_000).max(2_000).optional(),
+  /**
+   * What moved it. The engine holds each cause to its own ceiling (see
+   * `STANDING_CEILINGS_BPS`): a poem is not a triumph, and a shift nobody
+   * names a cause for is the smallest of all.
+   */
+  standingCause: z.enum(STANDING_CAUSES).optional(),
+  /**
+   * The power they belong to now: a defector received, an exile taken in, a
+   * man made a citizen. The engine lays down whatever they held in the old one
+   * -- office and command -- because a man cannot serve both.
+   */
+  polityId: RefSchema.optional(),
+  /**
+   * What they got better or worse at -- a season in the field, years of study,
+   * a wound that never healed. One step each, which is years of a life, not a
+   * week of it; the engine says what a step is worth.
+   */
+  skillShifts: z
+    .array(z.object({
+      skill: z.enum(["martial", "diplomacy", "intrigue", "stewardship", "learning", "piety", "body"]),
+      direction: z.enum(["better", "worse"]),
+    }).strict())
+    .max(3)
+    .optional(),
+  /** What they now want, or have got, or have given up on. "abandon" and "fulfil" name an ambition they already hold. */
+  ambitions: z
+    .array(z.object({
+      label: z.string().trim().min(1).max(200),
+      kind: z.enum(["office", "wealth", "revenge", "peace", "dynasty", "restoration", "other"]).default("other"),
+      change: z.enum(["take_up", "fulfil", "abandon"]).default("take_up"),
+    }).strict())
+    .max(3)
+    .optional(),
   reason: ReasonSchema,
 }).strict();
+
+/**
+ * Kinship made or ended between two people who already exist: a marriage, a
+ * divorce, an adoption.
+ *
+ * Kin could only be written when a person was created, so the commonest act
+ * in Roman politics -- marrying a daughter to an ally, adopting an heir out of
+ * another house -- could only be done by inventing a new person for it, and a
+ * divorce could not be done at all. Read from `characterRef`'s side, as
+ * `character_create.kin` is: an adopted son is "child" of his new father, a
+ * wife "spouse_or_partner" of her husband. Consent is the people's own
+ * business, and is the world's to judge; the engine keeps the record straight.
+ */
+const FamilyTieSetSchema = z.object({
+  op: z.literal("family_tie_set"),
+  characterRef: RefSchema,
+  relatedCharacterRef: RefSchema,
+  relation: FamilyLinkKindSchema,
+  change: z.enum(["form", "end"]),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * A man hired for work (roles plan phase 5; `material-state.ts`
+ * `ServiceContractSchema`).
+ *
+ * The engine pays it: "advance" moves now and has to be there, "monthlyPay"
+ * leaves the employer's account every month and the contract lapses the first
+ * month it cannot. What the work needs comes with it -- a "mercenary"'s
+ * "forceRef" answers to whoever hired it, an "envoy" may speak for the
+ * employing power to "counterpartPolityId", a "tax_farmer" takes the tax of
+ * "provinceId" for the treasury ("advance" is what he pays for the farm).
+ */
+const ServiceContractOpenSchema = z.object({
+  op: z.literal("service_contract_open"),
+  localId: LocalIdSchema,
+  role: z.enum(["mercenary", "assassin", "envoy", "engineer", "physician", "tax_farmer", "gladiator", "retainer"]),
+  label: z.string().trim().min(1).max(160),
+  employerAccountRef: RefSchema,
+  employeeRef: RefSchema,
+  advance: MoneySchema.default(0),
+  monthlyPay: MoneySchema.default(0),
+  termDays: DayOffsetSchema.nullable().default(null),
+  duties: z.string().trim().min(1).max(400),
+  forceRef: RefSchema.nullable().default(null),
+  provinceId: EntityIdSchema.nullable().default(null),
+  counterpartPolityId: RefSchema.nullable().default(null),
+  reason: ReasonSchema,
+}).strict();
+
+/** Either side ending it. The man walking out before his term is up has broken it, and it shows. */
+const ServiceContractCloseSchema = z.object({
+  op: z.literal("service_contract_close"),
+  contractRef: RefSchema,
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * What the law says a person is (roles plan phase 4).
+ *
+ * An owner frees his slave ("freed", and he stays the patron), sells him (a
+ * new "ownerRef"), or lets him keep a purse of his own ("peculium"). Only the
+ * owner can do any of it. A free man is made a slave only when he is already
+ * in somebody's hands -- a captive, a prisoner, one condemned -- and becomes
+ * the slave of whoever holds him, or of "ownerRef". Nobody is enslaved at large.
+ */
+const LegalStatusSetSchema = z.object({
+  op: z.literal("legal_status_set"),
+  characterRef: RefSchema,
+  status: z.enum(["free", "freed", "enslaved"]),
+  ownerRef: RefSchema.nullable().default(null),
+  peculium: z.boolean().optional(),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * A life ended by somebody's act rather than by time, illness or battle.
+ *
+ * Death had one door and it was the engine's alone, so a court could not
+ * condemn anybody, a captured king could not be put to death, a quarrel could
+ * not be settled with swords, and a beaten general could not fall on his own.
+ * Each of these is a door now, and each has the one thing that makes it a
+ * death somebody *did* rather than one a writer wanted:
+ *
+ * - `execution`: the condemned is held -- a captive, a prisoner -- where the
+ *   one who orders it has men or the ground. Nobody is executed at large.
+ * - `duel`: the two stand in one place, and the engine says who falls, from
+ *   their skill with arms and the state of their bodies. Nobody writes the
+ *   winner of a duel any more than of a battle.
+ * - `suicide`: a man's own act, or a captive's, or one whose life is already
+ *   in the balance.
+ */
+const CharacterDeathSchema = z.object({
+  op: z.literal("character_death"),
+  characterRef: RefSchema,
+  manner: z.enum(["execution", "duel", "suicide"]),
+  /** Who ordered it, or who fought him. Null only for a suicide. */
+  byCharacterRef: RefSchema.nullable().default(null),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * An army living off somebody else's country: farms burned, herds driven off,
+ * granaries emptied.
+ *
+ * There was no way to say it. The nearest thing was a `province_material_shift`
+ * that burned the fields and banked nothing, so "raid the Samnites and send the
+ * loot back to Rome" damaged Samnium and left Rome no richer -- and, since the
+ * shift is a number anybody may write, it could as easily be written against
+ * your own province as an enemy's. The engine sizes the take from the men and
+ * how fast they move (a hundred horsemen strip more than a hundred foot, and
+ * far less than a legion), the province's own worth sets what there is, and
+ * the damage follows from what was carried off.
+ *
+ * The raiders must be standing in the province. It cannot be their own power's
+ * ground: that is not a raid, it is plundering your own people.
+ */
+/**
+ * A named man joining an army's ranks, leaving them with leave, or leaving them
+ * without it. Not command: the commander is `force_modify`'s business. A man
+ * in the ranks shares his army's fortune in battle and sees what it sees.
+ */
+const ForceMembershipSetSchema = z.object({
+  op: z.literal("force_membership_set"),
+  characterRef: RefSchema,
+  forceRef: RefSchema,
+  change: z.enum(["enlist", "discharge", "desert"]),
+  reason: ReasonSchema,
+}).strict();
+
+const ForceRaidSchema = z.object({
+  op: z.literal("force_raid"),
+  forceRef: RefSchema,
+  provinceId: EntityIdSchema,
+  /** Where the loot is sent. Null keeps it with the army, or its power's treasury. */
+  toAccountRef: RefSchema.nullable().default(null),
+  reason: ReasonSchema,
+}).strict();
+
 
 /**
  * One power writing to another (VISION §24).
@@ -797,9 +1478,9 @@ const DiplomaticMessageSendSchema = z.object({
   op: z.literal("diplomatic_message_send"),
   localId: LocalIdSchema,
   kind: DiplomaticMessageKindSchema,
-  fromPolityId: EntityIdSchema,
+  fromPolityId: RefSchema,
   fromCharacterRef: RefSchema,
-  toPolityId: EntityIdSchema,
+  toPolityId: RefSchema,
   /** A named recipient where there is one; null addresses the power at large. */
   toCharacterRef: RefSchema.nullable().default(null),
   subject: z.string().trim().min(1).max(240),
@@ -834,15 +1515,137 @@ const AgreementOpenSchema = z.object({
   op: z.literal("agreement_open"),
   localId: LocalIdSchema,
   kind: PolityAgreementKindSchema,
-  /** For tribute, the order is the terms: the tributary pays the other. */
-  polityId: EntityIdSchema,
-  otherPolityId: EntityIdSchema,
+  /** For tribute and protection the order is the terms: the tributary pays, or the protected power is answered for by, the other. */
+  polityId: RefSchema,
+  otherPolityId: RefSchema,
   terms: z.string().trim().min(1).max(600),
+  /**
+   * What the treaty actually makes happen, beyond what it is called.
+   *
+   * Terms were prose, so an indemnity was a sentence nobody paid, a province
+   * ceded by treaty stayed where it was, and a hostage never left home. Each
+   * clause here is carried out the moment the treaty is made; an indemnity is
+   * owed period by period, falls into arrears like any debt, and stops when
+   * it is paid off or the treaty ends.
+   */
+  clauses: z
+    .array(z.discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("indemnity"),
+        payerPolityId: RefSchema,
+        /** Each period's payment, in the world's money. */
+        amount: MoneySchema,
+        cadenceDays: z.number().int().positive().max(3_660),
+        periods: z.number().int().min(1).max(100),
+      }).strict(),
+      z.object({ kind: z.literal("cession"), provinceId: EntityIdSchema, toPolityId: RefSchema }).strict(),
+      z.object({ kind: z.literal("hostage"), characterRef: RefSchema, heldByPolityId: RefSchema }).strict(),
+    ]))
+    .max(6)
+    .optional(),
   /** A truce with a term ends by itself. Null runs until somebody ends it. */
-  forDays: z.number().int().positive().max(36_600).nullable().default(null),
+  forDays: DaysSchema.nullable().default(null),
   /** The letter that produced it, where one did. */
   sourceMessageRef: RefSchema.nullable().default(null),
   visibility: VisibilitySchema.default("public"),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * Something laid against a person in secret (see `world/covert-plot.ts`).
+ *
+ * The order this exists for -- "hire a man to kill him, and never let my name
+ * be spoken" -- had no expression at all. Death runs through one door in this
+ * engine, deliberately, so that nobody is killed off without it having been
+ * made a thing of first; and the nearest thing this vocabulary could say was to
+ * drop the mark's health and tag him dead, which produced a man at no health,
+ * marked dead, and alive, still commanding his army.
+ *
+ * So it is said properly, and the sovereignty split holds exactly as it does
+ * for a battle. The world says who is moving against whom, whose hand it is,
+ * what was paid, what the cover story is, and how long it ought to take. The
+ * engine says whether it works. Neither the odds nor the outcome is writable
+ * here, and there is deliberately no field for either: an author who could set
+ * his own chance of success would never miss, and the player who writes "25/75"
+ * or "1% chance" in his order is telling the world how he rates it, not
+ * settling it.
+ *
+ * It may always be laid. It is never certain to come off.
+ */
+const CovertPlotOpenSchema = z.object({
+  op: z.literal("covert_plot_open"),
+  localId: LocalIdSchema,
+  kind: CovertPlotKindSchema,
+  targetCharacterRef: RefSchema,
+  /** Who wants it done -- usually, but not always, the person whose order this is. */
+  sponsorCharacterRef: RefSchema,
+  /** Whose hand it is, where one is named. A hired man may be created in this same answer. */
+  agentCharacterRef: RefSchema.nullable().default(null),
+  /** Where the money comes from. Null for a thing done for love, hatred or duty. */
+  fundingAccountRef: RefSchema.nullable().default(null),
+  /**
+   * What is paid for it. Money buys a better hand and a quieter one -- up to a
+   * point, past which more of it only means more people who know.
+   */
+  spend: MoneySchema.default(0),
+  /** Whom the world is to blame if it goes wrong. "The Carthaginians did this." */
+  cover: z.string().trim().min(1).max(300),
+  /**
+   * How long the world judges it will take to come to a head: a man has to be
+   * found, got near, and left alone with him. Held by the engine between three
+   * weeks and a year, because below that there is no plot and above it nobody
+   * is still watching.
+   */
+  expectedInDays: z.number().int().min(1).max(3_650).default(60),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * A plan laid against a day that has not come (see `world/contingency.ts`).
+ *
+ * "When the Carthaginians pass through the first layer of walls, set it ablaze
+ * and lock the gates." About a fifth of the orders a real player writes hang
+ * their content on a condition like that, and until now every one of them was
+ * a note in the record that something had to notice and choose to act on.
+ *
+ * The trigger is the watch language, which is already closed, deterministic and
+ * free to evaluate. The effect is one of two things and neither of them is
+ * yours to size: `spring_trap` does what was prepared, and the engine works out
+ * what that costs from what was actually spent laying it; `stand_to` raises the
+ * alarm and hands the ruler back the wheel, which is the right answer to every
+ * conditional whose consequence is a judgment rather than a bang -- "should the
+ * city fall, write to the Senate" is not an effect, it is the next order.
+ *
+ * Traps cost money, taken when they are laid. That is what a trap is.
+ */
+const ContingencyArmSchema = z.object({
+  op: z.literal("contingency_arm"),
+  localId: LocalIdSchema,
+  /** What it is called. "The Burning City." */
+  label: z.string().trim().min(1).max(200),
+  ownerCharacterRef: RefSchema,
+  /** When it springs, in the same language a watch is written in. */
+  trigger: WatchPredicateSchema,
+  effect: ContingencyEffectSchema,
+  provinceId: EntityIdSchema,
+  /** The exact ground, where the plan is about ground: the ward, the pass, the ford. */
+  positionId: EntityIdSchema.nullable().default(null),
+  /** Whom it is laid for. Null catches whoever walks into it, its owner's men included. */
+  againstPolityId: EntityIdSchema.nullable().default(null),
+  fundingAccountRef: RefSchema.nullable().default(null),
+  /** Pitch, timber and men paid to wait. The whole of what decides how badly it hurts. */
+  spend: MoneySchema.default(0),
+  /** Who falls on them once it springs, where anybody does. An ordinary battle follows. */
+  ambushForceRef: RefSchema.nullable().default(null),
+  /** How long it keeps. Null for a plan that waits as long as it must. */
+  expiresInDays: DayOffsetSchema.nullable().default(null),
+  reason: ReasonSchema,
+}).strict();
+
+/** Calling one off: the fires stopped drawing attention, or the ground was given up. */
+const ContingencyDisarmSchema = z.object({
+  op: z.literal("contingency_disarm"),
+  contingencyRef: RefSchema,
   reason: ReasonSchema,
 }).strict();
 
@@ -870,6 +1673,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   ProjectMilestoneUpdateSchema,
   ForceCreateSchema,
   ForceModifySchema,
+  ForceReinforceSchema,
   ForceAttritionSchema,
   CharacterCreateSchema,
   CharacterIntentSetSchema,
@@ -885,6 +1689,11 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   PoliticalSupportSetSchema,
   PoliticalProcedureResolveSchema,
   HoldingTransferSchema,
+  HoldingCreateSchema,
+  HoldingImproveSchema,
+  ForceMembershipSetSchema,
+  TradeVentureOpenSchema,
+  TradeVentureCloseSchema,
   GenericEntityUpdateSchema,
   LoanOpenSchema,
   LoanSettleSchema,
@@ -894,14 +1703,24 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   StorylineAdvanceSchema,
   CharacterPressureSetSchema,
   CharacterStateSetSchema,
+  ForceRaidSchema,
   DiplomaticMessageSendSchema,
   DiplomaticMessageAnswerSchema,
   AgreementOpenSchema,
   AgreementCloseSchema,
   ProvinceControlSetSchema,
+  SettlementControlSetSchema,
   PolityCreateSchema,
   OfficeSeatSetSchema,
-]);
+  CovertPlotOpenSchema,
+  ContingencyArmSchema,
+  ContingencyDisarmSchema,
+  FamilyTieSetSchema,
+  CharacterDeathSchema,
+  LegalStatusSetSchema,
+  ServiceContractOpenSchema,
+  ServiceContractCloseSchema,
+]).meta({ id: "WorldDelta" });
 export type WorldDelta = z.infer<typeof WorldDeltaSchema>;
 export type WorldDeltaOp = WorldDelta["op"];
 
@@ -914,6 +1733,7 @@ export const WORLD_DELTA_OPS = [
   "project_milestone_update",
   "force_create",
   "force_modify",
+  "force_reinforce",
   "force_attrition",
   "character_create",
   "character_intent_set",
@@ -929,6 +1749,11 @@ export const WORLD_DELTA_OPS = [
   "political_support_set",
   "political_procedure_resolve",
   "holding_transfer",
+  "holding_create",
+  "holding_improve",
+  "force_membership_set",
+  "trade_venture_open",
+  "trade_venture_close",
   "generic_entity_update",
   "loan_open",
   "loan_settle",
@@ -943,8 +1768,18 @@ export const WORLD_DELTA_OPS = [
   "agreement_open",
   "agreement_close",
   "province_control_set",
+  "settlement_control_set",
   "polity_create",
   "office_seat_set",
+  "covert_plot_open",
+  "contingency_arm",
+  "contingency_disarm",
+  "force_raid",
+  "family_tie_set",
+  "character_death",
+  "legal_status_set",
+  "service_contract_open",
+  "service_contract_close",
 ] as const satisfies readonly WorldDeltaOp[];
 
 /**
@@ -961,6 +1796,7 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   project_milestone_update: "civil",
   force_create: "military",
   force_modify: "military",
+  force_reinforce: "military",
   force_attrition: "military",
   character_create: "civil",
   character_intent_set: "social",
@@ -976,6 +1812,11 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   political_support_set: "social",
   political_procedure_resolve: "civil",
   holding_transfer: "judicial",
+  holding_create: "fiscal",
+  holding_improve: "fiscal",
+  force_membership_set: "military",
+  trade_venture_open: "fiscal",
+  trade_venture_close: "fiscal",
   generic_entity_update: "civil",
   loan_open: "fiscal",
   loan_settle: "fiscal",
@@ -985,13 +1826,32 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   storyline_advance: "civil",
   character_pressure_set: "social",
   character_state_set: "social",
+  force_raid: "military",
   diplomatic_message_send: "diplomatic",
   diplomatic_message_answer: "diplomatic",
   agreement_open: "diplomatic",
   agreement_close: "diplomatic",
   // Taking ground is a military act; founding a power is not anyone's office.
   province_control_set: "military",
+  settlement_control_set: "military",
   polity_create: "civil",
   // Putting a man in office, or out of it, is the civil power at its plainest.
   office_seat_set: "civil",
+  // Nobody's office authorises this, which is the point: every plot is a
+  // breach, and the record says so the moment it is laid.
+  covert_plot_open: "judicial",
+  // Laying and calling off a prepared destruction is a commander's act, made
+  // in advance. It is judged exactly as ordering it on the day would be.
+  contingency_arm: "military",
+  contingency_disarm: "military",
+  // Marrying and adopting are a family's business, and its head's.
+  family_tie_set: "social",
+  // Putting a man to death is the judicial power at its plainest; a duel or a
+  // suicide is nobody's office, and is judged as the act of whoever gave it.
+  character_death: "judicial",
+  // Freeing or selling a slave is the household's; enslaving a free man is the judicial power's.
+  legal_status_set: "judicial",
+  // Hiring a man is spending the money that pays him.
+  service_contract_open: "fiscal",
+  service_contract_close: "fiscal",
 };

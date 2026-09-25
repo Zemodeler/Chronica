@@ -1,5 +1,6 @@
 import {
   allOffices,
+  isOwnPurseGrant,
   buildAuthorityIndex,
   factsKnownTo,
   openStorylines,
@@ -100,12 +101,34 @@ export function routeAttention(input: AttentionInput): AttentionResult {
     allOffices(world, input.offices),
     world.elapsedStep,
   );
-  const holdsAuthority = new Set(authority.grants.map((grant) => grant.holder.id));
+  const holdsAuthority = new Set(authority.grants.filter((grant) => !isOwnPurseGrant(grant)).map((grant) => grant.holder.id));
   const affectedIds = new Set(triggering.flatMap((fact) => fact.affectedEntities.map((entity) => entity.id)));
   const affectedPolities = new Set(
     triggering.flatMap((fact) => fact.affectedEntities.filter((entity) => entity.kind === "polity").map((entity) => entity.id)),
   );
   const commanders = new Set(world.material.forces.map((force) => force.commanderCharacterId));
+
+  // Nearness. Nothing in the router knew where anybody was or whom they
+  // served beside, so a soldier's own centurion was exactly as likely to
+  // notice him being wounded as a king across the sea was. The armies a
+  // person is in (commanding or in the ranks), and where the news happened.
+  const forcesOf = (characterId: string): string[] => world.material.forces
+    .filter((force) => force.commanderCharacterId === characterId || force.controllerCharacterId === characterId || force.memberCharacterIds.includes(characterId))
+    .map((force) => force.id);
+  const affectedForceIds = new Set(world.material.forces.filter((force) => affectedIds.has(force.id)).map((force) => force.id));
+  const affectedCharacters = world.characters.filter((character) => affectedIds.has(character.id));
+  const comradeForceIds = new Set(affectedCharacters.flatMap((character) => forcesOf(character.id)));
+  const wherePlaces = new Set([
+    ...world.map.provinces.filter((province) => affectedIds.has(province.id)).map((province) => province.id),
+    ...affectedCharacters.map((character) => character.locationProvinceId),
+  ]);
+
+  // The two ends of every venture still trading, by owner.
+  const routesOf = new Map<string, string[]>();
+  for (const venture of world.material.ventures) {
+    if (venture.status !== "running") continue;
+    routesOf.set(venture.ownerCharacterId, [...(routesOf.get(venture.ownerCharacterId) ?? []), venture.fromProvinceId, venture.toProvinceId]);
+  }
 
   const scored: RoutedActor[] = [];
   let dormantCount = 0;
@@ -138,6 +161,21 @@ export function routeAttention(input: AttentionInput): AttentionResult {
     if (character.polityId !== null && affectedPolities.has(character.polityId)) {
       score += 20;
       reasons.push("their polity is involved");
+    }
+    const theirForces = forcesOf(character.id);
+    if (theirForces.some((forceId) => affectedForceIds.has(forceId))) {
+      score += 20;
+      reasons.push("their own army is involved");
+    } else if (!affectedIds.has(character.id) && theirForces.some((forceId) => comradeForceIds.has(forceId))) {
+      score += 25;
+      reasons.push("it touches a comrade in the same army");
+    }
+    if (!affectedIds.has(character.id) && wherePlaces.has(character.locationProvinceId)) {
+      score += 15;
+      reasons.push("it happened where they are");
+    } else if (!affectedIds.has(character.id) && (routesOf.get(character.id) ?? []).some((provinceId) => wherePlaces.has(provinceId))) {
+      score += 15;
+      reasons.push("it happened where their trade runs");
     }
     const pressures = world.characterPressures.filter((pressure) => pressure.characterId === character.id && pressure.status === "active");
     if (pressures.length > 0) {
@@ -287,7 +325,7 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
     allOffices(world, input.offices),
     world.elapsedStep,
   );
-  const holdsAuthority = new Set(authority.grants.map((grant) => grant.holder.id));
+  const holdsAuthority = new Set(authority.grants.filter((grant) => !isOwnPurseGrant(grant)).map((grant) => grant.holder.id));
   const commanders = new Set(world.material.forces.map((force) => force.commanderCharacterId));
   // The most recently moved thread each person is in, so the reason they are
   // asked says what is actually pending rather than that something is.
@@ -349,7 +387,13 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
       score += 28;
       reasons.push("has a letter to answer");
     }
-    if (priority.has(character.id)) reasons.unshift("something has just come to them");
+    // Asked because something just landed on them. It counts for itself: a man
+    // with no office and no command used to score only because everybody's own
+    // purse was counted as authority.
+    if (priority.has(character.id)) {
+      score += 20;
+      reasons.unshift("something has just come to them");
+    }
     // Always worth hearing, and never told why. The reason given is the true
     // one a man would give himself: he has something of his own running.
     if (character.id === input.nemesisCharacterId) {
@@ -360,7 +404,10 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
       score += 15;
       reasons.push("their government is pursuing something");
     }
-    if (score === 0) continue;
+    // Somebody with nothing on his plate still has a life: he is asked now and
+    // then, on the rotation alone, below everybody who has business -- which
+    // is what his own purse used to buy him, counted as authority.
+    if (score === 0) reasons.push("has his own affairs to see to");
 
     // Rotation, so the world elsewhere is not the same two people every time.
     // Bucketed by week and stable within it: a replay picks the same cast.

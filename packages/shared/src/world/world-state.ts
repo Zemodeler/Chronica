@@ -1,3 +1,4 @@
+import { FaithAdherenceSchema, FaithSchema } from "./faith";
 import { z } from "zod";
 import { ElapsedStepSchema, MaterialWorldStateSchema } from "../material-state";
 import { CharacterSchema, OfficeSchema } from "../characters/character";
@@ -11,6 +12,10 @@ import { StructureSchema } from "./structure";
 import { GenericEntitySchema } from "./generic-entity";
 import { PolityOutlookSchema } from "./outlook";
 import { ProvinceGraphSchema } from "./map";
+import { TroopCategoryDefinitionSchema } from "../warfare/battle";
+import { ContingencySchema } from "./contingency";
+import { EnactmentSchema } from "./enactment";
+import { CovertPlotSchema } from "./covert-plot";
 import { MapConflictsOverlaySchema } from "./map-presentation";
 import { NemesisSchema } from "./nemesis";
 import { WorldStorylineSchema } from "./storylines";
@@ -140,6 +145,19 @@ export const WorldStateSchema = z
      * made confers authority exactly as an authored one does.
      */
     offices: z.array(OfficeSchema).default([]),
+    /**
+     * Kinds of troops the world has made for itself, on the same terms as the
+     * offices above -- see `warfare/troop-categories.ts`.
+     *
+     * A scenario's list was closed, so an army could be reinforced only with a
+     * kind of soldier somebody had authored in advance, and "take the
+     * Carthaginian elephants into the legion" was answered with a refusal
+     * rather than with elephants. Merged with the scenario's wherever a
+     * category is read, so one the world minted fights exactly as an authored
+     * one does. Defaulted, so every snapshot written before this existed still
+     * parses -- and its armies stay the armies they were.
+     */
+    troopCategories: z.array(TroopCategoryDefinitionSchema).default([]),
     /** Current authoritative combat, siege, and war state for map projection. */
     conflicts: MapConflictsOverlaySchema.default({ battles: [], sieges: [], wars: [] }),
     material: MaterialWorldStateSchema,
@@ -207,6 +225,10 @@ export const WorldStateSchema = z
     structures: z.array(StructureSchema).default([]),
     /** docs/32, Part C.1: the true generic fallback for a genuinely novel composition -- see `world/generic-entity.ts`. */
     genericEntities: z.array(GenericEntitySchema).default([]),
+    /** What people believe, founded by naming (see `world/faith.ts`). */
+    faiths: z.array(FaithSchema).default([]),
+    /** Belief as it has changed, by province. A province with no row believes as it always did. */
+    faithAdherence: z.array(FaithAdherenceSchema).default([]),
     /**
      * VISION §11: what each polity is trying to do -- the state-level
      * counterpart to `Character.mind`. Ordinary world state, rewritten as
@@ -214,6 +236,35 @@ export const WorldStateSchema = z
      * written before this existed still parses.
      */
     polityOutlooks: z.array(PolityOutlookSchema).default([]),
+    /**
+     * What has been laid against somebody in secret, and how it is going --
+     * see `world/covert-plot.ts`.
+     *
+     * "Hire an assassin to kill Fabius" had no expression at all: the one door
+     * to death is `mortality.ts`, and it opened only on a roll off the age
+     * table. So the commonest order in the genre resolved as a man in poor
+     * health. A plot is the missing object -- always allowed to be laid, never
+     * certain to succeed, and open long enough that the mark may be warned and
+     * the plotter found out. Defaulted, so every snapshot written before it
+     * still parses.
+     */
+    covertPlots: z.array(CovertPlotSchema).default([]),
+    /**
+     * Plans laid against days that have not come -- see `world/contingency.ts`.
+     *
+     * "When the Carthaginians are through the first wall, fire it and bar the
+     * gates" could be written down and never read: about a fifth of the orders
+     * a real player writes hang their content on a condition, and every one of
+     * them depended on the narrator remembering the note. Defaulted, so every
+     * snapshot written before it still parses.
+     */
+    contingencies: z.array(ContingencySchema).default([]),
+    /**
+     * What measures before a council will do if carried -- see
+     * `world/enactment.ts`. Defaulted, so every snapshot written before a law
+     * could do anything still parses.
+     */
+    enactments: z.array(EnactmentSchema).default([]),
   })
   .strict()
   .superRefine((world, context) => {

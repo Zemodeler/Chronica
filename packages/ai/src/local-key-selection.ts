@@ -146,7 +146,7 @@ function modelsForProvider(provider: LocalAiProvider): readonly string[] {
   const models = configured?.split(",").map((model) => model.trim()).filter(Boolean);
   if (models && models.length > 0) return [...new Set(models)];
   return provider === "openai"
-    ? ["gpt-5.6-luna", "gpt-5-nano", "gpt-5.6-sol"]
+    ? ["gpt-6-luna", "gpt-5-nano", "gpt-6-sol"]
     : ["claude-haiku-4-5", "claude-sonnet-4-5", "claude-opus-4-5"];
 }
 
@@ -154,7 +154,7 @@ function unavailableConfiguration(): LocalAiProviderConfiguration {
   return {
     available: false,
     activeProvider: "openai",
-    activeModel: "gpt-5.6-luna",
+    activeModel: "gpt-6-luna",
     openAiConfigured: false,
     anthropicConfigured: false,
     openAiModels: [],

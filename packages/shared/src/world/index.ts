@@ -23,3 +23,5 @@ export * from "./world-state";
 export * from "./changes";
 export * from "./watch";
 export * from "./scenario";
+export * from "./standing-effects";
+export * from "./faith";

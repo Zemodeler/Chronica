@@ -76,6 +76,7 @@ function force(overrides: Partial<Force> = {}): Force {
     payObligationId: null,
     payArrearsPeriods: 0,
     history: [],
+    memberCharacterIds: [],
     ...overrides,
   };
 }

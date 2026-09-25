@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { InsufficientCoinsError, callWithCoinGate, createAiAdapter } from "@chronica/ai";
 import {
   WorldRevisionConflictError,
+  WorldWouldNotLoadError,
   commitBurst,
   createDatabase,
   failBurst,
@@ -21,8 +22,8 @@ import {
   type BurstFactRow,
   type ChronicaDatabase,
 } from "@chronica/db";
-import { FactSchema, PlayerDecisionSchema, buildStation, diffWorlds, formatWorldDate, holdsPolityStanding, type Fact, type Office, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
-import { closeTheBooks, composeChronicle, runSimulationBurst, whoSeeksThePlayer, type AnsweredDecision, type BurstProgress, type ChronicleEntry, type SimModelPort } from "@chronica/sim";
+import { FactSchema, PlayerDecisionSchema, abortsTheTurn, buildStation, diffWorlds, formatWorldDate, holdsPolityStanding, type Fact, type Office, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
+import { closeTheBooks, composeChronicle, runSimulationBurst, whoIsWho, whoSeeksThePlayer, type AnsweredDecision, type BurstProgress, type ChronicleEntry, type SimModelPort } from "@chronica/sim";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { requiredDatabaseUrl } from "./database-url";
 import { openInitiatedDialogue } from "./dialogue-service";
@@ -180,11 +181,17 @@ function toFactRow(significanceByFactId: ReadonlyMap<string, number>) {
   });
 }
 
+/** How far the player may ask the world to run at once, in days. */
+export const TIME_SPANS = [7, 30, 90, 180, 365] as const;
+
 export async function submitOrder(
   gameId: string,
-  orderText: string,
+  /** Null to let time pass without giving an order. */
+  orderText: string | null,
   answeredDecision?: AnsweredDecision,
   onProgress?: (progress: SimulationProgress) => void,
+  /** How far the player means to let the world run; omitted, the engine decides. */
+  spanDays?: number,
 ): Promise<SimulationOutcome> {
   const context = await resolveContext(gameId);
   if (context === null) return { status: "error", message: "You are not playing in this game." };
@@ -228,7 +235,7 @@ export async function submitOrder(
 
     const actorRef: OrderPartyRef = { kind: "character", id: characterId };
     const actorPolityId = view.world.characters.find((character) => character.id === characterId)?.polityId ?? null;
-    const burstId = await startBurst(db, { gameId, playerUserId: userId, orderText });
+    const burstId = await startBurst(db, { gameId, playerUserId: userId, orderText: orderText ?? "(time passes)" });
     const timed = createModelPort(db, userId, gameId);
     const port = timed.port;
     const turnStartedAt = performance.now();
@@ -240,6 +247,9 @@ export async function submitOrder(
         world: view.world,
         clock: view.scenarioClock,
         offices,
+        // How those offices are filled, so a consulship that runs out is
+        // refilled by election rather than left empty for good.
+        ...(view.scenarioGovernment === undefined ? {} : { successionRules: view.scenarioGovernment.successionRules }),
         warfare: view.scenarioWarfare,
         ...(view.scenarioMap === undefined ? {} : { terrains: view.scenarioMap.terrains }),
         // Loaded since the life system was written and read only by an admin
@@ -252,6 +262,7 @@ export async function submitOrder(
         actorRef,
         actorPolityId,
         orderText,
+        ...(spanDays === undefined ? {} : { spanDays }),
         ...(onProgress === undefined ? {} : { onProgress: (progress: BurstProgress) => onProgress(phrase(progress)) }),
         ...(answeredDecision === undefined ? {} : { answeredDecision }),
         knownFacts: parseFacts(factRows),
@@ -261,6 +272,13 @@ export async function submitOrder(
     } catch (error) {
       await failBurst(db, burstId, error instanceof Error ? error.message : String(error));
       if (error instanceof InsufficientCoinsError) return { status: "error", message: "You have run out of coins." };
+      // The provider refusing every call -- no credit on the account, a key it
+      // will not take -- stops the turn before anything is saved, and says so,
+      // rather than a season passing in which nothing came of the order.
+      if (abortsTheTurn(error)) {
+        console.error(`[burst ${burstId}] the model provider refused the turn:`, error);
+        return { status: "error", message: "The model provider refused the request (its account may be out of credit). Nothing was saved and your world is unchanged; try again once it is restored." };
+      }
       throw error;
     }
 
@@ -270,6 +288,11 @@ export async function submitOrder(
     // recording, the player's own among them, and costs nothing when no matter
     // did. What still gates it is weight, inside `composeChronicle`.
     onProgress?.({ stage: "chronicling", line: "The historian sits down to write." });
+    // Whatever the historian does, the turn it is writing up has happened. A
+    // throw in here used to escape past `failBurst`, leave the burst marked as
+    // running, and lock the game out of new orders for fifteen minutes while
+    // discarding a world the model had already paid for. The facts are kept
+    // either way; only the prose is lost.
     const chronicle = await composeChronicle({
       port,
       clock: view.scenarioClock,
@@ -286,6 +309,7 @@ export async function submitOrder(
       storylines: result.world.storylines,
       polityOfCharacter: (id) => result.world.characters.find((character) => character.id === id)?.polityId ?? null,
       nameOf: (ref) => nameOfSubject(result.world, ref),
+      describePerson: whoIsWho(result.world, offices),
       ownEntityIds: ownSideOf(result.world, actorRef.id, actorPolityId),
       personalEntityIds: personallyTouchedBy(result.world, actorRef.id, actorPolityId, offices),
       orderFactIds: new Set(result.orderFactIds),
@@ -296,6 +320,9 @@ export async function submitOrder(
       recentSubjects,
       // And what it actually said, so the historian is not asked to remember.
       recentTitles,
+    }).catch((error: unknown) => {
+      console.error(`[burst ${burstId}] the Chronicle could not be written:`, error);
+      return { entries: [], calls: 0 };
     });
 
     // And the books close because the calendar turned, not because anybody
@@ -360,13 +387,36 @@ export async function submitOrder(
         ...(result.playerDecision === null
           ? {}
           : { decision: { prompt: result.playerDecision.prompt, options: result.playerDecision.options } }),
+        audit: result.audit.map((entry) => ({
+          actorKind: entry.actorRef.kind,
+          actorId: entry.actorRef.id,
+          op: entry.op,
+          kind: entry.kind,
+          ofTheOrder: entry.ofTheOrder,
+          attempt: entry.attempt,
+          reason: entry.reason,
+          delta: entry.delta,
+        })),
       });
     } catch (error) {
+      await failBurst(db, burstId, error instanceof Error ? error.message : String(error));
       if (error instanceof WorldRevisionConflictError) {
-        await failBurst(db, burstId, error.message);
         return { status: "error", message: "The world moved while your order was being carried out. Try again." };
       }
+      if (error instanceof WorldWouldNotLoadError) {
+        console.error(`[burst ${burstId}] ${error.message}`);
+        return { status: "error", message: "Something in this turn would have damaged the save, so it was not kept. Your world is as it was; try the order again." };
+      }
       throw error;
+    }
+
+    // What the engine would not do as written, said where somebody will see it:
+    // an unreadable refusal of the order's own is the order quietly doing less.
+    const unreadable = (attempt: "first" | "repair") => result.audit.filter((entry) => entry.ofTheOrder && entry.kind === "reference" && entry.attempt === attempt);
+    const filled = result.audit.filter((entry) => entry.kind === "assumed").length;
+    if (unreadable("first").length > 0 || filled > 0) {
+      const still = unreadable("repair");
+      console.warn(`[burst ${burstId}] audit: ${filled} detail(s) filled in, ${unreadable("first").length} of the order's act(s) unreadable as written, ${still.length} still after repair${still.length === 0 ? "" : `: ${still.map((entry) => `${entry.op}: ${entry.reason}`).join(" | ")}`}`);
     }
 
     // What the turn actually cost in seconds, per stage.
@@ -555,17 +605,23 @@ const SUCCESSION_OPTION_PREFIX = "succeed-";
 export async function answerDecision(gameId: string, decisionId: string, optionId: string): Promise<SimulationOutcome> {
   const context = await resolveContext(gameId);
   if (context === null) return { status: "error", message: "You are not playing in this game." };
-  const { db, close, playerId } = context;
+  const { db, close, playerId, characterId: askedAs } = context;
   let answered: AnsweredDecision;
   try {
     const open = await getOpenDecision(db, gameId);
     if (open === undefined || open.id !== decisionId) return { status: "error", message: "That decision is no longer open." };
 
-    const options = PlayerDecisionSchema.shape.options.safeParse(open.options);
-    const chosen = options.success ? options.data.find((option) => option.id === optionId) : undefined;
+    // Read one by one, not against the proposal's floor of two. A decision
+    // already standing is the one on the player's screen, and a succession
+    // with a single heir -- the house otherwise extinct -- was saved with one
+    // option and then refused on every answer as "not one of the options",
+    // which locked the game for good.
+    const options = (Array.isArray(open.options) ? open.options : []).flatMap((raw: unknown) => {
+      const option = PlayerDecisionSchema.shape.options.element.safeParse(raw);
+      return option.success ? [option.data] : [];
+    });
+    const chosen = options.find((option) => option.id === optionId);
     if (chosen === undefined) return { status: "error", message: "That is not one of the options." };
-
-    await resolveDecision(db, decisionId, optionId);
 
     // The one decision that changes who is asking. `successionDecision` mints
     // its option ids as "succeed-<characterId>" precisely so this needs no
@@ -582,5 +638,39 @@ export async function answerDecision(gameId: string, decisionId: string, optionI
     await close();
   }
 
-  return submitOrder(gameId, `The ruler has answered: ${answered.label}.`, answered);
+  // The decision is closed only once the world has heard the answer. It used
+  // to be closed first, so a turn that then failed -- a conflict, a provider
+  // down, coins run out -- spent the answer on nothing: the question was gone,
+  // the world never learned what was chosen, and nothing could ask it again.
+  let outcome: SimulationOutcome;
+  try {
+    outcome = await submitOrder(gameId, `The ruler has answered: ${answered.label}.`, answered);
+  } catch (error) {
+    await restoreAskingCharacter(gameId, playerId, askedAs);
+    throw error;
+  }
+  if (outcome.status !== "ok") {
+    await restoreAskingCharacter(gameId, playerId, askedAs);
+    return outcome;
+  }
+  const closing = await resolveContext(gameId);
+  if (closing !== null) {
+    try {
+      await resolveDecision(closing.db, decisionId, optionId);
+    } finally {
+      await closing.close();
+    }
+  }
+  return outcome;
+}
+
+/** Puts the player back behind the eyes they answered from, when the answer did not take. */
+async function restoreAskingCharacter(gameId: string, playerId: string, characterId: string): Promise<void> {
+  const context = await resolveContext(gameId);
+  if (context === null) return;
+  try {
+    await context.db.update(schema.players).set({ characterId }).where(eq(schema.players.id, playerId));
+  } finally {
+    await context.close();
+  }
 }

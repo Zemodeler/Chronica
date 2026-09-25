@@ -63,12 +63,28 @@ export function provisionInWords(status: "provisioned" | "shortage" | "critical"
  * is a force nobody has undertaken to pay, which is a different and worse
  * thing, and the engine has always modelled it.
  */
-export function payInWords(obligation: MoneyObligation | undefined, arrearsPeriods: number): string {
+export function payInWords(
+  obligation: MoneyObligation | undefined,
+  arrearsPeriods: number,
+  /**
+   * Whether the wages come off the army's own chest rather than somebody
+   * else's books. A commander needs to know which arrangement he is on: men
+   * paid out of what they take are paid as long as they keep taking, and the
+   * day that stops is not a day he should learn about from the desertions.
+   */
+  fromTheirOwnChest = false,
+): string {
   if (obligation === undefined) return "Nobody has undertaken to pay them";
-  if (obligation.arrears <= 0 && arrearsPeriods <= 0) return "Paid";
+  if (obligation.arrears <= 0 && arrearsPeriods <= 0) {
+    return fromTheirOwnChest ? "Paid out of what they take" : "Paid";
+  }
   const periods = Math.max(arrearsPeriods, obligation.missedPeriods);
-  if (periods <= 0) return "Something is owed to them";
-  return `${periods === 1 ? "One period" : `${periods} periods`} of pay owed`;
+  const owed = periods <= 0
+    ? "Something is owed to them"
+    : `${periods === 1 ? "One period" : `${periods} periods`} of pay owed`;
+  // Said plainly, because it is the commander's own doing and the remedy is
+  // his: the chest is empty, and filling it means taking something.
+  return fromTheirOwnChest ? `${owed}, and their chest is empty` : owed;
 }
 
 /**

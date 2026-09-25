@@ -232,6 +232,20 @@ export const OrchestratorOutputSchema = ProposalSchema.extend({
     .max(12)
     .default([]),
   /** VISION §23's three outcomes. Also advisory -- pressure and budget decide. */
+  /**
+   * What the world does beside the order, rather than because of it: THE
+   * WORLD STIRS carried out, DUE NOW falling due, empty countries filled, and
+   * any other power's people getting on with their own business. `deltas` is
+   * the order and what it caused.
+   *
+   * They were one list, so the engine could not tell "the Carthaginian fleet
+   * put to sea", which the world may say, from "the Carthaginian fleet turned
+   * back because a Roman told it to", which it may not -- and the second was
+   * carried out every time it was written. What is in `deltas` and acts on
+   * another power's men, money or offices now needs them to answer to the
+   * person giving the order.
+   */
+  worldDeltas: z.array(WorldDeltaSchema).max(24).default([]),
   outcome: z.enum(["continue", "chronicle", "player_decision"]),
   playerDecision: PlayerDecisionSchema.nullable().default(null),
   /**

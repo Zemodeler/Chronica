@@ -38,11 +38,12 @@ arbitrates, assigns every id, and applies it atomically.**
 
 In `packages/shared/src/sim/`:
 
-- `deltas.ts` — `WorldDeltaSchema`, a discriminated union of **29 operations**. The complete set of
+- `deltas.ts` — `WorldDeltaSchema`, a discriminated union of **46 operations**. The complete set of
   ways the world can change: money, income, obligations, loans, projects, forces, battle, characters,
   beliefs, intentions, pressures, social events, generic entities, authority grants, order decisions,
   diplomatic stances, polity outlooks, legitimacy, province material, political procedures, support
-  positions, holdings, and the threads of history the world follows.
+  positions, estates bought, granted, improved and transferred, and the threads of history the world
+  follows.
 - `proposal.ts` — what an actor returns: `narrativeSummary`, `frictions`, `deltas`, `facts`,
   `discoveries`, `delegations`, `schedule`. The orchestrator and NPC cognition return the *same*
   shape, which is how VISION §10's symmetric agency falls out of one contract instead of a parallel
@@ -175,6 +176,10 @@ per tax payment would drown every Chronicle in bookkeeping. An unpaid army empha
 Without this the queue was write-mostly — a milestone came due, was mentioned to the orchestrator,
 and was retired whether or not anything happened. "Raise two legions" scheduled legions that could
 never arrive.
+
+Two things the tick now does that are decisions only in the sense a calendar makes them: it collects
+a power's taxes **no faster than its lands can bear**, and it keeps **elective offices filled** —
+ending terms, calling elections nobody called, and counting the votes. Both are in §5b.
 
 ### Why `packages/sim` is its own package
 
@@ -380,6 +385,25 @@ Played: "Invade the Boii lands" now produces Catamandus of the Boii with a 5,200
 outnumbering Rome's field army — along with Bellovesus of the Insubres, Apuanes of the Ligurians and
 Dumnorix of the Veneti, each with forces and a commander that resolves to a real person.
 
+### Births (`births.ts`)
+
+Every other way into `world.characters` is somebody needing a person. Nobody was ever born, so a
+house without a son stayed without one and primogeniture found no heir. A birth is now rolled at the
+mother's own life review in `reviewLives`, hashed on that review so a replay is the same world. It
+needs a living husband by a `spouse_or_partner` tie, in the same province. The mother must be aged
+15–44, and at least 450 days must have passed since her last child. The rates are the engine's (40%
+a year at 20–29), not the scenario's, so saves begun before them have children too. They come to
+about five children in twenty years of marriage.
+
+The child takes the father's power, culture, faith and house. They get the parents' averaged skills
+and a third of the father's standing, and both parents are recorded as parents. The eldest son is
+named for his father; the others are "Second son of …" until somebody names them better. Childbed
+kills 1.5% of mothers outright, or opens a peril for one whose death would be an event.
+
+The opening world records no marriages, so nobody is born until one is made in play (`family_tie_set`,
+`character_create` with `kin`, or a declared wife). A declared partner is now the player's opposite
+sex; every generated person used to be a man.
+
 ---
 
 ## 5a. The world makes trouble
@@ -470,6 +494,617 @@ authority derives from offices. Scenario version 20 seats the King of Syracuse, 
 Mamertines and Carthage's commander in Sicily. And COUNTRIES WITH NOBODY IN THEM now names the land
 each country holds, because told only that the Numidians had no army the model raised one in a
 province called "numidian-kingdoms".
+
+---
+
+## 5b. Offices, taxes and land
+
+Three gaps with one shape: the fields existed, a model could write to them, and nothing held them to
+anything. A consul's term ended and nobody was elected. A tax could be set to any number and was
+collected in full. A private citizen had no land, and no lawful way to get or improve any. Each is
+now kept by code, and the model's part is reduced to what it is good at: who stands, who backs whom,
+what is built on the land.
+
+### Elections (`elections.ts`)
+
+`termExpiresAtStep` had been on every office seat since the character system was written. The tick
+learned to end terms, and then nothing followed: on day 365 the consul laid down his office, and the
+republic had no consul for the rest of the game, because no one had been handed the question of an
+election. The second consulship was never filled at all.
+
+An office whose succession rule is `elective` is now kept by the calendar, at the end of every tick
+(`holdElections`):
+
+1. **The opening.** A seat that was never filled is filled at once, by the eligible man of most
+   standing (`resolveEligibility` against the seat's requirements, then prestige). The player is
+   never handed an office unasked; with the player as Curius, the chair goes to Ogulnius.
+2. **A vacancy.** The men who could win it — eligible, not holding a seat, at least half renown — get
+   an `opportunity` pressure: *the office stands vacant; he could call the Senate to an election, and
+   stand himself.* That is what brings them into the next round, because `routeAmbientActors` picks
+   people up by their pressures. They are told once per vacancy (the pressure id names it).
+3. **The election is called** as soon as somebody puts a man forward — a `nomination` or
+   `appointment` of a person, in words naming the office (`labelNamesOffice`) — or when the 30-day
+   canvass runs out, or at once if there is nobody of standing to call it. The engine opens it as a
+   `vote` procedure on the seat, before the office's institution, presided over by a sitting
+   colleague if there is one, and announces it publicly with its polling day.
+4. **Polling day** (20 days on) decides it in code. The candidates are whoever called it, whoever
+   was put forward, and — if that is fewer men than seats — the Senate's own choice of the likeliest.
+   Each scores `prestigeBps` plus net declared influence (the latest `SupportPosition` of each
+   supporter on his candidacy: for, less against). Seats go to the top scorers; ties break by id,
+   the same way every time. Winners are seated for the office's term, the election and the winning
+   candidacies pass, the rest fail, and a public fact names who won over whom.
+
+The model argues; it does not count. `political_procedure_resolve` on an election is refused — it
+used to close the procedure and seat nobody, since that handler only seats the subject of an
+appointment, and the engine then called the same election again. The orchestrator's rule 9 says so in
+one clause: a man stands by a nomination naming the office, and the count decides.
+
+The player may stand and win; he is simply never put forward for. A test has him beat Ogulnius on
+declared backing, and another has backing carry Ogulnius past him.
+
+**Terms.** `Office.termDays` says how long a holding lasts — a consulship's 365, null for an office
+held for life. A save from before offices said so infers it: an office with a held seat carrying an
+expiry, or one emptied by an expired term, runs by terms of a year. A leader acclaimed for life has
+none: the Mamertine leader is elected only if his seat falls vacant some other way. Every holding of
+a termed office gets its term from the day it began, however it was seated.
+
+This found a bug in `seatCharacterInOffice`, which every appointment goes through: it never touched
+the seat's expiry. A seat vacated by an expired term keeps that date, so a consul seated into it by
+a vote the model resolved was unseated again by the very next tick. Seating now sets the new holder's
+own term, or none.
+
+### What the land can bear (`material/taxation.ts`)
+
+A tax was a number the model wrote. "Double the tributum" doubled the revenue; "multiply it by ten"
+multiplied it by ten, collected in full every month from a province in revolt as readily as from a
+contented one. Every province carried a `taxCapacity` and a stability that were printed in the slice
+and bounded nothing, and `applyTaxationDraw` — the one function that would have tied them together —
+had no caller. It is deleted.
+
+Now a power's **domestic revenue** — `tax`, `land` and `tribute` income paid into its own treasury,
+with no foreign counterparty — is weighed each tick against what its held provinces can bear:
+
+- **Bearable** is 10% (`TAX_EXTRACTION_BPS`) of each held province's `taxCapacity × stability`,
+  summed. Disorder pays less.
+- **Asked** above bearable is not collected: every domestic source is paid in the same proportion
+  (`collectedShare`), and a `tax_shortfall` fact tells the government its collectors came back short.
+- **Asked above half of bearable** (`CUSTOMARY_TAX_BURDEN`) lowers the stability the power's
+  provinces settle to — a level, through the same `ProvinceTargets` a temple uses, not a one-off blow.
+  4,000 bps of settling point per whole multiple of bearable past the customary, at most 6,000.
+  Lower order lowers what can be borne, so over-taxing feeds on itself.
+
+Trade is not a levy on anybody's land and is left alone; war and blockade already bound it.
+Estates' yields go to private purses and are not a government's revenue.
+
+The slice shows whoever can open the treasury one line: *asked of bearable, in words, and what
+pressing does*. Without it a model triples a tax whose cost it cannot see.
+
+Measured over a year of Roman taxation at the new scenario rates:
+
+| Tributum | Monthly revenue | Roman stability after a year |
+| --- | --- | --- |
+| as authored (1 100) | 1 800 | 70% |
+| doubled | 2 790 | 69% |
+| tripled | 3 780 | 53% |
+| five times | 5 390, falling to 1 155 | 10% |
+
+A tax raised moderately pays; raised hard it pays and costs order; raised past what the land can give
+it collapses both. The extraction rate is set so every power in the opening asks under the customary
+half — Syracuse, one province carrying a city's whole treasury, is the tightest at just under it.
+
+### Land a man owns (`material/estates.ts`)
+
+`Holding` had been in the schema since the character system, with a legal holder, physical control,
+an income source and an inheritance rule — and the scenario's list of holdings was empty. A senator
+was a purse and an opinion. A private citizen ordering "I develop my estate" had no estate; ordering
+"I develop this province" touched a government's province, which is a breach — and since the men and
+money did not answer to him, `nobodyListens` usually meant it did not happen at all.
+
+Two ops, both priced by the engine:
+
+- **`holding_create`** — an estate of a band (`slight`, `marked`, `great`) in a province, for a
+  holder. Bought from an account (`priceFromAccountRef`), or granted out of the public land (null).
+  It yields 0.2%, 0.5% or 1.2% of the province's monthly tax capacity to the holder's own purse every
+  month, and costs 20 months of that yield. A smallholding in Latium yields 40 and costs 800.
+- **`holding_improve`** — works on an estate (`works` says what, in words), paid from an account now:
+  0.1%, 0.25% or 0.5% of the province's capacity added to the yield, at 30 months of the addition. No
+  estate yields more than 3% of its province, however much is spent on it.
+
+The shares are an order of magnitude below a market's (3%, 8%, 15% in `standing-effects.ts`) because
+an estate is a man's living, not a town's trade. The price is far below what land ever fetched —
+deliberately: at twenty years' rent no senator in the game could buy a farm with everything he owned.
+
+**Authority follows the money.** Both ops are weighed against the account paying for them, not the
+province. A man buying or improving land with his own purse holds his owner's grant over it and needs
+nobody's leave; improving his farm out of the treasury is spending money that is not his. A grant of
+public land is disposing of the state's property, so it is weighed against the treasury of the power
+holding the province: a consul, who may spend from it, grants lawfully; a private man breaches.
+Developing a whole province is still a government's act.
+
+The scenario's leading men now own estates, each at the yield `holding_create` would set for that
+size in that province, so land authored and land bought are the same kind of thing: Curius's famously
+modest Sabine farm (40 a month), the Genucian estates and the Ogulnian lands in Campania, Hanno's and
+the Gisconids' in the African hinterland, and Leptines' outside Syracuse. The slice shows our people's
+estates with their holder's id and, to whoever can open the purse it pays into, their yield.
+
+### Income comes from something
+
+The estates were priced by the engine, and then `income_source_upsert` let the model write any figure
+into any purse. Authority is judged against the account receiving the money, and a man holds
+authority over his own purse — so "he trades grain to Rome" could lawfully hand a private man five
+thousand a month, an estate's engine-set yield could be rewritten to anything, and a government's
+revenue could be pointed at somebody else's treasury by naming the new recipient.
+
+Now a figure may only be written into a **government's** treasury, where the tick bounds what its
+lands bear. Into a person's purse or an army's chest it is refused, and so is changing an income
+whose origin is an estate or whose recipient is private, and moving an income to a different
+recipient. The refusals are `reference` rejections, not the world's, so the repair pass puts the
+order the right way: a person's income comes from an estate, an office's pay, a venture standing in
+the world (`generic_entity_create` with an income effect), or a payment somebody makes him
+(`obligation_upsert` naming him as recipient). Updating an income also no longer resets its origin
+to "polity", which quietly turned an estate's yield into state revenue.
+
+### A merchant's trade (`material/ventures.ts`)
+
+A declared merchant got a purse and nothing else. Trade was an income with a label; he could not own
+a ship without breaching his whole country's military authority, and one raised for him came out as
+four hundred infantry; lending his own money to his own government was recorded as a breach of its
+treasury; and the only thing that could cut his trade was a blockade of any port his country held,
+anywhere.
+
+- **`trade_venture_open`** puts money into trade between two provinces (each must have a town). The
+  engine sets the monthly return — 0.3%, 0.8% or 1.8% of the *poorer* province's tax capacity, since
+  trade is no richer than its thinner end — and a price of 15 months of it: faster to pay back than
+  land, and riskier. A venture between two ports goes by sea. The far end's power, if foreign, is
+  the income's counterparty. **`trade_venture_close`** winds it up; the capital is not returned.
+- **What stops it.** A war with the counterparty (the same cut every foreign revenue has), or an
+  enemy fleet — at war with the owner's power — off *either of its own ports*. A fleet off some other
+  harbour of his country no longer touches him; the polity-wide blockade still applies to a
+  government's own trade. Stopping and resuming are each a fact his side knows, and
+  `TradeVenture.interruptedBy` says why.
+- **His route is his business.** Both ends of every running venture join his station's provinces,
+  and the attention router counts news there as *"it happened where their trade runs"*.
+- **Ships of his own.** `force_create` takes a `categoryId` from the scenario's troop categories
+  (`warship`), and a force paid through an obligation on a *person's* purse is weighed against that
+  purse, not the state's army. A purse's owner holds a latent command grant over it
+  (`owner:…:company`) — command of men his own money pays — which reaches nothing else, and which the
+  station's list of powers leaves unsaid, because owning a purse is not leading men.
+- **Lending.** A `loan_open` whose lender is a person is weighed against the lender's purse when the
+  lender is the one acting; taken by a government's official, it is the borrowing that is judged.
+- **Project income.** A project whose outcome is an income may not pay a private purse (a private
+  work that pays is a building with an income effect), and what a finished one pays a treasury is
+  capped at a great market's share (15%) of the province it stands in.
+
+### A man in the ranks
+
+A force was a commander and headcounts. So a man commanded an army or was nowhere in it: a player
+who declared himself a legionary was handed four hundred retainers and made their commander, only
+commanders rolled for their fate in battle, nobody near him had reason to notice him, and there was
+nothing to desert. `Force.memberCharacterIds` now names the people serving in its ranks.
+
+- **Declaring.** A role naming soldiering (`soldier`, `legionary`, `hoplite`, `rower`, `mercenary`
+  and so on — `RANKS_ROLE_WORDS`) enlists the player in an army of his own power, the one where he
+  stands or else the largest, and puts him where it stands. A role that also names a command ("a
+  veteran centurion") still commands.
+- **Battle.** `memberFates` gives each named man his own fate from his army's actual losses: killed
+  as often as the men around him died, wounded as often as they were, and three in ten of the
+  wounded maimed with an `INJURIES` entry. The roll is hashed from the battle and his name, outside
+  the resolver's random sequence, so replays match and no existing battle changes. A soldier's fate
+  is a fact known to his own side — named with his army's polity, since a polity fact is known only
+  to those whose polity it names — and the battle account the historian reads lists every named man
+  and what became of him.
+- **Death and promotion.** A dead man is struck from every army's ranks, and a dead commander is
+  succeeded from his own ranks first — which `killCharacter`'s comment had always claimed and could
+  not do.
+- **What he sees.** The army he serves in is in his station's `forceIds`, so its strength, morale and
+  whereabouts are his to see and it is his own business in the Chronicle. Its chest stays the
+  commander's.
+- **Who notices.** The attention router scores nearness for the first time: an army of one's own
+  involved (+20), a comrade in the same army touched (+25), news happening where one stands (+15).
+- **Enlisting, discharge, desertion.** `force_membership_set`. Taking service is nobody's authority
+  to grant. A discharge is the commander's. A desertion is a breach — of the deserter only; written
+  by whoever is telling the world's story about someone else, it would have been recorded as the
+  teller's, the tenth way this check could manufacture insubordination — and marks him `deserter`,
+  with a fact his side knows and his army is named in, which brings his commander to it.
+
+"I fight bravely in the front line" still changes nothing: courage is not a premise a battle weighs.
+
+### The economy they run in
+
+Measured against the engine's own wage rate — 0.075 a man a month, so a 4 000-man legion costs 300
+— Rome's 920 a month left one new legion eating most of its surplus. Scenario **version 27** roughly
+doubles every power's revenue (Rome to about 1 800: the tributum, the allies' contributions and the
+public land) and gives every power thousands in its chest: the Mamertines go from 600 to 2 500, with
+strait tolls that now pay their soldiery. That retires a built-in crisis — they used to run dry in the
+eleventh month — and `unpaid-armies.test.ts` now sets up the broke garrison it tests.
+
+Version 27 also carries the consulship's term and the estates. Running saves stay pinned to their own
+version and keep their old economy and empty land; elections (with the inferred term) and the tax
+ceiling apply to them anyway.
+
+---
+
+## 5c. Every station a person can hold — the plan
+
+**Status, 2026-09-24: all eight phases are built** (uncommitted, branch player-as-a-character). What
+landed, and where it differs from the plan below:
+
+- **Phase 4.** `Character` has `legalStatus`, `gender`, `ownerCharacterId` and `peculium`. Scenario
+  faiths are named and set on every character. The player's declared faith, age (worked out at
+  declaration), gender and status are kept, and a declared slave gets no office and no command.
+  `legal_status_set` covers freeing (the owner becomes patron), selling, a peculium, and enslaving
+  only someone already captive. `notHisToSpend` refuses a slave's spending without a peculium, and
+  a slave leaving without leave is recorded as a public runaway. Offices require free birth and
+  male, the Vestals female. `character_create` takes `gender` and `legalStatus`.
+- **Phase 5.** `service_contract_open` and `service_contract_close`, stored in `material.contracts`:
+  - The advance is paid up front, and the monthly pay is a salary obligation. The contract lapses
+    on the first missed month (`contracts.ts`, run each tick).
+  - A mercenary company answers to whoever hired it. An envoy holds a delegated `negotiate` grant
+    for the length of the contract.
+  - A tax farmer pays for the farm and takes the province's customary share, and his take counts
+    against the tax ceiling.
+  - Walking out before the term costs 300 standing and the employer's trust.
+  - Healing is capped at 500 without a physician. With `physicianRef` the engine rolls on the
+    physician's learning.
+  - Not built: an engineer's skill setting a project's pace, and a gladiator's games feeding
+    standing.
+- **Phase 6.** Plot kind `espionage`, outcome `learned`. A success writes a private report and
+  beliefs to the sponsor: the target's secrets, intentions, commands, purse and relations, all of
+  them on a full success. A failure is a public "spy caught".
+- **Phase 7.** Personal narrator seeds (below). `isOwnPurseGrant` stops a person's own purse counting
+  as authority in attention routing; a private man rides the ambient rotation below anyone with
+  business. Successors are offered by closeness, with office holders last. The prompt says "the
+  player", not "the ruler".
+- **Phase 8, done differently.** `Force.outlaw` rather than a nullable `polityId`: about sixty
+  readers of a force's power would each have needed checking. An outlaw band:
+  - is its own side in battle, and fights with no war declared
+  - raids its old country
+  - is reached by no government's grant
+  - can only be raised with a private purse
+  - comes from a garrison going outlaw through `force_modify`, which is public news.
+- **Prompt:** held at 63 000 by naming `Money`, `SignedBps`, `Name` and `Days` once. The slice
+  ceiling moved to 14 700 for faith.
+
+Built earlier the same day:
+
+- **Phase 1** is `apply/own-business.ts`, consulted before the authority test. A letter of one of
+  the personal kinds (letter, congratulation, warning, protest, marriage offer) in the writer's own
+  power's name is never a breach, whoever it is addressed to. Foundations need no land of their
+  own: what makes one private is that its keep comes out of the founder's purse. An arrangement's
+  upkeep is now weighed against the account paying it, and needs the power to spend from it.
+- **Phase 2** is `standingCause` on `character_state_set`, clamped per cause by
+  `characters/standing-causes.ts`. The engine's own shifts (battle ±400, election +500) stand
+  outside the clamp.
+- **Phase 3** is scenario **v28**:
+  - Each office has a `kind`, `seatCount`, `rank`, `cycleDays`, `vetoes` and
+    `enrolsFormerMagistrates`.
+  - New requirements: `min_age`, `held_office` and `not_held_within_years`.
+  - Waivers live on `Character.eligibilityWaivers`, and tenure on `Character.officesHeld`, which
+    `recordTenures` writes each tick.
+  - A college bigger than the men it names is elected whole, once a cycle. Places nobody named
+    wins go quietly to men of no note.
+  - A man presiding over an election beneath him does not stand in it.
+  - Rising lays down magistracies only.
+- **Beyond the plan, at the user's request:**
+  - A march of more than one province becomes a journey project automatically (8 days a
+    province).
+  - An order that nobody had to obey is carried out anyway when the one it depends on is kin, or
+    thinks well enough of the man asking, or wanted it already (`listensAnyway`). It still breaches.
+  - The narrator adds personal seeds (`personalSeeds`) beside the country's, measured on the
+    player's purse, debts, health, standing and enemies. They land on him, his circle, or the
+    ground he lives off.
+
+Where it says "the restrictiveness work", it
+means the concurrent session that is building `standing_shift`, `family_tie_set`, `character_death`,
+civil strife between forces of one power, office and institution reform, re-election and the
+`abroad` case in `nobody-listens.ts`. This plan uses those and doesn't rebuild them. A phase that
+depends on one waits until it has landed.
+
+### What a survey of 28 roles found
+
+- **Work:** consul, general, soldier, merchant, landowner, anyone ordering an assassination.
+- **Partly work:** king or chieftain, pirate, mercenary captain, rebel or pretender, banker,
+  philosopher (through an academy), priest (through a temple), craftsman, envoy.
+- **Broken:**
+  - senator and every magistrate below consul (the scenario has four offices in all)
+  - pontifex, augur, Vestal (no priesthoods, and `faithId` is null on every character)
+  - spy (no way to learn anything)
+  - tax farmer (no contract to collect for the state)
+  - physician (healing is a free `healthDeltaBps`)
+  - poet and historian (standing can't move)
+  - engineer, gladiator, peasant (no contract to be hired under, and nothing to do)
+  - slave and freedman (no legal status)
+
+The finding that matters most is that **ordinary private life goes on record as insubordination.**
+`actorIsAnswerableFor` weighs a private man's talk, letters and foundations against his whole
+power's authority, and he holds none of it. So a philosopher teaching or a senator speaking is
+logged as a breach.
+
+The eight mechanisms below are general. None of them is a patch for one role, and each phase can
+ship on its own.
+
+### Decisions settled with the user
+
+| Question | Answer |
+|---|---|
+| Scope | All eight mechanisms, staged |
+| Overlap with the restrictiveness work | Build on theirs; wait where it's shared |
+| Which powers get real offices | Every power |
+| Career ladder | Historical order, minimum ages and the ten-year gap before holding an office again, all checked in code; a passed law or a dictator can waive them |
+| Senate, council of elders, the 104 | An office with many seats, held for life. Only named characters hold seats; the rest of the body is implied |
+| Tribune's veto | Friction only: a fact and a line in the slice, with no code block |
+| Standing | The model proposes an amount; the engine clamps it according to the cause |
+| Legal status and gender | Code enforces three things: office eligibility, an owner's say over a slave, and manumission |
+| Service contracts | An optional advance at signing, plus monthly pay made by the engine |
+| Spying reveals | Secret facts, intentions, forces and money, relations: all four |
+| Narrator and the player | **The same as NPCs, death included.** This overrides the "lenient" line in the 2026-09-19 plan |
+| Private sphere | Speech and opinion, letters, one's own foundations, one's own household |
+| Outlaws | A force with no polity, owned by a purse |
+| Physician | Healing is a deterministic roll on skill, and the model no longer writes it |
+
+### Prompt budget
+
+The prompt budget comes first, because it rules out the obvious way to do this. The feedback rule
+stands: no per-role paragraph in the orchestrator prompt. Across all eight phases the plan adds
+**three ops**:
+
+- `legal_status_set`
+- `service_contract_open`
+- `service_contract_close`
+
+Everything else is one of these:
+
+- **Data:** offices, eligibility requirements, faiths.
+- **A new value in an existing enum:** the `espionage` plot kind, and standing causes.
+- **An engine rule with no op.**
+
+Each new op becomes a clause under the principle it belongs to. Contracts go under *pay*, legal
+status under *standing*.
+
+The slice ceiling of 14 500 is the tighter limit. There will be many more offices, so the slice
+shows an office only when the viewer holds it, is eligible for it, or is in a procedure about it.
+
+### Phase 1 — A private sphere
+
+*Depends on the `abroad` check landing, since both edit `actorIsAnswerableFor` and `nobody-listens.ts`.*
+
+One predicate, `isOwnBusiness(delta, actor, world)`, is consulted in `actorIsAnswerableFor` before
+any scope by polity. When it's true, the act is judged against the actor alone. It is true for:
+
+- **Speech and opinion.** `social_events` and `belief_set` where the actor is the speaker, and
+  `political_support_set` inside a body the actor sits in.
+- **Letters.** Writing to anyone. The recipient decides whether to answer, through their own
+  cognition. This makes the access ladder's promised "you may always write" step real. Today it
+  has nothing behind it.
+- **The actor's own foundations.** `generic_entity_create`, `holding_create` and structures, when
+  they are paid from the actor's own purse and stand on land the actor holds or buys in the same
+  answer.
+- **The actor's own household.** Their slaves (Phase 4), their clients, their family, and anyone
+  hired under a contract with them (Phase 5).
+
+It is still false for anything whose instrument answers to someone else. A private man founding a
+school on public land, or paying for it from the treasury, is judged as before.
+
+**Tests:**
+- A philosopher teaches.
+- A senator speaks against a motion.
+- A private man writes to Hieron.
+- A matron endows a shrine.
+
+Each of these must produce zero breach facts. The negative case must still produce one: a private
+man paying for his school from the treasury.
+
+### Phase 2 — Standing that moves
+
+*Depends on `standing_shift`.* This phase adds only the cause table and its feeders.
+
+The model names a cause and proposes an amount. The engine clamps the amount to that cause's ceiling
+and scales the ceiling by the size of the event:
+
+| Cause | Ceiling (bps) | Scaled by |
+|---|---|---|
+| victory in the field | ±1 500 | enemy strength engaged |
+| triumph or ovation | +1 000 | once per victory, and only after a victory |
+| games given, public works | +800 | money spent against the giver's own standing |
+| office held, priesthood entered | +500 | rank of the office |
+| patronage, a client won | +300 | the client's standing |
+| literary or learned work | +400 | learning skill |
+| scandal, bribery exposed, defeat | −1 500 | a fact must exist first |
+
+The bands are a first calibration. Tests pin them. Scaled by one's own standing means the same games
+lift a nobody more than they lift a Curius.
+
+`ELECTABLE_MIN_PRESTIGE_BPS` stops being one global 5 000. It becomes a `min_prestige` requirement on
+each office: quaestor 3 000, aedile 4 000, praetor 5 000, consul 6 000, censor 7 500. That lets a
+declared player, who starts at 3 000, stand for the first rung.
+
+### Phase 3 — The real offices, for every power
+
+*Depends on the other session's office and institution reform and re-election, since both change
+`elections.ts`.* The office list itself is scenario data, which is **v28**.
+
+Every power in the scenario gets offices:
+
+- **Rome (264 BC):**
+  - Magistrates: quaestor (8 seats), aedile (2 curule and 2 plebeian), praetor (1), tribune of
+    the plebs (10), censor (2, an 18-month term, every 5 years), dictator (6 months, named by a
+    consul and never elected).
+  - Senate: a membership office.
+  - Priesthoods: pontifex maximus and the pontifices, augurs, 6 Vestals.
+- **Carthage:** two suffetes (annual), the council of elders and the 104 (both membership offices),
+  and priesthoods of Baal Hammon and Tanit. The strategos stays.
+- **Syracuse:** the king's council (membership), strategoi, and the priest of Olympian Zeus (annual).
+- **Mamertines and the Campanians of Rhegium:** a meddix and an assembly.
+- **Tribal polities:** one shared template of chieftain, council of elders and priest.
+
+**How a seat is filled** is recorded per office through `successionRuleId`:
+
+- Popular election: the elections that already exist.
+- Co-optation: augurs and pontifices. The college's members choose, decided on the same prestige-and-support rule.
+- Appointment: Vestals, chosen by the pontifex maximus. A dictator, named by a consul.
+- Enrolment: the Senate. Censors enrol members through `office_seat_set`, and at the end of a
+  term the engine seats every former magistrate who isn't already in.
+
+**The career ladder** needs new eligibility requirement kinds: `min_age`, `held_office` (the
+required earlier rung), `not_held_within_years` (the ten-year gap), `legal_status`, `gender` and
+`faith_membership`.
+
+- The waiver is a resolution clause on a passed law, using the reform machinery the other session
+  is building, or an act by a sitting dictator. Either writes an `eligibility_waiver` onto the
+  person for one office and one term.
+- The engine keeps dropping sitting holders from their own election. Re-election belongs to the
+  other session.
+
+**Veto:** a tribune who intercedes writes a public fact onto the procedure, and the slice shows
+"vetoed by X" beside it. Nothing in code stops the vote. It's friction the model is expected to
+honour, and a vote that goes ahead over it is a scandal feeding Phase 2.
+
+**Priesthoods** grant sacral acts through `authorisedActionIds`: taking the auspices (which can
+delay a procedure the way a veto does), `belief_set` over the faith, and temple funds. They need
+`faithId` set, which Phase 4 provides.
+
+### Phase 4 — Legal status, gender, faith and age
+
+- `Character` gains three fields:
+  - `legalStatus`: `free` | `freed` | `enslaved`
+  - `gender`
+  - `ownerCharacterId`: a slave's owner, or a freedman's patron.
+- Scenario v28 defines the faiths and sets `faithId` on every character.
+- `player-materialization.ts` stops overwriting what the player declared. It keeps faith (resolved
+  against the scenario's faiths), age (read from the declaration and clamped between 14 and 80),
+  gender and status.
+- Declared family is the other session's to investigate.
+
+The engine enforces three gates:
+
+1. **Office eligibility.** Free (or freed, where the office allows it), male, a citizen of that
+   power. The Vestal is the exception and must be female.
+2. **An owner's say.** An enslaved actor's purse, movement and contracts answer to the owner in
+   `nobodyListens`. The owner can grant a *peculium*: a latent grant over the slave's purse, of the
+   same kind a merchant's company already uses. Without one, a slave spending "his" money is
+   refused, the same way a private man ordering a legion is.
+3. **Manumission, through the new op `legal_status_set`.**
+   - The owner frees the slave, who becomes `freed`. The patron tie is kept and a relation cause
+     is written.
+   - Enslavement comes only through capture in battle (`memberFates`), abduction, or a judicial
+     sentence. It needs an existing fact, and the model can't simply write it.
+
+### Phase 5 — Service contracts
+
+The new ops are `service_contract_open` and `service_contract_close`. They are stored in
+`material.contracts` with these fields:
+
+- employer account
+- employee character
+- role
+- advance
+- monthly pay
+- term in days
+- duties (text)
+- what's still owed
+
+The engine behaves like this:
+
+- **Signing.** The advance moves when the contract is signed, and has to be affordable.
+- **Pay.** Monthly pay runs as an income source from employer to employee. Contracts become the
+  fifth lawful source of private income under the *income comes from something* rule.
+- **Missed pay.** When the employer can't pay, the contract lapses and the employee gets a fact
+  saying so.
+- **Walking out.** Leaving before the term ends is a breach by whoever walks. It writes a trust
+  cause and a Phase 2 scandal.
+- **Authority.** While the contract runs, the employee holds a grant scoped to the role, and the
+  grant ends with the contract.
+
+What the grant does, by role:
+
+| Role | What the contract does |
+|---|---|
+| mercenary captain | the employer controls the force; pay comes out of the contract, not the war chest |
+| hired assassin | the plot is `commissionedBy` the employer. Exposure lands on both |
+| envoy | a grant to negotiate for the employing power, limited to the named counterpart |
+| engineer | project pace reads the engineer's stewardship and learning |
+| physician | may make healing rolls on the employer's household (below) |
+| tax farmer | collects a province's tax for a fixed sum paid to the treasury and keeps the surplus. The tax ceiling applies to *his* demand, and the stability cost falls on him in standing |
+| gladiator | fights at games; games feed Phase 2 for the giver and for the victor |
+
+**Healing** becomes an engine roll. `character_state_set` loses the ability to add positive
+`healthDeltaBps` unless the actor is the engine. A physician's treatment is a roll, by `stableHash`,
+of learning against the severity of the open peril. The model writes that he treats the patient;
+the roll writes the result.
+
+### Phase 6 — Spying
+
+- `espionage` joins `CovertPlotKindSchema`. It runs on the existing plot machinery: the intrigue
+  skill, the time the plot takes, the chance of exposure.
+- A success writes one report fact, visible to the spy and whoever commissioned him. It contains
+  all four things the user asked for:
+  - facts the target knows privately (the spy is added as a knower)
+  - the target's current intent, ambitions and pressures
+  - the true strength and position of the target's forces, and their treasury or purse
+  - the target's strongest relations
+- Failure exposes the spy: a relation cause against him and a Phase 2 scandal.
+- This is also where the map overlay's leak becomes a feature rather than a bug. Once the
+  restrictiveness work filters the overlay by station, spying is how a person gets to see past it.
+
+### Phase 7 — The world reacts to minor stations
+
+*Depends on the restrictiveness work's account of how the narrator's drama is measured.*
+
+- Remove the `character.id !== input.playerCharacterId` exclusion at `narrator.ts:604`. At the
+  user's choice, the player is a narrator target exactly like an NPC, death included.
+  - Death still comes only through `mortality.ts` perils, which stay open long enough to be acted
+    against, or through `character_death`.
+  - The succession flow for a dead player already exists.
+- The narrator's tension is measured on the person, not the power. For a private man that means
+  his purse, his debts, his relations and his health, not Rome's treasury.
+- Prompts stop calling the player "the ruler".
+- A purse doesn't count as holding power. The owner grants that come from `owner:<account>` make
+  nobody a figure of the state in attention routing, in the access ladder's peer test, or in the
+  succession offer list.
+
+### Phase 8 — Stateless forces
+
+- `ForceSchema.polityId` becomes nullable. A null polity means the force answers only to the purse
+  that pays it, through the latent company grant the merchants already use.
+- Such a force:
+  - can engage anyone (no same-side rule applies)
+  - can raid, through `force_raid`
+  - can be at sea, through a naval `categoryId`
+  - can be hired under Phase 5
+- Powers whose coasts it raids hold it as an enemy without any declaration.
+- **The risk is every reader of `force.polityId`.** There are many (battle sides, taxation, the
+  slice, the map overlay), and each one has to be audited for null. This phase goes last for that
+  reason.
+
+### What each role gets, and from which phase
+
+| Role | Phases |
+|---|---|
+| senator, magistrate | 2, 3 |
+| pontifex, augur, Vestal | 3, 4 |
+| philosopher, poet, historian | 1, 2 |
+| matron | 1, 4 |
+| banker, peasant | 1, plus existing loans and estates |
+| slave, freedman | 4 |
+| spy | 6 |
+| tax farmer, engineer, physician, gladiator, envoy, hired assassin, mercenary captain | 5 |
+| pirate, bandit, freebooting admiral | 8, 5 |
+| every minor station | 7 |
+
+### Saves and verification
+
+- Phases 1, 2, 5, 6 and 7 apply to running saves.
+- Phases 3 and 4 (offices, faiths, status) need scenario v28, so they reach only new games.
+- Phase 8 needs a migration default of `polityId` kept as it is.
+
+Each phase gets one story test in the house style, for example:
+- `a-quaestor-climbs.test.ts`
+- `a-philosopher-teaches.test.ts`
+- `a-slave-is-freed.test.ts`
+- `a-contract-goes-unpaid.test.ts`
+- `a-spy-comes-home.test.ts`
+
+Per *bugs only play finds*, each phase is also played live once as its role before it's called done.
 
 ---
 
@@ -770,6 +1405,12 @@ covers anything the model wants to do.
   and there is no starvation clock or blockade.
 - **Trade as geography.** An income source names the power it depends on, so a war can cut it. There
   are still no routes, no goods, and no prices.
+- **Courage.** A man in the ranks shares his army's fortune, but how he fights is not weighed: a
+  battle judges tactics by premises about the field, and bravery is not one.
+- **Goods and prices.** A venture has a return, not a cargo: there are still no goods, no prices,
+  and no piracy aimed at a particular route (the narrator's pirate seed is placed by country).
+- **Estates beyond their yield.** An estate pays and can be bought, granted, improved and inherited.
+  It does not yet feed the province it stands in, raise men, or carry debts of its own.
 - **Multiplayer.** The burst assumes one sovereign. Multiplayer reintroduces exactly the
   turn-synchronisation problem §15 exists to avoid.
 - **Games created before this work.** Their state lived in the dropped `world_snapshots`; they were
