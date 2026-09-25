@@ -7,6 +7,7 @@ export * from "./money-reservations";
 export * from "./project";
 export * from "./structure";
 export * from "./generic-entity";
+export * from "./mechanic";
 export * from "./outlook";
 export * from "./geojson";
 export * from "./map";

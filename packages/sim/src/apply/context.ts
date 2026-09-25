@@ -52,6 +52,15 @@ export interface ApplyContext {
    */
   readonly actsForTheWorld?: boolean | undefined;
   /**
+   * Set only by `mechanics/run-mechanics.ts`: the arrangement whose rule is
+   * firing, and the accounts its stored warrants let it debit. A firing is
+   * nobody's exercise of authority, so it is not judged as insubordination,
+   * and it may debit a warranted account -- the player's own purse among
+   * them -- where the world otherwise may not. No schema the model writes can
+   * set this.
+   */
+  readonly firingMechanic?: { readonly entityId: string; readonly warrantedAccountIds: ReadonlySet<string> } | undefined;
+  /**
    * Of the deltas passed, the ones that are the order itself rather than the
    * world moving beside it (the orchestrator's `deltas`, as against its
    * `worldDeltas`).

@@ -123,8 +123,10 @@ describe("a battle reaches the record as a battle", () => {
       narrative: result.narrative, frictions: result.frictions, battleAccounts: result.battleAccounts,
       significanceByFactId: result.significanceByFactId, storylines: result.world.storylines,
     });
-    const shown = historian.shown.compose_chronicle![0]!;
-    expect(shown).toContain("This thread holds a battle");
+    // Passages are written in the order the reader could know of them, not
+    // battle first, so the call that holds the fight is found, not assumed.
+    const shown = historian.shown.compose_chronicle!.find((message) => message.includes("This thread holds a battle"))!;
+    expect(shown).toBeDefined();
     expect(shown).toContain("three hundred and fifty to six");
     // Phase by phase, both commanders, and the men lost -- so the entry has
     // somewhere to get its 350 to 600 words from that is not more ways of

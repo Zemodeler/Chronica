@@ -18,9 +18,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createAiAdapter } from "@chronica/ai";
-import { punicWarsScenario } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, type Fact, type WorldState } from "@chronica/shared";
-import { composeChronicle, outcomeOfOrder, runSimulationBurst, whoIsWho, type AuditEntry, type OrderOutcome, type SimModelPort } from "@chronica/sim";
+import type { Fact } from "@chronica/shared";
+import { definition, opening } from "./opening";
+import { DEFAULT_BUDGET, createWindowWriter, outcomeOfOrder, runSimulationBurst, type AuditEntry, type OrderOutcome, type SimModelPort } from "@chronica/sim";
 import { CORPUS, type CorpusOrder } from "./corpus";
 
 const args = process.argv.slice(2);
@@ -29,6 +29,8 @@ const only = flag("--only")?.split(",").map((part) => part.trim()).filter(Boolea
 const failedReport = flag("--failed");
 const parallel = Math.max(1, Number(flag("--parallel") ?? 4));
 const outDir = flag("--out") ?? "eval-out";
+/** `--mechanics off` counts the arrangements a rule could be written for and asks the writer nothing (plan §2, step 0). */
+const mechanicCalls = flag("--mechanics") === "off" ? 0 : DEFAULT_BUDGET.maxMechanicCalls;
 
 /** The chains an earlier report found an engine failure in. */
 function chainsThatFailed(path: string): Set<string> {
@@ -54,41 +56,6 @@ if (!args.includes("--yes")) {
   process.exit(0);
 }
 
-const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-
-/** The opening, with the campaign's people in it. The consul is the scenario's own. */
-function opening(): WorldState {
-  const base = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
-  const template = base.characters.find((character) => character.id === "quintus-ogulnius")!;
-  const purse = base.material.accounts.find((account) => account.owner.kind === "character")!;
-  const legion = base.material.forces.find((force) => force.id === "roman-field-army")!;
-  const people: [string, string, string, number][] = [
-    ["gaius-furius", "Gaius Furius", "punic-gaul-bas-rhin", 800],
-    ["marcus-metellus", "Marcus Caecilius Metellus", "punic-italy-latium", 3_000],
-    ["quintus-agrippinus", "Quintus Valerius Agrippinus", "punic-italy-samnium", 1_500],
-  ];
-  return {
-    ...base,
-    characters: [
-      ...base.characters,
-      ...people.map(([id, name, where]) => ({ ...structuredClone(template), id, name, locationProvinceId: where, officeId: null, personalAccountId: `${id}-purse` })),
-    ],
-    material: {
-      ...base.material,
-      accounts: [
-        ...base.material.accounts,
-        ...people.map(([id, , , balance]) => ({ ...structuredClone(purse), id: `${id}-purse`, owner: { kind: "character" as const, id }, balance })),
-      ],
-      forces: [...base.material.forces, {
-        ...structuredClone(legion), id: "silver-shields", name: "Scuta Argentea",
-        commanderCharacterId: "quintus-agrippinus", controllerCharacterId: "quintus-agrippinus",
-        locationId: "punic-italy-samnium", positionId: null, authorizedStrength: 100, payObligationId: null,
-        personnel: [{ ...structuredClone(legion.personnel[0]!), categoryId: "cavalry", label: "Horse", fit: 97 }],
-      }],
-    },
-  };
-}
-
 const adapter = createAiAdapter();
 let calls = 0;
 const port: SimModelPort = {
@@ -98,7 +65,7 @@ const port: SimModelPort = {
   },
 };
 
-interface Scored { readonly order: CorpusOrder; readonly outcome: OrderOutcome | null; readonly entries: readonly { title: string; body: string }[]; readonly error: string | null; readonly seconds: number; readonly audit: readonly AuditEntry[] }
+interface Scored { readonly order: CorpusOrder; readonly outcome: OrderOutcome | null; readonly entries: readonly { title: string; body: string }[]; readonly error: string | null; readonly seconds: number; readonly audit: readonly AuditEntry[]; readonly skipped: readonly { stage: string; reason: string }[] }
 const scored = new Map<string, Scored>();
 
 /** One chain, in order: each order is given the world the one before it left. */
@@ -109,25 +76,27 @@ async function runChain(chain: readonly CorpusOrder[]): Promise<void> {
     const polity = state.world.characters.find((character) => character.id === order.actor)?.polityId ?? null;
     let row: Scored;
     try {
+      // The record as a player gets it: written window by window as the burst
+      // walks, in time order, not composed once over the whole span.
+      const writer = createWindowWriter({
+        port, clock: definition.clock, observer: { kind: "character", id: order.actor }, observerPolityId: polity,
+        offices: definition.government.offices, recentSubjects: [], recentTitles: [],
+      });
       const result = await runSimulationBurst({
         world: state.world, clock: definition.clock, offices: definition.government.offices, warfare: definition.warfare,
         terrains: definition.map.terrains, burstId: `eval-${order.id}`, gameId: `eval-${order.chain}`,
         actorRef: { kind: "character", id: order.actor }, actorPolityId: polity, orderText: order.text,
-        knownFacts: state.facts, queue: [], port,
+        knownFacts: state.facts, queue: [], port, onWindowClosed: writer.closed,
+        budget: { ...DEFAULT_BUDGET, maxMechanicCalls: mechanicCalls },
       });
-      const chronicle = await composeChronicle({
-        port, clock: definition.clock, observer: { kind: "character", id: order.actor }, observerPolityId: polity,
-        facts: result.newFacts, from: state.world.instant, to: result.world.instant,
-        narrative: result.narrative, frictions: result.frictions, utterances: result.utterances,
-        battleAccounts: result.battleAccounts, significanceByFactId: result.significanceByFactId,
-        storylines: result.world.storylines, orderFactIds: new Set(result.orderFactIds),
-        describePerson: whoIsWho(result.world, definition.government.offices),
-        ownEntityIds: new Set([order.actor, ...(polity === null ? [] : [polity])]),
-      });
+      const chronicle = await writer.finish();
       state = { world: result.world, facts: [...state.facts, ...result.newFacts] };
-      row = { order, outcome: outcomeOfOrder(result, chronicle.entries), entries: chronicle.entries.map(({ title, body }) => ({ title, body })), error: null, seconds: (performance.now() - started) / 1000, audit: result.audit };
+      // The world each chain leaves, for `let-time-pass.mts` to run on.
+      mkdirSync(outDir, { recursive: true });
+      writeFileSync(join(outDir, `world-${order.chain}.json`), JSON.stringify(result.world));
+      row = { order, outcome: outcomeOfOrder(result, chronicle.entries), entries: chronicle.entries.map(({ title, body }) => ({ title, body })), error: null, seconds: (performance.now() - started) / 1000, audit: result.audit, skipped: result.skipped };
     } catch (error) {
-      row = { order, outcome: null, entries: [], error: error instanceof Error ? error.message : String(error), seconds: (performance.now() - started) / 1000, audit: [] };
+      row = { order, outcome: null, entries: [], error: error instanceof Error ? error.message : String(error), seconds: (performance.now() - started) / 1000, audit: [], skipped: [] };
     }
     scored.set(order.id, row);
     console.log(`${order.id}: ${row.error ?? verdict(row.outcome!)} (${row.seconds.toFixed(0)}s)`);
@@ -186,6 +155,7 @@ const report = [
     ...(row.audit.length === 0 ? [] : [
       "",
       `Audit: ${[...new Set(row.audit.map((entry) => entry.kind))].map((kind) => `${row.audit.filter((entry) => entry.kind === kind).length} ${kind}`).join(", ")}`,
+      `Skipped calls: ${row.skipped.length === 0 ? "none" : row.skipped.map((skip) => `${skip.stage} (${skip.reason.slice(0, 120)})`).join("; ")}`,
       "",
       ...[...row.audit].sort((a, b) => Number(b.ofTheOrder) - Number(a.ofTheOrder)).map((entry) =>
         `- ${entry.ofTheOrder ? "order" : `${entry.actorRef.id}`} · ${entry.kind}/${entry.attempt} · ${entry.op}: ${entry.reason.replace(/\s+/g, " ").slice(0, 300)}`),

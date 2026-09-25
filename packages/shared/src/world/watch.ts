@@ -23,7 +23,17 @@ import { EntityIdSchema, MoneyAmountSchema } from "../material-state";
 // The web app renders these as a small form, never as a text box that silently
 // fails to match. Growing the union is ordinary work in packages/sim.
 
-export const WatchPredicateSchema = z.discriminatedUnion("kind", [
+/**
+ * The arms, as a tuple, so a second language can be built over the same ones.
+ *
+ * A mechanic (`world/mechanic.ts`) reads the world by these arms and by more
+ * of its own -- a province's order, a purse, a relation, a war. Those cannot
+ * be added here: this union is a named `$def` inside the orchestrator's prompt,
+ * and every arm added to it is paid for in the prompt's ceiling. So the arms
+ * are exported and the wider union is assembled elsewhere; one evaluator
+ * (`sim/watch.ts`) reads both.
+ */
+export const WATCH_ARMS = [
   /** An army arrives somewhere. The commonest watch, and the reason for the rest. */
   z
     .object({
@@ -106,7 +116,9 @@ export const WatchPredicateSchema = z.discriminatedUnion("kind", [
       vacant: z.boolean(),
     })
     .strict(),
-]).meta({
+] as const;
+
+export const WatchPredicateSchema = z.discriminatedUnion("kind", [...WATCH_ARMS]).meta({
   // Named, so the orchestrator's schema states it once and points at it from
   // both places it is used -- the ruler's own watch and a contingency's
   // trigger -- instead of inlining the same two thousand characters twice.

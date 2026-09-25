@@ -41,6 +41,8 @@ const STRUCTURE_RUN_LIMIT: Partial<Record<AiOperation, number>> = {
   simulate_orchestrate: 3_000,
   simulate_cognition: 3_000,
   compose_chronicle: 12_000,
+  repair_deltas: 3_000,
+  write_mechanic: 1_500,
 };
 const DEFAULT_STRUCTURE_RUN_LIMIT = 6_000;
 

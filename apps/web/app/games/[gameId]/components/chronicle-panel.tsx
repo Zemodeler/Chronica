@@ -50,7 +50,7 @@ function LedgerBody({ body }: { readonly body: string }) {
 
 function Entry({ entry, onTag }: { readonly entry: ChronicleEntry; readonly onTag: (tag: EntryTag) => void }) {
   return (
-    <article className="chronicle-entry">
+    <article className={entry.published ? "chronicle-entry" : "chronicle-entry is-unfolding"}>
       <header>
         {entry.date !== null && <p className="chronicle-entry__date">{entry.date}</p>}
         {entry.tags.length > 0 && (
@@ -122,6 +122,9 @@ export function ChroniclePanel({ controller, onClose }: { readonly controller: G
       )}
 
       <div className="chronicle-panel__scroll">
+        {controller.busy && (
+          <p className="chronicle-panel__unfolding" aria-live="polite">The season is still unfolding. What follows is written as it happens; nothing already shown will move.</p>
+        )}
         {entries.length === 0 ? (
           <p className="chronicle-panel__empty">
             {filter === null

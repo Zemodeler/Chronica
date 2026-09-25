@@ -23,6 +23,7 @@ import { answersAnOrder, assessExecution } from "./delegation";
 import { dropMalformedEntries, extractJson } from "./json";
 import { kindsIn, readLeniently } from "./bare-refs";
 import type { SimModelPort } from "./ports";
+import { ruleInWords } from "./mechanics/mechanic-words";
 
 /**
  * NPC cognition (VISION §28).
@@ -432,7 +433,9 @@ function describeMeans(character: Character, world: WorldState): string[] {
     .filter((entity) => entity.ownerRef?.kind === "character" && entity.ownerRef.id === character.id)
     .slice(0, ACTOR_CAPS.arrangements);
   if (arrangements.length > 0) {
-    lines.push("Arrangements in their hands:", ...arrangements.map((entity) => `  - ${entity.label} [${entity.id}] (${entity.kind})`));
+    // With the rule behind each, so a man knows what his racket does.
+    lines.push("Arrangements in their hands:", ...arrangements.map((entity) =>
+      `  - ${entity.label} [${entity.id}] (${entity.kind})${entity.mechanic === undefined || entity.mechanic.endedAtStep !== null ? "" : `; rule: ${ruleInWords(entity.mechanic, world, entity.id)}`}`));
   }
 
   return lines;
@@ -693,10 +696,17 @@ const ACTORS_PER_CALL = 4;
 /** Not wider than the database pool is prepared to hold coin holds open. */
 const MAX_BATCHES = 3;
 
+/** How a cast is dealt onto calls. The defaults are the measured guess; `CHRONICA_COGNITION_SHARDS` overrides them to measure another. */
+export interface CognitionSharding {
+  readonly maxBatches: number;
+  readonly actorsPerCall: number;
+}
+export const DEFAULT_SHARDING: CognitionSharding = { maxBatches: MAX_BATCHES, actorsPerCall: ACTORS_PER_CALL };
+
 /** The cast, dealt into the calls that will answer for it, in the router's order. */
-function deal(actors: readonly RoutedActor[]): readonly (readonly RoutedActor[])[] {
+export function deal(actors: readonly RoutedActor[], sharding: CognitionSharding = DEFAULT_SHARDING): readonly (readonly RoutedActor[])[] {
   if (actors.length < BATCH_SPLIT_THRESHOLD) return [actors];
-  const batches = Math.min(MAX_BATCHES, Math.ceil(actors.length / ACTORS_PER_CALL));
+  const batches = Math.max(1, Math.min(sharding.maxBatches, Math.ceil(actors.length / Math.max(1, sharding.actorsPerCall))));
   const size = Math.ceil(actors.length / batches);
   return Array.from({ length: batches }, (_, index) => actors.slice(index * size, (index + 1) * size))
     .filter((batch) => batch.length > 0);
@@ -784,6 +794,7 @@ export async function runCognition(
   actors: readonly RoutedActor[],
   world: WorldState,
   clock: ScenarioClock,
+  sharding: CognitionSharding = DEFAULT_SHARDING,
 ): Promise<CognitionResult> {
   if (actors.length === 0) return { output: EMPTY, calls: 0, parseFailure: null, salvaged: [] };
 
@@ -793,7 +804,7 @@ export async function runCognition(
   // carries a person, and nothing about what is said of them.
   const inBatch = actors.map((actor) => actor.characterId);
 
-  const chunks = deal(actors);
+  const chunks = deal(actors, sharding);
   const results = await Promise.all(chunks.map((chunk) => runOneBatch(port, chunk, world, clock, inBatch)));
 
   if (results.length === 1) return results[0]!;

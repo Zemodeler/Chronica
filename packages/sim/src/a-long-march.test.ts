@@ -52,3 +52,17 @@ describe("a long march", () => {
     expect(army(state).locationId).toBe(BRUTTIUM);
   });
 });
+
+describe("an army already on the road", () => {
+  it("is not sent out again when the same march is ordered a second time", () => {
+    const march = WorldDeltaSchema.parse({ op: "force_modify", forceRef: "roman-field-army", locationId: BRUTTIUM, reason: "March on Rhegium." });
+    const first = applyDeltas(world(), [march], context);
+    const second = applyDeltas(first.world, [WorldDeltaSchema.parse({ ...march, moraleBpsDelta: 100 })], { ...context, ids: createIdFactory("march-again") });
+    expect(second.rejected).toEqual([]);
+    const journeys = second.world.projects.filter((project) => project.completionOutcome?.kind === "force_move" && project.completionOutcome.forceId === "roman-field-army");
+    expect(journeys).toHaveLength(1);
+    expect(second.factProposals.some((fact) => fact.kind === "march_begun")).toBe(false);
+    // The rest of the repeated order still happens.
+    expect(army(second.world).moraleBps).toBe(army(first.world).moraleBps + 100);
+  });
+});

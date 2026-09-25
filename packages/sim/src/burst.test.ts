@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import { FactSchema, ScenarioDefinitionSchema, WorldStateSchema, factsKnownTo, factsVisibleTo, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
-import { DEFAULT_BUDGET, runSimulationBurst, type BurstInput } from "./burst";
+import { DEFAULT_BUDGET, runSimulationBurst, type BurstInput, type WindowSnapshot } from "./burst";
 import { composeChronicle } from "./chronicle";
 import type { SimModelPort, SimOperation } from "./ports";
 
@@ -890,5 +890,66 @@ describe("the audit", () => {
     expect(ofTheOrder.find((entry) => entry.kind === "reference")).toMatchObject({ op: "force_modify", attempt: "first" });
     // The repair carried it out, so nothing of the order's is refused the second time.
     expect(ofTheOrder.filter((entry) => entry.attempt === "repair" && entry.kind !== "assumed")).toEqual([]);
+  });
+});
+
+describe("the burst hands out its windows as the clock leaves them", () => {
+  it("cuts one window per move of the clock, partitioning every fact it wrote, with the order's facts in the first", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [CARTHAGE_REACTS, QUIET, QUIET, QUIET] });
+    const windows: WindowSnapshot[] = [];
+    const result = await runSimulationBurst(input(port, { onWindowClosed: (window) => { windows.push(window); } }));
+
+    expect(windows.length).toBeGreaterThanOrEqual(2);
+    // Numbered from the order, and the clock never moves backwards.
+    expect(windows.map((window) => window.index)).toEqual(windows.map((_, index) => index));
+    for (let index = 1; index < windows.length; index += 1) {
+      expect(windows[index]!.from).toEqual(windows[index - 1]!.to);
+      expect(windows[index]!.from.day).toBeGreaterThanOrEqual(windows[index - 1]!.from.day);
+    }
+    // Every fact of the burst lands in exactly one window, in the order written.
+    expect(windows.flatMap((window) => window.facts.map((fact) => fact.id))).toEqual(result.newFacts.map((fact) => fact.id));
+    // And the answer to the order is the first window's to tell.
+    expect(new Set(windows[0]!.orderFactIds)).toEqual(new Set(result.orderFactIds));
+    expect(windows.slice(1).every((window) => window.orderFactIds.length === 0)).toBe(true);
+    // The last window ends where the burst ended.
+    expect(windows[windows.length - 1]!.to).toEqual(result.world.instant);
+  });
+
+  it("is not failed by a listener that throws", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [CARTHAGE_REACTS, QUIET, QUIET, QUIET] });
+    const result = await runSimulationBurst(input(port, { onWindowClosed: () => { throw new Error("the page went away"); } }));
+    expect(result.newFacts.length).toBeGreaterThan(0);
+    expect(result.stopReason).not.toBe("budget_exhausted");
+  });
+});
+
+describe("calls the burst decides not to make", () => {
+  it("does not ask a cast of nobody pressing past the rounds it pays for, and says so", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [QUIET], simulate_cognition: [QUIET, QUIET, QUIET, QUIET] });
+    const result = await runSimulationBurst(input(port, { budget: { ...DEFAULT_BUDGET, maxAmbientOnlyRounds: 0 } }));
+    expect(port.calls.filter((call) => call === "simulate_cognition")).toHaveLength(0);
+    expect(result.skipped.some((skip) => skip.stage === "cognition" && skip.reason.includes("nobody pressing"))).toBe(true);
+    expect(result.stopReason).toBe("no_due_events");
+  });
+
+  it("still asks when somebody is pressing, however many quiet rounds went before", async () => {
+    // Carthage reacts to the levy: a reaction is always pressing.
+    const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [CARTHAGE_REACTS, QUIET, QUIET, QUIET] });
+    const result = await runSimulationBurst(input(port, { budget: { ...DEFAULT_BUDGET, maxAmbientOnlyRounds: 0 } }));
+    expect(port.calls.filter((call) => call === "simulate_cognition").length).toBeGreaterThan(0);
+    expect(result.newFacts.length).toBeGreaterThan(0);
+  });
+
+  it("spends no repair on a refusal no correction can cure", async () => {
+    const spendsHisPurse = JSON.stringify({
+      intent: { summary: "Games are held.", domains: [] }, narrativeSummary: "The world holds games.", frictions: [], deltas: [], facts: [], delegations: [], schedule: [],
+      worldDeltas: [{ op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: null, amount: 100, reason: "The city holds games at the consul's expense." }],
+      cognitionCandidates: [], outcome: "continue", playerDecision: null,
+    });
+    const port = scriptedPort({ simulate_orchestrate: [spendsHisPurse], repair_deltas: [JSON.stringify({ deltas: [] })], simulate_cognition: [QUIET, QUIET, QUIET, QUIET] });
+    const result = await runSimulationBurst(input(port));
+    expect(port.calls.filter((call) => call === "repair_deltas")).toHaveLength(0);
+    expect(result.skipped.some((skip) => skip.stage === "repair" && skip.reason.includes("player's own purse"))).toBe(true);
+    expect(result.audit.some((entry) => entry.kind === "reference" && entry.reason.includes("player's own purse"))).toBe(true);
   });
 });

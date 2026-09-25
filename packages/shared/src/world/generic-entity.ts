@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema } from "../material-state";
 import { OrderPartyRefSchema } from "./party-ref";
+import { MechanicSchema } from "./mechanic";
 import { StandingEffectsCarrierShape } from "./standing-effects";
 
 // The true generic fallback (docs/32, Part C.1): used only for a genuinely
@@ -29,6 +30,12 @@ export const GenericEntitySchema = z
      * carry out; now it carries them.
      */
     ...StandingEffectsCarrierShape,
+    /**
+     * The rule behind it, when the world wrote one (`world/mechanic.ts`): what
+     * it does each month, to whom, and what stops it. Absent for an arrangement
+     * that is only its standing effects.
+     */
+    mechanic: MechanicSchema.optional(),
   })
   .strict();
 export type GenericEntity = z.infer<typeof GenericEntitySchema>;

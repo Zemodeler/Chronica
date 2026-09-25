@@ -483,7 +483,7 @@ function powerOf(delta: WorldDelta): AuthorityPower {
  * Used to decide whether an act is the actor's at all -- not to decide whether
  * they may do it, which is `checkAuthority`'s business.
  */
-function polityOfScope(scope: AuthorityScope, world: WorldState, offices: readonly Office[] = []): string | null {
+export function polityOfScope(scope: AuthorityScope, world: WorldState, offices: readonly Office[] = []): string | null {
   switch (scope.kind) {
     case "polity":
       return scope.id;
@@ -537,6 +537,15 @@ function actsInsideAnotherPower(scope: AuthorityScope, world: WorldState, contex
 }
 
 function actorIsAnswerableFor(delta: WorldDelta, scope: AuthorityScope, world: WorldState, context: ApplyContext, ofTheOrder = false): boolean {
+  // A rule firing is nobody's exercise of authority (`mechanics/run-mechanics.ts`).
+  // Its money moves were warranted when the rule was attached -- an office
+  // over the treasury, a consent given, the owner's own purse -- and the
+  // warrant is what is checked, here, rather than the owner's standing today.
+  // An unwarranted debit is refused as anybody's would be.
+  if (context.firingMechanic !== undefined) {
+    if (delta.op !== "money_transfer" || scope.kind !== "account") return false;
+    return !context.firingMechanic.warrantedAccountIds.has(scope.id);
+  }
   // The world's own business, said apart from the order: a seed carried out,
   // a promise falling due, the Senate filling a post. None of it is the ruler
   // acting, wherever it falls. Before the two were separated, this was
@@ -736,7 +745,11 @@ export function applyDeltas(world: WorldState, deltas: readonly WorldDelta[], co
       // an order may ruin him -- cut his trade, burn his stall, sue him -- but it
       // may not decide what he pays for: asked who paid for a spectacle, it once
       // answered "the merchant", and spent the purse his order needed.
-      if (context.actsForTheWorld === true && !ofTheOrder && context.playerCharacterId != null && scope.kind === "account") {
+      // A rule the world wrote may take from a purse it holds a warrant for,
+      // the player's included: he can see the rule and the toll it takes, which
+      // is not the world deciding what he pays for behind his back.
+      const warranted = context.firingMechanic !== undefined && scope.kind === "account" && context.firingMechanic.warrantedAccountIds.has(scope.id);
+      if (context.actsForTheWorld === true && !ofTheOrder && context.playerCharacterId != null && scope.kind === "account" && !warranted) {
         const account = current.material.accounts.find((candidate) => candidate.id === scope.id);
         if (account?.owner.kind === "character" && account.owner.id === context.playerCharacterId) {
           rejected.push({ delta, reason: `${account.id} is the player's own purse, and the world does not spend it for him: take it from somebody else, or leave it to his order.`, kind: "reference", ofTheOrder });
@@ -1333,6 +1346,17 @@ function applyOne(
           // the model had thought to write a journey. Now the journey is made
           // for it, the army sets out, and it arrives when the road is walked.
           const days = hops * MARCH_DAYS_PER_PROVINCE;
+          // An army already on the road to that very place is not sent out
+          // again: a commander asked three times in a season what to do
+          // answered "move on Messana" three times, and three journeys were
+          // made, three arrivals told. The march under way is the order
+          // carried out; the rest of the order still happens today.
+          const underWay = world.projects.some((project) =>
+            project.status === "in_progress"
+            && project.completionOutcome?.kind === "force_move"
+            && project.completionOutcome.forceId === forceId
+            && project.completionOutcome.provinceId === delta.locationId);
+          if (underWay) return applyOne(world, { ...delta, locationId: undefined }, context, assignedIds, resolve, emitFact, emitAccount);
           const journey: WorldDelta = {
             op: "project_create",
             localId: `march-${forceId}`.slice(0, 60),
@@ -4401,7 +4425,7 @@ const SELLER_CREDIT_BPS = 100;
  * pledged against what was bought where it can be, and unpaid in the same
  * arrears as any other.
  */
-function payOrBorrow(
+export function payOrBorrow(
   world: WorldState,
   payerId: string,
   price: number,

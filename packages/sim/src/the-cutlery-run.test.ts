@@ -30,7 +30,7 @@ function scripted(orchestrator: readonly string[]): SimModelPort {
   const queue = [...orchestrator];
   return {
     complete(operation: SimOperation) {
-      if (operation === "simulate_orchestrate") {
+      if (operation === "simulate_orchestrate" || operation === "repair_deltas") {
         const next = queue.shift();
         if (next !== undefined) return Promise.resolve(next);
       }

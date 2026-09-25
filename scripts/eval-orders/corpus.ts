@@ -62,4 +62,13 @@ export const CORPUS: readonly CorpusOrder[] = [
   { id: "trade-syracuse-2-guild", chain: "trade-syracuse", actor: "leptines-syracuse", text: "I found a guild of Syracusan cutlers and pay for its hall out of my own purse." },
   { id: "private-1-greek", chain: "private-life", actor: "marcus-metellus", text: "I spend the season learning Greek from a tutor and reading Homer." },
   { id: "private-2-vineyard", chain: "private-life", actor: "marcus-metellus", text: "I buy a small vineyard outside Rome and hire a vilicus to run it." },
+  // Orders nobody designed for (plan §2): each sets something going that no op
+  // fits, and each has a reason to fire and a reason to stop.
+  { id: "toll-1-bridge", chain: "toll", actor: "marcus-metellus", text: "I build a toll-house on the bridge into Rome and charge every cart that crosses." },
+  { id: "toll-2-aediles", chain: "toll", actor: "marcus-metellus", text: "The aediles order my toll-house closed. I pay them off and keep it running quietly." },
+  { id: "dole-1-grain", chain: "dole", actor: "marcus-metellus", text: "I buy grain with my own money and give it out to the poor of Rome every month." },
+  { id: "school-1-open", chain: "school", actor: "leptines-syracuse", text: "I open a school in Syracuse and take pupils for a fee." },
+  { id: "school-2-rival", chain: "school", actor: "leptines-syracuse", text: "A rival opens a school across the street. I lower my fees and hire a second teacher." },
+  { id: "racket-1-forum", chain: "racket", actor: "marcus-metellus", text: "I hire toughs and make the shopkeepers of the Forum pay me for protection each month." },
+  { id: "tithe-1-cult", chain: "tithe", actor: "quintus-agrippinus", text: "I found a cult of Bacchus in Campania and have its followers tithe to me." },
 ];

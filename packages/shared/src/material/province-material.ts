@@ -1,6 +1,6 @@
 import type { WorldState } from "../world/world-state";
 import type { Province } from "../world/map";
-import type { ProvinceMaterial } from "../material-state";
+import type { ProvinceLevel, ProvinceMaterial } from "../material-state";
 
 // Background material society (docs/14 Phase 2).
 //
@@ -63,6 +63,22 @@ export function provinceTaxCapacity(world: WorldState, provinceId: string): numb
   if (row !== undefined) return row.taxCapacity;
   const province = world.map.provinces.find((candidate) => candidate.id === provinceId);
   return province === undefined ? null : deriveDefaultProvinceMaterial(province, world.elapsedStep).taxCapacity;
+}
+
+/** One of a province's levels, in basis points, from its material row or the default a province without one would have. Null for no such province. */
+export function provinceLevel(world: WorldState, provinceId: string, level: ProvinceLevel): number | null {
+  const row = world.material.provinceMaterial.find((material) => material.provinceId === provinceId)
+    ?? (() => {
+      const province = world.map.provinces.find((candidate) => candidate.id === provinceId);
+      return province === undefined ? undefined : deriveDefaultProvinceMaterial(province, world.elapsedStep);
+    })();
+  if (row === undefined) return null;
+  switch (level) {
+    case "stability": return row.stabilityBps;
+    case "food_security": return row.foodSecurityBps;
+    case "productive_capacity": return row.productiveCapacityBps;
+    case "war_damage": return row.warDamageBps;
+  }
 }
 
 export function findProvinceMaterial(world: WorldState, provinceId: string): ProvinceMaterial | undefined {

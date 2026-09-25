@@ -1,4 +1,4 @@
-import type { WatchPredicate, WorldState } from "@chronica/shared";
+import { atWar, deriveRelationDimension, provinceLevel, type MechanicPredicate, type WorldState } from "@chronica/shared";
 
 /**
  * Evaluating what the ruler asked to be woken for (VISION §23's
@@ -31,8 +31,12 @@ import type { WatchPredicate, WorldState } from "@chronica/shared";
 const fitStrength = (force: { readonly personnel: readonly { readonly fit: number }[] }): number =>
   force.personnel.reduce((sum, category) => sum + category.fit, 0);
 
-/** Whether the condition holds of one world, said without reference to any other. */
-function holdsIn(predicate: WatchPredicate, world: WorldState): boolean {
+/**
+ * Whether the condition holds of one world, said without reference to any
+ * other. Reads the watch's arms and the mechanic's (`world/mechanic.ts`): one
+ * language, one evaluator.
+ */
+export function holdsIn(predicate: MechanicPredicate, world: WorldState): boolean {
   switch (predicate.kind) {
     case "force_enters_province":
       return world.material.forces.some(
@@ -73,6 +77,37 @@ function holdsIn(predicate: WatchPredicate, world: WorldState): boolean {
       if (seats.length === 0) return false;
       return seats.some((seat) => seat.holderCharacterId === null) === predicate.vacant;
     }
+    case "province_level_above": {
+      const level = provinceLevel(world, predicate.provinceId, predicate.level);
+      return level !== null && level > predicate.bps;
+    }
+    case "province_level_below": {
+      const level = provinceLevel(world, predicate.provinceId, predicate.level);
+      return level !== null && level < predicate.bps;
+    }
+    case "account_above": {
+      const account = world.material.accounts.find((candidate) => candidate.id === predicate.accountId);
+      return account !== undefined && account.balance > predicate.amount;
+    }
+    case "relation_above":
+    case "relation_below": {
+      const subject = world.characters.find((candidate) => candidate.id === predicate.subjectCharacterId);
+      if (subject === undefined || !world.characters.some((candidate) => candidate.id === predicate.targetCharacterId)) return false;
+      const score = deriveRelationDimension(subject, predicate.targetCharacterId, predicate.dimension);
+      return predicate.kind === "relation_above" ? score > predicate.score : score < predicate.score;
+    }
+    case "polity_trust_above":
+    case "polity_trust_below": {
+      if (!world.map.polities.some((polity) => polity.id === predicate.polityId) || !world.map.polities.some((polity) => polity.id === predicate.towardPolityId)) return false;
+      const trust = world.polityStances.find((stance) => stance.polityId === predicate.polityId && stance.towardPolityId === predicate.towardPolityId)?.trustScore ?? 0;
+      return predicate.kind === "polity_trust_above" ? trust > predicate.score : trust < predicate.score;
+    }
+    case "at_war":
+      return atWar(world.polityAgreements, predicate.polityId, predicate.otherPolityId) === predicate.atWar;
+    case "force_strength_above": {
+      const force = world.material.forces.find((candidate) => candidate.id === predicate.forceId);
+      return force !== undefined && fitStrength(force) > predicate.headcount;
+    }
     // Not states anybody can hold: they are the comparison itself.
     case "province_control_changes":
     case "settlement_control_changes":
@@ -96,7 +131,7 @@ function holdsIn(predicate: WatchPredicate, world: WorldState): boolean {
  * holds a city -- are not states anybody can hold: the event *is* the change,
  * so the reading is the holder itself and any difference is the event.
  */
-export function watchReading(predicate: WatchPredicate, world: WorldState): string {
+export function watchReading(predicate: MechanicPredicate, world: WorldState): string {
   if (predicate.kind === "province_control_changes") {
     return world.map.provinces.find((province) => province.id === predicate.provinceId)?.controllerPolityId ?? "none";
   }
@@ -115,13 +150,13 @@ export function watchReading(predicate: WatchPredicate, world: WorldState): stri
  * order was given has not happened, and waking for it ends the order in the act
  * of giving it. For a change, any difference is the whole event.
  */
-export function firedBetween(predicate: WatchPredicate, armedReading: string, nowReading: string): boolean {
+export function firedBetween(predicate: MechanicPredicate, armedReading: string, nowReading: string): boolean {
   if (predicate.kind === "province_control_changes" || predicate.kind === "settlement_control_changes") {
     return nowReading !== armedReading;
   }
   return nowReading === "yes" && armedReading !== "yes";
 }
 
-export function isWatchSatisfied(predicate: WatchPredicate, opening: WorldState, now: WorldState): boolean {
+export function isWatchSatisfied(predicate: MechanicPredicate, opening: WorldState, now: WorldState): boolean {
   return firedBetween(predicate, watchReading(predicate, opening), watchReading(predicate, now));
 }
