@@ -1,4 +1,4 @@
-import { stableChoice } from "../determinism";
+import { boundedId, stableChoice } from "../determinism";
 import type {
   Estate,
   EstateStatusSchema,
@@ -114,7 +114,7 @@ export function settleEstate(
     if (account === undefined) continue;
     if (resolution.beneficiaryIds.length === 0) {
       transfers.push({
-        id: `${estate.id}:transfer:account:${accountId}`, estateId: estate.id, deceasedCharacterId: ownerCharacterId,
+        id: boundedId(estate.id, "transfer", "account", accountId), estateId: estate.id, deceasedCharacterId: ownerCharacterId,
         beneficiaryCharacterId: null, assetKind: "account_balance", assetId: accountId,
         reason: "Escheated: no valid beneficiary.", resolvedAtStep: atStep, sourceEventId: null,
       });
@@ -130,13 +130,13 @@ export function settleEstate(
       if (amount <= 0) return;
       const destinationAccountId = beneficiary.personalAccountId;
       transactions.push({
-        id: `${estate.id}:transaction:${accountId}:${beneficiaryId}`, atStep, kind: "inheritance", amount,
+        id: boundedId(estate.id, "transaction", accountId, beneficiaryId), atStep, kind: "inheritance", amount,
         sourceAccountId: accountId, destinationAccountId,
         cause: { kind: "succession", id: estate.id, explanation: resolution.reason },
         visibility: "polity",
       });
       transfers.push({
-        id: `${estate.id}:transfer:account:${accountId}:${beneficiaryId}`, estateId: estate.id, deceasedCharacterId: ownerCharacterId,
+        id: boundedId(estate.id, "transfer", "account", accountId, beneficiaryId), estateId: estate.id, deceasedCharacterId: ownerCharacterId,
         beneficiaryCharacterId: beneficiaryId, assetKind: "account_balance", assetId: accountId,
         reason: resolution.reason, resolvedAtStep: atStep, sourceEventId: null,
       });
@@ -160,7 +160,7 @@ export function settleEstate(
       holdings: material.holdings.map((h) => (h.id === holdingId && primaryBeneficiaryId !== null ? { ...h, legalHolderCharacterId: primaryBeneficiaryId } : h)),
     };
     transfers.push({
-      id: `${estate.id}:transfer:holding:${holdingId}`, estateId: estate.id, deceasedCharacterId: ownerCharacterId,
+      id: boundedId(estate.id, "transfer", "holding", holdingId), estateId: estate.id, deceasedCharacterId: ownerCharacterId,
       beneficiaryCharacterId: primaryBeneficiaryId, assetKind: "holding", assetId: holdingId,
       reason: primaryBeneficiaryId !== null ? resolution.reason : "Escheated: no valid beneficiary.",
       resolvedAtStep: atStep, sourceEventId: null,
@@ -177,14 +177,14 @@ export function settleEstate(
         obligations: material.obligations.map((o) => (o.id === obligationId && beneficiary ? { ...o, payerAccountId: beneficiary.personalAccountId } : o)),
       };
       transfers.push({
-        id: `${estate.id}:transfer:obligation:${obligationId}`, estateId: estate.id, deceasedCharacterId: ownerCharacterId,
+        id: boundedId(estate.id, "transfer", "obligation", obligationId), estateId: estate.id, deceasedCharacterId: ownerCharacterId,
         beneficiaryCharacterId: primaryBeneficiaryId, assetKind: "obligation", assetId: obligationId,
         reason: "The obligation transfers to the beneficiary.", resolvedAtStep: atStep, sourceEventId: null,
       });
     } else {
       material = { ...material, obligations: material.obligations.map((o) => (o.id === obligationId ? { ...o, active: false } : o)) };
       transfers.push({
-        id: `${estate.id}:transfer:obligation:${obligationId}`, estateId: estate.id, deceasedCharacterId: ownerCharacterId,
+        id: boundedId(estate.id, "transfer", "obligation", obligationId), estateId: estate.id, deceasedCharacterId: ownerCharacterId,
         beneficiaryCharacterId: null, assetKind: "obligation", assetId: obligationId,
         reason: "The obligation is forgiven on death.", resolvedAtStep: atStep, sourceEventId: null,
       });
@@ -238,7 +238,7 @@ export function deriveLegacyCauses(
     successorCharacterId: successorId,
     predecessorCharacterId: predecessorId,
     cause: {
-      id: `${predecessorId}:legacy:${holder.id}:${atStep}`,
+      id: boundedId(predecessorId, "legacy", holder.id, atStep),
       label: `Inherited standing: as it was held toward ${predecessorId}`,
       score: Math.round(score * LEGACY_SCORE_FACTOR),
       occurredAtStep: atStep,

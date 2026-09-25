@@ -824,6 +824,11 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 .sim-panel__order textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .sim-panel__order button { padding: 0.6rem; border: none; border-radius: var(--radius-card); background: var(--accent); color: var(--surface); cursor: pointer; font: 600 0.9rem system-ui, sans-serif; }
 .sim-panel__order button:disabled { opacity: 0.5; cursor: not-allowed; }
+.sim-panel__order-time { display: flex; align-items: center; gap: 0.4rem; font: 0.85rem system-ui, sans-serif; color: var(--text-muted); }
+.sim-panel__order .sim-panel__order-time label { font: inherit; letter-spacing: normal; text-transform: none; }
+.sim-panel__order-time select { padding: 0.3rem 0.4rem; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface-raised); color: var(--text); font: inherit; }
+.sim-panel__order-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+.sim-panel__order .sim-panel__order-actions button[type="button"] { background: transparent; color: var(--text); border: 1px solid var(--border); }
 
 .sim-panel__error { margin: 0; padding: 0 1rem 1rem; color: var(--danger, #e06c6c); font-size: 0.85rem; }
 

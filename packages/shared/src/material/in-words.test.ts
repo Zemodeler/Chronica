@@ -47,3 +47,19 @@ describe("in words, never in numbers", () => {
     expect(bandStrength(4_260)).toBe(4_500);
   });
 });
+
+describe("an army paid out of what it takes", () => {
+  const owing = { arrears: 300, missedPeriods: 2 } as Parameters<typeof payInWords>[0];
+
+  it("is told which arrangement it is on while the chest holds out", () => {
+    expect(payInWords({ arrears: 0, missedPeriods: 0 } as typeof owing, 0, true)).toBe("Paid out of what they take");
+    expect(payInWords({ arrears: 0, missedPeriods: 0 } as typeof owing, 0, false)).toBe("Paid");
+  });
+
+  it("is told why, once it does not", () => {
+    // The remedy is the commander's own and he should not have to infer it
+    // from the desertions.
+    expect(payInWords(owing, 2, true)).toBe("2 periods of pay owed, and their chest is empty");
+    expect(payInWords(owing, 2, false)).toBe("2 periods of pay owed");
+  });
+});

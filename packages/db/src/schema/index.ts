@@ -6,4 +6,3 @@ export * from "./dialogue";
 export * from "./game";
 export * from "./shared-knowledgebase";
 export * from "./simulation";
-export * from "./ui-state";

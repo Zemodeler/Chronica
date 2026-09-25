@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { games } from "./game";
 import { users } from "./auth";
 
@@ -99,6 +99,36 @@ export const simulationBursts = pgTable("simulation_bursts", {
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   endedAt: timestamp("ended_at", { withTimezone: true }),
 }, (table) => [index("simulation_bursts_game_idx").on(table.gameId, table.startedAt)]);
+
+/**
+ * Every act a burst did not carry out as the model wrote it: refused by the
+ * world, refused as unreadable, ignored by the men it was given to, or carried
+ * out with a detail the engine answered itself.
+ *
+ * Not the player's record and never shown to them. It is the engine's own
+ * account of where it and the model disagree, kept so the refusals nobody
+ * sees -- "no account merchant-purse exists" -- can be counted, and the ones
+ * that keep turning up fixed at their source.
+ */
+export const deltaAudit = pgTable("delta_audit", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  gameId: uuid("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+  burstId: uuid("burst_id").notNull().references(() => simulationBursts.id, { onDelete: "cascade" }),
+  actorKind: text("actor_kind").notNull(),
+  actorId: text("actor_id").notNull(),
+  op: text("op").notNull(),
+  /** "world", "reference", "ignored" or "assumed". */
+  kind: text("kind").notNull(),
+  ofTheOrder: boolean("of_the_order").notNull(),
+  /** "first" as written, "repair" for the corrected attempt. */
+  attempt: text("attempt").notNull(),
+  reason: text("reason").notNull(),
+  delta: jsonb("delta").notNull().$type<unknown>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("delta_audit_burst_idx").on(table.burstId),
+  index("delta_audit_kind_op_idx").on(table.kind, table.op),
+]);
 
 /** What the player has actually been told (VISION §25) -- never the whole record, only what reached them. */
 export const chronicleCheckpoints = pgTable("chronicle_checkpoints", {

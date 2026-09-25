@@ -154,15 +154,32 @@ const SPEND_WITHOUT_LEAVE = JSON.stringify({
   delegations: [], schedule: [], cognitionCandidates: [], outcome: "chronicle", playerDecision: null,
 });
 
+// A letter in Rome's name needs nobody's obedience to be written -- which is
+// exactly why writing it without the right is a breach and not a refusal.
+// (Proclaiming himself consul used to be the example; a seat is now taken only
+// by whoever may fill it, or with men at the capital.)
+const WRITE_WITHOUT_LEAVE = JSON.stringify({
+  intent: { summary: "Treat with Carthage.", domains: ["diplomacy"] },
+  narrativeSummary: "Fabius writes to Carthage over Rome's name.",
+  frictions: [],
+  deltas: [{
+    op: "diplomatic_message_send", localId: "fabius_letter", kind: "peace_offer", fromPolityId: "rome", fromCharacterRef: "quintus-fabius",
+    toPolityId: "carthage", subject: "Terms for the strait", terms: "Rome will not contest Messana if Carthage keeps to Africa.",
+    reason: "Fabius treats with Carthage on his own account.",
+  }],
+  facts: [], delegations: [], schedule: [], cognitionCandidates: [], outcome: "chronicle", playerDecision: null,
+});
+
 describe("acting beyond your place is something a person finds out", () => {
   it("records the breach in words a chronicler could use, and hands it to somebody who would come across it", async () => {
-    // Quintus Fabius holds no office over the treasury. Nothing stops him --
-    // VISION §12 is explicit that the act is applied anyway -- but it is now
-    // discoverable by a person rather than only by an audit line nobody reads.
-    const port = capturingPort({ simulate_orchestrate: [SPEND_WITHOUT_LEAVE], simulate_cognition: [NOBODY, NOBODY, NOBODY, NOBODY, NOBODY, NOBODY] });
+    // Quintus Fabius has no right to speak for Rome. A letter of his own is his
+    // own business; offering terms in Rome's name is not. It needs nobody's
+    // obedience to happen, so it happens -- and it is discoverable by a person
+    // rather than only by an audit line nobody reads.
+    const port = capturingPort({ simulate_orchestrate: [WRITE_WITHOUT_LEAVE], simulate_cognition: [NOBODY, NOBODY, NOBODY, NOBODY, NOBODY, NOBODY] });
     const result = await runSimulationBurst(input(port, {
       actorRef: { kind: "character", id: "quintus-fabius" },
-      orderText: "Pay the shipwrights out of the consul's chest.",
+      orderText: "Write to Carthage in Rome's name.",
     }));
 
     expect(result.breaches.length).toBeGreaterThan(0);
@@ -176,13 +193,29 @@ describe("acting beyond your place is something a person finds out", () => {
     // And it is the evidence, never the published event.
     expect(breach.visibility).toBe("private");
 
-    // The whole point of the slice: somebody other than the man who did it
-    // comes to know. Here it is the man whose chest it was, which is who
-    // would notice -- and nobody noticing at all must stay possible elsewhere,
-    // or nobody would ever try anything.
+    // Somebody other than the man who did it comes to know -- and nobody
+    // noticing at all must stay possible elsewhere, or nobody would ever try
+    // anything.
     const knowers = breach.discovery.discoveredBy.map((entry) => entry.observerRef.id);
     expect(knowers).toContain("quintus-fabius");
-    expect(knowers).toContain("marcus-atilius");
+    expect(knowers.length).toBeGreaterThan(1);
+  });
+
+  it("does not open another man's strongbox, and everybody hears that it did not", async () => {
+    // The other kind of overreach. Money answers to whoever keeps it, so an
+    // order to pay out of the consul's chest is not a breach that succeeds --
+    // it is an order nobody carries out, and a small public embarrassment.
+    const port = capturingPort({ simulate_orchestrate: [SPEND_WITHOUT_LEAVE], simulate_cognition: [NOBODY, NOBODY, NOBODY, NOBODY, NOBODY, NOBODY] });
+    const result = await runSimulationBurst(input(port, {
+      actorRef: { kind: "character", id: "quintus-fabius" },
+      orderText: "Pay the shipwrights out of the consul's chest.",
+    }));
+
+    expect(result.world.material.transactions.some((transaction) =>
+      transaction.sourceAccountId === "marcus-purse" && transaction.destinationAccountId === "quintus-purse")).toBe(false);
+    const ignored = result.newFacts.find((fact) => fact.kind === "order_ignored")!;
+    expect(ignored.visibility).toBe("public");
+    expect(ignored.summary).toContain("Quintus Fabius");
   });
 });
 

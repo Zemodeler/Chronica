@@ -54,6 +54,15 @@ export function describeBreach(delta: WorldDelta, world: WorldState, actorName: 
     case "political_support_set": return `${actorName} recorded a position in a body he does not sit in`;
     case "legitimacy_shift": return `${actorName} spent the government's standing as though it were his own`;
     case "holding_transfer": return `${actorName} moved a holding from one man's hands to another's`;
+    case "holding_create": return delta.priceFromAccountRef === null
+      ? `${actorName} granted away public land`
+      : `${actorName} bought land with money that was not his to spend`;
+    case "holding_improve": return `${actorName} paid for works on an estate with money that was not his to spend`;
+    case "trade_venture_open": return `${actorName} put money that was not his into ${delta.title}`;
+    case "trade_venture_close": return `${actorName} wound up a venture that was not his`;
+    case "force_membership_set": return delta.change === "desert"
+      ? `${actorName} deserted from ${force(delta.forceRef)}`
+      : `${actorName} discharged a man from ${force(delta.forceRef)} without the command to do it`;
     case "diplomatic_message_send": return `${actorName} wrote to a foreign power over the government's name`;
     case "diplomatic_message_answer": return `${actorName} answered a foreign power over the government's name`;
     case "agreement_open": return `${actorName} bound the government to terms he had no power to agree`;
@@ -115,6 +124,24 @@ export function findWhoWouldNotice(world: WorldState, scenarioOffices: readonly 
     // A legion does not move without the men who answer for it knowing.
     add(force?.controllerCharacterId, "witnessed", 2);
     add(force?.commanderCharacterId, "witnessed", 2);
+  }
+
+  // A seat taken without right is noticed first by whoever already sits in
+  // that office -- a colleague does not need an audit to see a new face.
+  if (delta.op === "office_seat_set") {
+    for (const seat of world.material.officeSeats) {
+      if (seat.officeId === delta.officeId && seat.status === "held") add(seat.holderCharacterId, "witnessed", 1);
+    }
+  }
+
+  // A letter over a government's name is answered to that government, and
+  // the answer lands on the desk of whoever holds its offices.
+  if (delta.op === "diplomatic_message_send") {
+    const writtenFor = delta.fromPolityId;
+    for (const seat of world.material.officeSeats) {
+      if (seat.status !== "held") continue;
+      if (offices.find((office) => office.id === seat.officeId)?.polityId === writtenFor) add(seat.holderCharacterId, "document", 20);
+    }
   }
 
   // Otherwise: whoever holds the office whose business this was. The person

@@ -370,14 +370,17 @@ export function recordNemesis(
   if (rival === undefined || ruler === undefined) return world;
 
   const storylineId = ids.next("storyline");
-  const stakes = arenaStakes(chosen.arena, rival.name, ruler.name);
+  // Names are the world's, up to a hundred and twenty characters each, and two
+  // of them in a thread title the schema caps at a hundred and sixty is a save
+  // that will not load. Clipped, never refused: the quarrel still begins.
+  const stakes = clip(arenaStakes(chosen.arena, rival.name, ruler.name), 320);
   return {
     ...world,
     storylines: [
       ...world.storylines,
       {
         id: storylineId,
-        title: `${rival.name} and ${ruler.name}`,
+        title: clip(`${rival.name} and ${ruler.name}`, 160),
         // The rival alone, and deliberately.
         //
         // A thread is shown to everyone in it, and the world slice draws the
@@ -428,4 +431,9 @@ export function retireNemesis(world: WorldState, nemesis: Nemesis): WorldState {
     ...world,
     nemeses: world.nemeses.map((entry) => (entry.id === nemesis.id ? { ...entry, retiredAtStep: world.elapsedStep } : entry)),
   };
+}
+
+/** Text cut to a schema's length, with an ellipsis to show it was. */
+function clip(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 3).trimEnd()}...`;
 }

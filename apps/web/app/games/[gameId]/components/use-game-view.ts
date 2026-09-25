@@ -12,6 +12,24 @@ import { useCallback, useEffect, useState } from "react";
  * receipt is read once.
  */
 
+/**
+ * How far the player may ask the world to run, in days: the choices the
+ * server accepts (`TIME_SPANS` in `lib/simulation-service.ts`, which this
+ * client cannot import).
+ */
+export const TIME_SPANS = [
+  { days: 7, label: "a week" },
+  { days: 30, label: "a month" },
+  { days: 90, label: "a season" },
+  { days: 180, label: "half a year" },
+  { days: 365, label: "a year" },
+] as const;
+
+export interface SendOptions {
+  readonly spanDays?: number | undefined;
+  readonly wait?: boolean | undefined;
+}
+
 export interface PartyRef {
   readonly kind: string;
   readonly id: string;
@@ -92,7 +110,11 @@ export interface GameViewController {
   readonly progress: readonly string[];
   readonly error: string | null;
   /** Resolves true when a report was committed, so the caller can go and read it. */
-  readonly send: (orderText: string) => Promise<boolean>;
+  /**
+   * An order, or -- with `wait` and no words -- time let pass. `spanDays` is
+   * how far the world is to run; omitted, the engine decides.
+   */
+  readonly send: (orderText: string, options?: SendOptions) => Promise<boolean>;
   readonly choose: (decisionId: string, optionId: string) => Promise<void>;
   readonly refresh: () => Promise<void>;
   /**
@@ -119,9 +141,10 @@ export function useGameView(gameId: string): GameViewController {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  const send = useCallback(async (orderText: string): Promise<boolean> => {
+  const send = useCallback(async (orderText: string, options: SendOptions = {}): Promise<boolean> => {
     const text = orderText.trim();
-    if (text.length === 0) return false;
+    const waiting = options.wait === true;
+    if (text.length === 0 && !waiting) return false;
     setBusy(true);
     setError(null);
     setProgress([]);
@@ -129,7 +152,11 @@ export function useGameView(gameId: string): GameViewController {
       const response = await fetch(`/api/games/${gameId}/simulate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderText: text }),
+        body: JSON.stringify({
+          orderText: text,
+          ...(options.spanDays === undefined ? {} : { spanDays: options.spanDays }),
+          ...(waiting ? { wait: true } : {}),
+        }),
       });
       // A refusal is still a plain JSON body: nothing was started, so there is
       // nothing to stream.

@@ -35,7 +35,110 @@ describe("orchestrator prompt", () => {
     // field added anywhere in `deltas.ts`. It is cached on every call after
     // the first, which is why this is a ceiling rather than a budget; if it
     // reaches seventy thousand the schema itself wants pruning, not the rule.
-    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(64_000);
+    // Raised again: taking a city and reinforcing an army are each their own
+    // op now, and an army can be renamed, rested, victualled and handed to
+    // another power. Every one of those is a field, and a field's generated
+    // schema costs more than the rule that explains it -- the prose for all of
+    // them is under 2 500 characters. The seventy-thousand line above is still
+    // the one that means something: past it, prune the union rather than the
+    // rules, because at that point the vocabulary is carrying more than a
+    // model can hold in its head at once anyway.
+    // Raised again for the closed lists opening and for plots: about 250
+    // characters of generated schema and about 1 000 of rules. Three of those
+    // fields exist to stop the engine refusing an order it simply had no row
+    // for -- a kind of soldier the scenario never authored, ground on the map
+    // nobody drew, a city outside the forty-one that were drawn -- and
+    // `covert_plot_open` is the whole of "hire a man to kill him", which had
+    // no expression at all and was written instead as health to nothing and a
+    // tag reading "dead".
+    //
+    // The rules were cut twice to land here rather than raising this to meet
+    // them, because the seventy-thousand line below is the one that means
+    // something and it is now close: past it, prune the union rather than the
+    // rules, since at that point the vocabulary is carrying more than a model
+    // can hold in its head at once anyway.
+    //
+    // ## And then it was crossed
+    //
+    // Contingencies cost 5 300 characters: about 4 700 of generated schema for
+    // `contingency_arm`/`contingency_disarm`, and 600 of rules. That buys the
+    // conditional order -- roughly a fifth of everything a real player writes
+    // hangs on one -- so the capability is worth having. It does not make the
+    // line above untrue, and this is deliberately not a quiet bump:
+    //
+    // **The duplication is mine and it is real.** `WatchPredicate` is now
+    // inlined twice, once for the ruler's own `watch` and once as a
+    // contingency's trigger, at roughly 2 000 characters. Worse, they are the
+    // same idea: a watch *is* a `stand_to` contingency that nobody kept. Folding
+    // one into the other is the honest prune, and it is a design decision about
+    // a load-bearing feature rather than something to slip into this change.
+    //
+    // **There is a measured alternative.** `z.toJSONSchema(..., { reused: "ref" })`
+    // takes 4 253 characters off the delta union by emitting `$defs` instead of
+    // repeating `RefSchema`, `ReasonSchema` and `OrderPartyRef` forty-odd times.
+    // It costs nothing in vocabulary. It was not taken here because it changes
+    // what the model actually reads -- opaque `#/$defs/__schema0` references in
+    // place of inline shapes -- and that wants an eval behind it, not a
+    // deadline.
+    //
+    // The next capability added here should pay for itself out of one of those
+    // two, rather than moving this number again.
+    //
+    // ## Paid for, not moved
+    //
+    // Raids, offices made on demand, passage for armies, moving a person, kin,
+    // skills in bands, a battle plan's premises and armies joining a battle
+    // came to about 5 000 characters. They were paid for out of the first of
+    // the two, narrowly: `WatchPredicate` alone is named (`.meta({ id })`), so
+    // the schema states it once under `$defs` and points at it twice, and the
+    // model reads `#/$defs/WatchPredicate` -- a word -- rather than the opaque
+    // `__schema0` that made the blanket version want an eval. The rules for
+    // the new ops were cut to a line each to land under the line.
+    //
+    // ## And then the rules were rewritten instead of added to
+    //
+    // Thirty-five numbered rules had grown one per capability, most of them
+    // explaining a field -- because what a field means lives in a TypeScript
+    // comment the model never sees, so every new field bought a new paragraph.
+    // They are now twelve principles (23 264 characters of rules down to about
+    // 8 400), each owning a concern -- standing, open lists, time, facts,
+    // costs, who settles what, what the engine owns, pay, the world moving --
+    // with the specifics as examples under the principle they belong to. A new
+    // capability goes under its principle as a clause, or not at all; if it
+    // needs a paragraph, the principle is missing, not the paragraph.
+    //
+    // The line is lowered to hold that: the prompt was 74 800 and is now
+    // about 60 000.
+    //
+    // Raised by 1 500 for land a man owns: an estate could be inherited and
+    // could not be bought, granted or improved, so a private citizen had no
+    // lawful way to develop anything. Two ops' schema and one clause each
+    // under principles 8 and 9 (elections are the other clause).
+    //
+    // Raised by 2 000 for men who are not the state: a man in an army's ranks
+    // (`force_membership_set`), a merchant's trade between two places
+    // (`trade_venture_open`/`_close`), and a force raised as the troops it is
+    // rather than always as infantry (`categoryId`). Each is its schema plus
+    // half a clause under principle 8.
+    //
+    // ## Paid for again, and the line lowered
+    //
+    // Standing, allegiance, skills and ambitions a person can gain or lose;
+    // kin between people who exist; deaths somebody brings about; an army's
+    // standing plan; a law that does what it enacts; a treaty's clauses; and
+    // the order's own acts apart from the world's ("worldDeltas") came to
+    // about 5 500 characters. Paid for by naming the five schemas repeated
+    // most -- `Id` alone was seventy-three copies -- so the model reads a word
+    // where it read the same string again, which is the precedent
+    // `WatchPredicate` set. Net, the prompt went down.
+    //
+    // ## And again, for the roles
+    //
+    // Legal status, service contracts, a physician's cure and a spy came to
+    // about 2 500 characters of schema and clause. Paid for the same way:
+    // `Money`, `SignedBps`, `Name` and `Days` are named once instead of being
+    // written out in full some fifty times between them.
+    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(63_000);
   });
 });
 

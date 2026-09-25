@@ -25,6 +25,8 @@ export const AiOperationSchema = z.enum([
   "simulate_cognition",
   /** Writes the player's Chronicle, from what they could actually know. */
   "compose_chronicle",
+  /** Withdraws what an answer said happened, where the engine refused the act it described. */
+  "reconcile_facts",
 ]);
 export type AiOperation = z.infer<typeof AiOperationSchema>;
 

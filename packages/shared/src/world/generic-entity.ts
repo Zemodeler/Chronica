@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema } from "../material-state";
 import { OrderPartyRefSchema } from "./party-ref";
+import { StandingEffectsCarrierShape } from "./standing-effects";
 
 // The true generic fallback (docs/32, Part C.1): used only for a genuinely
 // novel composition no typed schema (Force, Institution, Structure, Project,
@@ -20,6 +21,14 @@ export const GenericEntitySchema = z
     linkedEntityIds: z.array(EntityIdSchema).max(20).default([]),
     createdAtStep: ElapsedStepSchema,
     provenanceEventIds: z.array(z.string().max(120)).max(20).default([]),
+    /** Where it stands, when it stands somewhere: the church's seat, the school's town. Null for a law of the whole realm. */
+    provinceId: EntityIdSchema.nullable().optional(),
+    /**
+     * What it goes on doing (see `world/standing-effects.ts`). An arrangement
+     * used to be a record whose effects the model was asked to remember to
+     * carry out; now it carries them.
+     */
+    ...StandingEffectsCarrierShape,
   })
   .strict();
 export type GenericEntity = z.infer<typeof GenericEntitySchema>;

@@ -20,7 +20,24 @@ import { runDeterministicTick } from "./tick";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const opening = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
+/**
+ * The Mamertines as they were in scenario version 26: 600 in the chest and
+ * strait tolls that could not cover their soldiery, so the garrison holding
+ * Messana went unpaid in the eleventh month. Version 27 gave every power
+ * thousands in hand and a revenue that pays its men; the mechanism is still
+ * what these tests are about, so they set up the power that runs dry.
+ */
+const opening = (): WorldState => {
+  const world = WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
+  return {
+    ...world,
+    material: {
+      ...world.material,
+      accounts: world.material.accounts.map((account) => (account.id === "mamertine-treasury" ? { ...account, balance: 600 } : account)),
+      incomeSources: world.material.incomeSources.map((source) => (source.id === "mamertine-tolls" ? { ...source, amount: 90 } : source)),
+    },
+  };
+};
 
 /** Runs the world forward a month at a time, as a burst catching up would. */
 function runMonths(world: WorldState, months: number): WorldState {

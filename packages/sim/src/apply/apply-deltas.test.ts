@@ -52,32 +52,53 @@ describe("money", () => {
     expect(totalMoney(result.world)).toBe(totalMoney(before) - 200);
   });
 
-  it("refuses a payment larger than the balance as friction, leaving every balance untouched", () => {
+  it("pays what there is of a payment larger than the balance, and says what is still owed", () => {
+    // A man with twelve hundred who owes a hundred thousand pays twelve
+    // hundred. It used to be refused whole, so he paid nothing at all.
     const before = world();
+    const total = totalMoney(before);
     const result = applyDeltas(
       before,
       [{ op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: "hanno-purse", amount: 99_999, reason: "An impossible levy." }],
       context(),
     );
 
+    expect(result.rejected).toHaveLength(0);
+    expect(result.world.material.accounts.find((a) => a.id === "marcus-purse")!.balance).toBe(0);
+    expect(result.world.material.accounts.find((a) => a.id === "hanno-purse")!.balance).toBe(900 + 1_200);
+    expect(totalMoney(result.world)).toBe(total);
+    const short = result.factProposals.find((fact) => fact.kind === "payment_short");
+    expect(short?.summary).toContain(`${99_999 - 1_200} is still owed`);
+  });
+
+  it("refuses a payment from an empty chest as friction, leaving every balance untouched", () => {
+    const drained = applyDeltas(world(), [{ op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: null, amount: 1_200, reason: "Spent." }], context()).world;
+    const result = applyDeltas(
+      drained,
+      [{ op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: "hanno-purse", amount: 100, reason: "Nothing left to pay it with." }],
+      context(),
+    );
+
     expect(result.applied).toHaveLength(0);
-    expect(result.rejected[0]?.reason).toContain("cannot cover");
-    expect(result.world.material.accounts).toEqual(before.material.accounts);
+    expect(result.rejected[0]?.reason).toContain("is empty");
+    expect(result.rejected[0]?.kind).toBe("world");
+    expect(result.world.material.accounts).toEqual(drained.material.accounts);
   });
 
   it("keeps applying the rest of a batch after one delta is refused", () => {
     const result = applyDeltas(
       world(),
       [
-        { op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: "hanno-purse", amount: 99_999, reason: "An impossible levy." },
-        { op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: "hanno-purse", amount: 100, reason: "What could actually be raised." },
+        { op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: "hanno-purse", amount: 99_999, reason: "Everything he has." },
+        { op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: "hanno-purse", amount: 100, reason: "And then some." },
+        { op: "polity_stance_shift", polityId: "rome", towardPolityId: "carthage", trustDelta: -5, reason: "Word of it gets about." },
       ],
       context(),
     );
 
     expect(result.rejected).toHaveLength(1);
-    expect(result.applied).toHaveLength(1);
-    expect(result.world.material.accounts.find((a) => a.id === "marcus-purse")!.balance).toBe(1_100);
+    expect(result.applied).toHaveLength(2);
+    expect(result.world.material.accounts.find((a) => a.id === "marcus-purse")!.balance).toBe(0);
   });
 });
 
@@ -167,13 +188,16 @@ describe("authority", () => {
   });
 
   it("carries out an unauthorized act and records it as a breach rather than refusing it", () => {
-    // VISION §12: a general who marches without orders has not performed an
-    // invalid action. He has committed insubordination, and the world must be
-    // able to see that he did.
-    const before = world();
+    // VISION §12: overreach is a story, not an invalid action, wherever the act
+    // needs nobody's obedience. A Carthaginian writing to Syracuse over Rome's
+    // name has written the letter; the world must be able to see that he did.
     const result = applyDeltas(
-      before,
-      [{ op: "force_modify", forceRef: "legio-i", locationId: "ita-72843720b81376294924159-sicily-southeast", reason: "Marching without authority." }],
+      world(),
+      [{
+        op: "diplomatic_message_send", localId: "forged", kind: "letter", fromPolityId: "rome", fromCharacterRef: "hanno",
+        toPolityId: "syracuse", toCharacterRef: null, subject: "A Roman offer", terms: "Rome will abandon Messana.",
+        replyWithinDays: 30, inReplyToRef: null, visibility: "polity", reason: "Writing in a power that is not his.",
+      }],
       context({ actorRef: { kind: "character", id: "hanno" } }),
     );
 
@@ -181,7 +205,21 @@ describe("authority", () => {
     expect(result.applied).toHaveLength(1);
     expect(result.breaches).toHaveLength(1);
     expect(result.breaches[0]!.reason).toContain("No active grant");
-    expect(result.world.material.forces.find((f) => f.id === "legio-i")!.locationId).toBe("ita-72843720b81376294924159-sicily-southeast");
+  });
+
+  it("refuses an order to men who do not answer to the one giving it, in front of everybody", () => {
+    // The other half of the same rule. A letter needs only a pen; a legion
+    // needs its men to march, and they take their orders from their own
+    // general. Nobody moves, and the world has a story about why.
+    const result = applyDeltas(
+      world(),
+      [{ op: "force_modify", forceRef: "legio-i", locationId: "ita-72843720b81376294924159-sicily-southeast", reason: "Marching without authority." }],
+      context({ actorRef: { kind: "character", id: "hanno" } }),
+    );
+
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.kind).toBe("ignored");
+    expect(result.world.material.forces.find((f) => f.id === "legio-i")!.locationId).not.toBe("ita-72843720b81376294924159-sicily-southeast");
   });
 });
 
@@ -360,10 +398,11 @@ describe("what the country is made of", () => {
   it("refuses to change a place that is not on the map", () => {
     const result = applyDeltas(
       world(),
-      [{ op: "province_material_shift", provinceId: "latium", foodSecurityBpsDelta: -100, reason: "A shortage." }],
+      // Not "latium", which now finds Latium by its name: somewhere no map has.
+      [{ op: "province_material_shift", provinceId: "atlantis", foodSecurityBpsDelta: -100, reason: "A shortage." }],
       context(),
     );
-    expect(result.rejected[0]!.reason).toContain('No province "latium"');
+    expect(result.rejected[0]!.reason).toContain('No province "atlantis"');
     expect(result.rejected[0]!.kind).toBe("reference");
   });
 });
@@ -560,9 +599,17 @@ describe("borrowing", () => {
     expect(result.world.material.loans[0]!.outstanding).toBe(1_000);
   });
 
+  const withEmptyPurse = (state: WorldState, ownerId: string): WorldState => ({
+    ...state,
+    material: {
+      ...state.material,
+      accounts: state.material.accounts.map((account) => (account.owner.kind === "character" && account.owner.id === ownerId ? { ...account, balance: 0 } : account)),
+    },
+  });
+
   it("names the lender when he cannot afford it, rather than printing his id at the ruler", () => {
     const result = applyDeltas(
-      world(),
+      withEmptyPurse(world(), "hamilcar"),
       [{ op: "loan_open", localId: "doomed", lenderKind: "character", lenderRef: "hamilcar", borrowerAccountRef: "marcus-purse", principal: 9_000, interestBps: 900, cadenceDays: 90, terms: "More than he has", collateralHoldingRef: null, reason: "An overreach." }],
       context(),
     );
@@ -604,11 +651,20 @@ describe("borrowing", () => {
     expect(servicing.priority).toBeLessThan(500);
   });
 
-  it("refuses a loan the lender plainly cannot make", () => {
-    const result = applyDeltas(world(), [borrowFrom("hamilcar", 5_000)], context());
+  it("refuses a loan from a lender with nothing", () => {
+    const result = applyDeltas(withEmptyPurse(world(), "hamilcar"), [borrowFrom("hamilcar", 5_000)], context());
     expect(result.world.material.loans).toHaveLength(0);
-    expect(result.rejected[0]!.reason).toContain("will not cover a loan of 5000");
+    expect(result.rejected[0]!.reason).toContain("has nothing to lend");
     expect(result.rejected[0]!.kind).toBe("world");
+  });
+
+  it("lends what the lender has, when he has less than was asked", () => {
+    const before = world();
+    const has = before.material.accounts.find((account) => account.id === "hanno-purse")!.balance;
+    const result = applyDeltas(before, [borrowFrom("hanno", has + 5_000)], context());
+    expect(result.rejected).toHaveLength(0);
+    expect(result.world.material.loans[0]!.outstanding).toBe(has);
+    expect(result.world.material.accounts.find((account) => account.id === "hanno-purse")!.balance).toBe(0);
   });
 
   it("takes foreign money without anyone in the world being out of pocket", () => {
@@ -667,10 +723,13 @@ describe("what somebody can be made to believe", () => {
     expect(belief?.status).toBe("active");
   });
 
-  it("refuses to plant anything in a person who does not exist", () => {
+  it("makes the person a belief was planted in, when the answer named him and never made him", () => {
+    // Refused, once: a belief for "a-man-who-never-was" failed for want of a
+    // row. The world's lists are open -- a person named is a person -- so he
+    // is made, and believes it.
     const result = applyDeltas(world(), [plant("a-man-who-never-was", "Anything at all.", "fact", 90)], context());
-    expect(result.rejected[0]!.reason).toContain('No character "a-man-who-never-was"');
-    expect(result.rejected[0]!.kind).toBe("reference");
+    expect(result.rejected).toEqual([]);
+    expect(result.world.characters.some((character) => character.name === "A Man Who Never Was")).toBe(true);
   });
 });
 
@@ -760,7 +819,7 @@ describe("battle", () => {
     expect(result.rejected[0]!.kind).toBe("world");
   });
 
-  it("refuses a battle between two armies of the same power", () => {
+  it("refuses a battle between two armies of the same man", () => {
     const before = facing();
     const { roman } = sides(before);
     const twoRoman: WorldState = {
@@ -771,7 +830,28 @@ describe("battle", () => {
       },
     };
     const result = applyDeltas(twoRoman, [give(roman.id, "second-legion")], context());
-    expect(result.rejected[0]!.reason).toContain("answer to the same power");
+    expect(result.rejected[0]!.reason).toContain("answer to the same man");
+  });
+
+  it("lets two armies of one power under different men fight, and it costs the power", () => {
+    // A consul marching on his colleague: the civil war the world could not
+    // have while one power's armies could never meet each other.
+    const before = facing();
+    const { roman } = sides(before);
+    const rival = before.characters.find((character) => character.polityId === "rome" && character.id !== roman.commanderCharacterId && character.id !== roman.controllerCharacterId)!;
+    const twoRoman: WorldState = {
+      ...before,
+      material: {
+        ...before.material,
+        forces: [...before.material.forces, { ...roman, id: "rebel-legion", name: "The rebel legion", commanderCharacterId: rival.id, controllerCharacterId: rival.id }],
+      },
+    };
+    const legitimacy = (state: WorldState) => state.material.polityLegitimacy.find((entry) => entry.polityId === "rome")?.legitimacyBps ?? 5_000;
+    const result = applyDeltas(twoRoman, [give("rebel-legion", roman.id)], context());
+
+    expect(result.rejected).toHaveLength(0);
+    expect(result.factProposals.some((fact) => fact.kind === "civil_strife" && fact.visibility === "public")).toBe(true);
+    expect(legitimacy(result.world)).toBeLessThan(legitimacy(twoRoman));
   });
 
   it("refuses a battle a force that no longer exists is supposed to fight", () => {
@@ -806,18 +886,23 @@ describe("whose act it is", () => {
   });
 
   it("still holds the ruler to account inside their own polity", () => {
+    // Refused -- the purse is not his -- and the attempt is his to answer for.
     const result = applyDeltas(
       world(),
       [{ op: "money_transfer", fromAccountRef: "quintus-purse", toAccountRef: null, amount: 100, reason: "Helping himself to a rival's money." }],
       context({ actsForTheWorld: true }),
     );
-    expect(result.breaches).toHaveLength(1);
+    expect(result.rejected[0]!.kind).toBe("ignored");
   });
 
   it("holds a person to account for reaching into another power, which is the whole of insubordination", () => {
     const result = applyDeltas(
       world(),
-      [{ op: "force_modify", forceRef: "legio-i", locationId: "ita-72843720b81376294924159-sicily-southeast", reason: "Marching a legion that is not his." }],
+      [{
+        op: "diplomatic_message_send", localId: "overture", kind: "alliance_offer", fromPolityId: "rome", fromCharacterRef: "hanno",
+        toPolityId: "syracuse", toCharacterRef: null, subject: "Friendship", terms: "Rome offers Syracuse an alliance.",
+        replyWithinDays: 30, inReplyToRef: null, visibility: "polity", reason: "Speaking for a power that is not his.",
+      }],
       // Hanno acting through his own cognition: nobody is speaking for him.
       context({ actorRef: { kind: "character", id: "hanno" } }),
     );
@@ -1090,7 +1175,6 @@ describe("getting an army from here to there", () => {
     // This fixture's Africa has no edges at all, so the honest answer is that
     // no road leads there -- not a distance.
     expect(result.rejected[0]!.reason).toContain("cannot reach");
-    expect(result.rejected[0]!.reason).toContain("force_move");
     expect(result.world.material.forces.find((force) => force.id === "legio-i")!.locationId).toBe(world().material.forces.find((force) => force.id === "legio-i")!.locationId);
   });
 
@@ -1148,7 +1232,19 @@ describe("crossing water", () => {
     // is how a naval war came to be fightable on foot.
     const withoutHulls: WorldState = (() => {
       const state = atTheStrait();
-      return { ...state, material: { ...state.material, forces: state.material.forces.filter((force) => force.id !== "allied-greek-hulls") } };
+      // The chest goes with them: an army that is not in the world does not
+      // have money in it, and the world refuses to hold a chest whose owner
+      // does not exist.
+      return {
+        ...state,
+        material: {
+          ...state.material,
+          forces: state.material.forces.filter((force) => force.id !== "allied-greek-hulls"),
+          accounts: state.material.accounts.filter(
+            (account) => !(account.owner.kind === "force" && account.owner.id === "allied-greek-hulls"),
+          ),
+        },
+      };
     })();
     const result = applyDeltas(withoutHulls, [cross], punicContext());
 
@@ -1500,7 +1596,9 @@ describe("offices that actually move", () => {
     const result = applyDeltas(
       world(),
       [
-        // Rejected: no such province, so nobody is created.
+        // Rejected: no such province, so nobody is created. Spoken by the
+        // world, which the engine does not answer for -- an act of the actor's
+        // own would be placed where he stands (see `fillGaps`).
         {
           op: "character_create", localId: "ghost", name: "Nobody At All", polityId: "rome",
           provinceId: "no-such-province-anywhere", age: 40, officeLabel: null, officeAuthorises: [],
@@ -1512,7 +1610,7 @@ describe("offices that actually move", () => {
           targetRefs: [], rationale: "Doing something.", priority: 50, visibility: "private",
         },
       ],
-      context(),
+      { ...context(), actsForTheWorld: true },
     );
 
     expect(result.rejected).toHaveLength(2);
@@ -1544,7 +1642,7 @@ describe("offices that actually move", () => {
     expect(result.rejected[0]!.reason).toContain("Did you mean");
   });
 
-  it("says nothing about a near miss when there is none", () => {
+  it("makes somebody named who resembles nobody, instead of refusing the act that named him", () => {
     const result = applyDeltas(
       world(),
       [{
@@ -1553,7 +1651,8 @@ describe("offices that actually move", () => {
       }],
       context(),
     );
-    expect(result.rejected[0]!.reason).not.toContain("Did you mean");
+    expect(result.rejected).toEqual([]);
+    expect(result.world.characters.some((character) => character.name === "Nobody Resembling Anything")).toBe(true);
   });
 
   it("enlarges an office that exists rather than inventing a second one beside it", () => {
@@ -1829,5 +1928,464 @@ describe("men lost to something other than a battle", () => {
     }] as WorldDelta[], context());
     expect(result.rejected).toHaveLength(1);
     expect(result.rejected[0]!.kind).toBe("reference");
+  });
+});
+
+/**
+ * Who pays an army, as an order rather than as scenario data.
+ *
+ * `Force.payObligationId` was readable by the muster, by `payInWords` and by
+ * the tick's arrears rules, and writable by nothing at all: every scenario
+ * authored it once and no delta in the vocabulary could touch it afterwards.
+ * "Put the legions on the treasury" was sayable, narratable, and inert.
+ */
+describe("who has undertaken to pay them", () => {
+  const legion = (state: WorldState) => state.material.forces.find((force) => force.id === "legio-i")!;
+
+  it("moves an army onto a wage bill that already stands", () => {
+    const before = world();
+    expect(legion(before).payObligationId).toBe("legio-pay");
+
+    const result = applyDeltas(
+      before,
+      [{ op: "force_modify", forceRef: "legio-i", payObligationRef: "carthaginian-pay", reason: "The legion passes to another paymaster." }],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    expect(legion(result.world).payObligationId).toBe("carthaginian-pay");
+  });
+
+  it("raises men and funds them in one order", () => {
+    const result = applyDeltas(
+      world(),
+      [
+        {
+          op: "obligation_upsert", localId: "new_pay", obligationRef: null, kind: "army_pay",
+          label: "Pay of the new levy", payerAccountRef: "marcus-purse", recipientAccountRef: null,
+          amount: 50, cadenceDays: 30, priority: 900, active: true, reason: "The levy has to be paid.",
+        },
+        {
+          op: "force_create", localId: "levy", name: "The new levy", polityId: "rome",
+          commanderCharacterRef: "marcus-atilius", controllerCharacterRef: "marcus-atilius",
+          locationId: "ita-72843720b81376294924159-sicily-northeast", authorizedStrength: 1_000,
+          payObligationRef: localRef("new_pay"), reason: "Two thousand men, and somebody to pay them.",
+        },
+      ],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    const raised = result.world.material.forces.find((force) => force.name === "The new levy")!;
+    // Minted in the same answer: the obligation did not exist when the force
+    // delta was written, which is the whole point of a local ref.
+    expect(raised.payObligationId).not.toBeNull();
+    expect(result.world.material.obligations.some((o) => o.id === raised.payObligationId)).toBe(true);
+  });
+
+  it("leaves an army nobody has undertaken to pay when the order says so", () => {
+    const result = applyDeltas(
+      world(),
+      [{ op: "force_modify", forceRef: "legio-i", payObligationRef: null, reason: "Rome washes its hands of them." }],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    expect(legion(result.world).payObligationId).toBeNull();
+  });
+
+  it("leaves the arrangement alone when the order says nothing about it", () => {
+    const result = applyDeltas(
+      world(),
+      [{ op: "force_modify", forceRef: "legio-i", moraleBpsDelta: 200, reason: "An inspection, and nothing more." }],
+      context(),
+    );
+
+    expect(legion(result.world).payObligationId).toBe("legio-pay");
+  });
+
+  it("refuses to point an army at a wage bill that does not exist", () => {
+    const result = applyDeltas(
+      world(),
+      [{ op: "force_modify", forceRef: "legio-i", payObligationRef: "pay-from-thin-air", reason: "Paid by nobody in particular." }],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.reason).toContain("pay-from-thin-air");
+    expect(legion(result.world).payObligationId).toBe("legio-pay");
+  });
+
+  it("stops the grievance growing under a new paymaster without giving back the morale", () => {
+    const before = world();
+    const aggrieved: WorldState = {
+      ...before,
+      material: {
+        ...before.material,
+        forces: before.material.forces.map((force) =>
+          force.id === "legio-i" ? { ...force, payArrearsPeriods: 4, moraleBps: 3_000 } : force),
+      },
+    };
+
+    const result = applyDeltas(
+      aggrieved,
+      [{ op: "force_modify", forceRef: "legio-i", payObligationRef: "carthaginian-pay", reason: "Carthage buys the legion." }],
+      context(),
+    );
+
+    expect(legion(result.world).payArrearsPeriods).toBe(0);
+    expect(legion(result.world).moraleBps).toBe(3_000);
+  });
+});
+
+/**
+ * Orders that a person would give and the engine would not carry out.
+ *
+ * Both of these were found in play rather than by a test, and both had the
+ * same shape: the order was possible, the vocabulary could not express it, and
+ * what the player saw instead was a sentence that read like a rule of the
+ * world.
+ */
+describe("plain orders the vocabulary could not carry", () => {
+  const legion = (state: WorldState) => state.material.forces.find((force) => force.id === "legio-i")!;
+
+  it("renames an army, which nothing in the vocabulary could do", () => {
+    const result = applyDeltas(
+      world(),
+      [{ op: "force_modify", forceRef: "legio-i", name: "Legio I", reason: "The army is numbered." }],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    expect(legion(result.world).name).toBe("Legio I");
+  });
+
+  it("hands an army to a new commander without disturbing anything else about it", () => {
+    const before = world();
+    const result = applyDeltas(
+      before,
+      [{ op: "force_modify", forceRef: "legio-i", name: "Legio II", commanderCharacterRef: "quintus-fabius", reason: "A new man takes it." }],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    expect(legion(result.world).name).toBe("Legio II");
+    expect(legion(result.world).commanderCharacterId).toBe("quintus-fabius");
+    expect(legion(result.world).locationId).toBe(legion(before).locationId);
+    expect(legion(result.world).payObligationId).toBe(legion(before).payObligationId);
+  });
+
+  it("separates who leads an army from who answers for it", () => {
+    const result = applyDeltas(
+      world(),
+      [{ op: "force_modify", forceRef: "legio-i", controllerCharacterRef: "quintus-fabius", reason: "The Senate puts another man in charge of it." }],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    expect(legion(result.world).controllerCharacterId).toBe("quintus-fabius");
+    expect(legion(result.world).commanderCharacterId).toBe("marcus-atilius");
+  });
+
+  it("does not let a power lend to its own treasury", () => {
+    const before = world();
+    const total = totalMoney(before);
+    const result = applyDeltas(
+      before,
+      [{
+        op: "loan_open", localId: "self_loan", borrowerAccountRef: "marcus-purse",
+        lenderKind: "character", lenderRef: "marcus-atilius", principal: 200, interestBps: 500,
+        cadenceDays: 30, terms: "Funding the new legion", collateralHoldingRef: null,
+        reason: "Marcus funds the legion out of his own pocket, as a loan to himself.",
+      }],
+      context(),
+    );
+
+    // Allowed through, this moved the principal out of the account and
+    // straight back into it, and left a debt-service obligation whose payer
+    // and recipient were one account -- which is the object `obligation_upsert`
+    // has refused since it bricked a three-year campaign.
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.reason).toContain("cannot lend to its own account");
+    expect(result.world.material.loans).toHaveLength(0);
+    expect(totalMoney(result.world)).toBe(total);
+  });
+
+  it("tells the world's author what to write instead of putting one account on both sides", () => {
+    const result = applyDeltas(
+      world(),
+      [{
+        op: "obligation_upsert", localId: "circular", obligationRef: null, kind: "army_pay",
+        label: "Pay of the new legion", payerAccountRef: "marcus-purse", recipientAccountRef: "marcus-purse",
+        amount: 40, cadenceDays: 30, priority: 900, active: true, reason: "Somebody has to pay them.",
+      }],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.reason).toContain("wages and upkeep take no recipient");
+    // And it is the engine catching a malformed payload, not the world
+    // resisting: it belongs in the debugging record, not in the ruler's
+    // Chronicle as though Rome were forbidden to pay its own soldiers.
+    expect(result.rejected[0]!.kind).toBe("reference");
+  });
+});
+
+/**
+ * The rest of the plain orders, and whose fault a refusal is.
+ *
+ * `force_modify` could move an army, change its commander and move its morale.
+ * Everything else about an army was fixed for the life of the world: what it
+ * was called, who answered for it, which power it belonged to, how ragged and
+ * how tired it was, and how long it was fed for. Each of those is an order a
+ * commander gives in an ordinary week.
+ */
+describe("the rest of what can be said about an army", () => {
+  const legion = (state: WorldState) => state.material.forces.find((force) => force.id === "legio-i")!;
+
+  it("rests and drills them, which only morale could express before", () => {
+    const before = world();
+    const tired: WorldState = {
+      ...before,
+      material: {
+        ...before.material,
+        forces: before.material.forces.map((force) =>
+          force.id === "legio-i" ? { ...force, fatigueBps: 6_000, cohesionBps: 4_000 } : force),
+      },
+    };
+    const result = applyDeltas(
+      tired,
+      [{ op: "force_modify", forceRef: "legio-i", fatigueBpsDelta: -3_000, cohesionBpsDelta: 1_500, reason: "Winter quarters, and drill." }],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    expect(legion(result.world).fatigueBps).toBe(3_000);
+    expect(legion(result.world).cohesionBps).toBe(5_500);
+  });
+
+  it("victuals them for a stated span rather than an absolute day", () => {
+    const result = applyDeltas(
+      world(),
+      [{ op: "force_modify", forceRef: "legio-i", provisionStatus: "provisioned", provisionedForDays: 90, reason: "Supplied through the winter." }],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    expect(legion(result.world).provisionedThroughStep).toBe(world().elapsedStep + 90);
+  });
+
+  it("keeps every band inside its bounds however large the order", () => {
+    const result = applyDeltas(
+      world(),
+      [{ op: "force_modify", forceRef: "legio-i", fatigueBpsDelta: -10_000, cohesionBpsDelta: 10_000, moraleBpsDelta: 10_000, reason: "A triumph." }],
+      context(),
+    );
+
+    expect(legion(result.world).fatigueBps).toBe(0);
+    expect(legion(result.world).cohesionBps).toBe(10_000);
+    expect(legion(result.world).moraleBps).toBe(10_000);
+  });
+
+  it("hands an army to another power, and its old wages lapse with its old allegiance", () => {
+    const before = world();
+    expect(legion(before).payObligationId).toBe("legio-pay");
+
+    const result = applyDeltas(
+      before,
+      [{ op: "force_modify", forceRef: "legio-i", polityId: "carthage", reason: "The legion goes over." }],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    expect(legion(result.world).polityId).toBe("carthage");
+    // Left alone, Rome would have gone on paying an army that had left it.
+    expect(legion(result.world).payObligationId).toBeNull();
+  });
+
+  it("lets the same order hand an army over and say who pays it now", () => {
+    const result = applyDeltas(
+      world(),
+      [{ op: "force_modify", forceRef: "legio-i", polityId: "carthage", payObligationRef: "carthaginian-pay", reason: "Carthage takes them, and pays them." }],
+      context(),
+    );
+
+    expect(legion(result.world).polityId).toBe("carthage");
+    expect(legion(result.world).payObligationId).toBe("carthaginian-pay");
+  });
+});
+
+/**
+ * Whose fault a refusal is.
+ *
+ * A "world" rejection reaches the player as friction, because the order was
+ * well formed and the world would not have it. A "reference" rejection does
+ * not: it is a mistake in the writing. Sending one to the other place is what
+ * put "Rome cannot be both guarantor and debtor" in front of a player as
+ * though it were a law of the Republic.
+ */
+describe("a refusal says whose fault it was", () => {
+  const rejectionFor = (delta: WorldDelta) => applyDeltas(world(), [delta], context()).rejected[0]!;
+
+  it("keeps the world's own refusals where the player can read them", () => {
+    // Well-formed orders that the world genuinely will not have.
+    const broke = applyDeltas(world(), [
+      { op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: null, amount: 1_200, reason: "Everything he had." },
+      { op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: "hanno-purse", amount: 999_999, reason: "Spending what he has not got." },
+    ], context()).rejected[0]!;
+    expect(broke.kind).toBe("world");
+
+    const kin = rejectionFor({ op: "force_engage", forceRef: "legio-i", targetForceRef: "legio-i", posture: "offer_battle", tactic: null, reason: "Fighting itself." });
+    // Naming one army twice is a mistake in the writing, not a fact about Rome.
+    expect(kin.kind).toBe("reference");
+  });
+
+  it("keeps a payload that names one thing twice out of the record", () => {
+    for (const delta of [
+      { op: "polity_stance_shift", polityId: "rome", towardPolityId: "rome", trustDelta: 10, reason: "Rome regards itself." },
+      {
+        op: "diplomatic_message_send", localId: "note", kind: "proposal",
+        fromPolityId: "rome", fromCharacterRef: "marcus-atilius", toPolityId: "rome", toCharacterRef: null,
+        subject: "A note", terms: "To ourselves.", replyWithinDays: null, inReplyToRef: null,
+        visibility: "polity", reason: "Writing home.",
+      },
+      { op: "agreement_open", polityId: "rome", otherPolityId: "rome", kind: "alliance", terms: "With ourselves.", reason: "An alliance of one." },
+    ] as WorldDelta[]) {
+      expect(rejectionFor(delta).kind).toBe("reference");
+    }
+  });
+});
+
+/**
+ * One bad delta is one bad delta.
+ *
+ * Anything thrown out of a handler that was not a refusal used to leave
+ * `applyDeltas` altogether, taking every other change in the batch with it --
+ * so a single unanticipated shape turned a whole order into a failure of the
+ * engine. Found while writing the test above, with a payload that was missing
+ * a field the schema would normally have guaranteed.
+ */
+describe("an unexpected fault costs only the delta that carried it", () => {
+  it("keeps the rest of the batch, and records the fault against the one that failed", () => {
+    const before = world();
+    const result = applyDeltas(
+      before,
+      [
+        { op: "force_modify", forceRef: "legio-i", name: "Legio I", reason: "Renamed." },
+        // Missing every ref the handler will reach for. The schema would catch
+        // this first in the real pipeline; the point is what happens if
+        // anything ever gets past it.
+        { op: "diplomatic_message_send", fromPolityId: "rome", toPolityId: "carthage" } as unknown as WorldDelta,
+        { op: "force_modify", forceRef: "legio-i", moraleBpsDelta: 100, reason: "And encouraged." },
+      ],
+      context(),
+    );
+
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.kind).toBe("reference");
+    // The orders either side of it stood.
+    const legion = result.world.material.forces.find((force) => force.id === "legio-i")!;
+    expect(legion.name).toBe("Legio I");
+    expect(legion.moraleBps).toBe(before.material.forces.find((f) => f.id === "legio-i")!.moraleBps + 100);
+  });
+});
+
+/**
+ * Taking a city, which is not the same as taking a province.
+ *
+ * `Settlement.controllerPolityId` has carried the comment "a siege may change
+ * a city before its province changes hands" since the map was written, and no
+ * op could set it -- so the single act this scenario is pointed at could only
+ * be said as taking the whole of north-eastern Sicily.
+ */
+describe("a city changes hands", () => {
+  const MESSANA_PROVINCE = "ita-72843720b81376294924159-sicily-northeast";
+  const punicDefinition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
+  const punicWorld = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
+  const punicContext = (): ApplyContext => ({
+    now: { day: 0, minute: 540 },
+    actorRef: { kind: "character", id: "hieron-ii" },
+    offices: punicDefinition.government.offices,
+    warfare: punicDefinition.warfare,
+    terrains: punicDefinition.map.terrains,
+    ids: createIdFactory("city"),
+    gameId: "game-1",
+  });
+  const punicAtMessana = (): WorldState => {
+    const state = punicWorld();
+    return {
+      ...state,
+      material: {
+        ...state.material,
+        forces: state.material.forces.map((force) =>
+          force.id === "syracusan-army" ? { ...force, locationId: MESSANA_PROVINCE } : force),
+      },
+    };
+  };
+  const cityIn = (state: WorldState) =>
+    state.map.provinces.find((province) => province.id === MESSANA_PROVINCE)!.settlements;
+
+  it("falls to an army before its walls while its countryside does not", () => {
+    const before = punicAtMessana();
+    const city = cityIn(before)[0]!;
+    const heldBy = before.map.provinces.find((p) => p.id === MESSANA_PROVINCE)!.controllerPolityId;
+
+    const result = applyDeltas(
+      before,
+      [{ op: "settlement_control_set", settlementId: city.id, toPolityRef: "syracuse", sacked: false, reason: "The city opens its gates." }],
+      punicContext(),
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    expect(cityIn(result.world).find((s) => s.id === city.id)!.controllerPolityId).toBe("syracuse");
+    // Unless it was the last one, the province is untouched -- which is the
+    // whole state a siege is meant to be able to produce.
+    if (cityIn(before).length > 1) {
+      expect(result.world.map.provinces.find((p) => p.id === MESSANA_PROVINCE)!.controllerPolityId).toBe(heldBy);
+    }
+  });
+
+  it("takes the province with it once every city in it has gone", () => {
+    const before = punicAtMessana();
+    const result = applyDeltas(
+      before,
+      cityIn(before).map((city) => ({
+        op: "settlement_control_set" as const, settlementId: city.id, toPolityRef: "syracuse", sacked: false,
+        reason: "The last of them surrenders.",
+      })),
+      punicContext(),
+    );
+
+    expect(result.rejected).toHaveLength(0);
+    const province = result.world.map.provinces.find((p) => p.id === MESSANA_PROVINCE)!;
+    expect(province.controllerPolityId).toBe("syracuse");
+    // Held loosely: the countryside was left behind rather than beaten.
+    expect(province.controlFirmnessBps).toBeLessThanOrEqual(3_000);
+  });
+
+  it("plunders a city that was stormed and not one that surrendered", () => {
+    const before = punicAtMessana();
+    const city = cityIn(before)[0]!;
+    const take = (sacked: boolean) => applyDeltas(
+      before,
+      [{ op: "settlement_control_set", settlementId: city.id, toPolityRef: "syracuse", sacked, reason: sacked ? "Stormed." : "Surrendered." }],
+      punicContext(),
+    ).world.material.transactions.filter((transaction) => transaction.kind === "spoils");
+
+    expect(take(false)).toEqual([]);
+    expect(take(true).length).toBeGreaterThan(0);
+  });
+
+  it("refuses a city to a power with no army before it and no hold on the country", () => {
+    const result = applyDeltas(
+      punicWorld(),
+      [{ op: "settlement_control_set", settlementId: cityIn(punicWorld())[0]!.id, toPolityRef: "carthage", sacked: false, reason: "Carthage claims it from afar." }],
+      punicContext(),
+    );
+
+    expect(result.rejected).toHaveLength(1);
+    // The world resisting, not a malformed payload: the player should hear it.
+    expect(result.rejected[0]!.kind).toBe("world");
+    expect(result.rejected[0]!.reason).toContain("no army before");
   });
 });

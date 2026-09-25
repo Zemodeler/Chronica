@@ -1,6 +1,8 @@
 import { z } from "zod";
 
-export const EntityIdSchema = z.string().trim().min(1).max(120);
+// Named, so every JSON schema generated for a prompt states it once and points
+// at it: inlined, it was 73 copies of the same string in the orchestrator's.
+export const EntityIdSchema = z.string().trim().min(1).max(120).meta({ id: "Id" });
 export const ElapsedStepSchema = z.number().int().nonnegative().safe();
 export type ElapsedStep = z.infer<typeof ElapsedStepSchema>;
 export const MoneyAmountSchema = z.number().int().nonnegative().safe();
@@ -19,8 +21,24 @@ export const CurrencyDefinitionSchema = z.object({
 });
 export type CurrencyDefinition = z.infer<typeof CurrencyDefinitionSchema>;
 
+/**
+ * Whose money it is.
+ *
+ * "force" is the army's own chest -- the money that travels with it, out of
+ * which a commander pays his men when the state is not paying them, and which
+ * the enemy takes along with the field. Without it "they will be paid out of
+ * what they take" had nowhere to put what they took: every account in the
+ * world belonged to a person or a government, so an army could only ever be
+ * paid by somebody sitting still somewhere else.
+ */
 export const AccountOwnerSchema = z.object({
-  kind: z.enum(["character", "polity"]),
+  /**
+   * "entity" is an arrangement's own fund: a guild's treasury, a church's
+   * collection, a faction's war chest. An order that paid from one was refused
+   * for want of an account, because every account belonged to a person, a
+   * government or an army.
+   */
+  kind: z.enum(["character", "polity", "force", "entity"]),
   id: EntityIdSchema,
 });
 
@@ -58,7 +76,7 @@ export const IncomeSourceSchema = z.object({
   kind: z.enum(["land", "office", "trade", "pension", "tax", "tribute"]),
   label: z.string().trim().min(1).max(120),
   beneficiaryAccountId: EntityIdSchema,
-  originKind: z.enum(["holding", "office", "position", "polity"]),
+  originKind: z.enum(["holding", "office", "position", "polity", "venture"]),
   originId: EntityIdSchema,
   amount: MoneyAmountSchema,
   cadenceSteps: z.number().int().positive().max(36_600),
@@ -91,6 +109,13 @@ export const MoneyObligationSchema = z.object({
   missedPeriods: z.number().int().nonnegative(),
   active: z.boolean(),
   consequenceRef: EntityIdSchema.optional(),
+  /**
+   * How many more payments it runs for, where it does not run for ever: an
+   * indemnity of ten instalments. Counted down as each is paid, and the
+   * obligation lapses at nothing. Absent for everything that runs until
+   * somebody ends it.
+   */
+  remainingPeriods: z.number().int().nonnegative().optional(),
 });
 export type MoneyObligation = z.infer<typeof MoneyObligationSchema>;
 
@@ -190,9 +215,22 @@ export const MoneyTransactionSchema = z
   });
 export type MoneyTransaction = z.infer<typeof MoneyTransactionSchema>;
 
+/**
+ * Wealth that sits somewhere and changes hands when the place does.
+ *
+ * Declared with the economy and written by nothing for as long as it existed:
+ * both scenarios shipped `capturableValues: []`, so taking a city yielded
+ * nothing and "spoils" was a transaction kind no code path could produce.
+ *
+ * "province" is what a sack actually takes -- the movable wealth of the
+ * settlements in it, derived from their size rather than authored, so no
+ * scenario has to write a number for all 779 of them. The row is not created
+ * until somebody plunders the place: `remainingValue` is what is left after
+ * they have, which is why a province sacked twice yields less the second time.
+ */
 export const CapturableValueSchema = z.object({
   id: EntityIdSchema,
-  sourceKind: z.enum(["force_pay_chest", "treasury_location", "holding"]),
+  sourceKind: z.enum(["force_pay_chest", "treasury_location", "holding", "province"]),
   sourceId: EntityIdSchema,
   remainingValue: MoneyAmountSchema,
   currencyId: EntityIdSchema,
@@ -428,6 +466,16 @@ export const EligibilityRequirementKindSchema = z.enum([
   "not_disqualified",
   "sponsorship_required",
   "custom_scenario_flag",
+  /** `params.years`: at least this old. */
+  "min_age",
+  /** `params.officeId`: has held that office, now or before -- the rung below. */
+  "held_office",
+  /** `params.officeId`, `params.years`: has not held that office within so many years. */
+  "not_held_within_years",
+  /** `params.statuses`: what the law must say the person is -- free, freed, enslaved. */
+  "legal_status",
+  /** `params.gender`: a magistracy for men, the Vestals for women. */
+  "gender",
 ]);
 export type EligibilityRequirementKind = z.infer<typeof EligibilityRequirementKindSchema>;
 
@@ -751,7 +799,15 @@ export const ForcePersonnelEventSchema = z.object({
 export const ForceSchema = z.object({
   id: EntityIdSchema,
   name: z.string().trim().min(1).max(120),
+  /** The power it answers to -- or, for an outlaw band, the one it came out of. */
   polityId: EntityIdSchema,
+  /**
+   * Answers to no power at all (roles plan phase 8): pirates, brigands, a
+   * freebooting admiral. It follows whoever leads it and whoever pays it,
+   * fights anybody without a war being declared, raids anybody's land, its
+   * old country's included, and no government's grant reaches it.
+   */
+  outlaw: z.boolean().optional(),
   commanderCharacterId: EntityIdSchema,
   controllerCharacterId: EntityIdSchema,
   locationId: EntityIdSchema,
@@ -767,6 +823,31 @@ export const ForceSchema = z.object({
   payObligationId: EntityIdSchema.nullable(),
   payArrearsPeriods: z.number().int().nonnegative(),
   history: z.array(ForcePersonnelEventSchema),
+  /**
+   * Named people serving in the ranks -- not the commander, who is named
+   * above. A force was a commander and headcounts, so a man could command an
+   * army or be nowhere in it: a player who declared himself a legionary was
+   * handed a retinue of his own, and only commanders ever rolled for their
+   * fate in battle. Members share the force's losses, each by his own roll.
+   */
+  memberCharacterIds: z.array(EntityIdSchema).max(40).default([]),
+  /**
+   * How it means to fight when next brought to battle, whoever attacks: the
+   * ford it has fortified, the flank it keeps its horse on. Judged on the day
+   * against the field as it then stands, as an attacker's plan is. The same
+   * shape as `force_engage.tactic` (`sim/deltas.ts`), repeated here because
+   * the warfare module imports this one.
+   */
+  battlePlan: z
+    .object({
+      factor: z.enum(["deployment", "surprise", "effective_strength", "cohesion", "morale", "withdrawal"]),
+      magnitude: z.enum(["minor", "meaningful"]),
+      rationale: z.string().trim().min(1).max(600),
+      restsOn: z.array(z.enum(["scouted_ground", "prepared_position", "rough_ground", "superior_horse", "second_force", "numbers"])).max(6).optional(),
+    })
+    .strict()
+    .nullable()
+    .optional(),
 });
 export type Force = z.infer<typeof ForceSchema>;
 
@@ -846,6 +927,73 @@ export const LoanSchema = z
   });
 export type Loan = z.infer<typeof LoanSchema>;
 
+/**
+ * A trade a person has put money into: goods carried between two places, or
+ * sold in one (the same province at both ends), and the return they bring him.
+ *
+ * Trade was an income with a label and nothing behind it, so a merchant could
+ * be handed any figure, trade touched no place, and no fleet could cut a man's
+ * trade -- only a whole country's, all at once. A venture runs between two
+ * provinces, its return is set by the engine from what both can buy and sell,
+ * and it is stopped by a war with the power at the other end or an enemy fleet
+ * off either of its ports -- and resumes when the sea is clear.
+ */
+export const TradeVentureSchema = z
+  .object({
+    id: EntityIdSchema,
+    title: z.string().trim().min(1).max(120),
+    ownerCharacterId: EntityIdSchema,
+    fromProvinceId: EntityIdSchema,
+    toProvinceId: EntityIdSchema,
+    /** By sea when both ends are ports: a fleet can blockade it, and a ship can be lost. */
+    bySea: z.boolean(),
+    incomeSourceId: EntityIdSchema,
+    openedAtStep: ElapsedStepSchema,
+    /** Why it is not paying, if it is not. */
+    interruptedBy: z.enum(["war", "blockade"]).nullable().default(null),
+    status: z.enum(["running", "closed"]),
+  })
+  .strict();
+export type TradeVenture = z.infer<typeof TradeVentureSchema>;
+
+/**
+ * A man hired: employer, pay, term and what is owed (roles plan phase 5).
+ *
+ * Seven stations had no way to exist without it -- the mercenary captain, the
+ * hired knife, the envoy, the engineer, the physician, the tax farmer, the
+ * gladiator. Pay is an ordinary obligation, so a purse that runs dry misses it
+ * the way a treasury misses an army's; the contract lapses on the first missed
+ * month. While it runs, the man holds what the work needs: the captain's men
+ * answer to whoever hired them, the envoy may speak for the power that sent him.
+ */
+export const ServiceContractSchema = z
+  .object({
+    id: EntityIdSchema,
+    role: z.enum(["mercenary", "assassin", "envoy", "engineer", "physician", "tax_farmer", "gladiator", "retainer"]),
+    label: z.string().trim().min(1).max(160),
+    employerAccountId: EntityIdSchema,
+    employeeCharacterId: EntityIdSchema,
+    /** The monthly pay, or for a tax farmer his rent to the treasury. Null when nothing is paid by the month. */
+    obligationId: EntityIdSchema.nullable(),
+    /** What the tax farmer takes from the province, while the farm runs. */
+    incomeSourceId: EntityIdSchema.nullable().default(null),
+    /** The power the envoy may speak for while he is paid to. */
+    grantId: EntityIdSchema.nullable().default(null),
+    advance: MoneyAmountSchema,
+    monthlyPay: MoneyAmountSchema,
+    duties: z.string().trim().min(1).max(400),
+    openedAtStep: ElapsedStepSchema,
+    endsAtStep: ElapsedStepSchema.nullable(),
+    /** A captain's company, and who it answered to before it was hired. */
+    forceId: EntityIdSchema.nullable().default(null),
+    forceWas: z.object({ polityId: EntityIdSchema, controllerCharacterId: EntityIdSchema }).strict().nullable().default(null),
+    provinceId: EntityIdSchema.nullable().default(null),
+    counterpartPolityId: EntityIdSchema.nullable().default(null),
+    status: z.enum(["active", "ended", "lapsed", "broken"]),
+  })
+  .strict();
+export type ServiceContract = z.infer<typeof ServiceContractSchema>;
+
 export const MaterialWorldStateSchema = z
   .object({
     currency: CurrencyDefinitionSchema,
@@ -856,6 +1004,8 @@ export const MaterialWorldStateSchema = z
     transactions: z.array(MoneyTransactionSchema),
     capturableValues: z.array(CapturableValueSchema),
     holdings: z.array(HoldingSchema),
+    ventures: z.array(TradeVentureSchema).default([]),
+    contracts: z.array(ServiceContractSchema).default([]),
     institutions: z.array(GovernmentInstitutionSchema),
     reservedPowers: z.array(ReservedPowerRuleSchema),
     motions: z.array(MotionSchema),
@@ -900,12 +1050,18 @@ export const MaterialWorldStateSchema = z
       if (!exists) context.addIssue({ code: "custom", path, message });
     };
 
+    const forceIds = ids(state.forces);
     const seenOwners = new Set<string>();
     state.accounts.forEach((account, index) => {
       requireReference(account.currencyId === state.currency.id, ["accounts", index, "currencyId"], "Account currency must match the scenario currency.");
       const owner = `${account.owner.kind}:${account.owner.id}`;
       requireReference(!seenOwners.has(owner), ["accounts", index, "owner"], "An owner may have only one M1 money account.");
       seenOwners.add(owner);
+      // A chest belongs to an army that exists. An account owned by a force
+      // that was disbanded is money nobody can reach and nobody can capture.
+      if (account.owner.kind === "force") {
+        requireReference(forceIds.has(account.owner.id), ["accounts", index, "owner", "id"], "A force's chest must belong to an existing force.");
+      }
     });
     state.accountAccess.forEach((access, index) => {
       requireReference(accountIds.has(access.accountId), ["accountAccess", index, "accountId"], "Account access must reference an existing account.");

@@ -362,3 +362,36 @@ describe("trouble that lands on an army", () => {
     expect(everySeed(world, { warfare: undefined }).some((seed) => seed.archetype === "storm_at_sea")).toBe(false);
   });
 });
+
+describe("the player's own troubles", () => {
+  const asCurius = (world: WorldState, spanDays = 90) =>
+    decideNarratorSeeds(input(later(world, 45), { playerCharacterId: "manius-curius", spanDays }));
+
+  it("puts some of each season's trouble on the player and the people around him, measured on him", () => {
+    const personal = asCurius(large()).filter((seed) => seed.key.startsWith("seed-p-"));
+    expect(personal.length).toBeGreaterThan(0);
+    for (const seed of personal) {
+      // His name is in every one of them: the trouble is his, or it reaches him.
+      expect(`${seed.brief} ${seed.why}`).toContain("Manius Curius Dentatus");
+      expect(seed.why).toMatch(/purse/);
+    }
+  });
+
+  it("measures his comfort on his purse and his enemies, not Rome's treasury", async () => {
+    const { readPersonalTension } = await import("./narrator");
+    const world = large();
+    const easy = readPersonalTension(world, "manius-curius");
+    const hated: WorldState = {
+      ...world,
+      material: { ...world.material, accounts: world.material.accounts.map((account) => (account.id === "curius-purse" ? { ...account, balance: 0 } : account)) },
+      characters: world.characters.map((character) => (["hanno-carthage", "hieron-ii", "quintus-ogulnius"].includes(character.id)
+        ? { ...character, relations: [...character.relations, { subjectCharacterId: "manius-curius", causes: [{ id: "grudge", label: "He shamed me.", score: -20, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null, dimensions: { trust: -30, affection: -30 } }] }] }
+        : character)),
+    };
+    const hard = readPersonalTension(hated, "manius-curius");
+    expect(hard.comfort).toBeLessThan(easy.comfort);
+    expect(hard.summary).toMatch(/3 men hate him/);
+    // Rome is exactly as comfortable as it was.
+    expect(readTension(hated, "rome").comfort).toBeCloseTo(readTension(world, "rome").comfort);
+  });
+});

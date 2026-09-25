@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { latestReport, type GameViewController } from "./use-game-view";
+import { TIME_SPANS, latestReport, type GameViewController } from "./use-game-view";
 
 /**
  * The Council: where you speak to the world.
@@ -27,13 +27,23 @@ export function CouncilPanel({
 }) {
   const { view, busy, error, progress } = controller;
   const [order, setOrder] = useState("");
+  // Empty means "as far as the order takes it", which the engine judges.
+  const [span, setSpan] = useState<number | "">("");
   const latest = latestReport(view.chronicle);
+  const spanDays = span === "" ? undefined : span;
 
   const send = async () => {
     const text = order.trim();
     if (text.length === 0 || busy) return;
-    await controller.send(text);
+    await controller.send(text, { spanDays });
     setOrder("");
+  };
+
+  // Time let pass with no order at all. It still moves the world and its
+  // people, so it still costs what their answers cost.
+  const wait = async () => {
+    if (busy) return;
+    await controller.send("", { wait: true, spanDays: spanDays ?? 30 });
   };
 
   return (
@@ -104,9 +114,27 @@ export function CouncilPanel({
             disabled={busy}
             onChange={(event) => setOrder(event.target.value)}
           />
-          <button type="submit" disabled={busy || order.trim().length === 0}>
-            {busy ? "The world is moving…" : "Send"}
-          </button>
+          <div className="sim-panel__order-time">
+            <label htmlFor="sim-order-span">Then let</label>
+            <select
+              id="sim-order-span"
+              value={span}
+              disabled={busy}
+              onChange={(event) => setSpan(event.target.value === "" ? "" : Number(event.target.value))}
+            >
+              <option value="">as long as it takes</option>
+              {TIME_SPANS.map((choice) => <option key={choice.days} value={choice.days}>{choice.label}</option>)}
+            </select>
+            <span>pass</span>
+          </div>
+          <div className="sim-panel__order-actions">
+            <button type="button" disabled={busy} onClick={() => void wait()}>
+              Let {TIME_SPANS.find((choice) => choice.days === (spanDays ?? 30))?.label ?? "a month"} pass
+            </button>
+            <button type="submit" disabled={busy || order.trim().length === 0}>
+              {busy ? "The world is moving…" : "Send"}
+            </button>
+          </div>
         </form>
       )}
 

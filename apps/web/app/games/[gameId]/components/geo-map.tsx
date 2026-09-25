@@ -6,7 +6,7 @@ import { provinceContains, type StaticWorldGeometry } from "./world-geometry";
 import { resolveMapForcePlacements } from "./map-dynamic-geometry";
 import { deriveForceConflictStatuses } from "./map-conflict-state";
 import { armyStandardHitBounds, armyStandardWidthForZoom, type ForceFlagAsset } from "./army-standard";
-import { drawPickCanvas, pickProvinceAt } from "./map-canvas-terrain";
+import type { ViewportTransform } from "./map-viewport";
 
 export type { ForceFlagAsset };
 
@@ -21,9 +21,9 @@ interface GeoMapProps {
   readonly viewBox: string;
   readonly overlay: DynamicMapOverlay | null;
   readonly zoomBand: ZoomBand;
-  readonly scale: number;
-  readonly tx: number;
-  readonly ty: number;
+  /** The viewport's live transform — during a wheel zoom it runs ahead of
+   *  the committed React state, and hit tests must match what is drawn. */
+  readonly liveTransform: () => ViewportTransform;
   readonly forceFlagUrls: ReadonlyMap<string, ForceFlagAsset>;
   readonly onProvinceHover: (provinceId: string | null, event?: PointerEvent) => void;
   readonly onProvinceClick: (provinceId: string) => void;
@@ -34,11 +34,17 @@ interface GeoMapProps {
 function coordinateLabel([longitude, latitude]: GeoJsonPosition) { return `${latitude.toFixed(1)}°N, ${longitude.toFixed(1)}°E`; }
 
 /**
- * One transparent HTML interaction layer above the canvas. Province picking
- * uses a cached, colour-indexed canvas, avoiding an SVG path per province;
- * force hits use the same world-space geometry as the canvas standards.
+ * One transparent HTML interaction layer above the canvas. Both province and
+ * force hits are resolved in world space against the same geometry the canvas
+ * draws: a province by point-in-polygon (a bounds check rules out nearly all
+ * of them), a force by its standard's bounds.
+ *
+ * Provinces used to be picked from a colour-indexed canvas. Redrawing it for
+ * every new view cost ~19ms on the first hover after each pan or zoom, and
+ * its anti-aliased edges blended two provinces' colours into an index that
+ * named a third.
  */
-export function GeoMap({ world, viewBox, overlay, zoomBand, scale, tx, ty, forceFlagUrls, onProvinceHover, onProvinceClick, onForceClick, onMapPointerDown }: GeoMapProps) {
+export function GeoMap({ world, viewBox, overlay, zoomBand, liveTransform, forceFlagUrls, onProvinceHover, onProvinceClick, onForceClick, onMapPointerDown }: GeoMapProps) {
   const hoveredProvinceRef = useRef<string | null>(null);
   const forceMarkers = useMemo(() => {
     const placementByForceId = new Map(resolveMapForcePlacements(overlay?.forces ?? [], world, overlay ?? null).map((placement) => [placement.forceId, placement]));
@@ -52,32 +58,36 @@ export function GeoMap({ world, viewBox, overlay, zoomBand, scale, tx, ty, force
   }, [overlay, world]);
   const conflictByForceId = useMemo(() => deriveForceConflictStatuses(overlay), [overlay]);
 
-  const mapCoordinates = useCallback((event: MapEvent) => {
-    const frame = event.currentTarget.closest<HTMLElement>(".map-frame");
-    const rect = frame?.getBoundingClientRect();
-    if (!rect) return null;
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top, width: rect.width, height: rect.height };
-  }, []);
+  /** The pointer in projected world units (x = longitude, y = -latitude), plus the canvas scale `m`. */
+  const worldPoint = useCallback((event: MapEvent) => {
+    const rect = event.currentTarget.closest<HTMLElement>(".map-frame")?.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) return null;
+    const { scale, tx, ty } = liveTransform();
+    const [vx, vy, vw, vh] = viewBox.split(" ").map(Number) as [number, number, number, number];
+    const sf = Math.min(rect.width / vw, rect.height / vh);
+    const ox = (rect.width - vw * sf) / 2;
+    const oy = (rect.height - vh * sf) / 2;
+    const m = sf * scale;
+    return { wx: (event.clientX - rect.left - ((ox - vx * sf) * scale + tx)) / m, wy: (event.clientY - rect.top - ((oy - vy * sf) * scale + ty)) / m, m };
+  }, [liveTransform, viewBox]);
 
   const provinceAt = useCallback((event: MapEvent) => {
-    const point = mapCoordinates(event);
-    if (!point || point.width === 0 || point.height === 0) return null;
-    const pickCanvas = drawPickCanvas(Math.round(point.width), Math.round(point.height), { scale, tx, ty }, viewBox, world);
-    const index = pickProvinceAt(pickCanvas, point.x, point.y);
-    return index === 0 ? null : world.provinces[index - 1] ?? null;
-  }, [mapCoordinates, scale, tx, ty, viewBox, world]);
+    const point = worldPoint(event);
+    if (!point) return null;
+    const geographic: GeoJsonPosition = [point.wx, -point.wy];
+    // Last drawn is on top, as it was on the canvas.
+    for (let index = world.provinces.length - 1; index >= 0; index--) {
+      const province = world.provinces[index]!;
+      if (provinceContains(province, geographic)) return province;
+    }
+    return null;
+  }, [worldPoint, world]);
 
   const forceAt = useCallback((event: MapEvent) => {
-    const point = mapCoordinates(event);
-    if (!point || point.width === 0 || point.height === 0) return null;
-    const [vx, vy, vw, vh] = viewBox.split(" ").map(Number) as [number, number, number, number];
-    const sf = Math.min(point.width / vw, point.height / vh);
-    const ox = (point.width - vw * sf) / 2;
-    const oy = (point.height - vh * sf) / 2;
-    const m = sf * scale;
-    const wx = (point.x - ((ox - vx * sf) * scale + tx)) / m;
-    const wy = (point.y - ((oy - vy * sf) * scale + ty)) / m;
-    const armyWidth = armyStandardWidthForZoom(m);
+    const point = worldPoint(event);
+    if (!point) return null;
+    const { wx, wy } = point;
+    const armyWidth = armyStandardWidthForZoom(point.m);
     for (const force of forceMarkers) {
       const asset = forceFlagUrls.get(force.forceId) ?? { url: "/maps/generic-merchant-ship-standard.png", aspectRatio: 4 / 3 };
       const conflict = conflictByForceId.get(force.forceId);
@@ -85,7 +95,7 @@ export function GeoMap({ world, viewBox, overlay, zoomBand, scale, tx, ty, force
       if (wx >= bounds.x && wx <= bounds.x + bounds.width && wy >= bounds.y && wy <= bounds.y + bounds.height) return force;
     }
     return null;
-  }, [conflictByForceId, forceFlagUrls, forceMarkers, mapCoordinates, scale, tx, ty, viewBox]);
+  }, [conflictByForceId, forceFlagUrls, forceMarkers, worldPoint]);
 
   const activateForce = useCallback((force: typeof forceMarkers[number]) => {
     const locationLabel = world.provinceById.get(force.provinceId)?.name ?? force.provinceId;

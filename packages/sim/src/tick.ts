@@ -1,22 +1,38 @@
 import {
+  AGREEMENT_KIND_IN_WORDS,
+  DEFAULT_STRUCTURE_EFFECTS,
+  effectWorth,
   advanceProvinceMaterial,
   applyDiplomaticAnswerToStance,
+  domesticRevenuePolity,
+  provinceTaxCapacity,
+  taxBurdens,
   agreementsBetween,
   atWar,
   expireDatedAgreements,
   hopsBetween,
   isNavalForce,
   nextDueMilestone,
+  warfareWith,
   type FactProposalDraft,
   type MoneyObligation,
+  type ProvinceTargets,
   type ScenarioLifeRules,
   type ScenarioWarfareRules,
   type MoneyTransaction,
   type WorldState,
+  recordTenures,
 } from "@chronica/shared";
 import { projectConflicts } from "./conflicts";
+import { trespassOf } from "./trespass";
+import { provinceTargetsFrom, settleStandingEffects } from "./standing-effects";
 import { reviewLives } from "./mortality";
+import { resolvePlots } from "./plots";
+import { reviewContingencies } from "./contingencies";
+import type { BattleAccount } from "./battle";
 import type { IdFactory } from "./ports";
+import { holdElections, type ElectionGovernment } from "./elections";
+import { keepContracts } from "./contracts";
 
 /** The world with its conflict overlay brought back in step with it. */
 const projectConflictsInto = (world: WorldState): WorldState => ({ ...world, conflicts: projectConflicts(world) });
@@ -54,6 +70,8 @@ export interface TickInput {
   readonly life?: ScenarioLifeRules | undefined;
   /** Whose death ends the game rather than the man. Never taken by a roll without a peril first. */
   readonly playerCharacterId?: string | null | undefined;
+  /** The scenario's offices and how they are filled. Absent, no office is refilled by election. */
+  readonly government?: ElectionGovernment | undefined;
   /** The day the world is advancing to. Everything due at or before it resolves. */
   readonly toDay: number;
   readonly ids: IdFactory;
@@ -67,6 +85,54 @@ export interface TickResult {
   readonly notes: readonly string[];
   /** Whoever died of the passage of time this tick, so the caller can ask who follows. */
   readonly died: readonly string[];
+  /**
+   * Plans that sprang by themselves this tick.
+   *
+   * Handed out so the burst can stop and give the ruler back the wheel: a man
+   * who laid a trap against exactly this moment is owed the moment, not a
+   * paragraph about it a month later.
+   */
+  readonly sprungContingencies: readonly string[];
+  /** Battles the ambush half of a sprung plan started, for whoever writes them up. */
+  readonly contingencyBattles: readonly BattleAccount[];
+}
+
+/**
+ * A power pressing its lands past what they bear settles them lower, on top of
+ * whatever stands in them: the temple still calms the town, and the tax still
+ * sours it.
+ */
+function withTaxUnrest(
+  targets: Map<string, ProvinceTargets>,
+  world: WorldState,
+  burdens: ReadonlyMap<string, { readonly stabilityShiftBps: number }>,
+): Map<string, ProvinceTargets> {
+  const next = new Map(targets);
+  for (const province of world.map.provinces) {
+    const shift = province.controllerPolityId === null ? 0 : burdens.get(province.controllerPolityId)?.stabilityShiftBps ?? 0;
+    if (shift === 0) continue;
+    const current = next.get(province.id) ?? {};
+    next.set(province.id, { ...current, stabilityShiftBps: (current.stabilityShiftBps ?? 0) + shift });
+  }
+  return next;
+}
+
+/** Of a province's monthly tax capacity: the most a finished work there can yield -- a great market's share. */
+const PROJECT_INCOME_CEILING_SHARE = 0.15;
+
+function incomeCeilingOf(world: WorldState, provinceId: string | null, beneficiaryAccountId: string, cadenceDays: number): number {
+  const capacity = (id: string): number => provinceTaxCapacity(world, id) ?? 0;
+  let monthly: number;
+  if (provinceId !== null && world.map.provinces.some((province) => province.id === provinceId)) {
+    monthly = capacity(provinceId);
+  } else {
+    const owner = world.material.accounts.find((account) => account.id === beneficiaryAccountId)?.owner;
+    const held = owner?.kind === "polity" ? world.map.provinces.filter((province) => province.controllerPolityId === owner.id) : [];
+    monthly = held.length === 0 ? 0 : held.reduce((sum, province) => sum + capacity(province.id), 0) / held.length;
+  }
+  // A world with no towns to reckon by has nothing to bound it against.
+  if (monthly <= 0) return Number.POSITIVE_INFINITY;
+  return Math.max(1, Math.round(monthly * PROJECT_INCOME_CEILING_SHARE * (cadenceDays / 30)));
 }
 
 /** Days without a development before the world stops following a thread. */
@@ -124,7 +190,7 @@ export function runDeterministicTick(input: TickInput): TickResult {
     const controller = province.controllerPolityId;
     if (controller === null || !province.settlements.some((settlement) => settlement.kind === "port")) continue;
     const besiegers = input.world.material.forces.filter(
-      (force) => force.locationId === province.id && force.polityId !== controller && isNavalForce(force, input.warfare) && atWar(input.world.polityAgreements, force.polityId, controller),
+      (force) => force.locationId === province.id && force.polityId !== controller && isNavalForce(force, input.warfare === undefined ? undefined : warfareWith(input.world, input.warfare)) && atWar(input.world.polityAgreements, force.polityId, controller),
     );
     if (besiegers.length > 0) blockaded.add(controller);
   }
@@ -134,15 +200,54 @@ export function runDeterministicTick(input: TickInput): TickResult {
     return ours !== null && blockaded.has(ours);
   };
 
+  // What each power's own lands can bear this month, weighed before anything
+  // is collected (see `taxBurdens`). A power asking more than that gets what
+  // there is, every domestic revenue in the same proportion.
+  const burdens = taxBurdens(input.world);
+  const shortfalls = new Map<string, { asked: number; raised: number }>();
+
+  // A venture is cut at its own ports, not wherever its owner's country has
+  // one. An enemy fleet -- at war with the owner's power -- off either end of a
+  // sea venture stops it; one off some other harbour does not.
+  const ventureById = new Map(input.world.material.ventures.map((venture) => [venture.id, venture]));
+  const fleetOff = (provinceId: string, polityId: string | null): boolean =>
+    polityId !== null && input.world.material.forces.some((force) =>
+      force.locationId === provinceId
+      && force.polityId !== polityId
+      && isNavalForce(force, input.warfare === undefined ? undefined : warfareWith(input.world, input.warfare))
+      && atWar(input.world.polityAgreements, force.polityId, polityId));
+  const ventureCut = (source: { readonly originKind: string; readonly originId: string }): "war" | "blockade" | null => {
+    if (source.originKind !== "venture") return null;
+    const venture = ventureById.get(source.originId);
+    if (venture === undefined || venture.status !== "running") return null;
+    const owner = input.world.characters.find((character) => character.id === venture.ownerCharacterId)?.polityId ?? null;
+    if (venture.bySea && (fleetOff(venture.fromProvinceId, owner) || fleetOff(venture.toProvinceId, owner))) return "blockade";
+    return null;
+  };
+  const ventureState = new Map<string, "war" | "blockade" | null>();
+
   const incomeSources = input.world.material.incomeSources.map((source) => {
     if (!source.active) return source;
-    // Cut, not cancelled: the route is still there, and peace -- or the fleet
-    // sailing away -- restores it.
-    if (severed(source) || blockadedTrade(source)) return source;
+    if (source.originKind === "venture") {
+      const cut = severed(source) ? "war" as const : ventureCut(source);
+      ventureState.set(source.originId, cut);
+      if (cut !== null) return source;
+    } else if (severed(source) || blockadedTrade(source)) {
+      // Cut, not cancelled: the route is still there, and peace -- or the
+      // fleet sailing away -- restores it.
+      return source;
+    }
     let due = source.nextDueStep;
     let periods = 0;
     while (due <= input.toDay && periods < MAX_PERIODS_PER_TICK) {
-      const received = Math.round((source.amount * source.collectionRateBps) / 10_000);
+      const levied = domesticRevenuePolity(input.world, source);
+      const share = levied === null ? 1 : burdens.get(levied)?.collectedShare ?? 1;
+      const owed = Math.round((source.amount * source.collectionRateBps) / 10_000);
+      const received = Math.round(owed * share);
+      if (levied !== null && share < 1) {
+        const tally = shortfalls.get(levied) ?? { asked: 0, raised: 0 };
+        shortfalls.set(levied, { asked: tally.asked + owed, raised: tally.raised + received });
+      }
       if (received > 0) {
         credit(source.beneficiaryAccountId, received);
         collected += received;
@@ -179,8 +284,9 @@ export function runDeterministicTick(input: TickInput): TickResult {
     let arrears = obligation.arrears;
     let missed = obligation.missedPeriods;
     let wentUnpaid = false;
+    let remaining = obligation.remainingPeriods;
 
-    while (due <= input.toDay && periods < MAX_PERIODS_PER_TICK) {
+    while (due <= input.toDay && periods < MAX_PERIODS_PER_TICK && (remaining === undefined || remaining > 0)) {
       const owed = obligation.amount + arrears;
       const available = balanceOf(obligation.payerAccountId);
       if (available >= owed && owed > 0) {
@@ -205,6 +311,7 @@ export function runDeterministicTick(input: TickInput): TickResult {
           visibility: "polity",
         });
         arrears = 0;
+        if (remaining !== undefined) remaining -= 1;
       } else if (owed > 0) {
         arrears = owed;
         missed += 1;
@@ -214,7 +321,16 @@ export function runDeterministicTick(input: TickInput): TickResult {
       periods += 1;
     }
 
-    if (periods > 0) settled.set(obligation.id, { ...obligation, nextDueStep: due, arrears, missedPeriods: missed });
+    if (periods > 0) {
+      settled.set(obligation.id, {
+        ...obligation,
+        nextDueStep: due,
+        arrears,
+        missedPeriods: missed,
+        // Paid off: an indemnity of ten instalments is over after the tenth.
+        ...(remaining === undefined ? {} : { remainingPeriods: remaining, active: remaining > 0 }),
+      });
+    }
     if (wentUnpaid) newlyUnpaid.push(settled.get(obligation.id)!);
   }
 
@@ -413,6 +529,7 @@ export function runDeterministicTick(input: TickInput): TickResult {
         payObligationId: null,
         payArrearsPeriods: 0,
         history: [],
+        memberCharacterIds: [],
       });
       return { entityId: id, summary: `${outcome.label} [${id}] stands ready, ${strength} strong.` };
     }
@@ -439,27 +556,39 @@ export function runDeterministicTick(input: TickInput): TickResult {
       // ita-72843720b81376294924159-sicily-northeast" is the engine's
       // bookkeeping arriving in the historian's hands.
       const arrivedAt = input.world.map.provinces.find((province) => province.id === provinceId)?.name ?? provinceId;
-      return { entityId: forceId, summary: `${marching.name} [${forceId}] has arrived in ${arrivedAt} [${provinceId}].` };
+      // Arriving on somebody else's ground unasked is part of what arriving
+      // was. See `trespassOf`.
+      const trespass = trespassOf(input.world, marching, provinceId);
+      return { entityId: forceId, summary: `${marching.name} [${forceId}] has arrived in ${arrivedAt} [${provinceId}].${trespass === null ? "" : ` ${trespass.summary}`}` };
     }
 
     if (outcome.kind === "structure") {
       const provinceId = outcome.provinceId;
       if (provinceId === null || !input.world.map.provinces.some((province) => province.id === provinceId)) return null;
       const id = input.ids.next("structure");
+      // What it is and what it does. Every building a project ever finished
+      // was "other", defending nothing and supplying nobody, so a fortress
+      // raised in play was a name on the map. A kind nobody described still
+      // does what that kind of building does.
+      const kind = outcome.structureKind ?? "other";
+      const effects = (outcome.effects?.length ?? 0) > 0 ? outcome.effects! : DEFAULT_STRUCTURE_EFFECTS[kind] ?? [];
+      const placeName = input.world.map.provinces.find((province) => province.id === provinceId)?.name ?? provinceId;
       structures.push({
         id,
-        kind: "other",
+        kind,
         name: outcome.label,
         provinceId,
         settlementId: null,
         ownerPolityId: outcome.polityId,
         garrisonCapacity: outcome.amount,
-        defensiveEffectsBps: 0,
-        supplyRadius: 0,
+        defensiveEffectsBps: Math.min(2_000, effects.reduce((sum, effect) => sum + (effect.quantity === "defense" ? effectWorth.defenseBps(effect) : 0), 0)),
+        supplyRadius: effects.reduce((most, effect) => Math.max(most, effect.quantity === "supply" ? effectWorth.supplyRadius(effect) : 0), 0),
         builtAtStep: input.toDay,
         provenanceProjectId: project.id,
+        effects: [...effects],
+        upkeep: outcome.upkeep ?? null,
       });
-      return { entityId: id, summary: `${outcome.label} [${id}] now stands in ${provinceId}.` };
+      return { entityId: id, summary: `${outcome.label} [${id}] now stands in ${placeName} [${provinceId}].` };
     }
 
     if (outcome.kind === "agreement") {
@@ -497,7 +626,7 @@ export function runDeterministicTick(input: TickInput): TickResult {
           visibility: "public" as const,
         },
       ];
-      return { entityId: id, summary: `${sponsorPolityId} and ${withPolityId} now stand in ${outcome.agreementKind}: ${outcome.label}.` };
+      return { entityId: id, summary: `Between ${sponsorPolityId} and ${withPolityId} there is now ${AGREEMENT_KIND_IN_WORDS[outcome.agreementKind]}: ${outcome.label}.` };
     }
 
     if (outcome.kind === "transfer") {
@@ -508,6 +637,11 @@ export function runDeterministicTick(input: TickInput): TickResult {
       const toAccountId = outcome.beneficiaryAccountId;
       const fromAccountId = sponsorAccountId(project.sponsorEntityRef) ?? null;
       if (toAccountId === null || !accounts.some((account) => account.id === toAccountId)) return null;
+      // Paying yourself moves nothing, and a transaction from an account to
+      // itself is one the schema forbids -- so a levy "paid into the treasury"
+      // by the treasury that sponsored it wrote a world that could not be
+      // loaded again, and the save was lost on the turn after.
+      if (fromAccountId === toAccountId) return null;
       const available = fromAccountId === null ? outcome.amount : balanceOf(fromAccountId);
       const handed = Math.min(outcome.amount, available);
       if (handed <= 0) return null;
@@ -536,6 +670,11 @@ export function runDeterministicTick(input: TickInput): TickResult {
     if (beneficiaryId === null || !accounts.some((account) => account.id === beneficiaryId)) return null;
     const cadence = outcome.cadenceDays ?? 30;
     const id = input.ids.next("income");
+    // No richer than a great market in the place it stands (or the owner's
+    // average province, where it stands nowhere): a finished work used to pay
+    // whatever the model promised when it was begun, up to ten million a period.
+    const worth = incomeCeilingOf(input.world, outcome.provinceId, beneficiaryId, cadence);
+    const amount = Math.min(outcome.amount, worth);
     newIncome.push({
       id,
       kind: "trade",
@@ -543,14 +682,14 @@ export function runDeterministicTick(input: TickInput): TickResult {
       beneficiaryAccountId: beneficiaryId,
       originKind: "polity",
       originId: beneficiaryId,
-      amount: outcome.amount,
+      amount,
       cadenceSteps: cadence,
       nextDueStep: input.toDay + cadence,
       collectionRateBps: 10_000,
       counterpartyPolityId: null,
       active: true,
     });
-    return { entityId: id, summary: `${outcome.label} [${id}] begins returning ${outcome.amount} every ${cadence} days.` };
+    return { entityId: id, summary: `${outcome.label} [${id}] begins returning ${amount} every ${cadence} days.` };
   };
 
   const projects = input.world.projects.map((project) => {
@@ -680,7 +819,8 @@ export function runDeterministicTick(input: TickInput): TickResult {
    * every province takes the coarse recovery pass.
    */
   const before = new Map(input.world.material.provinceMaterial.map((material) => [material.provinceId, material]));
-  const recovered = advanceProvinceMaterial(
+  const standingWorld = structures.length === 0 ? input.world : { ...input.world, structures: [...input.world.structures, ...structures] };
+  const materialAdvanced = advanceProvinceMaterial(
     {
       ...input.world,
       projects,
@@ -703,7 +843,29 @@ export function runDeterministicTick(input: TickInput): TickResult {
     },
     input.toDay,
     new Set<string>(),
+    // Where each province settles to, given what stands in it -- and given
+    // what its government is taking out of it.
+    withTaxUnrest(provinceTargetsFrom(standingWorld), input.world, burdens),
   );
+  // Who has held what, written down before any term ends -- so the man whose
+  // year ran out today is remembered as having held it.
+  const recovered = recordTenures(materialAdvanced, input.toDay);
+
+  // Collectors who came back short. Once a tick per power, not per payment:
+  // it is the kind of thing a government hears about and has to answer for.
+  for (const [polityId, tally] of shortfalls) {
+    const name = input.world.map.polities.find((polity) => polity.id === polityId)?.name ?? polityId;
+    facts.push({
+      localId: nextLocalId("tax_short"),
+      kind: "tax_shortfall",
+      summary: `${name} asked more of its lands than they could bear: of ${tally.asked} due in taxes and dues, the collectors raised ${tally.raised}.`,
+      affectedRefs: [{ kind: "polity", id: polityId }],
+      visibility: "polity",
+      discoveryState: "polity",
+      knowableInDays: 0,
+      significance: 45,
+    });
+  }
 
   // Recovery itself is not news. A province crossing into real hunger or real
   // disorder is: it is the kind of thing a government hears about and has to
@@ -828,7 +990,7 @@ export function runDeterministicTick(input: TickInput): TickResult {
       facts.push({
         localId: nextLocalId("agreement"),
         kind: "agreement_lapsed",
-        summary: `The ${agreement.kind} between ${polityName(agreement.polityId)} and ${polityName(agreement.otherPolityId)} has run out.`,
+        summary: `The ${AGREEMENT_KIND_IN_WORDS[agreement.kind]} between ${polityName(agreement.polityId)} and ${polityName(agreement.otherPolityId)} has run out.`,
         affectedRefs: [{ kind: "polity", id: agreement.polityId }, { kind: "polity", id: agreement.otherPolityId }],
         visibility: "public",
         discoveryState: "public",
@@ -858,20 +1020,94 @@ export function runDeterministicTick(input: TickInput): TickResult {
   // Last, because a man who died today should not also have his wages paid and
   // his term expired today -- and because vacating a seat after the term check
   // means a death and an expiry cannot both claim the same seat.
+  // Plans laid in advance, before anything that could make one moot: a trap
+  // springs on men who walked into it during this tick, and it springs before
+  // they are paid, fed or reviewed.
+  // What made things do this month: their keep paid, their yield banked,
+  // their converts made -- or, unpaid, their falling into disuse.
+  // A venture stopping, or starting again, is news to the man whose money is
+  // in it -- and to his own side, whose ports it is.
+  const ventures = afterTime.material.ventures.map((venture) => {
+    if (!ventureState.has(venture.id)) return venture;
+    const cut = ventureState.get(venture.id) ?? null;
+    if (cut === venture.interruptedBy) return venture;
+    const owner = afterTime.characters.find((character) => character.id === venture.ownerCharacterId);
+    const why = cut === "war" ? "the war with the power at its other end" : "an enemy fleet off its port";
+    facts.push({
+      localId: nextLocalId("venture"),
+      kind: cut === null ? "venture_resumed" : "venture_interrupted",
+      summary: cut === null
+        ? `${venture.title} is trading again.`
+        : `${venture.title} has stopped: ${why} has closed it.`,
+      affectedRefs: [
+        { kind: "character", id: venture.ownerCharacterId },
+        { kind: "province", id: venture.fromProvinceId },
+        { kind: "province", id: venture.toProvinceId },
+        ...(owner?.polityId == null ? [] : [{ kind: "polity" as const, id: owner.polityId }]),
+      ],
+      visibility: "polity",
+      discoveryState: "polity",
+      knowableInDays: 0,
+      significance: 40,
+    });
+    return { ...venture, interruptedBy: cut };
+  });
+  const afterVentures = ventures.every((venture, index) => venture === afterTime.material.ventures[index])
+    ? afterTime
+    : { ...afterTime, material: { ...afterTime.material, ventures } };
+
+  const standing = settleStandingEffects({ world: afterVentures, toDay: input.toDay, ids: input.ids });
+  facts.push(...standing.facts);
+
+  const plans = reviewContingencies({
+    world: standing.world,
+    toDay: input.toDay,
+    ids: input.ids,
+    ...(input.warfare === undefined ? {} : { warfare: input.warfare }),
+  });
+
+  // Plots first, and for the same reason lives are last: a man killed by one
+  // should not also have his wages paid and his term expired on the day he
+  // died, and a man killed by one should not then be given a life review.
+  const plots = resolvePlots({
+    world: plans.world,
+    toDay: input.toDay,
+    ids: input.ids,
+    ...(input.life === undefined ? {} : { life: input.life }),
+    ...(input.playerCharacterId === undefined ? {} : { playerCharacterId: input.playerCharacterId }),
+  });
+
   const lives = input.life === undefined
-    ? { world: afterTime, facts: [] as FactProposalDraft[], died: [] as readonly string[] }
+    ? { world: plots.world, facts: [] as FactProposalDraft[], died: [] as readonly string[] }
     : reviewLives({
-      world: afterTime,
+      world: plots.world,
       life: input.life,
       toDay: input.toDay,
       ids: input.ids,
       ...(input.playerCharacterId === undefined ? {} : { playerCharacterId: input.playerCharacterId }),
     });
 
+  // Contracts whose pay was missed today, or whose term or man ran out.
+  const contracts = keepContracts(lives.world, input.toDay);
+
+  // After lives, so a magistrate who died today leaves a seat the living are
+  // told about today.
+  const elections = input.government === undefined
+    ? { world: contracts.world, facts: [] as readonly FactProposalDraft[] }
+    : holdElections({
+      world: contracts.world,
+      government: input.government,
+      toDay: input.toDay,
+      ids: input.ids,
+      ...(input.playerCharacterId === undefined ? {} : { playerCharacterId: input.playerCharacterId }),
+    });
+
   return {
-    world: lives.world,
-    factProposals: [...facts, ...lives.facts],
+    world: elections.world,
+    factProposals: [...facts, ...plans.facts, ...plots.facts, ...lives.facts, ...contracts.facts, ...elections.facts],
     notes,
-    died: lives.died,
+    died: [...plots.died, ...lives.died],
+    sprungContingencies: plans.sprung,
+    contingencyBattles: plans.battles,
   };
 }

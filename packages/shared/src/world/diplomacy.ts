@@ -202,6 +202,9 @@ export function applyDiplomaticAnswerToStance(
   atStep: number,
 ): readonly PolityStance[] {
   if (message.answer === null) return stances;
+  // A letter within one power -- a subject petitioning his own government --
+  // moves no trust between powers, because there is only the one.
+  if (message.fromPolityId === message.toPolityId) return stances;
   const shift = TRUST_SHIFT_BY_ANSWER[message.answer];
   const existing = findStance(stances, message.fromPolityId, message.toPolityId);
   const updated: PolityStance = {

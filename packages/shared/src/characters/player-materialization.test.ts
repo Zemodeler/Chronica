@@ -3,7 +3,7 @@ import { punicWarsScenario } from "@chronica/db";
 import { WorldStateSchema, type WorldState } from "../world/world-state";
 import { CharacterKnowledgebaseSchema, type CharacterKnowledgebase } from "./knowledgebase";
 import { deriveAuthoritySummary } from "./authority-projection";
-import { findOfficeSeatForRole, findPolityForRole, materializePlayerCharacter } from "./player-materialization";
+import { findCommandForRole, findOfficeSeatForRole, findPolityForRole, materializePlayerCharacter } from "./player-materialization";
 
 // A declared player who researched their way into a consulship must actually
 // hold it. These tests use the real Punic Wars scenario and the shape of role
@@ -67,7 +67,8 @@ describe("findOfficeSeatForRole", () => {
   });
 
   it("does not hand a consulship to a senator who never claimed one", () => {
-    expect(findOfficeSeatForRole(world(), government, "rome", "Roman senator without current military command")).toBeUndefined();
+    // A senator is seated in the Senate, which is an office of its own now -- never the consulship.
+    expect(findOfficeSeatForRole(world(), government, "rome", "Roman senator without current military command")?.office.id).toBe("roman-senator");
     expect(findOfficeSeatForRole(world(), government, "rome", "Military tribune serving with the Roman field army")).toBeUndefined();
   });
 
@@ -122,7 +123,7 @@ describe("a declared consul at game start", () => {
   });
 
   it("holds no office when the declared role claims none", () => {
-    const projected = materializePlayerCharacter(world(), PLAYER, knowledgebase({ role: "Roman senator without current military command" }), government);
+    const projected = materializePlayerCharacter(world(), PLAYER, knowledgebase({ role: "Roman landowner without any public charge" }), government);
     expect(projected.characters.find((candidate) => candidate.id === PLAYER)?.officeId).toBeNull();
     expect(deriveAuthoritySummary(projected, PLAYER, government)).toEqual(["No current public office"]);
   });
@@ -186,5 +187,35 @@ describe("whose man the player actually is", () => {
   it("prefers the fuller match", () => {
     const world = { map: { polities: [{ id: "rome-city", name: "Rome" }, { id: "rome", name: "Roman Republic" }] } };
     expect(findPolityForRole(world, "Consul of the Roman Republic", "Roman")).toBe("rome");
+  });
+});
+
+describe("findCommandForRole and the tribunes", () => {
+  it("gives a military tribune a command and a tribune of the plebs none", () => {
+    expect(findCommandForRole(world(), "rome", "Military tribune of the second legion", LATIUM)).toBeDefined();
+    expect(findCommandForRole(world(), "rome", "Tribune of the plebs, defender of the people", LATIUM)).toBeUndefined();
+  });
+});
+
+describe("who a declared player is, as they declared it", () => {
+  it("keeps their faith, their age and their sex", () => {
+    const projected = materializePlayerCharacter(world(), PLAYER, knowledgebase({ faith: "The Roman gods", ageYearsAtOpening: 23, gender: "female" }), government);
+    const player = projected.characters.find((candidate) => candidate.id === PLAYER)!;
+    expect(player.faithId).toBe("faith-roman");
+    expect(player.ageYearsAtStart).toBe(23);
+    expect(player.gender).toBe("female");
+  });
+
+  it("founds a faith nobody had named, rather than dropping it", () => {
+    const projected = materializePlayerCharacter(world(), PLAYER, knowledgebase({ faith: "The mysteries of Samothrace" }), government);
+    expect(projected.faiths.some((faith) => faith.name === "The mysteries of Samothrace")).toBe(true);
+  });
+
+  it("gives a slave no office and no command, whatever his role says", () => {
+    const projected = materializePlayerCharacter(world(), PLAYER, knowledgebase({ legalStatus: "enslaved" }), government);
+    const player = projected.characters.find((candidate) => candidate.id === PLAYER)!;
+    expect(player.legalStatus).toBe("enslaved");
+    expect(player.officeId).toBeNull();
+    expect(projected.material.forces.some((force) => force.commanderCharacterId === PLAYER)).toBe(false);
   });
 });

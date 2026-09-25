@@ -4,6 +4,7 @@ import { renderCharacterPortrait } from "./cognition";
 
 import {
   allOffices,
+  allTroopCategories,
   bandStrength,
   buildStation,
   currentAgeYears,
@@ -21,7 +22,12 @@ import {
   type Office,
   type OrderPartyRef,
   type ScenarioClock,
+  type ScenarioWarfareRules,
   type WorldState,
+  DEFAULT_STRUCTURE_EFFECTS,
+  effectInWords,
+  taxBurdenInWords,
+  taxBurdens,
 } from "@chronica/shared";
 
 /**
@@ -43,7 +49,7 @@ import {
  *    it actually has.
  */
 
-const CAPS = { characters: 12, forces: 10, projects: 8, accounts: 6, stances: 8, facts: 12, events: 8, intents: 8, provinces: 40, foreignForces: 12, foreignFigures: 12, outlooks: 8, institutions: 4, procedures: 6, strainedProvinces: 8, holdings: 6, arrangements: 8, debts: 6, trade: 6, storylines: 6, letters: 6, agreements: 8 } as const;
+const CAPS = { characters: 12, forces: 10, projects: 8, accounts: 6, stances: 8, facts: 12, events: 8, intents: 8, provinces: 40, citiesPerProvince: 4, groundPerProvince: 4, standingPlans: 6, foreignForces: 12, foreignFigures: 12, outlooks: 8, institutions: 4, procedures: 6, strainedProvinces: 8, holdings: 6, arrangements: 8, buildingsPerProvince: 3, faiths: 8, debts: 6, trade: 6, storylines: 6, letters: 6, agreements: 8 } as const;
 
 export interface SliceEvent {
   readonly kind: string;
@@ -73,6 +79,16 @@ export interface WorldSliceInput {
    * decide.
    */
   readonly offices: readonly Office[];
+  /**
+   * The scenario's warfare rules, so the kinds of troops the world has can be
+   * named back to it.
+   *
+   * `force_reinforce.categoryId` takes an id that appeared nowhere in the
+   * slice, so "take the Gauls into the Thirteenth as auxiliaries" could only be
+   * written by guessing one. Optional, because a slice without it is still a
+   * true slice -- it simply cannot say what kinds of soldier there are.
+   */
+  readonly warfare?: ScenarioWarfareRules | undefined;
   readonly actorRef: OrderPartyRef;
   readonly actorPolityId: string | null;
   readonly orderText: string | null;
@@ -107,6 +123,8 @@ export interface WorldSlice {
   readonly economy: readonly { readonly id: string; readonly label: string; readonly balance: number }[];
   readonly monthlyIncome: number;
   readonly monthlyExpenditure: number;
+  /** How hard the power's own lands are being taxed, for whoever can open its treasury. */
+  readonly taxBurden: { readonly asked: number; readonly bearable: number; readonly inWords: string } | null;
   readonly military: readonly {
     readonly id: string;
     readonly name: string;
@@ -121,9 +139,49 @@ export interface WorldSlice {
     readonly location: string;
     readonly locationId: string;
     readonly commander: string;
+    /** Named men in its ranks, by id, so an order can name the one it means. */
+    readonly ranks: readonly string[];
+    /** How it means to fight when attacked, for whoever leads it. */
+    readonly plan: string | null;
   }[];
-  readonly provinces: readonly { readonly id: string; readonly name: string; readonly controller: string }[];
-  readonly politics: readonly { readonly id: string; readonly name: string; readonly office: string | null; readonly age: number }[];
+  /**
+   * Places, with what stands in them.
+   *
+   * `cities` and `ground` are here because three ops take an id the model was
+   * never shown. `settlement_control_set` -- the op added so that taking
+   * Messana could be said at all -- needed a settlement id that appeared
+   * nowhere in the slice, so the only way to write one was to guess it; and
+   * Agrigentum's is `settlement-agrigentum-fort`, which nothing would guess.
+   * `force_modify.positionId` was in the same position: the scenario authored
+   * Mount Etna as a pass worth holding and no order could name it.
+   */
+  readonly provinces: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly controller: string;
+    readonly cities: readonly { readonly id: string; readonly name: string; readonly controller: string; readonly walls: number }[];
+    readonly ground: readonly { readonly id: string; readonly label: string; readonly type: string }[];
+    /** What stands there and what it does. */
+    readonly buildings: readonly string[];
+    /** Belief as it has changed there. Empty where it has not. */
+    readonly belief: readonly string[];
+  }[];
+  /** The faiths the world knows, by name. */
+  readonly faiths: readonly string[];
+  /**
+   * Plans laid in advance and still standing, so the world can see what it has
+   * waiting and call one off when the ground is given up.
+   *
+   * Only this government's own: a trap the enemy has laid is the enemy's
+   * secret, and printing it here would be a fog-of-war leak of exactly the kind
+   * the watch language was careful to avoid.
+   */
+  readonly standingPlans: readonly { readonly id: string; readonly label: string; readonly effect: string; readonly where: string }[];
+  /** The kinds of soldier this world has, for an order that reinforces an army with one. */
+  readonly troopKinds: readonly { readonly id: string; readonly label: string }[];
+  readonly politics: readonly { readonly id: string; readonly name: string; readonly office: string | null; readonly age: number; readonly faith: string | null;
+    /** Said only where it is not a free man: a woman, a slave and whose, a freedman and whose. */
+    readonly standing: string | null }[];
   readonly diplomacy: readonly { readonly toward: string; readonly trust: number; readonly why: string }[];
   /** What the powers have standing between them: war, peace, alliance, tribute (VISION §27's active wars). */
   readonly agreements: readonly {
@@ -207,7 +265,7 @@ export interface WorldSlice {
     readonly opposeWeight: number | null;
   }[];
   /** Land, and the gap between who owns it and who holds it. */
-  readonly holdings: readonly { readonly id: string; readonly title: string; readonly holder: string; readonly control: number; readonly territoryId: string }[];
+  readonly holdings: readonly { readonly id: string; readonly title: string; readonly holder: string; readonly holderId: string; readonly control: number; readonly territoryId: string; readonly monthlyYield: number | null }[];
   /**
    * VISION §9's dynamically created mechanics: a law, an institution, an
    * arrangement no typed schema fits. They were written and never read, so the
@@ -233,6 +291,9 @@ export interface WorldSlice {
     readonly owner: string | null;
     readonly attributes: readonly string[];
     readonly retired: boolean;
+    /** What it goes on doing, in words, and whether it has stopped. */
+    readonly effects: readonly string[];
+    readonly lapsed: boolean;
   }[];
   readonly outlooks: readonly {
     readonly polityId: string;
@@ -324,8 +385,11 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   // Money the actor's side actually holds, biggest first: a slice that leads
   // with a pauper's purse tells the model nothing about whether an order is
   // affordable.
+  const forcePolity = new Map(world.material.forces.map((force) => [force.id, force.polityId]));
   const accounts = [...world.material.accounts]
-    .filter((account) => account.owner.kind === "polity" || world.characters.some((c) => c.id === account.owner.id && c.polityId === ownPolity))
+    .filter((account) => account.owner.kind === "polity"
+      || (account.owner.kind === "force" && forcePolity.get(account.owner.id) === ownPolity)
+      || world.characters.some((c) => c.id === account.owner.id && c.polityId === ownPolity))
     // A merchant does not read the treasury, and does not read his neighbour's
     // purse either. Ownership and office reach are the whole of the answer.
     .filter((account) => reachesAccount(account.id))
@@ -333,7 +397,13 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     .slice(0, CAPS.accounts)
     .map((account) => ({
       id: account.id,
-      label: account.owner.kind === "polity" ? `${polityName(account.owner.id)} treasury` : `${name(account.owner.id)}'s purse`,
+      label: account.owner.kind === "polity"
+        ? `${polityName(account.owner.id)} treasury`
+        : account.owner.kind === "force"
+          // Named for what it is, so an order about an army's own money has
+          // an account to point at rather than a purse to borrow.
+          ? `war chest of ${world.material.forces.find((force) => force.id === account.owner.id)?.name ?? account.owner.id}`
+          : `${name(account.owner.id)}'s purse`,
       balance: account.balance,
     }));
 
@@ -344,6 +414,12 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       .filter((source) => source.active && reachesAccount(source.beneficiaryAccountId))
       .reduce((sum, source) => sum + perDay(source.amount, source.cadenceSteps) * 30, 0),
   );
+  // Only for whoever can open the power's own chest: how hard its lands are
+  // taxed is the treasury's business, and a private man hears it as grumbling.
+  const opensTreasury = ownPolity !== null && world.material.accounts.some((account) =>
+    account.owner.kind === "polity" && account.owner.id === ownPolity && reachesAccount(account.id));
+  const burden = opensTreasury ? taxBurdens(world).get(ownPolity) : undefined;
+  const taxBurden = burden === undefined ? null : { asked: burden.asked, bearable: burden.bearable, inWords: taxBurdenInWords(burden) };
   const monthlyExpenditure = Math.round(
     world.material.obligations
       .filter((obligation) => obligation.active && reachesAccount(obligation.payerAccountId))
@@ -355,7 +431,8 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     .slice(0, CAPS.forces)
     .map((force) => ({
       id: force.id,
-      name: force.name,
+      // A band that answers to nobody is still where its men came from, and has to be told apart.
+      name: force.outlaw === true ? `${force.name} (outlaw)` : force.name,
       // The men actually there, not the establishment. The two diverge the
       // moment a battle is fought, and an order planned on the paper figure is
       // an order planned on men who are dead.
@@ -373,6 +450,8 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       location: provinceName(force.locationId),
       locationId: force.locationId,
       commander: name(force.commanderCharacterId),
+      ranks: force.memberCharacterIds.map((id) => `${name(id)} [${id}]`),
+      plan: reachesForce(force.id) && force.battlePlan != null ? force.battlePlan.rationale.slice(0, 160) : null,
     }));
 
   // Every place the order might need to name, by the id it must name it by --
@@ -435,7 +514,49 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       id: province.id,
       name: province.name,
       controller: province.controllerPolityId === null ? "uncontrolled" : polityName(province.controllerPolityId),
+      cities: province.settlements.slice(0, CAPS.citiesPerProvince).map((settlement) => ({
+        id: settlement.id,
+        name: settlement.name,
+        controller: settlement.controllerPolityId === null ? "uncontrolled" : polityName(settlement.controllerPolityId),
+        walls: settlement.fortificationLevel,
+      })),
+      // Only ground somebody authored or made. Every province has a generated
+      // fallback list -- a camp, an interior -- and printing those for forty
+      // provinces would cost more than it tells anybody.
+      ground: (province.positions ?? []).slice(0, CAPS.groundPerProvince).map((position) => ({
+        id: position.id,
+        label: position.label,
+        type: position.type,
+      })),
+      buildings: world.structures
+        .filter((structure) => structure.provinceId === province.id)
+        .slice(0, CAPS.buildingsPerProvince)
+        .map((structure) => {
+          const does = (structure.effects ?? DEFAULT_STRUCTURE_EFFECTS[structure.kind] ?? []).map(effectInWords);
+          return `${structure.name} [${structure.id}] (${structure.kind.replace(/_/g, " ")}${structure.lapsedAtStep == null ? "" : ", fallen into disuse"}${does.length === 0 ? "" : `; ${does.join(", ")}`})`;
+        }),
+      belief: world.faithAdherence
+        .filter((row) => row.provinceId === province.id)
+        .sort((a, b) => b.shareBps - a.shareBps)
+        .slice(0, 3)
+        .map((row) => `${world.faiths.find((faith) => faith.id === row.faithId)?.name ?? row.faithId} ${Math.round(row.shareBps / 100)}%`),
     }));
+
+  const standingPlans = world.contingencies
+    .filter((plan) => plan.status === "armed" && (ownPolity === null || plan.ownerPolityId === ownPolity))
+    .slice(0, CAPS.standingPlans)
+    .map((plan) => ({
+      id: plan.id,
+      label: plan.label,
+      effect: plan.effect,
+      where: provinceName(plan.provinceId),
+    }));
+
+  // The kinds of soldier there are: the scenario's own, plus any the world has
+  // since made for itself. Named so an order can ask for one by id instead of
+  // guessing, and so the world can tell a legion from a squadron of horse.
+  const troopKinds = allTroopCategories(world, input.warfare?.troopCategories ?? [])
+    .map((category) => ({ id: category.id, label: category.label }));
 
   const politics = world.characters
     .filter((character) => character.alive && (ownPolity === null || character.polityId === ownPolity))
@@ -445,6 +566,12 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       name: character.name,
       office: character.officeId,
       age: currentAgeYears(character, world.elapsedStep),
+      faith: character.faithId === null ? null : world.faiths.find((faith) => faith.id === character.faithId)?.name ?? null,
+      standing: [
+        character.gender === "female" ? "a woman" : null,
+        character.legalStatus === "enslaved" ? `slave of ${world.characters.find((owner) => owner.id === character.ownerCharacterId)?.name ?? "a master"}` : null,
+        character.legalStatus === "freed" ? `freedman of ${world.characters.find((owner) => owner.id === character.ownerCharacterId)?.name ?? "a patron"}` : null,
+      ].filter((part): part is string => part !== null).join(", ") || null,
     }));
 
   const diplomacy = (speaksForTheGovernment ? world.polityStances : [])
@@ -616,13 +743,24 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       id: holding.id,
       title: holding.title,
       holder: name(holding.legalHolderCharacterId),
+      holderId: holding.legalHolderCharacterId,
       control: outOfHundred(holding.physicalControlBps),
       territoryId: holding.territoryId,
+      // What it pays its owner a month -- the owner's own business, so shown
+      // only to whoever can open the purse it is paid into.
+      monthlyYield: (() => {
+        const income = world.material.incomeSources.find((source) => source.id === holding.incomeSourceId);
+        return income === undefined || !reachesAccount(income.beneficiaryAccountId) ? null : Math.round(income.amount * (30 / Math.max(1, income.cadenceSteps)));
+      })(),
     }));
 
   const ourAccountIds = new Set(
     world.material.accounts
-      .filter((account) => (account.owner.kind === "polity" ? ownPolity === null || account.owner.id === ownPolity : ourCharacterIds.has(account.owner.id)))
+      .filter((account) => {
+        if (account.owner.kind === "polity") return ownPolity === null || account.owner.id === ownPolity;
+        if (account.owner.kind === "force") return forcePolity.get(account.owner.id) === ownPolity;
+        return ourCharacterIds.has(account.owner.id);
+      })
       .map((account) => account.id),
   );
 
@@ -680,6 +818,11 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
         .slice(0, 6)
         .map(([key, value]) => `${key}: ${String(value)}`),
       retired: "retiredAtStep" in entity.attributes,
+      effects: [
+        ...(entity.effects ?? []).map(effectInWords),
+        ...(entity.upkeep == null ? [] : [`kept at ${entity.upkeep.band} cost from [${entity.upkeep.fromAccountId}]`]),
+      ],
+      lapsed: entity.lapsedAtStep != null,
     }));
 
   // Ours first: the order the model reads them in is the order it weighs them.
@@ -736,7 +879,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       forces: world.material.forces
         .filter((force) => force.polityId === polity.id)
         .slice(0, 4)
-        .map((force) => `${force.name} [${force.id}] — ${force.personnel.reduce((sum, category) => sum + category.fit, 0)} men at ${provinceName(force.locationId)} [${force.locationId}]`),
+        .map((force) => `${force.name}${force.outlaw === true ? " (outlaw)" : ""} [${force.id}] — ${force.personnel.reduce((sum, category) => sum + category.fit, 0)} men at ${provinceName(force.locationId)} [${force.locationId}]`),
     }))
     .filter((power) => power.provinces > 0 || power.leaders.length > 0 || power.forces.length > 0)
     .sort((a, b) => {
@@ -826,10 +969,14 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     economy: accounts,
     monthlyIncome,
     monthlyExpenditure,
+    taxBurden,
     military,
     foreignPowers,
     populationGaps,
     provinces,
+    standingPlans,
+    troopKinds,
+    faiths: world.faiths.slice(0, CAPS.faiths).map((faith) => faith.name),
     politics,
     diplomacy,
     agreements,
@@ -899,15 +1046,34 @@ export function renderWorldSlice(slice: WorldSlice): string {
   section("TREASURY", [
     ...slice.economy.map((account) => `${account.label} [${account.id}]: ${account.balance}`),
     `Monthly income ~${slice.monthlyIncome}, monthly expenditure ~${slice.monthlyExpenditure}`,
+    ...(slice.taxBurden === null ? [] : [
+      `Our lands' taxes: ~${slice.taxBurden.asked}/month asked of ~${slice.taxBurden.bearable} bearable (${slice.taxBurden.inWords}); more is not collected, and past half, order sours.`,
+    ]),
   ]);
   section("MILITARY", slice.military.map((force) => {
-    const where = `at ${force.location} [${force.locationId}], under ${force.commander}`;
+    const where = `at ${force.location} [${force.locationId}], under ${force.commander}${force.ranks.length === 0 ? "" : `, with ${force.ranks.join(", ")} in the ranks`}`;
     if (force.banded) return `${force.name} [${force.id}] — about ${force.strength} men ${where}`;
     const short = force.paperStrength !== null && force.strength < force.paperStrength ? ` of ${force.paperStrength} on the books` : "";
     const fed = force.provisions === null || force.provisions === "provisioned" ? "" : `, ${force.provisions} of supply`;
-    return `${force.name} [${force.id}] — ${force.strength} men${short} ${where}, morale ${force.morale}/100${fed}`;
+    return `${force.name} [${force.id}] — ${force.strength} men${short} ${where}, morale ${force.morale}/100${fed}${force.plan === null ? "" : `; if attacked: ${force.plan}`}`;
   }));
-  section("PLACES", slice.provinces.map((province) => `${province.name} [${province.id}] — held by ${province.controller}`));
+  section("PLANS STANDING", slice.standingPlans.map((plan) =>
+    `${plan.label} [${plan.id}] — ${plan.effect === "spring_trap" ? "prepared, and springs by itself" : "waiting to raise the alarm"}, in ${plan.where}`));
+  section("KINDS OF SOLDIER", slice.troopKinds.length === 0 ? [] : [
+    `${slice.troopKinds.map((kind) => `${kind.label} [${kind.id}]`).join("; ")}. A kind not listed here can be taken into an army anyway -- name it and say what sort of troops they are.`,
+  ]);
+  section("PLACES", slice.provinces.map((province) => {
+    const cities = province.cities.length === 0
+      ? ""
+      : `. Cities: ${province.cities.map((city) => `${city.name} [${city.id}], ${city.controller}, walls ${city.walls}/10`).join("; ")}`;
+    const ground = province.ground.length === 0
+      ? ""
+      : `. Ground: ${province.ground.map((spot) => `${spot.label} [${spot.id}], ${spot.type}`).join("; ")}`;
+    const buildings = province.buildings.length === 0 ? "" : `. Standing there: ${province.buildings.join("; ")}`;
+    const belief = province.belief.length === 0 ? "" : `. Believe: ${province.belief.join(", ")}, the rest as of old`;
+    return `${province.name} [${province.id}] — held by ${province.controller}${cities}${ground}${buildings}${belief}`;
+  }));
+  section("FAITHS", slice.faiths.length === 0 ? [] : [`${slice.faiths.join("; ")}. A faith not listed is founded by naming it.`]);
   section("OTHER POWERS", slice.foreignPowers.map((power) => {
     const people = power.leaders.length === 0 ? "nobody known to lead them" : power.leaders.join("; ");
     const arms = power.forces.length === 0 ? "no forces known in the field" : power.forces.join("; ");
@@ -963,7 +1129,7 @@ export function renderWorldSlice(slice: WorldSlice): string {
   if (slice.seeds.length > 0) {
     lines.push(
       `THE WORLD STIRS — ${slice.seeds.length === 1 ? "one thing happens" : `${slice.seeds.length} separate things happen`} this season, beside the order and not because of it:`,
-      "  None of this is the ruler's doing and none of it is attributed to anybody in the government. Answer PLAYER ORDER first and in full; then, in the same answer, make every one of these happen too, each under its own facts. They are unrelated to each other: do not join them into one event, and do not let one of them be the reason for another.",
+      "  None of this is the player's doing, and none of it is attributed to anybody in the government. Answer PLAYER ORDER first and in full; then, in the same answer, make every one of these happen too, each under its own facts. They are unrelated to each other: do not join them into one event, and do not let one of them be the reason for another.",
       "  Spread them over the season. What happens at once, change now; what would take weeks, schedule with a scheduled event citing its own fact.",
       "",
     );
@@ -980,7 +1146,7 @@ export function renderWorldSlice(slice: WorldSlice): string {
       );
     }
   }
-  section("PEOPLE", slice.politics.map((person) => `${person.name} [${person.id}]${person.office === null ? "" : `, ${person.office}`}, aged ${person.age}`));
+  section("PEOPLE", slice.politics.map((person) => `${person.name} [${person.id}]${person.office === null ? "" : `, ${person.office}`}, aged ${person.age}${person.faith === null ? "" : `, of ${person.faith}`}${person.standing === null ? "" : `, ${person.standing}`}`));
   section(
     "POLITICAL STANDING",
     slice.standing.map((entry) => {
@@ -1033,11 +1199,12 @@ export function renderWorldSlice(slice: WorldSlice): string {
     slice.arrangements.map((entity) => {
       const owner = entity.owner === null ? "" : `, under ${entity.owner}`;
       const detail = entity.attributes.length === 0 ? "" : ` — ${entity.attributes.join(", ")}`;
-      return `${entity.label} [${entity.id}] (${entity.kind}${owner})${entity.retired ? ", repealed" : ""}${detail}`;
+      const does = entity.effects.length === 0 ? "" : `; ${entity.effects.join(", ")}`;
+      return `${entity.label} [${entity.id}] (${entity.kind}${owner})${entity.retired ? ", repealed" : ""}${entity.lapsed ? ", fallen into disuse" : ""}${detail}${does}`;
     }),
   );
   section("LANDS AND HOLDINGS", slice.holdings.map((holding) =>
-    `${holding.title} [${holding.id}] in ${holding.territoryId} — held in law by ${holding.holder}, held in fact ${holding.control}/100`));
+    `${holding.title} [${holding.id}] in ${holding.territoryId} — held in law by ${holding.holder} [${holding.holderId}], held in fact ${holding.control}/100${holding.monthlyYield === null ? "" : `, yielding ~${holding.monthlyYield} a month`}`));
   section("DIPLOMACY", slice.diplomacy.map((stance) => `toward ${stance.toward}: trust ${stance.trust} (${stance.why})`));
   section("WHERE THE POWERS STAND", slice.agreements.map((agreement) => {
     const term = agreement.endsInDays === null ? "" : `, for another ${agreement.endsInDays} day(s)`;

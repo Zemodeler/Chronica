@@ -36,6 +36,30 @@ export const WatchPredicateSchema = z.discriminatedUnion("kind", [
   /** A place changes hands, whoever took it. */
   z.object({ kind: z.literal("province_control_changes"), provinceId: EntityIdSchema }).strict(),
   /**
+   * An army reaches a named piece of ground *inside* a province: the ward
+   * behind the outer wall, the pass, the ford, the siege line.
+   *
+   * A province is too coarse for the thing players actually write. "When the
+   * Carthaginians are through the first wall, fire it" is not a condition about
+   * north-western Sicily; the enemy has been in north-western Sicily for a
+   * month. It is a condition about one position, which is why it could not be
+   * expressed until positions could be occupied.
+   */
+  z
+    .object({
+      kind: z.literal("force_enters_position"),
+      positionId: EntityIdSchema,
+      /** Only this polity's forces, or any force not the watcher's when omitted. */
+      polityId: EntityIdSchema.optional(),
+    })
+    .strict(),
+  /**
+   * A city changes hands. "Should Hadrumentum fall" is a sentence half the
+   * orders in a campaign hang on, and a province changing hands is not the same
+   * event -- a garrison can hold a city whose countryside has gone.
+   */
+  z.object({ kind: z.literal("settlement_control_changes"), settlementId: EntityIdSchema }).strict(),
+  /**
    * "Rome mobilises": a polity's total fit headcount crosses a threshold.
    *
    * Headcount rather than a count of forces, so splitting an army into three does
@@ -82,7 +106,14 @@ export const WatchPredicateSchema = z.discriminatedUnion("kind", [
       vacant: z.boolean(),
     })
     .strict(),
-]);
+]).meta({
+  // Named, so the orchestrator's schema states it once and points at it from
+  // both places it is used -- the ruler's own watch and a contingency's
+  // trigger -- instead of inlining the same two thousand characters twice.
+  // Only this one is named, and by a word a model can read; the blanket
+  // alternative (`reused: "ref"`) names everything `__schema0`.
+  id: "WatchPredicate",
+});
 export type WatchPredicate = z.infer<typeof WatchPredicateSchema>;
 
 export const WatchConditionSchema = z

@@ -198,7 +198,26 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     // Mamertines run out of money in the eleventh month and the garrison
     // holding Messana never noticed.
     await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 25, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Names the army behind every wage bill, and pays Hieron's hoplites and Rome's allied hulls at all -- so an unpaid army loses its morale and then its men, instead of a treasury going broke while the men holding the city never hear of it." }).onConflictDoNothing();
-    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 25, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
+    // Version 26 gives every army a chest of its own. Until now every account
+    // in the world belonged to a person or a government, so an army could only
+    // ever be paid by somebody sitting still somewhere else, plunder had
+    // nowhere to go, and "they will be paid out of what they take" was an
+    // order the engine could narrate and not obey.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 26, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Gives every army the chest it carries, so plunder has somewhere to land and an army can be paid out of what it takes rather than only out of a treasury." }).onConflictDoNothing();
+    // Version 27 is the economy the powers can actually run on, and the land
+    // men live on. Rome took in 920 a month and a new legion's pay was most of
+    // its surplus; it now takes in about 1 800, and every power has thousands
+    // in hand. The consulship runs for a year and is refilled by election, and
+    // the leading men own estates, so a private citizen has land of his own to
+    // improve.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 27, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Roughly doubles every power's revenue (Rome to about 1 800 a month) and lifts the Mamertine treasury to thousands; gives the consulship its one-year term; and gives the leading men estates that pay them and can be improved." }).onConflictDoNothing();
+    // Version 28 is every station a person can hold: Rome's quaestors,
+    // tribunes, aediles, praetor, censors, dictator, Senate and priesthoods,
+    // with the ladder between them; Carthage's suffetes, elders and the
+    // Hundred and Four; Syracuse's court; and a ruler, council and priesthood
+    // for every other power on the map.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 28, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Gives every power its real offices -- Rome's full ladder of magistracies with ages, rungs and the ten-year gap, the Senate, the priesthoods; Carthage's suffetes and councils; Syracuse's court; a ruler, council and priesthood for everyone else -- and seats the named men in them." }).onConflictDoNothing();
+    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 28, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
   });
 }
 
@@ -373,22 +392,6 @@ export async function claimCharacter(
   });
 }
 
-export interface CharacterClaimRow {
-  readonly id: string;
-  readonly characterId: string;
-  readonly playerId: string;
-  readonly resolvedRole: unknown;
-}
-
-/**
- * Resolved claims waiting to be materialized into `world.characters`.
- *
- * `resolvedRole is not null and introducedAtTurnId is null and releasedAt is
- * null` **is** the staging state -- no separate table. This is the raw
- * row-fetch only; the transformation into `CharacterIntroduction[]` shapes
- * happens in apps/worker, which has the world context needed to resolve
- * `cultureId`/`officeId` for each contact.
- */
 export interface GameSummaryRow {
   readonly gameId: string;
   readonly title: string;

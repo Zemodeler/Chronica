@@ -26,6 +26,7 @@ const JSON_MODE_OPERATIONS = new Set<AiOperation>([
   // Parsed as JSON and always was; it was simply never listed, so a line of
   // prose preamble dropped the whole report to the plain-facts fallback.
   "compose_chronicle",
+  "reconcile_facts",
 ]);
 
 /**

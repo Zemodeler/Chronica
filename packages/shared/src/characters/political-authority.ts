@@ -1,4 +1,6 @@
 import type { Character, Office } from "./character";
+import { currentAgeYears } from "./age";
+import { DAYS_PER_YEAR } from "../world/clock";
 import type { EligibilityRequirement, GroupMembership, MaterialWorldState, PoliticalProcedure } from "../material-state";
 
 // Political authority and eligibility (character-sim phase 4).
@@ -13,6 +15,8 @@ import type { EligibilityRequirement, GroupMembership, MaterialWorldState, Polit
 export interface PoliticalAuthorityWorldView {
   readonly characters: readonly Character[];
   readonly material: MaterialWorldState;
+  /** Today, for the requirements that count years. Absent reads as the opening. */
+  readonly elapsedStep?: number;
 }
 
 export interface EligibilityResult {
@@ -80,6 +84,32 @@ function checkRequirement(
       );
       return nominated ? null : `${character.name} has not been nominated by an eligible sponsor.`;
     }
+    case "min_age": {
+      const years = (params.years as number | undefined) ?? 0;
+      return currentAgeYears(character, world.elapsedStep ?? 0) >= years ? null : `${character.name} is younger than ${years}.`;
+    }
+    case "held_office": {
+      const officeId = params.officeId as string | undefined;
+      const held = character.officesHeld.some((tenure) => tenure.officeId === officeId)
+        || world.material.officeSeats.some((seat) => seat.officeId === officeId && seat.holderCharacterId === character.id && seat.status === "held");
+      return held ? null : `${character.name} has not yet held the office of "${officeId}".`;
+    }
+    case "not_held_within_years": {
+      const officeId = params.officeId as string | undefined;
+      const years = (params.years as number | undefined) ?? 10;
+      const last = character.officesHeld.find((tenure) => tenure.officeId === officeId)?.lastHeldAtStep;
+      return last === undefined || (world.elapsedStep ?? 0) - last >= years * DAYS_PER_YEAR
+        ? null
+        : `${character.name} held "${officeId}" within the last ${years} years.`;
+    }
+    case "legal_status": {
+      const statuses = (params.statuses as readonly string[] | undefined) ?? ["free"];
+      return statuses.includes(character.legalStatus) ? null : `${character.name} is not of the standing the law requires (${statuses.join(" or ")}).`;
+    }
+    case "gender": {
+      const gender = params.gender as string | undefined;
+      return gender === undefined || character.gender === gender ? null : `${character.name} cannot hold it: it is for ${gender === "female" ? "women" : "men"}.`;
+    }
     case "custom_scenario_flag": {
       const flagId = params.flagId as string | undefined;
       const mode = (params.mode as "present" | "absent" | undefined) ?? "absent";
@@ -93,13 +123,25 @@ function checkRequirement(
   }
 }
 
+/** The requirements a waiver can set aside: the ladder, never the man. */
+const LADDER_REQUIREMENTS = new Set<EligibilityRequirement["kind"]>(["min_age", "held_office", "not_held_within_years", "min_prestige"]);
+
 /** Resolves every named requirement against `characterId`. Missing requirement ids fail closed. */
 export function resolveEligibility(
   world: PoliticalAuthorityWorldView,
   characterId: string,
   requirementIds: readonly string[],
+  /**
+   * The office being sought. A law or a dictator can set aside the ladder --
+   * age, the rung below, the gap before holding it again -- for one man and
+   * one office, as Scipio was made consul at thirty. Never who he is: a
+   * waiver makes nobody a citizen, alive or free.
+   */
+  officeId: string | null = null,
 ): EligibilityResult {
   const character = world.characters.find((c) => c.id === characterId);
+  const waived = officeId !== null && character !== undefined
+    && character.eligibilityWaivers.some((waiver) => waiver.officeId === officeId && waiver.untilStep >= (world.elapsedStep ?? 0));
   const failedReasons: string[] = [];
   for (const requirementId of requirementIds) {
     const requirement = world.material.eligibilityRequirements.find((r) => r.id === requirementId);
@@ -107,6 +149,7 @@ export function resolveEligibility(
       failedReasons.push(`Eligibility requirement "${requirementId}" is not defined.`);
       continue;
     }
+    if (waived && LADDER_REQUIREMENTS.has(requirement.kind)) continue;
     const failure = checkRequirement(world, character, requirement);
     if (failure !== null) failedReasons.push(failure);
   }

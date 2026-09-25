@@ -61,7 +61,28 @@ describe("what the player's government can see of the world", () => {
     // the person whose order it was answering only a name and an opaque office
     // id. This should come back down once the sections are read by station --
     // a private citizen's slice ought to be markedly shorter than today's.
-    expect(text.length).toBeLessThan(13_000);
+    //
+    // Moved 13k -> 14k for the ids three ops require and the slice never
+    // printed: the cities in each province, the ground inside it, and the
+    // kinds of soldier there are. `settlement_control_set` exists so that
+    // taking Messana can be said, and the settlement id appeared nowhere here
+    // -- so the only way to write one was to guess, and Agrigentum's is
+    // `settlement-agrigentum-fort`. This is the cheapest kind of growth there
+    // is: it is paid once per order and it removes a whole class of refusal.
+    //
+    // Moved 14k -> 14.5k for the land men own and what the country's taxes
+    // cost it. Every holding list was empty until the scenario gave the
+    // leading men estates, so LANDS AND HOLDINGS printed nothing; now it prints
+    // the estates of our own people with their yields -- which is what makes
+    // "improve my estate" a sentence anybody can carry out -- and one line
+    // saying how hard our lands are taxed, which is what stops a model
+    // tripling a tax it cannot see the cost of.
+    //
+    // Moved 14.5k -> 14.7k for faith: the scenario's gods are named once
+    // (FAITHS), and each person's belief beside their age. Faith was null on
+    // every character, so a priest had nothing to serve and a conversion
+    // founded a new religion whenever it spelled an old one differently.
+    expect(text.length).toBeLessThan(14_700);
   });
 });
 

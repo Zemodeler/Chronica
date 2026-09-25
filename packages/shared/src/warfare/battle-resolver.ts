@@ -76,11 +76,28 @@ function categoryDefinition(rules: ScenarioWarfareRules | undefined, categoryId:
 }
 
 /** Coarse, scenario-independent terrain defense bonus, pending scenario-authored terrain rules. */
+/**
+ * What the ground is worth to the side standing on it.
+ *
+ * Keyed by terrain id, and the ids are the maps': a table written against
+ * `hills` and `mountains` while the Punic Wars map drew the whole of the
+ * Balkans and Gaul as `hills-uplands` made every one of those provinces as
+ * flat as a beach -- "draw them onto the rough ground" was worth nothing in
+ * any of them. Every id a scenario in this repository uses is here; an id that
+ * is not counts as open ground, which is the safe direction.
+ */
 const TERRAIN_DEFENSE_BPS: Record<string, number> = {
   hills: 500,
+  "hills-uplands": 500,
   mountains: 1_000,
+  "mountain-pass": 1_000,
   forest: 400,
 };
+
+/** What this terrain gives a defender, in basis points. Open ground gives nothing. */
+export function terrainDefenseBps(terrainId: string): number {
+  return TERRAIN_DEFENSE_BPS[terrainId] ?? 0;
+}
 
 function clampBps(value: number, min = 0, max = 10_000): number {
   return Math.max(min, Math.min(max, Math.round(value)));
@@ -137,6 +154,13 @@ export interface ResolveBattleParticipant {
   readonly force: Force;
   readonly commander: Character | null;
   readonly posture?: BattlePosture;
+  /**
+   * An attacker that comes down off ground it was already holding -- the
+   * ambush from the pass. Position has only ever favoured the defender, on the
+   * reasoning that an attacker is by definition on the move; the one attacker
+   * that is not is the one who waited for the enemy to walk under him.
+   */
+  readonly fightsFromPosition?: boolean;
 }
 
 export interface ResolveBattleInput {
@@ -267,8 +291,9 @@ function computeForceContribution(
   const baseStrength = paperWeightedStrength(force, rules);
   const position = resolveForcePosition(province, force.positionId);
   // Terrain and position favor the defender; an attacker is, by definition, on the move.
-  const positionBps = participant.side === "defender" ? position.combatModifierBps : 0;
-  const terrainBps = participant.side === "defender" ? (TERRAIN_DEFENSE_BPS[province.terrainId] ?? 0) : 0;
+  const holdsGround = participant.side === "defender" || participant.fightsFromPosition === true;
+  const positionBps = holdsGround ? position.combatModifierBps : 0;
+  const terrainBps = holdsGround ? terrainDefenseBps(province.terrainId) : 0;
   // `?? 0`, because an unrecognised posture here does not fail: it makes
   // `modifierBps` NaN, which makes the effective strength NaN, which makes
   // every casualty NaN, which lands in the world as `fit: NaN` and comes back
@@ -357,7 +382,11 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
     }
     acceptedTactics.push(proposal);
     const bps = MAGNITUDE_BPS[proposal.magnitude];
-    tacticBpsByForceId.set(proposer.forceId, (tacticBpsByForceId.get(proposer.forceId) ?? 0) + bps);
+    // A plan is the whole side's, not one army's: the Gauls waiting in the
+    // valley are the half of "hammer and anvil" the tactic is about.
+    for (const ally of participants.filter((p) => p.side === proposer.side)) {
+      tacticBpsByForceId.set(ally.forceId, (tacticBpsByForceId.get(ally.forceId) ?? 0) + bps);
+    }
   }
 
   // ── Phase 1: contact ────────────────────────────────────────────────────

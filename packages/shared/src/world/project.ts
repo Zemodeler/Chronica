@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { PolityAgreementKindSchema } from "./agreements";
+import { StandingEffectSchema, StandingUpkeepSchema } from "./standing-effects";
+import { StructureKindSchema } from "./structure";
 import { ElapsedStepSchema, EntityIdSchema, MoneyAmountSchema } from "../material-state";
 import { OrderPartyRefSchema } from "./party-ref";
 
@@ -54,6 +56,10 @@ export const ProjectCompletionOutcomeSchema = z
     /** For "agreement": what the two powers end up standing in, and with whom. */
     agreementKind: PolityAgreementKindSchema.nullable().default(null),
     withPolityId: EntityIdSchema.nullable().default(null),
+    /** For "structure": what kind of building it is, what it goes on doing, and who pays to keep it. */
+    structureKind: StructureKindSchema.optional(),
+    effects: z.array(StandingEffectSchema).max(6).optional(),
+    upkeep: StandingUpkeepSchema.nullable().optional(),
   })
   .strict();
 export type ProjectCompletionOutcome = z.infer<typeof ProjectCompletionOutcomeSchema>;

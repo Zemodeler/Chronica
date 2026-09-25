@@ -4,6 +4,8 @@ import {
   LOOSE_COHESION_BPS,
   TRAIT_REGISTRY,
   cohesionInWords,
+  standingInWords,
+  abortsTheTurn,
   isTimeout,
   deriveRelationDimension,
   formatWorldDate,
@@ -19,7 +21,7 @@ import {
 import type { RoutedActor } from "./attention";
 import { answersAnOrder, assessExecution } from "./delegation";
 import { dropMalformedEntries, extractJson } from "./json";
-import { salvageAgainst } from "./salvage";
+import { kindsIn, readLeniently } from "./bare-refs";
 import type { SimModelPort } from "./ports";
 
 /**
@@ -204,12 +206,11 @@ The same engine rules apply as elsewhere:
   "discoveries" -- the fact already existed; what changed is that they now know
   it. Someone who sets out to deceive uses "belief_set" on the person they are
   deceiving. A belief is never checked against the truth.
-- An army can only fight what it is standing next to, and can only move to
-  ground it borders. To attack, step it into the enemy's province with
-  "force_modify" and engage in the same answer; if the enemy is further off,
-  open a project whose outcome is "force_move" and let it arrive. A move across
-  the map and an engagement between two provinces are both refused, and the
-  attack simply does not happen.
+- An army can only fight what it is standing next to. To attack, step it into
+  the enemy's province with "force_modify" and engage in the same answer; if
+  the enemy is further off, send it there with "force_modify" anyway -- it sets
+  out, and arrives when the road has been walked. An engagement between two
+  provinces is refused, and the attack simply does not happen.
 - Two powers at peace do not fight. Declaring the war is a decision somebody
   takes, with "agreement_open"; an engagement without it is refused.
 - Ground taken is said with "province_control_set", and only for a province you
@@ -507,7 +508,7 @@ export function renderCharacterPortrait(
   const lines: string[] = [`## ${displayName} [${characterId}]`];
 
   if (character !== undefined) {
-    lines.push(`Office: ${character.officeId ?? "none"}. Polity: ${character.polityId ?? "none"}.`);
+    lines.push(`Office: ${character.officeId ?? "none"}. Polity: ${character.polityId ?? "none"}. Standing: ${standingInWords(character.prestigeBps)}.`);
     lines.push(...describeTraits(character));
     lines.push(...describeMind(character));
     lines.push(...describeMeans(character, world));
@@ -710,23 +711,18 @@ async function runOneBatch(
   inBatch: readonly string[],
 ): Promise<CognitionResult> {
   const userMessage = actors.map((actor) => renderActor(actor, world, clock, inBatch)).join("\n\n");
+  const kindOf = kindsIn(world);
   const complain = (issues: readonly { path: readonly PropertyKey[]; message: string }[]): string =>
     issues.slice(0, 4).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
 
   const salvaged: string[] = [];
   /** Parses, and if that fails drops what the schema named and parses again. */
   const read = (raw: string) => {
-    const prepared = foldStrayProposalKeys(extractJson(raw));
-    const parsed = CognitionOutputSchema.safeParse(prepared);
-    if (parsed.success) return parsed;
-    // A bad reference inside one person's fact should cost that reference, not
-    // the other five people's answers.
-    const rescued = salvageAgainst(prepared, parsed.error.issues);
-    if (rescued === null) return parsed;
-    const retried = CognitionOutputSchema.safeParse(rescued.value);
-    if (!retried.success) return parsed;
-    salvaged.push(...rescued.dropped);
-    return retried;
+    // A reference written as the bare id is put into shape, and a bad line
+    // inside one person's answer costs that line, not the other five people's.
+    const read = readLeniently(CognitionOutputSchema, foldStrayProposalKeys(extractJson(raw)), kindOf);
+    if (read.parsed.success) salvaged.push(...read.dropped);
+    return read.parsed;
   };
 
   let failure: string;
@@ -735,6 +731,7 @@ async function runOneBatch(
     if (parsed.success) return { output: parsed.data, calls: 1, parseFailure: null, salvaged };
     failure = complain(parsed.error.issues);
   } catch (error) {
+    if (abortsTheTurn(error)) throw error;
     const reason = error instanceof Error ? error.message : String(error);
     // A deadline is not a complaint about the answer's shape, so the repair
     // below would re-send a prompt that was never wrong and wait all over
@@ -768,6 +765,7 @@ async function runOneBatch(
     if (repaired.success) return { output: repaired.data, calls: 2, parseFailure: null, salvaged };
     return { output: EMPTY, calls: 2, parseFailure: complain(repaired.error.issues), salvaged };
   } catch (error) {
+    if (abortsTheTurn(error)) throw error;
     return { output: EMPTY, calls: 2, parseFailure: error instanceof Error ? error.message : String(error), salvaged };
   }
 }

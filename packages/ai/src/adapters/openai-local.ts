@@ -28,6 +28,7 @@ const JSON_MODE_OPERATIONS = new Set<AiOperation>([
   // ran without `response_format` and a single line of prose preamble dropped
   // the whole report to the plain-facts fallback.
   "compose_chronicle",
+  "reconcile_facts",
 ]);
 
 /**
@@ -50,6 +51,7 @@ const LOW_EFFORT_OPERATIONS = new Set<AiOperation>([
   "confirm_character",
   "simulate_orchestrate",
   "simulate_cognition",
+  "reconcile_facts",
 ]);
 
 type ReasoningEffort = "low" | "medium" | "high";
@@ -74,8 +76,8 @@ function reasoningEffortFor(operation: AiOperation): ReasoningEffort | undefined
 // Model assignments per tier. Override via env vars if needed.
 const TIER_MODELS: Record<AiTier, string> = {
   basic: process.env.CHRONICA_AI_MODEL_BASIC ?? "gpt-5-nano",
-  standard: process.env.CHRONICA_AI_MODEL_STANDARD ?? "gpt-5.6-luna",
-  premium: process.env.CHRONICA_AI_MODEL_PREMIUM ?? "gpt-5.6-sol",
+  standard: process.env.CHRONICA_AI_MODEL_STANDARD ?? "gpt-6-luna",
+  premium: process.env.CHRONICA_AI_MODEL_PREMIUM ?? "gpt-6-sol",
 };
 
 // Operations that use standard tier (everything else is basic). None of the
@@ -257,7 +259,7 @@ export function createOpenAiLocalAdapter(): AiAdapter {
           stream: true,
           stream_options: { include_usage: true },
           messages: [
-            { role: "system", content: systemPrompt },
+            { role: "system", content: isJsonMode ? mentionsJson(systemPrompt, userMessage) : systemPrompt },
             { role: "user", content: userMessage },
           ],
           ...(isJsonMode ? { response_format: { type: "json_object" as const } } : {}),
@@ -340,4 +342,16 @@ export function createOpenAiLocalAdapter(): AiAdapter {
       };
     },
   };
+}
+
+/**
+ * OpenAI refuses a JSON-mode request whose messages never say "json" -- a 400,
+ * not a warning. The delta repair prompt showed its shape as `{"deltas": [...]}`
+ * without ever naming the format, so on this provider every repair call failed
+ * and no malformed change was ever corrected; the fact reconciliation prompt
+ * did the same. A prompt should not have to remember a provider's rule, so it
+ * is kept here, where the rule lives.
+ */
+function mentionsJson(systemPrompt: string, userMessage: string): string {
+  return /json/i.test(systemPrompt) || /json/i.test(userMessage) ? systemPrompt : `${systemPrompt}\n\nAnswer in JSON.`;
 }

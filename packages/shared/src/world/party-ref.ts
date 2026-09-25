@@ -22,5 +22,6 @@ export const OrderPartyRefSchema = z
     ]),
     id: EntityIdSchema,
   })
-  .strict();
+  .strict()
+  .meta({ id: "PartyRef" });
 export type OrderPartyRef = z.infer<typeof OrderPartyRefSchema>;
