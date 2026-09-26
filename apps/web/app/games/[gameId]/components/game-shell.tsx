@@ -27,6 +27,7 @@ import { Era } from "../../../components/ui/era";
 import { ForcesPanel } from "./forces-panel";
 import { StandingPanel } from "./standing-panel";
 import { MapOrderBar } from "./map-order-bar";
+import { CalendarLine } from "./calendar-line";
 import { unreadCount, useGameView } from "./use-game-view";
 
 type ZoomBand = "far" | "medium" | "close";
@@ -622,7 +623,11 @@ export function GameShell({
             {unread > 0 && <span className="shell-place__badge badge">{unread}</span>}
           </button>
         </div>
-        <div className="shell-top-bar-right">{dateChip}{coinChip}</div>
+        <div className="shell-top-bar-right">
+          {dateChip}
+          <CalendarLine gameId={gameId} revision={view.chronicle.length} />
+          {coinChip}
+        </div>
       </header>
       <div className="game-shell">
         <div

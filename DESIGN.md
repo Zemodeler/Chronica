@@ -89,6 +89,10 @@ Shared components live in `apps/web/app/components/ui/`, styled in
   order on the desk), not its close button. Widths: `reading` (Chronicle,
   letters), `ledger` (treasury, muster, standing, the mirror), `desk` (the
   council), `narrow` (small forms).
+- **The calendar line** after the date in the lintel: the next dated thing
+  the player could know of, from `whatComesNext` (shared), never from the
+  event queue. A seal dot when it wants the player's word; choosing it opens
+  the next few in a native popover. Nothing coming, nothing shown.
 - **The army card** on the map is a papyrus card, not a sheet: a modal would
   take the map out of the player's hand while they look at an army.
 - **`Button`**: `primary` (bronze, one per surface), `quiet` (everything

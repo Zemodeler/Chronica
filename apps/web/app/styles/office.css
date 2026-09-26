@@ -87,6 +87,57 @@
   }
   .shell-coin-chip:hover { color: #fff; }
 
+  /* What is coming: one quiet line after the date. */
+  .calendar-line { min-width: 0; }
+  .calendar-line__next {
+    display: flex;
+    align-items: baseline;
+    gap: .35rem;
+    max-width: 24rem;
+    min-height: 0;
+    padding: .15rem 0;
+    border: 0;
+    border-bottom: 1px dashed transparent;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    color: var(--dust);
+    font: italic 400 var(--step-0) var(--font-serif);
+    font-variant-numeric: oldstyle-nums;
+    white-space: nowrap;
+  }
+  .calendar-line__next:hover:not(:disabled) { color: var(--vellum); border-bottom-color: color-mix(in srgb, var(--bronze) 60%, transparent); }
+  .calendar-line__next .seal-dot { align-self: center; flex: none; }
+  .calendar-line__label { overflow: hidden; text-overflow: ellipsis; }
+  .calendar-line__when { flex: none; color: var(--vellum); font-style: normal; }
+  .calendar-line__list {
+    position: fixed;
+    inset: auto;
+    top: calc(var(--lintel) + .25rem);
+    right: 1.5rem;
+    width: min(26rem, calc(100vw - 3rem));
+    margin: 0;
+    padding: 1rem 1.25rem 1.1rem;
+    border: 0;
+    border-radius: var(--radius);
+    background: var(--papyrus);
+    box-shadow: var(--shadow-lift), inset 0 0 0 1px rgb(122 86 38 / 28%);
+  }
+  .calendar-line__list h2 { margin-bottom: .5rem; color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
+  .calendar-line__list ol { display: grid; margin: 0; padding: 0; list-style: none; }
+  .calendar-line__list li {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: baseline;
+    gap: 1rem;
+    padding: .45rem 0;
+    border-bottom: 1px solid var(--rule);
+    font: 400 var(--step-0)/1.4 var(--font-serif);
+  }
+  .calendar-line__list li:last-child { border-bottom: 0; }
+  .calendar-line__list li.needs-you span { padding-left: .6rem; border-left: 2px solid var(--seal); }
+  .calendar-line__list time { color: var(--ink-faded); font-variant-numeric: oldstyle-nums; white-space: nowrap; }
+
   /* ─── The shell ────────────────────────────────────────────────────── */
   @keyframes game-shell-enter { from { opacity: 0; } to { opacity: 1; } }
   .game-shell {
