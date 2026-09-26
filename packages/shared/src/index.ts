@@ -12,6 +12,7 @@ export * from "./dialogue/index";
 export * from "./material-state";
 export * from "./material-view";
 export * from "./material/books";
+export * from "./material/account-names";
 export * from "./material/character-accounts";
 export * from "./material/forces";
 export * from "./material/in-words";

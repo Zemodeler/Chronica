@@ -10,6 +10,8 @@ import { enterTheWorld, waitForTheOffice } from "./fixture";
  */
 const A_SCORE = /\d+\s*\/\s*\d+/;
 const AN_ID = /\[[a-z0-9-]{4,}\]/;
+/** A lower-case slug of three or more parts, the shape every entity id has: "roman-field-army". */
+const A_BARE_ID = /\b[a-z0-9]+(?:-[a-z0-9]+){2,}\b/;
 
 test.describe("what the player is allowed to read", () => {
   test("counts the men actually present, in words", async ({ page }) => {
@@ -74,6 +76,12 @@ test.describe("what the player is allowed to read", () => {
     const panel = page.getByRole("dialog", { name: /treasury/i });
     await expect(panel).toBeVisible();
     await expect(panel.locator(".books__table")).toBeVisible({ timeout: 60_000 });
+
+    // Every account is named for a reader. The consul's army chests used to
+    // read "roman-field-army's purse": a bare slug, which AN_ID's brackets miss.
+    const text = await panel.innerText();
+    expect(text).not.toMatch(AN_ID);
+    expect(text).not.toMatch(A_BARE_ID);
   });
 });
 
