@@ -1,6 +1,7 @@
 import type { DynamicMapOverlay, GeoJsonPosition } from "@chronica/shared";
 import { polityColorFromId, polityColorWithAlpha } from "./geo-projection";
 import { provinceContains, type SharedBoundary, type StaticProvince, type StaticWorldGeometry, type WorldBounds } from "./world-geometry";
+import { MAJOR_POLITY_PIGMENTS } from "../../../../lib/palette";
 
 export type BorderClassification = "internal_province" | "country_border" | "coast";
 export interface PoliticalBorderSegment extends SharedBoundary { readonly classification: BorderClassification; }
@@ -38,18 +39,9 @@ export function deriveWarBorderPaths(state: PoliticalMapState, wars: DynamicMapO
 function boundsFor(provinces: readonly StaticProvince[]): WorldBounds { return provinces.reduce<WorldBounds>((bounds, province) => ({ minX: Math.min(bounds.minX, province.bounds.minX), minY: Math.min(bounds.minY, province.bounds.minY), maxX: Math.max(bounds.maxX, province.bounds.maxX), maxY: Math.max(bounds.maxY, province.bounds.maxY) }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }); }
 function componentFor(startId: string, available: Set<string>, world: StaticWorldGeometry): TerritorialComponent { const queue = [startId]; available.delete(startId); const provinceIds: string[] = []; while (queue.length) { const id = queue.pop()!; provinceIds.push(id); for (const neighbor of world.provinceById.get(id)?.labelNeighborIds ?? []) if (available.delete(neighbor)) queue.push(neighbor); } const provinces = provinceIds.map((id) => world.provinceById.get(id)!).filter(Boolean); const totalArea = provinces.reduce((sum, province) => sum + province.area, 0); return { provinceIds: provinceIds.sort(), totalArea, weightedCentroid: [provinces.reduce((sum, province) => sum + province.centroid[0] * province.area, 0) / totalArea, provinces.reduce((sum, province) => sum + province.centroid[1] * province.area, 0) / totalArea], bounds: boundsFor(provinces) }; }
 function weightedQuantile(samples: readonly { value: number; weight: number }[], quantile: number) { const sorted = [...samples].sort((a, b) => a.value - b.value); const threshold = sorted.reduce((sum, sample) => sum + sample.weight, 0) * quantile; let cumulative = 0; for (const sample of sorted) { cumulative += sample.weight; if (cumulative >= threshold) return sample.value; } return sorted.at(-1)?.value ?? 0; }
-const ROMAN_REPUBLIC_RED = "#b21f2d";
-const CARTHAGINIAN_PURPLE_BLUE = "#2e245f";
-const SYRACUSAN_EARTH = "#80512f";
-const MACEDONIAN_BLUE = "#355f91";
-const PTOLEMAIC_GOLD = "#bd9136";
-const MAJOR_POLITY_COLOURS: Readonly<Record<string, string>> = {
-  rome: ROMAN_REPUBLIC_RED,
-  carthage: CARTHAGINIAN_PURPLE_BLUE,
-  syracuse: SYRACUSAN_EARTH,
-  macedon: MACEDONIAN_BLUE,
-  "ptolemaic-cyrenaica": PTOLEMAIC_GOLD,
-};
+// The great powers in mineral pigments -- cinnabar, Tyrian purple, ochre,
+// azurite, orpiment -- as an atlas colourist would have had them.
+const MAJOR_POLITY_COLOURS = MAJOR_POLITY_PIGMENTS;
 export function politicalColourFromId(polityId: string) { return MAJOR_POLITY_COLOURS[polityId] ?? polityColorFromId(polityId); }
 export function politicalColourWithAlpha(polityId: string, alpha: number) { const colour = MAJOR_POLITY_COLOURS[polityId]; return colour === undefined ? polityColorWithAlpha(polityId, alpha) : `${colour}${Math.round(alpha * 255).toString(16).padStart(2, "0")}`; }
 const LABEL_PATH_COVERAGE = .85;

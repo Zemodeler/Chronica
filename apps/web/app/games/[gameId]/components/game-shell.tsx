@@ -134,6 +134,34 @@ interface GameShellProps {
   readonly roomStyle: RoomStyle;
 }
 
+let _toneWorker: Worker | null | undefined;
+let _toneRequests = 0;
+
+/**
+ * The raster, toned into an engraved plate (see atlas-tone.ts), off the main
+ * thread. Without a worker, or if toning fails, the raster as it is: a map in
+ * the wrong colours beats no map.
+ */
+async function tonedBitmap(img: HTMLImageElement): Promise<ImageBitmap> {
+  if (_toneWorker === undefined) {
+    try { _toneWorker = new Worker(new URL("./atlas-tone.worker.ts", import.meta.url)); } catch { _toneWorker = null; }
+  }
+  const worker = _toneWorker;
+  if (worker === null) return createImageBitmap(img);
+  const id = ++_toneRequests;
+  const raw = await createImageBitmap(img);
+  const toned = await new Promise<ImageBitmap | null>((resolve) => {
+    const onMessage = (event: MessageEvent<{ readonly id: number; readonly bitmap: ImageBitmap | null }>) => {
+      if (event.data.id !== id) return;
+      worker.removeEventListener("message", onMessage);
+      resolve(event.data.bitmap);
+    };
+    worker.addEventListener("message", onMessage);
+    worker.postMessage({ id, bitmap: raw }, [raw]);
+  });
+  return toned ?? createImageBitmap(img);
+}
+
 /**
  * Loads a map raster into `target` as an ImageBitmap and asks for a repaint.
  * Returns the effect cleanup, which drops a load that finishes too late.
@@ -145,7 +173,7 @@ function loadMapBitmap(url: string | undefined, target: { current: ImageBitmap |
   const img = new Image();
   img.src = url;
   img.decode()
-    .then(() => createImageBitmap(img))
+    .then(() => tonedBitmap(img))
     .then((bitmap) => {
       if (cancelled) { bitmap.close(); return; }
       target.current = bitmap;
