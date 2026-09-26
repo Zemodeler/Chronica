@@ -20,7 +20,10 @@ import { CouncilPanel } from "./council-panel";
 import { ChroniclePanel } from "./chronicle-panel";
 import { BooksPanel } from "./books-panel";
 import { Office, type OfficeSurface } from "./office";
-import type { RoomStyle } from "./office-objects";
+import { OFFICE_OBJECTS, ROOM_WIDTH, type RoomStyle } from "./office-objects";
+import { rectFor, sceneryFor } from "./office-scenery";
+import { Sheet, CloseButton, type SheetSide } from "../../../components/ui/sheet";
+import { Era } from "../../../components/ui/era";
 import { ForcesPanel } from "./forces-panel";
 import { StandingPanel } from "./standing-panel";
 import { MapOrderBar } from "./map-order-bar";
@@ -99,6 +102,19 @@ function deriveZoomBand(scale: number): ZoomBand {
   if (scale >= CLOSE_THRESHOLD) return "close";
   if (scale >= MEDIUM_THRESHOLD) return "medium";
   return "far";
+}
+
+/**
+ * Which side of the room a document is laid on: away from the object it was
+ * taken from, so the shelf stays in view beside the book. The desk's papers
+ * are laid in the middle, in front of it.
+ */
+function sheetSideFor(style: RoomStyle, id: OfficeSurface): SheetSide {
+  if (id === "council") return "center";
+  const object = OFFICE_OBJECTS.find((candidate) => candidate.id === id);
+  if (object === undefined) return "right";
+  const rect = rectFor(sceneryFor(style), id, object.rect);
+  return rect.x + rect.w / 2 < ROOM_WIDTH / 2 ? "right" : "left";
 }
 
 interface GameShellProps {
@@ -521,42 +537,42 @@ export function GameShell({
     return () => clearInterval(interval);
   }, [gameId]);
 
+  const dateChip = (
+    <div className="shell-date-chip" aria-label="Current date">
+      <span className="shell-date-arrow" aria-hidden="true">‹</span>
+      <span><Era text={elapsedStepLabel} /></span>
+      <span className="shell-date-arrow" aria-hidden="true">›</span>
+    </div>
+  );
+  const coinChip = <a className="shell-coin-chip" href="/account" aria-label="Open coin wallet">{coins ?? "—"} coins</a>;
+  const leave = (
+    <div className="shell-top-bar-left">
+      <a className="shell-top-bar-exit" href="/">Leave</a>
+      <span className="shell-game-title">{gameTitle}</span>
+    </div>
+  );
+
   if (!geoJson) {
     return (
-      <>
+      <div className="game" data-culture={roomStyle}>
         <header className="shell-top-bar">
-          <a className="shell-top-bar-exit" href="/">
-            Exit
-          </a>
-          <div className="shell-top-bar-center">
-            <span className="shell-game-title">{gameTitle}</span>
-          </div>
-          <div className="shell-top-bar-right">
-            <div className="shell-date-chip" aria-label="Current date">
-              <span className="shell-date-arrow" aria-hidden="true">‹</span>
-              <span>{elapsedStepLabel}</span>
-              <span className="shell-date-arrow" aria-hidden="true">›</span>
-            </div>
-            <a className="shell-coin-chip" href="/account" aria-label="Open coin wallet">◉ {coins ?? "—"} coins</a>
-          </div>
+          {leave}
+          <span />
+          <div className="shell-top-bar-right">{dateChip}{coinChip}</div>
         </header>
         <div className="game-shell">
           <div className="game-shell-map">
-            <p style={{ padding: "2rem", color: "var(--text-muted)" }}>
-              No map data available for this scenario.
-            </p>
+            <p className="game-shell-empty quiet">No map data available for this scenario.</p>
           </div>
         </div>
-      </>
+      </div>
     );
   }
 
   return (
-    <>
+    <div className="game" data-culture={roomStyle}>
       <header className="shell-top-bar">
-        <a className="shell-top-bar-exit" href="/">
-          Exit
-        </a>
+        {leave}
         <div className="shell-place-switch" role="tablist" aria-label="Where you are">
           <button
             type="button" role="tab" id="place-map-tab" aria-controls="place-map"
@@ -572,21 +588,13 @@ export function GameShell({
             {/* The decision mark is not polish. With the Council behind a door,
                 a player standing on the map has nothing else telling them the
                 world is waiting on their word. */}
-            {controller.view.decision !== null && <span className="shell-place__mark" aria-label="Something needs your word">•</span>}
-            {unread > 0 && <span className="shell-place__badge">{unread}</span>}
+            {controller.view.decision !== null && (
+              <span className="shell-place__mark seal-dot"><span className="visually-hidden">Something needs your word</span></span>
+            )}
+            {unread > 0 && <span className="shell-place__badge badge">{unread}</span>}
           </button>
         </div>
-        <div className="shell-top-bar-center">
-          <span className="shell-game-title">{gameTitle}</span>
-        </div>
-        <div className="shell-top-bar-right">
-          <div className="shell-date-chip" aria-label="Current date">
-            <span className="shell-date-arrow" aria-hidden="true">‹</span>
-            <span>{elapsedStepLabel}</span>
-            <span className="shell-date-arrow" aria-hidden="true">›</span>
-          </div>
-          <a className="shell-coin-chip" href="/account" aria-label="Open coin wallet">◉ {coins ?? "—"} coins</a>
-        </div>
+        <div className="shell-top-bar-right">{dateChip}{coinChip}</div>
       </header>
       <div className="game-shell">
         <div
@@ -614,23 +622,41 @@ export function GameShell({
               />
             )}
           </MapViewport>
-          {selectedForce && <aside className="map-force-details" aria-label={`${selectedForce.name} details`}>
-            <button type="button" className="map-force-details-close" onClick={() => setSelectedForce(null)} aria-label="Close army details">×</button>
-            <strong>{selectedForce.name}</strong>
-            <span>Commander: {selectedForce.commanderLabel ?? "Unknown"}</span>
-            <span>Combat status: {selectedForce.statusLabel}</span>
-            <span>Army size: {selectedForce.strengthLabel}</span>
-            <span>Current region: {selectedForce.locationLabel}</span>
-            <span>Going to: {selectedForce.destinationLabel}</span>
-            <span>Progress: {selectedForce.progressBps === null ? "Stationary" : `${(selectedForce.progressBps / 100).toFixed(0)}% along route${selectedForce.movementState === "retreating" ? " (retreating)" : ""}`}</span>
-            <button type="button" className="map-force-flag-button" onClick={() => setFlagCatalogForce(selectedForce)}>Change standard</button>
-          </aside>}
-          {flagCatalogForce && <div className="map-flag-catalog-backdrop" role="presentation" onMouseDown={() => setFlagCatalogForce(null)}>
-            <section className="map-flag-catalog" role="dialog" aria-modal="true" aria-labelledby="flag-catalog-title" onMouseDown={(event) => event.stopPropagation()}>
-              <div className="map-flag-catalog-header"><div><p>Army standard</p><h2 id="flag-catalog-title">Choose a banner for {flagCatalogForce.name}</h2></div><button type="button" className="map-force-details-close" onClick={() => setFlagCatalogForce(null)} aria-label="Close flag catalog">×</button></div>
-              <div className="map-flag-options">{flagsForPolity(flagCatalogForce.ownerPolityId).map((flag) => <button key={flag.id} type="button" className="map-flag-option" onClick={() => selectForceFlag(flag.id)}><img src={flag.url} alt="" decoding="sync" /><span><strong>{flag.name}</strong><small>{flag.description}</small></span></button>)}</div>
-            </section>
-          </div>}
+          {selectedForce && (
+            <aside className="map-force-details on-papyrus" aria-label={`${selectedForce.name} details`}>
+              <div className="map-force-details__head">
+                <h2>{selectedForce.name}</h2>
+                <CloseButton what="army details" onClick={() => setSelectedForce(null)} />
+              </div>
+              <dl>
+                <dt>Commander</dt><dd>{selectedForce.commanderLabel ?? "Unknown"}</dd>
+                <dt>In the field</dt><dd>{selectedForce.statusLabel}</dd>
+                <dt>Strength</dt><dd>{selectedForce.strengthLabel}</dd>
+                <dt>At</dt><dd>{selectedForce.locationLabel}</dd>
+                <dt>Going to</dt><dd>{selectedForce.destinationLabel}</dd>
+                <dt>Progress</dt><dd>{selectedForce.progressBps === null ? "Stationary" : `${(selectedForce.progressBps / 100).toFixed(0)}% along the route${selectedForce.movementState === "retreating" ? ", retreating" : ""}`}</dd>
+              </dl>
+              <button type="button" className="btn btn--small" onClick={() => setFlagCatalogForce(selectedForce)}>Change standard</button>
+            </aside>
+          )}
+          {flagCatalogForce && (
+            <Sheet
+              label="the army standards"
+              title={`A standard for ${flagCatalogForce.name}`}
+              width="reading"
+              side="center"
+              onClose={() => setFlagCatalogForce(null)}
+            >
+              <div className="map-flag-options">
+                {flagsForPolity(flagCatalogForce.ownerPolityId).map((flag) => (
+                  <button key={flag.id} type="button" className="map-flag-option" onClick={() => selectForceFlag(flag.id)}>
+                    <img src={flag.url} alt="" decoding="sync" />
+                    <span><strong>{flag.name}</strong><small>{flag.description}</small></span>
+                  </button>
+                ))}
+              </div>
+            </Sheet>
+          )}
           <MapTooltip ref={tooltipRef} />
           <MapControls
             onZoomIn={handleZoomIn}
@@ -647,7 +673,7 @@ export function GameShell({
       </div>
 
       {characterPanel && (
-        <CharacterPanel {...characterPanel} open={surface === "self"} onClose={closeSurface} />
+        <CharacterPanel {...characterPanel} open={surface === "self"} onClose={closeSurface} side={sheetSideFor(roomStyle, "self")} />
       )}
       {playerCharacterId && (
         <ChatPanel
@@ -655,6 +681,7 @@ export function GameShell({
           playerCharacterId={playerCharacterId}
           open={surface === "people"}
           onClose={closeSurface}
+          side={sheetSideFor(roomStyle, "people")}
           openSessionId={openChatSessionId}
           onOpenSessionConsumed={() => setOpenChatSessionId(null)}
         />
@@ -662,16 +689,16 @@ export function GameShell({
       {surface === "council" && orderingCharacterId && (
         <CouncilPanel controller={controller} onClose={closeSurface} onOpenChronicle={() => openSurface("chronicle")} />
       )}
-      {surface === "chronicle" && <ChroniclePanel controller={controller} onClose={closeSurface} />}
+      {surface === "chronicle" && <ChroniclePanel controller={controller} onClose={closeSurface} side={sheetSideFor(roomStyle, "chronicle")} />}
       {(surface === "books" || surface === "purse") && (
-        <BooksPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} />
+        <BooksPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} side={sheetSideFor(roomStyle, surface)} />
       )}
       {surface === "forces" && (
-        <ForcesPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} />
+        <ForcesPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} side={sheetSideFor(roomStyle, "forces")} />
       )}
       {surface === "standing" && (
-        <StandingPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} allianceLabels={allianceLabels} />
+        <StandingPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} allianceLabels={allianceLabels} side={sheetSideFor(roomStyle, "standing")} />
       )}
-    </>
+    </div>
   );
 }

@@ -67,6 +67,6 @@ test.describe("the two places", () => {
     // And the door back to the desk for anything longer than a line.
     await bar.getByRole("button", { name: "At the desk…" }).click();
     await expect(placeTab(page, "The Office")).toHaveAttribute("aria-selected", "true");
-    await expect(page.locator('aside[aria-label="Council"]')).toBeVisible();
+    await expect(page.getByRole("dialog", { name: /council/i })).toBeVisible();
   });
 });

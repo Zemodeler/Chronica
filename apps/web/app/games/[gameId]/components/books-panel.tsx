@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Sheet, type SheetSide } from "../../../components/ui/sheet";
 
 /**
  * The treasury, laid out the way VISION §7 lays it out.
@@ -31,7 +32,7 @@ interface BooksView {
   readonly currencyName: string;
 }
 
-export function BooksPanel({ gameId, revision, onClose }: { readonly gameId: string; readonly revision: number; readonly onClose: () => void }) {
+export function BooksPanel({ gameId, revision, onClose, side }: { readonly gameId: string; readonly revision: number; readonly onClose: () => void; readonly side: SheetSide }) {
   const [books, setBooks] = useState<BooksView | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -48,21 +49,21 @@ export function BooksPanel({ gameId, revision, onClose }: { readonly gameId: str
   const money = (amount: number): string => amount.toLocaleString();
 
   return (
-    <aside className="sim-panel" aria-label="The treasury">
-      <header className="sim-panel__header">
-        <h2>{books?.theirGovernments === true ? "The Treasury" : "Your Means"}</h2>
-        <div className="sim-panel__header-actions">
-          <button type="button" onClick={onClose} aria-label="Close the treasury">×</button>
-        </div>
-      </header>
-
-      {failed && <p className="sim-panel__empty">There are no books you may read.</p>}
-      {books === null && !failed && <p className="sim-panel__empty">Sending for the quaestor…</p>}
+    <Sheet
+      label="the treasury"
+      title={books?.theirGovernments === true ? "The Treasury" : "Your Means"}
+      width="ledger"
+      side={side}
+      onClose={onClose}
+      className="books-panel"
+    >
+      {failed && <p className="quiet">There are no books you may read.</p>}
+      {books === null && !failed && <p className="quiet">Sending for the quaestor…</p>}
 
       {books !== null && <div className="books">
         <section className="books__accounts">
           {books.accounts.length === 0
-            ? <p className="sim-panel__empty">You have nothing anybody keeps an account of.</p>
+            ? <p className="quiet">You have nothing anybody keeps an account of.</p>
             : <ul>{books.accounts.map((account) => (
               <li key={account.id}><span>{account.label}</span><strong>{money(account.balance)}</strong></li>
             ))}</ul>}
@@ -70,23 +71,25 @@ export function BooksPanel({ gameId, revision, onClose }: { readonly gameId: str
 
         <section className="books__side">
           <h3>Every month, in <em>{books.currencyName}</em></h3>
-          <table className="books__table">
+          <table className="books__table ledger">
             <tbody>
+              <tr className="ledger__head"><th scope="rowgroup" colSpan={2}>Coming in</th></tr>
               {books.income.map((line) => (
                 <tr key={line.key} className="books__in">
                   <th scope="row" title={line.detail.map((entry) => `${entry.label}: ${entry.monthly}`).join("\n")}>{line.label}</th>
                   <td>{money(line.monthly)}</td>
                 </tr>
               ))}
-              <tr className="books__total"><th scope="row">Income</th><td>{money(books.totalIncome)}</td></tr>
+              <tr className="books__total ledger__total"><th scope="row">Income</th><td>{money(books.totalIncome)}</td></tr>
+              <tr className="ledger__head"><th scope="rowgroup" colSpan={2}>Going out</th></tr>
               {books.expenditure.map((line) => (
                 <tr key={line.key} className="books__out">
                   <th scope="row" title={line.detail.map((entry) => `${entry.label}: ${entry.monthly}`).join("\n")}>{line.label}</th>
                   <td>−{money(line.monthly)}</td>
                 </tr>
               ))}
-              <tr className="books__total"><th scope="row">Expenditure</th><td>−{money(books.totalExpenditure)}</td></tr>
-              <tr className={books.surplus >= 0 ? "books__surplus" : "books__deficit"}>
+              <tr className="books__total ledger__total"><th scope="row">Expenditure</th><td>−{money(books.totalExpenditure)}</td></tr>
+              <tr className={`ledger__foot ${books.surplus >= 0 ? "books__surplus" : "books__deficit is-short"}`}>
                 <th scope="row">{books.surplus >= 0 ? "Surplus" : "Shortfall"}</th>
                 <td>{books.surplus >= 0 ? "+" : "−"}{money(Math.abs(books.surplus))}</td>
               </tr>
@@ -96,10 +99,10 @@ export function BooksPanel({ gameId, revision, onClose }: { readonly gameId: str
             {money(books.arrears)} is owed and has not been paid. A surplus with arrears under it is not a surplus.
           </p>}
           {books.income.length === 0 && books.expenditure.length === 0 && (
-            <p className="sim-panel__empty">Nothing comes in and nothing goes out that you can see.</p>
+            <p className="quiet">Nothing comes in and nothing goes out that you can see.</p>
           )}
         </section>
       </div>}
-    </aside>
+    </Sheet>
   );
 }

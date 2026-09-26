@@ -17,7 +17,7 @@ test.describe("what the player is allowed to read", () => {
     await waitForTheOffice(page);
     await page.locator('[data-object="forces"]').click();
 
-    const panel = page.locator('aside[aria-label="Your forces"]');
+    const panel = page.getByRole("dialog", { name: /your forces/i });
     await expect(panel).toBeVisible();
     await expect(panel.locator(".muster__force").first()).toBeVisible({ timeout: 60_000 });
 
@@ -42,7 +42,7 @@ test.describe("what the player is allowed to read", () => {
     await waitForTheOffice(page);
     await page.locator('[data-object="standing"]').click();
 
-    const panel = page.locator('aside[aria-label="Your standing"]');
+    const panel = page.getByRole("dialog", { name: /your standing/i });
     await expect(panel).toBeVisible();
     // The route compiles on its first hit under `next dev`; wait for what it
     // answers rather than for the panel's frame.
@@ -71,7 +71,7 @@ test.describe("what the player is allowed to read", () => {
     await enterTheWorld(page, "consul");
     await waitForTheOffice(page);
     await page.locator('[data-object="books"]').click();
-    const panel = page.locator(".sim-panel", { hasText: /The Treasury|Your Means/ });
+    const panel = page.getByRole("dialog", { name: /treasury/i });
     await expect(panel).toBeVisible();
     await expect(panel.locator(".books__table")).toBeVisible({ timeout: 60_000 });
   });
@@ -88,7 +88,7 @@ test.describe("the badge that pulls a player into the room", () => {
     const before = (await badge.count()) === 0 ? 0 : Number(await badge.innerText());
 
     await page.locator('[data-object="chronicle"]').click();
-    const record = page.locator('aside[aria-label="Chronicle"], aside.chronicle-panel').first();
+    const record = page.getByRole("dialog", { name: /chronicle/i });
     await expect(record).toBeVisible({ timeout: 60_000 });
     await record.getByRole("button", { name: /close/i }).first().click();
 

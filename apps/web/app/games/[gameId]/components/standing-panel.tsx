@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Sheet, type SheetSide } from "../../../components/ui/sheet";
 
 /**
  * What a person holds: the offices, the powers, and the land.
@@ -44,21 +45,33 @@ interface Standing {
   readonly nothing: string | null;
 }
 
-/** "Propose and spend in fiscal matters, over the Rome treasury." */
-function sentence(power: PowerReading): string {
-  const list = power.powers.length <= 1
-    ? power.powers.join("")
-    : `${power.powers.slice(0, -1).join(", ")} and ${power.powers[power.powers.length - 1]}`;
-  const said = `${list} in ${power.domain} matters, over ${power.overLabel}`;
-  return `${said.charAt(0).toUpperCase()}${said.slice(1)}.`;
+const listed = (items: readonly string[]): string =>
+  items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+
+/**
+ * "Propose and spend in fiscal matters; appoint in judicial matters." One
+ * sentence per thing held power over, rather than eight lines that all end
+ * "over the Roman Republic".
+ */
+function sentencesByHolding(powers: readonly PowerReading[]): { over: string; said: string }[] {
+  const byOver = new Map<string, string[]>();
+  for (const power of powers) {
+    const clause = `${listed(power.powers)} in ${power.domain} matters`;
+    byOver.set(power.overLabel, [...(byOver.get(power.overLabel) ?? []), clause]);
+  }
+  return [...byOver].map(([over, clauses]) => {
+    const said = clauses.join("; ");
+    return { over, said: `${said.charAt(0).toUpperCase()}${said.slice(1)}.` };
+  });
 }
 
-export function StandingPanel({ gameId, revision, onClose, allianceLabels }: {
+export function StandingPanel({ gameId, revision, onClose, allianceLabels, side }: {
   readonly gameId: string;
   readonly revision: number;
   readonly onClose: () => void;
   /** Who stands with whom. Moved off the map, which is now only the map. */
   readonly allianceLabels: readonly string[];
+  readonly side: SheetSide;
 }) {
   const [standing, setStanding] = useState<Standing | null>(null);
   const [failed, setFailed] = useState(false);
@@ -73,22 +86,15 @@ export function StandingPanel({ gameId, revision, onClose, allianceLabels }: {
   }, [gameId, revision]);
 
   return (
-    <aside className="sim-panel" aria-label="Your standing">
-      <header className="sim-panel__header">
-        <h2>Your Standing</h2>
-        <div className="sim-panel__header-actions">
-          <button type="button" onClick={onClose} aria-label="Close your standing">×</button>
-        </div>
-      </header>
-
-      {failed && <p className="sim-panel__empty">There is no standing you may read.</p>}
-      {standing === null && !failed && <p className="sim-panel__empty">Sending for the record…</p>}
-      {standing?.nothing != null && <p className="sim-panel__empty">{standing.nothing}</p>}
+    <Sheet label="your standing" title="Your Standing" width="ledger" side={side} onClose={onClose} className="standing-panel">
+      {failed && <p className="quiet">There is no standing you may read.</p>}
+      {standing === null && !failed && <p className="quiet">Sending for the record…</p>}
+      {standing?.nothing != null && <p className="quiet">{standing.nothing}</p>}
 
       {standing !== null && standing.nothing === null && (
         <div className="standing">
           {standing.seats.length > 0 && (
-            <section className="standing__section">
+            <section className="standing__section sheet-section">
               <h3>What you hold</h3>
               <ul>
                 {standing.seats.map((seat) => (
@@ -103,18 +109,18 @@ export function StandingPanel({ gameId, revision, onClose, allianceLabels }: {
           )}
 
           {standing.powers.length > 0 && (
-            <section className="standing__section">
+            <section className="standing__section sheet-section">
               <h3>What it lets you do</h3>
               <ul className="standing__powers">
-                {standing.powers.map((power) => (
-                  <li key={`${power.domain}-${power.overLabel}`}>{sentence(power)}</li>
+                {sentencesByHolding(standing.powers).map(({ over, said }) => (
+                  <li key={over}><b>Over {over}.</b> {said}</li>
                 ))}
               </ul>
             </section>
           )}
 
           {allianceLabels.length > 0 && (
-            <section className="standing__section">
+            <section className="standing__section sheet-section">
               <h3>Who stands with whom</h3>
               <ul className="standing__ties">
                 {allianceLabels.map((label) => <li key={label}>{label}</li>)}
@@ -122,15 +128,15 @@ export function StandingPanel({ gameId, revision, onClose, allianceLabels }: {
             </section>
           )}
 
-          <section className="standing__section">
+          <section className="standing__section sheet-section">
             <h3>Your land</h3>
             {standing.holdings.length === 0
-              ? <p className="sim-panel__empty">No land that anyone has written down.</p>
+              ? <p className="quiet">No land that anyone has written down.</p>
               : <ul>
                 {standing.holdings.map((holding) => (
                   <li key={holding.id} className="standing__holding">
                     <strong>{holding.title}</strong>
-                    <span>{holding.territoryLabel} — {holding.controlLabel}</span>
+                    <span>{holding.territoryLabel}, {holding.controlLabel}</span>
                     <em>{holding.incomeLabel}</em>
                   </li>
                 ))}
@@ -138,6 +144,6 @@ export function StandingPanel({ gameId, revision, onClose, allianceLabels }: {
           </section>
         </div>
       )}
-    </aside>
+    </Sheet>
   );
 }
