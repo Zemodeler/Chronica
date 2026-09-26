@@ -121,7 +121,7 @@
   .ledger { width: 100%; border-collapse: collapse; font-variant-numeric: lining-nums tabular-nums; }
   .ledger th, .ledger td { padding: .4rem 0; border-bottom: 1px solid var(--rule); }
   .ledger th { color: var(--fg); font: 400 var(--step-0) var(--font-sans); text-align: left; }
-  .ledger td { text-align: right; white-space: nowrap; }
+  .ledger td { font: 400 var(--step-0) var(--font-sans); font-variant-numeric: lining-nums tabular-nums; text-align: right; white-space: nowrap; }
   .ledger .ledger__head th {
     padding-top: 1rem;
     color: var(--fg-muted);
