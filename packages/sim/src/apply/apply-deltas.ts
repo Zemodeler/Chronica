@@ -88,6 +88,7 @@ import { plotOdds, plotResolvesIn } from "../plots";
 import { watchReading } from "../watch";
 import type { ApplyContext, ApplyResult, AppliedDelta, AssumedDetail, AuthorityBreach, RejectedDelta } from "./context";
 import { fillGaps } from "./fill-gaps";
+import { diplomaticAnswererOf } from "../letters";
 
 /**
  * Applies a validated batch of deltas to the world.
@@ -2996,7 +2997,7 @@ function applyOne(
       for (const change of delta.ambitions ?? []) {
         if (change.change === "take_up") {
           if (ambitions.some((ambition) => ambition.status === "active" && ambition.label.toLowerCase() === change.label.toLowerCase())) continue;
-          ambitions = [...ambitions, { id: context.ids.next("ambition"), label: change.label, kind: change.kind, targetId: null, status: "active" as const }];
+          ambitions = [...ambitions, { id: context.ids.next("ambition"), label: change.label, kind: change.kind, targetId: null, status: "active" as const, steps: [] }];
           continue;
         }
         const wanted = change.label.toLowerCase();
@@ -3436,7 +3437,11 @@ function applyOne(
       // asking to be made tribune" is a subject petitioning his own
       // government, which is most of what politics is. It was refused as "a
       // power does not write to itself", and the petition was lost.
-      const recipientId = delta.toCharacterRef === null ? null : required(delta.toCharacterRef, "The named recipient");
+      // A letter to a power, naming nobody, goes to the one person who answers
+      // for that power's relations (`letters.ts`), not to all of its people.
+      const recipientId = delta.toCharacterRef === null
+        ? diplomaticAnswererOf(world, letterToId, context.offices, senderId)
+        : required(delta.toCharacterRef, "The named recipient");
       if (recipientId !== null && !world.characters.some((character) => character.id === recipientId)) {
         reject(`No character "${recipientId}" exists to receive this.${nearestTo(recipientId)}`, "reference");
       }

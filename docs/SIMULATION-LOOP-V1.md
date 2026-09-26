@@ -1205,6 +1205,84 @@ Measured by `scripts/mechanic-rate.mts` (a played game) and `scripts/eval-orders
 (two years of nothing on an eval chain's world); the eval corpus gained a toll, a dole, a school, a
 racket and a tithe.
 
+## 5e. People plan, not only react
+
+Built 2026-09-25 (plan §5 of `docs/plans/what-the-engine-cannot-do-yet.md`). Before this, the world
+acted through two routers, and neither knew what anybody was trying to do. An ambition was a label
+in a portrait. Whether Hieron moved on Messana over two years depended on the rotation landing on
+him in the right week, and on him remembering.
+
+**A plan is an ambition with steps** (`PlanStepSchema` in `characters/character.ts`). Each step has
+an act, a day, and an optional `waitsOn` in the watch's own language. A person lays one in the
+cognition answer's `plan` field, and laying it again under the same want keeps what is done. The
+answer's `stepsTaken` names the steps it carries out, by the ids printed in the portrait, and a step
+counts as taken only if the answer left a fact. The plan lives on the cognition answer and not in
+the delta union: the orchestrator prompt sits at its ceiling, and the world voice lays no plans.
+
+**The engine keeps it** (`sim/plans.ts`). A step wakes its owner once, when what it waits on
+happens, or at the later of halfway through its span and a week before its day. The router reserves
+up to two places for plan owners, inside the cast. An owner already answering news is told the step
+too, and the burst's clock stops on plan days. A step past its day is marked missed and written as a
+private fact its owner knows. It then wakes him once more, to carry on late, re-lay the plan, or give
+it up. Past the burst's causal depth, a round of plan owners alone is still asked, since a plan is
+not a reaction. Without that, a month let pass spent its three rounds in nine days and let steps
+pass unasked.
+
+**A month is not its first nine days.** The depth cap on reactions counted rounds for the whole
+burst, so a month let pass spent its three in the first nine days and walked the rest asking nobody.
+News after `newChainAfterDays` (ten) of quiet now starts a chain of its own: its own depth, its own
+look at the world elsewhere. It reacts only to news no round has yet seen, since the router does
+not remember what it answered, and old news re-read would be answered twice. A plan-only round is
+asked past a chain's depth. VISION §29's four rounds bound the order's own chain, and
+`BurstResult.chainRounds` and `planRounds` say how the rest were spent. The call guard bounds the
+whole. A round it cannot pay for is skipped inside a span the player asked for, and still ends an
+ordinary order.
+
+**Measured by hand.** `scripts/hand-played-burst.mts` plays real bursts with every model call
+answered from a file, so no provider is called. Each burst logs `[burst …] plans:` with plans laid,
+steps taken and missed, owners woken, and the share of acting answers that belonged to a plan.
+
+## 5f. What a turn stopped paying for
+
+Written 2026-09-26. Live, a turn was 20 to 29 calls. About two-thirds of its price was output
+tokens: roughly 39 percent NPC answers, 29 percent the orchestrator and 28 percent the Chronicle.
+Seven answers the model wrote, and the player paid for, changed nothing:
+
+- **The router re-asked people about their own acts.** It remembered nothing between rounds, and
+  it scored everyone on the whole round's news, so a man was "directly affected" by what he had
+  just done. `routeAttention` now takes `alreadyAnswered` and `authorOf`, and scores each person on
+  the news that is new to them. Facts from before the burst are news only if they arrive during it.
+- **A letter to a power went to all of its people.** Three Romans answered one letter, and two
+  were refused: thirty such refusals in one eval. A letter that names nobody is now addressed on
+  sending to the power's diplomatic authority (`letters.ts`), and waiting letters are addressed at
+  the top of the burst.
+- **Not cut: the historian's light threads.** Printing a light home thread in its facts' own
+  words, with no call, was tried and undone on 2026-09-26: it read as a ledger ("Grain is dearer in
+  Latium" under a headline of the same words), and the Chronicle is the part of the game that is
+  read. Putting a window's threads in one call was also undone. It saved almost no tokens, and a
+  request per matter is what stops one thread's secret appearing in another's passage.
+- **The orchestrator copied the narrator's numbers.** Harvest, a lost grain fleet, fire and a closed
+  road or pass are carried out by the engine (`engineWork`): a province shift and a public fact,
+  before orchestration, so the orchestrator never sees them. The narrator offers two stirrings a
+  month instead of three, and at most four.
+- **A private citizen was briefed as the government.** Any power-wide grant counted as governing,
+  so every senator did. `holdsPolityStanding` now needs more than the power to propose. A private
+  man sees his own debts, trade, standing plans and orders, and not the men his country could raise
+  or what its provinces could be taxed. The slice names the actor neutrally, not as "the ruler".
+- **A typed wait cost a rule call.** The web's wait button already sends no order text, and the
+  harness now waits the same way.
+- **Doing nothing was written out.** A person who does nothing is now left out of the answer.
+
+Played by hand on the same month as before, with the same harness and budget:
+
+| | Before | After |
+|---|---|---|
+| Calls | 15 | 13 |
+| People asked | 45 | 40 |
+| Prompt text sent, in characters | 187 747 | 147 510 |
+
+The plans and chains ran as before. Of the earlier month's 45 answers, 26 were "nothing" entries.
+
 ## 6. Conversations are part of the record
 
 A proposed `CharacterSocialEvent` used to wait for a turn to apply it. Turns were deleted, so nothing
@@ -1348,6 +1426,26 @@ what had been asked.
 ---
 
 ## 12. Verification
+
+**The base way to play the engine is with the model answered by hand.** `CHRONICA_AI_MODE=hand`
+(`packages/ai/src/adapters/hand.ts`) writes each prompt to a file named by its own hash, in
+`CHRONICA_HAND_DIR`, and waits for the answer beside it. The coin gate lets it through without a
+hold. Because the name is the prompt's hash, a game played again from the same world replays every
+answer already written, and only what is new waits. A person can answer, or Claude working as the
+model. Nothing is sent to any provider and no coin is spent.
+
+- `npm run play` plays bursts in memory on the Punic Wars opening. It stops, with exit code 3, at
+  the first prompt with no answer, so the run can be answered and started again.
+- `npm run play:turn -- <gameId> "<order>"` plays a turn against a save in the database. It goes
+  through the web's own `runBurstToCommit`, and waits for each answer.
+- `npm run eval:orders` answers the corpus by hand.
+- `--live` puts any of them on the provider, and the eval then also asks for `--yes`.
+- The web app runs the same way with `CHRONICA_AI_MODE=hand`.
+
+A live model is for measuring what a real model does, with a go-ahead for the spend. Hand-played
+answers show that the engine does the right thing with an answer. They are not evidence of how a
+live model behaves.
+
 
 `packages/sim` has **89 tests**, all driven by a scripted model port — never a live adapter, because
 a test that can disagree with itself run-to-run is worth nothing as a regression guard. Repo-wide:

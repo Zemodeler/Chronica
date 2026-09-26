@@ -17,6 +17,7 @@ import { RelationDimensionScoresSchema } from "../characters/character";
 import {
   BasisPointsSchema,
   EntityIdSchema,
+  MaybeIdSchema,
   MoneyAmountSchema,
   OfficeSeatVacancyCauseSchema,
   PoliticalProcedureSubjectKindSchema,
@@ -39,7 +40,7 @@ import { PositionTypeSchema } from "../world/map";
 import { DiplomaticAnswerSchema, DiplomaticMessageKindSchema } from "../world/diplomacy";
 import { OrderPartyRefSchema } from "../world/party-ref";
 import { StorylinePhaseSchema } from "../world/storylines";
-import { LocalIdSchema, RefSchema } from "./refs";
+import { LocalIdSchema, MaybeRefSchema, RefSchema } from "./refs";
 
 /**
  * Every way the model is allowed to change the world.
@@ -72,10 +73,14 @@ const MoneySchema = MoneyAmountSchema.meta({ id: "Money" });
 const DaysSchema = z.number().int().positive().max(36_600).meta({ id: "Days" });
 /** A name or a short label: a person, a place, a thing. */
 const NameSchema = z.string().trim().min(1).max(120).meta({ id: "Name" });
+/** A short label, as somebody would say it: 160 characters. Named, as `Name` is. */
+const TitleSchema = z.string().trim().min(1).max(160).meta({ id: "Title" });
+/** A sentence of it: 200 characters. */
+const LabelSchema = z.string().trim().min(1).max(200).meta({ id: "Label" });
 /** A change in basis points, either way: morale, stability, health. Named once, for the same reason. */
 const SignedBpsSchema = z.number().int().min(-10_000).max(10_000).meta({ id: "SignedBps" });
 
-const DayOffsetSchema = z.number().int().min(0).max(36_600);
+const DayOffsetSchema = z.number().int().min(0).max(36_600).meta({ id: "DayOffset" });
 
 /**
  * Who pays to keep a made thing going, and roughly how much. The engine sizes
@@ -87,7 +92,7 @@ const UpkeepRefSchema = z.object({ fromAccountRef: RefSchema, band: EffectBandSc
 const MoneyTransferSchema = z.object({
   op: z.literal("money_transfer"),
   fromAccountRef: RefSchema,
-  toAccountRef: RefSchema.nullable(),
+  toAccountRef: MaybeRefSchema,
   amount: MoneySchema,
   reason: ReasonSchema,
 }).strict();
@@ -96,7 +101,7 @@ const MoneyTransferSchema = z.object({
 const IncomeSourceUpsertSchema = z.object({
   op: z.literal("income_source_upsert"),
   localId: LocalIdSchema.optional(),
-  incomeSourceRef: RefSchema.nullable(),
+  incomeSourceRef: MaybeRefSchema,
   kind: z.enum(["land", "office", "trade", "pension", "tax"]),
   label: NameSchema,
   beneficiaryAccountRef: RefSchema,
@@ -108,7 +113,7 @@ const IncomeSourceUpsertSchema = z.object({
    * Null for anything raised at home -- a tax on your own citizens depends on
    * nobody abroad and naming yourself here says nothing.
    */
-  counterpartyPolityId: EntityIdSchema.nullable().default(null),
+  counterpartyPolityId: MaybeIdSchema.default(null),
   active: z.boolean().default(true),
   reason: ReasonSchema,
 }).strict();
@@ -117,11 +122,11 @@ const IncomeSourceUpsertSchema = z.object({
 const ObligationUpsertSchema = z.object({
   op: z.literal("obligation_upsert"),
   localId: LocalIdSchema.optional(),
-  obligationRef: RefSchema.nullable(),
+  obligationRef: MaybeRefSchema,
   kind: z.enum(["army_pay", "army_upkeep", "salary", "tribute", "pension", "debt_service"]),
   label: NameSchema,
   payerAccountRef: RefSchema,
-  recipientAccountRef: RefSchema.nullable(),
+  recipientAccountRef: MaybeRefSchema,
   amount: MoneySchema,
   cadenceDays: DaysSchema,
   priority: z.number().int().min(0).max(1000).default(500),
@@ -138,13 +143,13 @@ const ProjectCreateSchema = z.object({
   op: z.literal("project_create"),
   localId: LocalIdSchema,
   kind: z.string().trim().min(1).max(80),
-  label: z.string().trim().min(1).max(160),
+  label: TitleSchema,
   sponsorRef: OrderPartyRefSchema,
-  fundingAccountRef: RefSchema.nullable(),
+  fundingAccountRef: MaybeRefSchema,
   milestones: z
     .array(
       z.object({
-        label: z.string().trim().min(1).max(160),
+        label: TitleSchema,
         dueInDays: DayOffsetSchema,
         /**
          * What this stage costs when it falls due.
@@ -170,14 +175,14 @@ const ProjectCreateSchema = z.object({
   completionOutcome: z
     .object({
       kind: z.enum(["force", "structure", "income_source", "force_move", "agreement", "transfer", "none"]),
-      label: z.string().trim().min(1).max(160),
+      label: TitleSchema,
       /** Men for a force, garrison capacity for a structure, revenue per period for an income source, the sum handed over for a transfer. */
       amount: z.number().int().nonnegative().max(10_000_000).default(0),
-      provinceId: EntityIdSchema.nullable().default(null),
-      polityId: EntityIdSchema.nullable().default(null),
-      commanderCharacterRef: RefSchema.nullable().default(null),
+      provinceId: MaybeIdSchema.default(null),
+      polityId: MaybeIdSchema.default(null),
+      commanderCharacterRef: MaybeRefSchema.default(null),
       /** For "force_move": the army that arrives at "provinceId" when the journey ends. */
-      forceRef: RefSchema.nullable().default(null),
+      forceRef: MaybeRefSchema.default(null),
       /**
        * For "agreement": what the two powers end up standing in, and who they
        * are. An embassy that arrives, is heard, and produces nothing has not
@@ -186,8 +191,8 @@ const ProjectCreateSchema = z.object({
        * world exactly as it was.
        */
       agreementKind: PolityAgreementKindSchema.nullable().default(null),
-      withPolityId: EntityIdSchema.nullable().default(null),
-      beneficiaryAccountRef: RefSchema.nullable().default(null),
+      withPolityId: MaybeIdSchema.default(null),
+      beneficiaryAccountRef: MaybeRefSchema.default(null),
       cadenceDays: DaysSchema.nullable().default(null),
       /** For "structure": what kind of building, what it goes on doing, and who pays its keep. */
       structureKind: StructureKindSchema.optional(),
@@ -228,7 +233,7 @@ const ForceCreateSchema = z.object({
    * has undertaken to pay is outside the arrears rules entirely, which is the
    * right reading of a warband and the wrong reading of a legion.
    */
-  payObligationRef: RefSchema.nullable().default(null),
+  payObligationRef: MaybeRefSchema.default(null),
   /**
    * What kind of fighting men, or ships, they are: one of the scenario's troop
    * categories ("warship" for a vessel). Everything raised used to be infantry,
@@ -335,7 +340,7 @@ const ForceReinforceSchema = z.object({
    * Taking them out of that force is the whole of what "integrate them" means,
    * and leaving it standing at its old strength would double the men.
    */
-  fromForceRef: RefSchema.nullable().default(null),
+  fromForceRef: MaybeRefSchema.default(null),
   reason: ReasonSchema,
 }).strict();
 
@@ -390,7 +395,7 @@ const ForceModifySchema = z.object({
    * cartographer wrote it down. Cleared automatically when the force moves,
    * because a position belongs to the ground and the ground has changed.
    */
-  positionId: EntityIdSchema.nullable().optional(),
+  positionId: MaybeIdSchema.optional(),
   /**
    * What sort of place it is, where the world is naming one that has no record
    * yet. Read only when `positionId` matches nothing, ignored otherwise.
@@ -447,7 +452,7 @@ const ForceModifySchema = z.object({
    * men are Carthage's to pay now" and "they will be paid out of what they
    * take" were all sayable, all convincingly narrated, and all inert.
    */
-  payObligationRef: RefSchema.nullable().optional(),
+  payObligationRef: MaybeRefSchema.optional(),
   /**
    * How this army means to fight when it is next brought to battle, whoever
    * attacks. Null drops it.
@@ -482,7 +487,7 @@ const CharacterCreateSchema = z.object({
    * worked stops working.
    */
   polityId: RefSchema,
-  provinceId: EntityIdSchema.nullable(),
+  provinceId: MaybeIdSchema,
   age: z.number().int().min(0).max(120),
   /**
    * What they are made, if they are made anything: "Military Quaestor",
@@ -611,7 +616,7 @@ const SocialEventsSchema = z.object({
             z.object({
               subjectCharacterRef: RefSchema,
               targetCharacterRef: RefSchema,
-              label: z.string().trim().min(1).max(200),
+              label: LabelSchema,
               score: z.number().int().min(-20).max(20),
               /** How much of it fades a year. Zero is permanent, which is the point of the field. */
               decayPerYearBps: z.number().int().min(0).max(10_000).default(2_000),
@@ -635,7 +640,7 @@ const SocialEventsSchema = z.object({
               observerCharacterRef: RefSchema,
               /** One of the engine's trait ids. Anything else is a word it does not have. */
               traitId: z.string().trim().min(1).max(60),
-              note: z.string().trim().min(1).max(200),
+              note: LabelSchema,
             }).strict(),
           )
           .max(4)
@@ -662,11 +667,11 @@ const GenericEntityCreateSchema = z.object({
   op: z.literal("generic_entity_create"),
   localId: LocalIdSchema,
   kind: z.string().trim().min(1).max(80),
-  label: z.string().trim().min(1).max(160),
+  label: TitleSchema,
   ownerRef: OrderPartyRefSchema.nullable(),
   attributes: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).default({}),
   /** Where it stands, if anywhere: a church's seat, a school's town. */
-  provinceId: EntityIdSchema.nullable().optional(),
+  provinceId: MaybeIdSchema.optional(),
   /** What it goes on doing, every month, while it is paid for (see `world/standing-effects.ts`). */
   effects: z.array(StandingEffectSchema).max(6).optional(),
   upkeep: UpkeepRefSchema.nullable().optional(),
@@ -683,7 +688,7 @@ const GenericEntityCreateSchema = z.object({
 const GenericEntityUpdateSchema = z.object({
   op: z.literal("generic_entity_update"),
   entityRef: RefSchema,
-  label: z.string().trim().min(1).max(160).optional(),
+  label: TitleSchema.optional(),
   /** Merged into what is already there. A null value removes that attribute. */
   attributes: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).default({}),
   /** Repealed, dissolved, wound up. The record stays; it simply no longer applies. */
@@ -697,7 +702,7 @@ const GenericEntityUpdateSchema = z.object({
 const AuthorityGrantUpsertSchema = z.object({
   op: z.literal("authority_grant_upsert"),
   localId: LocalIdSchema.optional(),
-  grantRef: RefSchema.nullable(),
+  grantRef: MaybeRefSchema,
   holder: OrderPartyRefSchema,
   source: AuthoritySourceSchema,
   domain: AuthorityDomainSchema,
@@ -734,10 +739,10 @@ const PolityOutlookSetSchema = z.object({
   polityId: RefSchema,
   primaryObjective: z.string().trim().min(1).max(240),
   concerns: z
-    .array(z.object({ label: z.string().trim().min(1).max(160), level: z.enum(["low", "medium", "high"]) }).strict())
+    .array(z.object({ label: TitleSchema, level: z.enum(["low", "medium", "high"]) }).strict())
     .max(6)
     .default([]),
-  intentions: z.array(z.string().trim().min(1).max(200)).max(6).default([]),
+  intentions: z.array(LabelSchema).max(6).default([]),
   riskTolerance: z.number().int().min(0).max(100),
   reason: ReasonSchema,
 }).strict();
@@ -757,7 +762,7 @@ const LegitimacyShiftSchema = z.object({
   legitimacyBpsDelta: SignedBpsSchema,
   /** Only meaningful for a polity: how far the institutions themselves are still trusted. */
   institutionalConfidenceBpsDelta: SignedBpsSchema.optional(),
-  causeLabel: z.string().trim().min(1).max(160),
+  causeLabel: TitleSchema,
   reason: ReasonSchema,
 }).strict();
 
@@ -828,11 +833,11 @@ const PoliticalProcedureOpenSchema = z.object({
   op: z.literal("political_procedure_open"),
   localId: LocalIdSchema,
   type: PoliticalProcedureTypeSchema,
-  institutionRef: RefSchema.nullable(),
+  institutionRef: MaybeRefSchema,
   sponsorCharacterRef: RefSchema,
   subjectKind: PoliticalProcedureSubjectKindSchema,
-  subjectRef: RefSchema.nullable(),
-  label: z.string().trim().min(1).max(200),
+  subjectRef: MaybeRefSchema,
+  label: LabelSchema,
   resolutionMechanism: PoliticalResolutionMechanismSchema,
   deadlineInDays: DayOffsetSchema.nullable().default(null),
   visibility: VisibilitySchema.default("polity"),
@@ -858,7 +863,7 @@ const PoliticalSupportSetSchema = z.object({
   position: SupportPositionChoiceSchema,
   influenceWeight: z.number().int().min(0).max(10_000),
   reasonKind: SupportReasonKindSchema,
-  reasonLabel: z.string().trim().min(1).max(200),
+  reasonLabel: LabelSchema,
   visibility: VisibilitySchema.default("polity"),
   reason: ReasonSchema,
 }).strict();
@@ -896,7 +901,7 @@ const HoldingCreateSchema = z.object({
   /** How much land, and how good: a smallholding, a proper estate, a great one. */
   band: EffectBandSchema.default("slight"),
   /** Who pays for it. Null for a grant of public land, which is the government's act. */
-  priceFromAccountRef: RefSchema.nullable(),
+  priceFromAccountRef: MaybeRefSchema,
   reason: ReasonSchema,
 }).strict();
 
@@ -910,7 +915,7 @@ const HoldingImproveSchema = z.object({
   holdingRef: RefSchema,
   band: EffectBandSchema.default("slight"),
   /** What is being done to the land, in words: "drain the lower fields and plant olives". */
-  works: z.string().trim().min(1).max(200),
+  works: LabelSchema,
   paidFromAccountRef: RefSchema,
   reason: ReasonSchema,
 }).strict();
@@ -944,7 +949,7 @@ const TradeVentureCloseSchema = z.object({
 const HoldingTransferSchema = z.object({
   op: z.literal("holding_transfer"),
   holdingRef: RefSchema,
-  toCharacterRef: RefSchema.nullable(),
+  toCharacterRef: MaybeRefSchema,
   physicalControlBpsDelta: SignedBpsSchema.optional(),
   reason: ReasonSchema,
 }).strict();
@@ -963,7 +968,7 @@ const LoanOpenSchema = z.object({
   localId: LocalIdSchema,
   lenderKind: z.enum(["character", "polity", "foreign"]),
   /** Omitted only for "foreign" money, which comes from outside the modelled world. */
-  lenderRef: RefSchema.nullable(),
+  lenderRef: MaybeRefSchema,
   borrowerAccountRef: RefSchema,
   principal: MoneySchema,
   /** Interest per servicing period, in basis points of the principal. */
@@ -971,7 +976,7 @@ const LoanOpenSchema = z.object({
   cadenceDays: DaysSchema,
   /** What was agreed, in words. Often the politically expensive part. */
   terms: z.string().trim().min(1).max(300),
-  collateralHoldingRef: RefSchema.nullable().default(null),
+  collateralHoldingRef: MaybeRefSchema.default(null),
   reason: ReasonSchema,
 }).strict();
 
@@ -1004,9 +1009,9 @@ const BeliefSetSchema = z.object({
   claim: z.string().trim().min(1).max(400),
   kind: z.enum(["fact", "rumour", "suspicion", "secret"]),
   confidence: z.number().int().min(0).max(100),
-  subjectRef: RefSchema.nullable().default(null),
+  subjectRef: MaybeRefSchema.default(null),
   /** Who they heard it from, where anybody did. */
-  sourceCharacterRef: RefSchema.nullable().default(null),
+  sourceCharacterRef: MaybeRefSchema.default(null),
   visibility: VisibilitySchema.default("private"),
   reason: ReasonSchema,
 }).strict();
@@ -1061,10 +1066,10 @@ const StorylineOpenSchema = z.object({
   localId: LocalIdSchema,
   /** The handle shown under THE WORLD STIRS, when this answers a seed. Null when the world opened it on its own account. */
   seedKey: z.string().trim().min(1).max(80).nullable().default(null),
-  title: z.string().trim().min(1).max(160),
+  title: TitleSchema,
   /** The people in it. A plague has none yet, and its province is enough. */
   participantRefs: z.array(RefSchema).max(16).default([]),
-  provinceId: EntityIdSchema.nullable().default(null),
+  provinceId: MaybeIdSchema.default(null),
   phase: StorylinePhaseSchema.exclude(["closed"]).default("brewing"),
   stakes: z.string().trim().min(1).max(320),
   nextDevelopment: z.string().trim().min(1).max(320),
@@ -1120,9 +1125,9 @@ const OfficeSeatSetSchema = z.object({
   officeLabel: NameSchema.nullable().optional(),
 
   /** The seat, when an existing one is meant. Null takes the first free seat, or opens one. */
-  seatId: EntityIdSchema.nullable().default(null),
+  seatId: MaybeIdSchema.default(null),
   /** Who holds it now. Null empties it. */
-  holderCharacterRef: RefSchema.nullable().default(null),
+  holderCharacterRef: MaybeRefSchema.default(null),
   /** Why it fell vacant, when it did. */
   cause: OfficeSeatVacancyCauseSchema.default("none"),
   /** How long they hold it, in days. Null for a term that ends when somebody ends it. */
@@ -1154,11 +1159,11 @@ const SettlementControlSetSchema = z.object({
    * other; left null, an unknown city is still refused, because a city with no
    * ground under it is a spelling mistake rather than a place.
    */
-  inProvinceId: EntityIdSchema.nullable().optional(),
+  inProvinceId: MaybeIdSchema.optional(),
   /** What it is called, for a city being put on the record. Falls back to the id read as words. */
   name: NameSchema.nullable().optional(),
   /** Who holds it now. Null for a city that answers to nobody -- sacked, abandoned, or its own. */
-  toPolityRef: RefSchema.nullable(),
+  toPolityRef: MaybeRefSchema,
   /** Whether the taking was a storm rather than a surrender. A stormed city is plundered. */
   sacked: z.boolean().default(false),
   reason: ReasonSchema,
@@ -1194,10 +1199,10 @@ const PolityCreateSchema = z.object({
   localId: LocalIdSchema,
   name: NameSchema,
   /** The power it is breaking from, when it is breaking from one. Null for a power that was always there. */
-  breaksFromPolityId: RefSchema.nullable().default(null),
+  breaksFromPolityId: MaybeRefSchema.default(null),
   /** What it holds at birth. Each must be controlled by `breaksFromPolityId` and connected to the rest. */
   provinceIds: z.array(EntityIdSchema).min(1).max(12),
-  capitalSettlementId: EntityIdSchema.nullable().default(null),
+  capitalSettlementId: MaybeIdSchema.default(null),
   /** Why it exists, in the record's words. */
   reason: ReasonSchema,
 }).strict();
@@ -1228,7 +1233,7 @@ const CharacterPressureSetSchema = z.object({
   action: z.enum(["create", "refresh", "resolve"]),
   kind: CharacterPressureKindSchema,
   intensity: z.number().int().min(0).max(100).default(50),
-  label: z.string().trim().min(1).max(200),
+  label: LabelSchema,
   reviewInDays: z.number().int().positive().max(365).default(30),
   expiresInDays: z.number().int().positive().max(3_660).nullable().default(null),
   visibility: VisibilitySchema.default("private"),
@@ -1258,12 +1263,12 @@ const CharacterStateSetSchema = z.object({
    * the engine rolls how well he does.
    */
   healthDeltaBps: SignedBpsSchema.default(0),
-  physicianRef: RefSchema.nullable().optional(),
+  physicianRef: MaybeRefSchema.optional(),
   /** Status tags to set and to lift -- "incapacitated", "captured", "wounded". */
   addStatuses: z.array(z.string().trim().min(1).max(40)).max(6).default([]),
   removeStatuses: z.array(z.string().trim().min(1).max(40)).max(6).default([]),
   /** Who they now mean to leave it all to. Null leaves the named heir alone. */
-  heirRef: RefSchema.nullable().default(null),
+  heirRef: MaybeRefSchema.default(null),
   /**
    * Where they are now, when they have gone somewhere.
    *
@@ -1273,7 +1278,7 @@ const CharacterStateSetSchema = z.object({
    * showed him at home. A journey that takes real time is a project whose end
    * sets this; a short one is set directly.
    */
-  moveToProvinceId: EntityIdSchema.nullable().optional(),
+  moveToProvinceId: MaybeIdSchema.optional(),
   /** What they believe now, by name: a conversion, or a faith they have just founded. */
   faith: NameSchema.optional(),
   /**
@@ -1312,7 +1317,7 @@ const CharacterStateSetSchema = z.object({
   /** What they now want, or have got, or have given up on. "abandon" and "fulfil" name an ambition they already hold. */
   ambitions: z
     .array(z.object({
-      label: z.string().trim().min(1).max(200),
+      label: LabelSchema,
       kind: z.enum(["office", "wealth", "revenge", "peace", "dynasty", "restoration", "other"]).default("other"),
       change: z.enum(["take_up", "fulfil", "abandon"]).default("take_up"),
     }).strict())
@@ -1357,16 +1362,16 @@ const ServiceContractOpenSchema = z.object({
   op: z.literal("service_contract_open"),
   localId: LocalIdSchema,
   role: z.enum(["mercenary", "assassin", "envoy", "engineer", "physician", "tax_farmer", "gladiator", "retainer"]),
-  label: z.string().trim().min(1).max(160),
+  label: TitleSchema,
   employerAccountRef: RefSchema,
   employeeRef: RefSchema,
   advance: MoneySchema.default(0),
   monthlyPay: MoneySchema.default(0),
   termDays: DayOffsetSchema.nullable().default(null),
   duties: z.string().trim().min(1).max(400),
-  forceRef: RefSchema.nullable().default(null),
-  provinceId: EntityIdSchema.nullable().default(null),
-  counterpartPolityId: RefSchema.nullable().default(null),
+  forceRef: MaybeRefSchema.default(null),
+  provinceId: MaybeIdSchema.default(null),
+  counterpartPolityId: MaybeRefSchema.default(null),
   reason: ReasonSchema,
 }).strict();
 
@@ -1390,7 +1395,7 @@ const LegalStatusSetSchema = z.object({
   op: z.literal("legal_status_set"),
   characterRef: RefSchema,
   status: z.enum(["free", "freed", "enslaved"]),
-  ownerRef: RefSchema.nullable().default(null),
+  ownerRef: MaybeRefSchema.default(null),
   peculium: z.boolean().optional(),
   reason: ReasonSchema,
 }).strict();
@@ -1417,7 +1422,7 @@ const CharacterDeathSchema = z.object({
   characterRef: RefSchema,
   manner: z.enum(["execution", "duel", "suicide"]),
   /** Who ordered it, or who fought him. Null only for a suicide. */
-  byCharacterRef: RefSchema.nullable().default(null),
+  byCharacterRef: MaybeRefSchema.default(null),
   reason: ReasonSchema,
 }).strict();
 
@@ -1455,7 +1460,7 @@ const ForceRaidSchema = z.object({
   forceRef: RefSchema,
   provinceId: EntityIdSchema,
   /** Where the loot is sent. Null keeps it with the army, or its power's treasury. */
-  toAccountRef: RefSchema.nullable().default(null),
+  toAccountRef: MaybeRefSchema.default(null),
   reason: ReasonSchema,
 }).strict();
 
@@ -1482,14 +1487,14 @@ const DiplomaticMessageSendSchema = z.object({
   fromCharacterRef: RefSchema,
   toPolityId: RefSchema,
   /** A named recipient where there is one; null addresses the power at large. */
-  toCharacterRef: RefSchema.nullable().default(null),
+  toCharacterRef: MaybeRefSchema.default(null),
   subject: z.string().trim().min(1).max(240),
   /** What is actually being proposed, demanded or asked. */
   terms: z.string().trim().min(1).max(1_200),
   /** How long the sender is willing to wait. Null when they set no term. */
   replyWithinDays: z.number().int().positive().max(3_660).nullable().default(null),
   /** Set when this is itself the answer to an earlier letter. */
-  inReplyToRef: RefSchema.nullable().default(null),
+  inReplyToRef: MaybeRefSchema.default(null),
   visibility: VisibilitySchema.default("polity"),
   reason: ReasonSchema,
 }).strict();
@@ -1546,7 +1551,7 @@ const AgreementOpenSchema = z.object({
   /** A truce with a term ends by itself. Null runs until somebody ends it. */
   forDays: DaysSchema.nullable().default(null),
   /** The letter that produced it, where one did. */
-  sourceMessageRef: RefSchema.nullable().default(null),
+  sourceMessageRef: MaybeRefSchema.default(null),
   visibility: VisibilitySchema.default("public"),
   reason: ReasonSchema,
 }).strict();
@@ -1580,9 +1585,9 @@ const CovertPlotOpenSchema = z.object({
   /** Who wants it done -- usually, but not always, the person whose order this is. */
   sponsorCharacterRef: RefSchema,
   /** Whose hand it is, where one is named. A hired man may be created in this same answer. */
-  agentCharacterRef: RefSchema.nullable().default(null),
+  agentCharacterRef: MaybeRefSchema.default(null),
   /** Where the money comes from. Null for a thing done for love, hatred or duty. */
-  fundingAccountRef: RefSchema.nullable().default(null),
+  fundingAccountRef: MaybeRefSchema.default(null),
   /**
    * What is paid for it. Money buys a better hand and a quieter one -- up to a
    * point, past which more of it only means more people who know.
@@ -1622,21 +1627,21 @@ const ContingencyArmSchema = z.object({
   op: z.literal("contingency_arm"),
   localId: LocalIdSchema,
   /** What it is called. "The Burning City." */
-  label: z.string().trim().min(1).max(200),
+  label: LabelSchema,
   ownerCharacterRef: RefSchema,
   /** When it springs, in the same language a watch is written in. */
   trigger: WatchPredicateSchema,
   effect: ContingencyEffectSchema,
   provinceId: EntityIdSchema,
   /** The exact ground, where the plan is about ground: the ward, the pass, the ford. */
-  positionId: EntityIdSchema.nullable().default(null),
+  positionId: MaybeIdSchema.default(null),
   /** Whom it is laid for. Null catches whoever walks into it, its owner's men included. */
-  againstPolityId: EntityIdSchema.nullable().default(null),
-  fundingAccountRef: RefSchema.nullable().default(null),
+  againstPolityId: MaybeIdSchema.default(null),
+  fundingAccountRef: MaybeRefSchema.default(null),
   /** Pitch, timber and men paid to wait. The whole of what decides how badly it hurts. */
   spend: MoneySchema.default(0),
   /** Who falls on them once it springs, where anybody does. An ordinary battle follows. */
-  ambushForceRef: RefSchema.nullable().default(null),
+  ambushForceRef: MaybeRefSchema.default(null),
   /** How long it keeps. Null for a plan that waits as long as it must. */
   expiresInDays: DayOffsetSchema.nullable().default(null),
   reason: ReasonSchema,

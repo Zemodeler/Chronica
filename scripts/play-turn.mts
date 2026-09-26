@@ -7,6 +7,10 @@
 // thing it leaves out is the conversation somebody may open with the ruler
 // afterwards, which is the web's business and runs after the timing line.
 //
+// The model is answered by hand from eval-out/hand-turns unless --live is
+// given (scripts/lib/model-mode.mts): the turn waits for each answer file, and
+// nothing is spent. With --live it is the provider, and coins, as in the web.
+//
 // Usage, from the repo root:
 //   npx tsx --env-file=.env.local scripts/play-turn.mts --new "<title>" [--as <characterId>] [--user <email>]
 //   npx tsx --env-file=.env.local scripts/play-turn.mts <gameId> "<order>"
@@ -26,8 +30,10 @@ import {
 } from "@chronica/db";
 import { and, eq } from "drizzle-orm";
 import { prepareBurst, runBurstToCommit } from "../apps/web/lib/burst-runner";
+import { chooseModel } from "./lib/model-mode.mts";
 
 const args = process.argv.slice(2);
+chooseModel(args, "eval-out/hand-turns");
 const flag = (name: string): string | undefined => {
   const at = args.indexOf(name);
   return at < 0 ? undefined : args[at + 1];

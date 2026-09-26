@@ -21,3 +21,4 @@ export * from "./births";
 export * from "./delegation";
 export * from "./order-outcome";
 export * from "./elections";
+export * from "./plans";

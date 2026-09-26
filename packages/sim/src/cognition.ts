@@ -24,6 +24,7 @@ import { dropMalformedEntries, extractJson } from "./json";
 import { kindsIn, readLeniently } from "./bare-refs";
 import type { SimModelPort } from "./ports";
 import { ruleInWords } from "./mechanics/mechanic-words";
+import { describePlans } from "./plans";
 
 /**
  * NPC cognition (VISION §28).
@@ -112,6 +113,12 @@ export function foldStrayProposalKeys(value: unknown): unknown {
       ? { ...(actor.proposal as Record<string, unknown>) }
       : {};
     drain(actor, proposal);
+    // A plan is the person's, not an act of the proposal, and the proposal is
+    // strict: written one level down it would cost the whole answer.
+    for (const key of ["plan", "stepsTaken"] as const) {
+      if (proposal[key] !== undefined && actor[key] === undefined) actor[key] = proposal[key];
+      delete proposal[key];
+    }
     // An op written as a key of the proposal is still that op. Put it back in
     // the deltas where it belongs rather than losing the whole answer to it.
     for (const [op, shape] of Object.entries(MISPLACED_OPS)) {
@@ -165,8 +172,9 @@ people in this batch may hold contradictory beliefs, and both are right to act o
 their own.
 
 For each person, decide what they actually do now — if anything. Most people, most
-of the time, do nothing of consequence, and answering "nothing" is a real answer:
-return them with an empty "deltas" list and say why in "reasoning".
+of the time, do nothing of consequence, and "nothing" is a real answer: leave them
+out of "actors" altogether. An entry saying nobody did anything costs as much to
+write as one that did something, and changes nothing.
 
 That is the answer for someone reacting to news. It is rarely the answer for
 someone whose section says nobody has brought them news: they are in the batch
@@ -174,7 +182,13 @@ because they have a war to press, a promise to keep, a city to hold or a rival t
 manage, and a month of their own is not nothing. Move their business on by a step
 they could actually take from where they stand, and record it as a fact so the
 world can see it happened. They are not waiting for the ruler; they do not know
-what the ruler is doing.
+what the ruler is doing. Business that will take months is a plan: give it in
+"plan" as up to four steps in order, each something they would do, with the days
+by which it should be done and, if it must wait for something, "when". A step
+they carry out in this answer goes in "stepsTaken" by its id; one shown as
+missed means the plan has fallen behind, and they carry on late, lay it again,
+or give it up. What their government means to do is somebody's to carry out,
+and if it is theirs -- their office, their army -- it is their plan.
 
 Someone may act within their authority, beyond it, or against it. A general may
 march without orders; an official may quietly divert funds; a senator may begin
@@ -398,9 +412,6 @@ function describeMind(character: Character): string[] {
     lines.push("They see no reason to spare a man's household or the people who depend on him, if that is where he is reachable.");
   }
 
-  const ambitions = character.ambitions.filter((ambition) => ambition.status === "active").slice(0, ACTOR_CAPS.ambitions);
-  if (ambitions.length > 0) lines.push("They want:", ...ambitions.map((ambition) => `  - ${ambition.label}`));
-
   return lines;
 }
 
@@ -514,6 +525,9 @@ export function renderCharacterPortrait(
     lines.push(`Office: ${character.officeId ?? "none"}. Polity: ${character.polityId ?? "none"}. Standing: ${standingInWords(character.prestigeBps)}.`);
     lines.push(...describeTraits(character));
     lines.push(...describeMind(character));
+    // What they want, with the plan for it where they have one. Its own
+    // block because a plan needs the calendar, and a mind does not.
+    lines.push(...describePlans(character, world, clock, ACTOR_CAPS.ambitions));
     lines.push(...describeMeans(character, world));
 
     // What they can actually speak for. A chieftain of a people who never had a

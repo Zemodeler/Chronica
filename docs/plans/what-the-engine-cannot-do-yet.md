@@ -239,6 +239,44 @@ least three powers each carrying a plan through three or more steps. The Chronic
 people's threads, not the player's alone. The share of NPC acts that belong to a plan is logged per
 burst.
 
+**Built (2026-09-25).** `packages/sim/src/plans.ts`, with the router and the burst wired to it.
+
+- An ambition has up to eight steps (`PlanStepSchema`): an act, a day, and an optional `waitsOn`
+  watch predicate. A person lays or re-lays a plan in the cognition answer's `plan` field and names
+  the steps an answer carries out in `stepsTaken`. A step counts as taken only when that answer
+  left a fact on the record.
+- **Deviation:** the plan is on the cognition answer, not on `character_state_set.ambitions`. The
+  orchestrator prompt was 4 characters under its 63 000 ceiling at the time, and the world voice has
+  no plans of its own. The cognition prompt grew by about 1 300 characters, and the schema naming
+  below then took back more than that. Fulfilling and abandoning still go
+  through `character_state_set`.
+- A step wakes its owner once: when what it waits on happens, or otherwise at the later of halfway
+  through its span and a week before its day. A step past its day is marked missed, written as a
+  private fact its owner knows, and wakes him once more to carry on late, re-lay the plan, or give it
+  up. No new pressure kind was added, because that enum is in the orchestrator's schema too.
+- The router reserves up to two places for plan owners, inside the cast rather than on top of it. A
+  plan owner who is already answering news is told the step as well. The burst's clock stops on plan
+  days.
+- **Found by playing:** a burst spent its three rounds of reactions in its first nine days, then
+  walked the rest of the month asking nobody, so steps passed their day unasked. Past the causal
+  depth, a round of plan owners alone is now still asked, bounded by the call budget and by each
+  step waking once. For everyone else, news after ten quiet days now starts a new chain of
+  reactions (see VISION §29's amendment of 2026-09-25).
+- **Prompt headroom:** the orchestrator prompt was down to 61 084 characters by naming nine repeated
+  schemas once (`MaybeRef`, `MaybeId`, `Title`, `Label`, `Summary`, `Score`, `Visibility`, `Band`,
+  `DayOffset`). That leaves about 1 900 characters under the 63 000 ceiling for the next feature.
+- Governments (§5.4) carry plans through the person able to carry them out: the prompt tells an
+  office holder that his government's aim, if it is his to carry out, is his plan. There is no
+  separate government plan.
+- Logged per burst as `[burst …] plans: …` and returned as `BurstResult.plans`.
+- **Played by hand, with no provider:** `scripts/hand-played-burst.mts` runs real bursts, and every
+  model call is answered from a file. Two months on the Punic Wars opening took 24 calls. Seven
+  people laid plans, Hieron finished four steps, and a missed step was re-laid. Three plans were
+  re-laid on new information, and 29 of 30 acting answers belonged to a plan.
+- **Not yet met:** the two-year, three-powers criterion needs a live campaign. Two months by hand is
+  not that. `recordActiveIntents` still gives each person one "watching events" intent that never
+  changes.
+
 ---
 
 ## Order of work

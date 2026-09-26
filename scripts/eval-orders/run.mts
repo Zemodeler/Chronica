@@ -6,8 +6,12 @@
 // the built-in Punic Wars opening, in memory, with no database, and writes a
 // report of what became of each.
 //
-// It spends real model calls. Usage:
-//   npx tsx scripts/eval-orders/run.mts --yes [--only <id,chain,...>] [--failed <report.md>] [--parallel <n>] [--out <dir>]
+// By default the model is answered by hand, from files in eval-out/hand-eval
+// (see scripts/lib/model-mode.mts): nothing is spent, and the run waits for
+// each answer. With --live it spends real model calls, and asks for --yes.
+// Usage:
+//   npx tsx scripts/eval-orders/run.mts [--only <id,chain,...>] [--failed <report.md>] [--parallel <n>] [--out <dir>]
+//   npx tsx scripts/eval-orders/run.mts --live --yes [...]
 //
 // --failed re-runs only the chains that had an engine failure in an earlier
 // report: a chain is re-run whole, because each order in it is given the world
@@ -22,6 +26,7 @@ import type { Fact } from "@chronica/shared";
 import { definition, opening } from "./opening";
 import { DEFAULT_BUDGET, createWindowWriter, outcomeOfOrder, runSimulationBurst, type AuditEntry, type OrderOutcome, type SimModelPort } from "@chronica/sim";
 import { CORPUS, type CorpusOrder } from "./corpus";
+import { chooseModel } from "../lib/model-mode.mts";
 
 const args = process.argv.slice(2);
 const flag = (name: string) => { const at = args.indexOf(name); return at < 0 ? undefined : args[at + 1]; };
@@ -51,7 +56,8 @@ if (orders.length === 0) {
   console.log("Nothing to run: no order matches.");
   process.exit(0);
 }
-if (!args.includes("--yes")) {
+const mode = chooseModel(args, "eval-out/hand-eval");
+if (mode === "live" && !args.includes("--yes")) {
   console.log(`This puts ${orders.length} order(s) to a real model: roughly ${orders.length * 6}-${orders.length * 12} calls. Re-run with --yes to spend them.`);
   process.exit(0);
 }

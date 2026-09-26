@@ -254,7 +254,7 @@ describe("rising while in office", () => {
       characters: state.characters.map((character) => (character.id === "quintus-ogulnius" ? { ...character, prestigeBps: 9_000 } : character.id === "manius-curius" ? { ...character, prestigeBps: 6_000 } : character)),
       material: {
         ...state.material,
-        officeSeats: state.material.officeSeats.map((seat) => (seat.id === "roman-consul:seat:1" ? { ...seat, vacancyCause: "term_expired" as const, termExpiresAtStep: 0 } : seat)),
+        officeSeats: state.material.officeSeats.map((seat) => (seat.id === "roman-consul:seat:1" ? { ...seat, holderCharacterId: null, status: "vacant" as const, vacancyCause: "term_expired" as const, termExpiresAtStep: 0 } : seat)),
       },
     };
     state = act("quintus-ogulnius", [{

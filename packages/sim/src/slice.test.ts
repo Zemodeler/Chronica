@@ -82,7 +82,10 @@ describe("what the player's government can see of the world", () => {
     // (FAITHS), and each person's belief beside their age. Faith was null on
     // every character, so a priest had nothing to serve and a conversion
     // founded a new religion whenever it spelled an old one differently.
-    expect(text.length).toBeLessThan(14_700);
+    //
+    // Moved 14.7k -> 15k for the second consul (v29), Gnaeus Cornelius
+    // Blasio, who is one of our own people with a purse and an estate.
+    expect(text.length).toBeLessThan(15_000);
   });
 });
 
@@ -356,6 +359,25 @@ describe("what the world is following, and what stirs", () => {
   });
 });
 
+/**
+ * The opening with one Roman who holds nothing: no seat, no office, no
+ * command, a purse of his own. The scenario's three Romans all hold senate
+ * seats, so every test below that asked for a private citizen found none and
+ * returned before checking anything -- and passed.
+ */
+function withCitizen(): WorldState {
+  // With its provinces' figures, as a game has them: without, THE COUNTRY is
+  // empty for everybody and nothing about who may read it can be seen.
+  const base = ensureProvinceMaterial(world(), 0);
+  const template = base.characters.find((character) => character.id === "quintus-ogulnius")!;
+  const purse = base.material.accounts.find((account) => account.id === template.personalAccountId)!;
+  return {
+    ...base,
+    characters: [...base.characters, { ...structuredClone(template), id: "lucius-privatus", name: "Lucius Privatus", officeId: null, relations: [], ambitions: [], personalAccountId: "lucius-privatus-purse" }],
+    material: { ...base.material, accounts: [...base.material.accounts, { ...structuredClone(purse), id: "lucius-privatus-purse", owner: { kind: "character" as const, id: "lucius-privatus" }, balance: 400 }] },
+  };
+}
+
 describe("who the world is told it is speaking for", () => {
   /** Somebody of the same polity holding no office and no command. */
   function privateCitizen(state: WorldState, polityId: string): string | null {
@@ -373,7 +395,7 @@ describe("who the world is told it is speaking for", () => {
     }));
 
   it("names the office a person holds, rather than handing over its id", () => {
-    const state = world();
+    const state = withCitizen();
     const seat = state.material.officeSeats.find((candidate) => candidate.status === "held" && candidate.holderCharacterId !== null);
     if (seat === undefined) return;
     const office = offices.find((candidate) => candidate.id === seat.officeId);
@@ -387,7 +409,7 @@ describe("who the world is told it is speaking for", () => {
   it("tells the world what the person it is speaking for is like", () => {
     // The world knew a minor Carthaginian admiral's temperament, drives and
     // fears, and knew of the person whose order it was answering only a name.
-    const state = world();
+    const state = withCitizen();
     const commander = state.material.forces[0]!.commanderCharacterId;
     const text = forCharacter(state, commander);
     expect(text).toContain(`## ${state.characters.find((c) => c.id === commander)!.name}`);
@@ -395,7 +417,7 @@ describe("who the world is told it is speaking for", () => {
   });
 
   it("tells it what they may do, and that people outside it may refuse", () => {
-    const state = world();
+    const state = withCitizen();
     const force = state.material.forces[0]!;
     const text = forCharacter(state, force.commanderCharacterId);
     expect(text).toContain(force.name);
@@ -403,7 +425,7 @@ describe("who the world is told it is speaking for", () => {
   });
 
   it("does not tell it a private citizen commands anything", () => {
-    const state = world();
+    const state = withCitizen();
     const citizenId = privateCitizen(state, "rome");
     if (citizenId === null) return;
 
@@ -421,6 +443,40 @@ describe("who the world is told it is speaking for", () => {
 });
 
 describe("what a person's station lets them read", () => {
+  it("has a private citizen to test with, so nothing below returns early", () => {
+    const state = withCitizen();
+    const seated = new Set(state.material.officeSeats.filter((seat) => seat.status === "held").map((seat) => seat.holderCharacterId));
+    expect(state.characters.some((character) => character.id === "lucius-privatus" && character.officeId === null && !seated.has(character.id))).toBe(true);
+  });
+
+  it("keeps the government's own figures from a private man and from a senator, and gives them to the consul", () => {
+    const state = withCitizen();
+    const text = (id: string) => renderWorldSlice(build(state, id));
+    const consul = state.material.officeSeats.find((seat) => seat.officeId === "roman-consul" && seat.status === "held")!.holderCharacterId!;
+    expect(text(consul)).toContain("men available to raise");
+    // A senator may put a question to the whole republic; that does not make
+    // him its government (holdsPolityStanding).
+    for (const id of ["lucius-privatus", "manius-curius"]) {
+      expect(text(id)).not.toContain("men available to raise");
+      expect(text(id)).not.toContain("taxable");
+    }
+  });
+
+  it("names the person it speaks for neutrally, not as the ruler", () => {
+    const state = withCitizen();
+    const text = renderWorldSlice(buildWorldSlice({
+      world: state, clock, offices, actorRef: { kind: "character", id: "lucius-privatus" }, actorPolityId: "rome", orderText: "Wait.",
+      facts: [{
+        id: "fact-known", time: { day: 0, minute: 0 }, atStep: 0, kind: "event", summary: "Rome hears of the Boii.", affectedEntities: [], resourceChanges: [],
+        authorityChange: undefined, visibility: "public", discovery: { state: "public", knowableAtInstant: null, discoveredBy: [] }, evidence: null,
+        eligibleReactionScopes: [], sourceEventId: null, sourceActionId: null, causalDepth: 0,
+      }],
+      dueEvents: [], pendingEvents: [],
+    }));
+    expect(text).toContain("RECENT HISTORY (only what is known to them)");
+    expect(text).not.toContain("known to this government");
+  });
+
   function privateCitizen(state: WorldState, polityId: string): string | null {
     const seated = new Set(state.material.officeSeats.filter((seat) => seat.status === "held").map((seat) => seat.holderCharacterId));
     const commanders = new Set(state.material.forces.flatMap((force) => [force.commanderCharacterId, force.controllerCharacterId]));
@@ -440,7 +496,7 @@ describe("what a person's station lets them read", () => {
   it("gives a private citizen materially less of the world than the man who governs it", () => {
     // The measurement this whole branch exists for: the two used to differ by
     // one line out of a hundred and forty-three.
-    const state = world();
+    const state = withCitizen();
     const consulId = seatedId(state);
     const citizenId = privateCitizen(state, "rome");
     if (consulId === null || citizenId === null) return;
@@ -493,7 +549,7 @@ describe("what a person's station lets them read", () => {
     // The invariant that stops false insubordination: narrow the readings,
     // never the roster. Take an id away and the orchestrator invents a
     // placeholder for it, the act is discarded, and it reads as overreach.
-    const state = world();
+    const state = withCitizen();
     const consulId = seatedId(state);
     const citizenId = privateCitizen(state, "rome");
     if (consulId === null || citizenId === null) return;
@@ -507,7 +563,7 @@ describe("what a person's station lets them read", () => {
   });
 
   it("shows a private citizen the question before the council, and not how the room is leaning", () => {
-    const state = world();
+    const state = withCitizen();
     const citizenId = privateCitizen(state, "rome");
     if (citizenId === null || state.material.politicalProcedures.length === 0) return;
     const slice = build(state, citizenId);
@@ -522,7 +578,7 @@ describe("what a person's station lets them read", () => {
     // Foreign aims and secret threads cannot be filtered away -- the
     // orchestrator is the world and must move Carthage coherently. They are
     // labelled instead.
-    const state = world();
+    const state = withCitizen();
     const citizenId = privateCitizen(state, "rome");
     if (citizenId === null) return;
     const text = renderWorldSlice(build(state, citizenId));

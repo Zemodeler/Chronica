@@ -38,7 +38,10 @@ describe("who you can get a hearing from", () => {
     // Constraint 2 of the branch: the player must never give an order and read
     // nothing back. This rule is first precisely so nothing else can shadow it.
     const state = world();
-    const [a, b] = state.characters;
+    // A Roman consul and a Carthaginian general: no office, kin or friendship
+    // between them that could open a door on its own.
+    const a = state.characters.find((character) => character.id === "gaius-genucius");
+    const b = state.characters.find((character) => character.id === "hanno-carthage");
     if (a === undefined || b === undefined) return;
     const stranger: WorldState = {
       ...state,

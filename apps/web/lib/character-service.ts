@@ -26,6 +26,7 @@ import {
   type CharacterKnowledgebase,
   type FamilyLinkKind,
   type ScenarioWealthRules,
+  type WorldState,
 } from "@chronica/shared";
 import { eq, and, isNull } from "drizzle-orm";
 import { schema } from "@chronica/db";
@@ -83,6 +84,8 @@ type ScenarioContext = Readonly<{
   regions: readonly { id: string; name: string }[];
   /** What a person of a given standing is worth here (slice 11). */
   wealth: ScenarioWealthRules | undefined;
+  /** Who is already in the world: the player may become one of them, and is never handed one by accident. */
+  people: readonly { id: string; label: string }[];
   currency: Readonly<{
     name: string;
     unitName: string;
@@ -99,6 +102,26 @@ function astronomicalYear(year: number, era: "BCE" | "CE" | undefined): number {
 export function ageAtScenarioStart(birthYearApprox: number | null, timelineStartYear: number | null): number | null {
   if (birthYearApprox === null || timelineStartYear === null) return null;
   return Math.max(0, timelineStartYear - birthYearApprox);
+}
+
+/**
+ * The people already in the world, named with their office and id.
+ *
+ * Asked for a consul by a player who called himself Andreus Maximus, the
+ * model gave him Gaius Genucius Clepsina, the consul the scenario already
+ * seats: the player became a second copy of a man the world was still
+ * running. Told who is here, the model can put a player who asked only for a
+ * station in that man's place (`becomesCharacterId`), and keeps a player who
+ * named himself from becoming anybody in it.
+ */
+function peopleInTheWorld(world: WorldState, offices: readonly { id: string; label: string }[]): { id: string; label: string }[] {
+  const labels = new Map(offices.map((office) => [office.id, office.label]));
+  return world.characters
+    .filter((character) => character.alive)
+    .map((character) => {
+      const office = character.officeId === null ? undefined : labels.get(character.officeId) ?? character.officeId;
+      return { id: character.id, label: office === undefined ? character.name : `${character.name} (${office})` };
+    });
 }
 
 async function getScenarioContext(db: ReturnType<typeof createDatabase>["db"], gameId: string): Promise<ScenarioContext> {
@@ -128,6 +151,7 @@ async function getScenarioContext(db: ReturnType<typeof createDatabase>["db"], g
     timelineStartYear,
     regions: world.success ? canvasRegions(row?.mapAssetId ?? null, world.data) : [],
     wealth: definition.success ? definition.data.wealth : undefined,
+    people: world.success ? peopleInTheWorld(world.data, definition.success ? definition.data.government.offices : []) : [],
     currency,
   };
 }
@@ -152,11 +176,15 @@ function buildDeclareSystemPrompt(context: ScenarioContext): string {
 The player will describe who they want to play as. You must interpret their intent and produce a character, then ask for confirmation.
 
 Rules:
-- If the player names a real historical figure: use them ONLY if they were already born and alive at the scenario opening (${start}). Never select, mention as the player character, or extend a historical person born after that date. If the requested or suggested figure does not yet exist, create an invented period-appropriate character instead and set origin to "invented".
-- Prefer a real person. When the player describes a role rather than a name — "a Roman senator", "a Carthaginian shipowner", "a soldier on the Sicilian frontier" — first look for somebody who actually held that station at the opening and is attested well enough to place and date. Use them, set origin to "historical", and say who they were in the confirmation. The player who asked for a merchant and got a merchant history records by name has a better game than the one who got a plausible stranger.
-- A real person is not automatically a famous one. A minor attested figure who fits the description beats a great name the player did not ask for: do not hand someone a consul because they asked for an officer.
-- Invent only where the description has no attested match, or where the player asked for somebody of their own. Then invent a culturally authentic character appropriate to the period and set origin to "invented". If their name is not historically accurate for the period, use it as a nickname and generate an accurate canonical name.
-- Be strict about historical authenticity (culture, faith, names, roles).
+- A station and no name — "a consul", "a Carthaginian shipowner", "a soldier on the Sicilian frontier" — is a request to be a real person: somebody who actually held that station at the opening and is attested well enough to place and date. Set origin to "historical" and say who they were in the confirmation. A real person is not automatically a famous one: a minor attested figure who fits beats a great name the player did not ask for, and an officer is not handed a consulship.
+- If the person who fits is one of the people already in the world (listed below), the player becomes that person: set becomesCharacterId to their id, and canonicalName to their name. Otherwise set becomesCharacterId to null.
+- A real historical figure named by the player is that figure, if they were already born and alive at the scenario opening (${start}), and becomesCharacterId is their id if they are listed below. Never select, mention as the player character, or extend a historical person born after that date; if the named figure does not yet exist, invent a period-appropriate character instead and set origin to "invented".
+- A name of the player's own, that is no real person's — "Andreus Maximus", "Hanno the Younger" — is somebody new: origin "invented", canonicalName exactly as the player gave it, nickname null, becomesCharacterId null. Never swap it for a better-attested name and never turn it into a real person. Give them the station they asked for, whole: a player who asked to be consul is consul, even where history knew the year's consuls and even where that puts one of the people below out of the office.
+- A player who asks to be rich — "rich", "wealthy", "a fortune" — gets startingMoney at the top of the range for their standing, not the middle. One who asks to be poor gets the bottom.
+- The people already in the world, as id: name (office):
+${context.people.length === 0 ? "  (none listed)" : context.people.map((person) => `  · ${person.id}: ${person.label}`).join("\n")}
+  Unless the player is becoming one of them, the character is somebody else, with another name. They may be among the character's relations under the same name.
+- Be strict about historical authenticity of culture, faith, family and manner of life. It never outranks the player's own name or the station they asked for.
 - For historical and hybrid characters, birthYearApprox and deathYearApprox must be known enough to prove that the person was alive at the scenario opening. Use negative years for BCE. For invented characters, make a plausible adult already alive at the opening.
 - Choose locationProvinceId from this exact opening-map list. It must be a region where the character can plausibly be present at the opening:
 ${regions}
@@ -170,11 +198,12 @@ ${describeWealthBands(context.wealth).map((band) => `  · ${band}`).join("\n")}
 
 Output ONLY a valid JSON object matching this schema (no markdown fences, no commentary):
 {
-  "canonicalName": "string — historically accurate name",
-  "nickname": "string | null — player's name if inaccurate, else null",
+  "canonicalName": "string — the character's name: the player's own, exactly as given, when they gave one",
+  "nickname": "string | null — a byname, if the character has one; else null",
   "birthYearApprox": "number | null — approximate birth year (negative = BC)",
   "deathYearApprox": "number | null — approximate death year or null if unknown",
   "origin": "historical | invented | hybrid",
+  "becomesCharacterId": "string | null — the id of the person already in the world whom the player becomes, else null",
   "period": "string — e.g. 'First Punic War, 264–241 BC'",
   "locationProvinceId": "string — required exact opening-map region id",
   "culture": "string — e.g. 'Roman Patrician'",
@@ -343,6 +372,9 @@ function parseAiKnowledgebase(
   }
 
   if (knowledgebase.locationProvinceId === null || !context.regions.some((region) => region.id === knowledgebase.locationProvinceId)) return null;
+  // Only somebody actually here can be become; an id the model made up means
+  // a new person, not nobody.
+  const becomesCharacterId = context.people.some((person) => person.id === knowledgebase.becomesCharacterId) ? knowledgebase.becomesCharacterId! : null;
 
   // Clamp, never reject. The prompt names the bands and this holds them: a
   // player who declared a common soldier does not open with a senator's
@@ -351,7 +383,7 @@ function parseAiKnowledgebase(
   // the player their character for the engine's convenience, and the model's
   // judgment *inside* a band is worth keeping.
   const purse = clampWealth(knowledgebase.startingMoney, knowledgebase.socioEconomicClass, context.wealth);
-  return purse === knowledgebase.startingMoney ? knowledgebase : { ...knowledgebase, startingMoney: purse };
+  return { ...knowledgebase, startingMoney: purse, becomesCharacterId };
 }
 
 export async function declareCharacter(gameId: string, playerInput: string): Promise<CharacterDeclarationResult> {
@@ -543,12 +575,16 @@ export async function confirmDeclaredCharacter(gameId: string): Promise<Characte
     );
     for (const relation of existing.relations) {
       if (relation.kind !== "person") continue;
-      const npcId = `declared-npc-${relation.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${playerId}`;
       const relationScore = scoreForDeclaredConnection(relation.relationship, relation.notes);
       const player = canonicalWorld.characters.find((candidate) => candidate.id === characterId);
       if (player === undefined) return { status: "error", message: "The confirmed player could not enter canonical world state." };
-      const kin = relation.familyRole === null ? null : FAMILY_LINK_BY_ROLE[relation.familyRole] ?? null;
-      const created = createCanonicalNpc(canonicalWorld, {
+      // Somebody the world already has -- the other consul, a rival senator --
+      // is that man, not a namesake made beside him.
+      const known = canonicalWorld.characters.find((candidate) => candidate.alive && candidate.id !== characterId
+        && candidate.name.trim().toLowerCase() === relation.name.trim().toLowerCase());
+      const npcId = known?.id ?? `declared-npc-${relation.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${playerId}`;
+      const kin = known !== undefined || relation.familyRole === null ? null : FAMILY_LINK_BY_ROLE[relation.familyRole] ?? null;
+      const created = known !== undefined ? { world: canonicalWorld } : createCanonicalNpc(canonicalWorld, {
         characterId: npcId,
         name: relation.name,
         polityId: player.polityId,

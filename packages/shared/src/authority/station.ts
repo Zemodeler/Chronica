@@ -238,9 +238,19 @@ export function speaksForPolity(station: Station, domain: AuthorityDomain): bool
   );
 }
 
-/** Any polity-wide standing at all. The line between the government and a private person. */
+/**
+ * Standing that governs: a power-wide grant that does more than put a
+ * question. The line between the government and a private person.
+ *
+ * It was any power-wide grant at all, and every senator holds one -- the
+ * right to propose to the whole republic -- so a senator read the treaties,
+ * the letters, the trust between powers and the whole record as though he
+ * were the consul. Proposing is how a private man is heard, not how a
+ * country is run.
+ */
 export function holdsPolityStanding(station: Station): boolean {
-  return station.grants.some((grant) => grant.scope.kind === "polity" && grant.scope.id === station.polityId);
+  return station.grants.some((grant) =>
+    grant.scope.kind === "polity" && grant.scope.id === station.polityId && grant.powers.some((power) => power !== "propose"));
 }
 
 export const seesAccount = (station: Station, accountId: string): boolean =>

@@ -22,6 +22,8 @@
     "maps:graph": "cd apps/web && tsx --tsconfig ../../scripts/map-graph/tsconfig.json ../../scripts/map-graph/build-punic-map-graph.ts",
     "maps:simplify": "node scripts/simplify-geojson.mjs",
     "validate:scenario": "tsx scripts/validate-scenario.ts",
+    "play": "tsx scripts/hand-played-burst.mts",
+    "play:turn": "tsx --env-file=.env.local scripts/play-turn.mts",
     "eval:orders": "tsx scripts/eval-orders/run.mts",
     "audit:deltas": "tsx scripts/delta-audit.mts"
   },

@@ -19,9 +19,27 @@ const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const government = { offices: definition.government.offices, successionRules: definition.government.successionRules };
 const LUCIUS = "lucius-young";
 
+
+/**
+ * The opening as it stood before v29 seated Blasio: the second consul's chair
+ * empty and Blasio not yet in the world. These tests walk an election, and
+ * were written round the empty chair.
+ */
+const withoutBlasio = (world: WorldState): WorldState => ({
+  ...world,
+  characters: world.characters.filter((character) => character.id !== "gnaeus-cornelius"),
+  material: {
+    ...world.material,
+    officeSeats: world.material.officeSeats
+      .filter((seat) => seat.holderCharacterId !== "gnaeus-cornelius" || seat.officeId === "roman-consul")
+      .map((seat) => (seat.holderCharacterId === "gnaeus-cornelius"
+        ? { ...seat, holderCharacterId: null, status: "vacant" as const, vacancyCause: "never_filled" as const, termStartedAtStep: null, termExpiresAtStep: null }
+        : seat)),
+  },
+});
 /** The opening, with a young man of no office who means to rise. */
 function opening(): WorldState {
-  const world = WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
+  const world = withoutBlasio(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)));
   const curius = world.characters.find((character) => character.id === "manius-curius")!;
   const lucius: Character = {
     ...curius, id: LUCIUS, name: "Lucius Caecilius", ageYearsAtStart: 27, prestigeBps: 3_200, officeId: null,

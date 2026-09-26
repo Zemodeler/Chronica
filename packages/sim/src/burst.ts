@@ -37,7 +37,7 @@ import { misfiledWorldActs } from "./apply/misfiled";
 import { routeAmbientActors, routeAttention, type RoutedActor } from "./attention";
 import { renderCharacterPortrait, runCognition } from "./cognition";
 import { materializeFacts } from "./facts";
-import { decideNarratorSeeds, recordSeedsOffered, seedParticipants, seedWasTaken, type NarratorSeed } from "./narrator";
+import { decideNarratorSeeds, engineWork, recordSeedsOffered, seedParticipants, seedWasTaken, type NarratorSeed } from "./narrator";
 import { chooseNemesis, conductInWords, nemesisStance, recordNemesis, retireNemesis, shouldRetire, stanceInWords } from "./nemesis";
 import { orchestrate } from "./orchestrate";
 import { describeBreach, findWhoWouldNotice, noticersAsRefs } from "./oversight";
@@ -56,6 +56,8 @@ import { readableRefsFor } from "./mechanics/refs";
 import { runMechanics } from "./mechanics/run-mechanics";
 import { validateMechanic } from "./mechanics/validate-mechanic";
 import { writeMechanic } from "./mechanics/write-mechanic";
+import { addressWaitingLetters } from "./letters";
+import { dueSteps, emptyPlanTally, layPlan, markWoken, nextPlanDay, settleOverdueSteps, takeSteps, type PlanTally } from "./plans";
 
 /**
  * One simulation burst: everything that happens between the player pressing
@@ -88,6 +90,19 @@ export interface SimulationBudget {
    * still gets its look; it does not get one every hop.
    */
   readonly maxAmbientOnlyRounds: number;
+  /**
+   * Days of quiet after which fresh news starts a new chain of reactions,
+   * with its own causal depth and its own look at the world elsewhere.
+   *
+   * The depth cap counted rounds for the whole burst, so a month let pass
+   * spent all three in its first nine days and then walked three weeks
+   * asking nobody: a garrison let into Messana on the twentieth was answered
+   * by no one. A cascade is reactions within days of each other; news a
+   * fortnight later is news. What a later chain costs comes out of
+   * `maxModelCalls`, and a chain the budget cannot pay for is skipped rather
+   * than ending the burst: only the order's own consequences may do that.
+   */
+  readonly newChainAfterDays: number;
   /** Deal a large cast onto this many cognition calls instead of the measured default (plan §1 F). */
   readonly cognitionShards?: number | undefined;
   /**
@@ -124,6 +139,7 @@ export const DEFAULT_BUDGET: SimulationBudget = {
   maxAmbientActors: 6,
   maxHops: 64,
   maxAmbientOnlyRounds: 1,
+  newChainAfterDays: 10,
   // Two rules a burst: an order rarely sets more than one thing going, and
   // the world's own doings get the second. Counted apart from `maxModelCalls`.
   maxMechanicCalls: 2,
@@ -331,6 +347,18 @@ export interface BurstResult {
   readonly skipped: readonly { readonly stage: "cognition" | "reconcile" | "repair"; readonly reason: string }[];
   /** Every act refused, ignored or filled in, pass by pass, for the audit (see `AuditEntry`). */
   readonly audit: readonly AuditEntry[];
+  /** How far people's plans moved in this burst, and how much of what they did belonged to one (gap §5). */
+  readonly plans: PlanTally;
+  /**
+   * Rounds per chain of reactions, the order's own first; its first entry
+   * counts the orchestration, as `iterations` does. VISION §29's two to four
+   * is the bound on the first. Later chains are the world's own business
+   * after a quiet stretch (see `newChainAfterDays`), and the call guard
+   * bounds the whole.
+   */
+  readonly chainRounds: readonly number[];
+  /** Rounds of plan owners alone, asked after their chain's depth was spent; each step wakes one at most once. */
+  readonly planRounds: number;
 }
 
 /**
@@ -923,6 +951,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
    * Everything that fell due on the way here: revenue collected, wages paid,
    * milestones reached. Deterministic, and therefore free.
    */
+  const plans = emptyPlanTally();
+  let planFactSerial = 0;
   const tickTo = (toDay: number): void => {
     const ticked = runDeterministicTick({
       world, toDay, ids, warfare: input.warfare,
@@ -999,6 +1029,17 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       significance += materialized.significance;
     }
     factsSeenByMechanics = newFacts.length;
+    // Plans whose steps passed their day undone. Each owner's own record of
+    // it, and the step left for the router to wake him with.
+    const behind = settleOverdueSteps(world, input.clock, (prefix) => `${prefix}_${newFacts.length}_${(planFactSerial += 1)}`);
+    if (behind.missed > 0) {
+      world = behind.world;
+      plans.missed += behind.missed;
+      const materialized = materializeFacts({ proposals: behind.facts, now: world.instant, atStep: world.elapsedStep, ids, causalDepth: 0, assignedIds: new Map() });
+      newFacts.push(...materialized.facts);
+      for (const [factId, weight] of materialized.significanceByFactId) significanceByFactId.set(factId, weight);
+      significance += materialized.significance;
+    }
   };
 
   /**
@@ -1234,6 +1275,9 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // orchestrator, so it can be carried out in the call the order was already
   // paying for -- and decided as a batch, because a burst covers a season and
   // one stirring a season is not a world that moves on its own.
+  // A power's waiting letters, put to the one person who answers for it.
+  world = addressWaitingLetters(world, input.offices);
+
   const seeds: readonly NarratorSeed[] = input.narratorSeeds !== undefined
     ? input.narratorSeeds
     : input.narratorSeed !== undefined
@@ -1254,6 +1298,34 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       });
   world = recordSeedsOffered(world, seeds, world.instant.day + Math.min(input.spanDays ?? budget.maxSimulatedDays, input.clock.maxSpanDays));
 
+  // The stirrings that are arithmetic and a line of news are the engine's to
+  // carry out (`engineWork`), before the orchestrator is asked anything; it
+  // is shown only the ones that need somebody to decide something.
+  const offeredSeeds: NarratorSeed[] = [];
+  for (const seed of seeds) {
+    const work = engineWork(seed);
+    if (work === null) {
+      offeredSeeds.push(seed);
+      continue;
+    }
+    const done = applyDeltas(world, [...work.deltas], {
+      now: world.instant, actorRef: input.actorRef, offices: input.offices, warfare: input.warfare, ids, gameId: input.gameId,
+      actsForTheWorld: true,
+      playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
+      ...(input.terrains === undefined ? {} : { terrains: input.terrains }),
+      ...(input.wealth === undefined ? {} : { wealth: input.wealth }),
+    });
+    if (done.applied.length === 0) {
+      offeredSeeds.push(seed);
+      continue;
+    }
+    world = done.world;
+    const materialized = materializeFacts({ proposals: [work.fact], now: world.instant, atStep: world.elapsedStep, ids, causalDepth: 0, assignedIds: new Map() });
+    newFacts.push(...materialized.facts);
+    for (const [factId, weight] of materialized.significanceByFactId) significanceByFactId.set(factId, weight);
+    significance += materialized.significance;
+  }
+
   const slice = buildWorldSlice({
     world,
     clock: input.clock,
@@ -1266,7 +1338,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     facts: input.knownFacts,
     dueEvents: dueNow,
     pendingEvents: upcoming,
-    narratorSeeds: seeds,
+    narratorSeeds: offeredSeeds,
   });
 
   sliceText = renderWorldSlice(slice);
@@ -1285,6 +1357,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // One pursuit per person, the latest replacing the last; it does nothing and
   // costs nothing, and it is what a later act can build on. A question asks
   // for nothing to be done, and an unreadable answer is already its own fault.
+  // Nor does a wait: the web's "let a month pass" sends no order text at all.
   if (
     acts.carriedOut === 0 && acts.refusedByTheWorld === 0
     && input.orderText !== null && input.answeredDecision === undefined
@@ -1316,7 +1389,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // Who the stirrings landed on decides who is asked first what they do about
   // it. The ledger was written when they were offered: a batch is not
   // re-offered, so there is nothing further to record here.
-  const priorityCharacterIds: string[] = seeds
+  const priorityCharacterIds: string[] = offeredSeeds
     .filter((seed) => seedWasTaken(world, newFacts.slice(factsBefore), seed))
     .flatMap((seed) => seedParticipants(world, seed))
     .filter((id) => input.actorRef.kind !== "character" || id !== input.actorRef.id);
@@ -1349,6 +1422,27 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const maxDays = Math.max(1, Math.min(input.spanDays ?? budget.maxSimulatedDays, input.clock.maxSpanDays));
   const minDays = input.spanDays === undefined ? input.clock.minSpanDays : maxDays;
   let causalDepth = 1;
+  // The chain of reactions being answered (see `newChainAfterDays`). The
+  // first is the order's; each later one reacts only to news no round has
+  // yet seen: what was written after the last round's cast was chosen, and
+  // what has since arrived from further off.
+  let chain = 1;
+  // The orchestration is the order's chain's first round, as it is the first of `iterations`.
+  const chainRounds: number[] = [1];
+  let planRounds = 0;
+  let chainStartIterations = 0;
+  let chainNewsFrom = 0;
+  // Facts known before the burst began are news only if they arrive during it:
+  // the rest were there to be answered last time, and re-reading them woke
+  // the same people about the same things every order.
+  let chainNewsAfterKey = input.world.instant.day * 1440 + input.world.instant.minute;
+  // Who has been asked about what, and who wrote what, this burst (see
+  // `routeAttention`'s `alreadyAnswered`).
+  const answeredBy = new Map<string, Set<string>>();
+  const authorOf = new Map<string, string>();
+  let lastAskedDay: number | null = null;
+  let factsSeenByLastRound = 0;
+  let lastRoundKey = 0;
   let hops = 0;
 
   while (playerDecision === null) {
@@ -1365,8 +1459,12 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     }
     hops += 1;
 
+    // A plan is on the calendar too: the week a step comes into, and the day
+    // it passes undone, are moments somebody has to be asked about.
+    const planDay = nextPlanDay(world);
     const nextScheduled = [...input.queue, ...scheduled]
       .map((event) => event.dueInstantSortKey)
+      .concat(planDay === undefined ? [] : [planDay * 1440])
       .filter((key) => key > nowKey())
       .sort((a, b) => a - b)[0];
     // The first step is short, so word can travel and the people the order
@@ -1394,13 +1492,33 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     report({ kind: "advanced", date: today() });
 
     const playerCharacterIds = input.actorRef.kind === "character" ? [input.actorRef.id] : [];
+    if (lastAskedDay !== null && causalDepth > 1 && world.instant.day - lastAskedDay >= budget.newChainAfterDays) {
+      chain += 1;
+      causalDepth = 1;
+      ambientOnlyRounds = 0;
+      chainStartIterations = iterations;
+      chainNewsFrom = factsSeenByLastRound;
+      chainNewsAfterKey = lastRoundKey;
+    }
+    const arrivedSince = (fact: Fact): boolean => {
+      const at = fact.discovery.knowableAtInstant;
+      return at !== null && at.day * 1440 + at.minute > chainNewsAfterKey;
+    };
+    // Old news arriving now is news to this chain, at its first depth; old
+    // news long since answered is not news at all.
+    const reactTo = [
+      ...[...input.knownFacts, ...newFacts.slice(0, chainNewsFrom)].filter(arrivedSince).map((fact) => ({ ...fact, causalDepth: 0 })),
+      ...newFacts.slice(chainNewsFrom),
+    ];
     const attention = routeAttention({
       world,
-      facts: [...input.knownFacts, ...newFacts],
+      facts: reactTo,
       offices: input.offices,
       excludeCharacterIds: playerCharacterIds,
       maxFocused: budget.maxFocusedActors,
       maxCausalDepth: budget.maxCausalDepth,
+      alreadyAnswered: answeredBy,
+      authorOf,
     });
 
     // Actors who care but do not warrant a model call still record what they
@@ -1416,6 +1534,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // days after the order, a foreign king sensibly answers that nothing has
     // changed yet; it is after the world jumps a month to the next thing on the
     // calendar that his own business has somewhere to go.
+    const due = dueSteps(world, input.clock, playerCharacterIds);
     const ambient = routeAmbientActors({
       world,
       facts: [...input.knownFacts, ...newFacts],
@@ -1428,45 +1547,121 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       // Every round, not only the first: a quarrel that goes quiet whenever the
       // week is busy is not a quarrel, it is a coincidence.
       nemesisCharacterId: nemesis?.characterId ?? null,
+      dueStepOwners: new Map(due.map((entry) => [entry.ownerId, entry.why])),
     });
 
     // Where the antagonist stands is the world's to know and his to act on, so
     // it is said in his own section and nowhere else. Nothing tells him what he
     // is; he is told what his situation is, which is what anybody knows.
     const note = antagonistNote();
-    const cast = [...attention.focused, ...ambient].map((actor) =>
-      nemesis !== undefined && actor.characterId === nemesis.characterId && note !== undefined ? { ...actor, note } : actor,
-    );
+    // A man a plan wants who is also answering news is told both: the router
+    // that woke him for the news knows nothing of his plan, and without this
+    // the step came due while he was being asked about something else.
+    const dueWhy = new Map(due.map((entry) => [entry.ownerId, entry.why]));
+    const cast = [...attention.focused, ...ambient].map((actor) => {
+      const planned = actor.impetus === "own_business" ? undefined : dueWhy.get(actor.characterId);
+      const told = planned === undefined ? actor : { ...actor, why: `${actor.why}; and ${planned}` };
+      return nemesis !== undefined && told.characterId === nemesis.characterId && note !== undefined ? { ...told, note } : told;
+    });
+    // Reactions to reactions stop at a depth; a man's own plan is not a
+    // reaction. Past that depth the burst used to walk the rest of its span
+    // asking nobody, so a month let pass spent its three rounds in the first
+    // nine days, and four steps went by their day with their owners never
+    // asked -- found by playing it by hand. Now whoever a plan wants is still
+    // asked, alone with the others it wants: each step wakes him once, and the
+    // call budget still bounds the whole.
+    const reactionsSpent = causalDepth > budget.maxCausalDepth;
+    const asking = reactionsSpent ? cast.filter((actor) => dueWhy.has(actor.characterId)) : cast;
     // Nobody pressing means the rotation alone, and the burst pays for only
     // so many of those rounds: the world elsewhere gets its look, not a look
     // every hop. Logged, never silent.
-    const ambientOnly = cast.length > 0 && !cast.some((actor) => actor.pressing);
+    const ambientOnly = asking.length > 0 && !asking.some((actor) => actor.pressing);
     let asked = false;
     if (ambientOnly && ambientOnlyRounds >= budget.maxAmbientOnlyRounds) {
-      skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: a cast of ${cast.length} with nobody pressing, ${ambientOnlyRounds} such round(s) already answered` });
+      skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: a cast of ${asking.length} with nobody pressing, ${ambientOnlyRounds} such round(s) already answered` });
       report({ kind: "skipped", date: today() });
     }
-    const wantsAnswering = cast.length > 0 && causalDepth <= budget.maxCausalDepth && !(ambientOnly && ambientOnlyRounds >= budget.maxAmbientOnlyRounds);
+    const wantsAnswering = asking.length > 0 && !(ambientOnly && ambientOnlyRounds >= budget.maxAmbientOnlyRounds);
     if (wantsAnswering) {
       asked = true;
       if (ambientOnly) ambientOnlyRounds += 1;
       // Somebody has something to say and there is nothing left to pay them
       // with. Stopping here is honest; carrying on would silence them.
-      if (modelCalls >= budget.maxModelCalls || iterations >= budget.maxIterations) {
+      const spent = modelCalls >= budget.maxModelCalls || (!reactionsSpent && iterations - chainStartIterations >= budget.maxIterations);
+      // The order's own consequences stop the burst when they cannot be paid
+      // for, and so does anything in a burst the player gave no span: he gets
+      // the wheel back rather than a world that went quiet. A span he asked
+      // for is his to have, so there a later chain is skipped instead.
+      if (spent && !reactionsSpent && (chain === 1 || input.spanDays === undefined)) {
         stopReason = "budget_exhausted";
         break;
       }
-      report({ kind: "answering", date: today(), people: cast.map((actor) => actor.name) });
+    }
+    // The world's later business, and a plan's, are not the order's: a round
+    // of them the budget cannot pay for is skipped, and the span carries on.
+    const canPay = modelCalls < budget.maxModelCalls && (reactionsSpent || iterations - chainStartIterations < budget.maxIterations);
+    if (wantsAnswering && !canPay) {
+      asked = false;
+      skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: chain ${chain}, the call budget is spent; ${asking.length} left unasked` });
+    }
+    if (wantsAnswering && canPay) {
+      // Measured from the last round that answered news, not from a round of
+      // plans alone: those come every few days, and would put off the next
+      // chain for ever. What they write is news for it.
+      if (!reactionsSpent) {
+        lastAskedDay = world.instant.day;
+        lastRoundKey = nowKey();
+        factsSeenByLastRound = newFacts.length;
+      }
+      report({ kind: "answering", date: today(), people: asking.map((actor) => actor.name) });
+      // Only now that they are really being asked: a step whose owner the
+      // budget turned away stays due, and wakes him next time.
+      const castIds = new Set(asking.map((actor) => actor.characterId));
+      // What each of them is being shown now is theirs to have answered.
+      for (const actor of asking) {
+        const seen = answeredBy.get(actor.characterId) ?? new Set<string>();
+        for (const fact of actor.knownFacts) seen.add(fact.id);
+        answeredBy.set(actor.characterId, seen);
+      }
+      const woken = due.filter((entry) => castIds.has(entry.ownerId));
+      world = markWoken(world, woken);
+      plans.woken += woken.length;
       const cognition = await runCognition(
-        input.port, cast, world, input.clock,
-        budget.cognitionShards === undefined ? undefined : { maxBatches: budget.cognitionShards, actorsPerCall: Math.ceil(cast.length / budget.cognitionShards) },
+        input.port, asking, world, input.clock,
+        budget.cognitionShards === undefined ? undefined : { maxBatches: budget.cognitionShards, actorsPerCall: Math.ceil(asking.length / budget.cognitionShards) },
       );
       modelCalls += cognition.calls;
       iterations += 1;
+      if (reactionsSpent) planRounds += 1;
+      else chainRounds[chain - 1] = (chainRounds[chain - 1] ?? 0) + 1;
       askedSinceWindow = true;
       if (cognition.parseFailure !== null) parseFailures.push(cognition.parseFailure);
       salvaged.push(...cognition.salvaged);
-      for (const actor of cognition.output.actors) await applyProposal(actor.proposal, actor.actorRef, causalDepth);
+      for (const actor of cognition.output.actors) {
+        const factsBeforeActor = newFacts.length;
+        await applyProposal(actor.proposal, actor.actorRef, causalDepth);
+        // A plan is laid, and a step taken, only by a person who was asked --
+        // never by the player, who is in no cast, and never by somebody the
+        // answer merely named. Steps first: they name the plan as it stood.
+        if (actor.actorRef.kind !== "character" || !castIds.has(actor.actorRef.id)) continue;
+        const ownerId = actor.actorRef.id;
+        for (const fact of newFacts.slice(factsBeforeActor)) authorOf.set(fact.id, ownerId);
+        const leftAMark = newFacts.length > factsBeforeActor;
+        const took = takeSteps(world, ownerId, actor.stepsTaken, leftAMark);
+        world = took.world;
+        plans.taken += took.taken;
+        let laid = false;
+        if (actor.plan !== null) {
+          const planned = layPlan(world, ownerId, actor.plan, ids);
+          world = planned.world;
+          laid = planned.ambitionId !== null;
+          if (laid) plans.laid += 1;
+        }
+        if (leftAMark) {
+          plans.acted += 1;
+          if (laid || took.taken > 0) plans.actedOnAPlan += 1;
+        }
+      }
       causalDepth += 1;
     }
 
@@ -1532,6 +1727,9 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     salvaged,
     skipped,
     audit,
+    plans,
+    chainRounds,
+    planRounds,
   };
 }
 

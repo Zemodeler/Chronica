@@ -380,6 +380,11 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
     // Every call the burst decided not to make, and why: a stage that keeps
     // being skipped for the same reason is a prompt or a router to look at.
     for (const skip of result.skipped) console.log(`[burst ${burstId}] skipped ${skip.stage}: ${skip.reason}`);
+    // How much of what the world's people did belonged to a plan (gap §5).
+    const plans = result.plans;
+    if (plans.acted > 0 || plans.laid > 0 || plans.missed > 0) {
+      console.log(`[burst ${burstId}] plans: ${plans.laid} laid, ${plans.taken} step(s) taken, ${plans.missed} missed, ${plans.woken} owner(s) woken; ${plans.actedOnAPlan} of ${plans.acted} who acted did so on a plan`);
+    }
     // What the turn actually cost in seconds, per stage: the only place the
     // call budget and the player's wait are written down together.
     console.log(

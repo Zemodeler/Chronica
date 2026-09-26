@@ -171,8 +171,10 @@ describe("a burst answering \"Raise two new legions\"", () => {
     // count is held to the guard against a loop that will not stop.
     const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [CARTHAGE_REACTS] });
     const result = await runSimulationBurst(input(port));
-    expect(result.iterations).toBeLessThanOrEqual(4);
-    expect(result.iterations).toBeGreaterThanOrEqual(2);
+    // The order's own chain. What the world does after a quiet stretch is a
+    // chain of its own, bounded by the call guard (`newChainAfterDays`).
+    expect(result.chainRounds[0]).toBeLessThanOrEqual(4);
+    expect(result.chainRounds[0]).toBeGreaterThanOrEqual(2);
     expect(result.modelCalls).toBeLessThanOrEqual(DEFAULT_BUDGET.maxModelCalls);
   });
 });
@@ -348,7 +350,7 @@ describe("budget and termination", () => {
     const quiet = JSON.stringify({ actors: [] });
     const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [quiet, quiet, quiet] });
     const result = await runSimulationBurst(input(port));
-    expect(result.iterations).toBeLessThanOrEqual(DEFAULT_BUDGET.maxIterations);
+    for (const rounds of result.chainRounds) expect(rounds).toBeLessThanOrEqual(DEFAULT_BUDGET.maxIterations);
     expect(result.modelCalls).toBeLessThanOrEqual(DEFAULT_BUDGET.maxModelCalls);
   });
 
@@ -459,7 +461,11 @@ describe("budget and termination", () => {
     // that no proposal was applied, not that no money moved.
     expect(result.world.characters).toHaveLength(world().characters.length);
     expect(result.world.projects).toHaveLength(0);
-    expect(result.outcome).toBe("continue");
+    // What news there is, is the engine's own: the record that the order was
+    // given, and a stirring the engine carries out itself (`engineWork`),
+    // which happens whatever the model answers.
+    const engineStirrings = new Set(["order_given", "harvest", "grain_fleet_lost", "fire", "road_or_pass"]);
+    expect(result.newFacts.filter((fact) => (result.significanceByFactId.get(fact.id) ?? 0) > 0).every((fact) => engineStirrings.has(fact.kind))).toBe(true);
   });
 
   it("interrupts for a decision that needs the ruler's own authority", async () => {
@@ -690,11 +696,13 @@ describe("the world stirs: a secret plot", () => {
     // alone. The orchestrator's summary is the one thing code cannot gate --
     // it describes the visible order too -- which is what the secrecy principle (7) is for.
     const historian = capturingScriptedPort({ compose_chronicle: [JSON.stringify({ entries: [] })] });
-    await composeChronicle({
+    const record = await composeChronicle({
       port: historian, clock, observer: player, observerPolityId: "rome", facts: result.newFacts, from: { day: 0, minute: 0 }, to: result.world.instant,
       narrative: result.narrative, frictions: result.frictions, significanceByFactId: result.significanceByFactId, storylines: result.world.storylines,
     });
-    const shown = historian.shown.compose_chronicle![0]!;
+    // Whatever reaches the record: what the historian was shown, and what the
+    // record printed.
+    const shown = [...(historian.shown.compose_chronicle ?? []), ...record.entries.map((entry) => `${entry.title}\n${entry.body}`)].join("\n");
     expect(shown).toContain("inspects the first legion");
     expect(shown).not.toContain("spreads discontent");
     expect(shown).not.toContain("whisper");

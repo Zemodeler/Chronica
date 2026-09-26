@@ -8,6 +8,8 @@ import {
   stableChoice,
   stableHash,
   type Fact,
+  type FactProposalDraft,
+  type WorldDelta,
   type ScenarioHistoricalPressure,
   type ScenarioWarfareRules,
   type WorldState,
@@ -819,10 +821,18 @@ function personalSeeds(input: NarratorInput, firstOrdinal: number, count: number
   return seeds;
 }
 
-/** One stirring per this many days: three in a month. */
-const SEED_EVERY_DAYS = 10;
-const MIN_SEEDS_PER_BURST = 3;
-const MAX_SEEDS_PER_BURST = 6;
+/**
+ * One stirring per this many days: two in a month.
+ *
+ * It was three, and each is several deltas, a fact and a thread in the
+ * orchestrator's answer -- written out at the price of output tokens, on
+ * every order, beside whatever the player asked for. Two still makes a month
+ * in which the world does something of its own; the four the engine can carry
+ * out itself (`engineWork`) cost the orchestrator nothing at all.
+ */
+const SEED_EVERY_DAYS = 15;
+const MIN_SEEDS_PER_BURST = 2;
+const MAX_SEEDS_PER_BURST = 4;
 
 /**
  * Whether the world is due to stir at all.
@@ -1062,6 +1072,88 @@ export function seedParticipants(world: WorldState, seed: NarratorSeed): string[
   const opened = world.storylines.find((storyline) => storyline.seedKey === seed.key);
   if (opened !== undefined) return [...opened.participantIds];
   return seed.target.characterId === null ? [] : [seed.target.characterId];
+}
+
+/**
+ * The stirrings that are arithmetic and a line of news, done by the engine.
+ *
+ * A storm that sinks the grain convoy, a street of workshops burned, a pass
+ * shut for the season, a good harvest: the brief already named the numbers,
+ * and the orchestrator's whole part was to copy them into a
+ * "province_material_shift" and write one public sentence -- some hundreds of
+ * output tokens on every order, and now and then the wrong province or the
+ * wrong sign. Nothing in these asks for a decision. So the engine moves the
+ * province and records the news itself, at the top of the burst, and the
+ * orchestrator is never shown them. The ones that do ask for a decision --
+ * who paid for the games, what the omen means, who is blamed -- stay the
+ * model's.
+ */
+interface EngineWork {
+  readonly food?: readonly [number, number, number];
+  readonly stability?: readonly [number, number, number];
+  readonly productive?: readonly [number, number, number];
+  readonly news: (place: string, severity: SeedSeverity) => string;
+  readonly significance: readonly [number, number, number];
+}
+
+const ENGINE_WORK: Readonly<Record<string, EngineWork>> = {
+  harvest: {
+    food: [400, 1200, 2500], stability: [100, 400, 600], significance: [15, 25, 35],
+    news: (place, s) => magnitude(s, `${place} brought in a fair harvest, and the market was quiet.`, `${place} brought in a harvest better than anyone had expected.`, `${place} brought in a glut: the granaries full, grain cheap, and the men who had bought early ruined.`),
+  },
+  grain_fleet_lost: {
+    food: [-400, -900, -1500], stability: [-100, -300, -600], significance: [20, 35, 50],
+    news: (place, s) => magnitude(s, `A storm off ${place} took a few grain ships.`, `A storm off ${place} took the season's grain convoy.`, `A storm off ${place} took the grain fleet and the ships that guarded it.`),
+  },
+  fire: {
+    stability: [-200, -500, -900], productive: [-300, -800, -1500], significance: [20, 35, 55],
+    news: (place, s) => magnitude(s, `Fire took a street of workshops in ${place}.`, `Fire took a quarter of ${place}, and its granaries with it.`, `Fire took the heart of ${place}, and the records kept there.`),
+  },
+  road_or_pass: {
+    food: [-150, -400, -800], stability: [-100, -250, -500], significance: [15, 25, 40],
+    news: (place, s) => magnitude(s, `A bridge came down in ${place}, and traffic went by the ford instead.`, `The pass through ${place} was shut, and the traffic went round.`, `The way through ${place} closed for the season, and everything that moved on it stopped.`),
+  },
+};
+
+const bySeverity = (values: readonly [number, number, number] | undefined, severity: SeedSeverity): number | undefined =>
+  values === undefined ? undefined : values[severity === "minor" ? 0 : severity === "serious" ? 1 : 2];
+
+/**
+ * What the engine does for this seed itself, or null when it is the model's to
+ * carry out. Its deltas are the world's own acts; its fact is public news.
+ */
+export function engineWork(seed: NarratorSeed): { readonly deltas: readonly WorldDelta[]; readonly fact: FactProposalDraft } | null {
+  const work = ENGINE_WORK[seed.archetype];
+  const provinceId = seed.target.provinceId;
+  if (work === undefined || provinceId === null || seed.secret) return null;
+  const food = bySeverity(work.food, seed.severity);
+  const stability = bySeverity(work.stability, seed.severity);
+  const productive = bySeverity(work.productive, seed.severity);
+  const place = seed.target.provinceName ?? provinceId;
+  const news = work.news(place, seed.severity);
+  return {
+    deltas: [{
+      op: "province_material_shift",
+      provinceId,
+      ...(food === undefined ? {} : { foodSecurityBpsDelta: food }),
+      ...(stability === undefined ? {} : { stabilityBpsDelta: stability }),
+      ...(productive === undefined ? {} : { productiveCapacityBpsDelta: productive }),
+      reason: news,
+    }],
+    fact: {
+      localId: `stirring_${seed.key.replace(/[^a-z0-9_-]/g, "_")}`,
+      kind: seed.archetype,
+      summary: news,
+      affectedRefs: [
+        { kind: "province", id: provinceId },
+        ...(seed.target.polityId === null ? [] : [{ kind: "polity" as const, id: seed.target.polityId }]),
+      ],
+      visibility: "public",
+      discoveryState: "public",
+      knowableInDays: 0,
+      significance: bySeverity(work.significance, seed.severity) ?? 20,
+    },
+  };
 }
 
 /** Provinces on the sea: a sea lane or strait out of them, or a port in them. */

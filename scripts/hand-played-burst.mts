@@ -1,0 +1,128 @@
+// Real bursts on the Punic Wars opening, with the model answered by hand.
+//
+// The base way to test the engine: nothing is sent to any provider and no
+// coins are spent. Every model call goes to the hand adapter
+// (`packages/ai/src/adapters/hand.ts`), which writes the prompt to a file
+// named by its own hash and waits for the answer beside it. By default this
+// script stops at the first prompt with no answer (exit code 3) so it can be
+// answered and the run started again: the engine is deterministic, so every
+// prompt already answered is asked again word for word and answered from
+// disk, and the run goes one call further. With --wait it keeps running and
+// waits instead.
+//
+// Written to test NPC plans by hand (gap document §5); good for anything a
+// scripted port is too blunt for, since the answers are read against the real
+// prompts and the real engine does everything else.
+//
+// Usage:
+//   npm run play -- [--dir eval-out/hand-played] [--bursts 2] [--span 30]
+//     [--as gaius-genucius] [--order "<an order; none means waiting>"] [--focused 3] [--ambient 4] [--wait]
+//
+// In <dir>: system-<op>.txt is each operation's system prompt, written once;
+// <op>-<hash>.prompt.txt is a call waiting for its answer, <op>-<hash>.json
+// the answer; queue.log lists prompts in the order they were asked. When the
+// run finishes, the report is printed and saved as report.txt.
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { createHandAdapter } from "@chronica/ai";
+import { punicWarsScenario } from "@chronica/db";
+import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, formatWorldDate, type Fact, type WorldState } from "@chronica/shared";
+import { DEFAULT_BUDGET, runSimulationBurst, type PendingEvent, type PlanTally, type SimModelPort } from "@chronica/sim";
+
+const args = process.argv.slice(2);
+const option = (name: string, fallback: string): string => {
+  const at = args.indexOf(`--${name}`);
+  return at === -1 ? fallback : args[at + 1] ?? fallback;
+};
+const dir = option("dir", "eval-out/hand-played");
+const bursts = Number(option("bursts", "2"));
+const spanDays = Number(option("span", "30"));
+const player = option("as", "gaius-genucius");
+// No order text by default: waiting, as the web's "let a month pass" sends it.
+// A typed "let the month pass" is an order the engine records as a pursuit and
+// offers the rule writer, which is a call spent on nothing.
+const orderText = args.includes("--order") ? option("order", "") : null;
+const budget = { ...DEFAULT_BUDGET, maxFocusedActors: Number(option("focused", "3")), maxAmbientActors: Number(option("ambient", "4")) };
+mkdirSync(dir, { recursive: true });
+
+const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
+let world: WorldState = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
+const polity = world.characters.find((character) => character.id === player)?.polityId ?? null;
+
+let call = 0;
+const stopWhenWaiting = !args.includes("--wait");
+let stopping = false;
+const adapter = createHandAdapter({
+  dir,
+  pollMs: 200,
+  onWaiting: (promptPath) => {
+    console.log(`WAITING ${promptPath}`);
+    // Concurrent calls in the same round are each written before the run
+    // stops, so a split cast is answered in one sitting.
+    if (stopWhenWaiting && !stopping) {
+      stopping = true;
+      setTimeout(() => process.exit(3), 300);
+    }
+  },
+});
+const port: SimModelPort = {
+  async complete(operation, system, user) {
+    call += 1;
+    return (await adapter.call(operation, system, user)).content;
+  },
+};
+
+const report: string[] = [];
+const say = (line: string): void => { report.push(line); };
+let knownFacts: Fact[] = [];
+let queue: PendingEvent[] = [];
+const tallies: PlanTally[] = [];
+
+for (let index = 0; index < bursts; index += 1) {
+  const printedFrom = report.length;
+  const from = world.instant;
+  const result = await runSimulationBurst({
+    world, clock: definition.clock, offices: definition.government.offices, warfare: definition.warfare,
+    terrains: definition.map.terrains, burstId: `hand-${index}`, gameId: "hand-played",
+    actorRef: { kind: "character", id: player }, actorPolityId: polity,
+    orderText, spanDays, knownFacts, queue, port, budget,
+  });
+  world = result.world;
+  const fired = new Set(result.firedEventIds);
+  queue = [...queue, ...result.scheduled].filter((event) => !fired.has(event.id));
+  knownFacts = [...knownFacts, ...result.newFacts].slice(-300);
+  tallies.push(result.plans);
+  const p = result.plans;
+  say(`Burst ${index + 1}: ${formatWorldDate(from, definition.clock)} to ${formatWorldDate(world.instant, definition.clock)}, stopped on ${result.stopReason}, ${result.modelCalls} model call(s).`);
+  say(`  rounds per chain of reactions: ${result.chainRounds.join(", ")} (the first counts the orchestration), and ${result.planRounds} of plan owners alone.`);
+  say(`  plans: ${p.laid} laid, ${p.taken} step(s) taken, ${p.missed} missed, ${p.woken} owner(s) woken; ${p.actedOnAPlan} of ${p.acted} who acted did so on a plan.`);
+  for (const fact of result.newFacts.filter((entry) => entry.kind === "plan_fell_behind")) say(`  ${fact.summary}`);
+  for (const skip of result.skipped) say(`  skipped ${skip.stage}: ${skip.reason}`);
+  // What the engine refused or filled in, so an answer that did less than it
+  // said is visible here and not only in the world it left.
+  for (const entry of result.audit) say(`  audit ${entry.kind} ${entry.op} (${entry.actorRef?.id ?? "world"}): ${entry.reason.slice(0, 200)}`);
+  for (const rejected of result.frictions) say(`  friction: ${rejected.line.slice(0, 200)}`);
+  if (result.parseFailures.length > 0) say(`  unreadable: ${result.parseFailures.join(" | ")}`);
+  if (result.salvaged.length > 0) say(`  dropped to keep the answer: ${result.salvaged.join(", ")}`);
+  console.log(report.slice(printedFrom).join("\n"));
+}
+
+say("");
+say("Plans at the end:");
+for (const character of world.characters) {
+  const planned = character.ambitions.filter((ambition) => ambition.steps.length > 0);
+  for (const ambition of planned) {
+    say(`- ${character.name}: ${ambition.label} (${ambition.status})`);
+    for (const step of ambition.steps) {
+      const settled = step.settledOnDay === null ? "" : `, settled ${formatWorldDate({ day: step.settledOnDay, minute: 0 }, definition.clock)}`;
+      say(`    ${step.status.padEnd(7)} ${step.act} (due ${formatWorldDate({ day: step.dueDay, minute: 0 }, definition.clock)}${settled})`);
+    }
+  }
+}
+const total = tallies.reduce((sum, tally) => ({ acted: sum.acted + tally.acted, onPlan: sum.onPlan + tally.actedOnAPlan }), { acted: 0, onPlan: 0 });
+say("");
+say(`Across the run, ${total.onPlan} of ${total.acted} answers that left a mark belonged to a plan. ${call} model call(s), all answered from ${dir}.`);
+
+writeFileSync(path.join(dir, "report.txt"), `${report.join("\n")}\n`);
+writeFileSync(path.join(dir, "world.json"), JSON.stringify(world));
+console.log(report.join("\n"));
