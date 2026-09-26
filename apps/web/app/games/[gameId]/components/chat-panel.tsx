@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback, type FormEvent } from "react";
+import { useRef, useState, useEffect, useCallback, useMemo, type FormEvent } from "react";
+import { Sheet, type SheetSide } from "../../../components/ui/sheet";
 
 interface ContactView {
   readonly sessionId: string;
@@ -26,21 +27,27 @@ interface ChatPanelProps {
   /** Opened from the Office, so the panel no longer owns the answer to whether it is. */
   readonly open: boolean;
   readonly onClose: () => void;
+  readonly side: SheetSide;
   /** Set to open this panel directly on a specific session -- e.g. a conversation a character initiated. */
   readonly openSessionId?: string | null;
   readonly onOpenSessionConsumed?: () => void;
 }
 
-export function ChatPanel({ gameId, playerCharacterId, open, onClose, openSessionId, onOpenSessionConsumed }: ChatPanelProps) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const discoverDialogRef = useRef<HTMLDialogElement>(null);
-  const groupDialogRef = useRef<HTMLDialogElement>(null);
+/**
+ * The letter tray: the people the player can reach, and what has been said.
+ *
+ * A conversation reads as a transcript -- who spoke, and what they said --
+ * the way a history records an exchange, not as chat bubbles.
+ */
+export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSessionConsumed }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [contacts, setContacts] = useState<readonly ContactView[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<readonly MessageView[]>([]);
   const [messageBody, setMessageBody] = useState("");
   const [sending, setSending] = useState(false);
+  const [discoverOpen, setDiscoverOpen] = useState(false);
+  const [groupOpen, setGroupOpen] = useState(false);
   const [discoverQuery, setDiscoverQuery] = useState("");
   const [discovering, setDiscovering] = useState(false);
   const [discoverError, setDiscoverError] = useState<string | null>(null);
@@ -51,6 +58,11 @@ export function ChatPanel({ gameId, playerCharacterId, open, onClose, openSessio
   const [loadingMessages, setLoadingMessages] = useState(false);
 
   const activeContact = contacts.find((c) => c.sessionId === activeSessionId) ?? null;
+  // In a group, each line is spoken by one of its members; their names are
+  // the player's contacts.
+  const namesById = useMemo(() => new Map(contacts.filter((c) => !c.isGroup).map((c) => [c.npcCharacterId, c.knownName])), [contacts]);
+  const speakerOf = (message: MessageView): string =>
+    message.isPlayerMessage ? "You" : namesById.get(message.speakerCharacterId) ?? activeContact?.knownName ?? "They";
 
   const fetchContacts = useCallback(async () => {
     try {
@@ -78,7 +90,7 @@ export function ChatPanel({ gameId, playerCharacterId, open, onClose, openSessio
   }, [gameId]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages]);
 
   useEffect(() => {
@@ -91,8 +103,7 @@ export function ChatPanel({ gameId, playerCharacterId, open, onClose, openSessio
   }, [openSessionId]);
 
   useEffect(() => {
-    if (open) { dialogRef.current?.showModal(); void fetchContacts(); }
-    else { dialogRef.current?.close(); }
+    if (open) void fetchContacts();
     // Deliberately keyed on `open` alone: fetchContacts is re-created every
     // render and re-running it while the panel is already open would be a
     // second identical request.
@@ -143,21 +154,18 @@ export function ChatPanel({ gameId, playerCharacterId, open, onClose, openSessio
   function openDiscover() {
     setDiscoverQuery("");
     setDiscoverError(null);
-    discoverDialogRef.current?.showModal();
+    setDiscoverLadder([]);
+    setDiscoverOpen(true);
   }
 
-  function closeDiscover() {
-    discoverDialogRef.current?.close();
-  }
-
-  function openGroup() { setGroupParticipantIds([]); groupDialogRef.current?.showModal(); }
+  function openGroup() { setGroupParticipantIds([]); setGroupOpen(true); }
   async function createGroup() {
     if (groupParticipantIds.length < 2 || creatingGroup) return;
     setCreatingGroup(true);
     try {
       const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/conversations/group`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ participantIds: groupParticipantIds }) });
       const data = await res.json() as { sessionId?: string };
-      if (res.ok && data.sessionId) { groupDialogRef.current?.close(); await fetchContacts(); await selectContact(data.sessionId); }
+      if (res.ok && data.sessionId) { setGroupOpen(false); await fetchContacts(); await selectContact(data.sessionId); }
     } finally { setCreatingGroup(false); }
   }
 
@@ -174,7 +182,7 @@ export function ChatPanel({ gameId, playerCharacterId, open, onClose, openSessio
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query }) },
       );
       if (!res.ok) {
-        setDiscoverError("Could not reach the server. Please try again.");
+        setDiscoverError("The server could not be reached. Try again.");
         return;
       }
       const data = await res.json() as {
@@ -188,143 +196,142 @@ export function ChatPanel({ gameId, playerCharacterId, open, onClose, openSessio
         return;
       }
       if (data.sessionId) {
-        closeDiscover();
+        setDiscoverOpen(false);
         await fetchContacts();
         await selectContact(data.sessionId);
       }
     } catch {
-      setDiscoverError("An error occurred. Please try again.");
+      setDiscoverError("Something went wrong finding them. Try again.");
     } finally {
       setDiscovering(false);
     }
   }
 
-  void open;
-  void playerCharacterId;
-
   return (
     <>
-
-      <dialog ref={dialogRef} className="chat-panel-dialog" onClose={closePanel}>
-        <div className="chat-panel-layout">
-          {/* Contact list */}
-          <aside className="chat-contact-list">
-            <div className="chat-contact-list-header">
-              <span className="chat-contact-list-title">Contacts</span>
-              <button type="button" className="chat-add-contact-button" onClick={openGroup} aria-label="Create group chat">◉</button>
-              <button type="button" className="chat-add-contact-button" onClick={openDiscover} aria-label="Add contact">+</button>
+      <Sheet label="your letters" title="Letters" width="reading" side={side} open={open} onClose={closePanel} className="sheet--wide sheet--letters">
+        <div className="letters">
+          <nav className="letters__people" aria-label="People you can reach">
+            <div className="letters__people-head">
+              <h3>People</h3>
+              <div className="letters__people-actions">
+                <button type="button" className="word-button" onClick={openDiscover}>Find someone</button>
+                <button type="button" className="word-button" onClick={openGroup}>Gather several</button>
+              </div>
             </div>
             {contacts.length === 0 && (
-              <p className="chat-no-contacts">No contacts yet. Use + to add someone nearby.</p>
+              <p className="letters__none">Nobody yet. Find someone nearby to speak with.</p>
             )}
-            <ul className="chat-contact-items">
+            <ul className="letters__list">
               {contacts.map((contact) => (
                 <li key={contact.sessionId}>
                   <button
                     type="button"
-                    className={`chat-contact-item${activeSessionId === contact.sessionId ? " chat-contact-item--active" : ""}`}
+                    className="letters__person"
+                    aria-current={activeSessionId === contact.sessionId ? "true" : undefined}
                     onClick={() => { void selectContact(contact.sessionId); }}
                   >
-                    <span className="chat-contact-name">{contact.knownName}</span>
-                    <span className="chat-contact-role">{contact.roleLabel}</span>
-                    {contact.unread > 0 && <span className="chat-unread-badge">{contact.unread}</span>}
+                    <strong>{contact.knownName}</strong>
+                    <span>{contact.roleLabel}</span>
+                    {contact.unread > 0 && <span className="badge">{contact.unread}</span>}
                   </button>
                 </li>
               ))}
             </ul>
-          </aside>
+          </nav>
 
-          {/* Message thread */}
-          <div className="chat-thread-pane">
-            <div className="chat-thread-header">
-              {activeContact ? (
-                <>
-                  <strong className="chat-thread-npc-name">{activeContact.knownName}</strong>
-                  <span className="chat-thread-role">{activeContact.roleLabel}</span>
-                </>
-              ) : (
-                <span className="chat-thread-placeholder">Select a contact</span>
-              )}
-              <button type="button" className="chat-close-button" onClick={closePanel} aria-label="Close chat">×</button>
-            </div>
-
-            <div className="chat-messages">
-              {loadingMessages && <p className="chat-loading">Loading…</p>}
+          <div className="letters__thread">
+            {activeContact !== null && (
+              <div className="letters__with">
+                <strong>{activeContact.knownName}</strong>
+                <span>{activeContact.roleLabel}</span>
+              </div>
+            )}
+            <div className="letters__transcript" aria-live="polite">
+              {loadingMessages && <p className="letters__hint">Finding what was said…</p>}
               {!loadingMessages && activeContact === null && (
-                <p className="chat-empty-hint">Choose a contact to start a conversation.</p>
+                <p className="letters__hint">Choose someone to speak with.</p>
               )}
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`chat-bubble${msg.isPlayerMessage ? " chat-bubble--player" : " chat-bubble--npc"}`}
-                >
-                  {msg.body}
+              {messages.map((message) => (
+                <div key={message.id} className={message.isPlayerMessage ? "letters__line is-yours" : "letters__line"}>
+                  <span className="letters__speaker">{speakerOf(message)}</span>
+                  <p>{message.body}</p>
                 </div>
               ))}
-              {sending && <div className="chat-bubble chat-bubble--npc chat-bubble--typing">…</div>}
+              {sending && (
+                <div className="letters__line is-waiting">
+                  <span className="letters__speaker">{activeContact?.knownName ?? "They"}</span>
+                  <p>considers what to say…</p>
+                </div>
+              )}
               <div ref={messagesEndRef} />
             </div>
 
             {activeContact && (
-              <form className="chat-composer" onSubmit={(e) => { void handleSend(e); }}>
+              <form className="letters__compose" onSubmit={(e) => { void handleSend(e); }}>
+                <label className="visually-hidden" htmlFor="letters-say">What you say to {activeContact.knownName}</label>
                 <input
-                  className="chat-composer-input"
+                  id="letters-say"
                   type="text"
                   value={messageBody}
                   onChange={(e) => setMessageBody(e.target.value)}
-                  placeholder="Write a message…"
+                  placeholder={`Say something to ${activeContact.knownName}…`}
                   disabled={sending}
                   autoComplete="off"
                 />
-                <button type="submit" className="chat-composer-send" disabled={sending || !messageBody.trim()}>
-                  Send
-                </button>
+                <button type="submit" className="btn btn--primary" disabled={sending || !messageBody.trim()}>Say it</button>
               </form>
             )}
           </div>
         </div>
-      </dialog>
+      </Sheet>
 
-      <dialog ref={groupDialogRef} className="chat-discover-dialog">
-        <div className="chat-discover-header"><h2 className="chat-discover-title">New Group Chat</h2><button type="button" onClick={() => groupDialogRef.current?.close()} aria-label="Close">×</button></div>
-        <p className="chat-discover-hint">Choose at least two existing contacts.</p>
-        {contacts.filter((contact) => !contact.isGroup).map((contact) => (
-          <label key={contact.sessionId} className="chat-discover-hint"><input type="checkbox" checked={groupParticipantIds.includes(contact.npcCharacterId)} onChange={(event) => setGroupParticipantIds((ids) => event.target.checked ? [...ids, contact.npcCharacterId] : ids.filter((id) => id !== contact.npcCharacterId))} /> {contact.knownName}</label>
-        ))}
-        <div className="chat-discover-actions"><button type="button" className="btn-secondary" onClick={() => groupDialogRef.current?.close()}>Cancel</button><button type="button" className="btn-primary" onClick={() => { void createGroup(); }} disabled={creatingGroup || groupParticipantIds.length < 2}>{creatingGroup ? "Creating…" : "Create"}</button></div>
-      </dialog>
+      {groupOpen && (
+        <Sheet label="gathering several people" title="Gather several" width="narrow" side="center" onClose={() => setGroupOpen(false)}>
+          <div className="letters-form">
+            <p className="mirror__note">Choose at least two of the people you already speak with.</p>
+            <div className="letters-form__choices">
+              {contacts.filter((contact) => !contact.isGroup).map((contact) => (
+                <label key={contact.sessionId}>
+                  <input type="checkbox" checked={groupParticipantIds.includes(contact.npcCharacterId)} onChange={(event) => setGroupParticipantIds((ids) => event.target.checked ? [...ids, contact.npcCharacterId] : ids.filter((id) => id !== contact.npcCharacterId))} />
+                  {contact.knownName}
+                </label>
+              ))}
+            </div>
+            <div className="letters-form__actions">
+              <button type="button" className="btn btn--quiet" onClick={() => setGroupOpen(false)}>Cancel</button>
+              <button type="button" className="btn btn--primary" onClick={() => { void createGroup(); }} disabled={creatingGroup || groupParticipantIds.length < 2}>{creatingGroup ? "Gathering…" : "Gather them"}</button>
+            </div>
+          </div>
+        </Sheet>
+      )}
 
-      {/* Add contact dialog */}
-      <dialog ref={discoverDialogRef} className="chat-discover-dialog">
-        <form onSubmit={(e) => { void handleDiscover(e); }}>
-          <div className="chat-discover-header">
-            <h2 className="chat-discover-title">Add a Contact</h2>
-            <button type="button" onClick={closeDiscover} aria-label="Close">×</button>
-          </div>
-          <p className="chat-discover-hint">
-            Who do you want to contact? Describe a person nearby — their name, role, or relationship to you.
-          </p>
-          <input
-            className="chat-discover-input"
-            type="text"
-            value={discoverQuery}
-            onChange={(e) => setDiscoverQuery(e.target.value)}
-            placeholder="e.g. the garrison commander, Marcus Fabius…"
-            disabled={discovering}
-            autoFocus
-          />
-          {discoverError && <p className="chat-discover-error">{discoverError}</p>}
-          {discoverLadder.length > 0 && <ul className="chat-discover-ladder">
-            {discoverLadder.map((step) => <li key={step.rung + step.label}>{step.label}</li>)}
-          </ul>}
-          <div className="chat-discover-actions">
-            <button type="button" className="btn-secondary" onClick={closeDiscover}>Cancel</button>
-            <button type="submit" className="btn-primary" disabled={discovering || !discoverQuery.trim()}>
-              {discovering ? "Searching…" : "Find"}
-            </button>
-          </div>
-        </form>
-      </dialog>
+      {discoverOpen && (
+        <Sheet label="finding someone" title="Find someone" width="narrow" side="center" onClose={() => setDiscoverOpen(false)}>
+          <form className="letters-form" onSubmit={(e) => { void handleDiscover(e); }}>
+            <label htmlFor="letters-find">Who do you want to speak with? Give a name, a role, or how they stand to you.</label>
+            <input
+              id="letters-find"
+              type="text"
+              value={discoverQuery}
+              onChange={(e) => setDiscoverQuery(e.target.value)}
+              placeholder="The garrison commander, Marcus Fabius…"
+              disabled={discovering}
+              autoFocus
+            />
+            {discoverError && <p className="letters-form__error" role="alert">{discoverError}</p>}
+            {discoverLadder.length > 0 && <ul className="letters-form__ladder">
+              {discoverLadder.map((step) => <li key={step.rung + step.label}>{step.label}</li>)}
+            </ul>}
+            <div className="letters-form__actions">
+              <button type="button" className="btn btn--quiet" onClick={() => setDiscoverOpen(false)}>Cancel</button>
+              <button type="submit" className="btn btn--primary" disabled={discovering || !discoverQuery.trim()}>
+                {discovering ? "Asking around…" : "Find them"}
+              </button>
+            </div>
+          </form>
+        </Sheet>
+      )}
     </>
   );
 }

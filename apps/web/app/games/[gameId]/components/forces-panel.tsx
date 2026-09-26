@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Sheet, type SheetSide } from "../../../components/ui/sheet";
 
 /**
  * The muster, as the man responsible for it can read it.
@@ -37,7 +38,12 @@ interface MusterView {
   readonly theirGovernments: boolean;
 }
 
-export function ForcesPanel({ gameId, revision, onClose }: { readonly gameId: string; readonly revision: number; readonly onClose: () => void }) {
+/** "Men in good heart, fed and paid." Three labels, read as a sentence. */
+function condition(force: ForceReading): string {
+  return `Men ${force.moraleLabel}, ${force.provisionLabel.toLowerCase()} and ${force.payStatus.toLowerCase()}.`;
+}
+
+export function ForcesPanel({ gameId, revision, onClose, side }: { readonly gameId: string; readonly revision: number; readonly onClose: () => void; readonly side: SheetSide }) {
   const [muster, setMuster] = useState<MusterView | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -53,23 +59,23 @@ export function ForcesPanel({ gameId, revision, onClose }: { readonly gameId: st
   const men = (n: number): string => n.toLocaleString();
 
   return (
-    <aside className="sim-panel" aria-label="Your forces">
-      <header className="sim-panel__header">
-        <h2>{muster?.theirGovernments === true ? "The Army" : "Your Men"}</h2>
-        <div className="sim-panel__header-actions">
-          <button type="button" onClick={onClose} aria-label="Close the muster">×</button>
-        </div>
-      </header>
-
-      {failed && <p className="sim-panel__empty">There are no forces you may count.</p>}
-      {muster === null && !failed && <p className="sim-panel__empty">Sending for the muster roll…</p>}
+    <Sheet
+      label="your forces"
+      title={muster?.theirGovernments === true ? "The Army" : "Your Men"}
+      width="ledger"
+      side={side}
+      onClose={onClose}
+      className="forces-panel"
+    >
+      {failed && <p className="quiet">There are no forces you may count.</p>}
+      {muster === null && !failed && <p className="quiet">Sending for the muster roll…</p>}
 
       {muster !== null && muster.forces.length === 0 && (
-        <p className="sim-panel__empty">You command no one.</p>
+        <p className="quiet">You command no one.</p>
       )}
 
       {muster !== null && muster.forces.length > 0 && (
-        <ul className="muster">
+        <ul className="muster ruled">
           {muster.forces.map((force) => (
             <li key={force.id} className="muster__force">
               <h3>{force.name}</h3>
@@ -77,20 +83,20 @@ export function ForcesPanel({ gameId, revision, onClose }: { readonly gameId: st
               <p className="muster__strength">
                 <strong>{men(force.fitStrength)} men</strong>
                 {force.fitStrength < force.authorizedStrength && <span>, of {men(force.authorizedStrength)} on the books</span>}
-                {force.unavailable > 0 && <span> · {men(force.unavailable)} unfit</span>}
+                {force.unavailable > 0 && <span>, and {men(force.unavailable)} unfit</span>}
               </p>
-              <p className="muster__condition">
-                {force.moraleLabel} · {force.provisionLabel} · {force.payStatus}
-              </p>
+              <p className="muster__condition">{condition(force)}</p>
               <p className="muster__where">
                 At {force.locationLabel}. {force.destinationLabel}
                 {force.arrivalLabel !== null && `, expected ${force.arrivalLabel}`}
               </p>
-              <p className="muster__change">{force.changeExplanation}</p>
+              <p className={force.changeExplanation.startsWith("Nothing has changed") ? "muster__change" : "muster__change is-new"}>
+                {force.changeExplanation}
+              </p>
             </li>
           ))}
         </ul>
       )}
-    </aside>
+    </Sheet>
   );
 }
