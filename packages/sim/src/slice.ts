@@ -223,6 +223,8 @@ export interface WorldSlice {
   }[];
   /** What the country is actually made of -- people, manpower, food, order. */
   readonly country: {
+    /** Whether they read the government's own figures: men to raise, what a province could be taxed. */
+    readonly governs: boolean;
     readonly provinces: number;
     readonly population: number;
     readonly availableManpower: number;
@@ -545,8 +547,11 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
         .map((row) => `${world.faiths.find((faith) => faith.id === row.faithId)?.name ?? row.faithId} ${Math.round(row.shareBps / 100)}%`),
     }));
 
+  // A private man's own plans, not his government's traps: he was shown every
+  // armed plan his power had laid, and wrote orders as though they were his.
   const standingPlans = world.contingencies
-    .filter((plan) => plan.status === "armed" && (ownPolity === null || plan.ownerPolityId === ownPolity))
+    .filter((plan) => plan.status === "armed" && (ownPolity === null || plan.ownerPolityId === ownPolity)
+      && (speaksForTheGovernment || station === null || plan.ownerCharacterId === station.characterId))
     .slice(0, CAPS.standingPlans)
     .map((plan) => ({
       id: plan.id,
@@ -656,7 +661,11 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   // Manpower is per-province and there is no polity total, so the total the
   // model needs to answer "can we raise another legion" has to be summed here.
   const ourMaterial = world.material.provinceMaterial.filter((material) => ourProvinceIds.has(material.provinceId));
+  // The figures a government reads -- the men it could raise, what each
+  // province could be taxed -- are its own. Anybody knows how many people
+  // there are and which provinces are hungry.
   const country = {
+    governs: station === null || speaksForTheGovernment,
     provinces: ourMaterial.length,
     population: ourMaterial.reduce((sum, material) => sum + material.population, 0),
     availableManpower: ourMaterial.reduce((sum, material) => sum + material.availableManpower, 0),
@@ -767,8 +776,10 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       .map((account) => account.id),
   );
 
+  // A private man owes what he owes; his neighbours' debts and the state's
+  // are not his to read, and were a reason to write orders about them.
   const debts = world.material.loans
-    .filter((loan) => loan.status !== "repaid" && ourAccountIds.has(loan.borrowerAccountId))
+    .filter((loan) => loan.status !== "repaid" && ourAccountIds.has(loan.borrowerAccountId) && reachesAccount(loan.borrowerAccountId))
     .slice(0, CAPS.debts)
     .map((loan) => {
       const servicing = loan.serviceObligationId === null
@@ -791,7 +802,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   const trade = world.material.incomeSources
     // Our own polity named as the counterparty means domestic revenue that was
     // mislabelled; it depends on nobody abroad and cannot be cut by a war.
-    .filter((source) => source.counterpartyPolityId !== null && source.counterpartyPolityId !== ownPolity && ourAccountIds.has(source.beneficiaryAccountId))
+    .filter((source) => source.counterpartyPolityId !== null && source.counterpartyPolityId !== ownPolity && ourAccountIds.has(source.beneficiaryAccountId) && reachesAccount(source.beneficiaryAccountId))
     .slice(0, CAPS.trade)
     .map((source) => ({
       id: source.id,
@@ -948,8 +959,11 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       secret: storyline.visibility === "private",
     }));
 
+  // Orders he gave or was given, unless he speaks for the government that
+  // gives them all.
   const openOrders = world.orderAttempts
     .filter((attempt) => attempt.status === "issued" || attempt.status === "received" || attempt.status === "delayed" || attempt.status === "accepted")
+    .filter((attempt) => station === null || speaksForTheGovernment || attempt.issuerRef.id === station.characterId || attempt.recipientRef.id === station.characterId)
     .slice(0, CAPS.events)
     .map((attempt) => ({ id: attempt.id, recipient: name(attempt.recipientRef.id), status: attempt.status }));
 
@@ -1038,9 +1052,9 @@ export function renderWorldSlice(slice: WorldSlice): string {
   // resuming something it had already begun and put to the ruler.
   if (slice.answeredDecision !== null) {
     lines.push(
-      "A QUESTION WAS PUT TO THE RULER:",
+      "A QUESTION WAS PUT TO THEM:",
       `  ${slice.answeredDecision.prompt}`,
-      "THE RULER'S ANSWER:",
+      "THEIR ANSWER:",
       `  ${slice.answeredDecision.label} — ${slice.answeredDecision.summary}`,
       "",
       "Carry out that answer. Do not ask it again.",
@@ -1186,9 +1200,13 @@ export function renderWorldSlice(slice: WorldSlice): string {
     slice.country.provinces === 0
       ? []
       : [
-        `${slice.country.provinces} province(s), ${slice.country.population} people, ${slice.country.availableManpower} men available to raise.`,
+        slice.country.governs
+          ? `${slice.country.provinces} province(s), ${slice.country.population} people, ${slice.country.availableManpower} men available to raise.`
+          : `${slice.country.provinces} province(s), ${slice.country.population} people.`,
         ...slice.country.strained.map((province) =>
-          `${province.name} [${province.id}] — ${province.manpower} men, food ${province.food}/100, order ${province.stability}/100, war damage ${province.warDamage}/100, taxable ${province.taxCapacity}`),
+          slice.country.governs
+            ? `${province.name} [${province.id}] — ${province.manpower} men, food ${province.food}/100, order ${province.stability}/100, war damage ${province.warDamage}/100, taxable ${province.taxCapacity}`
+            : `${province.name} [${province.id}] — food ${province.food}/100, order ${province.stability}/100, war damage ${province.warDamage}/100`),
       ],
   );
   section(
@@ -1225,7 +1243,7 @@ export function renderWorldSlice(slice: WorldSlice): string {
     `${project.label} [${project.id}] — ${project.status}${project.nextMilestone === null ? "" : `, next: ${project.nextMilestone.label} [${project.nextMilestone.id}]`}`));
   section("STANDING INTENTIONS", slice.intents.map((intent) => `${intent.actor} means to ${intent.action}: ${intent.rationale}`));
   section("ORDERS AWAITING AN ANSWER", slice.openOrders.map((order) => `${order.id} to ${order.recipient} — ${order.status}`));
-  section("RECENT HISTORY (only what is known to this government)", slice.recentHistory.map((entry) => `${entry.summary} [${entry.id}]`));
+  section("RECENT HISTORY (only what is known to them)", slice.recentHistory.map((entry) => `${entry.summary} [${entry.id}]`));
   const threadOf = (event: SliceEvent): string => (event.thread === undefined ? "" : ` (thread: ${event.thread})`);
   section("DUE NOW", slice.dueEvents.map((event) => `${event.kind}: ${event.summary}${threadOf(event)}`));
   section("SCHEDULED AHEAD", slice.pendingEvents.map((event) => `in ${event.dueInDays} days — ${event.kind}: ${event.summary}${threadOf(event)}`));

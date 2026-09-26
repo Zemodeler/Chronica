@@ -14,6 +14,7 @@ export { AiTimeoutError, aiMaxRetries, aiRequestTimeoutMs, isTimeout } from "./t
 export { createAnthropicLocalAdapter } from "./adapters/anthropic-local";
 export { createOpenAiLocalAdapter } from "./adapters/openai-local";
 export { createMockAdapter, type MockAdapterOptions, type MockToolStep } from "./adapters/mock";
+export { createHandAdapter, handStem, type HandAdapterOptions } from "./adapters/hand";
 export {
   getConfiguredApiKey,
   getLocalAiProviderConfiguration,
@@ -30,6 +31,8 @@ import { createAnthropicLocalAdapter } from "./adapters/anthropic-local";
 import { createOpenAiLocalAdapter } from "./adapters/openai-local";
 import { createMockAdapter, type MockToolStep } from "./adapters/mock";
 import { getSelectedLocalAiProvider } from "./local-key-selection";
+import path from "node:path";
+import { createHandAdapter } from "./adapters/hand";
 
 interface MockScriptFile {
   /** Returned verbatim by the plain (non-tool) `call`, e.g. for character declaration. */
@@ -67,10 +70,23 @@ function readMockScriptFromEnvFile(): MockScriptFile | undefined {
  * "openai" (default): OpenAI API called directly from this process.
  * "local":            Anthropic API called directly from this process.
  * "mock":             deterministic fixture for tests.
+ * "hand":             answered from files by a person, or by Claude working as
+ *                     the model (`adapters/hand.ts`). Spends nothing. Prompts
+ *                     and answers live in CHRONICA_HAND_DIR, by default
+ *                     eval-out/hand under the working directory.
  * "worker":           reserved for M2 — calls the remote apps/worker HTTP endpoint.
  */
 export function createAiAdapter(): AiAdapter {
   const mode = process.env.CHRONICA_AI_MODE ?? "openai";
+  if (mode === "hand") {
+    const dir = path.resolve(process.env.CHRONICA_HAND_DIR ?? "eval-out/hand");
+    const timeout = Number(process.env.CHRONICA_HAND_TIMEOUT_MS ?? "");
+    return createHandAdapter({
+      dir,
+      ...(Number.isFinite(timeout) && timeout > 0 ? { timeoutMs: timeout } : {}),
+      onWaiting: (promptPath) => console.log(`[ai] waiting for an answer to ${promptPath}`),
+    });
+  }
   if (mode !== "mock") {
     const localProvider = getSelectedLocalAiProvider();
     if (localProvider === "openai") return createOpenAiLocalAdapter();
@@ -86,6 +102,6 @@ export function createAiAdapter(): AiAdapter {
     case "local":
       return createAnthropicLocalAdapter();
     default:
-      throw new Error(`Unknown CHRONICA_AI_MODE: "${mode}". Use "openai", "local", or "mock".`);
+      throw new Error(`Unknown CHRONICA_AI_MODE: "${mode}". Use "openai", "local", "hand", or "mock".`);
   }
 }

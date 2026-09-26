@@ -46,7 +46,7 @@ export const StandingEffectQuantitySchema = z.enum([
 ]);
 export type StandingEffectQuantity = z.infer<typeof StandingEffectQuantitySchema>;
 
-export const EffectBandSchema = z.enum(["slight", "marked", "great"]);
+export const EffectBandSchema = z.enum(["slight", "marked", "great"]).meta({ id: "Band" });
 export type EffectBand = z.infer<typeof EffectBandSchema>;
 
 export const StandingEffectSchema = z

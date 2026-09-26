@@ -214,9 +214,11 @@ describe("how much stirs in a season", () => {
     // A burst covers a season and used to carry exactly one stirring, so a
     // record of three months came back with two entries, both of them the
     // player's own business.
+    // Two a month now, and at most four: each is paid for in the
+    // orchestrator's output tokens on every order (SEED_EVERY_DAYS).
     const seeds = decideNarratorSeeds(input(later(large(), 45)));
-    expect(seeds.length).toBeGreaterThanOrEqual(3);
-    expect(seeds.length).toBeLessThanOrEqual(6);
+    expect(seeds.length).toBeGreaterThanOrEqual(2);
+    expect(seeds.length).toBeLessThanOrEqual(4);
     expect(new Set(seeds.map((seed) => seed.key)).size).toBe(seeds.length);
   });
 

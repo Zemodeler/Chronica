@@ -601,6 +601,11 @@ const initialWorld: WorldState = WorldStateSchema.parse({
   ],
   characters: [
     { id: "gaius-genucius", officesHeld: [{ officeId: "roman-quaestor", lastHeldAtStep: 0 }, { officeId: "roman-praetor", lastHeldAtStep: 0 }], name: "Gaius Genucius Clepsina", cultureId: "roman", faithId: "faith-roman", dynastyId: null, locationProvinceId: "punic-italy-latium", polityId: "rome", ageYearsAtStart: 45, officeId: "roman-consul", personalAccountId: "gaius-purse", skills: { martial: 65, intrigue: 40, learning: 50, piety: 45, stewardship: 55, diplomacy: 60, body: 65, subSkills: {} }, traits: ["dutiful", "disciplined"], healthBps: 9_000, prestigeBps: 7_000, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null },
+    // Genucius's colleague for 270 (scenario v29). Rome's two consuls sat
+    // alone for twenty-eight versions with the second chair empty; Blasio, a
+    // patrician Cornelius, held it that year, and was consul again in 257 and
+    // censor after. He keeps the city while Genucius takes the army south.
+    { id: "gnaeus-cornelius", officesHeld: [{ officeId: "roman-quaestor", lastHeldAtStep: 0 }, { officeId: "roman-praetor", lastHeldAtStep: 0 }], name: "Gnaeus Cornelius Blasio", cultureId: "roman", faithId: "faith-roman", dynastyId: null, locationProvinceId: "punic-italy-latium", polityId: "rome", ageYearsAtStart: 42, officeId: "roman-consul", personalAccountId: "blasio-purse", skills: { martial: 55, intrigue: 50, learning: 55, piety: 55, stewardship: 65, diplomacy: 60, body: 55, subSkills: {} }, traits: ["ambitious", "methodical"], healthBps: 9_000, prestigeBps: 7_000, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null },
     // Carthage is a real party watching the Messana crisis, not a passive
     // name on the map: an active goal and plot (character-sim phase 3) give
     // Hanno explicit scenario relevance from the opening turn, and the
@@ -689,6 +694,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
     currency: { id: "denarius", name: "Denarii", unitName: "denarius", unitNamePlural: "denarii", symbol: "D" },
     accounts: [
       { id: "gaius-purse", owner: { kind: "character", id: "gaius-genucius" }, currencyId: "denarius", balance: 1_200, status: "active", visibility: "private" },
+      { id: "blasio-purse", owner: { kind: "character", id: "gnaeus-cornelius" }, currencyId: "denarius", balance: 1_300, status: "active", visibility: "private" },
       { id: "hanno-purse", owner: { kind: "character", id: "hanno-carthage" }, currencyId: "denarius", balance: 1_100, status: "active", visibility: "private" },
       { id: "hieron-purse", owner: { kind: "character", id: "hieron-ii" }, currencyId: "denarius", balance: 1_000, status: "active", visibility: "private" },
       { id: "mamertine-purse", owner: { kind: "character", id: "mamertine-spokesman" }, currencyId: "denarius", balance: 700, status: "active", visibility: "private" },
@@ -727,7 +733,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       })),
     ],
     accountAccess: [
-      ["gaius", "gaius-genucius"], ["hanno", "hanno-carthage"], ["hieron", "hieron-ii"], ["mamertine", "mamertine-spokesman"],
+      ["gaius", "gaius-genucius"], ["blasio", "gnaeus-cornelius"], ["hanno", "hanno-carthage"], ["hieron", "hieron-ii"], ["mamertine", "mamertine-spokesman"],
       ["curius", "manius-curius"], ["ogulnius", "quintus-ogulnius"], ["vibellius", "decius-vibellius"], ["leptines", "leptines-syracuse"], ["gisco", "hannibal-gisco"],
     ].map(([id, characterId]) => ({ id: `${id}-purse-access`, characterId, accountId: `${id}-purse`, permissions: ["view", "spend_without_vote"], sourceKind: "ownership", sourceId: characterId })),
     transactions: [], capturableValues: [],
@@ -744,6 +750,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
     holdings: [
       { id: "curius-sabine-farm", title: "The Sabine farm", territoryId: "punic-italy-latium", legalHolderCharacterId: "manius-curius", incomeSourceId: "curius-sabine-farm-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
       { id: "genucian-estates", title: "The Genucian estates", territoryId: "punic-italy-latium", legalHolderCharacterId: "gaius-genucius", incomeSourceId: "genucian-estates-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
+      { id: "cornelian-estates", title: "The Cornelian estates", territoryId: "punic-italy-latium", legalHolderCharacterId: "gnaeus-cornelius", incomeSourceId: "cornelian-estates-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
       { id: "ogulnian-estates", title: "The Ogulnian lands in Campania", territoryId: "punic-italy-campanian-plain", legalHolderCharacterId: "quintus-ogulnius", incomeSourceId: "ogulnian-estates-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
       { id: "hanno-estates", title: "Hanno's estates in the African hinterland", territoryId: "tun-13205935b88806172084765", legalHolderCharacterId: "hanno-carthage", incomeSourceId: "hanno-estates-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
       { id: "gisco-estates", title: "The Gisconid farms", territoryId: "tun-13205935b88806172084765", legalHolderCharacterId: "hannibal-gisco", incomeSourceId: "gisco-estates-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
@@ -774,11 +781,10 @@ const initialWorld: WorldState = WorldStateSchema.parse({
     ],
     officeSeats: [
       { id: "roman-consul:seat:0", officeId: "roman-consul", seatIndex: 0, holderCharacterId: "gaius-genucius", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: 365, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: [...romanReqs, "req-age-38", "req-standing-6000", "req-held-praetor", "req-gap-consul-10"] },
-      // Rome elected two consuls a year, and the scenario only ever seated
-      // one. The empty chair matters mechanically: a player who declares
-      // themselves consul has nowhere to sit if the college is modelled as a
-      // single seat, and starts the game holding no office at all.
-      { id: "roman-consul:seat:1", officeId: "roman-consul", seatIndex: 1, holderCharacterId: null, status: "vacant", vacancyCause: "never_filled", termStartedAtStep: null, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: [...romanReqs, "req-age-38", "req-standing-6000", "req-held-praetor", "req-gap-consul-10"] },
+      // Rome elected two consuls a year, and both chairs are filled (v29): a
+      // player who declares themselves consul takes one of these men's
+      // places, or puts one of them out of it.
+      { id: "roman-consul:seat:1", officeId: "roman-consul", seatIndex: 1, holderCharacterId: "gnaeus-cornelius", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: 365, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: [...romanReqs, "req-age-38", "req-standing-6000", "req-held-praetor", "req-gap-consul-10"] },
       { id: "syracusan-king:seat:0", officeId: "syracusan-king", seatIndex: 0, holderCharacterId: "hieron-ii", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
       { id: "mamertine-leader:seat:0", officeId: "mamertine-leader", seatIndex: 0, holderCharacterId: "mamertine-spokesman", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
       { id: "carthaginian-strategos:seat:0", officeId: "carthaginian-strategos", seatIndex: 0, holderCharacterId: "hanno-carthage", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: ["req-alive", "req-not-disqualified"] },
@@ -786,6 +792,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { id: "roman-senator:seat:0", officeId: "roman-senator", seatIndex: 0, holderCharacterId: "gaius-genucius", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: [] },
       { id: "roman-senator:seat:1", officeId: "roman-senator", seatIndex: 1, holderCharacterId: "manius-curius", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: [] },
       { id: "roman-senator:seat:2", officeId: "roman-senator", seatIndex: 2, holderCharacterId: "quintus-ogulnius", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: [] },
+      { id: "roman-senator:seat:3", officeId: "roman-senator", seatIndex: 3, holderCharacterId: "gnaeus-cornelius", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: [] },
       { id: "carthaginian-elder:seat:0", officeId: "carthaginian-elder", seatIndex: 0, holderCharacterId: "hanno-carthage", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: [] },
       { id: "carthaginian-elder:seat:1", officeId: "carthaginian-elder", seatIndex: 1, holderCharacterId: "hannibal-gisco", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: [] },
       { id: "syracusan-friend:seat:0", officeId: "syracusan-friend", seatIndex: 0, holderCharacterId: "leptines-syracuse", status: "held", vacancyCause: "none", termStartedAtStep: 0, termExpiresAtStep: null, appointmentProcedureId: null, removalProcedureId: null, eligibilityRequirementIds: [] },
@@ -813,6 +820,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       ...([
         ["curius-sabine-farm", "The Sabine farm", "curius-purse", 40],
         ["genucian-estates", "The Genucian estates", "gaius-purse", 100],
+        ["cornelian-estates", "The Cornelian estates", "blasio-purse", 110],
         ["ogulnian-estates", "The Ogulnian lands in Campania", "ogulnius-purse", 125],
         ["hanno-estates", "Hanno's estates in the African hinterland", "hanno-purse", 240],
         ["gisco-estates", "The Gisconid farms", "gisco-purse", 100],

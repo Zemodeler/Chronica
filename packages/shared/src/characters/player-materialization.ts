@@ -264,6 +264,11 @@ export function materializePlayerCharacter(
     : world.map.provinces.find((province) => province.id === locationProvinceId);
   if (!location) throw new Error("The submitted player's character has no valid starting location.");
 
+  const taken = knowledgebase.becomesCharacterId == null
+    ? undefined
+    : world.characters.find((character) => character.id === knowledgebase.becomesCharacterId && character.alive);
+  if (taken !== undefined) return takeThePlaceOf(world, taken.id, actorCharacterId, knowledgebase.startingMoney);
+
   const accountId = `account-${actorCharacterId}`;
   const existingAccount = world.material.accounts.find((account) => account.id === accountId);
   const personalAccount = existingAccount ?? {
@@ -300,12 +305,20 @@ export function materializePlayerCharacter(
   // and where that office has a seat free, starts holding it. This is the only
   // mechanical link between character creation and the canonical Authority
   // projection (characters/authority-projection.ts); a role that names no
-  // office, or one whose seats are all filled, leaves officeId null rather
-  // than granting power the scenario did not actually have to give.
+  // office leaves officeId null rather than granting power the scenario did
+  // not actually have to give.
   // A slave holds no office and commands nobody, whatever his role says.
   const legalStatus = knowledgebase.legalStatus ?? "free";
   const unfree = legalStatus === "enslaved";
-  const matched = unfree ? undefined : findOfficeSeatForRole(world, scenarioGovernment, declaredPolityId, knowledgebase.role);
+  // A player who asked for an office the world has, and found every seat of
+  // it taken, is still given it: one of the men sitting in it is put out, and
+  // the player sits in his chair for the rest of his term. Asked for a consul
+  // while both consuls sat, the player used to be seated nowhere, or handed
+  // one of the sitting consuls to play.
+  const office = unfree || scenarioGovernment === undefined ? undefined : findOfficeForRole(scenarioGovernment.offices, declaredPolityId, knowledgebase.role);
+  const free = unfree ? undefined : findOfficeSeatForRole(world, scenarioGovernment, declaredPolityId, knowledgebase.role);
+  const putOut = free === undefined && office !== undefined ? seatToPutOutOf(world, office) : undefined;
+  const matched = free ?? (putOut === undefined || office === undefined ? undefined : { office, vacantSeatId: putOut.seatId });
   // What he believes and how old he is, as he declared them. Both used to be
   // thrown away -- every player was thirty-five and believed in nothing.
   const believes = knowledgebase.faith === null ? null : faithNamed(world, knowledgebase.faith, world.elapsedStep);
@@ -392,9 +405,9 @@ export function materializePlayerCharacter(
         ? { ...seat, holderCharacterId: actorCharacterId, status: "held" as const, vacancyCause: "none" as const, termStartedAtStep: world.elapsedStep }
         : seat))
       : [...world.material.officeSeats, {
-        id: boundedId(matched.office.id, "seat", 0),
+        id: boundedId(matched.office.id, "seat", world.material.officeSeats.filter((seat) => seat.officeId === matched.office.id).length),
         officeId: matched.office.id,
-        seatIndex: 0,
+        seatIndex: world.material.officeSeats.filter((seat) => seat.officeId === matched.office.id).length,
         holderCharacterId: actorCharacterId,
         status: "held" as const,
         vacancyCause: "none" as const,
@@ -405,10 +418,18 @@ export function materializePlayerCharacter(
         eligibilityRequirementIds: matched.office.eligibilityRequirementIds,
       }];
 
+  // The man put out keeps whatever else he holds -- his seat in the Senate --
+  // and is called by that instead.
+  const characters = putOut === undefined
+    ? world.characters
+    : world.characters.map((character) => (character.id === putOut.holderId && character.officeId === matched!.office.id
+      ? { ...character, officeId: officeSeats.find((seat) => seat.holderCharacterId === character.id && seat.status === "held")?.officeId ?? null }
+      : character));
+
   return {
     ...world,
     ...(believes === null ? {} : { faiths: believes.world.faiths }),
-    characters: [...world.characters, playerCharacter],
+    characters: [...characters, playerCharacter],
     material: {
       ...world.material,
       // A role that says they command men gives them men to command. Nothing
@@ -433,5 +454,46 @@ export function materializePlayerCharacter(
           sourceId: actorCharacterId,
         }],
     },
+  };
+}
+
+/**
+ * Which of an office's sitting holders makes room for a player who asked for
+ * it. The one with least in hand -- no force under him, the fewest matters in
+ * train -- so the world loses as little as it can: of two consuls, the one
+ * keeping the city goes, not the one leading the army south. Ties go to the
+ * junior chair.
+ */
+function seatToPutOutOf(world: WorldState, office: Office): { readonly seatId: string; readonly holderId: string } | undefined {
+  const held = world.material.officeSeats.filter((seat) => seat.officeId === office.id && seat.status === "held" && seat.holderCharacterId !== null);
+  const load = (characterId: string): number =>
+    world.material.forces.filter((force) => force.commanderCharacterId === characterId || force.controllerCharacterId === characterId).length * 10
+    + world.storylines.filter((storyline) => storyline.participantIds.includes(characterId)).length;
+  const chosen = [...held].sort((a, b) => load(a.holderCharacterId!) - load(b.holderCharacterId!) || b.seatIndex - a.seatIndex)[0];
+  return chosen === undefined ? undefined : { seatId: chosen.id, holderId: chosen.holderCharacterId! };
+}
+
+/**
+ * The player becomes a person the world already has.
+ *
+ * Every reference to him -- his seats, his purse and who may spend it, the
+ * army he commands, the matters he is party to, what others feel about him --
+ * is renamed to the player's id, so he is the same man in the same place with
+ * the same business, and nothing is left pointing at somebody who is gone.
+ * The rename is over whole string values, never substrings: "gaius-purse" is
+ * not "gaius-genucius". His purse holds what the player was told it would.
+ */
+export function takeThePlaceOf(world: WorldState, characterId: string, actorCharacterId: string, startingMoney: number): WorldState {
+  const rename = (value: unknown): unknown => {
+    if (value === characterId) return actorCharacterId;
+    if (Array.isArray(value)) return value.map(rename);
+    if (value === null || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key === characterId ? actorCharacterId : key, rename(entry)]));
+  };
+  const next = rename(world) as WorldState;
+  const purseId = next.characters.find((character) => character.id === actorCharacterId)?.personalAccountId ?? null;
+  return purseId === null ? next : {
+    ...next,
+    material: { ...next.material, accounts: next.material.accounts.map((account) => (account.id === purseId ? { ...account, balance: startingMoney } : account)) },
   };
 }

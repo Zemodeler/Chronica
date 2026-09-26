@@ -15,6 +15,21 @@ const government = punicWarsScenario.definition.government;
 
 const world = (): WorldState => structuredClone(punicWarsScenario.initialWorld);
 
+/** The opening with Blasio's chair empty, as the scenario had it before v29. */
+function withSecondChairEmpty(): WorldState {
+  const base = world();
+  return WorldStateSchema.parse({
+    ...base,
+    characters: base.characters.map((character) => (character.id === "gnaeus-cornelius" ? { ...character, officeId: "roman-senator" } : character)),
+    material: {
+      ...base.material,
+      officeSeats: base.material.officeSeats.map((seat) => (seat.id === "roman-consul:seat:1"
+        ? { ...seat, holderCharacterId: null, status: "vacant", vacancyCause: "never_filled", termStartedAtStep: null }
+        : seat)),
+    },
+  });
+}
+
 /** Verbatim from a real declared character: a role is a sentence, not a title. */
 const CONSUL_ROLE = "Consul of the Roman Republic, directing senatorial policy and preparing Roman military operations";
 
@@ -57,12 +72,12 @@ describe("findOfficeSeatForRole", () => {
   it("matches an office named inside a descriptive role sentence", () => {
     // The old substring test asked whether "roman consul" appeared inside the
     // role text. It does not, in any role a model actually writes.
-    const matched = findOfficeSeatForRole(world(), government, "rome", CONSUL_ROLE);
+    const matched = findOfficeSeatForRole(withSecondChairEmpty(), government, "rome", CONSUL_ROLE);
     expect(matched?.office.id).toBe("roman-consul");
   });
 
   it("finds the free seat when a colleague already holds the other", () => {
-    const matched = findOfficeSeatForRole(world(), government, "rome", CONSUL_ROLE);
+    const matched = findOfficeSeatForRole(withSecondChairEmpty(), government, "rome", CONSUL_ROLE);
     expect(matched?.vacantSeatId).toBe("roman-consul:seat:1");
   });
 
@@ -76,18 +91,8 @@ describe("findOfficeSeatForRole", () => {
     expect(findOfficeSeatForRole(world(), government, "carthage", CONSUL_ROLE)).toBeUndefined();
   });
 
-  it("refuses when every seat of the office is held", () => {
-    const base = world();
-    const full = WorldStateSchema.parse({
-      ...base,
-      material: {
-        ...base.material,
-        officeSeats: base.material.officeSeats.map((seat) => seat.id === "roman-consul:seat:1"
-          ? { ...seat, holderCharacterId: "hieron-ii", status: "held", vacancyCause: "none", termStartedAtStep: 0 }
-          : seat),
-      },
-    });
-    expect(findOfficeSeatForRole(full, government, "rome", CONSUL_ROLE)).toBeUndefined();
+  it("refuses when every seat of the office is held, as both are at the opening", () => {
+    expect(findOfficeSeatForRole(world(), government, "rome", CONSUL_ROLE)).toBeUndefined();
   });
 });
 
@@ -100,6 +105,8 @@ describe("a declared consul at game start", () => {
     const seat = projected.material.officeSeats.find((candidate) => candidate.holderCharacterId === PLAYER);
     expect(seat?.id).toBe("roman-consul:seat:1");
     expect(seat?.status).toBe("held");
+    // The chair's own term, not a new one: he sits out the year Blasio was elected for.
+    expect(seat?.termExpiresAtStep).toBe(365);
 
     // The reported bug, end to end.
     const authority = deriveAuthoritySummary(projected, PLAYER, government);
@@ -107,11 +114,22 @@ describe("a declared consul at game start", () => {
     expect(authority).not.toEqual(["No current public office"]);
   });
 
-  it("does not displace the sitting consul", () => {
-    const projected = materializePlayerCharacter(world(), PLAYER, knowledgebase(), government);
-    const colleague = projected.material.officeSeats.find((seat) => seat.id === "roman-consul:seat:0");
-    expect(colleague?.holderCharacterId).toBe("gaius-genucius");
+  it("puts out the consul keeping the city, not the one leading the army, and leaves him his Senate seat", () => {
+    // "Andreus Maximus, consul": a name of the player's own, and a station
+    // both of whose chairs are filled.
+    const projected = materializePlayerCharacter(world(), PLAYER, knowledgebase({ canonicalName: "Andreus Maximus" }), government);
+    const consuls = projected.material.officeSeats.filter((seat) => seat.officeId === "roman-consul" && seat.status === "held");
+    expect(consuls.map((seat) => seat.holderCharacterId)).toEqual(["gaius-genucius", PLAYER]);
+    expect(projected.characters.find((candidate) => candidate.id === PLAYER)).toMatchObject({ name: "Andreus Maximus", officeId: "roman-consul" });
+    expect(projected.characters.find((candidate) => candidate.id === "gnaeus-cornelius")).toMatchObject({ alive: true, officeId: "roman-senator" });
     expect(deriveAuthoritySummary(projected, "gaius-genucius", government)).toContain("Roman consul of Roman Republic");
+    expect(WorldStateSchema.safeParse(projected).success).toBe(true);
+  });
+
+  it("takes the free chair and puts nobody out when there is one", () => {
+    const projected = materializePlayerCharacter(withSecondChairEmpty(), PLAYER, knowledgebase(), government);
+    expect(projected.material.officeSeats.find((seat) => seat.id === "roman-consul:seat:1")?.holderCharacterId).toBe(PLAYER);
+    expect(projected.material.officeSeats.find((seat) => seat.id === "roman-consul:seat:0")?.holderCharacterId).toBe("gaius-genucius");
   });
 
   it("still produces a valid world, purse and all", () => {
@@ -131,6 +149,35 @@ describe("a declared consul at game start", () => {
   it("is a no-op once the character is really in the snapshot", () => {
     const projected = materializePlayerCharacter(world(), PLAYER, knowledgebase(), government);
     expect(materializePlayerCharacter(projected, PLAYER, knowledgebase(), government)).toBe(projected);
+  });
+});
+
+describe("a player who asked only for a station", () => {
+  it("becomes the man who holds it: his chair, purse, lands and Senate seat, and nobody left behind", () => {
+    const projected = materializePlayerCharacter(world(), PLAYER, knowledgebase({ canonicalName: "Gnaeus Cornelius Blasio", origin: "historical", becomesCharacterId: "gnaeus-cornelius", startingMoney: 4_000 }), government);
+    expect(projected.characters.some((character) => character.id === "gnaeus-cornelius")).toBe(false);
+    expect(projected.characters.filter((character) => character.name === "Gnaeus Cornelius Blasio").map((character) => character.id)).toEqual([PLAYER]);
+    expect(projected.material.officeSeats.filter((seat) => seat.holderCharacterId === PLAYER).map((seat) => seat.id).sort()).toEqual(["roman-consul:seat:1", "roman-senator:seat:3"]);
+    expect(projected.material.accounts.find((account) => account.id === "blasio-purse")).toMatchObject({ owner: { kind: "character", id: PLAYER }, balance: 4_000 });
+    expect(projected.material.accountAccess.find((access) => access.accountId === "blasio-purse")?.characterId).toBe(PLAYER);
+    expect(projected.material.holdings.find((holding) => holding.id === "cornelian-estates")?.legalHolderCharacterId).toBe(PLAYER);
+    // The purse's id is not the man's: a rename over whole values, never substrings.
+    expect(JSON.stringify(projected)).not.toContain("\"gnaeus-cornelius\"");
+    expect(projected.characters.length).toBe(world().characters.length);
+    expect(WorldStateSchema.safeParse(projected).success).toBe(true);
+    expect(materializePlayerCharacter(projected, PLAYER, knowledgebase({ becomesCharacterId: "gnaeus-cornelius" }), government)).toBe(projected);
+  });
+
+  it("taking Genucius's place, commands his army and is party to his matters", () => {
+    const projected = materializePlayerCharacter(world(), PLAYER, knowledgebase({ canonicalName: "Gaius Genucius Clepsina", origin: "historical", becomesCharacterId: "gaius-genucius" }), government);
+    expect(projected.material.forces.find((force) => force.id === "roman-field-army")?.commanderCharacterId).toBe(PLAYER);
+    expect(projected.storylines.find((storyline) => storyline.id === "rhegium-recovery")?.participantIds).toContain(PLAYER);
+    expect(projected.material.officeSeats.find((seat) => seat.id === "roman-consul:seat:1")?.holderCharacterId).toBe("gnaeus-cornelius");
+  });
+
+  it("is somebody new when the person named is not in the world", () => {
+    const projected = materializePlayerCharacter(world(), PLAYER, knowledgebase({ becomesCharacterId: "nobody-here" }), government);
+    expect(projected.characters.find((character) => character.id === PLAYER)?.name).toBe("Lucius Papirius Carbo");
   });
 });
 

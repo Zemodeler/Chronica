@@ -1,9 +1,10 @@
 import { z } from "zod";
-import { EntityIdSchema } from "../material-state";
+import { EntityIdSchema, MaybeIdSchema } from "../material-state";
 import { FactDiscoveryStateSchema, FactVisibilitySchema } from "../world/facts";
 import { OrderPartyRefSchema } from "../world/party-ref";
 import { WatchPredicateSchema } from "../world/watch";
-import { LocalIdSchema, RefSchema } from "./refs";
+import { AmbitionKindSchema } from "../characters/character";
+import { LocalIdSchema, MaybeRefSchema, RefSchema } from "./refs";
 import { WorldDeltaSchema } from "./deltas";
 
 /**
@@ -15,7 +16,8 @@ import { WorldDeltaSchema } from "./deltas";
  * contract instead of a parallel NPC system that drifts from the player's.
  */
 
-const SummarySchema = z.string().trim().min(1).max(600);
+/** Named, so the schema says "Summary" where it wrote the same string nine times. */
+const SummarySchema = z.string().trim().min(1).max(600).meta({ id: "Summary" });
 
 /**
  * A fact the actor claims it made true. The model supplies judgment --
@@ -46,7 +48,7 @@ export const FactProposalSchema = z.object({
    */
   knownToRefs: z.array(OrderPartyRefSchema).max(16).default([]),
   /** The thread this belongs to, when it belongs to one: an existing storyline id or a "local:" handle opened in this answer. */
-  storylineRef: RefSchema.nullable().default(null),
+  storylineRef: MaybeRefSchema.default(null),
 });
 export type FactProposal = z.infer<typeof FactProposalSchema>;
 /** The same, before defaults: what the engine itself writes when it records a consequence the model did not author. */
@@ -57,7 +59,7 @@ export const DelegationProposalSchema = z.object({
   localId: LocalIdSchema,
   issuerRef: OrderPartyRefSchema,
   recipientRef: OrderPartyRefSchema,
-  claimedAuthorityGrantRef: RefSchema.nullable().default(null),
+  claimedAuthorityGrantRef: MaybeRefSchema.default(null),
   instruction: SummarySchema,
 });
 export type DelegationProposal = z.infer<typeof DelegationProposalSchema>;
@@ -80,7 +82,7 @@ export const ScheduledEventProposalSchema = z.object({
   visibility: FactVisibilitySchema.default("public"),
   significance: z.number().int().min(0).max(100).default(35),
   knownToRefs: z.array(OrderPartyRefSchema).max(8).default([]),
-  storylineRef: RefSchema.nullable().default(null),
+  storylineRef: MaybeRefSchema.default(null),
 });
 export type ScheduledEventProposal = z.infer<typeof ScheduledEventProposalSchema>;
 
@@ -96,7 +98,7 @@ export const ScheduledEventPayloadSchema = z
     visibility: FactVisibilitySchema.default("public"),
     significance: z.number().int().min(0).max(100).default(35),
     knownTo: z.array(OrderPartyRefSchema).max(8).default([]),
-    storylineId: EntityIdSchema.nullable().default(null),
+    storylineId: MaybeIdSchema.default(null),
   })
   .loose();
 export type ScheduledEventPayload = z.infer<typeof ScheduledEventPayloadSchema>;
@@ -256,6 +258,33 @@ export const OrchestratorOutputSchema = ProposalSchema.extend({
 }).strict();
 export type OrchestratorOutput = z.infer<typeof OrchestratorOutputSchema>;
 
+/**
+ * Something a person means to go on pursuing, worked out as steps (gap §5).
+ *
+ * Only a person thinking for himself writes one, which is why it lives on the
+ * cognition answer and not in the delta union: the world voice has no plans
+ * of its own to lay, and every character the orchestrator's schema grows is
+ * paid on every order.
+ */
+export const PlanProposalSchema = z
+  .object({
+    /** What they are after. An ambition they already hold, named the same way, is planned again. */
+    ambition: z.string().trim().min(1).max(200),
+    kind: AmbitionKindSchema.default("other"),
+    steps: z
+      .array(z.object({
+        act: z.string().trim().min(1).max(200),
+        /** Days from now by which it should be done. */
+        inDays: z.number().int().min(1).max(730),
+        /** What it has to wait for, if anything. */
+        when: WatchPredicateSchema.nullable().default(null),
+      }).strict())
+      .min(1)
+      .max(4),
+  })
+  .strict();
+export type PlanProposal = z.infer<typeof PlanProposalSchema>;
+
 /** One batched call answers for several actors at once (VISION §29's call budget). */
 export const CognitionOutputSchema = z
   .object({
@@ -266,6 +295,9 @@ export const CognitionOutputSchema = z
           /** Reasoning from that actor's knowledge alone (VISION §28) -- kept for inspection, never applied. */
           reasoning: SummarySchema,
           proposal: ProposalSchema,
+          plan: PlanProposalSchema.nullable().default(null),
+          /** Steps of their own plan this answer carries out, by the ids in their section. */
+          stepsTaken: z.array(EntityIdSchema).max(2).default([]),
         }),
       )
       // The cap the router's own budget is allowed to fill. It was six, which

@@ -8,6 +8,7 @@ import {
   SignedScoreSchema,
 } from "../material-state";
 import { CharacterMindSchema, NEUTRAL_MIND } from "./mind";
+import { WatchPredicateSchema } from "../world/watch";
 
 // Characters (docs/08).
 //
@@ -80,13 +81,55 @@ export const DirectedRelationSchema = z
   .strict();
 export type DirectedRelation = z.infer<typeof DirectedRelationSchema>;
 
+export const AmbitionKindSchema = z.enum(["office", "wealth", "revenge", "peace", "dynasty", "restoration", "other"]);
+
+/**
+ * One step of a plan: something the person means to have done by a day.
+ *
+ * An ambition used to be a label and nothing else, so whether a man made
+ * progress on it over two years depended on whether the rotation kept asking
+ * him and he kept remembering. A step is what the engine can hold him to. It
+ * decides *when* -- the day comes near, or the thing it waits on happens --
+ * and wakes him; he decides what the step becomes when he takes it.
+ *
+ * A step is only ever in one of three states. "missed" is not the end of the
+ * plan: it is news for its owner, who is woken to carry on late, lay it again,
+ * or give it up.
+ */
+export const PlanStepSchema = z
+  .object({
+    id: EntityIdSchema,
+    /** What he means to do, as he would say it. Shown back, never parsed. */
+    act: z.string().trim().min(1).max(200),
+    /** The world day by which it should have happened (`world.instant.day`). */
+    dueDay: z.number().int().nonnegative(),
+    /** The day it was laid. A step is not asked about before half its time has run. */
+    laidOnDay: z.number().int().nonnegative().default(0),
+    /** What it waits on, if anything. The same language a watch is written in. */
+    waitsOn: WatchPredicateSchema.nullable().default(null),
+    /**
+     * What `waitsOn` read when the step was laid. Two predicates -- who holds a
+     * province, who holds a city -- are changes rather than states, and a
+     * change can only be seen against what it changed from.
+     */
+    armedReading: z.string().max(120).nullable().default(null),
+    status: z.enum(["pending", "done", "missed"]).default("pending"),
+    /** The day its owner was last woken for it; a step wakes him once for being due and once for being missed. */
+    wokenOnDay: z.number().int().nonnegative().nullable().default(null),
+    settledOnDay: z.number().int().nonnegative().nullable().default(null),
+  })
+  .strict();
+export type PlanStep = z.infer<typeof PlanStepSchema>;
+
 export const AmbitionSchema = z
   .object({
     id: EntityIdSchema,
     label: z.string().trim().min(1).max(200),
-    kind: z.enum(["office", "wealth", "revenge", "peace", "dynasty", "restoration", "other"]),
+    kind: AmbitionKindSchema,
     targetId: EntityIdSchema.nullable(),
     status: z.enum(["active", "fulfilled", "abandoned", "inherited"]),
+    /** The plan, in order. Empty for a want nobody has worked out how to get. */
+    steps: z.array(PlanStepSchema).max(8).default([]),
   })
   .strict();
 export type Ambition = z.infer<typeof AmbitionSchema>;

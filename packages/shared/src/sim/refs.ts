@@ -30,6 +30,13 @@ export const LocalIdSchema = z
 
 /** Either an existing world entity id, or `local:<localId>` minted in this same payload. */
 export const RefSchema = z.string().trim().min(1).max(130).meta({ id: "Ref" });
+
+/**
+ * A reference that may be absent. Named, like `Ref` itself, because the
+ * orchestrator's schema wrote it out in full some forty times, and every
+ * character of that schema is paid on every order.
+ */
+export const MaybeRefSchema = RefSchema.nullable().meta({ id: "MaybeRef" });
 export type Ref = z.infer<typeof RefSchema>;
 
 export function isLocalRef(ref: string): boolean {

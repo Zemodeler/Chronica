@@ -3,17 +3,19 @@ import { z } from "zod";
 // Named, so every JSON schema generated for a prompt states it once and points
 // at it: inlined, it was 73 copies of the same string in the orchestrator's.
 export const EntityIdSchema = z.string().trim().min(1).max(120).meta({ id: "Id" });
+/** An id that may be absent, named for the same reason as `MaybeRef` (see `sim/refs.ts`). */
+export const MaybeIdSchema = EntityIdSchema.nullable().meta({ id: "MaybeId" });
 export const ElapsedStepSchema = z.number().int().nonnegative().safe();
 export type ElapsedStep = z.infer<typeof ElapsedStepSchema>;
 export const MoneyAmountSchema = z.number().int().nonnegative().safe();
 export const BasisPointsSchema = z.number().int().min(0).max(10_000);
-export const SignedScoreSchema = z.number().int().min(-100).max(100);
+export const SignedScoreSchema = z.number().int().min(-100).max(100).meta({ id: "Score" });
 /** The levels a province is read or tested by, in basis points (`material/province-material.ts`, `world/mechanic.ts`). */
 export const PROVINCE_LEVELS = ["stability", "food_security", "productive_capacity", "war_damage"] as const;
 export const ProvinceLevelSchema = z.enum(PROVINCE_LEVELS);
 export type ProvinceLevel = z.infer<typeof ProvinceLevelSchema>;
 
-export const VisibilitySchema = z.enum(["public", "polity", "private"]);
+export const VisibilitySchema = z.enum(["public", "polity", "private"]).meta({ id: "Visibility" });
 export type Visibility = z.infer<typeof VisibilitySchema>;
 
 export const CurrencyDefinitionSchema = z.object({

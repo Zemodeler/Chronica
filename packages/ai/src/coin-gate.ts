@@ -106,6 +106,9 @@ export async function callWithCoinGate(
   validate?: (content: string) => boolean,
   options?: { maxRetries?: number },
 ): Promise<AiCallResult> {
+  // Nothing to reserve and nothing to charge: a person is answering.
+  if (adapter.free === true) return adapter.call(operation, prompts.system, prompts.user);
+
   // Fast pre-check: refuse immediately if wallet is empty (before touching holds).
   // Timed with everything else we do around the call: three database round
   // trips per model call is a number worth being able to see next to the
@@ -217,6 +220,7 @@ export async function callWithToolsAndCoinGate(
   messages: readonly AiConversationMessage[],
   tools: readonly AiToolDefinition[],
 ): Promise<AiToolCallResult> {
+  if (adapter.free === true) return adapter.callWithTools(operation, systemPrompt, messages, tools);
   let ledgerMs = 0;
   const openedAt = performance.now();
   const snapshot = await getCoinWalletSnapshot(db, userId);

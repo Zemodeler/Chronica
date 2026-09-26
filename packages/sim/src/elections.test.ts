@@ -18,13 +18,31 @@ import { runDeterministicTick } from "./tick";
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const government = { offices: definition.government.offices, successionRules: definition.government.successionRules };
+
+/**
+ * The opening as it stood before v29 seated Blasio: the second consul's chair
+ * empty and Blasio not yet in the world. These tests walk an election, and
+ * were written round the empty chair.
+ */
+const withoutBlasio = (world: WorldState): WorldState => ({
+  ...world,
+  characters: world.characters.filter((character) => character.id !== "gnaeus-cornelius"),
+  material: {
+    ...world.material,
+    officeSeats: world.material.officeSeats
+      .filter((seat) => seat.holderCharacterId !== "gnaeus-cornelius" || seat.officeId === "roman-consul")
+      .map((seat) => (seat.holderCharacterId === "gnaeus-cornelius"
+        ? { ...seat, holderCharacterId: null, status: "vacant" as const, vacancyCause: "never_filled" as const, termStartedAtStep: null, termExpiresAtStep: null }
+        : seat)),
+  },
+});
 /**
  * These are about how an election is run, not who may stand, so the
  * consulship's ladder -- the rung below, the ten-year gap that bars Curius and
  * then Gaius -- is taken off. `a-career.test.ts` is about the ladder.
  */
 const opening = (): WorldState => {
-  const world = WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
+  const world = withoutBlasio(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)));
   return {
     ...world,
     material: {

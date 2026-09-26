@@ -68,3 +68,13 @@ describe("settling a hold", () => {
     expect(ledger.releaseCoinHold).not.toHaveBeenCalled();
   });
 });
+
+describe("a free adapter", () => {
+  it("is let through without touching the wallet or reserving anything", async () => {
+    const free = { free: true, call, callWithTools: () => Promise.reject(new Error("unused")) } as unknown as AiAdapter;
+    await expect(callWithCoinGate(db, "user", "game", "simulate_cognition", free, { system: "", user: "" })).resolves.toMatchObject({ model: "gpt-6-luna" });
+    expect(ledger.getCoinWalletSnapshot).not.toHaveBeenCalled();
+    expect(ledger.authorizeCoinHold).not.toHaveBeenCalled();
+    expect(ledger.settleCoinHold).not.toHaveBeenCalled();
+  });
+});

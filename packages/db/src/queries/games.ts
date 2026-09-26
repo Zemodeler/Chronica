@@ -217,7 +217,10 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     // Hundred and Four; Syracuse's court; and a ruler, council and priesthood
     // for every other power on the map.
     await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 28, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Gives every power its real offices -- Rome's full ladder of magistracies with ages, rungs and the ten-year gap, the Senate, the priesthoods; Carthage's suffetes and councils; Syracuse's court; a ruler, council and priesthood for everyone else -- and seats the named men in them." }).onConflictDoNothing();
-    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 28, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
+    // Version 29 seats Gnaeus Cornelius Blasio, the second consul of 270,
+    // in the chair the scenario had always left empty.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 29, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Seats the second consul of 270, Gnaeus Cornelius Blasio, with his purse, estates and Senate seat, so both consular chairs are filled." }).onConflictDoNothing();
+    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 29, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
   });
 }
 

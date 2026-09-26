@@ -10,6 +10,7 @@ import {
   type OrderPartyRef,
   type WorldState,
 } from "@chronica/shared";
+import { PLAN_SLOTS } from "./plans";
 
 /**
  * The attention router (VISION §18, §19).
@@ -82,6 +83,15 @@ export interface AttentionInput {
   readonly excludeCharacterIds: readonly string[];
   readonly maxFocused: number;
   readonly maxCausalDepth: number;
+  /**
+   * Facts each person has already been asked about, this burst. The router
+   * remembered nothing between rounds, so a man was put in front of the same
+   * news every round until the depth ran out -- and "directly affected" by a
+   * fact he had written himself, because his own act names him.
+   */
+  readonly alreadyAnswered?: ReadonlyMap<string, ReadonlySet<string>> | undefined;
+  /** Who wrote each fact this burst, by character. Nobody is woken by his own act. */
+  readonly authorOf?: ReadonlyMap<string, string> | undefined;
 }
 
 export function routeAttention(input: AttentionInput): AttentionResult {
@@ -110,10 +120,6 @@ export function routeAttention(input: AttentionInput): AttentionResult {
     world.elapsedStep,
   );
   const holdsAuthority = new Set(authority.grants.filter((grant) => !isOwnPurseGrant(grant)).map((grant) => grant.holder.id));
-  const affectedIds = new Set(triggering.flatMap((fact) => fact.affectedEntities.map((entity) => entity.id)));
-  const affectedPolities = new Set(
-    triggering.flatMap((fact) => fact.affectedEntities.filter((entity) => entity.kind === "polity").map((entity) => entity.id)),
-  );
   const commanders = new Set(world.material.forces.map((force) => force.commanderCharacterId));
 
   // Nearness. Nothing in the router knew where anybody was or whom they
@@ -123,13 +129,22 @@ export function routeAttention(input: AttentionInput): AttentionResult {
   const forcesOf = (characterId: string): string[] => world.material.forces
     .filter((force) => force.commanderCharacterId === characterId || force.controllerCharacterId === characterId || force.memberCharacterIds.includes(characterId))
     .map((force) => force.id);
-  const affectedForceIds = new Set(world.material.forces.filter((force) => affectedIds.has(force.id)).map((force) => force.id));
-  const affectedCharacters = world.characters.filter((character) => affectedIds.has(character.id));
-  const comradeForceIds = new Set(affectedCharacters.flatMap((character) => forcesOf(character.id)));
-  const wherePlaces = new Set([
-    ...world.map.provinces.filter((province) => affectedIds.has(province.id)).map((province) => province.id),
-    ...affectedCharacters.map((character) => character.locationProvinceId),
-  ]);
+  // What a person's own news touches: who and what it names, the armies in
+  // it and the armies of the people in it, and where it happened. Worked out
+  // from the news that is new to them, not from the whole round's, so a man
+  // is not "directly affected" by what he himself just did.
+  const interestOf = (news: readonly Fact[]) => {
+    const affectedIds = new Set(news.flatMap((fact) => fact.affectedEntities.map((entity) => entity.id)));
+    const affectedPolities = new Set(news.flatMap((fact) => fact.affectedEntities.filter((entity) => entity.kind === "polity").map((entity) => entity.id)));
+    const affectedForceIds = new Set(world.material.forces.filter((force) => affectedIds.has(force.id)).map((force) => force.id));
+    const affectedCharacters = world.characters.filter((character) => affectedIds.has(character.id));
+    const comradeForceIds = new Set(affectedCharacters.flatMap((character) => forcesOf(character.id)));
+    const wherePlaces = new Set([
+      ...world.map.provinces.filter((province) => affectedIds.has(province.id)).map((province) => province.id),
+      ...affectedCharacters.map((character) => character.locationProvinceId),
+    ]);
+    return { affectedIds, affectedPolities, affectedForceIds, comradeForceIds, wherePlaces };
+  };
 
   // The two ends of every venture still trading, by owner.
   const routesOf = new Map<string, string[]>();
@@ -151,11 +166,14 @@ export function routeAttention(input: AttentionInput): AttentionResult {
 
     // Gate 1: could they know? This is the epistemic wall -- a secret nobody
     // has discovered cannot pull anyone into cognition (VISION §14).
-    const knownFacts = factsKnownTo(triggering, ref, character.polityId, world.instant);
+    const answered = input.alreadyAnswered?.get(character.id);
+    const knownFacts = factsKnownTo(triggering, ref, character.polityId, world.instant)
+      .filter((fact) => input.authorOf?.get(fact.id) !== character.id && answered?.has(fact.id) !== true);
     if (knownFacts.length === 0) {
       dormantCount += 1;
       continue;
     }
+    const { affectedIds, affectedPolities, affectedForceIds, comradeForceIds, wherePlaces } = interestOf(knownFacts);
 
     // Gate 2: would they care?
     const reasons: string[] = [];
@@ -307,6 +325,13 @@ export interface AmbientInput {
    * the room, and his own thread is in his section like anyone else's.
    */
   readonly nemesisCharacterId?: string | null | undefined;
+  /**
+   * People a step of their own plan wants now (see `plans.ts`), with the
+   * sentence they are told. The engine decides when it is time; asking them is
+   * how that decision reaches the world. Up to `PLAN_SLOTS` of them are
+   * reserved places, taken from the cast rather than added to it.
+   */
+  readonly dueStepOwners?: ReadonlyMap<string, string> | undefined;
 }
 
 /**
@@ -415,6 +440,15 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
       pressing = true;
       reasons.unshift("has a matter of their own that will not keep");
     }
+    // A step of their own plan has come due, or what it waited for has
+    // happened, or it passed its day undone. Pressing: that is a round worth
+    // paying for, and the step wakes him once for each, never every hop.
+    const step = input.dueStepOwners?.get(character.id);
+    if (step !== undefined) {
+      score += 30;
+      pressing = true;
+      reasons.unshift(step);
+    }
     if (character.polityId !== null && polityHasAims.has(character.polityId)) {
       score += 15;
       reasons.push("their government is pursuing something");
@@ -443,11 +477,15 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
 
   scored.sort((a, b) => b.score - a.score || stableHash([a.characterId]) - stableHash([b.characterId]));
   // The antagonist first, then whoever the narrator has just handed something
-  // to, then the rotation. Both are reservations against the same cast size:
-  // a busy week must not be the reason the quarrel goes quiet.
+  // to, then whoever a plan wants now, then the rotation. All three are
+  // reservations against the same cast size: a busy week must not be the
+  // reason the quarrel goes quiet, nor the reason a man's plan never comes up.
   const antagonist = scored.filter((actor) => actor.characterId === input.nemesisCharacterId).slice(0, 1);
   const reserved = scored.filter((actor) => priority.has(actor.characterId) && !antagonist.includes(actor)).slice(0, 1);
-  const held = [...antagonist, ...reserved];
+  const planned = scored
+    .filter((actor) => input.dueStepOwners?.has(actor.characterId) === true && !antagonist.includes(actor) && !reserved.includes(actor))
+    .slice(0, PLAN_SLOTS);
+  const held = [...antagonist, ...reserved, ...planned].slice(0, input.max);
   const rest = scored.filter((actor) => !held.includes(actor)).slice(0, Math.max(0, input.max - held.length));
   return [...held, ...rest];
 }

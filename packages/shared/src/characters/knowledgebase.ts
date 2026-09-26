@@ -51,6 +51,12 @@ export const CharacterKnowledgebaseSchema = z
     deathYearApprox: z.number().int().nullable(),
     /** historical = researched from model knowledge; invented = fully AI-created; hybrid = real figure, filled gaps. */
     origin: z.enum(["historical", "invented", "hybrid"]),
+    /**
+     * A person already in the world whose place the player takes: asked for a
+     * station and no name, the player is the man who holds it, not a stranger
+     * beside him. Unset or null, the player is somebody new.
+     */
+    becomesCharacterId: EntityIdSchema.nullable().optional(),
 
     // Historical and cultural context
     period: z.string().trim().min(1).max(200),

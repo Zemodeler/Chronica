@@ -1055,7 +1055,10 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   const plainly = (thread: Thread): ChronicleEntry =>
     entryOf(thread, period, thread.facts.map((fact) => readable(fact.summary)).join("\n\n"));
 
-  // One matter to a call.
+  // One matter to a call, and every matter written, the light ones too. A
+  // light home thread was once printed in its facts' own words to save its
+  // call, and read as a ledger -- "Grain is dearer in Latium" under a headline
+  // of the same words. The Chronicle is the part of the game that is read.
   //
   // The selection above -- what is visible, what belongs with what, what
   // weighs enough to tell -- stays a single pass over the whole burst, because

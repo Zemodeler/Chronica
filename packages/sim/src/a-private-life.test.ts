@@ -138,7 +138,7 @@ describe("men who follow a man with no right to lead them", () => {
     const gaiusWantsIt = {
       ...state,
       characters: state.characters.map((character) => (character.id === "gaius-genucius"
-        ? { ...character, ambitions: [...character.ambitions, { id: "humble-syracuse", label: "Humble Syracuse", kind: "revenge" as const, targetId: "syracuse", status: "active" as const }] }
+        ? { ...character, ambitions: [...character.ambitions, { id: "humble-syracuse", label: "Humble Syracuse", kind: "revenge" as const, targetId: "syracuse", status: "active" as const, steps: [] }] }
         : character)),
     };
     const result = asCurius([{ op: "force_engage", forceRef: "roman-field-army", targetForceRef: syracuse.id, posture: "offer_battle", reason: "Curius wants war." }], gaiusWantsIt);
