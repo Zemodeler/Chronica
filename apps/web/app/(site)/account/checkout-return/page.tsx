@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { StatusMessage } from "../../components/status-message";
+import { StatusMessage } from "../../../components/status-message";
 
 export const metadata: Metadata = { title: "Coin purchasing unavailable" };
 

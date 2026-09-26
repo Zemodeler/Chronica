@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { registerCredentials } from "../actions";
-import { StatusMessage } from "../components/status-message";
+import { registerCredentials } from "../../actions";
+import { StatusMessage } from "../../components/status-message";
 
 export const metadata: Metadata = { title: "Create account" };
 

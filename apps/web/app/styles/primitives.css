@@ -1,0 +1,248 @@
+/*
+ * The shared parts: the sheet, buttons, badges, ledgers. Surfaces build on
+ * these rather than restyling a button of their own.
+ */
+@layer primitives {
+  /* ─── Buttons ──────────────────────────────────────────────────────── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: .5em;
+    min-height: 2.5rem;
+    padding: .5rem 1.15rem;
+    border: 1px solid color-mix(in srgb, var(--edge) 60%, transparent);
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--fg);
+    font: 500 var(--step-0)/1.2 var(--font-sans);
+    text-decoration: none;
+    cursor: pointer;
+    transition: border-color .15s var(--ease), background-color .15s var(--ease);
+  }
+  .btn:hover { border-color: var(--edge); }
+  .btn--primary {
+    border-color: var(--bronze-high);
+    background: var(--bronze);
+    color: var(--soot);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 22%), 0 1px 0 rgb(0 0 0 / 35%);
+  }
+  .btn--primary:hover { background: #C99A58; border-color: var(--bronze-high); }
+  .on-papyrus .btn--primary { border-color: var(--bronze-deep); }
+  .btn--quiet { background: transparent; color: var(--fg); box-shadow: none; }
+  .btn--seal {
+    border-color: rgb(255 255 255 / 14%);
+    background: var(--seal);
+    color: var(--vellum);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 12%);
+  }
+  .btn--danger {
+    border-color: color-mix(in srgb, var(--seal-roman) 70%, transparent);
+    background: transparent;
+    color: #E3A69E;
+    box-shadow: none;
+  }
+  .btn--danger:hover { border-color: #C0534A; }
+  .btn--small { min-height: 2rem; padding: .3rem .8rem; font-size: var(--step--1); }
+
+  /* A control that reads as a word: filters, "show all", headline links. */
+  .word-button {
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    color: var(--fg);
+    font: inherit;
+    text-align: left;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--edge) 55%, transparent);
+    text-decoration-thickness: 1px;
+    text-underline-offset: .22em;
+  }
+  .word-button:hover { text-decoration-color: var(--edge); text-decoration-thickness: 2px; }
+
+  /* ─── The one close control ────────────────────────────────────────── */
+  .close-button {
+    flex: none;
+    min-height: 2rem;
+    padding: .25rem .1rem;
+    border: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--edge) 55%, transparent);
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    color: var(--fg-muted);
+    font: 500 var(--step--1)/1 var(--font-sans);
+    letter-spacing: .02em;
+  }
+  .close-button:hover { color: var(--fg); border-bottom-color: var(--edge); }
+
+  /* ─── Badges ───────────────────────────────────────────────────────── */
+  /* Unread is a small disc of lamp-gold wax. */
+  .badge {
+    display: inline-block;
+    min-width: 1.3rem;
+    height: 1.3rem;
+    padding: 0 .35rem;
+    border-radius: 999px;
+    background: radial-gradient(circle at 40% 35%, #F7D98F, var(--lamp) 55%, #C9993F);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 55%);
+    color: var(--soot);
+    font: 700 .72rem/1.3rem var(--font-sans);
+    font-variant-numeric: lining-nums tabular-nums;
+    text-align: center;
+  }
+  /* Something is waiting on the player's word. */
+  .seal-dot {
+    display: inline-block;
+    width: .55rem;
+    height: .55rem;
+    border-radius: 50%;
+    background: var(--seal);
+    box-shadow: 0 0 0 2px rgb(21 17 13 / 80%), 0 0 .6rem color-mix(in srgb, var(--seal) 80%, transparent);
+  }
+
+  /* A quiet line where content would be: loading, empty, not permitted. */
+  .quiet {
+    color: var(--fg-muted);
+    font-family: var(--font-serif);
+    font-style: italic;
+  }
+
+  /* A list divided by rules, not boxed into cards. */
+  .ruled { display: grid; margin: 0; padding: 0; list-style: none; }
+  .ruled > li { padding-block: .85rem; border-bottom: 1px solid var(--rule); }
+  .ruled > li:first-child { padding-top: 0; }
+  .ruled > li:last-child { border-bottom: 0; padding-bottom: 0; }
+
+  /* ─── Ledgers ──────────────────────────────────────────────────────── */
+  .ledger { width: 100%; border-collapse: collapse; font-variant-numeric: lining-nums tabular-nums; }
+  .ledger th, .ledger td { padding: .4rem 0; border-bottom: 1px solid var(--rule); }
+  .ledger th { color: var(--fg); font: 400 var(--step-0) var(--font-sans); text-align: left; }
+  .ledger td { text-align: right; white-space: nowrap; }
+  .ledger .ledger__head th {
+    padding-top: 1rem;
+    color: var(--fg-muted);
+    font-family: var(--font-serif);
+    font-style: italic;
+    border-bottom-color: var(--rule);
+  }
+  .ledger .ledger__head:first-child th { padding-top: 0; }
+  .ledger .ledger__total th, .ledger .ledger__total td { font-weight: 700; }
+  .ledger .ledger__foot th, .ledger .ledger__foot td {
+    padding-top: .6rem;
+    border-top: 1.5px solid var(--fg);
+    border-bottom: 0;
+    font-weight: 700;
+  }
+  .is-short { color: var(--seal); }
+
+  /* ─── The sheet ────────────────────────────────────────────────────── */
+  .sheet {
+    position: fixed;
+    top: calc(var(--lintel) + 1rem);
+    bottom: auto;
+    width: min(var(--sheet-width, 34rem), calc(100vw - 4rem));
+    max-width: none;
+    max-height: calc(100dvh - var(--lintel) - 2.25rem);
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lift), inset 0 0 0 1px rgb(122 86 38 / 28%);
+    opacity: 1;
+    translate: 0 0;
+    transition:
+      opacity .28s var(--ease),
+      translate .28s var(--ease),
+      overlay .28s allow-discrete,
+      display .28s allow-discrete;
+  }
+  .sheet[open] { display: flex; flex-direction: column; }
+  .sheet--right { right: 2.5vw; left: auto; }
+  .sheet--left { left: 2.5vw; right: auto; }
+  .sheet--center { left: 0; right: 0; margin-inline: auto; }
+  .sheet--reading { --sheet-width: 42rem; }
+  .sheet--ledger { --sheet-width: 34rem; }
+  .sheet--desk { --sheet-width: 48rem; }
+  .sheet--narrow { --sheet-width: 28rem; }
+
+  @starting-style {
+    .sheet[open] { opacity: 0; }
+    .sheet--right[open] { translate: 1rem 0; }
+    .sheet--left[open] { translate: -1rem 0; }
+    .sheet--center[open] { translate: 0 .75rem; }
+  }
+
+  /* The lamp turns down: the room dims toward its edges and softens. */
+  .sheet::backdrop {
+    background:
+      radial-gradient(120% 95% at 20% 15%, rgb(21 17 13 / 30%), rgb(21 17 13 / 72%));
+    backdrop-filter: blur(2px) saturate(.85);
+    transition:
+      background .32s var(--ease),
+      backdrop-filter .32s var(--ease),
+      overlay .32s allow-discrete,
+      display .32s allow-discrete;
+  }
+  @starting-style {
+    .sheet[open]::backdrop { background: rgb(21 17 13 / 0%); backdrop-filter: blur(0) saturate(1); }
+  }
+
+  .sheet--papyrus { background: var(--papyrus); }
+  .sheet--umber {
+    background: linear-gradient(180deg, var(--umber) 0%, #221A14 100%);
+    box-shadow: var(--shadow-lift), inset 0 0 0 1px rgb(185 139 74 / 35%);
+  }
+
+  .sheet__frame { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+  .sheet__header {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    padding: 1.25rem 1.6rem .9rem;
+    border-bottom: 1px solid var(--rule);
+    flex: none;
+  }
+  .sheet__heading { flex: 1; min-width: 0; display: grid; gap: .1rem; }
+  .sheet__title { font-size: var(--step-3); line-height: 1.1; }
+  .sheet__subtitle { color: var(--fg-muted); font-size: var(--step-0); }
+  .sheet__body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 1.1rem 1.6rem 1.5rem;
+    scrollbar-color: color-mix(in srgb, var(--edge) 55%, transparent) transparent;
+    scrollbar-width: thin;
+  }
+  /* Focused so that reading starts at the document, and so it can be scrolled
+     from the keyboard: a quiet ring inside the edge, not a control's. */
+  .sheet__body:focus { outline: none; }
+  .sheet__body:focus-visible { outline: 1px solid color-mix(in srgb, var(--edge) 60%, transparent); outline-offset: -6px; }
+  /* A section inside a sheet: a quiet italic heading and ruled content. */
+  .sheet-section { display: grid; gap: .6rem; padding-block: 1rem; border-bottom: 1px solid var(--rule); }
+  .sheet-section:first-child { padding-top: 0; }
+  .sheet-section:last-child { border-bottom: 0; padding-bottom: 0; }
+  .sheet-section > h3 {
+    color: var(--fg-muted);
+    font-size: var(--step-0);
+    font-style: italic;
+    font-weight: 400;
+  }
+
+  /* Status lines on forms. */
+  .notice, .error {
+    padding: .7rem 1rem;
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--bronze);
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--umber) 80%, transparent);
+    color: var(--fg);
+    scroll-margin-top: 1rem;
+  }
+  .error { border-left-color: #C0534A; }
+}

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import { beginGoogleSignIn, loginWithCredentials } from "../actions";
-import { StatusMessage } from "../components/status-message";
-import { googleSignInAvailable } from "../../lib/authentication";
+import { beginGoogleSignIn, loginWithCredentials } from "../../actions";
+import { StatusMessage } from "../../components/status-message";
+import { googleSignInAvailable } from "../../../lib/authentication";
 
 export const metadata: Metadata = { title: "Log in" };
 

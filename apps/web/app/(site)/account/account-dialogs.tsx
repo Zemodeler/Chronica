@@ -13,8 +13,8 @@ import {
   selectLocalAiProvider,
   signOut,
   updateProfile,
-} from "../actions";
-import { DeleteSaveForm } from "../components/delete-save-form";
+} from "../../actions";
+import { DeleteSaveForm } from "../../components/delete-save-form";
 
 const AVATARS = ["laurel", "owl", "lion", "horse", "ship", "tower"] as const;
 
@@ -136,76 +136,68 @@ export function AccountDashboard({
 
       <div className="account-grid">
         <button type="button" className="account-card" onClick={() => setOpenDialog("profile")}>
-          <span className="account-card-icon">🧑</span>
           <span className="account-card-title">Profile</span>
           <span className="account-card-meta">
-            {account.displayName}{account.username ? ` · @${account.username}` : ""}
+            {account.displayName}{account.username ? `, @${account.username}` : ""}
           </span>
-          <span className="account-card-action">Edit →</span>
+          <span className="account-card-action">Edit</span>
         </button>
 
         <button type="button" className="account-card" onClick={() => setOpenDialog("wallet")}>
-          <span className="account-card-icon">🪙</span>
-          <span className="account-card-title">Coin Wallet</span>
+          <span className="account-card-title">Coin wallet</span>
           <span className="account-card-value">{displayedCoins}</span>
-          <span className="account-card-action">View →</span>
+          <span className="account-card-action">View</span>
         </button>
 
         <button type="button" className="account-card" onClick={() => setOpenDialog("redeem")}>
-          <span className="account-card-icon">🎁</span>
-          <span className="account-card-title">Redeem Gift</span>
+          <span className="account-card-title">Redeem a gift</span>
           <span className="account-card-meta">Enter a gift code to receive coins</span>
-          <span className="account-card-action">Redeem →</span>
+          <span className="account-card-action">Redeem</span>
         </button>
 
         <button type="button" className="account-card" onClick={() => setOpenDialog("saves")}>
-          <span className="account-card-icon">💾</span>
-          <span className="account-card-title">Your Saves</span>
+          <span className="account-card-title">Your saves</span>
           <span className="account-card-meta">
             {totalSaves} save{totalSaves !== 1 ? "s" : ""}
           </span>
-          <span className="account-card-action">Manage →</span>
+          <span className="account-card-action">Manage</span>
         </button>
 
         <button type="button" className="account-card" onClick={() => setOpenDialog("email")}>
-          <span className="account-card-icon">✉️</span>
-          <span className="account-card-title">Recovery Email</span>
+          <span className="account-card-title">Recovery email</span>
           <span className="account-card-meta">
             {account.emailVerified ? `Verified: ${account.email}` : "No recovery email set"}
           </span>
-          <span className="account-card-action">{account.emailVerified ? "Info →" : "Add →"}</span>
+          <span className="account-card-action">{account.emailVerified ? "Info" : "Add"}</span>
         </button>
 
         {canManageGifts && (
           <button type="button" className="account-card account-card--dev" onClick={() => setOpenDialog("developer")}>
-            <span className="account-card-icon">🔑</span>
-            <span className="account-card-title">Gift Codes</span>
+            <span className="account-card-title">Gift codes</span>
             <span className="account-card-meta">
               {gifts.length} code{gifts.length !== 1 ? "s" : ""} created
             </span>
-            <span className="account-card-action">Manage →</span>
+            <span className="account-card-action">Manage</span>
           </button>
         )}
 
         {canManageGifts && localAiProviderConfiguration?.available && (
           <button type="button" className="account-card account-card--dev" onClick={() => setOpenDialog("ai_provider")}>
-            <span className="account-card-icon">⚙️</span>
-            <span className="account-card-title">Local AI Provider</span>
+            <span className="account-card-title">Local AI provider</span>
             <span className="account-card-meta">
               {localAiProviderConfiguration.activeProvider === "openai" ? "OpenAI" : "Anthropic"}
             </span>
-            <span className="account-card-action">Switch →</span>
+            <span className="account-card-action">Switch</span>
           </button>
         )}
 
         {canManageGifts && (
           <button type="button" className="account-card account-card--dev" onClick={() => setOpenDialog("workflow_proposals")}>
-            <span className="account-card-icon">🔬</span>
-            <span className="account-card-title">Invented Workflows</span>
+            <span className="account-card-title">Invented workflows</span>
             <span className="account-card-meta">
               {pendingProposalCount} saved workflow{pendingProposalCount === 1 ? "" : "s"}
             </span>
-            <span className="account-card-action">Review →</span>
+            <span className="account-card-action">Review</span>
           </button>
         )}
       </div>
@@ -233,7 +225,7 @@ function DialogHeader({ title, onClose }: { title: string; onClose: () => void }
   return (
     <div className="dialog-header">
       <h2 className="dialog-title">{title}</h2>
-      <button type="button" className="dialog-close" onClick={onClose} aria-label="Close">✕</button>
+      <button type="button" className="dialog-close" onClick={onClose}>Close</button>
     </div>
   );
 }
@@ -241,7 +233,7 @@ function DialogHeader({ title, onClose }: { title: string; onClose: () => void }
 function ProfileDialog({ account, onClose }: { account: AccountDashboardViewModel; onClose: () => void }) {
   return (
     <>
-      <DialogHeader title="Edit Profile" onClose={onClose} />
+      <DialogHeader title="Edit profile" onClose={onClose} />
       <div className="dialog-body">
         <form action={updateProfile}>
           <label htmlFor="displayName">Display name</label>
@@ -270,7 +262,7 @@ function ProfileDialog({ account, onClose }: { account: AccountDashboardViewMode
 function EmailDialog({ account, onClose }: { account: AccountDashboardViewModel; onClose: () => void }) {
   return (
     <>
-      <DialogHeader title="Recovery Email" onClose={onClose} />
+      <DialogHeader title="Recovery email" onClose={onClose} />
       <div className="dialog-body">
         {account.emailVerified ? (
           <p><strong>{account.email}</strong> is verified and can be used to reset your password.</p>
@@ -292,7 +284,7 @@ function EmailDialog({ account, onClose }: { account: AccountDashboardViewModel;
 function WalletDialog({ account, displayedCoins, onClose }: { account: AccountDashboardViewModel; displayedCoins: string; onClose: () => void }) {
   return (
     <>
-      <DialogHeader title="Coin Wallet" onClose={onClose} />
+      <DialogHeader title="Coin wallet" onClose={onClose} />
       <div className="dialog-body">
         <p className="acct-wallet-note">Coins can currently be funded only by a Zemodeler gift code. Purchasing is not available yet.</p>
         <div className="credit-summary">
@@ -361,13 +353,13 @@ function WalletDialog({ account, displayedCoins, onClose }: { account: AccountDa
 function RedeemDialog({ onClose }: { onClose: () => void }) {
   return (
     <>
-      <DialogHeader title="Redeem a Gift" onClose={onClose} />
+      <DialogHeader title="Redeem a gift" onClose={onClose} />
       <div className="dialog-body">
         <p>Enter a gift code to add coins to your wallet.</p>
         <form action={redeemGift}>
           <label htmlFor="code">Gift code</label>
           <input id="code" name="code" autoComplete="off" required placeholder="CHR-..." />
-          <button type="submit">Redeem Gift</button>
+          <button type="submit">Redeem a gift</button>
         </form>
       </div>
     </>
@@ -379,7 +371,7 @@ function SavesDialog({ account, onClose }: { account: AccountDashboardViewModel;
   const joinedSaves = account.joinedSaves ?? [];
   return (
     <>
-      <DialogHeader title="Your Saves" onClose={onClose} />
+      <DialogHeader title="Your saves" onClose={onClose} />
       <div className="dialog-body">
         <h3 style={{ marginTop: 0 }}>Hosted</h3>
         {hostedSaves.length === 0 ? (
@@ -417,7 +409,7 @@ function DeveloperDialog({ gifts, onClose }: { gifts: SerializedGift[]; onClose:
 
   return (
     <>
-      <DialogHeader title="Gift Codes" onClose={onClose} />
+      <DialogHeader title="Gift codes" onClose={onClose} />
       <div className="dialog-body">
         <h3 style={{ marginTop: 0 }}>Create a new code</h3>
         <form action={createDeveloperGift}>
@@ -505,7 +497,7 @@ function LocalAiProviderDialog({ configuration, onClose }: { configuration: Loca
 
   return (
     <>
-      <DialogHeader title="Local AI Provider" onClose={onClose} />
+      <DialogHeader title="Local AI provider" onClose={onClose} />
       <div className="dialog-body">
         <p className="dialog-lede">
           Choose the AI provider used by this local development server. API keys stay in your local environment file and are never shown here.
@@ -583,7 +575,7 @@ function WorkflowProposalsDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <DialogHeader title="Invented Workflows" onClose={onClose} />
+      <DialogHeader title="Invented workflows" onClose={onClose} />
       <div className="dialog-body">
         <p className="dialog-lede">
           Reusable AI-created game workflows, ranked by successful use. Disabling one removes it from future AI decisions without changing past turns.
@@ -596,14 +588,14 @@ function WorkflowProposalsDialog({ onClose }: { onClose: () => void }) {
         )}
 
         {workflows.map((workflow) => (
-          <div key={workflow.id} style={{ borderTop: "1px solid var(--border)", paddingTop: "1rem", marginTop: "1rem" }}>
+          <div key={workflow.id} style={{ borderTop: "1px solid var(--rule)", paddingTop: "1rem", marginTop: "1rem" }}>
             <p><strong>{workflow.actionId}</strong> · {workflow.status} · {workflow.successfulUseCount} successful use{workflow.successfulUseCount === 1 ? "" : "s"}</p>
             <p><strong>Intent:</strong> {workflow.intent}</p>
-            <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>
+            <p style={{ color: "var(--fg-muted)", fontSize: "0.875rem" }}>
               {workflow.description} · game: <code>{workflow.gameId.slice(0, 8)}</code> · last use: {workflow.lastUsedAt ? new Date(workflow.lastUsedAt).toLocaleString() : "never"}
             </p>
             {useHistory[workflow.id] && (
-              <pre style={{ fontSize: "0.75rem", overflowX: "auto", background: "var(--surface-alt)", padding: "0.5rem", borderRadius: "4px" }}>
+              <pre style={{ fontSize: "0.75rem", overflowX: "auto", background: "var(--papyrus-shade)", padding: "0.5rem", borderRadius: "4px" }}>
                 {JSON.stringify({ definition: workflow.definition, recentUses: useHistory[workflow.id] }, null, 2)}
               </pre>
             )}

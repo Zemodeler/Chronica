@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import { redirect } from "next/navigation";
-import { StatusMessage } from "./components/status-message";
-import { DeleteSaveForm } from "./components/delete-save-form";
-import { gameRepository } from "../lib/game-repository";
+import { StatusMessage } from "../components/status-message";
+import { DeleteSaveForm } from "../components/delete-save-form";
+import { gameRepository } from "../../lib/game-repository";
 
 export const metadata: Metadata = { title: "Chronica" };
 
@@ -34,7 +34,7 @@ export default async function HomePage({
       )}
 
       <div className="dashboard-heading">
-        <h1>Your Games</h1>
+        <h1>Your games</h1>
         <a className="button" href="/worlds">Find a world</a>
       </div>
 
@@ -57,9 +57,9 @@ export default async function HomePage({
         <div className="slot-rail">
           {hosted.map((game, i) => (
             <article key={game.gameId} className="slot-card">
+              <span className="slot-number" aria-hidden="true">{SLOT_NUMERALS[i] ?? String(i + 1)}</span>
               <div className="slot-thumb">
                 <Image src="/images/basic-scenario-map.png" alt="" width={1280} height={720} unoptimized />
-                <span className="slot-number">{String(i + 1).padStart(2, "0")}</span>
               </div>
               <div className="slot-body">
                 <h3 className="slot-title">{game.title}</h3>
@@ -75,9 +75,8 @@ export default async function HomePage({
           ))}
           {!atCap && (
             <article className="slot-card slot-card-new">
-              <div className="slot-thumb slot-thumb-new">
-                <span className="slot-number">{String(activeHostedCount + 1).padStart(2, "0")}</span>
-              </div>
+              <span className="slot-number" aria-hidden="true">{SLOT_NUMERALS[activeHostedCount] ?? String(activeHostedCount + 1)}</span>
+              <div className="slot-thumb slot-thumb-new" />
               <div className="slot-body">
                 <h3 className="slot-title">New save</h3>
                 <p className="slot-meta">Start a world</p>
@@ -94,10 +93,13 @@ export default async function HomePage({
   );
 }
 
+/** A save's place on the shelf. There are at most three. */
+const SLOT_NUMERALS = ["I", "II", "III", "IV"];
+
 function saveStatusLabel(status: string): string {
   switch (status) {
     case "lobby": return "Preparing your character";
-    case "active": return "Paused · ready to continue";
+    case "active": return "Paused, ready to continue";
     case "finished": return "Finished";
     case "abandoned": return "Abandoned";
     default: return status;

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { requestPasswordReset } from "../actions";
-import { StatusMessage } from "../components/status-message";
+import { requestPasswordReset } from "../../actions";
+import { StatusMessage } from "../../components/status-message";
 
 export const metadata: Metadata = { title: "Reset password" };
 

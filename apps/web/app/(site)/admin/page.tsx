@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import { createAdminGift } from "../actions";
-import { StatusMessage } from "../components/status-message";
-import { gameRepository } from "../../lib/game-repository";
+import { createAdminGift } from "../../actions";
+import { StatusMessage } from "../../components/status-message";
+import { gameRepository } from "../../../lib/game-repository";
 
 export const metadata: Metadata = { title: "Administration" };
 
