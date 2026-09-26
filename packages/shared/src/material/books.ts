@@ -1,6 +1,7 @@
 import { buildStation, seesAccount, type Station } from "../authority/station";
 import type { Office } from "../characters/character";
 import type { WorldState } from "../world/world-state";
+import { accountLabel } from "./account-names";
 
 /**
  * The books, as the person holding them can read them (VISION §7).
@@ -90,17 +91,11 @@ export function readTheBooks(
   const reaches = (accountId: string): boolean => station === null || seesAccount(station, accountId);
   const polityId = characterId === null ? null : world.characters.find((character) => character.id === characterId)?.polityId ?? null;
 
-  const accounts = world.material.accounts
+  const open = world.material.accounts
     .filter((account) => reaches(account.id))
     .filter((account) => account.owner.kind !== "polity" || account.owner.id === polityId || polityId === null)
-    .sort((a, b) => b.balance - a.balance)
-    .map((account) => ({
-      id: account.id,
-      label: account.owner.kind === "polity"
-        ? `${world.map.polities.find((polity) => polity.id === account.owner.id)?.name ?? account.owner.id} treasury`
-        : `${world.characters.find((character) => character.id === account.owner.id)?.name ?? account.owner.id}'s purse`,
-      balance: account.balance,
-    }));
+    .sort((a, b) => b.balance - a.balance);
+  const accounts = open.map((account) => ({ id: account.id, label: accountLabel(world, account), balance: account.balance }));
   const readable = new Set(accounts.map((account) => account.id));
 
   const income = fold(
@@ -133,6 +128,6 @@ export function readTheBooks(
     surplus: totalIncome - totalExpenditure,
     arrears: owed.reduce((sum, obligation) => sum + obligation.arrears, 0),
     accounts,
-    theirGovernments: accounts.some((account) => account.label.endsWith("treasury")),
+    theirGovernments: open.some((account) => account.owner.kind === "polity"),
   };
 }

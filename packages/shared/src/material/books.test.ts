@@ -38,6 +38,27 @@ describe("the books, as the person holding them can read them", () => {
     expect(theirs.accounts.every((account) => !account.label.endsWith("treasury"))).toBe(true);
   });
 
+  it("names an army's account by the army, never by its id", () => {
+    // The consul's treasury listed "roman-field-army's purse": every owner
+    // was looked up among the characters, and a force fell back to its id.
+    const state = world();
+    const chest = state.material.accounts.find((account) => account.owner.kind === "force");
+    expect(chest, "the scenario gives an army a chest").toBeDefined();
+    const force = state.material.forces.find((candidate) => candidate.id === chest!.owner.id)!;
+    const line = readTheBooks(state, null).accounts.find((account) => account.id === chest!.id)!;
+    expect(line.label).toContain(force.name.replace(/^the\s+/i, ""));
+    expect(line.label).not.toContain(force.id);
+    expect(line.label).not.toContain("'s purse");
+  });
+
+  it("names no account by an id, whoever owns it", () => {
+    const state = world();
+    const ids = new Set([...state.material.accounts.map((account) => account.owner.id), ...state.material.accounts.map((account) => account.id)]);
+    for (const account of readTheBooks(state, null).accounts) {
+      for (const id of ids) expect(account.label, `${account.label} contains ${id}`).not.toMatch(new RegExp(`(^|[^A-Za-z])${id}([^A-Za-z]|$)`));
+    }
+  });
+
   it("counts what actually arrives, not what was levied", () => {
     const state = world();
     const source = state.material.incomeSources[0];
