@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { UnderWayItem } from "@chronica/shared";
 import { Sheet } from "../../../components/ui/sheet";
 import { Era } from "../../../components/ui/era";
 import { TIME_SPANS, latestReport, type GameViewController } from "./use-game-view";
@@ -24,10 +25,12 @@ import { TIME_SPANS, latestReport, type GameViewController } from "./use-game-vi
  * long it has been, rather than spinning.
  */
 export function CouncilPanel({
+  gameId,
   controller,
   onClose,
   onOpenChronicle,
 }: {
+  readonly gameId: string;
   readonly controller: GameViewController;
   readonly onClose: () => void;
   readonly onOpenChronicle: () => void;
@@ -111,6 +114,8 @@ export function CouncilPanel({
           </section>
         )}
 
+        {!busy && <UnderWay gameId={gameId} revision={view.chronicle.length} />}
+
         {view.decision === null && (
           <form className="tablet" onSubmit={(event) => { event.preventDefault(); void send(); }}>
             <label htmlFor="sim-order">Your order</label>
@@ -155,6 +160,36 @@ export function CouncilPanel({
         {error !== null && <p className="desk__error" role="alert">{error}</p>}
       </div>
     </Sheet>
+  );
+}
+
+/**
+ * What the player's orders are doing: one line each, a stalled one marked in
+ * the seal colour. Nothing under way, nothing shown.
+ */
+function UnderWay({ gameId, revision }: { readonly gameId: string; readonly revision: number }) {
+  const [items, setItems] = useState<readonly UnderWayItem[]>([]);
+  useEffect(() => {
+    let live = true;
+    void fetch(`/api/games/${encodeURIComponent(gameId)}/under-way`, { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { items: UnderWayItem[] } | null) => { if (live && data !== null) setItems(data.items); })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, [gameId, revision]);
+  if (items.length === 0) return null;
+  return (
+    <section className="under-way" aria-labelledby="under-way-heading">
+      <h3 id="under-way-heading">Under way</h3>
+      <ul>
+        {items.map((item) => (
+          <li key={item.key} className={item.stalled ? "is-stalled" : undefined}>
+            <strong>{item.stalled && <span className="seal-dot"><span className="visually-hidden">Stalled: </span></span>}{item.label}</strong>
+            <span>{item.detail}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

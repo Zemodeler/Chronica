@@ -720,7 +720,7 @@ export function GameShell({
         />
       )}
       {surface === "council" && orderingCharacterId && (
-        <CouncilPanel controller={controller} onClose={closeSurface} onOpenChronicle={() => openSurface("chronicle")} />
+        <CouncilPanel gameId={gameId} controller={controller} onClose={closeSurface} onOpenChronicle={() => openSurface("chronicle")} />
       )}
       {surface === "chronicle" && <ChroniclePanel controller={controller} onClose={closeSurface} side={sheetSideFor(roomStyle, "chronicle")} />}
       {(surface === "books" || surface === "purse") && (
