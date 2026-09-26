@@ -81,12 +81,16 @@ at about 62 characters.
 Shared components live in `apps/web/app/components/ui/`, styled in
 `apps/web/app/styles/primitives.css`.
 
-- **`Sheet`**: every surface the Office opens, and the map's own panels. A
-  native `<dialog>` opened with `showModal`, so focus is trapped and restored
-  and Escape closes it. The backdrop is the room with the lamp turned down.
-  It anchors on the side opposite the object that opened it. Widths:
-  `reading` (Chronicle, letters), `ledger` (treasury, muster, standing, the
-  mirror), `desk` (the council).
+- **`Sheet`**: every surface the Office opens, and the map's standard
+  catalog. A native `<dialog>` opened with `showModal`, so focus is held and
+  restored and Escape closes it. The backdrop is the room with the lamp turned
+  down. It anchors on the side opposite the object that opened it. On opening
+  it focuses its content (or an element marked `data-autofocus`, like the
+  order on the desk), not its close button. Widths: `reading` (Chronicle,
+  letters), `ledger` (treasury, muster, standing, the mirror), `desk` (the
+  council), `narrow` (small forms).
+- **The army card** on the map is a papyrus card, not a sheet: a modal would
+  take the map out of the player's hand while they look at an army.
 - **`Button`**: `primary` (bronze, one per surface), `quiet` (everything
   else), `seal` (only inside a decision).
 - **`CloseButton`**: the one close control, labelled "Close".

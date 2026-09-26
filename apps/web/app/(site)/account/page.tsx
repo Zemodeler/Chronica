@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { developerGiftList, loadAccountDashboard } from "../../lib/account-service";
-import { redeemGift } from "../actions";
+import { developerGiftList, loadAccountDashboard } from "../../../lib/account-service";
+import { redeemGift } from "../../actions";
 import { AccountDashboard, type SerializedGift } from "./account-dialogs";
 import { getLocalAiProviderConfiguration } from "@chronica/ai";
 

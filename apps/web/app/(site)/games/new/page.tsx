@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { createGame } from "../../actions";
-import { StatusMessage } from "../../components/status-message";
-import { gameRepository } from "../../../lib/game-repository";
+import { createGame } from "../../../actions";
+import { StatusMessage } from "../../../components/status-message";
+import { gameRepository } from "../../../../lib/game-repository";
 
 export const metadata: Metadata = { title: "Start a game" };
 
@@ -12,7 +12,7 @@ export default async function NewGamePage({ searchParams }: Readonly<{ searchPar
   const scenario = await gameRepository.getPublicScenario(scenarioId);
   if (scenario === null) notFound();
 
-  return <main id="main-content" className="shell"><header className="page-header"><p className="eyebrow">Scenario · {scenario.period}</p><h1>Begin {scenario.title}</h1><p className="lede">Create your single-player save and enter the world.</p></header>
+  return <main id="main-content" className="shell"><header className="page-header"><p className="eyebrow">{scenario.period}</p><h1>Begin {scenario.title}</h1><p className="lede">Create your single-player save and enter the world.</p></header>
     {status === "invalid" && <StatusMessage kind="error">Give the save a title and a coin cap.</StatusMessage>}
     {status === "save-limit" && <StatusMessage kind="error">You already have three active saves. End or replace one before starting another.</StatusMessage>}
     {status === "unavailable" && <StatusMessage kind="error">That world is no longer available to host.</StatusMessage>}

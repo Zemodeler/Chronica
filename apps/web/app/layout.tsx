@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { Suspense } from "react";
-import Image from "next/image";
-import { headers } from "next/headers";
-import "./styles.css";
-import { resolveAccount } from "../lib/account-service";
-import { TopNavLink } from "./components/top-nav-link";
+import { Alegreya, Alegreya_Sans, Alegreya_SC } from "next/font/google";
+import "./styles/tokens.css";
+import "./styles/base.css";
+import "./styles/primitives.css";
+import "./styles/office.css";
+import "./styles/documents.css";
+import "./styles/map.css";
+import "./styles/pages.css";
 
 export const metadata: Metadata = {
   title: {
@@ -15,49 +17,36 @@ export const metadata: Metadata = {
   description: "A deterministic historical map game where you play a person.",
 };
 
-async function TopBarAvatar() {
-  try {
-    const account = await resolveAccount(await headers());
-    if (account !== null) {
-      return (
-        <TopNavLink className="top-bar-avatar top-bar-avatar--img" href="/account" aria-label="Account">
-          <Image src={`/avatars/${account.avatarKey}.svg`} width={32} height={32} alt="" />
-        </TopNavLink>
-      );
-    }
-  } catch {
-    // fallthrough
-  }
-  return <TopNavLink className="top-bar-pill" href="/login">Log in</TopNavLink>;
-}
+// One family, three cuts: DESIGN.md says why. Each becomes a CSS variable
+// that tokens.css builds its --font-* stacks on.
+const serif = Alegreya({
+  subsets: ["latin", "latin-ext"],
+  style: ["normal", "italic"],
+  variable: "--font-alegreya",
+  display: "swap",
+});
+const sans = Alegreya_Sans({
+  subsets: ["latin", "latin-ext"],
+  weight: ["400", "500", "700"],
+  style: ["normal", "italic"],
+  variable: "--font-alegreya-sans",
+  display: "swap",
+});
+const caps = Alegreya_SC({
+  subsets: ["latin", "latin-ext"],
+  weight: ["400", "500"],
+  variable: "--font-alegreya-sc",
+  display: "swap",
+});
 
+/**
+ * The document, and nothing else. The site's bar and footer live in the
+ * (site) group's layout; the game draws its own lintel over the room.
+ */
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en">
-      <body>
-        <a className="skip-link" href="#main-content">
-          Skip to main content
-        </a>
-        <header className="top-bar">
-          <div className="top-bar-inner">
-            <TopNavLink className="top-bar-wordmark" href="/">Chronica</TopNavLink>
-            <nav className="top-bar-nav" aria-label="Primary">
-              <TopNavLink className="top-bar-pill" href="/">Dashboard</TopNavLink>
-              <TopNavLink className="top-bar-pill" href="/worlds">Worlds</TopNavLink>
-              <TopNavLink className="top-bar-pill" href="/account">Account</TopNavLink>
-            </nav>
-            <div className="top-bar-right">
-              <Suspense fallback={<TopNavLink className="top-bar-pill" href="/login">Log in</TopNavLink>}>
-                <TopBarAvatar />
-              </Suspense>
-            </div>
-          </div>
-        </header>
-        {children}
-        <footer className="site-footer">
-          <p>Chronica — sign-in and billing work without JavaScript.</p>
-        </footer>
-      </body>
+    <html lang="en" className={`${serif.variable} ${sans.variable} ${caps.variable}`}>
+      <body>{children}</body>
     </html>
   );
 }

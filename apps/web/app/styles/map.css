@@ -1,0 +1,131 @@
+/*
+ * The Map's chrome: controls, the tooltip, the army card, the standards and
+ * the order strip. The map itself is canvas, coloured from lib/palette.ts.
+ */
+@layer surfaces {
+  .game-shell-map > figure { width: 100%; height: 100%; margin: 0; }
+  .game-shell-map > figure svg { width: 100%; height: 100%; }
+  .map-frame-interactive { position: relative; overflow: hidden; }
+  .map-frame-interactive svg { touch-action: none; cursor: grab; }
+  .map-frame-interactive svg:active { cursor: grabbing; }
+  .geo-map, .geo-map * { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  [data-zoom="far"] .layer-forces { display: none; }
+
+  /* The name of land nobody holds. */
+  .map-tooltip {
+    position: absolute;
+    z-index: 5;
+    padding: .2rem .6rem;
+    border: 1px solid color-mix(in srgb, var(--bronze) 55%, transparent);
+    background: rgb(21 17 13 / 90%);
+    color: var(--vellum);
+    font: 400 var(--step-0) var(--font-caps);
+    letter-spacing: .08em;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .map-controls {
+    position: absolute;
+    right: 1.25rem;
+    bottom: 1.25rem;
+    z-index: 3;
+    display: grid;
+    border: 1px solid color-mix(in srgb, var(--bronze) 55%, transparent);
+    border-radius: var(--radius);
+    background: rgb(21 17 13 / 88%);
+    box-shadow: 0 .5rem 1.5rem rgb(0 0 0 / 40%);
+  }
+  .map-controls button {
+    width: 2.5rem;
+    min-height: 2.5rem;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    color: var(--vellum);
+    font: 400 1.3rem/1 var(--font-serif);
+  }
+  .map-controls button + button { border-top: 1px solid color-mix(in srgb, var(--bronze) 35%, transparent); }
+  .map-controls button:hover:not(:disabled) { color: var(--lamp); }
+  .map-controls button:focus-visible { outline-offset: -3px; }
+
+  /* An army, when its standard is clicked: a card, not a dialog, so the map
+     stays in hand around it. */
+  .map-force-details {
+    position: absolute;
+    right: 5.25rem;
+    bottom: 1.25rem;
+    z-index: 3;
+    display: grid;
+    gap: .75rem;
+    width: 21rem;
+    padding: 1.1rem 1.25rem 1.2rem;
+    border-radius: var(--radius);
+    background: var(--papyrus);
+    box-shadow: var(--shadow-lift), inset 0 0 0 1px rgb(122 86 38 / 28%);
+  }
+  .map-force-details__head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+  .map-force-details h2 { font-size: var(--step-2); }
+  .map-force-details dl { display: grid; grid-template-columns: auto 1fr; gap: .3rem 1rem; font-size: var(--step-0); }
+  .map-force-details dt { color: var(--ink-faded); font-family: var(--font-serif); font-style: italic; }
+  .map-force-details dd { font-variant-numeric: lining-nums tabular-nums; }
+  .map-force-details .btn { justify-self: start; }
+
+  .map-flag-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+  .map-flag-option {
+    display: grid;
+    justify-content: stretch;
+    justify-items: start;
+    gap: .5rem;
+    min-height: 0;
+    padding: .65rem;
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    background: rgb(255 255 255 / 22%);
+    box-shadow: none;
+    color: var(--ink);
+    text-align: left;
+  }
+  .map-flag-option:hover:not(:disabled) { border-color: var(--bronze-deep); background: rgb(255 255 255 / 38%); }
+  .map-flag-option img { width: 100%; height: 5.5rem; object-fit: contain; }
+  .map-flag-option span { display: grid; gap: .1rem; }
+  .map-flag-option strong { font: 500 var(--step-0) var(--font-serif); }
+  .map-flag-option small { color: var(--ink-faded); font-size: var(--step--1); line-height: 1.35; }
+
+  /* One line for an order, written on the same wax as the desk, and a door. */
+  .map-order-bar {
+    position: absolute;
+    left: 50%;
+    bottom: 1.25rem;
+    z-index: 25;
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    width: min(46rem, calc(100% - 12rem));
+    padding: .5rem .6rem .5rem 1.1rem;
+    border: 1px solid var(--bronze);
+    border-radius: var(--radius);
+    background: var(--wax);
+    box-shadow: inset 0 0 0 3px var(--umber), inset 0 0 0 4px rgb(185 139 74 / 35%), var(--shadow-lift);
+    translate: -50% 0;
+  }
+  .map-order-bar input {
+    flex: 1;
+    min-width: 0;
+    padding: .35rem 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+    color: var(--vellum);
+    font: 400 var(--step-1) var(--font-serif);
+    caret-color: var(--lamp);
+  }
+  .map-order-bar input:focus-visible { outline: none; box-shadow: none; }
+  .map-order-bar:focus-within { border-color: var(--bronze-high); }
+  .map-order-bar__desk { color: var(--dust); white-space: nowrap; }
+  .map-order-bar__desk:hover:not(:disabled) { color: var(--vellum); }
+  .map-order-bar--waiting { justify-content: center; padding: .5rem; border-color: color-mix(in srgb, var(--seal) 80%, var(--bronze)); }
+  .map-order-bar--waiting .btn { width: 100%; }
+}
