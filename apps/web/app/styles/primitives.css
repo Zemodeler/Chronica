@@ -117,6 +117,29 @@
   .ruled > li:first-child { padding-top: 0; }
   .ruled > li:last-child { border-bottom: 0; padding-bottom: 0; }
 
+  /* ─── Tabs: ribbons in a ledger ────────────────────────────────────── */
+  .tabs { display: grid; gap: 1.1rem; }
+  .tabs__list { display: flex; gap: 1.4rem; border-bottom: 1px solid var(--rule); }
+  .tabs__list button {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    min-height: 0;
+    margin-bottom: -1px;
+    padding: .35rem 0 .5rem;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    color: var(--fg-muted);
+    font: 400 var(--step-1) var(--font-serif);
+  }
+  .tabs__list button:hover:not(:disabled) { color: var(--fg); }
+  .tabs__list button[aria-selected="true"] { border-bottom-color: var(--edge); color: var(--fg); }
+  .tabs__panel { display: grid; gap: 1.25rem; }
+  .tabs__panel:focus-visible { outline-offset: 4px; }
+
   /* ─── Ledgers ──────────────────────────────────────────────────────── */
   .ledger { width: 100%; border-collapse: collapse; font-variant-numeric: lining-nums tabular-nums; }
   .ledger th, .ledger td { padding: .4rem 0; border-bottom: 1px solid var(--rule); }

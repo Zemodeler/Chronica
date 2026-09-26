@@ -59,6 +59,42 @@ describe("the books, as the person holding them can read them", () => {
     }
   });
 
+  it("tells whoever opens the treasury how hard its taxes press, and a private man nothing", () => {
+    const state = world();
+    const seat = state.material.officeSeats.find((candidate) => candidate.status === "held" && candidate.holderCharacterId !== null)!;
+    const governing = readTheBooks(state, seat.holderCharacterId, offices);
+    if (governing.theirGovernments) {
+      expect(governing.pressure?.inWords).toMatch(/complaint|resented|pressing|more than the land/);
+      expect(governing.lands).not.toBeNull();
+    }
+    const seated = new Set(state.material.officeSeats.filter((s) => s.status === "held").map((s) => s.holderCharacterId));
+    const priv = state.characters.find((character) => character.alive && !seated.has(character.id));
+    if (priv === undefined) return;
+    const theirs = readTheBooks(state, priv.id, offices);
+    expect(theirs.pressure).toBeNull();
+    expect(theirs.lands).toBeNull();
+  });
+
+  it("lists only the reader's own power's provinces among its lands", () => {
+    const state = world();
+    const seat = state.material.officeSeats.find((candidate) => candidate.status === "held" && candidate.holderCharacterId !== null)!;
+    const holder = state.characters.find((character) => character.id === seat.holderCharacterId)!;
+    const books = readTheBooks(state, holder.id, offices);
+    const ours = new Set(state.map.provinces.filter((province) => province.controllerPolityId === holder.polityId).map((province) => province.id));
+    for (const land of books.lands ?? []) expect(ours.has(land.id)).toBe(true);
+    for (const land of books.lands ?? []) expect(land.order).toMatch(/orderly|uneasy|restless|disorder/);
+  });
+
+  it("names each payment that has fallen behind, rather than one sum", () => {
+    const state = world();
+    const behind: WorldState = {
+      ...state,
+      material: { ...state.material, obligations: state.material.obligations.map((obligation, index) => (index === 0 ? { ...obligation, arrears: 400, missedPeriods: 2 } : obligation)) },
+    };
+    const books = readTheBooks(behind, null);
+    expect(books.behind[0]).toMatchObject({ arrears: 400, missedPeriods: 2, label: state.material.obligations[0]!.label });
+  });
+
   it("counts what actually arrives, not what was levied", () => {
     const state = world();
     const source = state.material.incomeSources[0];
