@@ -225,6 +225,23 @@
   .books__side h3 em { font-style: normal; }
   .books__out td { color: var(--ink-faded); }
   .books__arrears { padding-left: .9rem; border-left: 2px solid var(--seal); font: italic 400 var(--step-0) var(--font-serif); }
+  .books__pressure { color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
+  .books__pressure.is-hard { padding-left: .9rem; border-left: 2px solid var(--seal); color: var(--ink); }
+  .books__list li { display: grid; gap: .1rem; }
+  .books__list strong { font: 500 var(--step-1)/1.3 var(--font-serif); }
+  .books__list s { text-decoration-color: var(--seal); text-decoration-thickness: 1.5px; }
+  .books__list span { color: var(--ink-faded); }
+  .books__list em { color: var(--ink-faded); font-family: var(--font-serif); }
+  .books__list li.is-strained strong::before {
+    content: "";
+    display: inline-block;
+    width: .5rem;
+    height: .5rem;
+    margin-right: .5rem;
+    border-radius: 50%;
+    background: var(--seal);
+    vertical-align: .12em;
+  }
 
   /* ─── The muster ───────────────────────────────────────────────────── */
   .muster__force { display: grid; gap: .25rem; }
