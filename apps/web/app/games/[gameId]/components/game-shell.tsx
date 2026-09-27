@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef, type PointerEvent } from "react";
-import { DynamicMapOverlaySchema, GeoJsonMapSchema, type GeoJsonMap, type DynamicMapOverlay } from "@chronica/shared";
+import { DynamicMapOverlaySchema, GeoJsonMapSchema, type GeoJsonMap, type DynamicMapOverlay, type RoomStates } from "@chronica/shared";
 
 // Module-level cache provides geometry immediately during soft navigation; a
 // fresh request below then replaces it if the active scenario map was revised.
@@ -20,10 +20,14 @@ import { CouncilPanel } from "./council-panel";
 import { ChroniclePanel } from "./chronicle-panel";
 import { BooksPanel } from "./books-panel";
 import { Office, type OfficeSurface } from "./office";
-import type { RoomStyle } from "./office-objects";
+import { OFFICE_OBJECTS, ROOM_WIDTH, type RoomStyle } from "./office-objects";
+import { rectFor, sceneryFor } from "./office-scenery";
+import { Sheet, CloseButton, type SheetSide } from "../../../components/ui/sheet";
+import { Era } from "../../../components/ui/era";
 import { ForcesPanel } from "./forces-panel";
 import { StandingPanel } from "./standing-panel";
 import { MapOrderBar } from "./map-order-bar";
+import { CalendarLine } from "./calendar-line";
 import { unreadCount, useGameView } from "./use-game-view";
 import { standardFor, standardsForPolity, type ArmyStandard } from "../../../../lib/army-standards";
 
@@ -39,6 +43,19 @@ function deriveZoomBand(scale: number): ZoomBand {
   if (scale >= CLOSE_THRESHOLD) return "close";
   if (scale >= MEDIUM_THRESHOLD) return "medium";
   return "far";
+}
+
+/**
+ * Which side of the room a document is laid on: away from the object it was
+ * taken from, so the shelf stays in view beside the book. The desk's papers
+ * are laid in the middle, in front of it.
+ */
+function sheetSideFor(style: RoomStyle, id: OfficeSurface): SheetSide {
+  if (id === "council") return "center";
+  const object = OFFICE_OBJECTS.find((candidate) => candidate.id === id);
+  if (object === undefined) return "right";
+  const rect = rectFor(sceneryFor(style), id, object.rect);
+  return rect.x + rect.w / 2 < ROOM_WIDTH / 2 ? "right" : "left";
 }
 
 interface GameShellProps {
@@ -58,6 +75,34 @@ interface GameShellProps {
   readonly roomStyle: RoomStyle;
 }
 
+let _toneWorker: Worker | null | undefined;
+let _toneRequests = 0;
+
+/**
+ * The raster, toned into an engraved plate (see atlas-tone.ts), off the main
+ * thread. Without a worker, or if toning fails, the raster as it is: a map in
+ * the wrong colours beats no map.
+ */
+async function tonedBitmap(img: HTMLImageElement): Promise<ImageBitmap> {
+  if (_toneWorker === undefined) {
+    try { _toneWorker = new Worker(new URL("./atlas-tone.worker.ts", import.meta.url)); } catch { _toneWorker = null; }
+  }
+  const worker = _toneWorker;
+  if (worker === null) return createImageBitmap(img);
+  const id = ++_toneRequests;
+  const raw = await createImageBitmap(img);
+  const toned = await new Promise<ImageBitmap | null>((resolve) => {
+    const onMessage = (event: MessageEvent<{ readonly id: number; readonly bitmap: ImageBitmap | null }>) => {
+      if (event.data.id !== id) return;
+      worker.removeEventListener("message", onMessage);
+      resolve(event.data.bitmap);
+    };
+    worker.addEventListener("message", onMessage);
+    worker.postMessage({ id, bitmap: raw }, [raw]);
+  });
+  return toned ?? createImageBitmap(img);
+}
+
 /**
  * Loads a map raster into `target` as an ImageBitmap and asks for a repaint.
  * Returns the effect cleanup, which drops a load that finishes too late.
@@ -69,7 +114,7 @@ function loadMapBitmap(url: string | undefined, target: { current: ImageBitmap |
   const img = new Image();
   img.src = url;
   img.decode()
-    .then(() => createImageBitmap(img))
+    .then(() => tonedBitmap(img))
     .then((bitmap) => {
       if (cancelled) { bitmap.close(); return; }
       target.current = bitmap;
@@ -136,7 +181,7 @@ export function GameShell({
    * in a private citizen's room. Null until it answers, and an object is not
    * drawn on a guess.
    */
-  const [room, setRoom] = useState<{ forces: boolean; standing: boolean; books: boolean; purse: boolean } | null>(null);
+  const [room, setRoom] = useState<{ forces: boolean; standing: boolean; books: boolean; purse: boolean; states: RoomStates } | null>(null);
   const controller = useGameView(gameId);
   const zoomBand = deriveZoomBand(viewport.scale);
 
@@ -197,20 +242,29 @@ export function GameShell({
    * because somebody gave him a legion is a moment the game has had no way to
    * express.
    */
+  // Each object's current fact, and whether it wants the player's word: the
+  // plaque says it, and the seal mark shows it (room-states.ts).
+  const stateOf = (id: keyof RoomStates) => ({ says: room?.states[id]?.says, marked: room?.states[id]?.marked === true });
+  // The window looks out on the map: what has changed there since the player
+  // last read the record.
+  const mapChanges = view.chronicle.filter((entry) => entry.unread).reduce((sum, entry) => sum + entry.changes.length, 0);
   const things = useMemo(() => [
     ...(orderingCharacterId === undefined ? [] : [{
       // A sealed document lies on the desk when the world wants an answer.
-      id: "council" as const, marked: view.decision !== null,
+      id: "council" as const,
+      says: view.decision !== null ? "Something needs your word" : stateOf("council").says,
+      marked: view.decision !== null || stateOf("council").marked,
       state: view.decision !== null ? "sealed" : undefined,
     }]),
     { id: "chronicle" as const, badge: unread },
-    ...(playerCharacterId === undefined ? [] : [{ id: "people" as const }]),
-    ...(room?.books === true ? [{ id: "books" as const }] : []),
-    ...(room?.purse === true ? [{ id: "purse" as const }] : []),
-    ...(room?.forces === true ? [{ id: "forces" as const }] : []),
-    ...(room?.standing === true ? [{ id: "standing" as const }] : []),
-    ...(characterPanel === undefined ? [] : [{ id: "self" as const }]),
-  ], [orderingCharacterId, playerCharacterId, characterPanel, room, view.decision, unread]);
+    ...(playerCharacterId === undefined ? [] : [{ id: "people" as const, ...stateOf("people") }]),
+    ...(room?.books === true ? [{ id: "books" as const, ...stateOf("books") }] : []),
+    ...(room?.purse === true ? [{ id: "purse" as const, ...stateOf("purse") }] : []),
+    ...(room?.forces === true ? [{ id: "forces" as const, ...stateOf("forces") }] : []),
+    ...(room?.standing === true ? [{ id: "standing" as const, ...stateOf("standing") }] : []),
+    ...(characterPanel === undefined ? [] : [{ id: "self" as const, ...stateOf("self") }]),
+    ...(mapChanges > 0 ? [{ id: "window" as const, says: mapChanges === 1 ? "One change on the map since you last read" : `${mapChanges} changes on the map since you last read` }] : []),
+  ], [orderingCharacterId, playerCharacterId, characterPanel, room, view.decision, unread, mapChanges]);
 
   // --- Geometry shared between canvas terrain layer and lightweight SVG overlay ---
 
@@ -299,11 +353,6 @@ export function GameShell({
     const interval = setInterval(requestRedraw, 1000 / 30);
     return () => clearInterval(interval);
   }, [hasActiveConflict, place, requestRedraw]);
-
-  const allianceLabels = useMemo(() => {
-    const names = new Map(overlay?.polities.map((polity) => [polity.polityId, polity.name]) ?? []);
-    return (overlay?.politicalRelations ?? []).map((relation) => `${names.get(relation.leaderPolityId) ?? relation.leaderPolityId} allied with ${names.get(relation.memberPolityId) ?? relation.memberPolityId}`);
-  }, [overlay]);
 
   useEffect(() => {
     let cancelled = false;
@@ -493,42 +542,42 @@ export function GameShell({
     return () => clearInterval(interval);
   }, [gameId]);
 
+  const dateChip = (
+    <div className="shell-date-chip" aria-label="Current date">
+      <span className="shell-date-arrow" aria-hidden="true">‹</span>
+      <span><Era text={elapsedStepLabel} /></span>
+      <span className="shell-date-arrow" aria-hidden="true">›</span>
+    </div>
+  );
+  const coinChip = <a className="shell-coin-chip" href="/account" aria-label="Open coin wallet">{coins ?? "—"} coins</a>;
+  const leave = (
+    <div className="shell-top-bar-left">
+      <a className="shell-top-bar-exit" href="/">Leave</a>
+      <span className="shell-game-title">{gameTitle}</span>
+    </div>
+  );
+
   if (!geoJson) {
     return (
-      <>
+      <div className="game" data-culture={roomStyle}>
         <header className="shell-top-bar">
-          <a className="shell-top-bar-exit" href="/">
-            Exit
-          </a>
-          <div className="shell-top-bar-center">
-            <span className="shell-game-title">{gameTitle}</span>
-          </div>
-          <div className="shell-top-bar-right">
-            <div className="shell-date-chip" aria-label="Current date">
-              <span className="shell-date-arrow" aria-hidden="true">‹</span>
-              <span>{elapsedStepLabel}</span>
-              <span className="shell-date-arrow" aria-hidden="true">›</span>
-            </div>
-            <a className="shell-coin-chip" href="/account" aria-label="Open coin wallet">◉ {coins ?? "—"} coins</a>
-          </div>
+          {leave}
+          <span />
+          <div className="shell-top-bar-right">{dateChip}{coinChip}</div>
         </header>
         <div className="game-shell">
           <div className="game-shell-map">
-            <p style={{ padding: "2rem", color: "var(--text-muted)" }}>
-              No map data available for this scenario.
-            </p>
+            <p className="game-shell-empty quiet">No map data available for this scenario.</p>
           </div>
         </div>
-      </>
+      </div>
     );
   }
 
   return (
-    <>
+    <div className="game" data-culture={roomStyle}>
       <header className="shell-top-bar">
-        <a className="shell-top-bar-exit" href="/">
-          Exit
-        </a>
+        {leave}
         <div className="shell-place-switch" role="tablist" aria-label="Where you are">
           <button
             type="button" role="tab" id="place-map-tab" aria-controls="place-map"
@@ -544,20 +593,16 @@ export function GameShell({
             {/* The decision mark is not polish. With the Council behind a door,
                 a player standing on the map has nothing else telling them the
                 world is waiting on their word. */}
-            {controller.view.decision !== null && <span className="shell-place__mark" aria-label="Something needs your word">•</span>}
-            {unread > 0 && <span className="shell-place__badge">{unread}</span>}
+            {controller.view.decision !== null && (
+              <span className="shell-place__mark seal-dot"><span className="visually-hidden">Something needs your word</span></span>
+            )}
+            {unread > 0 && <span className="shell-place__badge badge">{unread}</span>}
           </button>
         </div>
-        <div className="shell-top-bar-center">
-          <span className="shell-game-title">{gameTitle}</span>
-        </div>
         <div className="shell-top-bar-right">
-          <div className="shell-date-chip" aria-label="Current date">
-            <span className="shell-date-arrow" aria-hidden="true">‹</span>
-            <span>{elapsedStepLabel}</span>
-            <span className="shell-date-arrow" aria-hidden="true">›</span>
-          </div>
-          <a className="shell-coin-chip" href="/account" aria-label="Open coin wallet">◉ {coins ?? "—"} coins</a>
+          {dateChip}
+          <CalendarLine gameId={gameId} revision={view.chronicle.length} />
+          {coinChip}
         </div>
       </header>
       <div className="game-shell">
@@ -587,35 +632,53 @@ export function GameShell({
               />
             )}
           </MapViewport>
-          {selectedForce && <aside className="map-force-details" aria-label={`${selectedForce.name} details`}>
-            <button type="button" className="map-force-details-close" onClick={() => setSelectedForce(null)} aria-label="Close army details">×</button>
-            <strong>{selectedForce.name}</strong>
-            <span>Commander: {selectedForce.commanderLabel ?? "Unknown"}</span>
-            <span>Combat status: {selectedForce.statusLabel}</span>
-            <span>Army size: {selectedForce.strengthLabel}</span>
-            <span>Current region: {selectedForce.locationLabel}</span>
-            <span>Going to: {selectedForce.destinationLabel}</span>
-            <span>Progress: {selectedForce.progressBps === null ? "Stationary" : `${(selectedForce.progressBps / 100).toFixed(0)}% along route${selectedForce.movementState === "retreating" ? " (retreating)" : ""}`}</span>
-            {selectedForce.commandable && (renaming === null
-              ? <div className="map-force-actions">
-                  <button type="button" className="map-force-flag-button" onClick={() => setRenaming(selectedForce.name)} disabled={forceEdit.saving}>Rename</button>
-                  <button type="button" className="map-force-flag-button" onClick={() => setFlagCatalogForce(selectedForce)} disabled={forceEdit.saving}>Change standard</button>
-                </div>
-              : <form className="map-force-rename" onSubmit={(event) => { event.preventDefault(); void submitRename(); }}>
-                  <label className="visually-hidden" htmlFor="map-force-name">New name</label>
-                  <input id="map-force-name" value={renaming} maxLength={120} autoFocus onChange={(event) => setRenaming(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setRenaming(null); }} />
-                  <button type="submit" className="map-force-flag-button" disabled={forceEdit.saving}>{forceEdit.saving ? "Saving…" : "Save"}</button>
-                  <button type="button" className="map-force-flag-button map-force-flag-button--quiet" onClick={() => setRenaming(null)}>Cancel</button>
-                </form>)}
-            {forceEdit.error !== null && !flagCatalogForce && <p className="map-force-error" role="alert">{forceEdit.error}</p>}
-          </aside>}
-          {flagCatalogForce && <div className="map-flag-catalog-backdrop" role="presentation" onMouseDown={() => setFlagCatalogForce(null)}>
-            <section className="map-flag-catalog" role="dialog" aria-modal="true" aria-labelledby="flag-catalog-title" onMouseDown={(event) => event.stopPropagation()}>
-              <div className="map-flag-catalog-header"><div><p>Army standard</p><h2 id="flag-catalog-title">Choose a banner for {flagCatalogForce.name}</h2></div><button type="button" className="map-force-details-close" onClick={() => setFlagCatalogForce(null)} aria-label="Close flag catalog">×</button></div>
+          {selectedForce && (
+            <aside className="map-force-details on-papyrus" aria-label={`${selectedForce.name} details`}>
+              <div className="map-force-details__head">
+                <h2>{selectedForce.name}</h2>
+                <CloseButton what="army details" onClick={() => setSelectedForce(null)} />
+              </div>
+              <dl>
+                <dt>Commander</dt><dd>{selectedForce.commanderLabel ?? "Unknown"}</dd>
+                <dt>In the field</dt><dd>{selectedForce.statusLabel}</dd>
+                <dt>Strength</dt><dd>{selectedForce.strengthLabel}</dd>
+                <dt>At</dt><dd>{selectedForce.locationLabel}</dd>
+                <dt>Going to</dt><dd>{selectedForce.destinationLabel}</dd>
+                <dt>Progress</dt><dd>{selectedForce.progressBps === null ? "Stationary" : `${(selectedForce.progressBps / 100).toFixed(0)}% along the route${selectedForce.movementState === "retreating" ? ", retreating" : ""}`}</dd>
+              </dl>
+              {selectedForce.commandable && (renaming === null
+                ? <div className="map-force-actions">
+                    <button type="button" className="btn btn--small" onClick={() => setRenaming(selectedForce.name)} disabled={forceEdit.saving}>Rename</button>
+                    <button type="button" className="btn btn--small" onClick={() => setFlagCatalogForce(selectedForce)} disabled={forceEdit.saving}>Change standard</button>
+                  </div>
+                : <form className="map-force-rename" onSubmit={(event) => { event.preventDefault(); void submitRename(); }}>
+                    <label className="visually-hidden" htmlFor="map-force-name">New name</label>
+                    <input id="map-force-name" value={renaming} maxLength={120} autoFocus onChange={(event) => setRenaming(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setRenaming(null); }} />
+                    <button type="submit" className="btn btn--small btn--primary" disabled={forceEdit.saving}>{forceEdit.saving ? "Saving…" : "Save"}</button>
+                    <button type="button" className="btn btn--small" onClick={() => setRenaming(null)}>Cancel</button>
+                  </form>)}
+              {forceEdit.error !== null && !flagCatalogForce && <p className="map-force-error" role="alert">{forceEdit.error}</p>}
+            </aside>
+          )}
+          {flagCatalogForce && (
+            <Sheet
+              label="the army standards"
+              title={`A standard for ${flagCatalogForce.name}`}
+              width="reading"
+              side="center"
+              onClose={() => setFlagCatalogForce(null)}
+            >
               {forceEdit.error !== null && <p className="map-force-error" role="alert">{forceEdit.error}</p>}
-              <div className="map-flag-options">{standardsForPolity(flagCatalogForce.ownerPolityId).map((flag) => <button key={flag.id} type="button" className="map-flag-option" disabled={forceEdit.saving} onClick={() => void selectForceFlag(flag)}><img src={flag.url} alt="" decoding="sync" /><span><strong>{flag.name}</strong><small>{flag.description}</small></span></button>)}</div>
-            </section>
-          </div>}
+              <div className="map-flag-options">
+                {standardsForPolity(flagCatalogForce.ownerPolityId).map((flag) => (
+                  <button key={flag.id} type="button" className="map-flag-option" disabled={forceEdit.saving} onClick={() => void selectForceFlag(flag)}>
+                    <img src={flag.url} alt="" decoding="sync" />
+                    <span><strong>{flag.name}</strong><small>{flag.description}</small></span>
+                  </button>
+                ))}
+              </div>
+            </Sheet>
+          )}
           <MapTooltip ref={tooltipRef} />
           <MapControls
             onZoomIn={handleZoomIn}
@@ -632,7 +695,7 @@ export function GameShell({
       </div>
 
       {characterPanel && (
-        <CharacterPanel {...characterPanel} open={surface === "self"} onClose={closeSurface} />
+        <CharacterPanel {...characterPanel} gameId={gameId} open={surface === "self"} onClose={closeSurface} side={sheetSideFor(roomStyle, "self")} />
       )}
       {playerCharacterId && (
         <ChatPanel
@@ -640,23 +703,25 @@ export function GameShell({
           playerCharacterId={playerCharacterId}
           open={surface === "people"}
           onClose={closeSurface}
+          side={sheetSideFor(roomStyle, "people")}
+          onAnswerAtDesk={goToDesk}
           openSessionId={openChatSessionId}
           onOpenSessionConsumed={() => setOpenChatSessionId(null)}
         />
       )}
       {surface === "council" && orderingCharacterId && (
-        <CouncilPanel controller={controller} onClose={closeSurface} onOpenChronicle={() => openSurface("chronicle")} />
+        <CouncilPanel gameId={gameId} controller={controller} onClose={closeSurface} onOpenChronicle={() => openSurface("chronicle")} />
       )}
-      {surface === "chronicle" && <ChroniclePanel controller={controller} onClose={closeSurface} />}
+      {surface === "chronicle" && <ChroniclePanel controller={controller} onClose={closeSurface} side={sheetSideFor(roomStyle, "chronicle")} />}
       {(surface === "books" || surface === "purse") && (
-        <BooksPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} />
+        <BooksPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} side={sheetSideFor(roomStyle, surface)} />
       )}
       {surface === "forces" && (
-        <ForcesPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} />
+        <ForcesPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} side={sheetSideFor(roomStyle, "forces")} />
       )}
       {surface === "standing" && (
-        <StandingPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} allianceLabels={allianceLabels} />
+        <StandingPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} side={sheetSideFor(roomStyle, "standing")} />
       )}
-    </>
+    </div>
   );
 }

@@ -4,6 +4,8 @@ import { leadersOf, politicalColourWithAlpha } from "./political-geometry";
 import { resolveMapForcePlacements } from "./map-dynamic-geometry";
 import { deriveForceConflictStatuses } from "./map-conflict-state";
 import { FALLBACK_FORCE_FLAG, FORCES_VISIBLE_FROM_SCALE, armyStandardBounds, armyStandardWidthForZoom, fannedStandardCentre, type ForceFlagAsset } from "./army-standard";
+import { labelFontFamily } from "./map-fonts";
+import { ATLAS, TOKENS } from "../../../../lib/palette";
 
 interface VisibleWorldRect { minX: number; maxX: number; minY: number; maxY: number; }
 
@@ -36,20 +38,21 @@ const SETTLEMENT_LABEL_GAP_PIXELS = 3;
 
 // Mirrors MapViewport's zoom bands (far < 2.5 <= medium < 5 <= close) and the
 // same-named CSS zoom-visibility rules that used to gate the SVG settlement
-// layer (styles.css, "Map: zoom-band visibility"): at "far" zoom only
+// layer (styles/map.css): at "far" zoom only
 // capitals show, with no labels at all; at "medium" only settlements/towns
 // stay hidden and only capitals keep their label; "close" shows everything.
 const MEDIUM_ZOOM_SCALE = 2.5;
 const CLOSE_ZOOM_SCALE = 5;
 
-const SETTLEMENT_DEFAULT_FILL = "#c8b88a";
-const SETTLEMENT_STROKE = "#10151f";
-const CAPITAL_STROKE = "#f4cf68";
-const SETTLEMENT_LABEL_FILL = "#dce8e5";
-const SETTLEMENT_LABEL_HALO = "rgba(10, 15, 20, 0.7)";
-const LABEL_FONT_FAMILY = '"Times New Roman", Times, serif';
-const SIEGE_STROKE = "#dc5d5d";
-const CONFLICT_COMBAT_STROKE = "#dc5d5d";
+// Towns in ink on the plate, like the region names; capitals ringed in lamp
+// gold; anything under siege or in battle in the war red. See lib/palette.ts.
+const SETTLEMENT_DEFAULT_FILL = TOKENS.papyrus;
+const SETTLEMENT_STROKE = TOKENS.ink;
+const CAPITAL_STROKE = TOKENS.lamp;
+const SETTLEMENT_LABEL_FILL = ATLAS.label;
+const SETTLEMENT_LABEL_HALO = ATLAS.labelHalo;
+const SIEGE_STROKE = ATLAS.war;
+const CONFLICT_COMBAT_STROKE = ATLAS.war;
 const CONFLICT_SIEGE_DEFENDER_STROKE = "#72c783";
 
 /** Triangle wave over [.55, 1] with a 1.8s period — matches the CSS
@@ -189,7 +192,7 @@ export function drawSettlements(
   ctx.fillStyle = SETTLEMENT_LABEL_FILL;
   const placedBoxes: { minX: number; maxX: number; minY: number; maxY: number }[] = [];
   for (const label of labelCandidates.sort((a, b) => b.priority - a.priority)) {
-    ctx.font = `500 ${label.fontSize}px ${LABEL_FONT_FAMILY}`;
+    ctx.font = `500 ${label.fontSize}px ${labelFontFamily()}`;
     const halfWidth = ctx.measureText(label.name).width / 2;
     const box = { minX: label.x - halfWidth, maxX: label.x + halfWidth, minY: label.labelY - label.fontSize, maxY: label.labelY };
     if (placedBoxes.some((p) => box.minX < p.maxX && box.maxX > p.minX && box.minY < p.maxY && box.maxY > p.minY)) continue;
@@ -277,11 +280,11 @@ export function drawForces(
       const badgeX = bounds.x + bounds.width - badgeRadius * 0.4;
       const badgeY = bounds.y - badgeRadius * 0.4;
       ctx.beginPath();
-      ctx.fillStyle = "#1a1a1a";
+      ctx.fillStyle = TOKENS.ink;
       ctx.arc(badgeX, badgeY, badgeRadius, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = "#ffffff";
-      ctx.font = `${badgeRadius * 1.1}px sans-serif`;
+      ctx.fillStyle = TOKENS.vellum;
+      ctx.font = `600 ${badgeRadius * 1.1}px ${labelFontFamily()}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(String(placement.group.size), badgeX, badgeY);

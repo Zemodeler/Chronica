@@ -29,8 +29,8 @@ export function MapOrderBar({
   if (view.decision !== null) {
     return (
       <div className="map-order-bar map-order-bar--waiting">
-        <button type="button" onClick={onGoToDesk}>
-          The world is waiting on your word.
+        <button type="button" className="btn btn--seal" onClick={onGoToDesk}>
+          The world is waiting on your word
         </button>
       </div>
     );
@@ -57,8 +57,8 @@ export function MapOrderBar({
         disabled={busy}
         onChange={(event) => setOrder(event.target.value)}
       />
-      <button type="submit" disabled={busy || order.trim().length === 0}>Send</button>
-      <button type="button" className="map-order-bar__desk" onClick={onGoToDesk}>At the desk…</button>
+      <button type="submit" className="btn btn--primary" disabled={busy || order.trim().length === 0}>Send</button>
+      <button type="button" className="word-button map-order-bar__desk" onClick={onGoToDesk}>At the desk…</button>
     </form>
   );
 }

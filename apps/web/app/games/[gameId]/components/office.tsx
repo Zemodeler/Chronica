@@ -39,6 +39,11 @@ export interface OfficeThing {
   readonly marked?: boolean | undefined;
   /** The drawing shows this differently: an empty strongbox, a thinned rack. */
   readonly state?: string | undefined;
+  /**
+   * What the thing says about itself now -- "Short 58 a month" -- shown on
+   * its plaque in place of what it is for.
+   */
+  readonly says?: string | undefined;
 }
 
 export function Office({
@@ -70,6 +75,9 @@ export function Office({
       data-style={style}
       data-scenery={scenery.kind}
     >
+      {/* The same painting, blurred and dark, filling whatever the 16:9 room
+          does not: a window of another shape gets more room, not black bars. */}
+      {drawn && <img className="office__ambience" src={scenery.src} alt="" aria-hidden="true" draggable={false} />}
       <div className="office__room">
         {drawn && (
           <img
@@ -117,11 +125,14 @@ export function Office({
                   {/* The thing itself. Its own element so the edge that lights
                       up is the object's, not a box drawn round it. */}
                   {sprite !== null && <img className="office-object__cut-out" src={sprite} alt="" aria-hidden="true" draggable={false} />}
-                  <span className="office-object__name">{object.name}</span>
-                  <span className="office-object__does">{object.does}</span>
-                  {thing?.marked === true && <span className="office-object__mark"><span className="visually-hidden">Waiting on your word</span><span aria-hidden="true">•</span></span>}
+                  {/* Its name, on a plaque hung from it while it is pointed at. */}
+                  <span className="office-object__plaque">
+                    <span className="office-object__name">{object.name}</span>
+                    <span className="office-object__does">{thing?.says ?? object.does}</span>
+                  </span>
+                  {thing?.marked === true && <span className="office-object__mark seal-dot"><span className="visually-hidden">Waiting on your word</span></span>}
                   {thing?.badge !== undefined && thing.badge > 0 && (
-                    <span className="office-object__badge">{thing.badge}</span>
+                    <span className="office-object__badge badge">{thing.badge}</span>
                   )}
                 </button>
               </li>

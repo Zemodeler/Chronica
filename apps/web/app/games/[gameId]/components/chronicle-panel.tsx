@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Sheet, type SheetSide } from "../../../components/ui/sheet";
+import { Era } from "../../../components/ui/era";
 import type { ChronicleEntry, EntryTag, GameViewController } from "./use-game-view";
 
 /**
@@ -52,29 +54,29 @@ function Entry({ entry, onTag }: { readonly entry: ChronicleEntry; readonly onTa
   return (
     <article className={entry.published ? "chronicle-entry" : "chronicle-entry is-unfolding"}>
       <header>
-        {entry.date !== null && <p className="chronicle-entry__date">{entry.date}</p>}
+        {entry.date !== null && <p className="chronicle-entry__date"><Era text={entry.date} /></p>}
+        <h3>{entry.title}</h3>
         {entry.tags.length > 0 && (
-          <ul className="chronicle-entry__tags">
+          <ul className="chronicle-entry__tags" aria-label="Show everything touching">
             {entry.tags.map((tag) => (
               <li key={tagKey(tag)}>
-                <button type="button" onClick={() => onTag(tag)} title={`Everything touching this ${KIND_LABEL[tag.kind] ?? tag.kind}`}>
+                <button type="button" className="word-button" onClick={() => onTag(tag)} title={`Everything touching this ${KIND_LABEL[tag.kind] ?? tag.kind}`}>
                   {tag.label}
                 </button>
               </li>
             ))}
           </ul>
         )}
-        <h3>{entry.title}</h3>
       </header>
 
       {entry.kind === "recorded"
         ? <LedgerBody body={entry.body} />
-        : entry.body.split("\n\n").map((paragraph, index) => <p key={index}>{paragraph}</p>)}
+        : <div className="chronicle-entry__body">{entry.body.split("\n\n").map((paragraph, index) => <p key={index}>{paragraph}</p>)}</div>}
 
       {entry.quote !== null && (
         <figure className="chronicle-entry__quote">
           <blockquote>{`“${entry.quote.line}”`}</blockquote>
-          <figcaption>{`— ${entry.quote.speaker}, ${entry.quote.occasion}`}</figcaption>
+          <figcaption>{`${entry.quote.speaker}, ${entry.quote.occasion}`}</figcaption>
         </figure>
       )}
 
@@ -95,7 +97,7 @@ function Entry({ entry, onTag }: { readonly entry: ChronicleEntry; readonly onTa
   );
 }
 
-export function ChroniclePanel({ controller, onClose }: { readonly controller: GameViewController; readonly onClose: () => void }) {
+export function ChroniclePanel({ controller, onClose, side }: { readonly controller: GameViewController; readonly onClose: () => void; readonly side: SheetSide }) {
   const [filter, setFilter] = useState<EntryTag | null>(null);
 
   // Newest first: a reader opening the record wants where it has got to, and
@@ -108,33 +110,25 @@ export function ChroniclePanel({ controller, onClose }: { readonly controller: G
   }, [controller.view.chronicle, filter]);
 
   return (
-    <aside className="chronicle-panel" aria-label="Chronicle">
-      <header className="chronicle-panel__header">
-        <h2>Chronicle</h2>
-        <button type="button" onClick={onClose} aria-label="Close the chronicle">×</button>
-      </header>
-
+    <Sheet label="the chronicle" title="Chronicle" width="reading" side={side} onClose={onClose} className="chronicle-panel">
       {filter !== null && (
-        <div className="chronicle-panel__filter">
-          <span>{`Everything touching ${filter.label}`}</span>
-          <button type="button" onClick={() => setFilter(null)}>Show all</button>
+        <div className="chronicle-filter">
+          <span>Everything touching <strong>{filter.label}</strong></span>
+          <button type="button" className="word-button" onClick={() => setFilter(null)}>Show all</button>
         </div>
       )}
-
-      <div className="chronicle-panel__scroll">
-        {controller.busy && (
-          <p className="chronicle-panel__unfolding" aria-live="polite">The season is still unfolding. What follows is written as it happens; nothing already shown will move.</p>
-        )}
-        {entries.length === 0 ? (
-          <p className="chronicle-panel__empty">
-            {filter === null
-              ? "Nothing has been recorded yet. Give an order and the world will answer."
-              : "Nothing in the record touches that."}
-          </p>
-        ) : (
-          entries.map((entry) => <Entry key={entry.id} entry={entry} onTag={setFilter} />)
-        )}
-      </div>
-    </aside>
+      {controller.busy && (
+        <p className="chronicle-unfolding" aria-live="polite">The season is still unfolding. What follows is written as it happens; nothing already shown will move.</p>
+      )}
+      {entries.length === 0 ? (
+        <p className="quiet">
+          {filter === null
+            ? "Nothing has been recorded yet. Give an order and the world will answer."
+            : "Nothing in the record touches that."}
+        </p>
+      ) : (
+        entries.map((entry) => <Entry key={entry.id} entry={entry} onTag={setFilter} />)
+      )}
+    </Sheet>
   );
 }

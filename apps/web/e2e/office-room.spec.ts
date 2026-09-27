@@ -7,8 +7,8 @@ import { enterTheWorld, waitForTheOffice } from "./fixture";
  * the part that has to work. Everything here is done without a mouse.
  */
 test.describe("the room", () => {
-  /** Every surface the room opens: an aside for the working panels, a dialog for the rest. */
-  const anyPanel = (page: Page) => page.locator('aside[class$="-panel"], aside.sim-panel, dialog[open]').first();
+  /** Every surface the room opens is a sheet: a modal dialog laid over the room. */
+  const anyPanel = (page: Page) => page.locator("dialog[open]").first();
 
   test("opens every object from the keyboard, and gives focus back", async ({ page }) => {
     await enterTheWorld(page, "consul");
@@ -29,14 +29,8 @@ test.describe("the room", () => {
       // Generous: each route and panel compiles on its first hit under dev.
       await expect(anyPanel(page), `${id} opened nothing`).toBeVisible({ timeout: 60_000 });
 
-      const dialog = page.locator("dialog[open]");
-      if (await dialog.count() > 0) {
-        await page.keyboard.press("Escape");
-        await expect(dialog).toHaveCount(0);
-      } else {
-        await page.locator('aside[class$="-panel"], aside.sim-panel').first()
-          .getByRole("button", { name: /close/i }).first().click();
-      }
+      // Escape puts any sheet down.
+      await page.keyboard.press("Escape");
       await expect(anyPanel(page)).toHaveCount(0);
       // The room gives focus back to the thing that was picked up.
       await expect(object).toBeFocused();
@@ -73,6 +67,10 @@ test.describe("the room", () => {
   });
 
   test("has no accessibility violations, room or panels", async ({ page }) => {
+    // A sheet fades in; measured mid-fade, its text is a blend of ink and
+    // room and fails contrast it passes at rest. Reduced motion makes the
+    // opening a cut, so axe reads the document as the player reads it.
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await enterTheWorld(page);
     await waitForTheOffice(page);
 
@@ -86,13 +84,13 @@ test.describe("the room", () => {
       const object = page.locator(`[data-object="${id}"]`);
       if (await object.count() === 0) continue;
       await object.click();
-      const panel = page.locator('aside[class$="-panel"], aside.sim-panel').first();
+      const panel = anyPanel(page);
       await expect(panel).toBeVisible({ timeout: 60_000 });
       // WCAG A and AA. The page's own landmark structure -- a global header
       // and the shell's own, which axe counts as two banners -- predates the
       // Office by a long way and is a best-practice note, not a failure.
       const result = await new AxeBuilder({ page })
-        .include("aside")
+        .include("dialog[open]")
         .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
         .analyze();
       expect(result.violations, `${id}: ${JSON.stringify(result.violations.map((v) => v.id))}`).toEqual([]);

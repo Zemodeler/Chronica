@@ -1,10 +1,12 @@
 import { projectCoordinate } from "./geo-projection";
 import { derivePoliticalLabels, type PoliticalLabelLayout } from "./political-labels";
 import type { PoliticalMapState } from "./political-geometry";
+import { labelFontFamily, whenLabelFontReady } from "./map-fonts";
+import { ATLAS } from "../../../../lib/palette";
 
-const LABEL_FILL = "#f4f0df";
-const LABEL_HALO = "rgba(10, 15, 20, 0.78)";
-const LABEL_FONT_FAMILY = '"Times New Roman", Times, serif';
+// Ink on the plate, lifted off the relief by a thin paper-coloured halo.
+const LABEL_FILL = ATLAS.label;
+const LABEL_HALO = ATLAS.labelHalo;
 const CURVE_SAMPLES = 24;
 
 interface VisibleWorldRect { minX: number; maxX: number; minY: number; maxY: number; }
@@ -64,11 +66,11 @@ function layoutCharacters(label: PoliticalLabelLayout): { char: string; x: numbe
 }
 
 function drawCurvedLabel(ctx: OffscreenCanvasRenderingContext2D, label: PoliticalLabelLayout, characters: ReturnType<typeof layoutCharacters>): void {
-  ctx.font = `bold ${label.fontSize}px ${LABEL_FONT_FAMILY}`;
+  ctx.font = `500 ${label.fontSize}px ${labelFontFamily()}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.lineJoin = "round";
-  ctx.lineWidth = label.fontSize * .22;
+  ctx.lineWidth = label.fontSize * .18;
   ctx.strokeStyle = LABEL_HALO;
   ctx.fillStyle = LABEL_FILL;
   for (const { char, x, y, angle } of characters) {
@@ -138,6 +140,9 @@ interface LabelBitmap { readonly canvas: OffscreenCanvas; readonly x: number; re
 // political → level → the placed labels, and their bitmaps by label id
 interface LabelLevel { readonly placed: readonly PlacedLabel[]; readonly bitmaps: Map<string, LabelBitmap> }
 const _labelCache = new WeakMap<PoliticalMapState, Map<number, LabelLevel>>();
+// Bitmaps made before the label face loaded are in the fallback face; they
+// are all thrown away once, when it arrives.
+let _labelFontReady = false;
 
 function renderLabelBitmap({ label, characters }: PlacedLabel, devicePixelsPerUnit: number): LabelBitmap {
   // Each glyph fits inside a square of its font size around its anchor
@@ -172,6 +177,10 @@ export function drawPoliticalLabels(
   const level = Math.round(Math.log2(pixelsPerDegree * dpr) * LEVELS_PER_OCTAVE);
   const devicePixelsPerUnit = 2 ** (level / LEVELS_PER_OCTAVE);
   let levels = _labelCache.get(political);
+  if (!_labelFontReady && whenLabelFontReady(requestRedraw)) {
+    _labelFontReady = true;
+    levels?.clear();
+  }
   if (!levels) { levels = new Map(); _labelCache.set(political, levels); }
   for (const cached of levels.keys()) if (Math.abs(cached - level) > KEEP_LEVELS) levels.delete(cached);
   let current = levels.get(level);

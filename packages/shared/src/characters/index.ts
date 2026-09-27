@@ -18,6 +18,8 @@ export * from "./mind";
 export * from "./opinion";
 export * from "./access";
 export * from "./acquaintance";
+export * from "./directory";
+export * from "./promises";
 export * from "./beliefs-in-words";
 export * from "./skills-in-words";
 export * from "./skill-bands";

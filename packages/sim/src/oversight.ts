@@ -1,4 +1,4 @@
-import { allOffices, type Office, type OrderPartyRef, type WorldDelta, type WorldState } from "@chronica/shared";
+import { accountLabel, allOffices, type Office, type OrderPartyRef, type WorldDelta, type WorldState } from "@chronica/shared";
 import type { AuthorityBreach } from "./apply/context";
 
 /**
@@ -30,9 +30,7 @@ export function describeBreach(delta: WorldDelta, world: WorldState, actorName: 
   const account = (id: string | null): string => {
     if (id === null) return "the treasury";
     const found = world.material.accounts.find((candidate) => candidate.id === id);
-    if (found === undefined) return "an account";
-    if (found.owner.kind === "polity") return `the ${world.map.polities.find((polity) => polity.id === found.owner.id)?.name ?? found.owner.id} treasury`;
-    return `${world.characters.find((character) => character.id === found.owner.id)?.name ?? found.owner.id}'s purse`;
+    return found === undefined ? "an account" : accountLabel(world, found, "clause");
   };
   const force = (id: string): string => world.material.forces.find((candidate) => candidate.id === id)?.name ?? "a force";
   const province = (id: string): string => world.map.provinces.find((candidate) => candidate.id === id)?.name ?? "a province";
