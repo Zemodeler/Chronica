@@ -19,7 +19,7 @@
  */
 import { writeFileSync } from "node:fs";
 import { punicWarsGeoJson } from "../../apps/web/lib/punic-wars-geojson";
-import { PUNIC_WARS_CONTROL_MANIFEST, PUNIC_WARS_MAP_POLITIES } from "../../apps/web/lib/punic-wars-map-territory";
+import { CAPITAL_POLITY_BY_SETTLEMENT, PUNIC_WARS_CONTROL_MANIFEST, PUNIC_WARS_MAP_POLITIES, settlementControllerFor } from "../../apps/web/lib/punic-wars-map-territory";
 
 type Point = readonly number[];
 
@@ -294,8 +294,8 @@ const fortification = (type: string): number => (type === "fort" ? 3 : type === 
 const settlements = punicWarsGeoJson.features.flatMap((feature) => {
   if (feature.properties.kind !== "settlement") return [];
   const properties = feature.properties as { name?: string; provinceId: string; type: string };
-  const controllerPolityId = controllerByProvince.get(properties.provinceId);
-  if (controllerPolityId === undefined) return [];
+  if (!controllerByProvince.has(properties.provinceId)) return [];
+  const controllerPolityId = settlementControllerFor(feature.id, properties.provinceId)!;
   return [{
     id: feature.id,
     name: repairEncoding(properties.name ?? feature.id),
@@ -308,19 +308,13 @@ const settlements = punicWarsGeoJson.features.flatMap((feature) => {
 }).sort((a, b) => a.id.localeCompare(b.id));
 
 /**
- * A capital is a fact about a polity, and the map records four beyond the ones
- * the scenario authored by hand: Cirta, Volubilis, Garama and Cyrene. Naming
- * them matters past display -- a polity holding a named capital is one the
- * world will give a leader to before it gets around to the hill tribes.
+ * A capital is a fact about a polity. Naming it matters past display -- a
+ * polity holding a named capital is one the world will give a leader to before
+ * it gets around to the hill tribes. The polities the scenario authors by hand
+ * set their own and are filtered out of this file's list there.
  */
-const CAPITAL_BY_SETTLEMENT: Readonly<Record<string, string>> = {
-  "settlement-cirta": "numidian-kingdoms",
-  "settlement-volubilis": "mauretanian-peoples",
-  "settlement-garama": "garamantes",
-  "settlement-cyrene": "ptolemaic-cyrenaica",
-};
 const capitalByPolity = new Map<string, string>();
-for (const [settlementId, polityId] of Object.entries(CAPITAL_BY_SETTLEMENT)) {
+for (const [settlementId, polityId] of Object.entries(CAPITAL_POLITY_BY_SETTLEMENT)) {
   if (settlements.some((settlement) => settlement.id === settlementId)) capitalByPolity.set(polityId, settlementId);
 }
 

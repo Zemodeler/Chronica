@@ -102,7 +102,7 @@ describe("elections to an elective office", () => {
     const canvassOver = tick(yearEnded(), 365 + ELECTION_CANVASS_DAYS);
     const [called] = elections(canvassOver.world);
     expect(called?.stage).toBe("gathering_support");
-    expect(called?.institutionId).toBe("roman-senate");
+    expect(called?.institutionId).toBe("roman-comitia-centuriata");
     expect(canvassOver.factProposals.some((fact) => fact.kind === "election_called")).toBe(true);
 
     const pollingDay = tick(canvassOver.world, 365 + ELECTION_CANVASS_DAYS + ELECTION_POLLING_DAYS);
@@ -115,7 +115,7 @@ describe("elections to an elective office", () => {
     const held = pollingDay.world.material.officeSeats.filter((seat) => seat.officeId === "roman-consul");
     expect(held.every((seat) => seat.termExpiresAtStep === 365 + ELECTION_CANVASS_DAYS + ELECTION_POLLING_DAYS + 365)).toBe(true);
     const account = pollingDay.factProposals.find((fact) => fact.kind === "election_held");
-    expect(account?.summary).toContain("Senate elected");
+    expect(account?.summary).toContain("Centuriate Assembly elected");
     expect(account?.visibility).toBe("public");
   });
 

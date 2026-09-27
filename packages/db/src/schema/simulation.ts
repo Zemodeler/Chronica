@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, bigserial, boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, bigserial, boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { games } from "./game";
 import { users } from "./auth";
 
@@ -100,7 +100,11 @@ export const simulationBursts = pgTable("simulation_bursts", {
   /** Last sign of life from the process running it. A running row that stops beating is abandoned, whatever its age. */
   heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
   endedAt: timestamp("ended_at", { withTimezone: true }),
-}, (table) => [index("simulation_bursts_game_idx").on(table.gameId, table.startedAt)]);
+}, (table) => [
+  index("simulation_bursts_game_idx").on(table.gameId, table.startedAt),
+  // One burst at a time per world, kept here rather than by a read before the insert (0040).
+  uniqueIndex("simulation_bursts_one_running_idx").on(table.gameId).where(sql`${table.status} = 'running'`),
+]);
 
 /**
  * What a running burst has to say for itself, in order: where the world has

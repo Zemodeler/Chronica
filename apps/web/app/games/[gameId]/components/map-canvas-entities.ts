@@ -1,9 +1,9 @@
 import type { DynamicMapOverlay } from "@chronica/shared";
 import type { StaticWorldGeometry } from "./world-geometry";
-import { politicalColourWithAlpha } from "./political-geometry";
+import { leadersOf, politicalColourWithAlpha } from "./political-geometry";
 import { resolveMapForcePlacements } from "./map-dynamic-geometry";
 import { deriveForceConflictStatuses } from "./map-conflict-state";
-import { armyStandardBounds, armyStandardWidthForZoom, type ForceFlagAsset } from "./army-standard";
+import { FALLBACK_FORCE_FLAG, FORCES_VISIBLE_FROM_SCALE, armyStandardBounds, armyStandardWidthForZoom, fannedStandardCentre, type ForceFlagAsset } from "./army-standard";
 
 interface VisibleWorldRect { minX: number; maxX: number; minY: number; maxY: number; }
 
@@ -119,6 +119,7 @@ export function drawSettlements(
 ): void {
   const settlementOverlay = new Map((overlay?.settlements ?? []).map((s) => [s.settlementId, s]));
   const besiegedSettlementIds = new Set(overlay?.conflicts.sieges.map((siege) => siege.settlementId) ?? []);
+  const leaderByPolity = leadersOf(overlay?.politicalRelations ?? []);
   const showNonCapitals = scale >= MEDIUM_ZOOM_SCALE;
   const showTowns = scale >= CLOSE_ZOOM_SCALE;
   const pulse = pulseOpacity(nowMs);
@@ -145,7 +146,7 @@ export function drawSettlements(
     }
 
     const radius = settlementRadius(settlement.type, pixelsPerDegree);
-    const fill = state?.controllerPolityId ? politicalColourWithAlpha(state.controllerPolityId, .9) : SETTLEMENT_DEFAULT_FILL;
+    const fill = state?.controllerPolityId ? politicalColourWithAlpha(state.controllerPolityId, .9, leaderByPolity) : SETTLEMENT_DEFAULT_FILL;
     const underSiege = besiegedSettlementIds.has(settlement.id);
 
     ctx.fillStyle = fill;
@@ -230,8 +231,8 @@ export function drawForces(
   nowMs: number,
   requestRedraw: () => void,
 ): void {
-  // Mirrors `[data-zoom="far"] .layer-forces { display: none; }`.
-  if (scale < MEDIUM_ZOOM_SCALE) return;
+  // Too far out to draw an army; the hit test (geo-map.tsx) refuses the same.
+  if (scale < FORCES_VISIBLE_FROM_SCALE) return;
 
   const conflictByForceId = deriveForceConflictStatuses(overlay);
   const armyStandardWidth = armyStandardWidthForZoom(pixelsPerDegree);
@@ -245,10 +246,10 @@ export function drawForces(
     if (placement.group?.isPrimary === false) continue;
     const force = forceById.get(placement.forceId);
     if (!force) continue;
-    const { x, y } = placement;
+    const { x, y } = fannedStandardCentre(placement, armyStandardWidth);
     if (x < visibleRect.minX || x > visibleRect.maxX || y < visibleRect.minY || y > visibleRect.maxY) continue;
 
-    const asset = forceFlagUrls.get(force.forceId) ?? { url: "/maps/generic-merchant-ship-standard.png", aspectRatio: 4 / 3 };
+    const asset = forceFlagUrls.get(force.forceId) ?? FALLBACK_FORCE_FLAG;
     const bounds = armyStandardBounds(asset, x, y, armyStandardWidth);
     const conflict = conflictByForceId.get(force.forceId);
 
@@ -272,7 +273,7 @@ export function drawForces(
     // besieging one settlement) carries a small count badge instead of a
     // second flag, per docs/19 Phase 3's "one marker with count/summary".
     if (placement.group && placement.group.size > 1) {
-      const badgeRadius = Math.max(4, armyStandardWidth * 0.16) / pixelsPerDegree;
+      const badgeRadius = Math.max(4, armyStandardWidth * pixelsPerDegree * 0.16) / pixelsPerDegree;
       const badgeX = bounds.x + bounds.width - badgeRadius * 0.4;
       const badgeY = bounds.y - badgeRadius * 0.4;
       ctx.beginPath();

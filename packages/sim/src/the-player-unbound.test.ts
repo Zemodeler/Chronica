@@ -13,6 +13,7 @@ import { createIdFactory } from "./ports";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
 import { holdElections } from "./elections";
+import { holdVotes, voteDayOf } from "./senate";
 
 /**
  * The places the engine held a person back that it had no business holding.
@@ -311,6 +312,21 @@ describe("a death somebody brings about", () => {
 });
 
 describe("a measure that does what it says", () => {
+  // Carried by the Senate on its day, as every counted question now is. A
+  // grain law is no landowner's wish, so the Patricians' leaders declare for
+  // it -- the government's own measure -- and that carries the house.
+  const votedOn = (state: WorldState, procedureId: string) => {
+    const procedure = state.material.politicalProcedures.find((candidate) => candidate.id === procedureId)!;
+    const backed = act("gaius-genucius", [WorldDeltaSchema.parse({
+      op: "political_support_set", procedureRef: procedureId, supporterKind: "group", supporterRef: "patrician-bloc", position: "support",
+      influenceWeight: 50, reasonKind: "group_loyalty", reasonLabel: "The consul's measure.", reason: "The Patricians back the government.",
+    })], state);
+    expect(backed.rejected).toEqual([]);
+    const result = holdVotes({ world: backed.world, offices: definition.government.offices, toDay: voteDayOf(procedure), ids: createIdFactory("vote") });
+    expect(WorldStateSchema.safeParse(result.world).success).toBe(true);
+    expect(result.world.material.politicalProcedures.find((candidate) => candidate.id === procedureId)!.outcome).toBe("passed");
+    return result;
+  };
   const open = (enacts: unknown): WorldDelta => WorldDeltaSchema.parse({
     op: "political_procedure_open", localId: "law", type: "vote", institutionRef: "roman-senate", sponsorCharacterRef: "gaius-genucius",
     subjectKind: "polity", subjectRef: "rome", label: "The grain law", resolutionMechanism: "vote", enacts, reason: "A law is put.",
@@ -320,16 +336,16 @@ describe("a measure that does what it says", () => {
     const opened = act("gaius-genucius", [open({ effects: [{ quantity: "food_security", band: "marked" }] })]);
     expect(opened.world.genericEntities.some((entity) => entity.kind === "law")).toBe(false);
     const procedureId = opened.world.material.politicalProcedures.find((procedure) => procedure.label === "The grain law")!.id;
-    const carried = act("gaius-genucius", [{ op: "political_procedure_resolve", procedureRef: procedureId, outcome: "passed", outcomeReason: "Carried.", reason: "The vote." }], opened.world);
+    const carried = votedOn(opened.world, procedureId);
     const law = carried.world.genericEntities.find((entity) => entity.kind === "law")!;
     expect(law.effects?.[0]?.scope).toBe("realm");
-    expect(carried.factProposals.some((fact) => fact.kind === "law_enacted")).toBe(true);
+    expect(carried.facts.some((fact) => fact.kind === "law_enacted")).toBe(true);
   });
 
   it("reforms an office's term and adds a seat to its college", () => {
     const opened = act("gaius-genucius", [open({ office: { officeId: "roman-consul", termDays: 730, seats: 3 } })]);
     const procedureId = opened.world.material.politicalProcedures.find((procedure) => procedure.label === "The grain law")!.id;
-    const carried = act("gaius-genucius", [{ op: "political_procedure_resolve", procedureRef: procedureId, outcome: "passed", outcomeReason: "Carried.", reason: "The vote." }], opened.world);
+    const carried = votedOn(opened.world, procedureId);
     expect(carried.world.offices.find((office) => office.id === "roman-consul")?.termDays).toBe(730);
     expect(carried.world.material.officeSeats.filter((seat) => seat.officeId === "roman-consul")).toHaveLength(3);
   });
@@ -337,7 +353,7 @@ describe("a measure that does what it says", () => {
   it("founds a council", () => {
     const opened = act("gaius-genucius", [open({ body: { name: "The Tribal Assembly" } })]);
     const procedureId = opened.world.material.politicalProcedures.find((procedure) => procedure.label === "The grain law")!.id;
-    const carried = act("gaius-genucius", [{ op: "political_procedure_resolve", procedureRef: procedureId, outcome: "passed", outcomeReason: "Carried.", reason: "The vote." }], opened.world);
+    const carried = votedOn(opened.world, procedureId);
     expect(carried.world.material.institutions.some((institution) => institution.name === "The Tribal Assembly" && institution.polityId === "rome")).toBe(true);
   });
 });

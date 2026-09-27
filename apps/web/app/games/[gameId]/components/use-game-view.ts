@@ -155,8 +155,14 @@ export function useGameView(gameId: string): GameViewController {
   const [committed, setCommitted] = useState<GameView>({ chronicle: [], decision: null, running: null });
   /** Passages of the running burst, in the order they were written. Dropped once the commit is read back. */
   const [pending, setPending] = useState<readonly ChronicleEntry[]>([]);
-  /** The burst being followed, so a second follow of the same one is not started. */
+  /**
+   * The burst being followed. A loop that finds another burst here has been
+   * superseded and leaves quietly: two loops writing into one `pending` showed
+   * every passage of the later one twice.
+   */
   const following = useRef<string | null>(null);
+  /** An order on its way to the server, so a double click or Enter-and-click sends it once. */
+  const sending = useRef(false);
 
   const refresh = useCallback(async () => {
     const response = await fetch(`/api/games/${gameId}/simulate`, { cache: "no-store" });
@@ -187,16 +193,19 @@ export function useGameView(gameId: string): GameViewController {
     setPending([]);
     let cursor = 0;
     let failures = 0;
+    const superseded = () => following.current !== burstId;
     try {
       for (;;) {
         let status: BurstStatus | null = null;
         try {
           const response = await fetch(`/api/games/${gameId}/bursts/${burstId}?after=${cursor}`, { cache: "no-store" });
+          if (superseded()) return false;
           if (response.status === 404) { setError("That order is no longer being carried out."); return false; }
           if (response.ok) status = (await response.json()) as BurstStatus;
         } catch {
           // The network, not the world: keep asking for a while.
         }
+        if (superseded()) return false;
         if (status === null) {
           failures += 1;
           if (failures >= POLL_FAILURES_TOLERATED) { setError("Lost contact with the world while your order was being carried out. It is still being carried out; reload to catch up."); return false; }
@@ -213,8 +222,10 @@ export function useGameView(gameId: string): GameViewController {
         await sleep(POLL_MS);
       }
     } finally {
-      following.current = null;
-      setBusy(false);
+      if (!superseded()) {
+        following.current = null;
+        setBusy(false);
+      }
     }
   }, [gameId, refresh]);
 
@@ -227,20 +238,33 @@ export function useGameView(gameId: string): GameViewController {
   }, [committed.running, follow]);
 
   const start = useCallback(async (path: string, body: unknown): Promise<boolean> => {
+    if (sending.current || following.current !== null) return false;
+    sending.current = true;
+    // Busy from the click, not from the answer: the form stays shut while the
+    // order is on its way, so it cannot be sent a second time.
+    setBusy(true);
     setError(null);
-    let response: Response;
+    let burstId: string;
     try {
-      response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    } catch {
-      setError("The order could not be sent.");
-      return false;
+      let response: Response;
+      try {
+        response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      } catch {
+        setError("The order could not be sent.");
+        setBusy(false);
+        return false;
+      }
+      const answer = (await response.json().catch(() => ({}))) as { burstId?: string; error?: string };
+      if (!response.ok || typeof answer.burstId !== "string") {
+        setError(answer.error ?? "The order could not be carried out.");
+        setBusy(false);
+        return false;
+      }
+      burstId = answer.burstId;
+    } finally {
+      sending.current = false;
     }
-    const answer = (await response.json().catch(() => ({}))) as { burstId?: string; error?: string };
-    if (!response.ok || typeof answer.burstId !== "string") {
-      setError(answer.error ?? "The order could not be carried out.");
-      return false;
-    }
-    return follow(answer.burstId);
+    return follow(burstId);
   }, [follow]);
 
   const send = useCallback(async (orderText: string, options: SendOptions = {}): Promise<boolean> => {

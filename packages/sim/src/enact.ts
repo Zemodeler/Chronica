@@ -7,9 +7,11 @@ import {
   vacateOfficeOf,
   type FactProposalDraft,
   type Office,
+  type SuccessionRule,
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+import { amend } from "./constitutions";
 
 /**
  * A measure carried, and what it does.
@@ -33,6 +35,7 @@ export function carryOutEnactment(
   atStep: number,
   ids: IdFactory,
   scenarioOffices: readonly Office[],
+  scenarioSuccessionRules: readonly SuccessionRule[] = [],
 ): { world: WorldState; facts: FactProposalDraft[] } {
   const enactment = world.enactments.find((candidate) => candidate.procedureId === procedureId && candidate.enactedAtStep === null);
   if (enactment === undefined) return { world, facts: [] };
@@ -158,6 +161,7 @@ export function carryOutEnactment(
             id: `${id}-members`, name: "Members", representedInterest: "its members", weight: 100,
             baseSupport: 0, yesThreshold: 10, noThreshold: -10, causes: [],
           }],
+          franchise: "council" as const,
           totalVotingWeight: 100,
           quorumBps: 5_000,
           passageThresholdBps: 5_000,
@@ -190,9 +194,18 @@ export function carryOutEnactment(
     }
   }
 
+  // The constitution itself, changed as parts: a form recast, a chamber
+  // founded or done away with, a throne made elective.
+  if (enactment.constitution != null) {
+    const amended = amend(next, enactment.polityId, enactment.constitution, { offices: scenarioOffices, successionRules: scenarioSuccessionRules }, atStep, ids, title, procedure?.sponsorCharacterId ?? null);
+    next = amended.world;
+    facts.push(...amended.facts);
+    said.push(...amended.said);
+  }
+
   next = {
     ...next,
-    enactments: next.enactments.map((candidate) => (candidate === enactment ? { ...candidate, enactedAtStep: atStep } : candidate)),
+    enactments: next.enactments.map((candidate) => (candidate.procedureId === enactment.procedureId && candidate.enactedAtStep === null ? { ...candidate, enactedAtStep: atStep } : candidate)),
   };
   if (said.length > 0) {
     facts.push({

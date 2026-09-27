@@ -1,6 +1,45 @@
 import { z } from "zod";
 import { EntityIdSchema } from "../material-state";
 import { StandingEffectSchema, StandingUpkeepSchema } from "./standing-effects";
+import { ChamberPowerSchema, FranchiseSchema, GovernmentFormSchema } from "../political-parts";
+
+/**
+ * A change to the constitution itself, as parts (`sim/constitutions.ts`).
+ *
+ * - `form`: the whole of it recast -- a kingship abolished for a republic.
+ *   Every part the old form had and the new one lacks goes.
+ * - `chamber`: one chamber founded, reformed or abolished.
+ * - `succession`: how one office is filled -- a throne made elective.
+ */
+export const ConstitutionAmendmentSchema = z
+  .object({
+    form: GovernmentFormSchema.nullable().default(null),
+    chamber: z
+      .object({
+        /** Null founds a new one. */
+        institutionId: EntityIdSchema.nullable().default(null),
+        name: z.string().trim().min(1).max(120).nullable().default(null),
+        powers: z.array(ChamberPowerSchema).max(6).nullable().default(null),
+        advisory: z.boolean().nullable().default(null),
+        franchise: FranchiseSchema.nullable().default(null),
+        abolish: z.boolean().default(false),
+      })
+      .strict()
+      .nullable()
+      .default(null),
+    succession: z
+      .object({
+        officeId: EntityIdSchema,
+        kind: z.enum(["primogeniture", "elective", "appointment", "seniority"]),
+        /** The chamber that elects, for an elective office. */
+        institutionId: EntityIdSchema.nullable().default(null),
+      })
+      .strict()
+      .nullable()
+      .default(null),
+  })
+  .strict();
+export type ConstitutionAmendment = z.infer<typeof ConstitutionAmendmentSchema>;
 
 /**
  * What a measure before a council will do if it is carried.
@@ -32,6 +71,8 @@ export const EnactmentSchema = z
       .nullable()
       .default(null),
     body: z.object({ name: z.string().trim().min(1).max(120) }).strict().nullable().default(null),
+    /** The constitution changed, as parts. */
+    constitution: ConstitutionAmendmentSchema.nullable().optional(),
     /** A man excused the ladder for one office (`resolveEligibility`). */
     waiver: z.object({ characterId: EntityIdSchema, officeId: EntityIdSchema }).strict().nullable().default(null),
     /** Set when it was carried out, so it is never carried out twice. */

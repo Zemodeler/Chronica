@@ -71,7 +71,7 @@ export function materializeCanvasProvince(
   const polities = materializedControllerId !== null && controller !== undefined && !world.map.polities.some((polity) => polity.id === materializedControllerId)
     // A region materialised from the canvas is somebody's ground, and the
     // peoples this reaches for are the ones the map names and nobody organised.
-    ? [...world.map.polities, { id: materializedControllerId, name: controller.name, capitalSettlementId: null, cohesionBps: 3_000 }]
+    ? [...world.map.polities, { id: materializedControllerId, name: controller.name, capitalSettlementId: null, cohesionBps: 3_000, soldierPayPerThousand: null }]
     : world.map.polities;
 
   return {

@@ -110,11 +110,15 @@ export async function prepareBurst(
   // while one is open -- it is what closes it.
   if (input.answeredDecision === undefined && open !== undefined) return { status: "error", message: "A decision is waiting on you before the world can move on." };
   // One burst at a time, and refused at the door rather than at the commit.
-  if (running !== undefined) return { status: "error", message: "The world is already moving on an earlier order. Wait for it to settle." };
+  // The read turns most second orders away; the insert turns away the one
+  // sent in the same breath, which read "nothing running" too.
+  const alreadyMoving = { status: "error", message: "The world is already moving on an earlier order. Wait for it to settle." } as const;
+  if (running !== undefined) return alreadyMoving;
 
   const actorRef: OrderPartyRef = { kind: "character", id: characterId };
   const actorPolityId = view.world.characters.find((character) => character.id === characterId)?.polityId ?? null;
   const burstId = await startBurst(db, { gameId, playerUserId: userId, orderText: input.orderText ?? "(time passes)" });
+  if (burstId === null) return alreadyMoving;
   return {
     status: "ready",
     job: {

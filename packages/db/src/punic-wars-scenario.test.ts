@@ -15,9 +15,10 @@ describe("Punic Wars built-in scenario", () => {
     expect(punicWarsScenario.initialWorld.map.polities.filter((polity) => ["rome", "carthage", "syracuse", "mamertines"].includes(polity.id))).toHaveLength(4);
     // Five armies -- the four powers' own, and the Campanian legion holding
     // Rhegium against the Republic -- plus the ships that decide who can cross
-    // to Sicily at all.
+    // to Sicily at all. The consul's army is half allies, as a consular army was.
     const forces = punicWarsScenario.initialWorld.material.forces;
     expect(forces.filter((force) => force.personnel.every((category) => category.categoryId === "infantry"))).toHaveLength(5);
+    expect(forces.find((force) => force.id === "roman-field-army")!.personnel.map((category) => category.label)).toEqual(["Legionaries", "Allied infantry"]);
     expect(forces.filter((force) => force.personnel.some((category) => category.categoryId === "warship"))).toHaveLength(3);
   });
 
@@ -33,11 +34,21 @@ describe("Punic Wars built-in scenario", () => {
     expect(crossing("tun-13205935b88806172084765", "ita-72843720b81376294924159-sicily-west")).toBe("sea_lane");
   });
 
-  it("uses direct Roman control for its Italian client territories", () => {
-    const controller = new Map(punicWarsScenario.initialWorld.map.provinces.map((province) => [province.id, province.controllerPolityId]));
-    expect(controller.get("punic-italy-etrurian-uplands")).toBe("rome");
-    expect(controller.get("punic-italy-samnium")).toBe("rome");
-    expect(controller.get("punic-italy-lucanian-uplands")).toBe("rome");
+  it("governs Latium and Campania from Rome, and the rest of Italy through allies bound by foedus", () => {
+    const world = punicWarsScenario.initialWorld;
+    const controller = new Map(world.map.provinces.map((province) => [province.id, province.controllerPolityId]));
+    expect(controller.get("punic-italy-latium")).toBe("rome");
+    expect(controller.get("punic-italy-campanian-plain")).toBe("rome");
+    expect(controller.get("punic-italy-etrurian-uplands")).toBe("etruscan-cities");
+    expect(controller.get("punic-italy-samnium")).toBe("samnites");
+    expect(controller.get("punic-italy-sallentine-peninsula")).toBe("messapians");
+    const allies = world.polityAgreements.filter((agreement) => agreement.kind === "foedus" && agreement.otherPolityId === "rome").map((agreement) => agreement.polityId);
+    expect(allies.sort()).toEqual(["apulian-cities", "bruttians", "etruscan-cities", "lucanians", "marsi-paeligni", "picentes", "samnites", "umbrians"]);
+    // Every ally holds its own ground; the Messapians are not yet anybody's.
+    for (const ally of allies) expect([...controller.values()]).toContain(ally);
+    expect(allies).not.toContain("messapians");
+    // Soldiers, not money: nothing the allies pay reaches Rome's treasury.
+    expect(world.material.incomeSources.some((source) => source.beneficiaryAccountId === "rome-treasury" && source.kind === "tribute")).toBe(false);
   });
 
   it("keeps every rendered settlement in a playable province available to the simulation", () => {
@@ -53,8 +64,10 @@ describe("Punic Wars built-in scenario", () => {
     });
     expect(settlements.get("settlement-volsinii")).toMatchObject({
       provinceId: "punic-italy-etrurian-uplands",
-      controllerPolityId: "rome",
+      controllerPolityId: "etruscan-cities",
     });
+    // Rome's Latin colonies stand inside its allies' land as its own.
+    expect(settlements.get("settlement-luceria")).toMatchObject({ provinceId: "punic-italy-apulian-coast", controllerPolityId: "rome" });
     expect(settlements.get("settlement-lilybaeum")?.provinceId).toBe("ita-72843720b81376294924159-sicily-west");
     expect(settlements.get("settlement-panormus")?.provinceId).toBe("ita-72843720b81376294924159-sicily-northwest");
   });
@@ -88,13 +101,16 @@ describe("the Punic Wars map as authoritative world state", () => {
   const terrains = new Map(punicWarsScenario.definition.map.terrains.map((terrain) => [terrain.id, terrain]));
 
   it("carries every province the map draws a controller for, each with a declared holder", () => {
-    expect(provinces).toHaveLength(779);
+    // 779 drawn provinces, and Messapia cut from Apulia.
+    expect(provinces).toHaveLength(780);
     expect(new Set(provinces.map((province) => province.id)).size).toBe(provinces.length);
 
     const polityIds = new Set(world.map.polities.map((polity) => polity.id));
     const undeclared = provinces.filter((province) => province.controllerPolityId !== null && !polityIds.has(province.controllerPolityId));
     expect(undeclared.map((province) => province.id)).toEqual([]);
-    expect(world.map.polities.length).toBeGreaterThanOrEqual(126);
+    // v31 merged duplicate peoples (two Treveri, two Danubian Boii) and dropped
+    // polities named after modern regions (Ceuta, Melilla, Marne, TIMIS).
+    expect(world.map.polities.length).toBeGreaterThanOrEqual(120);
   });
 
   it("gives every polity that holds ground somewhere to hold", () => {
@@ -103,12 +119,12 @@ describe("the Punic Wars map as authoritative world state", () => {
     // otherwise controls, which is precisely what it did -- and what the
     // Mamertines did at Messana.
     for (const province of provinces) for (const settlement of province.settlements) held.add(settlement.controllerPolityId);
-    // Two polities are declared without territory on purpose: Etruria passed to
-    // Rome and the Cenomani province was merged away, but both peoples remain
-    // nameable. Every other polity must actually hold something, or it is a
-    // name the world can neither show nor act on.
+    // One polity is declared without territory on purpose: the Cenomani
+    // province was merged away, but the people remain nameable. Every other
+    // polity must actually hold something, or it is a name the world can
+    // neither show nor act on.
     const landless = world.map.polities.filter((polity) => !held.has(polity.id)).map((polity) => polity.id);
-    expect(landless.sort()).toEqual(["cenomani", "etruscan-cities"]);
+    expect(landless.sort()).toEqual(["cenomani"]);
   });
 
   it("draws no border to a province that does not exist", () => {

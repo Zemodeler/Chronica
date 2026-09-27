@@ -281,6 +281,13 @@
       "when": 1788401000000,
       "tag": "0039_burst_progress",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1788401100000,
+      "tag": "0040_one_running_burst",
+      "breakpoints": true
     }
   ]
 }

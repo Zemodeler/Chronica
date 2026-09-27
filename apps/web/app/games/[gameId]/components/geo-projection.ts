@@ -142,23 +142,25 @@ const CONSOLIDATED_POLITY_PALETTE_SLOTS: Readonly<Record<string, number>> = {
   "gaul-armorican-confederacy": 0, "gaul-belgae": 1, "gaul-treveri": 2, "gaul-sequani": 3,
   "gaul-aedui": 4, "gaul-arverni": 5, "gaul-bituriges": 6, "gaul-sequana-peoples": 7,
   "gaul-aquitani": 8, "gaul-volcae": 9, "gaul-allobroges": 10, "gaul-salyens": 11,
-  "germania-suebi": 0, "germania-ubii": 1, "germania-vindelici": 2, "germania-boii": 3,
+  "gaul-santones": 12, "gaul-pictones": 13, "gaul-lemovices": 14, "gaul-petrocorii": 15, "gaul-cadurci": 0,
+  "germania-ubii": 1, "germania-vindelici": 2,
   "germania-semnones": 4, "germania-chauci": 5, "germania-chatti": 6, "germania-cherusci": 7,
-  "germania-bructeri": 8, "germania-treveri": 9, "germania-hermunduri": 10, "germania-cimbri": 11,
+  "germania-bructeri": 8, "germania-hermunduri": 10, "germania-cimbri": 11,
   "iberia-gallaeci": 0, "iberia-astures": 1, "iberia-cantabri": 2, "iberia-vascones": 3,
   "iberia-vaccei": 4, "iberia-vettones": 5, "iberia-lusitani": 6, "iberia-carpetani": 7,
-  "iberia-celtiberi": 8, "iberia-ilergetes": 9,
+  "iberia-celtiberi": 8, "iberia-ilergetes": 9, "iberia-turdetani": 10, "iberia-edetani": 11,
+  "iberia-contestani": 12, "balearic-islanders": 13,
   "thrace-dacian-highland-communities": 0, "thrace-getae": 1, "thrace-eastern-carpathian-communities": 2,
   // Mainland Greece is unusually dense: neighbouring leagues and city-states
   // need deliberately separated swatches rather than incidental hash picks.
-  athens: 0, "achaean-league": 1, "aetolian-league": 2, "thessalian-league": 3,
+  athens: 0, "achaean-league": 1, "aetolian-league": 2,
   epirus: 4, acarnania: 5, "boeotian-league": 6, "phocian-league": 7,
-  "corinthian-league": 8, "arcadian-league": 9, thebes: 10, argos: 11,
+  "arcadian-league": 9, argos: 11,
   elis: 12, messenia: 13, sparta: 14, megalopolis: 15,
   // Reuse the mainland's separated swatches only for non-adjacent island and
   // coastal states, where their parent palette is still legible at a glance.
-  "euboean-cities": 12, "ionian-islands": 6, "cycladic-islanders": 13,
-  "dodecanese-islanders": 8, "aeolis-communities": 4, "ionia-communities": 1,
+  "ionian-islands": 6, "cycladic-islanders": 13,
+  rhodes: 8, "aeolis-communities": 4, "ionia-communities": 1,
   "cretan-cities-west": 12, "cretan-cities-east": 11,
 };
 
@@ -167,21 +169,22 @@ function historicalFamilyForPolity(polityId: string): HistoricalPolityFamily {
     polityId.startsWith("gaul-")
     || polityId.startsWith("britain-")
     || polityId.startsWith("belgica-")
+    || polityId.startsWith("ireland-")
     || ["insubres", "boii", "cenomani", "helvetian-peoples", "transalpine-celts"].includes(polityId)
   ) return "celtic";
   if (polityId.startsWith("germania-") || polityId.startsWith("low-countries-")) return "germanic";
-  if (polityId.startsWith("iberia-") || polityId === "lusitanians") return "iberian";
+  if (polityId.startsWith("iberia-") || polityId === "lusitanians" || polityId === "balearic-islanders") return "iberian";
   if (polityId.startsWith("illyria-") || polityId.startsWith("thrace-") || polityId === "noric-communities") return "balkan";
-  if (polityId === "ligurians") return "alpine";
+  if (["ligurians", "taurini", "salassi", "raeti"].includes(polityId)) return "alpine";
   if (/(^|-)(hungary|hungarian|magyar|pannon|arpad)(-|$)/.test(polityId)) return "hungarian";
   if (/(^|-)(czech|bohemia|bohemian|moravia|moravian)(-|$)/.test(polityId)) return "czech";
   if (/(^|-)(poland|polish|piast|mazovia|mazovian|wielkopolska|pomerania|pomeranian)(-|$)/.test(polityId)) return "polish";
   if (["veneti", "etruscan-cities", "mamertines", "sabines", "umbrians", "picentes", "marsi-paeligni", "campanians", "samnites", "daunians", "peucetians", "messapians", "tarentines", "lucanians", "bruttians", "rhegines"].includes(polityId)) return "italic";
   if ([
-    "athens", "achaean-league", "aetolian-league", "thessalian-league", "epirus", "massalia",
-    "acarnania", "boeotian-league", "phocian-league", "corinthian-league", "arcadian-league", "thebes", "argos",
-    "elis", "messenia", "sparta", "megalopolis", "euboean-cities", "ionian-islands", "cycladic-islanders",
-    "dodecanese-islanders", "aeolis-communities", "ionia-communities", "cretan-cities-west", "cretan-cities-east",
+    "athens", "achaean-league", "aetolian-league", "epirus", "massalia",
+    "acarnania", "boeotian-league", "phocian-league", "arcadian-league", "argos",
+    "elis", "messenia", "sparta", "megalopolis", "ionian-islands", "cycladic-islanders",
+    "rhodes", "aeolis-communities", "ionia-communities", "cretan-cities-west", "cretan-cities-east",
   ].includes(polityId)) return "hellenic";
   if (["mauretanian-peoples", "numidian-kingdoms", "gaetuli", "garamantes"].includes(polityId)) return "northAfrican";
   return "neutral";

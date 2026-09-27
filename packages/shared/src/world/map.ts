@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { GovernmentFormSchema } from "../political-parts";
 import { BasisPointsSchema, EntityIdSchema } from "../material-state";
 import { AdministrationRecordSchema, ClaimRecordSchema, ControlRecordSchema, OccupationRecordSchema } from "./authority-records";
 
@@ -156,6 +157,21 @@ export const PolitySchema = z
      * keeps working and simply describes states -- which is what it meant.
      */
     cohesionBps: BasisPointsSchema.default(7_000),
+    /**
+     * What this power pays its soldiers: coin a month for every thousand men.
+     *
+     * An army's pay is a flat line in the books, and whoever raised new men
+     * had only the treasury's totals to price them from, so every new legion's
+     * wage was a guess. Null where the scenario says nothing.
+     */
+    soldierPayPerThousand: z.number().int().nonnegative().nullable().default(null),
+    /**
+     * The seed of its constitution: what sort of government it had when the
+     * world first met it. Only the seed -- the parts it grows into are its
+     * chambers, offices and succession rules, and those change by law and by
+     * force (`sim/constitutions.ts`). Null is read from its cohesion.
+     */
+    governmentForm: GovernmentFormSchema.nullable().optional(),
   })
   .strict();
 export type Polity = z.infer<typeof PolitySchema>;

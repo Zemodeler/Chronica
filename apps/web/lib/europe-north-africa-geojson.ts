@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { GeoJsonMap, GeoJsonMapFeature } from "@chronica/shared";
-import { agrigentumFortDemoSettlement, caralisDemoSettlement, naplesDemoSettlement, romeDemoSettlement, syracuseDemoSettlement } from "./calibration-map-features";
+import { agrigentumDemoSettlement, caralisDemoSettlement, naplesDemoSettlement, romeDemoSettlement, syracuseDemoSettlement } from "./calibration-map-features";
 
 /**
  * Europe and Northern Africa provincial boundaries from geoBoundaries gbOpen.
@@ -286,7 +286,7 @@ const GREEK_METRO_REGION_GROUPS: readonly LocalRegionGroup[] = [
   },
   {
     id: "53547021B21928215171810",
-    name: "Midelion",
+    name: "Arcadia",
     members: ["53547021B27793297184106", "53547021B95421116796613", "53547021B21928215171810"],
   },
   {
@@ -341,7 +341,7 @@ const GREEK_METRO_REGION_GROUPS: readonly LocalRegionGroup[] = [
   },
   {
     id: "53547021B33259065854290",
-    name: "Dodecanese",
+    name: "Rhodes",
     members: [
       "53547021B79831596850386", "53547021B33259065854290", "53547021B75170445936702", "53547021B47996092529292", "53547021B10109746206606",
       "53547021B81123909455737", "53547021B14104981349473", "53547021B57223359042947", "53547021B5655608109078", "53547021B65639562394227",
@@ -502,6 +502,135 @@ function clipRingToHalfPlane(ring: readonly (readonly [number, number])[], value
   return result;
 }
 
+/**
+ * Messapia -- the Sallentine peninsula, the heel of Italy -- was still free of
+ * Rome in 270 (it fell in 267-266), so it cannot be painted as part of Apulia.
+ * The source has only Puglia's regional outline, so the frontier is drawn here:
+ * from the Ionian shore between Taras's territory and Messapian Manduria, north
+ * past Oria, Ceglie and the Itria hills, to the Adriatic above Egnatia, the
+ * last Messapian city. Frontiers follow ridges and streams rather than
+ * surveyors' lines, so the course is broken up by a seeded midpoint
+ * displacement: the same wandering line on every build.
+ */
+const MESSAPIAN_FRONTIER: readonly (readonly [number, number])[] = [
+  [17.455, 40.285], // in the Gulf of Taranto, between Taras's shore and Manduria's
+  [17.47, 40.33],
+  [17.52, 40.37],
+  [17.5, 40.42],
+  [17.535, 40.47], // east of Grottaglie
+  [17.49, 40.52],
+  [17.51, 40.57],
+  [17.45, 40.61], // Ceglie stays Messapian
+  [17.44, 40.67],
+  [17.38, 40.7], // the Itria hills
+  [17.4, 40.76],
+  [17.35, 40.8],
+  [17.37, 40.85],
+  [17.33, 40.9], // above Egnatia
+  [17.33, 40.975], // in the Adriatic
+];
+
+function wanderingLine(points: readonly (readonly [number, number])[], depth: number, seed: number): [number, number][] {
+  let state = seed >>> 0;
+  const random = () => {
+    state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+    return state / 0x1_0000_0000 - 0.5;
+  };
+  let line = points.map(([x, y]) => [x, y] as [number, number]);
+  for (let level = 0; level < depth; level += 1) {
+    const next: [number, number][] = [line[0]!];
+    for (let index = 1; index < line.length; index += 1) {
+      const [ax, ay] = line[index - 1]!;
+      const [bx, by] = line[index]!;
+      const length = Math.hypot(bx - ax, by - ay);
+      // Offset the midpoint across the segment, by less at each level.
+      const offset = random() * length * 0.55;
+      next.push([(ax + bx) / 2 - ((by - ay) / length) * offset, (ay + by) / 2 + ((bx - ax) / length) * offset]);
+      next.push(line[index]!);
+    }
+    line = next;
+  }
+  return line;
+}
+
+function segmentIntersection(a: readonly [number, number], b: readonly [number, number], c: readonly [number, number], d: readonly [number, number]): { t: number; u: number; point: [number, number] } | null {
+  const denominator = (b[0] - a[0]) * (d[1] - c[1]) - (b[1] - a[1]) * (d[0] - c[0]);
+  if (denominator === 0) return null;
+  const t = ((c[0] - a[0]) * (d[1] - c[1]) - (c[1] - a[1]) * (d[0] - c[0])) / denominator;
+  const u = ((c[0] - a[0]) * (b[1] - a[1]) - (c[1] - a[1]) * (b[0] - a[0])) / denominator;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+  return { t, u, point: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t] };
+}
+
+function ringContains(ring: readonly (readonly [number, number])[], [x, y]: readonly [number, number]): boolean {
+  let inside = false;
+  for (let index = 0, previous = ring.length - 1; index < ring.length; previous = index, index += 1) {
+    const [xi, yi] = ring[index]!;
+    const [xj, yj] = ring[previous]!;
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Cut a closed ring in two along a line that enters and leaves it once each.
+ * Both halves carry the line's own vertices, so the border they share is
+ * exact and the province graph finds them adjacent.
+ */
+function splitRingAlongLine(ring: readonly (readonly [number, number])[], line: readonly (readonly [number, number])[]): [[number, number][], [number, number][]] {
+  const crossings: { along: number; edge: number; u: number; point: [number, number] }[] = [];
+  for (let segment = 1; segment < line.length; segment += 1) {
+    for (let edge = 1; edge < ring.length; edge += 1) {
+      const hit = segmentIntersection(line[segment - 1]!, line[segment]!, ring[edge - 1]!, ring[edge]!);
+      if (hit !== null) crossings.push({ along: segment - 1 + hit.t, edge: edge - 1, u: hit.u, point: hit.point });
+    }
+  }
+  if (crossings.length !== 2) throw new Error(`The Messapian frontier must cross Apulia's coast exactly twice; it crosses ${crossings.length} times.`);
+  const [entry, exit] = crossings.sort((a, b) => a.along - b.along) as [typeof crossings[number], typeof crossings[number]];
+  const inland = line.slice(Math.floor(entry.along) + 1, Math.floor(exit.along) + 1).map(([x, y]) => [x, y] as [number, number]);
+  const open = ring.slice(0, -1).map(([x, y]) => [x, y] as [number, number]);
+  // The coast from one crossing round to the other, walking the ring forward.
+  const coastBetween = (from: typeof entry, to: typeof entry): [number, number][] => {
+    const points: [number, number][] = [];
+    let edge = from.edge;
+    if (edge === to.edge && to.u > from.u) return points;
+    do {
+      edge = (edge + 1) % open.length;
+      points.push(open[edge]!);
+    } while (edge !== to.edge);
+    return points;
+  };
+  const first: [number, number][] = [entry.point, ...coastBetween(entry, exit), exit.point, ...[...inland].reverse()];
+  const second: [number, number][] = [exit.point, ...coastBetween(exit, entry), entry.point, ...inland];
+  return [[...first, first[0]!], [...second, second[0]!]];
+}
+
+const MESSAPIA_ID = "ita-local-messapia";
+
+function splitMessapiaFromApulia(map: GeoJsonMap): GeoJsonMap {
+  return {
+    ...map,
+    features: map.features.flatMap((feature) => {
+      if (feature.properties.kind !== "province" || feature.properties.name !== "Puglia" || feature.geometry.type !== "MultiPolygon") return [feature];
+      const polygons = feature.geometry.coordinates;
+      const mainland = polygons.reduce((largest, polygon) => ((polygon[0]?.length ?? 0) > (largest[0]?.length ?? 0) ? polygon : largest));
+      const [one, other] = splitRingAlongLine(mainland[0]!, wanderingLine(MESSAPIAN_FRONTIER, 4, 267));
+      const lupiae: readonly [number, number] = [18.17, 40.35];
+      const [messapia, apulia] = ringContains(one, lupiae) ? [one, other] : [other, one];
+      // Islets go with whichever side of the frontier they lie on.
+      const islets = polygons.filter((polygon) => polygon !== mainland);
+      const isMessapian = (polygon: (typeof polygons)[number]) => {
+        const [longitude, latitude] = polygonCenter(polygon);
+        return longitude > 17.5 && latitude < 40.85;
+      };
+      return [
+        { ...feature, geometry: { type: "MultiPolygon" as const, coordinates: [[apulia], ...islets.filter((polygon) => !isMessapian(polygon))] } },
+        { ...feature, id: MESSAPIA_ID, geometry: { type: "MultiPolygon" as const, coordinates: [[messapia], ...islets.filter(isMessapian)] }, properties: { ...feature.properties, name: "Sallentine Peninsula" } },
+      ];
+    }),
+  };
+}
+
 type SicilySite = Readonly<{ id: string; name: string; coordinate: readonly [number, number] }>;
 
 function sicilianCityRegion(sicily: readonly (readonly (readonly [number, number][])[])[], site: SicilySite, allSites: readonly SicilySite[]) {
@@ -547,7 +676,7 @@ function splitSicily(map: GeoJsonMap): GeoJsonMap {
         { id: "sicily-northeast", name: "Messana and the strait", coordinate: [15.55, 38.19] },
       ];
       return [
-        { ...feature, geometry: { type: "MultiPolygon" as const, coordinates: remaining }, properties: { ...feature.properties, name: "Sardegna e isole" } },
+        { ...feature, geometry: { type: "MultiPolygon" as const, coordinates: remaining }, properties: { ...feature.properties, name: "Sardinia" } },
         ...regions.map((region) => ({ ...feature, id: `${ITALIAN_ISLANDS_ID}-${region.id}`, geometry: { type: "MultiPolygon" as const, coordinates: sicilianCityRegion(sicily, region, regions) }, properties: { ...feature.properties, name: region.name } })),
       ];
     }),
@@ -557,7 +686,7 @@ function splitSicily(map: GeoJsonMap): GeoJsonMap {
 const splitRegionalMap = splitSicily(
   replaceWithLocalBoundaries(
     replaceWithLocalBoundaries(
-      replaceItalyWithLocalBoundaries(replaceFranceWithLocalBoundaries(regionalMap)),
+      splitMessapiaFromApulia(replaceItalyWithLocalBoundaries(replaceFranceWithLocalBoundaries(regionalMap))),
       "gbr-",
       "gbr-local-",
       unitedKingdomDistricts.features,
@@ -575,7 +704,7 @@ export const europeNorthAfricaGeoJson: GeoJsonMap = {
     withSettlementProvince(romeDemoSettlement, "ita-local-23120603B86473916475875"),
     withSettlementProvince(naplesDemoSettlement, "ita-local-23120603B14973764900567"),
     syracuseDemoSettlement,
-    agrigentumFortDemoSettlement,
+    agrigentumDemoSettlement,
     caralisDemoSettlement,
   ],
 };

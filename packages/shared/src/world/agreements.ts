@@ -53,6 +53,22 @@ export const PolityAgreementKindSchema = z.enum([
    * trespassing, the host hears of it, and the host may do something about it.
    */
   "military_access",
+  /**
+   * An ally bound to a leading power: Rome and its socii.
+   *
+   * Not a vassal and not a tributary. The Samnites, Lucanians and Etruscan
+   * cities kept their own magistrates and laws and paid Rome nothing. What
+   * they gave up was a foreign policy of their own: they sent men when Rome
+   * called, fought Rome's wars, and made no war or peace but Rome's. So the
+   * engine treats the ally as sharing its leader's wars and peaces (`atWar`),
+   * refuses it treaties of its own with anybody else, and lets it fight at its
+   * leader's side. It pays in soldiers, not in money.
+   *
+   * Ordered like tribute: the ally first, the leading power second. An ally
+   * leaves by ending the foedus or by going to war with its leader -- which is
+   * what a revolt is, and it ends the foedus in the same act.
+   */
+  "foedus",
 ]);
 export type PolityAgreementKind = z.infer<typeof PolityAgreementKindSchema>;
 
@@ -70,6 +86,7 @@ export const AGREEMENT_KIND_IN_WORDS: Record<PolityAgreementKind, string> = {
   trade_pact: "trade pact",
   protectorate: "protectorate",
   military_access: "grant of passage for armies",
+  foedus: "foedus",
 };
 
 export const PolityAgreementSchema = z
@@ -112,27 +129,68 @@ export function agreementsBetween(agreements: readonly PolityAgreement[], a: str
     .sort((first, second) => second.sinceStep - first.sinceStep);
 }
 
+/** The power this one follows by foedus, if it follows one. */
+export function leaderOf(agreements: readonly PolityAgreement[], polityId: string): string | null {
+  return agreements.find((agreement) => agreement.status === "active" && agreement.kind === "foedus" && agreement.polityId === polityId)?.otherPolityId ?? null;
+}
+
+/** The powers that follow this one by foedus. */
+export function alliesLedBy(agreements: readonly PolityAgreement[], leaderPolityId: string): string[] {
+  return agreements
+    .filter((agreement) => agreement.status === "active" && agreement.kind === "foedus" && agreement.otherPolityId === leaderPolityId)
+    .map((agreement) => agreement.polityId);
+}
+
+/** A power and the leader whose wars and peaces are its own. */
+function blocOf(agreements: readonly PolityAgreement[], polityId: string): string[] {
+  const leader = leaderOf(agreements, polityId);
+  return leader === null ? [polityId] : [polityId, leader];
+}
+
+/** One power, or a leader and its allies, or two allies of the same leader. */
+export function sameConfederation(agreements: readonly PolityAgreement[], a: string, b: string): boolean {
+  if (a === b) return true;
+  const leaderOfA = leaderOf(agreements, a);
+  const leaderOfB = leaderOf(agreements, b);
+  return leaderOfA === b || leaderOfB === a || (leaderOfA !== null && leaderOfA === leaderOfB);
+}
+
+/**
+ * Every standing agreement between the two sides, where a side is a power
+ * together with the leader it follows by foedus: Carthage at peace with Rome
+ * is at peace with the Samnites. The foedus binding one side to the other is
+ * among them.
+ */
+export function agreementsBetweenSides(agreements: readonly PolityAgreement[], a: string, b: string): PolityAgreement[] {
+  const found = new Map<string, PolityAgreement>();
+  for (const x of blocOf(agreements, a)) {
+    for (const y of blocOf(agreements, b)) {
+      if (x === y) continue;
+      for (const agreement of agreementsBetween(agreements, x, y)) found.set(agreement.id, agreement);
+    }
+  }
+  return [...found.values()].sort((first, second) => second.sinceStep - first.sinceStep);
+}
+
 /**
  * Are these two at war?
  *
  * The question the rest of the engine actually asks: whether an engagement is
  * a battle or an atrocity, whether a trade route is cut, whether a neighbour
- * has reason to care.
+ * has reason to care. An ally bound by foedus is at war with whoever its
+ * leader is at war with.
  */
 export function atWar(agreements: readonly PolityAgreement[], a: string, b: string): boolean {
-  return agreementsBetween(agreements, a, b).some((agreement) => agreement.kind === "war");
+  return agreementsBetweenSides(agreements, a, b).some((agreement) => agreement.kind === "war");
 }
 
-/** Every power this one is at war with. */
+/** Every power this one is at war with, its leader's enemies and their allies included. */
 export function enemiesOf(agreements: readonly PolityAgreement[], polityId: string): string[] {
-  return [
-    ...new Set(
-      agreements
-        .filter((agreement) => agreement.status === "active" && agreement.kind === "war")
-        .filter((agreement) => agreement.polityId === polityId || agreement.otherPolityId === polityId)
-        .map((agreement) => (agreement.polityId === polityId ? agreement.otherPolityId : agreement.polityId)),
-    ),
-  ];
+  const bloc = blocOf(agreements, polityId);
+  const direct = agreements
+    .filter((agreement) => agreement.status === "active" && agreement.kind === "war")
+    .flatMap((agreement) => bloc.includes(agreement.polityId) ? [agreement.otherPolityId] : bloc.includes(agreement.otherPolityId) ? [agreement.polityId] : []);
+  return [...new Set(direct.flatMap((enemy) => [enemy, ...alliesLedBy(agreements, enemy)]))].filter((enemy) => !bloc.includes(enemy));
 }
 
 /**
@@ -160,7 +218,7 @@ export function mayEnterWithoutLeave(
   moverPolityId: string,
   hostPolityId: string,
 ): boolean {
-  if (moverPolityId === hostPolityId) return true;
+  if (sameConfederation(agreements, moverPolityId, hostPolityId) || atWar(agreements, moverPolityId, hostPolityId)) return true;
   return agreementsBetween(agreements, moverPolityId, hostPolityId).some((agreement) =>
     agreement.kind === "war"
     || agreement.kind === "alliance"

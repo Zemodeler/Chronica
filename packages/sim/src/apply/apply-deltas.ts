@@ -6,6 +6,11 @@ import {
   SKILL_BY_BAND,
   faithNamed,
   agreementsBetween,
+  agreementsBetweenSides,
+  atWar,
+  leaderOf,
+  alliesLedBy,
+  sameConfederation,
   applyDiplomaticAnswerToStance,
   canMoveTo,
   crossingAdmitted,
@@ -83,6 +88,10 @@ import { isOwnBusiness } from "./own-business";
 import { endContract } from "../contracts";
 import { accountOf, normalizeRefs, peopleNamedButNeverMade } from "./normalize-refs";
 import { arrangementNetIncome, recruitSkillBiasIn } from "../standing-effects";
+import { isBindingChamberQuestion, overruleCost, seatByOutcome, voteDayOf } from "../senate";
+import { constitutionOf, rulerOf, sovereignChamberOf } from "../constitutions";
+import { attemptRegimeChange } from "../regime";
+import { concernsOf } from "../questions";
 import { assessExecution, daysInHand, throughHand } from "../delegation";
 import { plotOdds, plotResolvesIn } from "../plots";
 import { watchReading } from "../watch";
@@ -133,6 +142,15 @@ class DeltaRejection extends Error {
  * order was forbidden. Anything that is a mistake in the writing rather than a
  * fact about the world is "reference".
  */
+/** A question's concerns, written down once it exists: what it enacts, what it is called, and what the model said. */
+function withConcerns(world: WorldState, procedureId: string): WorldState {
+  const procedure = world.material.politicalProcedures.find((candidate) => candidate.id === procedureId);
+  if (procedure === undefined) return world;
+  const concerns = concernsOf(world, procedure);
+  if (concerns.length === 0) return world;
+  return { ...world, material: { ...world.material, politicalProcedures: world.material.politicalProcedures.map((candidate) => (candidate.id === procedureId ? { ...candidate, concerns } : candidate)) } };
+}
+
 function reject(reason: string, kind: "world" | "reference" = "world"): never {
   throw new DeltaRejection(reason, kind);
 }
@@ -470,6 +488,8 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   legal_status_set: "punish",
   service_contract_open: "spend",
   service_contract_close: "spend",
+  // Taking a state is the power nobody's office grants: every attempt is recorded as a breach.
+  regime_change: "override",
 };
 
 /** The power an act needs: founding something is proposing it, and keeping it at an account's expense is spending from it. */
@@ -1459,6 +1479,7 @@ function applyOne(
       const updated = {
         ...force,
         ...(delta.name === undefined ? {} : { name: delta.name }),
+        ...(delta.standardId === undefined ? {} : { standardId: delta.standardId }),
         ...(delta.locationId === undefined ? {} : { locationId: delta.locationId }),
         ...(positionChange === null ? {} : positionChange),
         ...(commanderId === undefined ? {} : { commanderCharacterId: commanderId }),
@@ -1731,6 +1752,11 @@ function applyOne(
       // Whose side a force is on: its power's, or -- an outlaw band -- its own.
       const sideOf = (force: typeof attacker): string => (force.outlaw === true ? `outlaw:${force.id}` : force.polityId);
       const civilStrife = sideOf(attacker) === sideOf(defender);
+      // One power's armies, or a leader's and its allies' by foedus: a Samnite
+      // contingent camped with a consul's legions is attacked with them.
+      const onOneSide = (force: typeof attacker, other: typeof attacker): boolean =>
+        sideOf(force) === sideOf(other)
+        || (force.outlaw !== true && other.outlaw !== true && sameConfederation(world.polityAgreements, force.polityId, other.polityId));
       if (civilStrife && (attacker.commanderCharacterId === defender.commanderCharacterId || attacker.controllerCharacterId === defender.controllerCharacterId)) {
         reject(`${attacker.name} and ${defender.name} answer to the same man and will not fight each other.`);
       }
@@ -1754,8 +1780,9 @@ function applyOne(
       // single deltas and both leave a record of who chose it.
       // Nobody makes peace with brigands: an outlaw band may be fought, and may
       // fight, without a war being declared on anybody.
-      const standing = attacker.outlaw === true || defender.outlaw === true ? [] : agreementsBetween(world.polityAgreements, attacker.polityId, defender.polityId);
-      const peaceBetween = standing.find((agreement) => agreement.kind === "peace" || agreement.kind === "truce" || agreement.kind === "alliance" || agreement.kind === "non_aggression");
+      // An ally bound by foedus stands in its leader's peaces as well as its own.
+      const standing = attacker.outlaw === true || defender.outlaw === true ? [] : agreementsBetweenSides(world.polityAgreements, attacker.polityId, defender.polityId);
+      const peaceBetween = standing.find((agreement) => agreement.kind === "peace" || agreement.kind === "truce" || agreement.kind === "alliance" || agreement.kind === "non_aggression" || agreement.kind === "foedus");
       if (peaceBetween !== undefined && !standing.some((agreement) => agreement.kind === "war")) {
         reject(`${attacker.polityId} and ${defender.polityId} stand in ${AGREEMENT_KIND_IN_WORDS[peaceBetween.kind]}; break it or declare war before giving battle.`);
       }
@@ -1781,16 +1808,16 @@ function applyOne(
         }
         const sameSideAsDefender = civilStrife
           ? ally.commanderCharacterId === defender.commanderCharacterId || ally.controllerCharacterId === defender.controllerCharacterId
-          : sideOf(ally) === sideOf(defender);
+          : onOneSide(ally, defender);
         if (sameSideAsDefender) reject(`${ally.name} stands with ${defender.name} and will not attack it.`);
       }
       const underTheSameMan = (force: typeof attacker, as: typeof attacker): boolean =>
-        sideOf(force) === sideOf(as) && (force.commanderCharacterId === as.commanderCharacterId || force.controllerCharacterId === as.controllerCharacterId);
+        onOneSide(force, as) && (force.commanderCharacterId === as.commanderCharacterId || force.controllerCharacterId === as.controllerCharacterId);
       const attackerAllies = here.filter((force) => named.has(force.id) || underTheSameMan(force, attacker));
       // A camp attacked is attacked whole -- but in a civil war the camp is
       // divided, and only the defender's own man's armies stand with him.
       const defenderAllies = here.filter((force) => !attackerAllies.includes(force)
-        && (civilStrife ? underTheSameMan(force, defender) : sideOf(force) === sideOf(defender)));
+        && (civilStrife ? underTheSameMan(force, defender) : onOneSide(force, defender)));
 
       // The engine decides what happens. Everything the model chose -- who, and
       // how -- is already spent by this point.
@@ -2117,6 +2144,24 @@ function applyOne(
         reject("A question can only be put to a vote before an institution that can hold one.");
       }
       const subjectId = delta.subjectRef === null ? null : required(delta.subjectRef, "The subject");
+      // The constitution is changed only where it may be: before the chamber
+      // that holds that power, or by the ruler's own decree where none does.
+      const amendment = delta.enacts?.constitution;
+      if (amendment !== undefined) {
+        const lawPolity = world.material.institutions.find((institution) => institution.id === institutionId)?.polityId
+          ?? world.characters.find((character) => character.id === sponsorId)?.polityId ?? null;
+        if (lawPolity !== null) {
+          const sovereign = sovereignChamberOf(world, lawPolity);
+          const government = { offices: context.offices, successionRules: context.successionRules ?? [] };
+          if (sovereign !== null && institutionId !== sovereign.id) {
+            reject(`Only the ${sovereign.name} [${sovereign.id}] may change the constitution of ${world.map.polities.find((polity) => polity.id === lawPolity)?.name ?? lawPolity}; put it there.`);
+          }
+          if (sovereign === null && institutionId === null && rulerOf(world, lawPolity, government)?.id !== sponsorId) {
+            const ruler = rulerOf(world, lawPolity, government);
+            reject(`Where no chamber holds the constitution, only its ruler${ruler === null ? "" : `, ${ruler.name},`} may decree a change to it; anybody else may put it to his council, or take the state.`);
+          }
+        }
+      }
       const id = mint("procedure", delta.localId);
       const procedure = {
         id,
@@ -2139,16 +2184,17 @@ function applyOne(
         outcomeReason: null,
         sourceEventIds: [],
         resultingEventIds: [],
+        ...(delta.concerns === undefined ? {} : { concerns: [...delta.concerns] }),
       };
       const opened: WorldState = { ...world, material: { ...world.material, politicalProcedures: [...world.material.politicalProcedures, procedure] } };
-      if (delta.enacts == null) return opened;
+      if (delta.enacts == null) return withConcerns(opened, id);
       // What it will do if carried, kept until then with every reference
       // resolved now: an account named today is the one that pays.
       const polityId = world.material.institutions.find((institution) => institution.id === institutionId)?.polityId
         ?? world.characters.find((character) => character.id === sponsorId)?.polityId;
       if (polityId == null) reject("A measure has to be some power's law; its sponsor belongs to none.", "reference");
       const office = delta.enacts.office;
-      return {
+      const enacted = {
         ...opened,
         enactments: [...opened.enactments, {
           procedureId: id,
@@ -2165,9 +2211,26 @@ function applyOne(
           },
           body: delta.enacts.body ?? null,
           waiver: delta.enacts.waiver === undefined ? null : { characterId: required(delta.enacts.waiver.characterRef, "The man excused"), officeId: delta.enacts.waiver.officeId },
+          constitution: amendment === undefined ? null : {
+            form: amendment.form ?? null,
+            chamber: amendment.chamber === undefined ? null : {
+              institutionId: amendment.chamber.institutionRef == null ? null : required(amendment.chamber.institutionRef, "The chamber"),
+              name: amendment.chamber.name ?? null,
+              powers: amendment.chamber.powers ?? null,
+              advisory: amendment.chamber.advisory ?? null,
+              franchise: amendment.chamber.franchise ?? null,
+              abolish: amendment.chamber.abolish,
+            },
+            succession: amendment.succession === undefined ? null : {
+              officeId: amendment.succession.officeId,
+              kind: amendment.succession.kind,
+              institutionId: amendment.succession.institutionRef == null ? null : required(amendment.succession.institutionRef, "The chamber that elects"),
+            },
+          },
           enactedAtStep: null,
         }],
-      };
+      } satisfies WorldState;
+      return withConcerns(enacted, id);
     }
 
     case "political_support_set": {
@@ -2246,9 +2309,9 @@ function applyOne(
         provenanceEventIds: [],
         changedAtStep: atStep,
       };
-      // A tribune against a measure of his own republic forbids it. Nothing
-      // here stops the vote -- the veto is said aloud, and a body that goes on
-      // over it has done something the whole city saw.
+      // A tribune against a measure of his own republic forbids it. Said
+      // aloud now; if he still holds to it on the day, the question is not put
+      // to the vote at all (`holdVotes`).
       if (delta.supporterKind === "character" && delta.position === "oppose") {
         const procedure = world.material.politicalProcedures.find((candidate) => candidate.id === procedureId)!;
         const procedurePolity = world.material.institutions.find((institution) => institution.id === procedure.institutionId)?.polityId
@@ -2260,7 +2323,7 @@ function applyOne(
           emitFact({
             localId: `veto_${procedureId}_${supporterId}`.slice(0, 60),
             kind: "veto",
-            summary: `${who}, as ${vetoing.label}, forbade "${procedure.label}". Whoever carries it now carries it over his veto.`,
+            summary: `${who}, as ${vetoing.label}, forbade "${procedure.label}". Unless he relents, it cannot be put to the vote.`,
             affectedRefs: [{ kind: "character", id: supporterId }, { kind: "procedure", id: procedureId }, ...(procedurePolity === undefined || procedurePolity === null ? [] : [{ kind: "polity" as const, id: procedurePolity }])],
             visibility: "public",
             discoveryState: "public",
@@ -2286,6 +2349,11 @@ function applyOne(
       if (procedure.subjectKind === "office_seat" && procedure.resolutionMechanism === "vote" && (delta.outcome === "passed" || delta.outcome === "failed")) {
         reject(`"${procedure.label}" is decided when the ${world.material.institutions.find((institution) => institution.id === procedure.institutionId)?.name ?? "assembly"} votes on its day; stand a man for it, or back or oppose one, instead.`);
       }
+      // Nor is any other question a chamber counts (`senate.ts`). It can be
+      // withdrawn or blocked; carried or rejected is the house's to say.
+      if (isBindingChamberQuestion(world, procedure) && (delta.outcome === "passed" || delta.outcome === "failed")) {
+        reject(`"${procedure.label}" is decided when the ${world.material.institutions.find((institution) => institution.id === procedure.institutionId)?.name ?? "assembly"} votes on it, in ${Math.max(0, voteDayOf(procedure) - atStep)} days; speak for it or against it, or win men over, instead.`);
+      }
       // Stage and outcome move together: the schema refuses a resolved
       // procedure with no outcome, and an unresolved one that has one.
       const stage = delta.outcome === "withdrawn" ? "withdrawn" as const : delta.outcome === "blocked" ? "blocked" as const : "resolved" as const;
@@ -2303,34 +2371,18 @@ function applyOne(
           politicalProcedures: world.material.politicalProcedures.map((candidate) => (candidate.id === procedureId ? settled : candidate)),
         },
       };
-      // Carried, it does what it said it would.
+      // Carried, it does what it said it would -- and a ruler who carries it
+      // against his council's advice pays for doing so.
       let resolved = settledWorld;
       if (delta.outcome === "passed") {
-        const enacted = carryOutEnactment(settledWorld, procedureId, atStep, context.ids, context.offices);
+        const overruled = overruleCost(settledWorld, settled, context.offices, context.successionRules ?? [], atStep);
+        if (overruled.fact !== null) emitFact(overruled.fact);
+        const enacted = carryOutEnactment(overruled.world, procedureId, atStep, context.ids, context.offices, context.successionRules ?? []);
         for (const fact of enacted.facts) emitFact(fact);
         resolved = enacted.world;
       }
-      // A question about who holds an office has to move the office. This
-      // settled the procedure's own row and touched no seat, so an appointment
-      // that passed a vote changed nothing whatever: the man was appointed in
-      // the record and held nothing in the world.
-      if (delta.outcome !== "passed" || procedure.subjectId === null) return resolved;
-      if (procedure.type === "removal") {
-        const holder = procedure.subjectKind === "character"
-          ? procedure.subjectId
-          : resolved.material.officeSeats.find((seat) => seat.id === procedure.subjectId)?.holderCharacterId ?? null;
-        return holder === null ? resolved : vacateOfficesOf(resolved, holder, "removal", atStep);
-      }
-      if (procedure.type === "appointment" || procedure.type === "command_assignment") {
-        if (procedure.subjectKind !== "character") return resolved;
-        const appointed = resolved.characters.find((character) => character.id === procedure.subjectId);
-        if (appointed === undefined || !appointed.alive) return resolved;
-        // The office is named by the question itself -- "Elect a consul for the
-        // year" -- which is the same match declaration already uses.
-        const matched = findOfficeSeatForRole(resolved, { offices: context.offices }, appointed.polityId, procedure.label);
-        return matched === undefined ? resolved : seatCharacterInOffice(resolved, appointed.id, matched, atStep);
-      }
-      return resolved;
+      // A question about who holds an office has to move the office.
+      return delta.outcome === "passed" ? seatByOutcome(resolved, procedure, atStep, context.offices) : resolved;
     }
 
     case "holding_create": {
@@ -3206,6 +3258,25 @@ function applyOne(
       return next;
     }
 
+    case "regime_change": {
+      const actorId = required(delta.actorCharacterRef, "Who is taking the state");
+      const polityId = required(delta.polityRef, "The power whose government changes");
+      const attempt = attemptRegimeChange({
+        world,
+        actorId,
+        polityId,
+        route: delta.route,
+        form: delta.form,
+        forceIds: delta.forceRefs.map((ref) => required(ref, "The army")),
+        government: { offices: context.offices, successionRules: context.successionRules ?? [] },
+        atStep,
+        gameId: context.gameId,
+      });
+      if ("refused" in attempt) reject(attempt.refused);
+      for (const fact of attempt.facts) emitFact(fact);
+      return attempt.world;
+    }
+
     case "legal_status_set": {
       const personId = required(delta.characterRef, "Whose standing this is");
       const person = world.characters.find((character) => character.id === personId && character.alive);
@@ -3360,6 +3431,11 @@ function applyOne(
         // refusal into the man condemning the burning he had ordered.
         reject(`${force.name} were ordered to raid ${province.name} and did not: it is ${polityName(force.polityId)}'s own land, and its farmers are ${polityName(force.polityId)}'s own people. No farm was burned and nothing was taken.`);
       }
+      if (province.controllerPolityId !== null && force.outlaw !== true && province.controllerPolityId !== force.polityId
+        && sameConfederation(world.polityAgreements, force.polityId, province.controllerPolityId)
+        && !atWar(world.polityAgreements, force.polityId, province.controllerPolityId)) {
+        reject(`${force.name} were ordered to raid ${province.name} and did not: ${polityName(province.controllerPolityId)} are sworn allies of ${polityName(leaderOf(world.polityAgreements, province.controllerPolityId) ?? province.controllerPolityId)}, and nobody burns an ally's farms without first going to war with it.`);
+      }
       const intoAccountId = delta.toAccountRef === null ? undefined : required(delta.toAccountRef, "Where the loot is sent");
       if (intoAccountId !== undefined && !world.material.accounts.some((account) => account.id === intoAccountId && account.status === "active")) {
         reject(`No account "${intoAccountId}" exists to send the loot to.`, "reference");
@@ -3511,17 +3587,35 @@ function applyOne(
       if (agreementsBetween(world.polityAgreements, partyId, otherPartyId).some((agreement) => agreement.kind === delta.kind)) {
         reject(`${partyId} and ${otherPartyId} already stand in ${delta.kind}.`);
       }
+      // An ally bound by foedus makes no war or peace but its leader's. It can
+      // trade, and it can turn on its leader -- that is a revolt, and it ends
+      // the foedus -- but anything else it must leave the foedus to do.
+      const nameOf = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
+      for (const [party, counterparty] of [[partyId, otherPartyId], [otherPartyId, partyId]] as const) {
+        const leader = leaderOf(world.polityAgreements, party);
+        if (leader === null || leader === counterparty || delta.kind === "trade_pact") continue;
+        reject(`${nameOf(party)} are bound to ${nameOf(leader)} by foedus, and ${nameOf(leader)} makes their war and peace. They must break with ${nameOf(leader)} before they treat with ${nameOf(counterparty)}.`);
+      }
+      if (delta.kind === "foedus") {
+        const leader = leaderOf(world.polityAgreements, partyId);
+        if (leader !== null) reject(`${nameOf(partyId)} already follow ${nameOf(leader)} by foedus.`);
+        if (leaderOf(world.polityAgreements, otherPartyId) !== null) reject(`${nameOf(otherPartyId)} follow another power themselves and cannot lead allies.`);
+        if (alliesLedBy(world.polityAgreements, partyId).length > 0) reject(`${nameOf(partyId)} lead allies of their own and follow nobody.`);
+      }
       // War and peace cannot both be true. Opening one closes the others, which
       // is what makes "accept the peace" a single act rather than a checklist.
       const opposed: Record<string, readonly string[]> = {
         // A protectorate is not a peace, so a war does not end one: a protector
         // at war with its own client has a revolt on its hands, which is a
         // different and more interesting thing than a lapsed treaty.
-        war: ["peace", "truce", "alliance", "non_aggression"],
+        // An ally that goes to war with its leader has left the foedus.
+        war: ["peace", "truce", "alliance", "non_aggression", "foedus"],
         peace: ["war"],
         truce: ["war"],
         alliance: ["war"],
         non_aggression: ["war"],
+        // Enemies who swear the foedus -- the defeated usually did -- are at war no longer.
+        foedus: ["war"],
         // Nobody is protected by two powers at once. That is the quarrel the
         // second protector is picking, and at Messana it was the war itself.
         protectorate: ["protectorate"],
@@ -4026,7 +4120,9 @@ function applyOne(
             // A rising holds together by the thing that made it rise, and not
             // much else. It is never tighter than what it broke from, and
             // usually looser: nobody has yet built it a centre.
-            { id, name: delta.name, capitalSettlementId, cohesionBps: Math.min(4_000, parent?.cohesionBps ?? 4_000) },
+            // Governed as what it broke from was, until it decides otherwise: a
+            // province of a republic rises as a republic, a kingdom's as a kingdom.
+            { id, name: delta.name, capitalSettlementId, cohesionBps: Math.min(4_000, parent?.cohesionBps ?? 4_000), soldierPayPerThousand: null, ...(parentId === null ? {} : { governmentForm: constitutionOf(world, parentId)?.form ?? parent?.governmentForm ?? null }) },
           ],
           provinces: world.map.provinces.map((province) =>
             wanted.has(province.id)

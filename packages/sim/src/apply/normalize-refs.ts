@@ -201,12 +201,14 @@ export function normalizeRefs(
     if (/institution/i.test(key) && !world.material.institutions.some((institution) => institution.id === value)) {
       // A treasury or a power named where the body that settles things was
       // wanted: that power's own council, or none -- a decree needs no room.
+      // A power with several bodies lists its council first: Rome's Senate
+      // before the assemblies that elect its magistrates.
       const polity = world.map.polities.find((candidate) => candidate.id === value)?.id
         ?? world.material.accounts.find((account) => account.id === value && account.owner.kind === "polity")?.owner.id
         ?? polityOf(world, value);
       if (polity != null) {
         const councils = world.material.institutions.filter((institution) => institution.polityId === polity);
-        if (councils.length === 1) return councils[0]!.id;
+        if (councils.length > 0) return councils[0]!.id;
         if (councils.length === 0 && key === "institutionRef") return null;
       }
     }

@@ -58,6 +58,8 @@ import { validateMechanic } from "./mechanics/validate-mechanic";
 import { writeMechanic } from "./mechanics/write-mechanic";
 import { addressWaitingLetters } from "./letters";
 import { dueSteps, emptyPlanTally, layPlan, markWoken, nextPlanDay, settleOverdueSteps, takeSteps, type PlanTally } from "./plans";
+import { debatersOf, electiveOfficesOf, voteCalendarDays } from "./senate";
+import { ensureConstitutions } from "./constitutions";
 
 /**
  * One simulation burst: everything that happens between the player pressing
@@ -421,7 +423,13 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const ids = createIdFactory(input.burstId);
   const startDay = input.world.instant.day;
 
-  let world = input.world;
+  // Every power's constitution exists before anybody is asked anything: a new
+  // game's first order is answered before its first tick, and a world where
+  // Carthage has no government yet is not one to answer it in.
+  const governed = input.successionRules === undefined
+    ? input.world
+    : ensureConstitutions({ world: input.world, government: { offices: input.offices, successionRules: input.successionRules }, toDay: startDay });
+  let world = governed;
   /**
    * Says where the burst has got to. Never allowed to fail the burst: a player
    * watching is a convenience, and a convenience that can lose an order is not
@@ -440,7 +448,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
    * world as it stood. A window is the slice from these marks to the present.
    */
   let windowIndex = 0;
-  let windowMark = { facts: 0, narrative: 0, frictions: 0, utterances: 0, battles: 0, world: input.world };
+  let windowMark = { facts: 0, narrative: 0, frictions: 0, utterances: 0, battles: 0, world: governed };
   let windowOrderFactIds: readonly string[] = [];
   /** Whether anybody has been asked anything since the window opened. */
   let askedSinceWindow = false;
@@ -546,6 +554,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       now: world.instant,
       actorRef,
       offices: input.offices,
+      ...(input.successionRules === undefined ? {} : { successionRules: input.successionRules }),
       warfare: input.warfare,
       ...(input.terrains === undefined ? {} : { terrains: input.terrains }),
       ...(input.wealth === undefined ? {} : { wealth: input.wealth }),
@@ -1309,7 +1318,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       continue;
     }
     const done = applyDeltas(world, [...work.deltas], {
-      now: world.instant, actorRef: input.actorRef, offices: input.offices, warfare: input.warfare, ids, gameId: input.gameId,
+      now: world.instant, actorRef: input.actorRef, offices: input.offices, ...(input.successionRules === undefined ? {} : { successionRules: input.successionRules }), warfare: input.warfare, ids, gameId: input.gameId,
       actsForTheWorld: true,
       playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
       ...(input.terrains === undefined ? {} : { terrains: input.terrains }),
@@ -1330,6 +1339,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     world,
     clock: input.clock,
     offices: input.offices,
+    ...(input.successionRules === undefined ? {} : { successionRules: input.successionRules }),
     warfare: input.warfare,
     actorRef: input.actorRef,
     actorPolityId: input.actorPolityId,
@@ -1366,7 +1376,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   ) {
     const pursuing = pursuitOf(world, input.actorRef, orchestration.output.intent.summary, input.orderText);
     const recorded = applyDeltas(world, [pursuing], {
-      now: world.instant, actorRef: input.actorRef, offices: input.offices, warfare: input.warfare, ids, gameId: input.gameId,
+      now: world.instant, actorRef: input.actorRef, offices: input.offices, ...(input.successionRules === undefined ? {} : { successionRules: input.successionRules }), warfare: input.warfare, ids, gameId: input.gameId,
       ...(input.terrains === undefined ? {} : { terrains: input.terrains }),
     });
     if (recorded.applied.length > 0) {
@@ -1462,9 +1472,20 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // A plan is on the calendar too: the week a step comes into, and the day
     // it passes undone, are moments somebody has to be asked about.
     const planDay = nextPlanDay(world);
+    // And so is word arriving. A letter written on the 3rd that reaches its
+    // king on the 8th is the 8th's business: with only a project milestone
+    // three months off on the calendar, the burst jumped straight to it, and
+    // both kings "refused by silence" letters they were never shown.
+    // Older news arrives at depth 0 (see `reactTo`); this burst's only while a reaction to it is still allowed.
+    const arrivals = [...input.knownFacts, ...newFacts.filter((fact) => fact.causalDepth < budget.maxCausalDepth)]
+      .flatMap((fact) => (fact.discovery.knowableAtInstant === null ? [] : [fact.discovery.knowableAtInstant.day * 1440 + fact.discovery.knowableAtInstant.minute]));
     const nextScheduled = [...input.queue, ...scheduled]
       .map((event) => event.dueInstantSortKey)
       .concat(planDay === undefined ? [] : [planDay * 1440])
+      .concat(arrivals)
+      // A chamber's debate and its vote: a long jump used to carry the world
+      // past both, and the question sat undecided past its day.
+      .concat(voteCalendarDays(world, electiveOfficesOf(world, input.offices, input.successionRules ?? [])).map((day) => day * 1440))
       .filter((key) => key > nowKey())
       .sort((a, b) => a - b)[0];
     // The first step is short, so word can travel and the people the order
@@ -1535,6 +1556,12 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // changed yet; it is after the world jumps a month to the next thing on the
     // calendar that his own business has somewhere to go.
     const due = dueSteps(world, input.clock, playerCharacterIds);
+    // Who owes the world something now: a plan's step, or their word on a
+    // question about to be voted. Both wake a man as pressing, once a round.
+    const wanted = new Map<string, string>([
+      ...debatersOf(world, input.offices, world.instant.day, playerCharacterIds, input.successionRules ?? []),
+      ...due.map((entry) => [entry.ownerId, entry.why] as const),
+    ]);
     const ambient = routeAmbientActors({
       world,
       facts: [...input.knownFacts, ...newFacts],
@@ -1547,7 +1574,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       // Every round, not only the first: a quarrel that goes quiet whenever the
       // week is busy is not a quarrel, it is a coincidence.
       nemesisCharacterId: nemesis?.characterId ?? null,
-      dueStepOwners: new Map(due.map((entry) => [entry.ownerId, entry.why])),
+      dueStepOwners: wanted,
     });
 
     // Where the antagonist stands is the world's to know and his to act on, so
@@ -1557,7 +1584,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // A man a plan wants who is also answering news is told both: the router
     // that woke him for the news knows nothing of his plan, and without this
     // the step came due while he was being asked about something else.
-    const dueWhy = new Map(due.map((entry) => [entry.ownerId, entry.why]));
+    const dueWhy = wanted;
     const cast = [...attention.focused, ...ambient].map((actor) => {
       const planned = actor.impetus === "own_business" ? undefined : dueWhy.get(actor.characterId);
       const told = planned === undefined ? actor : { ...actor, why: `${actor.why}; and ${planned}` };

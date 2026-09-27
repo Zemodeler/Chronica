@@ -85,7 +85,21 @@ describe("what the player's government can see of the world", () => {
     //
     // Moved 14.7k -> 15k for the second consul (v29), Gnaeus Cornelius
     // Blasio, who is one of our own people with a purse and an estate.
-    expect(text.length).toBeLessThan(15_000);
+    //
+    // Moved 15k -> 15.5k for the assemblies (v31): the Centuriate and Tribal
+    // Assemblies, not the Senate, elect Rome's magistrates, and a candidate
+    // has to be able to see the body he is canvassing.
+    //
+    // Moved 15.5k -> 16.5k for allied Italy (v32): the peninsula is eleven
+    // powers, not one, with their towns and Rome's Latin colonies among them.
+    // Their foedera are one line rather than eight, and a city's holder is
+    // named only where it is not the province's, which paid back a third.
+    //
+    // Moved 16.5k -> 17k for constitutions (v33): what sort of government it
+    // is and who may change it, and what each bloc wants rather than only
+    // whom it speaks for. Powers are named only where a chamber has fewer
+    // than all of them.
+    expect(text.length).toBeLessThan(17_000);
   });
 });
 
@@ -298,8 +312,12 @@ describe("what the treasury owes and depends on", () => {
     expect(text).toContain("from Carthage");
   });
 
-  it("says nothing about trade for revenue that depends on nobody", () => {
-    expect(renderWorldSlice(slice())).not.toContain("TRADE");
+  it("lists as trade only revenue that depends on somebody abroad", () => {
+    // At the opening that is the rent of land Rome took from its allies: a
+    // Bruttian or Samnite revolt would cut it. The tributum depends on nobody.
+    const text = renderWorldSlice(slice());
+    expect(text).toContain("from Bruttians");
+    expect(text).not.toContain("tributum on Roman citizens [rome-tributum] — ");
   });
 });
 
@@ -614,5 +632,18 @@ describe("the rules the actor's arrangements run by", () => {
     // Hanno's rule is his to know, not the consul's.
     const hannoLine = withRules.split("\n").find((line) => line.includes("Toll-house 8"));
     expect(hannoLine === undefined || !hannoLine.includes("rule:")).toBe(true);
+  });
+});
+
+describe("what a soldier costs", () => {
+  const forConsul = (characterId: string) =>
+    renderWorldSlice(buildWorldSlice({
+      world: world(), clock, offices, actorRef: { kind: "character", id: characterId }, actorPolityId: "rome",
+      orderText: "Raise four more legions.", facts: [], dueEvents: [], pendingEvents: [],
+    }));
+
+  it("is told to whoever keeps the treasury, so new legions are priced at Rome's rate rather than guessed", () => {
+    // Twenty thousand men at 35 a thousand is 700 a month, of an income near 1 800.
+    expect(forConsul("gaius-genucius")).toContain("Our soldiers are paid 35/month for every 1,000 men.");
   });
 });

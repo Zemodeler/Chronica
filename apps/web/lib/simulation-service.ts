@@ -40,7 +40,7 @@ export interface SimulationContext {
   readonly characterId: string;
 }
 
-async function resolveContext(gameId: string): Promise<SimulationContext | null> {
+export async function resolveContext(gameId: string): Promise<SimulationContext | null> {
   if (!isAuthenticationConfigured()) return null;
   const session = await getAuthentication().api.getSession({ headers: await headers() });
   const userId = session?.user.id;

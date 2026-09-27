@@ -57,7 +57,7 @@ export const CORPUS: readonly CorpusOrder[] = [
   { id: "consul-cult", chain: "cult", actor: "gaius-genucius", text: "Suppress the Bacchic cult in Campania and seize its temples." },
   { id: "trade-rome-1-cutlery", chain: "trade-rome", actor: "marcus-metellus", text: "I make a business deal and start selling cutlery in the streets of Rome." },
   { id: "trade-rome-2-stall", chain: "trade-rome", actor: "marcus-metellus", text: "The cutlery sells well. I hire two apprentices and open a second stall near the Forum." },
-  { id: "trade-rome-3-loan", chain: "trade-rome", actor: "marcus-metellus", text: "I lend 300 denarii to a shipowner at Ostia against his next cargo of grain." },
+  { id: "trade-rome-3-loan", chain: "trade-rome", actor: "marcus-metellus", text: "I lend 300 drachmae to a shipowner at Ostia against his next cargo of grain." },
   { id: "trade-syracuse-1-oil", chain: "trade-syracuse", actor: "leptines-syracuse", text: "I fit out a ship and trade olive oil to Messana." },
   { id: "trade-syracuse-2-guild", chain: "trade-syracuse", actor: "leptines-syracuse", text: "I found a guild of Syracusan cutlers and pay for its hall out of my own purse." },
   { id: "private-1-greek", chain: "private-life", actor: "marcus-metellus", text: "I spend the season learning Greek from a tutor and reading Homer." },

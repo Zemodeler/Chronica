@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DynamicMapOverlay, GeoJsonMap } from "@chronica/shared";
 import { derivePoliticalLabels } from "./political-labels";
-import { derivePoliticalMapState, deriveWarBorderPaths, politicalColourFromId } from "./political-geometry";
+import { derivePoliticalMapState, deriveWarBorderPaths, politicalColourFromId, politicalColourWithAlpha } from "./political-geometry";
 import { prepareStaticWorldGeometry } from "./world-geometry";
 
 const map: GeoJsonMap = { type: "FeatureCollection", features: [
@@ -36,12 +36,12 @@ describe("political map derivation", () => {
     expect(aedui).not.toBe(arverni);
     expectMutedHsl(politicalColourFromId("boii"));
     expectMutedHsl(politicalColourFromId("iberia-celtiberians"));
-    expectMutedHsl(politicalColourFromId("germania-suebi"));
+    expectMutedHsl(politicalColourFromId("germania-chatti"));
   });
   it("assigns consolidated neighbouring realms distinct curated palette slots", () => {
     const groups = [
       ["gaul-aedui", "gaul-arverni", "gaul-sequani", "gaul-belgae"],
-      ["germania-suebi", "germania-chatti", "germania-cherusci", "germania-chauci"],
+      ["germania-ubii", "germania-chatti", "germania-cherusci", "germania-chauci"],
       ["iberia-vaccei", "iberia-vettones", "iberia-carpetani", "iberia-celtiberi"],
       ["thrace-dacian-highland-communities", "thrace-getae", "thrace-eastern-carpathian-communities"],
     ] as const;
@@ -50,6 +50,18 @@ describe("political map derivation", () => {
       expect(new Set(colours).size).toBe(colours.length);
       for (const colour of colours) expectMutedHsl(colour);
     }
+  });
+  it("paints Rome's allies as lighter shades of Rome, each its own", () => {
+    const leaders = new Map([["samnites", "rome"], ["lucanians", "rome"]]);
+    const hueOf = (colour: string) => Number(/hsl\(([\d.]+)/.exec(colour)![1]);
+    const samnites = politicalColourWithAlpha("samnites", 1, leaders);
+    const lucanians = politicalColourWithAlpha("lucanians", 1, leaders);
+    // Rome's red is hue ~354; its allies stay within a few degrees of it.
+    for (const colour of [samnites, lucanians]) expect(Math.abs(((hueOf(colour) - 354 + 540) % 360) - 180)).toBeLessThan(12);
+    expect(samnites).not.toBe(lucanians);
+    expect(samnites).not.toBe(politicalColourWithAlpha("samnites", 1));
+    // Without a leader, a people keeps its own colour.
+    expect(politicalColourWithAlpha("messapians", 1, leaders)).toBe(politicalColourWithAlpha("messapians", 1));
   });
   it("gives Hungarian, Czech, and Polish polities distinct muted lineage shades", () => {
     const hungarian = politicalColourFromId("kingdom-of-hungary");

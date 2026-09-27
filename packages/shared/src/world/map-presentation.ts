@@ -187,8 +187,10 @@ export const MapForceOverlaySchema = z.object({
   commanderLabel: z.string().trim().min(1).max(160).nullable(),
   strengthLabel: z.string().trim().min(1).max(120),
   relation: z.enum(["friendly", "hostile", "neutral", "unknown"]),
-  /** Optional scenario-catalogue standard displayed for this force. */
+  /** The standard it carries (`Force.standardId`); absent, the client shows its power's first. */
   flagAssetId: EntityIdSchema.optional(),
+  /** Whether the viewer commands or controls it, and so may rename it or change its standard. */
+  commandable: z.boolean().optional(),
   selected: z.boolean().default(false),
   movement: MapMovementOverlaySchema.nullable(),
 }).strict();

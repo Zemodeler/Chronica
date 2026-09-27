@@ -232,11 +232,21 @@ describe("the world's own generals are as good as the world says", () => {
 });
 
 describe("Quintus raids the Samnites", () => {
-  it("refuses to burn his own country, in words the player hears", () => {
-    // Samnium is Rome's at the opening: there are no Samnites to raid.
+  it("refuses to burn an ally's country without a war, in words the player hears", () => {
+    // The Samnites are Rome's allies by foedus at the opening.
     const result = order("quintus-agrippinus", [{ op: "force_raid", forceRef: "silver-shields", provinceId: SAMNIUM, reason: "Into the Samnite hills." }]);
     expect(result.rejected).toHaveLength(1);
     expect(result.rejected[0]!.kind).toBe("world");
+    expect(result.rejected[0]!.reason).toContain("sworn allies");
+  });
+
+  it("refuses to burn his own country", () => {
+    const home = world();
+    const inRome: WorldState = {
+      ...home,
+      map: { ...home.map, provinces: home.map.provinces.map((province) => (province.id === SAMNIUM ? { ...province, controllerPolityId: "rome" } : province)) },
+    };
+    const result = order("quintus-agrippinus", [{ op: "force_raid", forceRef: "silver-shields", provinceId: SAMNIUM, reason: "Into the hills." }], inRome);
     expect(result.rejected[0]!.reason).toContain("own land");
   });
 
@@ -244,7 +254,7 @@ describe("Quintus raids the Samnites", () => {
     const hostile = world();
     const samnites: WorldState = {
       ...hostile,
-      map: { ...hostile.map, provinces: hostile.map.provinces.map((province) => (province.id === SAMNIUM ? { ...province, controllerPolityId: "etruscan-cities" } : province)) },
+      map: { ...hostile.map, provinces: hostile.map.provinces.map((province) => (province.id === SAMNIUM ? { ...province, controllerPolityId: "messapians" } : province)) },
     };
     const treasury = (state: WorldState) => state.material.accounts.find((account) => account.id === "rome-treasury")!.balance;
     const result = order("quintus-agrippinus", [{
@@ -253,7 +263,7 @@ describe("Quintus raids the Samnites", () => {
 
     expect(result.rejected).toEqual([]);
     expect(treasury(result.world)).toBeGreaterThan(treasury(samnites));
-    expect(result.factProposals.find((fact) => fact.kind === "province_raided")!.affectedRefs).toContainEqual({ kind: "polity", id: "etruscan-cities" });
+    expect(result.factProposals.find((fact) => fact.kind === "province_raided")!.affectedRefs).toContainEqual({ kind: "polity", id: "messapians" });
   });
 });
 
@@ -346,7 +356,7 @@ describe("Gaius rallies the Gauls at the Rhine", () => {
     reason: "Gauls rally to a promise of citizenship.",
   };
   const unifiedGallia = {
-    op: "polity_create", localId: "gallia", name: "Unified Gallia", breaksFromPolityId: "gaul-bas-rhin",
+    op: "polity_create", localId: "gallia", name: "Unified Gallia", breaksFromPolityId: "gaul-sequani",
     provinceIds: [RHINE], reason: "Gaius Furius proclaims a united Gaul.",
   };
 
@@ -411,7 +421,7 @@ describe("a reference that is almost right", () => {
       officeLabel: null, traits: [], generatedBecause: "A chief of the Rhine.",
     }]);
     expect(result.rejected).toEqual([]);
-    expect(result.world.characters.find((character) => character.name === "Ambiorix")!.polityId).toBe("gaul-bas-rhin");
+    expect(result.world.characters.find((character) => character.name === "Ambiorix")!.polityId).toBe("gaul-sequani");
   });
 
   it("makes the king an answer named and never made, and he commands the army he was named for", () => {

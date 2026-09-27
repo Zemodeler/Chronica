@@ -3,6 +3,7 @@ import { punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, resolveEligibility, type Character, type PoliticalProcedure, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import { holdElections } from "./elections";
+import { holdVotes, voteDayOf } from "./senate";
 import { createIdFactory } from "./ports";
 
 /**
@@ -119,16 +120,16 @@ describe("a Roman career", () => {
       enacts: { waiver: { characterRef: LUCIUS, officeId: "roman-consul" } }, reason: "The city wants him.",
     })], context);
     expect(opened.rejected).toEqual([]);
-    const passed = applyDeltas(opened.world, [WorldDeltaSchema.parse({
-      op: "political_procedure_resolve", procedureRef: opened.assignedIds.get("law"), outcome: "passed", outcomeReason: "Carried.", reason: "The Senate votes.",
-    })], context);
-    expect(passed.rejected).toEqual([]);
+    // Carried on its day, by the count: nobody spoke against it.
+    const question = opened.world.material.politicalProcedures.find((procedure) => procedure.id === opened.assignedIds.get("law"))!;
+    const passed = holdVotes({ world: opened.world, offices: definition.government.offices, toDay: voteDayOf(question), ids: createIdFactory("waiver-vote") });
+    expect(passed.world.material.politicalProcedures.find((procedure) => procedure.id === question.id)!.outcome).toBe("passed");
     // The ladder is waived. Who he is -- a living Roman -- is not.
     expect(eligibleFor(passed.world, LUCIUS, "roman-consul").eligible).toBe(true);
     expect(eligibleFor(passed.world, LUCIUS, "roman-censor").eligible).toBe(false);
   });
 
-  it("says aloud a tribune's veto, and stops nothing", () => {
+  it("says aloud a tribune's veto, and leaves the question open until its day", () => {
     let world = opening();
     world = {
       ...world,
@@ -156,7 +157,8 @@ describe("a Roman career", () => {
     const veto = vetoed.factProposals.find((fact) => fact.kind === "veto");
     expect(veto?.summary).toContain("as Tribune of the plebs, forbade");
     expect(veto?.visibility).toBe("public");
-    // The question is still open: the veto is friction, not a lock.
+    // Still open: he may relent before the day. If he holds to it, the
+    // question is blocked then (senate.test.ts, "a tribune's veto").
     const procedure = vetoed.world.material.politicalProcedures.find((candidate) => candidate.id === opened.assignedIds.get("levy"));
     expect(procedure?.stage).toBe("gathering_support");
   });

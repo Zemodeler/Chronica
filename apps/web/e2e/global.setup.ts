@@ -63,6 +63,8 @@ setup("sign up once and seed two worlds", async ({ page }) => {
   for (const route of ["room", "forces", "standing", "books", "people", "simulate"]) {
     await page.request.get(`/api/games/${consul}/${route}`, { timeout: 180_000 }).catch(() => undefined);
   }
+  // Renaming an army is a POST; a GET is refused, but compiles the route.
+  await page.request.get(`/api/games/${consul}/forces/none`, { timeout: 180_000 }).catch(() => undefined);
   await page.goto(`/games/${consul}`);
   await page.locator(".office-object").first().waitFor({ timeout: 180_000 });
 });

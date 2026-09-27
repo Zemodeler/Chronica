@@ -247,8 +247,6 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
     const handlePointerDown = useCallback((e: PointerEvent) => {
       const container = containerRef.current;
       if (!container) return;
-      // A pan whose click never came must not eat the next real one.
-      swallowClickRef.current = false;
 
       if (pinchRef.current) {
         pinchRef.current.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -368,6 +366,14 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
       }
     }, [onTransformChange, setPanning]);
 
+    // A pan whose click never came must not eat the next real one. Cleared in
+    // the capture phase, because a press on an army standard stops before it
+    // bubbles up to `handlePointerDown`, and a pan that ended just before it
+    // then ate the click that should have opened the army.
+    const handlePointerDownCapture = useCallback(() => {
+      swallowClickRef.current = false;
+    }, []);
+
     const handleClickCapture = useCallback((e: MouseEvent) => {
       if (!swallowClickRef.current) return;
       swallowClickRef.current = false;
@@ -398,6 +404,7 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
         ref={containerRef}
         className="map-frame map-frame-interactive"
         onWheel={handleWheel}
+        onPointerDownCapture={handlePointerDownCapture}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
