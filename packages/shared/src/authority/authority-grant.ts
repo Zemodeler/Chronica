@@ -134,6 +134,8 @@ export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = 
   province_control_set: "command",
   settlement_control_set: "command",
   polity_create: "override",
+  // Nobody's office grants taking the state; the attempt is judged as the override it is.
+  regime_change: "override",
   office_seat_set: "appoint",
   agreement_open: "negotiate",
   agreement_close: "negotiate",

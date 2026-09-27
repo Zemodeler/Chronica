@@ -1,5 +1,6 @@
 import {
   allOffices,
+  allSuccessionRules,
   boundedId,
   createPressure,
   labelNamesOffice,
@@ -53,7 +54,7 @@ export const ELECTION_POLLING_DAYS = 20;
  * ran by terms -- a save made before offices said so.
  */
 export const ELECTED_TERM_DAYS = 365;
-/** Standing below this and a man is not somebody the Senate would think of electing unprompted. */
+/** Standing below this and a man is not somebody the voters would think of electing unprompted. */
 export const ELECTABLE_MIN_PRESTIGE_BPS = 5_000;
 /** What winning an election adds to a man's standing. */
 const ELECTION_STANDING_BPS = 500;
@@ -128,7 +129,7 @@ interface Place {
 export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
   const facts: FactProposalDraft[] = [];
   const player = input.playerCharacterId ?? null;
-  const rulesById = new Map(input.government.successionRules.map((rule) => [rule.id, rule]));
+  const rulesById = new Map(allSuccessionRules(input.world, input.government.successionRules).map((rule) => [rule.id, rule]));
   const offices = allOffices(input.world, input.government.offices);
   const officesById = new Map(offices.map((office) => [office.id, office]));
   let world = input.world;

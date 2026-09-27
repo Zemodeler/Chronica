@@ -12,12 +12,17 @@ export type PunicWarsControlRecord = Readonly<{
 }>;
 
 const ITALIAN_CONTROLLERS: Readonly<Record<string, string>> = {
-  "punic-italy-ligurian-coast": "ligurians", "punic-italy-upper-padus-and-alpine-gate": "insubres", "punic-italy-insubrian-plain": "insubres",
+  "punic-italy-ligurian-coast": "ligurians", "punic-italy-upper-padus-and-alpine-gate": "taurini", "punic-italy-insubrian-plain": "insubres",
   "punic-italy-middle-padus": "boii", "punic-italy-venetian-lagoon": "veneti", "punic-italy-isonzo-gate": "veneti",
-  "punic-italy-etrurian-uplands": "rome", "punic-italy-umbrian-valleys": "rome", "punic-italy-picenum-coast": "rome",
-  "punic-italy-latium": "rome", "punic-italy-marsian-highlands": "rome", "punic-italy-samnium": "rome",
-  "punic-italy-campanian-plain": "rome", "punic-italy-apulian-coast": "rome", "punic-italy-lucanian-uplands": "rome", "punic-italy-bruttian-highlands": "rome",
-  "punic-italy-alpine-passes": "noric-communities", "punic-italy-adige-passes": "noric-communities",
+  // Rome governs Latium and Campania; the rest are its allies by foedus
+  // (packages/db/src/punic-wars-scenario.ts, `alliedItaly`).
+  "punic-italy-etrurian-uplands": "etruscan-cities", "punic-italy-umbrian-valleys": "umbrians", "punic-italy-picenum-coast": "picentes",
+  "punic-italy-latium": "rome", "punic-italy-marsian-highlands": "marsi-paeligni", "punic-italy-samnium": "samnites",
+  "punic-italy-campanian-plain": "rome", "punic-italy-apulian-coast": "apulian-cities", "punic-italy-lucanian-uplands": "lucanians", "punic-italy-bruttian-highlands": "bruttians",
+  "punic-italy-sallentine-peninsula": "messapians",
+  // Aosta is the Salassi's valley and the Adige the Raeti's: the western and
+  // central Alps, a long way from Noricum.
+  "punic-italy-alpine-passes": "salassi", "punic-italy-adige-passes": "raeti",
 };
 
 const POLITY_NAMES: Record<string, string> = {
@@ -26,6 +31,9 @@ const POLITY_NAMES: Record<string, string> = {
   syracuse: "Kingdom of Syracuse",
   mamertines: "Mamertines of Messana",
   ligurians: "Ligurian peoples",
+  taurini: "Taurini",
+  salassi: "Salassi",
+  raeti: "Raeti",
   insubres: "Insubres",
   boii: "Boii",
   cenomani: "Cenomani",
@@ -41,6 +49,7 @@ const POLITY_NAMES: Record<string, string> = {
   peucetians: "Peucetians",
   messapians: "Messapians",
   tarentines: "Tarentines",
+  "apulian-cities": "Apulian cities",
   lucanians: "Lucanians",
   bruttians: "Bruttians",
   rhegines: "Rhegines",
@@ -57,10 +66,10 @@ const POLITY_NAMES: Record<string, string> = {
   athens: "Athens",
   "achaean-league": "Achaean League",
   "aetolian-league": "Aetolian League",
-  "thessalian-league": "Thessalian League",
   "illyrian-communities": "Illyrian communities",
   "thracian-communities": "Thracian communities",
-  "ptolemaic-cyrenaica": "Ptolemaic Cyrenaica",
+  // Magas broke with Ptolemy II c. 276 and ruled Cyrene as its king until c. 250.
+  cyrene: "Kingdom of Cyrene",
   "boii-middle-danube": "Boii of the Middle Danube",
   "thrace-scordisci": "Scordisci",
   "gaul-armorican-confederacy": "Armorican confederacy",
@@ -72,20 +81,22 @@ const POLITY_NAMES: Record<string, string> = {
   "gaul-bituriges": "Bituriges Cubi",
   "gaul-sequana-peoples": "Sequana peoples",
   "gaul-aquitani": "Aquitani",
+  "gaul-santones": "Santones",
+  "gaul-pictones": "Pictones",
+  "gaul-lemovices": "Lemovices",
+  "gaul-petrocorii": "Petrocorii",
+  "gaul-cadurci": "Cadurci",
   "gaul-volcae": "Volcae",
   "gaul-allobroges": "Allobroges",
   "gaul-salyens": "Salyens",
   massalia: "Massalia",
-  "germania-suebi": "Suebi",
   "germania-ubii": "Ubii",
   "germania-vindelici": "Vindelici",
-  "germania-boii": "Boii of the Danube",
   "germania-semnones": "Semnones",
   "germania-chauci": "Chauci",
   "germania-chatti": "Chatti",
   "germania-cherusci": "Cherusci",
   "germania-bructeri": "Bructeri",
-  "germania-treveri": "Treveri",
   "germania-hermunduri": "Hermunduri",
   "germania-cimbri": "Cimbri",
   "iberia-gallaeci": "Gallaeci",
@@ -98,6 +109,10 @@ const POLITY_NAMES: Record<string, string> = {
   "iberia-carpetani": "Carpetani",
   "iberia-celtiberi": "Celtiberian peoples",
   "iberia-ilergetes": "Ilergetes",
+  "iberia-turdetani": "Turdetani",
+  "iberia-edetani": "Edetani",
+  "iberia-contestani": "Contestani",
+  "balearic-islanders": "Balearic islanders",
   "canarian-peoples": "Canarian peoples",
   "thrace-dacian-highland-communities": "Dacian highland communities",
   "thrace-getae": "Getae",
@@ -111,6 +126,7 @@ const POLITY_NAMES: Record<string, string> = {
   "illyria-taulantii": "Taulantii",
   "illyria-dardani": "Dardani",
   "illyria-paeonian-communities": "Paeonian communities",
+  "low-countries-rhine-delta": "Rhine delta peoples",
   "britain-caledonian-communities": "Caledonian communities",
   "britain-northern-britons": "Northern Britons",
   "britain-welsh-communities": "Western Britons",
@@ -118,21 +134,20 @@ const POLITY_NAMES: Record<string, string> = {
   "britain-thames-britons": "Thames Basin Britons",
   "britain-eastern-britons": "Eastern Britons",
   "britain-midland-britons": "Midland Britons",
-  "britain-irish-sea-communities": "Irish Sea communities",
+  "ireland-ulster-communities": "Ulster communities",
   acarnania: "Acarnanian League",
   "boeotian-league": "Boeotian League",
   "phocian-league": "Phocian League",
-  "corinthian-league": "Corinthian League",
-  "arcadian-league": "Midelion",
+  "arcadian-league": "Arcadian cities",
   "euboean-cities": "Euboean cities",
   "ionian-islands": "Ionian Islands",
-  "cycladic-islanders": "Cycladic islanders",
-  "dodecanese-islanders": "Dodecanesian islanders",
+  // The Nesiotic League, under Ptolemaic hegemony since c. 287.
+  "cycladic-islanders": "League of the Islanders",
+  rhodes: "Rhodes",
   "aeolis-communities": "Aeolis",
   "ionia-communities": "Ionia",
   "cretan-cities-west": "Western Crete",
   "cretan-cities-east": "Eastern Crete",
-  thebes: "Thebes",
   argos: "Argos",
   elis: "Elis",
   messenia: "Messenia",
@@ -149,29 +164,39 @@ const POLITY_NAMES: Record<string, string> = {
 const HISTORICAL_POLITY_GROUPS: readonly (readonly [string, readonly string[]])[] = [
   ["gaul-armorican-confederacy", ["Finistère", "Côtes d'Armor", "Morbihan", "Ille-et-Vilaine", "Loire-Atlantique", "Mayenne", "Sarthe", "Manche", "Calvados", "Orne", "Maine-et-Loire", "Vendée"]],
   ["gaul-belgae", ["Nord", "Pas-de-Calais", "Somme", "Oise", "Aisne", "Ardennes"]],
-  ["gaul-treveri", ["Meuse", "Mosella Valley", "Meurthe-et-Moselle", "Vosges"]],
-  ["gaul-sequani", ["Haute-Marne", "Haute-Saône", "Doubs", "Jura", "Territoire de Belfort", "Bas-Rhin", "Haut-Rhin"]],
+  ["gaul-belgae", ["Marne"]],
+  ["gaul-treveri", ["Meuse", "Mosella Valley", "Meurthe-et-Moselle", "Vosges Passes", "Saar Coal Hills", "Mosella–Rhenus Confluence", "Treveran Mosella"]],
+  ["gaul-sequani", ["Haute-Marne", "Haute-Saône", "Doubs", "Jura", "Territoire de Belfort", "Lower Rhenus Terrace"]],
   ["gaul-aedui", ["Ain", "Côte-d'Or", "Arar Heights", "Nièvre", "Yonne", "Loire", "Rhône"]],
   ["gaul-arverni", ["Allier", "Arvernian Cones", "Cantal", "Haute-Loire", "Creuse", "Corrèze", "Lozère", "Aveyron"]],
   ["gaul-bituriges", ["Cher", "Indre", "Loir-et-Cher", "Loiret", "Eure-et-Loir", "Indre-et-Loire "]],
   ["gaul-sequana-peoples", ["Lutetian Island", "Seine-et-Marne", "Yvelines", "Essonne", "Hauts-de-Seine", "Seine-Saint-Denis", "Val-de-Marne", "Val-d'Oise", "Aube", "Eure", "Seine-Maritime"]],
-  ["gaul-aquitani", ["Charente", "Charente-Maritime", "Dordogne", "Gironde", "Landes", "Lot-et-Garonne", "Deux-Sèvres", "Vienne", "Haute-Vienne", "Gers", "Hautes-Pyrénées", "Pyrénées-Atlantiques", "Lot"]],
+  // The Aquitani lived between the Garonne and the Pyrenees; north of the
+  // river the peoples were Celtic.
+  ["gaul-aquitani", ["Gironde", "Landes", "Lot-et-Garonne", "Gers", "Hautes-Pyrénées", "Pyrénées-Atlantiques"]],
+  ["gaul-santones", ["Charente", "Charente-Maritime"]],
+  ["gaul-pictones", ["Vienne", "Deux-Sèvres"]],
+  ["gaul-lemovices", ["Haute-Vienne"]],
+  ["gaul-petrocorii", ["Dordogne"]],
+  ["gaul-cadurci", ["Lot"]],
   ["gaul-volcae", ["Ariège", "Aude", "Gard", "Hérault", "Haute-Garonne", "Pyrénées-Orientales", "Tarn", "Tarn-et-Garonne"]],
   ["gaul-allobroges", ["Isère", "Drôme", "Ardèche", "Savoie", "Haute-Savoie"]],
   ["ligurians", ["Alpes-de-Haute-Provence", "Hautes-Alpes", "Alpes-Maritimes", "Var"]],
   ["gaul-salyens", ["Vaucluse"]],
   ["massalia", ["Rhodanus Delta"]],
 
-  ["germania-suebi", ["Neckar Uplands", "Black Forest Gate", "Swabian Jura", "Naab Uplands", "Franconian Forest", "Middle Moenus", "Lower Moenus", "Moenus–Rhenus Gate", "Upper Rhenus Bend", "Saar Coal Hills"]],
+  // The south-west was Celtic in 270: the Helvetii held the land between the
+  // Rhine, the Main and the Hercynian forest (Tacitus, Germania 28), and the
+  // Suebi reached it only with Ariovistus. North Bavaria faced Boian Bohemia.
+  ["helvetian-peoples", ["Neckar Uplands", "Black Forest Gate", "Swabian Jura", "Middle Moenus", "Lower Moenus", "Moenus–Rhenus Gate", "Upper Rhenus Bend"]],
+  ["boii-middle-danube", ["Naab Uplands", "Franconian Forest", "Boii of the Danube"]],
   ["germania-ubii", ["Upper Rhenus Terrace", "Ubian Lower Rhenus", "Rhenus Gorge"]],
   ["germania-vindelici", ["Upper Isar Country", "Vindelician Lech"]],
-  ["germania-boii", ["Boii of the Danube"]],
   ["germania-semnones", ["Spree–Havel Confluence", "Semnonian March", "Albis Heath", "Middle Albis", "Upper Albis Valley"]],
   ["germania-chauci", ["Visurgis Mouth", "Albis Mouth", "Baltic Lagoons"]],
   ["germania-chatti", ["Chattian Lahn", "Upper Visurgis", "Harz Foreland"]],
   ["germania-cherusci", ["Cheruscan Leine", "Teutoburg Ridge"]],
   ["germania-bructeri", ["Bructerian Plain", "Sauerland Heights"]],
-  ["germania-treveri", ["Mosella–Rhenus Confluence", "Treveran Mosella"]],
   ["germania-hermunduri", ["Ore Mountain Passes", "Pleiße Lowland", "Hermundurian Basin"]],
   ["germania-cimbri", ["Cimbrian Jutland Approaches"]],
 
@@ -186,9 +211,15 @@ const HISTORICAL_POLITY_GROUPS: readonly (readonly [string, readonly string[]])[
   ["iberia-carpetani", ["Comunidad de Madrid", "Castilla-La Mancha", "Carpetani"]],
   ["iberia-celtiberi", ["Aragón", "Celtiberi"]],
   ["iberia-ilergetes", ["Cataluña/Catalunya", "Ilergetes", "Lacetani"]],
-  ["carthage", ["Oretani", "Turdetani", "Turduli", "Celtici", "Conii", "Bastetani", "Contestani", "Edetani"]],
+  // Before the Barcid conquest (237 on) Carthage held no Iberian territory,
+  // only Gades as an ally and the Punic ports; see SETTLEMENT_CONTROLLERS.
+  ["iberia-turdetani", ["Andalucía"]],
+  ["iberia-edetani", ["Comunitat Valenciana"]],
+  ["iberia-contestani", ["Región de Murcia"]],
+  ["balearic-islanders", ["Illes Balears"]],
+  ["mauretanian-peoples", ["Ciudad Autónoma de Ceuta", "Ciudad Autónoma de Melilla"]],
 
-  ["thrace-dacian-highland-communities", ["ALBA", "ARAD", "BIHOR", "BISTRITA-NASAUD", "BRASOV", "CARAS-SEVERIN", "CLUJ", "COVASNA", "GORJ", "HARGHITA", "HUNEDOARA", "MARAMURES", "MURES", "SALAJ", "SATU MARE", "SIBIU", "MEHEDINTI", "VALCEA"]],
+  ["thrace-dacian-highland-communities", ["ALBA", "ARAD", "BIHOR", "TIMIS", "BISTRITA-NASAUD", "BRASOV", "CARAS-SEVERIN", "CLUJ", "COVASNA", "GORJ", "HARGHITA", "HUNEDOARA", "MARAMURES", "MURES", "SALAJ", "SATU MARE", "SIBIU", "MEHEDINTI", "VALCEA"]],
   ["thrace-getae", ["ARGES", "BRAILA", "BUZAU", "CALARASI", "CONSTANTA", "DAMBOVITA", "DOLJ", "GALATI", "GIURGIU", "IALOMITA", "ILFOV", "BUCURESTI", "OLT", "PRAHOVA", "TELEORMAN", "TULCEA", "VRANCEA"]],
   ["thrace-eastern-carpathian-communities", ["BACAU", "BOTOSANI", "IASI", "NEAMT", "SUCEAVA", "VASLUI"]],
 ];
@@ -212,37 +243,61 @@ const TRANSREGIONAL_TRIBAL_CONTROLLERS: Readonly<Record<string, string>> = {
   "punic-czechoslovakia-boii-moravia": "boii-middle-danube",
   "punic-czechoslovakia-boii-slovakia": "boii-middle-danube",
   "punic-hungary-scordisci": "thrace-scordisci",
-  "punic-luxembourg-treveri": "germania-treveri",
+  "punic-luxembourg-treveri": "gaul-treveri",
+  // Alsace's southern terrace shares its polygon name with the German bank's.
+  "punic-gaul-haut-rhin": "gaul-sequani",
+  // The Batavi and Cananefates split from the Chatti in the 1st century BCE,
+  // and the Aduatuci descend from the Cimbri and Teutones (c. 103 BCE).
+  "punic-low-countries-batavi": "low-countries-rhine-delta",
+  "punic-low-countries-cananefates": "low-countries-rhine-delta",
+  "punic-belgica-aduatuci": "belgica-eburones",
+  "punic-czechoslovakia-eastern-carpathian-communities": "carpathian-communities",
 };
 
-const CARTHAGINIAN_IBERIAN_REGIONS = new Set([
-  "punic-iberia-andalucia",
-  "punic-iberia-region-de-murcia",
-  "punic-iberia-comunitat-valenciana",
-  "esp-25490228b26609846683583", // Balearic islands
-  "esp-25490228b18225280299410", // Melilla
-  "esp-25490228b48808997991554", // Ceuta
-]);
-
-// The supplied opening reference is retained for the Punic coastal belt. These
-// interior and eastern regions remain independent African peoples in 270 BCE.
-const NUMIDIAN_PROVINCES = new Set([
-  "dza-43142294b54486011126442", "dza-43142294b89976296243107", "dza-43142294b45118294569306",
-  "dza-43142294b7086800589276", "dza-43142294b35959348509380", "dza-43142294b67344016857851",
-  "dza-43142294b52445945964546", "dza-43142294b60721224304202", "dza-43142294b80473805298321",
+/**
+ * Carthage's Algerian coast: the strip of Punic ports (Hippo Regius, Rusicade,
+ * Igilgili, Saldae, Icosium, Iol, Cartennae, Siga's shore). Carthage held the
+ * harbours, never the hinterland -- every other Algerian province is Numidian
+ * or, south of the Atlas, Gaetulian.
+ */
+const CARTHAGINIAN_ALGERIAN_COAST = new Set([
+  "dza-43142294b15861145285183", // El Tarf
+  "dza-43142294b62233719624556", // Annaba
+  "dza-43142294b45005324618688", // Skikda
+  "dza-43142294b41901445774444", // Jijel
+  "dza-43142294b58957670986273", // Bejaia
+  "dza-43142294b98012200258451", // Boumerdès
+  "dza-43142294b57836115778835", // Algiers
+  "dza-43142294b44506325294932", // Tipaza
+  "dza-43142294b40291105422873", // Chlef
+  "dza-43142294b83605883333857", // Mostaganem
+  "dza-43142294b89431929839902", // Oran
+  "dza-43142294b30165394777555", // Aïn Témouchent
 ]);
 const GAETULIAN_PROVINCES = new Set([
   "dza-43142294b97480278452280", "dza-43142294b70824426814000", "dza-43142294b43473078766346",
   "dza-43142294b57632161166824", "dza-43142294b83676700490594", "dza-43142294b80449327613638",
   "dza-43142294b23379165901565", "dza-43142294b64493603110073", "dza-43142294b58874984978475",
   "dza-43142294b74351585751074", "dza-43142294b66953226377953", "dza-43142294b26097348484504",
+  "dza-43142294b6851000275455", // El Oued
+  // The chotts and the desert south of Carthage's African territory.
+  "tun-13205935b95771050896452", // Tozeur
+  "tun-13205935b11721331776240", // Kébili
+  "tun-13205935b85172640982228", // Tataouine
 ]);
-const CARTHAGINIAN_MAURETANIAN_COAST = new Set([
+/** Carthage reached Theveste only c. 247 (Hanno the Great); the high steppe beyond its border was Numidian. */
+const NUMIDIAN_TUNISIAN_PROVINCES = new Set([
+  "tun-13205935b54080015312342", // Gafsa (Capsa)
+  "tun-13205935b52637504718586", // Kasserine
+]);
+/** Only for terrain: the Atlantic and Mediterranean shore of Mauretania, which Carthage traded along but did not hold. */
+const MAURETANIAN_COAST = new Set([
   "mar-70788906b66040098455254", "mar-70788906b40056535803135", "mar-70788906b33851053053385", "mar-70788906b15955360211262",
 ]);
-const PTOLEMAIC_CYRENAICA_PROVINCES = new Set([
+const CYRENE_PROVINCES = new Set([
   "lby-10800210b28216506156245", "lby-10800210b39782956615971", "lby-10800210b23470577588067",
   "lby-10800210b54463644997685", "lby-10800210b74925506200485",
+  "lby-10800210b44488917334986", // Al Qubbah, in the Jebel Akhdar east of Cyrene itself
 ]);
 const GARAMANTIAN_PROVINCES = new Set([
   "lby-10800210b65194490964920", "lby-10800210b89898169718474", "lby-10800210b53073192190863",
@@ -274,19 +329,21 @@ function provinceCentre(feature: (typeof punicWarsGeoJson.features)[number]): re
 const GREEK_PROVINCE_POLITY_BY_NAME: Readonly<Record<string, string>> = {
   // Macedon
   "Upper Macedonia": "macedon", Bottiaea: "macedon", Pieria: "macedon", Amphaxitis: "macedon", Chalcidice: "macedon", Bisaltia: "macedon",
-  // Thessaly
-  Perrhaebia: "thessalian-league", Trikala: "thessalian-league", Magnesia: "thessalian-league", Sporades: "thessalian-league",
+  // Thessaly, Antigonid since Demetrius; Demetrias in Magnesia was a royal city.
+  Perrhaebia: "macedon", Trikala: "macedon", Magnesia: "macedon", Sporades: "macedon",
   // Epirus
   Molossia: "epirus", Thesprotia: "epirus", Ambracia: "epirus", Preveza: "epirus",
   // Aegean Thrace
   Xanthi: "thracian-communities", Rodopi: "thracian-communities", Evros: "thracian-communities", Nestos: "thracian-communities",
   // Central and southern Greece
-  Athens: "athens", Acarnania: "acarnania", Achaea: "achaean-league", Aetolia: "aetolian-league", Midelion: "arcadian-league",
-  Argos: "argos", Boeotia: "boeotian-league", Thebes: "thebes", Corinthia: "corinthian-league", Elis: "elis", Euboea: "euboean-cities",
+  // Acrocorinth and Chalcis were two of Gonatas's "fetters of Greece"; Thebes
+  // had rejoined the Boeotian League c. 287.
+  Athens: "athens", Acarnania: "acarnania", Achaea: "achaean-league", Aetolia: "aetolian-league", Arcadia: "arcadian-league",
+  Argos: "argos", Boeotia: "boeotian-league", Thebes: "boeotian-league", Corinthia: "macedon", Elis: "elis", Euboea: "macedon",
   Messenia: "messenia", Phocis: "phocian-league", Sparta: "sparta", Megalopolis: "megalopolis",
   // Aegean and Ionian islands
   "Eastern Crete": "cretan-cities-east", "Western Crete": "cretan-cities-west", Cyclades: "cycladic-islanders",
-  Dodecanese: "dodecanese-islanders", Aeolis: "aeolis-communities", Ionia: "ionia-communities", "Ionian Islands": "ionian-islands",
+  Rhodes: "rhodes", Aeolis: "aeolis-communities", Ionia: "ionia-communities", "Ionian Islands": "ionian-islands",
 };
 
 function greekControllerFor(feature: (typeof punicWarsGeoJson.features)[number]): string {
@@ -316,8 +373,12 @@ function groundedControllerFor(feature: (typeof punicWarsGeoJson.features)[numbe
   if (feature.id.startsWith("punic-britain-")) {
     const [longitude, latitude] = provinceCentre(feature);
     if (latitude >= 56.45) return "britain-caledonian-communities";
+    // Ulster is Irish, not British: its districts sit west of the North
+    // Channel, between the Mournes and the Causeway coast.
+    if (longitude < -5.5 && latitude > 54 && latitude < 55.4) return "ireland-ulster-communities";
     if (latitude >= 54.7) return "britain-northern-britons";
-    if (longitude < -5.15) return "britain-irish-sea-communities";
+    // Cornwall and Scilly were Dumnonian, with Devon.
+    if (latitude < 50.8) return "britain-southwestern-britons";
     if (longitude < -3.0 && latitude < 54.7) return "britain-welsh-communities";
     if (latitude < 51.55 && longitude < -2.2) return "britain-southwestern-britons";
     if (longitude > -0.25 && latitude < 53.2) return "britain-eastern-britons";
@@ -348,7 +409,7 @@ function controllerFor(provinceId: string): string | null {
   if (groundedPolity !== undefined) return groundedPolity;
   if (provinceId === "punic-gaul-corse-du-sud" || provinceId === "punic-gaul-haute-corse") return "carthage";
   if (provinceId.startsWith("punic-gaul-")) return `gaul-${provinceId.slice("punic-gaul-".length)}`;
-  if (provinceId.startsWith("punic-iberia-")) return CARTHAGINIAN_IBERIAN_REGIONS.has(provinceId) ? "carthage" : `iberia-${provinceId.slice("punic-iberia-".length)}`;
+  if (provinceId.startsWith("punic-iberia-")) return `iberia-${provinceId.slice("punic-iberia-".length)}`;
   if (provinceId.startsWith("punic-thrace-")) return `thrace-${provinceId.slice("punic-thrace-".length)}`;
   if (provinceId.startsWith("punic-belgica-")) return `belgica-${provinceId.slice("punic-belgica-".length)}`;
   if (provinceId.startsWith("punic-low-countries-")) return `low-countries-${provinceId.slice("punic-low-countries-".length)}`;
@@ -356,13 +417,13 @@ function controllerFor(provinceId: string): string | null {
   if (provinceId.startsWith("punic-hungary-")) return `hungary-${provinceId.slice("punic-hungary-".length)}`;
   if (provinceId.startsWith("punic-czechoslovakia-")) return `czechoslovakia-${provinceId.slice("punic-czechoslovakia-".length)}`;
   if (provinceId.startsWith("prt-")) return "lusitanians";
-  if (provinceId.startsWith("mar-")) return CARTHAGINIAN_MAURETANIAN_COAST.has(provinceId) ? "carthage" : "mauretanian-peoples";
-  if (provinceId.startsWith("dza-")) return GAETULIAN_PROVINCES.has(provinceId) ? "gaetuli" : NUMIDIAN_PROVINCES.has(provinceId) ? "numidian-kingdoms" : "carthage";
-  if (provinceId.startsWith("tun-")) return "carthage";
-  if (provinceId.startsWith("lby-")) return PTOLEMAIC_CYRENAICA_PROVINCES.has(provinceId) ? "ptolemaic-cyrenaica" : GARAMANTIAN_PROVINCES.has(provinceId) ? "garamantes" : "carthage";
+  if (provinceId.startsWith("mar-")) return "mauretanian-peoples";
+  if (provinceId.startsWith("dza-")) return GAETULIAN_PROVINCES.has(provinceId) ? "gaetuli" : CARTHAGINIAN_ALGERIAN_COAST.has(provinceId) ? "carthage" : "numidian-kingdoms";
+  if (provinceId.startsWith("tun-")) return GAETULIAN_PROVINCES.has(provinceId) ? "gaetuli" : NUMIDIAN_TUNISIAN_PROVINCES.has(provinceId) ? "numidian-kingdoms" : "carthage";
+  if (provinceId.startsWith("lby-")) return CYRENE_PROVINCES.has(provinceId) ? "cyrene" : GARAMANTIAN_PROVINCES.has(provinceId) ? "garamantes" : "carthage";
   if (provinceId.startsWith("che-")) return "helvetian-peoples";
   if (provinceId.startsWith("aut-")) return "noric-communities";
-  if (provinceId === "ita-72843720b81376294924159" || provinceId === "fra-19338628b22604203385446" || CARTHAGINIAN_IBERIAN_REGIONS.has(provinceId)) return "carthage";
+  if (provinceId === "ita-72843720b81376294924159" || provinceId === "fra-19338628b22604203385446") return "carthage";
   if (provinceId.startsWith("ita-72843720b81376294924159-sicily-")) {
     if (provinceId.endsWith("sicily-southeast")) return "syracuse";
     if (provinceId.endsWith("sicily-northeast")) return "mamertines";
@@ -390,15 +451,15 @@ function nameFor(controllerPolityId: string, provinceName: string): string {
 // terrain, and the rest (river plains, the Argolid, Attica, the Macedonian
 // coastal lowlands) read as ordinary coastal plain.
 const GREEK_ISLAND_POLITIES = new Set([
-  "ionian-islands", "cycladic-islanders", "dodecanese-islanders", "aeolis-communities", "ionia-communities", "cretan-cities-west", "cretan-cities-east", "euboean-cities",
+  "ionian-islands", "cycladic-islanders", "rhodes", "aeolis-communities", "ionia-communities", "cretan-cities-west", "cretan-cities-east",
 ]);
 const GREEK_MOUNTAIN_POLITIES = new Set(["epirus", "arcadian-league", "aetolian-league", "phocian-league"]);
 
 function terrainFor(provinceId: string): string {
   if (GAETULIAN_PROVINCES.has(provinceId) || GARAMANTIAN_PROVINCES.has(provinceId)) return "desert-steppe";
-  if (provinceId.startsWith("lby-")) return PTOLEMAIC_CYRENAICA_PROVINCES.has(provinceId) ? "coastal-plain" : "desert-steppe";
-  if (provinceId.startsWith("tun-") || CARTHAGINIAN_MAURETANIAN_COAST.has(provinceId)) return "coastal-plain";
-  if (provinceId.startsWith("mar-") || provinceId.startsWith("dza-")) return NUMIDIAN_PROVINCES.has(provinceId) ? "hills-uplands" : "desert-steppe";
+  if (provinceId.startsWith("lby-")) return CYRENE_PROVINCES.has(provinceId) ? "coastal-plain" : "desert-steppe";
+  if (provinceId.startsWith("tun-") || MAURETANIAN_COAST.has(provinceId) || CARTHAGINIAN_ALGERIAN_COAST.has(provinceId)) return "coastal-plain";
+  if (provinceId.startsWith("mar-") || provinceId.startsWith("dza-")) return controllerFor(provinceId) === "numidian-kingdoms" ? "hills-uplands" : "desert-steppe";
   if (provinceId.startsWith("punic-greece-")) {
     const polity = GROUNDED_POLITY_BY_PROVINCE_ID.get(provinceId);
     if (polity !== undefined && GREEK_ISLAND_POLITIES.has(polity)) return "island-coastal";
@@ -432,7 +493,7 @@ export const PUNIC_WARS_CONTROL_MANIFEST: readonly PunicWarsControlRecord[] = pu
     }];
   });
 
-const CAPITAL_POLITY_BY_SETTLEMENT: Readonly<Record<string, string>> = {
+export const CAPITAL_POLITY_BY_SETTLEMENT: Readonly<Record<string, string>> = {
   "settlement-rome": "rome",
   "settlement-carthage": "carthage",
   "settlement-syracuse": "syracuse",
@@ -440,8 +501,33 @@ const CAPITAL_POLITY_BY_SETTLEMENT: Readonly<Record<string, string>> = {
   "settlement-cirta": "numidian-kingdoms",
   "settlement-volubilis": "mauretanian-peoples",
   "settlement-garama": "garamantes",
-  "settlement-cyrene": "ptolemaic-cyrenaica",
+  "settlement-cyrene": "cyrene",
+  "settlement-pella": "macedon",
+  "settlement-athens": "athens",
 };
+
+/**
+ * Towns held by someone other than the people around them. Gades was Carthage's
+ * ally and Ebusus a Punic colony while their hinterlands were Turdetanian and
+ * Talayotic; Numantia was the Arevaci's, a Celtiberian people, standing in the
+ * Vaccaei's province.
+ */
+const SETTLEMENT_CONTROLLERS: Readonly<Record<string, string>> = {
+  // Rome's Latin colonies, its garrisons inside its allies' lands.
+  "settlement-cosa": "rome",
+  "settlement-narnia": "rome",
+  "settlement-alba-fucens": "rome",
+  "settlement-luceria": "rome",
+  "settlement-venusia": "rome",
+  "settlement-rhegium": "rhegium-campanians",
+  "settlement-gades": "carthage",
+  "settlement-ebusus": "carthage",
+  "settlement-numantia": "iberia-celtiberi",
+};
+
+export function settlementControllerFor(settlementId: string, provinceId: string): string | null {
+  return SETTLEMENT_CONTROLLERS[settlementId] ?? CONTROL_BY_PROVINCE.get(provinceId) ?? null;
+}
 
 const CONTROL_BY_PROVINCE = new Map(PUNIC_WARS_CONTROL_MANIFEST.map((record) => [record.provinceId, record.controllerPolityId]));
 const PUNIC_WARS_MAP_SETTLEMENTS: DynamicMapOverlay["settlements"] = punicWarsGeoJson.features.flatMap((feature) => {
@@ -458,7 +544,7 @@ const PUNIC_WARS_MAP_SETTLEMENTS: DynamicMapOverlay["settlements"] = punicWarsGe
     anchorFeatureId: feature.id,
     name: feature.properties.name,
     kind,
-    controllerPolityId: CONTROL_BY_PROVINCE.get(feature.properties.provinceId) ?? null,
+    controllerPolityId: settlementControllerFor(feature.id, feature.properties.provinceId),
     capitalPolityId: CAPITAL_POLITY_BY_SETTLEMENT[feature.id] ?? null,
     importance,
     underSiege: false,
@@ -476,8 +562,10 @@ export const PUNIC_WARS_MAP_POLITIES: DynamicMapOverlay["polities"] = [...POLITY
   .map(([polityId, name]) => ({ polityId, name }))
   .sort((a, b) => a.name.localeCompare(b.name));
 
-/** This opening has no tactical or diplomatic ties; Roman client regions are direct Roman territory. */
-export const PUNIC_WARS_ROMAN_ALLIANCES: DynamicMapOverlay["politicalRelations"] = [];
+/** Rome's allies by foedus, as the map's standing panel names them. Mirrors the scenario's `alliedItaly`. */
+export const PUNIC_WARS_ROMAN_ALLIANCES: DynamicMapOverlay["politicalRelations"] = [
+  "etruscan-cities", "umbrians", "picentes", "marsi-paeligni", "samnites", "lucanians", "bruttians", "apulian-cities",
+].map((memberPolityId) => ({ id: `foedus-${memberPolityId}`, kind: "alliance" as const, leaderPolityId: "rome", memberPolityId, sourceNote: "Allied to Rome by foedus: soldiers for Rome's wars, no tribute, no war or peace of their own." }));
 
 export function punicWarsOpeningOverlay(revision: number): DynamicMapOverlay {
   return {

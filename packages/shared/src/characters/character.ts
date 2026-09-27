@@ -394,6 +394,21 @@ export function allOffices(
   return [...scenarioOffices.map((office) => byId.get(office.id) ?? office), ...made.filter((office) => !authored.has(office.id))];
 }
 
+/**
+ * Every succession rule there is: the scenario's, and the ones the world has
+ * made or changed since. The world's copy wins a collision, as with offices.
+ */
+export function allSuccessionRules(
+  world: { readonly successionRules?: readonly SuccessionRule[] },
+  scenarioRules: readonly SuccessionRule[] = [],
+): readonly SuccessionRule[] {
+  const made = world.successionRules ?? [];
+  if (made.length === 0) return scenarioRules;
+  const byId = new Map(made.map((rule) => [rule.id, rule]));
+  const authored = new Set(scenarioRules.map((rule) => rule.id));
+  return [...scenarioRules.map((rule) => byId.get(rule.id) ?? rule), ...made.filter((rule) => !authored.has(rule.id))];
+}
+
 export const ScenarioGovernmentRulesSchema = z
   .object({
     offices: z.array(OfficeSchema),

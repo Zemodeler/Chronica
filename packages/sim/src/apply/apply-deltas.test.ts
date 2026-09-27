@@ -162,6 +162,18 @@ describe("authority", () => {
     expect(result.breaches).toHaveLength(0);
   });
 
+  it("renames a force and changes its standard, and keeps both", () => {
+    const result = applyDeltas(
+      world(),
+      [{ op: "force_modify", forceRef: "legio-i", name: "Legio I Italica", standardId: "roman-wolf-twins", reason: "The consul numbers his legion." }],
+      context(),
+    );
+    expect(result.rejected).toHaveLength(0);
+    const legion = result.world.material.forces.find((force) => force.id === "legio-i")!;
+    expect(legion.name).toBe("Legio I Italica");
+    expect(legion.standardId).toBe("roman-wolf-twins");
+  });
+
   it("lets a character spend their own purse without recording a breach", () => {
     // Found running a live model: office grants cover an office's named
     // treasury and nothing else, so spending one's own money was reported as
@@ -508,15 +520,26 @@ describe("a question put to a body", () => {
     const state = world();
     const opened = applyDeltas(state, [open(state)], context());
     const procedureId = opened.world.material.politicalProcedures.at(-1)!.id;
-    const resolve: WorldDelta = { op: "political_procedure_resolve", procedureRef: procedureId, outcome: "failed", outcomeReason: "The chamber would not carry it.", reason: "The vote was held." };
+    const resolve: WorldDelta = { op: "political_procedure_resolve", procedureRef: procedureId, outcome: "withdrawn", outcomeReason: "Its sponsor let it drop.", reason: "The question was withdrawn." };
 
     const once = applyDeltas(opened.world, [resolve], context());
     const settled = once.world.material.politicalProcedures.find((procedure) => procedure.id === procedureId)!;
-    expect(settled.stage).toBe("resolved");
-    expect(settled.outcome).toBe("failed");
+    expect(settled.stage).toBe("withdrawn");
+    expect(settled.outcome).toBe("withdrawn");
 
     const twice = applyDeltas(once.world, [resolve], context());
     expect(twice.rejected[0]!.reason).toContain("already been settled");
+  });
+
+  it("will not let anybody write how the chamber voted", () => {
+    // The count is the Senate's, on its day (`senate.ts`); a model may argue
+    // for an outcome, and withdraw or block a question, but not carry it.
+    const state = world();
+    const opened = applyDeltas(state, [open(state)], context());
+    const procedureId = opened.world.material.politicalProcedures.at(-1)!.id;
+    const result = applyDeltas(opened.world, [{ op: "political_procedure_resolve", procedureRef: procedureId, outcome: "failed", outcomeReason: "The chamber would not carry it.", reason: "The vote was held." }], context());
+    expect(result.rejected[0]!.reason).toContain("votes on it");
+    expect(result.world.material.politicalProcedures.find((procedure) => procedure.id === procedureId)!.outcome).toBeNull();
   });
 });
 

@@ -4,6 +4,9 @@ export interface ForceFlagAsset {
   readonly contentBounds?: Readonly<{ x: number; y: number; width: number; height: number }>;
 }
 
+/** Drawn for a force whose standard has not been resolved yet. */
+export const FALLBACK_FORCE_FLAG: ForceFlagAsset = { url: "/maps/generic-merchant-ship-standard.png", aspectRatio: 3 / 2 };
+
 // The conflict treatment is deliberately excluded: this is the exact painted
 // flag rectangle, which is the only pointer target that may open army details.
 export const ARMY_STANDARD_WIDTH = .18;
@@ -60,3 +63,26 @@ export function armyStandardHitBounds(asset: ForceFlagAsset, centreX: number, ce
     height: flag.height * content.height,
   };
 }
+
+/** Space between neighbouring standards in a row, as a share of a standard's width. */
+const FAN_GAP = .12;
+
+/**
+ * Where a standard is drawn once forces sharing a point are put side by side:
+ * a row centred on the point, one standard width and a gap apart, so none of
+ * them covers another at any zoom.
+ */
+export function fannedStandardCentre(
+  placement: Readonly<{ x: number; y: number; fan: { readonly index: number; readonly count: number } | null }>,
+  width: number,
+): { x: number; y: number } {
+  if (placement.fan === null) return { x: placement.x, y: placement.y };
+  const step = width * (1 + FAN_GAP);
+  return { x: placement.x + (placement.fan.index - (placement.fan.count - 1) / 2) * step, y: placement.y };
+}
+
+/** Below this zoom the map draws no forces, so none may be hovered or clicked. */
+export const FORCES_VISIBLE_FROM_SCALE = 2.5;
+
+/** Extra reach around a standard's painted edge, in screen pixels, so a small flag is not a fiddly target. */
+export const ARMY_STANDARD_HIT_SLOP_PIXELS = 4;

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BlocInterestSchema, ChamberPowerSchema, FranchiseSchema, QuestionConcernSchema } from "./political-parts";
 
 // Named, so every JSON schema generated for a prompt states it once and points
 // at it: inlined, it was 73 copies of the same string in the orchestrator's.
@@ -349,6 +350,14 @@ export const VotingBlocSchema = z
     yesThreshold: SignedScoreSchema,
     noThreshold: SignedScoreSchema,
     causes: z.array(PoliticalCauseSchema),
+    /**
+     * What it wants, so it leans by the question rather than by one fixed
+     * mood: a landed bloc against a land law and for a war of conquest.
+     * Empty leaves it at its disposition, as every bloc was before.
+     */
+    interests: z.array(BlocInterestSchema).max(4).optional(),
+    /** The group whose members it is, where it is one: a faction, a party of debtors. It appears and goes with the group. */
+    groupId: EntityIdSchema.nullable().optional(),
   })
   .refine((bloc) => bloc.noThreshold < bloc.yesThreshold, {
     message: "A voting bloc's no threshold must be below its yes threshold.",
@@ -366,6 +375,23 @@ export const GovernmentInstitutionSchema = z
     quorumBps: BasisPointsSchema,
     passageThresholdBps: BasisPointsSchema,
     denominator: z.enum(["total", "present", "cast"]),
+    /**
+     * What it may decide. A question outside them is not its to count.
+     * Absent is everything, which is what every chamber was before.
+     */
+    powers: z.array(ChamberPowerSchema).optional(),
+    /** Its word binds nobody: a king's council. Counted, and then the ruler decides. */
+    advisory: z.boolean().optional(),
+    /** Who sits in it, and so which of the world's groups can take a bloc in it. Null admits none. */
+    franchise: FranchiseSchema.nullable().optional(),
+    /**
+     * Where its blocs come from. "authored" blocs are the scenario's and stay;
+     * "world" blocs are rebuilt from the groups that exist (`sim/society.ts`),
+     * beside the chamber's own standing blocs.
+     */
+    blocSource: z.enum(["authored", "world"]).optional(),
+    /** Where a question it rejects goes next, when a magistrate raised it: Carthage's council sent a split to the people. */
+    refersFailuresTo: EntityIdSchema.nullable().optional(),
   })
   .superRefine((institution, context) => {
     const weight = institution.votingBlocs.reduce((total, bloc) => total + bloc.weight, 0);
@@ -511,6 +537,13 @@ export const PoliticalGroupTypeSchema = z.enum([
   "merchant_interest",
   "landholder_interest",
   "other",
+  // Groups the world makes for itself (`sim/society.ts`).
+  "clientele",
+  "deposed_party",
+  "debtors",
+  "veterans",
+  "conquered_people",
+  "cult",
 ]);
 export type PoliticalGroupType = z.infer<typeof PoliticalGroupTypeSchema>;
 
@@ -531,6 +564,18 @@ export const PoliticalGroupSchema = z
     resourceAccountId: EntityIdSchema.nullable(),
     publicReputationBps: BasisPointsSchema,
     active: z.boolean(),
+    /**
+     * For a group the world made: what it is the group of, so the engine finds
+     * it again next month -- "debtors:rome", "faction:hanno-carthage".
+     * Null for a group anybody founded.
+     */
+    emergentKey: z.string().trim().min(1).max(160).nullable().optional(),
+    /** How much it weighs, 0-10 000: its seats in a chamber, and its pull on the people in it. */
+    strengthBps: BasisPointsSchema.optional(),
+    /** What it wants, for the blocs it takes. */
+    interest: BlocInterestSchema.nullable().optional(),
+    foundedAtStep: ElapsedStepSchema.nullable().optional(),
+    endedAtStep: ElapsedStepSchema.nullable().optional(),
   })
   .strict();
 export type PoliticalGroup = z.infer<typeof PoliticalGroupSchema>;
@@ -566,6 +611,10 @@ export const OfficeSeatVacancyCauseSchema = z.enum([
   "never_filled",
   "incapacity",
   "capture",
+  /** The office itself was done away with, by law or by force. */
+  "abolished",
+  /** Put out by force: a coup, a revolution, a conqueror. */
+  "deposed",
 ]);
 
 /**
@@ -697,6 +746,10 @@ export const PoliticalProcedureSchema = z
     outcomeReason: z.string().trim().max(400).nullable().default(null),
     sourceEventIds: z.array(EntityIdSchema).max(8).default([]),
     resultingEventIds: z.array(EntityIdSchema).max(8).default([]),
+    /** What it is about, so each bloc can lean by what it wants (`political-parts.ts`). */
+    concerns: z.array(QuestionConcernSchema).max(8).optional(),
+    /** The chamber that sent it here, when a failed vote was referred on: it is not referred twice. */
+    referredFromInstitutionId: EntityIdSchema.nullable().optional(),
   })
   .strict()
   .superRefine((procedure, context) => {
@@ -839,6 +892,12 @@ export const ForceSchema = z.object({
    * fate in battle. Members share the force's losses, each by his own roll.
    */
   memberCharacterIds: z.array(EntityIdSchema).max(40).default([]),
+  /**
+   * The standard it marches under: an id in the web client's catalogue of
+   * banners. Absent, it carries its power's first. Only a name the client
+   * knows is ever drawn, so an id nobody painted falls back the same way.
+   */
+  standardId: EntityIdSchema.optional(),
   /**
    * How it means to fight when next brought to battle, whoever attacks: the
    * ford it has fortified, the flank it keeps its horse on. Judged on the day
@@ -1099,8 +1158,10 @@ export const MaterialWorldStateSchema = z
     state.motions.forEach((motion, index) => {
       requireReference(institutionIds.has(motion.institutionId), ["motions", index, "institutionId"], "Motion must reference an existing institution.");
     });
+    // A chamber's count is of a political procedure now; the old motions are
+    // scaffold nothing writes.
     state.voteRecords.forEach((record, index) => {
-      requireReference(motionIds.has(record.motionId), ["voteRecords", index, "motionId"], "Vote record must reference an existing motion.");
+      requireReference(motionIds.has(record.motionId) || procedureIds.has(record.motionId), ["voteRecords", index, "motionId"], "Vote record must reference an existing motion or procedure.");
     });
     state.forces.forEach((force, index) => {
       if (force.payObligationId !== null) {

@@ -111,7 +111,7 @@ function fillProvinces(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingC
   for (const province of provinces) {
     const owner = political.ownerByProvince.get(province.id);
     if (owner) {
-      ctx.fillStyle = politicalColourWithAlpha(owner, 0.76);
+      ctx.fillStyle = politicalColourWithAlpha(owner, 0.76, political.leaderByPolity);
       ctx.fill(getProvincePath(world, province.id, province.svgPath));
     }
   }

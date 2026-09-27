@@ -32,6 +32,10 @@ import { reviewContingencies } from "./contingencies";
 import type { BattleAccount } from "./battle";
 import type { IdFactory } from "./ports";
 import { holdElections, type ElectionGovernment } from "./elections";
+import { holdVotes } from "./senate";
+import { ensureConstitutions, keepThrones } from "./constitutions";
+import { reviewSociety } from "./society";
+import { raiseOpenings } from "./openings";
 import { keepContracts } from "./contracts";
 
 /** The world with its conflict overlay brought back in step with it. */
@@ -1090,21 +1094,43 @@ export function runDeterministicTick(input: TickInput): TickResult {
   // Contracts whose pay was missed today, or whose term or man ran out.
   const contracts = keepContracts(lives.world, input.toDay);
 
+  // A throne that passes by blood is filled by blood, the day it falls
+  // vacant -- after lives, so a king who died today is followed today.
+  const thrones = input.government === undefined
+    ? { world: contracts.world, facts: [] as readonly FactProposalDraft[] }
+    // Every power has a constitution from the first review on: grown from its
+    // form where the scenario wrote none (silent -- it was always there).
+    : keepThrones({ world: ensureConstitutions({ world: contracts.world, government: input.government, toDay: input.toDay }), government: input.government, toDay: input.toDay, ...(input.playerCharacterId === undefined ? {} : { playerCharacterId: input.playerCharacterId }) });
+
   // After lives, so a magistrate who died today leaves a seat the living are
   // told about today.
   const elections = input.government === undefined
-    ? { world: contracts.world, facts: [] as readonly FactProposalDraft[] }
+    ? { world: thrones.world, facts: [] as readonly FactProposalDraft[] }
     : holdElections({
-      world: contracts.world,
+      world: thrones.world,
       government: input.government,
       toDay: input.toDay,
       ids: input.ids,
       ...(input.playerCharacterId === undefined ? {} : { playerCharacterId: input.playerCharacterId }),
     });
 
+  // And every other question before a chamber whose day has come is counted.
+  const votes = input.government === undefined
+    ? { world: elections.world, facts: [] as readonly FactProposalDraft[] }
+    : holdVotes({ world: elections.world, offices: input.government.offices, successionRules: input.government.successionRules, toDay: input.toDay, ids: input.ids });
+
+  // Once a month the world is read for its groups; and whoever could take a
+  // moment to change a government is told it is there.
+  const society = input.government === undefined
+    ? { world: votes.world, facts: [] as readonly FactProposalDraft[] }
+    : reviewSociety({ world: votes.world, government: input.government, warfare: input.warfare, toDay: input.toDay, ids: input.ids });
+  const opened = input.government === undefined
+    ? society.world
+    : raiseOpenings({ world: society.world, government: input.government, toDay: input.toDay, ...(input.playerCharacterId === undefined ? {} : { playerCharacterId: input.playerCharacterId }) });
+
   return {
-    world: elections.world,
-    factProposals: [...facts, ...plans.facts, ...plots.facts, ...lives.facts, ...contracts.facts, ...elections.facts],
+    world: opened,
+    factProposals: [...facts, ...plans.facts, ...plots.facts, ...lives.facts, ...contracts.facts, ...thrones.facts, ...elections.facts, ...votes.facts, ...society.facts],
     notes,
     died: [...plots.died, ...lives.died],
     sprungContingencies: plans.sprung,

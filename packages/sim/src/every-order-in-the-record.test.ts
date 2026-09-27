@@ -10,6 +10,7 @@ import {
 } from "@chronica/shared";
 import { createIdFactory } from "./ports";
 import { applyDeltas } from "./apply/apply-deltas";
+import { holdVotes, voteDayOf } from "./senate";
 import type { ApplyContext } from "./apply/context";
 
 /**
@@ -409,7 +410,7 @@ describe("battles, sorties and unusual tactics (orders 8, 18, 20, 21, 27, 29, 57
 });
 
 describe("the war inside the government (orders 26, 30, 33, 34, 39, 42, 44, 51, 53, 55, 66, 79)", () => {
-  it("puts a question to the Senate, takes sides on it, and settles it", () => {
+  it("puts a question to the Senate and takes sides on it, and the Senate settles it on its day", () => {
     const result = order([
       {
         op: "political_procedure_open", localId: "clemency", type: "decree",
@@ -427,15 +428,15 @@ describe("the war inside the government (orders 26, 30, 33, 34, 39, 42, 44, 51, 
         visibility: "polity",
         reason: "A senator speaks for him.",
       },
-      {
-        op: "political_procedure_resolve", procedureRef: localRef("clemency"), outcome: "passed",
-        outcomeReason: "The Senate grants it, on the strength of the Sicilian command.",
-        reason: "The question is settled.",
-      },
     ]);
 
     carriedOut(result);
-    expect(result.world.material.politicalProcedures.at(-1)!.outcome).toBe("passed");
+    // The order does not get to write the vote: the house counts it in thirty days.
+    const question = result.world.material.politicalProcedures.at(-1)!;
+    expect(question.outcome).toBeNull();
+    const voted = holdVotes({ world: result.world, offices: definition.government.offices, toDay: voteDayOf(question), ids: createIdFactory("clemency-vote") });
+    expect(voted.world.material.politicalProcedures.at(-1)!.outcome).toBe("passed");
+    expect(voted.facts.find((fact) => fact.kind === "motion_passed")?.summary).toContain("Quintus");
   });
 
   it("puts down a cult, and takes the legitimacy it costs", () => {

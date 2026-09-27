@@ -10,6 +10,7 @@ export * from "./continuity/index";
 export * from "./determinism";
 export * from "./dialogue/index";
 export * from "./material-state";
+export * from "./political-parts";
 export * from "./material-view";
 export * from "./material/books";
 export * from "./material/character-accounts";

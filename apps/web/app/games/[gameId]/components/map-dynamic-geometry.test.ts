@@ -68,14 +68,14 @@ describe("resolveMapForcePlacements (docs/19 Phase 3)", () => {
     const placements = resolveMapForcePlacements([forceA, forceB], world, null);
     expect(placements).toHaveLength(2);
     expect(placements.every((p) => p.group === null)).toBe(true);
-    const [a, b] = placements;
-    expect(a!.x === b!.x && a!.y === b!.y).toBe(false);
+    expect(placements.map((p) => p.fan)).toEqual([{ index: 0, count: 2 }, { index: 1, count: 2 }]);
   });
 
   it("does not offset a lone force", () => {
     const placements = resolveMapForcePlacements([forceA], world, null);
     expect(placements[0]!.x).toBe(1);
     expect(placements[0]!.y).toBe(-1);
+    expect(placements[0]!.fan).toBeNull();
   });
 
   it("groups both sides of a battle at the same placement, with one primary", () => {

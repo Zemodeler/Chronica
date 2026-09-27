@@ -41,6 +41,7 @@ import { DiplomaticAnswerSchema, DiplomaticMessageKindSchema } from "../world/di
 import { OrderPartyRefSchema } from "../world/party-ref";
 import { StorylinePhaseSchema } from "../world/storylines";
 import { LocalIdSchema, MaybeRefSchema, RefSchema } from "./refs";
+import { ChamberPowerSchema, FranchiseSchema, GovernmentFormSchema, QuestionConcernSchema } from "../political-parts";
 
 /**
  * Every way the model is allowed to change the world.
@@ -379,6 +380,12 @@ const ForceModifySchema = z.object({
    * embarrassment.
    */
   name: NameSchema.optional(),
+  /**
+   * The banner it now carries. Set by the player's own hand from the map, where
+   * the catalogue is; anything else writing it names a banner the client may
+   * not have, and the force then shows its power's first.
+   */
+  standardId: EntityIdSchema.optional(),
   locationId: EntityIdSchema.optional(),
   /**
    * Where in that province they actually stand.
@@ -818,6 +825,39 @@ const EnactmentProposalSchema = z
     body: z.object({ name: NameSchema }).strict().optional(),
     /** One man excused the ladder -- age, the rung below, the gap -- for one office, for a year. */
     waiver: z.object({ characterRef: RefSchema, officeId: EntityIdSchema }).strict().optional(),
+    /**
+     * The constitution changed: the whole form recast ("form"), one chamber
+     * founded, reformed or abolished, or how one office is filled. Only the
+     * chamber that holds the power over the constitution may carry it; where
+     * none does, the ruler decrees it.
+     */
+    constitution: z
+      .object({
+        form: GovernmentFormSchema.optional(),
+        chamber: z
+          .object({
+            /** Absent founds a new chamber. */
+            institutionRef: MaybeRefSchema.optional(),
+            name: NameSchema.optional(),
+            powers: z.array(ChamberPowerSchema).max(6).optional(),
+            advisory: z.boolean().optional(),
+            franchise: FranchiseSchema.optional(),
+            abolish: z.boolean().default(false),
+          })
+          .strict()
+          .optional(),
+        succession: z
+          .object({
+            officeId: EntityIdSchema,
+            kind: z.enum(["primogeniture", "elective", "appointment", "seniority"]),
+            /** The chamber that elects it, when elective. */
+            institutionRef: MaybeRefSchema.optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .meta({ id: "Enactment" });
@@ -851,6 +891,34 @@ const PoliticalProcedureOpenSchema = z.object({
    * carries this out on the day it passes, and only then.
    */
   enacts: EnactmentProposalSchema.nullable().optional(),
+  /** What it touches, so each bloc leans by what it wants. The engine adds what the measure plainly enacts. */
+  concerns: z.array(QuestionConcernSchema).max(6).optional(),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * A government taken by force, or dictated.
+ *
+ * - "coup": a man with an army near the capital makes himself its master.
+ * - "revolution": the people rise behind a leader and remake the state.
+ * - "imposition": a conqueror or senior ally dictates the government of a power it holds.
+ * - "restoration": the fallen government takes back what it lost.
+ *
+ * Never whether it works. The engine checks what the attempt needs -- men at
+ * the capital, a people in unrest, a conquered city -- rolls it from the
+ * armies' loyalty, the state's legitimacy and the plotters' standing, and
+ * writes what follows either way.
+ */
+const RegimeChangeSchema = z.object({
+  op: z.literal("regime_change"),
+  actorCharacterRef: RefSchema,
+  /** The power whose government changes. */
+  polityRef: RefSchema,
+  route: z.enum(["coup", "revolution", "imposition", "restoration"]),
+  /** What it becomes. Absent: a coup makes a monarchy of it, a revolution a republic of its citizens, a restoration what it was. */
+  form: GovernmentFormSchema.nullable().default(null),
+  /** The armies used, which must answer to the actor. */
+  forceRefs: z.array(RefSchema).max(4).default([]),
   reason: ReasonSchema,
 }).strict();
 
@@ -1520,7 +1588,7 @@ const AgreementOpenSchema = z.object({
   op: z.literal("agreement_open"),
   localId: LocalIdSchema,
   kind: PolityAgreementKindSchema,
-  /** For tribute and protection the order is the terms: the tributary pays, or the protected power is answered for by, the other. */
+  /** For tribute, protection and foedus the order is the terms: the tributary pays, the protected power is answered for by, or the ally follows, the other. */
   polityId: RefSchema,
   otherPolityId: RefSchema,
   terms: z.string().trim().min(1).max(600),
@@ -1725,6 +1793,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   LegalStatusSetSchema,
   ServiceContractOpenSchema,
   ServiceContractCloseSchema,
+  RegimeChangeSchema,
 ]).meta({ id: "WorldDelta" });
 export type WorldDelta = z.infer<typeof WorldDeltaSchema>;
 export type WorldDeltaOp = WorldDelta["op"];
@@ -1785,6 +1854,7 @@ export const WORLD_DELTA_OPS = [
   "legal_status_set",
   "service_contract_open",
   "service_contract_close",
+  "regime_change",
 ] as const satisfies readonly WorldDeltaOp[];
 
 /**
@@ -1859,4 +1929,6 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   // Hiring a man is spending the money that pays him.
   service_contract_open: "fiscal",
   service_contract_close: "fiscal",
+  // No office authorises taking the state: every attempt is a breach, and the record says so.
+  regime_change: "military",
 };

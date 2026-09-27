@@ -29,6 +29,8 @@ import { FamilyLinkSchema, HouseholdSchema, LifeContractSchema } from "../charac
 import { LegacyCauseSchema } from "../continuity/continuity";
 import { PolityAgreementSchema } from "./agreements";
 import { DiplomaticMessageSchema, PolityStanceSchema } from "./diplomacy";
+import { ConstitutionSchema, EMPTY_SOCIETY_MEMORY, SocietyMemorySchema } from "./constitution";
+import { SuccessionRuleSchema } from "../characters/character";
 
 /**
  * Bumped when an old snapshot needs upgrading on load.
@@ -145,6 +147,21 @@ export const WorldStateSchema = z
      * made confers authority exactly as an authored one does.
      */
     offices: z.array(OfficeSchema).default([]),
+    /**
+     * How offices are filled, where the world has changed or added to the
+     * scenario's rules: a throne made elective, a council's own elections.
+     * Merged with the scenario's exactly as `offices` is (`allSuccessionRules`).
+     */
+    successionRules: z.array(SuccessionRuleSchema).default([]),
+    /**
+     * Each power's constitution: what form its parts read as, and how they came
+     * to be (`world/constitution.ts`). A power with no entry has not yet been
+     * given one; the engine grows it from the power's form the first time it
+     * reviews the world.
+     */
+    constitutions: z.array(ConstitutionSchema).default([]),
+    /** What the world remembers to see its groups coming -- see `SocietyMemorySchema`. */
+    society: SocietyMemorySchema.default(EMPTY_SOCIETY_MEMORY),
     /**
      * Kinds of troops the world has made for itself, on the same terms as the
      * offices above -- see `warfare/troop-categories.ts`.

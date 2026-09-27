@@ -69,7 +69,7 @@ export interface WorldViewMeta {
 
 const NO_ACCOUNT: AccountView = { id: "no-account", label: "No personal account", balance: 0, recentChanges: [] };
 
-function projectOverlay(world: WorldState): DynamicMapOverlay {
+function projectOverlay(world: WorldState, viewerCharacterId: string | null = null): DynamicMapOverlay {
   const characterNames = new Map(world.characters.map((character) => [character.id, character.name]));
 
   return DynamicMapOverlaySchema.parse({
@@ -77,7 +77,17 @@ function projectOverlay(world: WorldState): DynamicMapOverlay {
     // simulated time has moved, which is the only thing that can change it.
     revision: world.elapsedStep,
     polities: world.map.polities.map((polity) => ({ polityId: polity.id, name: polity.name })),
-    politicalRelations: [],
+    // Who follows whom, read from the treaties themselves: a foedus names its
+    // leader second, and an alliance of equals is shown as led by its first party.
+    politicalRelations: world.polityAgreements
+      .filter((agreement) => agreement.status === "active" && agreement.visibility === "public" && (agreement.kind === "foedus" || agreement.kind === "alliance"))
+      .map((agreement) => ({
+        id: agreement.id,
+        kind: "alliance" as const,
+        leaderPolityId: agreement.kind === "foedus" ? agreement.otherPolityId : agreement.polityId,
+        memberPolityId: agreement.kind === "foedus" ? agreement.polityId : agreement.otherPolityId,
+        sourceNote: agreement.terms,
+      })),
     provinces: world.map.provinces.map((province) => ({
       provinceId: province.id,
       controllerPolityId: province.controllerPolityId,
@@ -107,6 +117,8 @@ function projectOverlay(world: WorldState): DynamicMapOverlay {
       commanderLabel: characterNames.get(force.commanderCharacterId) ?? null,
       strengthLabel: `${force.authorizedStrength.toLocaleString()} men`,
       relation: "neutral",
+      ...(force.standardId === undefined ? {} : { flagAssetId: force.standardId }),
+      commandable: viewerCharacterId !== null && (force.commanderCharacterId === viewerCharacterId || force.controllerCharacterId === viewerCharacterId),
       selected: false,
       movement: null,
     })),
@@ -159,7 +171,7 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
     viewerPolityId: viewer?.polityId ?? null,
     dateLabel: meta.clock === undefined ? `Day ${world.elapsedStep}` : formatWorldDate(world.instant, meta.clock),
     provinces,
-    mapOverlay: projectOverlay(world),
+    mapOverlay: projectOverlay(world, viewer?.id ?? null),
     material: { currencyName: world.material.currency.name, personalAccount },
   };
 }

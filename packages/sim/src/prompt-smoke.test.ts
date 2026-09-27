@@ -138,7 +138,10 @@ describe("orchestrator prompt", () => {
     // about 2 500 characters of schema and clause. Paid for the same way:
     // `Money`, `SignedBps`, `Name` and `Days` are named once instead of being
     // written out in full some fifty times between them.
-    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(63_000);
+    // Raised from 63 000 on 2026-09-26 for constitutions: the "constitution"
+    // amendment, "regime_change" and one sentence in principle 9. The user
+    // asked for the feature whatever it cost in prompt.
+    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(65_000);
   });
 });
 

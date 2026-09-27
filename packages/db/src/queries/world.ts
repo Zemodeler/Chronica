@@ -86,7 +86,7 @@ function hashWorld(world: WorldState): string {
   return (hash >>> 0).toString(16);
 }
 
-function instantSortKeyOf(world: WorldState): number {
+export function instantSortKeyOf(world: WorldState): number {
   return world.instant.day * 1440 + world.instant.minute;
 }
 
@@ -405,15 +405,35 @@ export async function commitBurst(db: ChronicaDatabase, commit: BurstCommit): Pr
   });
 }
 
+/**
+ * Opens a burst, or returns null when one is already running for this game.
+ *
+ * `findRunningBurst` alone could not keep that promise: two orders sent
+ * together both read "nothing running" and both got here. The partial unique
+ * index on running rows is what refuses the second one.
+ */
 export async function startBurst(
   db: ChronicaDatabase,
   input: { gameId: string; playerUserId: string | null; orderText: string | null },
-): Promise<string> {
-  const [row] = await db
-    .insert(simulationBursts)
-    .values({ gameId: input.gameId, playerUserId: input.playerUserId, orderText: input.orderText, heartbeatAt: new Date() })
-    .returning({ id: simulationBursts.id });
-  return row!.id;
+): Promise<string | null> {
+  try {
+    const [row] = await db
+      .insert(simulationBursts)
+      .values({ gameId: input.gameId, playerUserId: input.playerUserId, orderText: input.orderText, heartbeatAt: new Date() })
+      .returning({ id: simulationBursts.id });
+    return row!.id;
+  } catch (error) {
+    if (isUniqueViolation(error)) return null;
+    throw error;
+  }
+}
+
+/** Postgres's 23505, whether drizzle hands it over bare or wrapped in a `DrizzleQueryError`. */
+function isUniqueViolation(error: unknown): boolean {
+  for (let current = error; typeof current === "object" && current !== null; current = (current as { cause?: unknown }).cause) {
+    if ("code" in current && current.code === "23505") return true;
+  }
+  return false;
 }
 
 export async function failBurst(db: ChronicaDatabase, burstId: string, error: string): Promise<void> {

@@ -425,13 +425,24 @@ button:hover { background: var(--accent-hover); border-color: var(--accent-hover
 /* ─── Map: zoom-band visibility ────────────────────────────────── */
 [data-zoom="far"] .layer-forces { display: none; }
 
-.map-force-details { position: absolute; right: 1rem; bottom: 1rem; z-index: 3; display: grid; gap: .35rem; min-width: 15rem; padding: .9rem 2.2rem .9rem .9rem; color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-card); background: rgb(12 20 31 / 94%); box-shadow: 0 12px 28px rgb(0 0 0 / 28%); }
+/* Above the order bar (z-index 25) and clear of it, which runs along the bottom. */
+.map-force-details { position: absolute; right: 1rem; bottom: 5rem; z-index: 26; display: grid; gap: .35rem; min-width: 15rem; padding: .9rem 2.2rem .9rem .9rem; color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-card); background: rgb(12 20 31 / 94%); box-shadow: 0 12px 28px rgb(0 0 0 / 28%); }
 .map-force-details strong { font-family: "Times New Roman", Times, serif; font-size: 1.1rem; }
 .map-force-details span { color: var(--text-muted); font-size: .86rem; }
 .map-force-details-close { position: absolute; top: .35rem; right: .5rem; padding: 0; color: var(--text-muted); border: 0; background: transparent; font-size: 1.3rem; line-height: 1; cursor: pointer; }
 .map-force-flag-button { margin-top: .45rem; justify-self: start; padding: .42rem .65rem; border: 1px solid #a97f32; border-radius: .35rem; background: #3b2a18; color: #f4cf68; font: 600 .82rem system-ui, sans-serif; cursor: pointer; }
+.map-force-flag-button:disabled { opacity: .6; cursor: default; }
+.map-force-flag-button--quiet { border-color: var(--border); background: transparent; color: var(--text-muted); }
+.map-force-actions { display: flex; gap: .45rem; }
+.map-force-actions .map-force-flag-button { margin-top: .45rem; }
+.map-force-rename { display: flex; gap: .4rem; align-items: center; margin-top: .45rem; }
+.map-force-rename input { flex: 1; min-width: 0; padding: .4rem .55rem; border: 1px solid var(--border); border-radius: .35rem; background: var(--surface); color: var(--text); font: 400 .86rem system-ui, sans-serif; }
+.map-force-rename .map-force-flag-button { margin-top: 0; }
+.map-force-error { margin: .25rem 0 0; color: #f08a7a; font-size: .82rem; }
+.map-flag-option:disabled { opacity: .6; cursor: wait; }
+.geo-map[data-over-force] { cursor: pointer; }
 .map-force-flag-button:hover { background: #57391d; }
-.map-flag-catalog-backdrop { position: absolute; inset: 0; z-index: 10; display: grid; place-items: center; padding: 1rem; background: rgb(6 8 13 / 72%); backdrop-filter: blur(3px); }
+.map-flag-catalog-backdrop { position: absolute; inset: 0; z-index: 27; display: grid; place-items: center; padding: 1rem; background: rgb(6 8 13 / 72%); backdrop-filter: blur(3px); }
 .map-flag-catalog { position: relative; width: min(32rem, 100%); border: 1px solid #a97f32; border-radius: var(--radius-card); background: #101923; color: var(--text); box-shadow: 0 1rem 4rem rgb(0 0 0 / 60%); overflow: hidden; }
 .map-flag-catalog-header { display: flex; align-items: start; gap: 1rem; padding: 1rem 2.5rem 1rem 1.2rem; border-bottom: 1px solid var(--border); }
 .map-flag-catalog-header p { margin: 0 0 .2rem; color: #d6b768; font: 700 .72rem system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase; }

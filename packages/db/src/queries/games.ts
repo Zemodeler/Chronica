@@ -220,7 +220,25 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     // Version 29 seats Gnaeus Cornelius Blasio, the second consul of 270,
     // in the chair the scenario had always left empty.
     await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 29, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Seats the second consul of 270, Gnaeus Cornelius Blasio, with his purse, estates and Senate seat, so both consular chairs are filled." }).onConflictDoNothing();
-    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 29, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
+    // Version 30 cuts what Rome pays a soldier by more than half, and names the rate, so new
+    // legions are priced from it rather than guessed.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 30, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Lowers Roman soldiers' pay to 35 a month for every thousand men and says so in the treasury, so Rome can keep twenty thousand under arms; the field army's pay falls from 300 to 140." }).onConflictDoNothing();
+    // Version 31 puts the map back in 270: Carthage keeps the Punic coast of Africa and
+    // loses Iberia, the Numidian interior and Morocco; Macedon holds Thessaly, Corinth and
+    // Chalcis; Cyrene is Magas's kingdom. Money is counted in drachmae, and the Roman
+    // assemblies, not the Senate, elect the magistrates.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 31, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Corrects the opening map to 270 BCE (Carthage out of Iberia, the Numidian interior and Morocco; Macedon in Thessaly, Corinth and Euboea; Cyrene independent; anachronistic tribes and towns removed), counts money in drachmae, and has the Centuriate and Tribal Assemblies, not the Senate, elect the magistrates." }).onConflictDoNothing();
+    // Version 32 makes Rome's allies what they were: the Etruscans, Umbrians, Picentes, Marsi
+    // and Paeligni, Samnites, Lucanians, Bruttians and Apulian cities govern themselves and
+    // follow Rome by foedus -- soldiers, not tribute, and no war or peace of their own. Rome
+    // keeps Latium and Campania and its Latin colonies. The Messapians hold the Sallentine
+    // peninsula, free until 267.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 32, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Rome's Italian allies become polities bound by foedus (soldiers for Rome's wars, no tribute, no war or peace of their own); Rome keeps Latium, Campania and its Latin colonies, gains an allied contingent and loses the allied tribute; Messapia is split from Apulia and free." }).onConflictDoNothing();
+    // Version 33 gives every power a government: Carthage its council, tribunal and
+    // assembly, Syracuse the king's council, the Mamertines and the Campanians of Rhegium
+    // their soldiers' assemblies, and every other power a form its constitution grows from.
+    await tx.insert(scenarioVersions).values({ scenarioId: PUNIC_WARS_SCENARIO_ID, version: 33, mapAssetId: PUNIC_WARS_MAP_ASSET_ID, definition: punicWarsScenario.definition, initialWorld: punicWarsScenario.initialWorld, schemaVersion: 3, origin: "built-in", validatedAt: new Date(), notes: "Every power governs itself through chambers: Carthage's Council of Elders, Hundred and Four and Assembly of the People; Syracuse's advisory councils; the Mamertine and Campanian soldiers' assemblies; and a government form for every other power, from which its chambers and offices are grown. Rome's blocs now lean by what they want." }).onConflictDoNothing();
+    await tx.update(scenarios).set({ title: "Punic Wars", period: "270 BCE · Before the Punic Wars", currentVersion: 33, updatedAt: new Date() }).where(eq(scenarios.id, PUNIC_WARS_SCENARIO_ID));
   });
 }
 

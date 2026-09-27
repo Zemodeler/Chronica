@@ -82,7 +82,7 @@ for (let index = 0; index < bursts; index += 1) {
   const printedFrom = report.length;
   const from = world.instant;
   const result = await runSimulationBurst({
-    world, clock: definition.clock, offices: definition.government.offices, warfare: definition.warfare,
+    world, clock: definition.clock, offices: definition.government.offices, successionRules: definition.government.successionRules, warfare: definition.warfare,
     terrains: definition.map.terrains, burstId: `hand-${index}`, gameId: "hand-played",
     actorRef: { kind: "character", id: player }, actorPolityId: polity,
     orderText, spanDays, knownFacts, queue, port, budget,

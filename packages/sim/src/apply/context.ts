@@ -2,6 +2,7 @@ import type {
   AuthorityCheckResult,
   FactProposalDraft,
   Office,
+  SuccessionRule,
   OrderPartyRef,
   ScenarioWarfareRules,
   ScenarioWealthRules,
@@ -19,6 +20,8 @@ export interface ApplyContext {
   readonly actorRef: OrderPartyRef;
   /** Scenario offices -- authority derivation needs them and they are not part of `WorldState`. */
   readonly offices: readonly Office[];
+  /** Scenario succession rules, so a constitution's parts can be read and changed. */
+  readonly successionRules?: readonly SuccessionRule[] | undefined;
   /**
    * The scenario's warfare rules. Like offices, they belong to the scenario
    * rather than the world, and battle resolution cannot proceed without them.

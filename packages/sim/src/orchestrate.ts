@@ -130,7 +130,8 @@ principle it falls under.
 
 8. Everything costs. POLITICAL STANDING, THE COUNCIL and THE COUNTRY are real
    numbers: a measure that angers people moves them ("legitimacy_shift",
-   "political_support_set"), a levy takes manpower and a march eats food
+   "political_support_set"), a levy takes manpower -- from an ally's provinces
+   too, where a foedus owes it men -- and a march eats food
    ("province_material_shift"), and a deed that makes or breaks a name moves
    "standingDeltaBps", naming its "standingCause". People change: a slave freed, sold or a captive enslaved ("legal_status_set"), a defector's new "polityId", a skill
    learned or lost, an ambition taken up or given up. What no other act fits is an arrangement; it persists under
@@ -151,6 +152,12 @@ principle it falls under.
    "clauses" are what it makes happen. One power speaks to another by
    letter, and the answer belongs to the power it was put to; an offer that
    would bind the player's own power is theirs to settle, as "playerDecision".
+   A power's CONSTITUTION is its chambers -- each deciding what it lists, an
+   advisory one only counselling its ruler, who pays for overruling it -- and
+   how its offices are filled; it changes by a measure that "enacts" a
+   "constitution" change, put to the chamber that holds it, or decreed by the
+   ruler where none does. A government taken by force or dictated is
+   "regime_change": who, the route and the armies, never whether it works.
    What powers stand in is an agreement: war and peace close each other, armies
    at peace cannot fight until somebody declares the war, and an ordered
    agreement names first the party that pays tribute, is protected, or is

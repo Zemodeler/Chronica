@@ -65,15 +65,21 @@ describe("taxes the land can bear", () => {
 
     const year = aYearOf(opening());
     expect(year.facts).not.toContain("tax_shortfall");
-    // The tributum, the allies' contributions and the land rents, as authored:
-    // about 1 800 a month.
-    expect(year.monthly[0]).toBe(Math.round(1_100 * 0.9) + Math.round(600 * 0.8) + 330);
+    // The tributum and the land rents, as authored: about 1 600 a month. The
+    // allies pay no tribute (v32); two of the rents come from land Rome took
+    // from the Bruttians and Samnites.
+    expect(year.monthly[0]).toBe(Math.round(1_100 * 0.9) + 330 + 150 + 150);
   });
 
   it("does not collect a tenfold tributum: the collectors raise what the land can bear, and say so", () => {
     const pressed = aYearOf(withTributum(opening(), 11_000));
     const bearable = taxBurdens(opening()).get("rome")!.bearable;
-    expect(pressed.monthly[0]).toBeLessThanOrEqual(bearable + 1);
+    // What Rome's own lands can bear, plus the rents it draws from its allies'
+    // country, which that ceiling does not govern.
+    const fromAbroad = opening().material.incomeSources
+      .filter((source) => source.beneficiaryAccountId === "rome-treasury" && source.counterpartyPolityId !== null)
+      .reduce((sum, source) => sum + source.amount, 0);
+    expect(pressed.monthly[0]).toBeLessThanOrEqual(bearable + fromAbroad + 1);
     expect(pressed.facts).toContain("tax_shortfall");
   });
 
