@@ -710,6 +710,7 @@ export function GameShell({
           open={surface === "people"}
           onClose={closeSurface}
           side={sheetSideFor(roomStyle, "people")}
+          onAnswerAtDesk={goToDesk}
           openSessionId={openChatSessionId}
           onOpenSessionConsumed={() => setOpenChatSessionId(null)}
         />

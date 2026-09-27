@@ -375,7 +375,28 @@
   .letters__people { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--rule); background: var(--papyrus-shade); }
   .letters__people-head { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; padding: .9rem 1.1rem .6rem; }
   .letters__people-head h3 { color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
-  .letters__people-actions { display: flex; gap: .9rem; font-size: var(--step--1); }
+  .letters__people-actions { display: flex; gap: .9rem; padding: 0 1.1rem .6rem; font-size: var(--step--1); }
+  .letters__search { padding: .9rem 1.1rem .5rem; }
+  .letters__search input { padding: .45rem .6rem; font-size: var(--step-0); }
+  .letters__scroll { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: .75rem; }
+  .letters__group h3 { padding: .75rem 1.1rem .25rem; color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
+  .letters__person .letters__reach { grid-column: 1; font: 400 var(--step--1) var(--font-sans); }
+  .letters__person .letters__reach--here { color: var(--bronze-deep); }
+  .letters__person .letters__reach--letter { color: var(--ink-faded); }
+  .letters__person .letters__reach--out_of_reach { color: var(--ink-faded); opacity: .75; }
+  .letters__person--letter strong { display: flex; align-items: center; gap: .4rem; }
+  .letters__dossier { display: grid; align-content: start; gap: .9rem; padding: 1.2rem 1.6rem; overflow-y: auto; }
+  .letters__dossier h3 { font-size: var(--step-2); }
+  .letters__who { display: grid; gap: .1rem; }
+  .letters__who strong { font: 500 var(--step-2) var(--font-serif); }
+  .letters__who span { color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
+  .letters__with--dossier { flex-direction: column; align-items: flex-start; gap: .2rem; }
+  .letters__known { font-size: var(--step--1); }
+  .letters__reach-line { font: 400 var(--step-0) var(--font-serif); }
+  .letters__from { color: var(--ink-faded); font-family: var(--font-serif); font-style: italic; }
+  .letters__subject { font: 500 var(--step-1) var(--font-serif); }
+  .letters__terms { margin: 0; padding-left: 1rem; border-left: 2px solid var(--seal); font: 400 1.075rem/1.55 var(--font-serif); }
+  .letters-form__actions--start { justify-content: flex-start; }
   .letters__none { padding: 0 1.1rem; color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
   .letters__list { flex: 1; margin: 0; padding: 0 0 .5rem; overflow-y: auto; list-style: none; }
   .letters__person {
