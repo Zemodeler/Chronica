@@ -89,6 +89,13 @@ Shared components live in `apps/web/app/components/ui/`, styled in
   order on the desk), not its close button. Widths: `reading` (Chronicle,
   letters), `ledger` (treasury, muster, standing, the mirror), `desk` (the
   council), `narrow` (small forms).
+- **`Tabs`**: ribbons in a document (the treasury, the seal case). A ribbon
+  with nothing in it is not offered; a document with one section shows no
+  ribbons. A ribbon wanting attention carries the seal dot.
+- **Object states**: an object's plaque says its current fact ("1,370 a
+  month to spare"), from `roomStates` (shared); the seal mark when that fact
+  wants the player's word. One line and one mark per object at most; a quiet
+  room means nothing needs you.
 - **The calendar line** after the date in the lintel: the next dated thing
   the player could know of, from `whatComesNext` (shared), never from the
   event queue. A seal dot when it wants the player's word; choosing it opens

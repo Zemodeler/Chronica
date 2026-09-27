@@ -67,6 +67,10 @@ test.describe("the room", () => {
   });
 
   test("has no accessibility violations, room or panels", async ({ page }) => {
+    // A sheet fades in; measured mid-fade, its text is a blend of ink and
+    // room and fails contrast it passes at rest. Reduced motion makes the
+    // opening a cut, so axe reads the document as the player reads it.
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await enterTheWorld(page);
     await waitForTheOffice(page);
 
