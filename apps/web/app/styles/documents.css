@@ -398,7 +398,7 @@
   .letters__from { color: var(--ink-faded); font-family: var(--font-serif); font-style: italic; }
   .letters__subject { font: 500 var(--step-1) var(--font-serif); }
   .letters__terms { margin: 0; padding-left: 1rem; border-left: 2px solid var(--seal); font: 400 1.075rem/1.55 var(--font-serif); }
-  .letters-form__actions--start { justify-content: flex-start; }
+  .letters-form__actions.letters-form__actions--start { justify-content: flex-start; }
   .letters__none { padding: 0 1.1rem; color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
   .letters__list { flex: 1; margin: 0; padding: 0 0 .5rem; overflow-y: auto; list-style: none; }
   .letters__person {

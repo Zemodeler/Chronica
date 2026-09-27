@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef, type PointerEvent } from "react";
-import { DynamicMapOverlaySchema, GeoJsonMapSchema, type GeoJsonMap, type DynamicMapOverlay } from "@chronica/shared";
+import { DynamicMapOverlaySchema, GeoJsonMapSchema, type GeoJsonMap, type DynamicMapOverlay, type RoomStates } from "@chronica/shared";
 
 // Module-level cache provides geometry immediately during soft navigation; a
 // fresh request below then replaces it if the active scenario map was revised.
@@ -241,7 +241,7 @@ export function GameShell({
    * in a private citizen's room. Null until it answers, and an object is not
    * drawn on a guess.
    */
-  const [room, setRoom] = useState<{ forces: boolean; standing: boolean; books: boolean; purse: boolean } | null>(null);
+  const [room, setRoom] = useState<{ forces: boolean; standing: boolean; books: boolean; purse: boolean; states: RoomStates } | null>(null);
   const controller = useGameView(gameId);
   const zoomBand = deriveZoomBand(viewport.scale);
 
@@ -302,20 +302,29 @@ export function GameShell({
    * because somebody gave him a legion is a moment the game has had no way to
    * express.
    */
+  // Each object's current fact, and whether it wants the player's word: the
+  // plaque says it, and the seal mark shows it (room-states.ts).
+  const stateOf = (id: keyof RoomStates) => ({ says: room?.states[id]?.says, marked: room?.states[id]?.marked === true });
+  // The window looks out on the map: what has changed there since the player
+  // last read the record.
+  const mapChanges = view.chronicle.filter((entry) => entry.unread).reduce((sum, entry) => sum + entry.changes.length, 0);
   const things = useMemo(() => [
     ...(orderingCharacterId === undefined ? [] : [{
       // A sealed document lies on the desk when the world wants an answer.
-      id: "council" as const, marked: view.decision !== null,
+      id: "council" as const,
+      says: view.decision !== null ? "Something needs your word" : stateOf("council").says,
+      marked: view.decision !== null || stateOf("council").marked,
       state: view.decision !== null ? "sealed" : undefined,
     }]),
     { id: "chronicle" as const, badge: unread },
-    ...(playerCharacterId === undefined ? [] : [{ id: "people" as const }]),
-    ...(room?.books === true ? [{ id: "books" as const }] : []),
-    ...(room?.purse === true ? [{ id: "purse" as const }] : []),
-    ...(room?.forces === true ? [{ id: "forces" as const }] : []),
-    ...(room?.standing === true ? [{ id: "standing" as const }] : []),
-    ...(characterPanel === undefined ? [] : [{ id: "self" as const }]),
-  ], [orderingCharacterId, playerCharacterId, characterPanel, room, view.decision, unread]);
+    ...(playerCharacterId === undefined ? [] : [{ id: "people" as const, ...stateOf("people") }]),
+    ...(room?.books === true ? [{ id: "books" as const, ...stateOf("books") }] : []),
+    ...(room?.purse === true ? [{ id: "purse" as const, ...stateOf("purse") }] : []),
+    ...(room?.forces === true ? [{ id: "forces" as const, ...stateOf("forces") }] : []),
+    ...(room?.standing === true ? [{ id: "standing" as const, ...stateOf("standing") }] : []),
+    ...(characterPanel === undefined ? [] : [{ id: "self" as const, ...stateOf("self") }]),
+    ...(mapChanges > 0 ? [{ id: "window" as const, says: mapChanges === 1 ? "One change on the map since you last read" : `${mapChanges} changes on the map since you last read` }] : []),
+  ], [orderingCharacterId, playerCharacterId, characterPanel, room, view.decision, unread, mapChanges]);
 
   // --- Geometry shared between canvas terrain layer and lightweight SVG overlay ---
 

@@ -168,7 +168,7 @@ function TheState({ state }: { readonly state: StateReading }) {
     <div className="standing">
       {state.legitimacy !== null && (
         <section className="standing__section sheet-section">
-          <h3>{state.polityLabel}&rsquo;s right to rule</h3>
+          <h3>The right to rule</h3>
           <p className={state.legitimacy.shaky ? "standing__legitimacy is-shaky" : "standing__legitimacy"}>
             {capitalise(state.legitimacy.inWords)}.
           </p>
@@ -228,7 +228,7 @@ function Treaties({ state }: { readonly state: StateReading }) {
     <div className="standing">
       {state.treaties.length > 0 && (
         <section className="standing__section sheet-section">
-          <h3>What {state.polityLabel} has agreed, and with whom it is at war</h3>
+          <h3>Agreements and wars</h3>
           <ul>
             {state.treaties.map((treaty) => (
               <li key={treaty.key} className={treaty.atWar ? "standing__seat standing__treaty is-war" : "standing__seat standing__treaty"}>
