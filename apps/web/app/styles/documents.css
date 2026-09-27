@@ -264,7 +264,24 @@
   .standing__powers { display: grid; gap: .55rem; margin: 0; padding: 0; list-style: none; }
   .standing__powers li { font: 400 1.05rem/1.5 var(--font-serif); }
   .standing__powers b { font-weight: 500; }
-  .standing__ties { display: grid; gap: .3rem; margin: 0; padding: 0; list-style: none; }
+  .standing__legitimacy { font: 500 var(--step-1)/1.4 var(--font-serif); }
+  .standing__legitimacy.is-shaky { padding-left: .9rem; border-left: 2px solid var(--seal); }
+  .standing__business.is-yours strong::before, .standing__treaty.is-war strong::before {
+    content: "";
+    display: inline-block;
+    width: .5rem;
+    height: .5rem;
+    margin-right: .5rem;
+    border-radius: 50%;
+    background: var(--seal);
+    vertical-align: .12em;
+  }
+  .standing__offices li { display: grid; grid-template-columns: 10rem 1fr auto; align-items: baseline; gap: 1rem; padding: .3rem 0; border-bottom: 1px solid var(--rule); }
+  .standing__offices li:last-child { border-bottom: 0; }
+  .standing__offices span { color: var(--ink-faded); font-family: var(--font-serif); font-style: italic; }
+  .standing__offices strong { font: 500 var(--step-0) var(--font-serif); }
+  .standing__offices em { color: var(--ink-faded); font-size: var(--step--1); white-space: nowrap; }
+  .standing__treaty span { color: var(--ink); font-family: var(--font-serif); }
 
   /* ─── The mirror ───────────────────────────────────────────────────── */
   .mirror__rows { display: grid; margin: 0; padding: 0; list-style: none; }
