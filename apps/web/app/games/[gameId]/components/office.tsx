@@ -39,6 +39,11 @@ export interface OfficeThing {
   readonly marked?: boolean | undefined;
   /** The drawing shows this differently: an empty strongbox, a thinned rack. */
   readonly state?: string | undefined;
+  /**
+   * What the thing says about itself now -- "Short 58 a month" -- shown on
+   * its plaque in place of what it is for.
+   */
+  readonly says?: string | undefined;
 }
 
 export function Office({
@@ -123,7 +128,7 @@ export function Office({
                   {/* Its name, on a plaque hung from it while it is pointed at. */}
                   <span className="office-object__plaque">
                     <span className="office-object__name">{object.name}</span>
-                    <span className="office-object__does">{object.does}</span>
+                    <span className="office-object__does">{thing?.says ?? object.does}</span>
                   </span>
                   {thing?.marked === true && <span className="office-object__mark seal-dot"><span className="visually-hidden">Waiting on your word</span></span>}
                   {thing?.badge !== undefined && thing.badge > 0 && (
