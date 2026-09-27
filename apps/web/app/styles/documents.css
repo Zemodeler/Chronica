@@ -306,6 +306,8 @@
   .mirror__row > span { color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
   .mirror__row strong { overflow: hidden; font: 500 var(--step-1) var(--font-serif); text-overflow: ellipsis; white-space: nowrap; }
   .mirror__row em { color: var(--ink-faded); font-style: normal; font-size: var(--step--1); }
+  .mirror__row em.is-pressing { display: inline-flex; align-items: center; gap: .35rem; color: var(--ink); }
+  .mirror__list li.is-pressing { padding-left: .8rem; border-left: 2px solid var(--seal); }
   .mirror__detail { display: grid; gap: 1rem; }
   .mirror__back { justify-self: start; color: var(--ink-faded); }
   .mirror__value { font: 500 var(--step-2) var(--font-serif); }

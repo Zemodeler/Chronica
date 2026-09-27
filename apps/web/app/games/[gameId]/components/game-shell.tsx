@@ -701,7 +701,7 @@ export function GameShell({
       </div>
 
       {characterPanel && (
-        <CharacterPanel {...characterPanel} open={surface === "self"} onClose={closeSurface} side={sheetSideFor(roomStyle, "self")} />
+        <CharacterPanel {...characterPanel} gameId={gameId} open={surface === "self"} onClose={closeSurface} side={sheetSideFor(roomStyle, "self")} />
       )}
       {playerCharacterId && (
         <ChatPanel

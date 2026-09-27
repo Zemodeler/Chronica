@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { PromiseReading } from "@chronica/shared";
 import { Sheet, type SheetSide } from "../../../components/ui/sheet";
+import { Era } from "../../../components/ui/era";
 
 type RelationCategory = "family" | "other";
 type FamilyRole = "parent" | "partner" | "sibling" | "child" | "other_relative";
 type FamilyView = "tree" | "list";
-type DetailKey = "location" | "culture" | "money" | "authority" | "reputation" | "origin" | "relations";
+type DetailKey = "location" | "culture" | "money" | "authority" | "reputation" | "origin" | "relations" | "promises";
 
 interface CharacterRelation {
   readonly name: string;
@@ -46,7 +48,7 @@ export interface CharacterPanelProps {
   readonly skills?: readonly string[];
 }
 
-const DETAIL_TITLES: Record<DetailKey, string> = { location: "Location", culture: "Culture", money: "Money", authority: "Authority", reputation: "Reputation", origin: "Origin", relations: "Key relations" };
+const DETAIL_TITLES: Record<DetailKey, string> = { location: "Location", culture: "Culture", money: "Money", authority: "Authority", reputation: "Reputation", origin: "Origin", relations: "Key relations", promises: "Promises" };
 function inferredCategory(relation: CharacterRelation): RelationCategory {
   if (relation.category) return relation.category;
   return /\b(mother|father|parent|wife|husband|spouse|sister|brother|sibling|daughter|son|child|cousin|aunt|uncle|niece|nephew)\b/i.test(relation.relationship) ? "family" : "other";
@@ -75,9 +77,23 @@ function formatYear(year: number | null): string { return year === null ? "Unkno
  * same sheet, with a way back, rather than a second panel pinned beside the
  * first.
  */
-export function CharacterPanel(props: CharacterPanelProps & { readonly open: boolean; readonly onClose: () => void; readonly side: SheetSide }) {
-  const { characterName, role, locationLabel, culture, relations, origin, moneyLabel, moneyBalance, moneyChanges, birthYearApprox, ageAtStart, authority, open, onClose, side } = props;
+export function CharacterPanel(props: CharacterPanelProps & { readonly gameId: string; readonly open: boolean; readonly onClose: () => void; readonly side: SheetSide }) {
+  const { characterName, role, locationLabel, culture, relations, origin, moneyLabel, moneyBalance, moneyChanges, birthYearApprox, ageAtStart, authority, open, onClose, side, gameId } = props;
   const [detail, setDetail] = useState<DetailKey | null>(null);
+  const [promises, setPromises] = useState<readonly PromiseReading[]>([]);
+  // Read each time the mirror is picked up: a promise made in conversation a
+  // moment ago should be there.
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    void fetch(`/api/games/${encodeURIComponent(gameId)}/promises`, { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { promises: PromiseReading[] } | null) => { if (live && data !== null) setPromises(data.promises); })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, [open, gameId]);
+  const yourPromises = promises.filter((promise) => promise.yours);
+  const pressing = yourPromises.filter((promise) => promise.pressing).length;
   const [relationsTab, setRelationsTab] = useState<RelationCategory>("family");
   const [familyView, setFamilyView] = useState<FamilyView>("tree");
   const [birthYearOpen, setBirthYearOpen] = useState(false);
@@ -113,6 +129,17 @@ export function CharacterPanel(props: CharacterPanelProps & { readonly open: boo
           <li><Row label="Reputation" value={reputationValue} onClick={() => openDetail("reputation")} /></li>
           <li><Row label="Origin" value={originLabel(origin)} onClick={() => openDetail("origin")} /></li>
           <li><Row label="Key relations" value={relations.length === 0 ? "None recorded" : `${relations.length} named people`} onClick={() => openDetail("relations")} /></li>
+          {promises.length > 0 && (
+            <li>
+              <Row
+                label="Promises"
+                value={yourPromises.length === 0 ? `${promises.length} made to you` : `${yourPromises.length} you have made`}
+                suffix={pressing > 0 ? `${pressing} due soon` : undefined}
+                marked={pressing > 0}
+                onClick={() => openDetail("promises")}
+              />
+            </li>
+          )}
         </ul>
       ) : (
         <section className="mirror__detail" aria-label={`${DETAIL_TITLES[detail]} details`}>
@@ -124,6 +151,7 @@ export function CharacterPanel(props: CharacterPanelProps & { readonly open: boo
           {detail === "authority" && <AuthorityDetail role={role} authority={authorityHoldings} backgroundNote={props.authorityBackgroundNote ?? []} />}
           {detail === "reputation" && <ReputationDetail traits={traits} standing={props.standing ?? null} skills={skills} />}
           {detail === "origin" && <OriginDetail origin={origin} ageAtStart={ageAtStart} birthYearApprox={birthYearApprox} biography={props.biography} notableEvents={props.notableEvents} birthYearOpen={birthYearOpen} onToggleBirthYear={() => setBirthYearOpen((current) => !current)} />}
+          {detail === "promises" && <PromisesDetail promises={promises} />}
           {detail === "relations" && <RelationsDetail family={family} others={others} tab={relationsTab} onTabChange={setRelationsTab} familyView={familyView} onFamilyViewChange={setFamilyView} />}
         </section>
       )}
@@ -131,8 +159,37 @@ export function CharacterPanel(props: CharacterPanelProps & { readonly open: boo
   );
 }
 
-function Row({ label, value, suffix, onClick }: { label: string; value: string; suffix?: string | undefined; onClick: () => void }) {
-  return <button type="button" className="mirror__row" onClick={onClick}><span>{label}</span><strong>{value}</strong>{suffix !== undefined ? <em>{suffix}</em> : <em aria-hidden="true" />}</button>;
+function Row({ label, value, suffix, marked = false, onClick }: { label: string; value: string; suffix?: string | undefined; marked?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" className="mirror__row" onClick={onClick}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {suffix !== undefined
+        ? <em className={marked ? "is-pressing" : undefined}>{marked && <span className="seal-dot" aria-hidden="true" />} {suffix}</em>
+        : <em aria-hidden="true" />}
+    </button>
+  );
+}
+
+/**
+ * What the player has promised and been promised. A promise of theirs falling
+ * due within a fortnight is marked: the world holds them to it.
+ */
+function PromisesDetail({ promises }: { promises: readonly PromiseReading[] }) {
+  return (
+    <>
+      <p className="mirror__note">The world holds a promise to its maker. Broken, it costs standing, money or safety.</p>
+      <ul className="mirror__list">
+        {promises.map((promise) => (
+          <li key={promise.id} className={promise.pressing ? "is-pressing" : undefined}>
+            <span>{promise.between}{promise.dueLabel !== null && <>, to be kept by <Era text={promise.dueLabel} /></>}</span>
+            <strong>{promise.description}</strong>
+            {promise.conditions !== null && <span>{promise.conditions}</span>}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
 }
 
 function MoneyDetail({ moneyLabel, balance, changes }: { moneyLabel: string; balance: number; changes: readonly MoneyChange[] }) {
