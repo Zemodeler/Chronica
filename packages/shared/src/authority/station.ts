@@ -4,6 +4,7 @@ import { allOffices, type Office } from "../characters/character";
 import { factsKnownTo, type Fact } from "../world/facts";
 import type { WorldInstant } from "../world/instant";
 import type { WorldState } from "../world/world-state";
+import { accountLabel } from "../material/account-names";
 
 /**
  * A person's station: what their place in the world actually reaches.
@@ -359,10 +360,7 @@ export function authorityInWords(station: Station, world: WorldState): Authority
       case "institution": return world.material.institutions.find((institution) => institution.id === scope.id)?.name ?? scope.id;
       case "account": {
         const account = world.material.accounts.find((candidate) => candidate.id === scope.id);
-        if (account === undefined) return scope.id;
-        if (account.owner.kind === "polity") return `the ${world.map.polities.find((polity) => polity.id === account.owner.id)?.name ?? account.owner.id} treasury`;
-        const owner = world.characters.find((character) => character.id === account.owner.id);
-        return owner === undefined ? scope.id : `${owner.name}'s purse`;
+        return account === undefined ? "an account" : accountLabel(world, account, "clause");
       }
       default: return scope.id;
     }

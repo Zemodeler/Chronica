@@ -22,7 +22,9 @@ export async function POST(
     });
 
     if (result.status === "unavailable") {
-      return Response.json({ status: "unavailable", explanation: result.explanation });
+      // With the ladder: what it would take is the whole point of refusing
+      // (slice 10), and this route used to drop it, so the tray never showed it.
+      return Response.json({ status: "unavailable", explanation: result.explanation, ladder: "ladder" in result ? result.ladder ?? [] : [] });
     }
     if (result.status === "choice") return Response.json(result);
     return Response.json({ status: "found", sessionId: result.sessionId, knownName: result.knownName });

@@ -1,6 +1,9 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback, type FormEvent } from "react";
+import { useRef, useState, useEffect, useCallback, useMemo, type FormEvent } from "react";
+import type { AwaitingLetter, DirectoryEntry, DirectoryGroup } from "@chronica/shared";
+import { Sheet, type SheetSide } from "../../../components/ui/sheet";
+import { Era } from "../../../components/ui/era";
 
 interface ContactView {
   readonly sessionId: string;
@@ -26,21 +29,49 @@ interface ChatPanelProps {
   /** Opened from the Office, so the panel no longer owns the answer to whether it is. */
   readonly open: boolean;
   readonly onClose: () => void;
+  readonly side: SheetSide;
+  /** Letters from other powers are answered at the desk, as orders. */
+  readonly onAnswerAtDesk: () => void;
   /** Set to open this panel directly on a specific session -- e.g. a conversation a character initiated. */
   readonly openSessionId?: string | null;
   readonly onOpenSessionConsumed?: () => void;
 }
 
-export function ChatPanel({ gameId, playerCharacterId, open, onClose, openSessionId, onOpenSessionConsumed }: ChatPanelProps) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const discoverDialogRef = useRef<HTMLDialogElement>(null);
-  const groupDialogRef = useRef<HTMLDialogElement>(null);
+type Focus =
+  | { readonly kind: "none" }
+  | { readonly kind: "letter"; readonly id: string }
+  | { readonly kind: "person"; readonly id: string };
+
+/**
+ * The letter tray: everyone the player knows of, what they have said, and
+ * the letters from other powers waiting on an answer.
+ *
+ * The column used to hold only people already spoken to, so a new player met
+ * an empty list and a free-text box. It now lists everyone the player knows
+ * of and every sitting officeholder (`lettersDirectory`), grouped -- those
+ * spoken with, family, those who answer to you, then each power -- with a
+ * search, and each marked with whether they can be reached. Choosing someone
+ * shows what is known of them, and a way to speak or write, or what it would
+ * take when that cannot be done yet.
+ *
+ * A conversation reads as a transcript -- who spoke, and what they said --
+ * the way a history records an exchange, not as chat bubbles.
+ */
+export function ChatPanel({ gameId, open, onClose, side, onAnswerAtDesk, openSessionId, onOpenSessionConsumed }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [contacts, setContacts] = useState<readonly ContactView[]>([]);
+  const [groups, setGroups] = useState<readonly DirectoryGroup[]>([]);
+  const [letters, setLetters] = useState<readonly AwaitingLetter[]>([]);
+  const [search, setSearch] = useState("");
+  const [focus, setFocus] = useState<Focus>({ kind: "none" });
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<readonly MessageView[]>([]);
   const [messageBody, setMessageBody] = useState("");
   const [sending, setSending] = useState(false);
+  const [approaching, setApproaching] = useState(false);
+  const [refusal, setRefusal] = useState<{ explanation: string; ladder: string[] } | null>(null);
+  const [discoverOpen, setDiscoverOpen] = useState(false);
+  const [groupOpen, setGroupOpen] = useState(false);
   const [discoverQuery, setDiscoverQuery] = useState("");
   const [discovering, setDiscovering] = useState(false);
   const [discoverError, setDiscoverError] = useState<string | null>(null);
@@ -51,6 +82,24 @@ export function ChatPanel({ gameId, playerCharacterId, open, onClose, openSessio
   const [loadingMessages, setLoadingMessages] = useState(false);
 
   const activeContact = contacts.find((c) => c.sessionId === activeSessionId) ?? null;
+  const everyone = useMemo(() => groups.flatMap((group) => group.people), [groups]);
+  const personById = useMemo(() => new Map(everyone.map((person) => [person.id, person])), [everyone]);
+  const sessionFor = (personId: string): ContactView | undefined => contacts.find((contact) => !contact.isGroup && contact.npcCharacterId === personId);
+  const gatherings = contacts.filter((contact) => contact.isGroup);
+  const focused = focus.kind === "person" ? personById.get(focus.id) ?? null : null;
+  const letter = focus.kind === "letter" ? letters.find((candidate) => candidate.id === focus.id) ?? null : null;
+  // In a group, each line is spoken by one of its members.
+  const namesById = useMemo(() => new Map([
+    ...everyone.map((person) => [person.id, person.name] as const),
+    ...contacts.filter((c) => !c.isGroup).map((c) => [c.npcCharacterId, c.knownName] as const),
+  ]), [everyone, contacts]);
+  const speakerOf = (message: MessageView): string =>
+    message.isPlayerMessage ? "You" : namesById.get(message.speakerCharacterId) ?? activeContact?.knownName ?? "They";
+
+  const wanted = search.trim().toLowerCase();
+  const shownGroups = wanted.length === 0 ? groups : groups
+    .map((group) => ({ ...group, people: group.people.filter((person) => [person.name, person.officeLabel, person.polityLabel, person.whereLabel].some((field) => field?.toLowerCase().includes(wanted))) }))
+    .filter((group) => group.people.length > 0);
 
   const fetchContacts = useCallback(async () => {
     try {
@@ -60,6 +109,18 @@ export function ChatPanel({ gameId, playerCharacterId, open, onClose, openSessio
       setContacts(data.contacts ?? []);
     } catch {
       // Silently ignore — contacts load on next open
+    }
+  }, [gameId]);
+
+  const fetchDirectory = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/directory`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json() as { groups: DirectoryGroup[]; letters: AwaitingLetter[] };
+      setGroups(data.groups ?? []);
+      setLetters(data.letters ?? []);
+    } catch {
+      // The tray still shows the conversations already open.
     }
   }, [gameId]);
 
@@ -78,36 +139,68 @@ export function ChatPanel({ gameId, playerCharacterId, open, onClose, openSessio
   }, [gameId]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages]);
 
   useEffect(() => {
     if (!openSessionId) return;
     void fetchContacts();
-    void selectContact(openSessionId);
+    void openSession(openSessionId);
     onOpenSessionConsumed?.();
     // openSessionId is a one-shot signal from the parent; deliberately not
-    // re-running when fetchContacts/selectContact identity changes.
+    // re-running when fetchContacts/openSession identity changes.
   }, [openSessionId]);
 
   useEffect(() => {
-    if (open) { dialogRef.current?.showModal(); void fetchContacts(); }
-    else { dialogRef.current?.close(); }
-    // Deliberately keyed on `open` alone: fetchContacts is re-created every
-    // render and re-running it while the panel is already open would be a
+    if (open) { void fetchContacts(); void fetchDirectory(); }
+    // Deliberately keyed on `open` alone: the fetchers are re-created every
+    // render and re-running them while the panel is already open would be a
     // second identical request.
   }, [open]);
 
   function closePanel() {
     setActiveSessionId(null);
     setMessages([]);
+    setFocus({ kind: "none" });
     onClose();
   }
 
-  async function selectContact(sessionId: string) {
+  async function openSession(sessionId: string) {
     setActiveSessionId(sessionId);
     setMessages([]);
+    setRefusal(null);
     await fetchMessages(sessionId);
+  }
+
+  function choosePerson(person: DirectoryEntry) {
+    setFocus({ kind: "person", id: person.id });
+    setRefusal(null);
+    const session = sessionFor(person.id);
+    if (session !== undefined) void openSession(session.sessionId);
+    else { setActiveSessionId(null); setMessages([]); }
+  }
+
+  /** Open a conversation with someone chosen from the list. */
+  async function approach(person: DirectoryEntry) {
+    if (approaching) return;
+    setApproaching(true);
+    setRefusal(null);
+    try {
+      const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/conversations/discover`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: person.name, characterId: person.id }),
+      });
+      if (!res.ok) { setRefusal({ explanation: "The message could not be sent. Try again.", ladder: [] }); return; }
+      const data = await res.json() as { status: string; sessionId?: string; explanation?: string; ladder?: { label: string }[] };
+      if (data.status === "found" && data.sessionId) {
+        await fetchContacts();
+        await openSession(data.sessionId);
+        void fetchDirectory();
+        return;
+      }
+      setRefusal({ explanation: data.explanation ?? "They cannot be reached yet.", ladder: (data.ladder ?? []).map((step) => step.label) });
+    } finally {
+      setApproaching(false);
+    }
   }
 
   async function handleSend(event: FormEvent) {
@@ -141,23 +234,20 @@ export function ChatPanel({ gameId, playerCharacterId, open, onClose, openSessio
   }
 
   function openDiscover() {
-    setDiscoverQuery("");
+    setDiscoverQuery(search);
     setDiscoverError(null);
-    discoverDialogRef.current?.showModal();
+    setDiscoverLadder([]);
+    setDiscoverOpen(true);
   }
 
-  function closeDiscover() {
-    discoverDialogRef.current?.close();
-  }
-
-  function openGroup() { setGroupParticipantIds([]); groupDialogRef.current?.showModal(); }
+  function openGroup() { setGroupParticipantIds([]); setGroupOpen(true); }
   async function createGroup() {
     if (groupParticipantIds.length < 2 || creatingGroup) return;
     setCreatingGroup(true);
     try {
       const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/conversations/group`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ participantIds: groupParticipantIds }) });
       const data = await res.json() as { sessionId?: string };
-      if (res.ok && data.sessionId) { groupDialogRef.current?.close(); await fetchContacts(); await selectContact(data.sessionId); }
+      if (res.ok && data.sessionId) { setGroupOpen(false); await fetchContacts(); setFocus({ kind: "none" }); await openSession(data.sessionId); }
     } finally { setCreatingGroup(false); }
   }
 
@@ -174,7 +264,7 @@ export function ChatPanel({ gameId, playerCharacterId, open, onClose, openSessio
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query }) },
       );
       if (!res.ok) {
-        setDiscoverError("Could not reach the server. Please try again.");
+        setDiscoverError("The server could not be reached. Try again.");
         return;
       }
       const data = await res.json() as {
@@ -188,143 +278,238 @@ export function ChatPanel({ gameId, playerCharacterId, open, onClose, openSessio
         return;
       }
       if (data.sessionId) {
-        closeDiscover();
+        setDiscoverOpen(false);
         await fetchContacts();
-        await selectContact(data.sessionId);
+        void fetchDirectory();
+        setFocus({ kind: "none" });
+        await openSession(data.sessionId);
       }
     } catch {
-      setDiscoverError("An error occurred. Please try again.");
+      setDiscoverError("Something went wrong finding them. Try again.");
     } finally {
       setDiscovering(false);
     }
   }
 
-  void open;
-  void playerCharacterId;
+  const unreadFor = (personId: string): number => sessionFor(personId)?.unread ?? 0;
 
   return (
     <>
-
-      <dialog ref={dialogRef} className="chat-panel-dialog" onClose={closePanel}>
-        <div className="chat-panel-layout">
-          {/* Contact list */}
-          <aside className="chat-contact-list">
-            <div className="chat-contact-list-header">
-              <span className="chat-contact-list-title">Contacts</span>
-              <button type="button" className="chat-add-contact-button" onClick={openGroup} aria-label="Create group chat">◉</button>
-              <button type="button" className="chat-add-contact-button" onClick={openDiscover} aria-label="Add contact">+</button>
+      <Sheet label="your letters" title="Letters" width="reading" side={side} open={open} onClose={closePanel} className="sheet--wide sheet--letters">
+        <div className="letters">
+          <nav className="letters__people" aria-label="People you can reach">
+            <div className="letters__search">
+              <label className="visually-hidden" htmlFor="letters-search">Find someone in your letters</label>
+              <input id="letters-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by name, office or power" autoComplete="off" />
             </div>
-            {contacts.length === 0 && (
-              <p className="chat-no-contacts">No contacts yet. Use + to add someone nearby.</p>
+            <div className="letters__people-actions">
+              <button type="button" className="word-button" onClick={openDiscover}>Find someone else</button>
+              {contacts.filter((contact) => !contact.isGroup).length >= 2 && <button type="button" className="word-button" onClick={openGroup}>Gather several</button>}
+            </div>
+
+            <div className="letters__scroll">
+              {letters.length > 0 && wanted.length === 0 && (
+                <section className="letters__group">
+                  <h3>Waiting on your answer</h3>
+                  <ul className="letters__list">
+                    {letters.map((entry) => (
+                      <li key={entry.id}>
+                        <button type="button" className="letters__person letters__person--letter" aria-current={focus.kind === "letter" && focus.id === entry.id ? "true" : undefined} onClick={() => { setFocus({ kind: "letter", id: entry.id }); setActiveSessionId(null); }}>
+                          <strong><span className="seal-dot" aria-hidden="true" /> {entry.kindLabel}</strong>
+                          <span>From {entry.fromLabel}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {gatherings.length > 0 && wanted.length === 0 && (
+                <section className="letters__group">
+                  <h3>Gatherings</h3>
+                  <ul className="letters__list">
+                    {gatherings.map((contact) => (
+                      <li key={contact.sessionId}>
+                        <button type="button" className="letters__person" aria-current={activeSessionId === contact.sessionId ? "true" : undefined} onClick={() => { setFocus({ kind: "none" }); void openSession(contact.sessionId); }}>
+                          <strong>{contact.knownName}</strong>
+                          <span>{contact.roleLabel}</span>
+                          {contact.unread > 0 && <span className="badge">{contact.unread}</span>}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {shownGroups.map((group) => (
+                <section key={group.key} className="letters__group">
+                  <h3>{group.label}</h3>
+                  <ul className="letters__list">
+                    {group.people.map((person) => (
+                      <li key={person.id}>
+                        <button type="button" className="letters__person" aria-current={focus.kind === "person" && focus.id === person.id ? "true" : undefined} onClick={() => choosePerson(person)}>
+                          <strong>{person.name}</strong>
+                          <span>{[person.officeLabel, group.key.startsWith("polity:") ? null : person.polityLabel].filter(Boolean).join(", ") || (person.how === "heard_of" ? "Heard of" : "")}</span>
+                          <span className={`letters__reach letters__reach--${person.reach}`}>{person.reach === "here" ? "Here" : person.reach === "letter" ? "By letter" : "Out of reach"}</span>
+                          {unreadFor(person.id) > 0 && <span className="badge">{unreadFor(person.id)}</span>}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+
+              {groups.length === 0 && contacts.length === 0 && <p className="letters__none">Nobody yet. Find someone nearby to speak with.</p>}
+              {wanted.length > 0 && shownGroups.length === 0 && <p className="letters__none">Nobody you know of by that name. Find someone else to ask around.</p>}
+            </div>
+          </nav>
+
+          <div className="letters__thread">
+            {letter !== null && (
+              <article className="letters__dossier" aria-label={`${letter.kindLabel} from ${letter.fromLabel}`}>
+                <h3>{letter.kindLabel}</h3>
+                <p className="letters__from">From {letter.fromLabel}{letter.replyByLabel !== null && <>, wanting an answer by <Era text={letter.replyByLabel} /></>}.</p>
+                <p className="letters__subject">{letter.subject}</p>
+                <blockquote className="letters__terms">{letter.terms}</blockquote>
+                <p className="mirror__note">{letter.toYou ? "It is addressed to you." : "It is addressed to your government."} Answer it at the desk, as an order.</p>
+                <div><button type="button" className="btn btn--primary" onClick={onAnswerAtDesk}>Answer at the desk</button></div>
+              </article>
             )}
-            <ul className="chat-contact-items">
-              {contacts.map((contact) => (
-                <li key={contact.sessionId}>
-                  <button
-                    type="button"
-                    className={`chat-contact-item${activeSessionId === contact.sessionId ? " chat-contact-item--active" : ""}`}
-                    onClick={() => { void selectContact(contact.sessionId); }}
-                  >
-                    <span className="chat-contact-name">{contact.knownName}</span>
-                    <span className="chat-contact-role">{contact.roleLabel}</span>
-                    {contact.unread > 0 && <span className="chat-unread-badge">{contact.unread}</span>}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </aside>
 
-          {/* Message thread */}
-          <div className="chat-thread-pane">
-            <div className="chat-thread-header">
-              {activeContact ? (
-                <>
-                  <strong className="chat-thread-npc-name">{activeContact.knownName}</strong>
-                  <span className="chat-thread-role">{activeContact.roleLabel}</span>
-                </>
-              ) : (
-                <span className="chat-thread-placeholder">Select a contact</span>
-              )}
-              <button type="button" className="chat-close-button" onClick={closePanel} aria-label="Close chat">×</button>
-            </div>
-
-            <div className="chat-messages">
-              {loadingMessages && <p className="chat-loading">Loading…</p>}
-              {!loadingMessages && activeContact === null && (
-                <p className="chat-empty-hint">Choose a contact to start a conversation.</p>
-              )}
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`chat-bubble${msg.isPlayerMessage ? " chat-bubble--player" : " chat-bubble--npc"}`}
-                >
-                  {msg.body}
+            {focused !== null && (
+              <div className={activeContact !== null ? "letters__with letters__with--dossier" : "letters__dossier"}>
+                <div className="letters__who">
+                  <strong>{focused.name}</strong>
+                  <span>{[focused.officeLabel, focused.polityLabel].filter(Boolean).join(", ")}</span>
                 </div>
-              ))}
-              {sending && <div className="chat-bubble chat-bubble--npc chat-bubble--typing">…</div>}
-              <div ref={messagesEndRef} />
-            </div>
+                {activeContact === null && (
+                  <>
+                    <dl className="mirror__facts">
+                      {focused.whereLabel !== null && <><dt>Where</dt><dd>{focused.whereLabel}</dd></>}
+                      {focused.standingLabel !== null && <><dt>Standing</dt><dd>{focused.standingLabel}</dd></>}
+                      {focused.knownFor.length > 0 && <><dt>Known for</dt><dd>{focused.knownFor.join(", ")}</dd></>}
+                      {focused.ties.length > 0 && <><dt>Between you</dt><dd>{focused.ties.join("; ")}</dd></>}
+                      {focused.opinionLabel !== null && <><dt>What you think of them</dt><dd>{focused.opinionLabel}</dd></>}
+                      {focused.how === "public" && <><dt>Known</dt><dd>By repute; you have never dealt with them.</dd></>}
+                    </dl>
+                    <p className="letters__reach-line">{focused.reachLabel}.</p>
+                    {focused.reach === "out_of_reach" && focused.ladder.length > 0 && (
+                      <div className="letters-form">
+                        <p className="mirror__note">What it would take:</p>
+                        <ol className="letters-form__ladder">{focused.ladder.map((step) => <li key={step}>{step}</li>)}</ol>
+                      </div>
+                    )}
+                    {refusal !== null && (
+                      <div className="letters-form">
+                        <p className="letters-form__error" role="alert">{refusal.explanation}</p>
+                        {refusal.ladder.length > 0 && <ol className="letters-form__ladder">{refusal.ladder.map((step) => <li key={step}>{step}</li>)}</ol>}
+                      </div>
+                    )}
+                    <div className="letters-form__actions letters-form__actions--start">
+                      <button type="button" className="btn btn--primary" disabled={approaching} onClick={() => void approach(focused)}>
+                        {approaching ? "Sending for them…" : focused.reach === "here" ? `Speak with ${focused.name}` : focused.reach === "letter" ? `Write to ${focused.name}` : "Try anyway"}
+                      </button>
+                    </div>
+                  </>
+                )}
+                {activeContact !== null && focused.knownFor.length > 0 && <span className="letters__known">Known for {focused.knownFor.join(", ")}</span>}
+              </div>
+            )}
 
-            {activeContact && (
-              <form className="chat-composer" onSubmit={(e) => { void handleSend(e); }}>
+            {focused === null && letter === null && activeContact !== null && (
+              <div className="letters__with">
+                <strong>{activeContact.knownName}</strong>
+                <span>{activeContact.roleLabel}</span>
+              </div>
+            )}
+
+            {letter === null && (activeContact !== null || focused === null) && (
+              <div className="letters__transcript" aria-live="polite">
+                {loadingMessages && <p className="letters__hint">Finding what was said…</p>}
+                {!loadingMessages && activeContact === null && focused === null && (
+                  <p className="letters__hint">Choose someone to speak with, or a letter to answer.</p>
+                )}
+                {messages.map((message) => (
+                  <div key={message.id} className={message.isPlayerMessage ? "letters__line is-yours" : "letters__line"}>
+                    <span className="letters__speaker">{speakerOf(message)}</span>
+                    <p>{message.body}</p>
+                  </div>
+                ))}
+                {sending && (
+                  <div className="letters__line is-waiting">
+                    <span className="letters__speaker">{activeContact?.knownName ?? "They"}</span>
+                    <p>considers what to say…</p>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+            )}
+
+            {activeContact && letter === null && (
+              <form className="letters__compose" onSubmit={(e) => { void handleSend(e); }}>
+                <label className="visually-hidden" htmlFor="letters-say">What you say to {activeContact.knownName}</label>
                 <input
-                  className="chat-composer-input"
+                  id="letters-say"
                   type="text"
                   value={messageBody}
                   onChange={(e) => setMessageBody(e.target.value)}
-                  placeholder="Write a message…"
+                  placeholder={`Say something to ${activeContact.knownName}…`}
                   disabled={sending}
                   autoComplete="off"
                 />
-                <button type="submit" className="chat-composer-send" disabled={sending || !messageBody.trim()}>
-                  Send
-                </button>
+                <button type="submit" className="btn btn--primary" disabled={sending || !messageBody.trim()}>Say it</button>
               </form>
             )}
           </div>
         </div>
-      </dialog>
+      </Sheet>
 
-      <dialog ref={groupDialogRef} className="chat-discover-dialog">
-        <div className="chat-discover-header"><h2 className="chat-discover-title">New Group Chat</h2><button type="button" onClick={() => groupDialogRef.current?.close()} aria-label="Close">×</button></div>
-        <p className="chat-discover-hint">Choose at least two existing contacts.</p>
-        {contacts.filter((contact) => !contact.isGroup).map((contact) => (
-          <label key={contact.sessionId} className="chat-discover-hint"><input type="checkbox" checked={groupParticipantIds.includes(contact.npcCharacterId)} onChange={(event) => setGroupParticipantIds((ids) => event.target.checked ? [...ids, contact.npcCharacterId] : ids.filter((id) => id !== contact.npcCharacterId))} /> {contact.knownName}</label>
-        ))}
-        <div className="chat-discover-actions"><button type="button" className="btn-secondary" onClick={() => groupDialogRef.current?.close()}>Cancel</button><button type="button" className="btn-primary" onClick={() => { void createGroup(); }} disabled={creatingGroup || groupParticipantIds.length < 2}>{creatingGroup ? "Creating…" : "Create"}</button></div>
-      </dialog>
+      {groupOpen && (
+        <Sheet label="gathering several people" title="Gather several" width="narrow" side="center" onClose={() => setGroupOpen(false)}>
+          <div className="letters-form">
+            <p className="mirror__note">Choose at least two of the people you already speak with.</p>
+            <div className="letters-form__choices">
+              {contacts.filter((contact) => !contact.isGroup).map((contact) => (
+                <label key={contact.sessionId}>
+                  <input type="checkbox" checked={groupParticipantIds.includes(contact.npcCharacterId)} onChange={(event) => setGroupParticipantIds((ids) => event.target.checked ? [...ids, contact.npcCharacterId] : ids.filter((id) => id !== contact.npcCharacterId))} />
+                  {contact.knownName}
+                </label>
+              ))}
+            </div>
+            <div className="letters-form__actions">
+              <button type="button" className="btn btn--quiet" onClick={() => setGroupOpen(false)}>Cancel</button>
+              <button type="button" className="btn btn--primary" onClick={() => { void createGroup(); }} disabled={creatingGroup || groupParticipantIds.length < 2}>{creatingGroup ? "Gathering…" : "Gather them"}</button>
+            </div>
+          </div>
+        </Sheet>
+      )}
 
-      {/* Add contact dialog */}
-      <dialog ref={discoverDialogRef} className="chat-discover-dialog">
-        <form onSubmit={(e) => { void handleDiscover(e); }}>
-          <div className="chat-discover-header">
-            <h2 className="chat-discover-title">Add a Contact</h2>
-            <button type="button" onClick={closeDiscover} aria-label="Close">×</button>
-          </div>
-          <p className="chat-discover-hint">
-            Who do you want to contact? Describe a person nearby — their name, role, or relationship to you.
-          </p>
-          <input
-            className="chat-discover-input"
-            type="text"
-            value={discoverQuery}
-            onChange={(e) => setDiscoverQuery(e.target.value)}
-            placeholder="e.g. the garrison commander, Marcus Fabius…"
-            disabled={discovering}
-            autoFocus
-          />
-          {discoverError && <p className="chat-discover-error">{discoverError}</p>}
-          {discoverLadder.length > 0 && <ul className="chat-discover-ladder">
-            {discoverLadder.map((step) => <li key={step.rung + step.label}>{step.label}</li>)}
-          </ul>}
-          <div className="chat-discover-actions">
-            <button type="button" className="btn-secondary" onClick={closeDiscover}>Cancel</button>
-            <button type="submit" className="btn-primary" disabled={discovering || !discoverQuery.trim()}>
-              {discovering ? "Searching…" : "Find"}
-            </button>
-          </div>
-        </form>
-      </dialog>
+      {discoverOpen && (
+        <Sheet label="finding someone" title="Find someone else" width="narrow" side="center" onClose={() => setDiscoverOpen(false)}>
+          <form className="letters-form" onSubmit={(e) => { void handleDiscover(e); }}>
+            <label htmlFor="letters-find">Who do you want to speak with? Give a name, a role, or how they stand to you.</label>
+            <input
+              id="letters-find"
+              type="text"
+              value={discoverQuery}
+              onChange={(e) => setDiscoverQuery(e.target.value)}
+              placeholder="The garrison commander, Marcus Fabius…"
+              disabled={discovering}
+              autoFocus
+            />
+            {discoverError && <p className="letters-form__error" role="alert">{discoverError}</p>}
+            {discoverLadder.length > 0 && <ol className="letters-form__ladder">
+              {discoverLadder.map((step) => <li key={step.rung + step.label}>{step.label}</li>)}
+            </ol>}
+            <div className="letters-form__actions">
+              <button type="button" className="btn btn--quiet" onClick={() => setDiscoverOpen(false)}>Cancel</button>
+              <button type="submit" className="btn btn--primary" disabled={discovering || !discoverQuery.trim()}>
+                {discovering ? "Asking around…" : "Find them"}
+              </button>
+            </div>
+          </form>
+        </Sheet>
+      )}
     </>
   );
 }

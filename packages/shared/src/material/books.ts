@@ -1,6 +1,8 @@
-import { buildStation, seesAccount, type Station } from "../authority/station";
+import { buildStation, holdsPolityStanding, seesAccount, type Station } from "../authority/station";
+import { taxBurdens, taxBurdenInWords } from "./taxation";
 import type { Office } from "../characters/character";
 import type { WorldState } from "../world/world-state";
+import { accountLabel } from "./account-names";
 
 /**
  * The books, as the person holding them can read them (VISION §7).
@@ -44,7 +46,55 @@ export interface Books {
   readonly accounts: readonly { readonly id: string; readonly label: string; readonly balance: number }[];
   /** True when these are a government's books rather than one man's purse. */
   readonly theirGovernments: boolean;
+  /**
+   * How hard the power's taxes press on its lands, for whoever can open its
+   * treasury (product guide: "your treasury shows how hard you are pressing").
+   * `hard` once order is suffering for it.
+   */
+  readonly pressure: { readonly inWords: string; readonly hard: boolean } | null;
+  /** Loans owed out of accounts they can open. */
+  readonly debts: readonly DebtLine[];
+  /** Payments that have fallen behind, one by one rather than as one sum. */
+  readonly behind: readonly { readonly key: string; readonly label: string; readonly arrears: number; readonly missedPeriods: number }[];
+  /** Income that has stopped -- a trade cut by war or blockade -- and what it used to bring. */
+  readonly stopped: readonly { readonly key: string; readonly label: string; readonly monthly: number }[];
+  /** The power's most strained provinces, for whoever reads its books. Null for a private purse. */
+  readonly lands: readonly LandLine[] | null;
 }
+
+export interface DebtLine {
+  readonly id: string;
+  /** "Owed to the Roman Republic", "Owed to foreign lenders". */
+  readonly lenderLabel: string;
+  readonly outstanding: number;
+  /** What servicing it costs a month, when a payment was set up. */
+  readonly monthly: number | null;
+  readonly interestLabel: string;
+  readonly terms: string;
+  readonly defaulted: boolean;
+}
+
+export interface LandLine {
+  readonly id: string;
+  readonly name: string;
+  readonly order: string;
+  readonly food: string;
+  /** Null when war has not touched it. */
+  readonly damage: string | null;
+  /** What it could be taxed, a month: only for those who govern. */
+  readonly taxable: number | null;
+  /** Worse than uneasy on order or food, or ravaged. */
+  readonly strained: boolean;
+}
+
+const band = (bps: number, words: readonly [string, string, string, string]): string =>
+  bps >= 7_000 ? words[0] : bps >= 5_000 ? words[1] : bps >= 3_000 ? words[2] : words[3];
+const ORDER_WORDS = ["orderly", "uneasy", "restless", "in disorder"] as const;
+const FOOD_WORDS = ["well fed", "short of grain", "hungry", "starving"] as const;
+const damageInWords = (bps: number): string | null =>
+  bps >= 5_000 ? "ravaged by war" : bps >= 2_000 ? "scarred by war" : bps >= 500 ? "touched by war" : null;
+/** How many of its most strained provinces a treasury lists. */
+const LANDS_SHOWN = 8;
 
 /** §7's own categories, which the engine's kinds already very nearly are. */
 const INCOME_LABELS: Readonly<Record<string, string>> = {
@@ -90,17 +140,11 @@ export function readTheBooks(
   const reaches = (accountId: string): boolean => station === null || seesAccount(station, accountId);
   const polityId = characterId === null ? null : world.characters.find((character) => character.id === characterId)?.polityId ?? null;
 
-  const accounts = world.material.accounts
+  const open = world.material.accounts
     .filter((account) => reaches(account.id))
     .filter((account) => account.owner.kind !== "polity" || account.owner.id === polityId || polityId === null)
-    .sort((a, b) => b.balance - a.balance)
-    .map((account) => ({
-      id: account.id,
-      label: account.owner.kind === "polity"
-        ? `${world.map.polities.find((polity) => polity.id === account.owner.id)?.name ?? account.owner.id} treasury`
-        : `${world.characters.find((character) => character.id === account.owner.id)?.name ?? account.owner.id}'s purse`,
-      balance: account.balance,
-    }));
+    .sort((a, b) => b.balance - a.balance);
+  const accounts = open.map((account) => ({ id: account.id, label: accountLabel(world, account), balance: account.balance }));
   const readable = new Set(accounts.map((account) => account.id));
 
   const income = fold(
@@ -125,6 +169,63 @@ export function readTheBooks(
   const totalIncome = income.reduce((sum, line) => sum + line.monthly, 0);
   const totalExpenditure = expenditure.reduce((sum, line) => sum + line.monthly, 0);
 
+  // Only for whoever can open the power's own chest, as the world slice has
+  // it: how hard its lands are taxed is the treasury's business.
+  const opensTreasury = open.some((account) => account.owner.kind === "polity");
+  const readerPolity = polityId ?? open.find((account) => account.owner.kind === "polity")?.owner.id ?? null;
+  const governs = station === null || holdsPolityStanding(station);
+  const burden = opensTreasury && readerPolity !== null ? taxBurdens(world).get(readerPolity) : undefined;
+  const pressure = burden === undefined ? null : {
+    inWords: taxBurdenInWords(burden),
+    hard: burden.bearable <= 0 || burden.asked / burden.bearable > 0.8,
+  };
+
+  const nameOf = (kind: "character" | "polity" | "foreign", id: string | null): string =>
+    kind === "foreign" || id === null ? "foreign lenders"
+      : kind === "polity" ? `the ${world.map.polities.find((polity) => polity.id === id)?.name ?? "a foreign power"}`
+        : world.characters.find((character) => character.id === id)?.name ?? "a private lender";
+  const debts: DebtLine[] = world.material.loans
+    .filter((loan) => readable.has(loan.borrowerAccountId) && (loan.status === "active" || loan.status === "defaulted" || loan.status === "renegotiated"))
+    .map((loan) => {
+      const service = loan.serviceObligationId === null ? undefined : world.material.obligations.find((obligation) => obligation.id === loan.serviceObligationId);
+      return {
+        id: loan.id,
+        lenderLabel: `Owed to ${nameOf(loan.lenderKind, loan.lenderId)}`,
+        outstanding: Math.round(loan.outstanding),
+        monthly: service === undefined ? null : Math.round(perMonth(service.amount, service.cadenceSteps)),
+        interestLabel: `${(loan.interestBps / 100).toLocaleString("en-GB", { maximumFractionDigits: 1 })}% interest`,
+        terms: loan.terms,
+        defaulted: loan.status === "defaulted",
+      };
+    })
+    .sort((a, b) => b.outstanding - a.outstanding);
+
+  const behind = owed
+    .filter((obligation) => obligation.arrears > 0)
+    .map((obligation) => ({ key: obligation.id, label: obligation.label, arrears: Math.round(obligation.arrears), missedPeriods: obligation.missedPeriods }))
+    .sort((a, b) => b.arrears - a.arrears);
+
+  const stopped = world.material.incomeSources
+    .filter((source) => !source.active && readable.has(source.beneficiaryAccountId))
+    .map((source) => ({ key: source.id, label: source.label, monthly: Math.round(perMonth(source.amount, source.cadenceSteps)) }))
+    .filter((line) => line.monthly > 0);
+
+  const provinceName = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? "A province";
+  const held = new Set(world.map.provinces.filter((province) => province.controllerPolityId === readerPolity).map((province) => province.id));
+  const lands: LandLine[] | null = !opensTreasury || readerPolity === null ? null : world.material.provinceMaterial
+    .filter((material) => held.has(material.provinceId))
+    .sort((a, b) => (a.foodSecurityBps + a.stabilityBps - a.warDamageBps) - (b.foodSecurityBps + b.stabilityBps - b.warDamageBps))
+    .slice(0, LANDS_SHOWN)
+    .map((material) => ({
+      id: material.provinceId,
+      name: provinceName(material.provinceId),
+      order: band(material.stabilityBps, ORDER_WORDS),
+      food: band(material.foodSecurityBps, FOOD_WORDS),
+      damage: damageInWords(material.warDamageBps),
+      taxable: governs ? Math.round(material.taxCapacity) : null,
+      strained: material.stabilityBps < 5_000 || material.foodSecurityBps < 5_000 || material.warDamageBps >= 5_000,
+    }));
+
   return {
     income,
     expenditure,
@@ -133,6 +234,11 @@ export function readTheBooks(
     surplus: totalIncome - totalExpenditure,
     arrears: owed.reduce((sum, obligation) => sum + obligation.arrears, 0),
     accounts,
-    theirGovernments: accounts.some((account) => account.label.endsWith("treasury")),
+    theirGovernments: opensTreasury,
+    pressure,
+    debts,
+    behind,
+    stopped,
+    lands,
   };
 }

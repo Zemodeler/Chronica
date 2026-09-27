@@ -10,6 +10,8 @@ import { enterTheWorld, waitForTheOffice } from "./fixture";
  */
 const A_SCORE = /\d+\s*\/\s*\d+/;
 const AN_ID = /\[[a-z0-9-]{4,}\]/;
+/** A lower-case slug of three or more parts, the shape every entity id has: "roman-field-army". */
+const A_BARE_ID = /\b[a-z0-9]+(?:-[a-z0-9]+){2,}\b/;
 
 test.describe("what the player is allowed to read", () => {
   test("counts the men actually present, in words", async ({ page }) => {
@@ -17,7 +19,7 @@ test.describe("what the player is allowed to read", () => {
     await waitForTheOffice(page);
     await page.locator('[data-object="forces"]').click();
 
-    const panel = page.locator('aside[aria-label="Your forces"]');
+    const panel = page.getByRole("dialog", { name: /your forces/i });
     await expect(panel).toBeVisible();
     await expect(panel.locator(".muster__force").first()).toBeVisible({ timeout: 60_000 });
 
@@ -42,7 +44,7 @@ test.describe("what the player is allowed to read", () => {
     await waitForTheOffice(page);
     await page.locator('[data-object="standing"]').click();
 
-    const panel = page.locator('aside[aria-label="Your standing"]');
+    const panel = page.getByRole("dialog", { name: /your standing/i });
     await expect(panel).toBeVisible();
     // The route compiles on its first hit under `next dev`; wait for what it
     // answers rather than for the panel's frame.
@@ -71,9 +73,15 @@ test.describe("what the player is allowed to read", () => {
     await enterTheWorld(page, "consul");
     await waitForTheOffice(page);
     await page.locator('[data-object="books"]').click();
-    const panel = page.locator(".sim-panel", { hasText: /The Treasury|Your Means/ });
+    const panel = page.getByRole("dialog", { name: /treasury/i });
     await expect(panel).toBeVisible();
     await expect(panel.locator(".books__table")).toBeVisible({ timeout: 60_000 });
+
+    // Every account is named for a reader. The consul's army chests used to
+    // read "roman-field-army's purse": a bare slug, which AN_ID's brackets miss.
+    const text = await panel.innerText();
+    expect(text).not.toMatch(AN_ID);
+    expect(text).not.toMatch(A_BARE_ID);
   });
 });
 
@@ -88,7 +96,7 @@ test.describe("the badge that pulls a player into the room", () => {
     const before = (await badge.count()) === 0 ? 0 : Number(await badge.innerText());
 
     await page.locator('[data-object="chronicle"]').click();
-    const record = page.locator('aside[aria-label="Chronicle"], aside.chronicle-panel').first();
+    const record = page.getByRole("dialog", { name: /chronicle/i });
     await expect(record).toBeVisible({ timeout: 60_000 });
     await record.getByRole("button", { name: /close/i }).first().click();
 

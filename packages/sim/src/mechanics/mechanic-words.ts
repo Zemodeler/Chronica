@@ -1,4 +1,4 @@
-import type { Mechanic, MechanicAmount, MechanicDraft, MechanicEffect, MechanicPredicate, MechanicTrigger, WorldState } from "@chronica/shared";
+import { accountLabel, type Mechanic, type MechanicAmount, type MechanicDraft, type MechanicEffect, type MechanicPredicate, type MechanicTrigger, type WorldState } from "@chronica/shared";
 
 /**
  * A rule in words: for the slice, the facts, and the audit. Never parsed.
@@ -14,10 +14,7 @@ const named = (world: WorldState, id: string): string =>
 
 function accountName(world: WorldState, id: string): string | null {
   const account = world.material.accounts.find((candidate) => candidate.id === id);
-  if (account === undefined) return null;
-  if (account.owner.kind === "character") return `${world.characters.find((character) => character.id === account.owner.id)?.name ?? account.owner.id}'s purse`;
-  if (account.owner.kind === "polity") return `the treasury of ${world.map.polities.find((polity) => polity.id === account.owner.id)?.name ?? account.owner.id}`;
-  return `the fund of ${world.genericEntities.find((entity) => entity.id === account.owner.id)?.label ?? account.owner.id}`;
+  return account === undefined ? null : accountLabel(world, account, "clause");
 }
 
 const level = (name: string): string => name.replace(/_/g, " ");

@@ -21,12 +21,12 @@ function expectMutedHsl(colour: string) {
 }
 
 describe("political map derivation", () => {
-  it("uses a saturated red for Roman territory", () => {
-    expect(politicalColourFromId("rome")).toBe("#b21f2d");
+  it("colours Rome in cinnabar", () => {
+    expect(politicalColourFromId("rome")).toBe("#9E2B25");
   });
-  it("uses the Carthaginian blue-grey for territory", () => {
-    expect(politicalColourFromId("carthage")).toBe("#2e245f");
-    expect(politicalColourFromId("syracuse")).toBe("#80512f");
+  it("colours Carthage in Tyrian purple and Syracuse in ochre", () => {
+    expect(politicalColourFromId("carthage")).toBe("#5B2A5E");
+    expect(politicalColourFromId("syracuse")).toBe("#9A6A2E");
   });
   it("gives minor polities distinct shades within their cultural palette", () => {
     const arverni = politicalColourFromId("gaul-arverni");
@@ -56,8 +56,8 @@ describe("political map derivation", () => {
     const hueOf = (colour: string) => Number(/hsl\(([\d.]+)/.exec(colour)![1]);
     const samnites = politicalColourWithAlpha("samnites", 1, leaders);
     const lucanians = politicalColourWithAlpha("lucanians", 1, leaders);
-    // Rome's red is hue ~354; its allies stay within a few degrees of it.
-    for (const colour of [samnites, lucanians]) expect(Math.abs(((hueOf(colour) - 354 + 540) % 360) - 180)).toBeLessThan(12);
+    // Rome's cinnabar is hue ~3; its allies stay within a few degrees of it.
+    for (const colour of [samnites, lucanians]) expect(Math.abs(((hueOf(colour) - 3 + 540) % 360) - 180)).toBeLessThan(12);
     expect(samnites).not.toBe(lucanians);
     expect(samnites).not.toBe(politicalColourWithAlpha("samnites", 1));
     // Without a leader, a people keeps its own colour.
@@ -71,7 +71,7 @@ describe("political map derivation", () => {
     for (const colour of [hungarian, czech, polish]) expectMutedHsl(colour);
   });
   it("keeps major nations visually distinct from their cultural group", () => {
-    expect(politicalColourFromId("macedon")).toBe("#355f91");
+    expect(politicalColourFromId("macedon")).toBe("#2F5A8A");
     expect(politicalColourFromId("macedon")).not.toBe(politicalColourFromId("athens"));
   });
   it("builds static adjacency and shared boundaries once", () => {

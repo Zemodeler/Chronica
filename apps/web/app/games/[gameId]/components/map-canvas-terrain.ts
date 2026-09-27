@@ -5,12 +5,13 @@ import type { ViewportTransform } from "./map-viewport";
 import { drawPoliticalLabels } from "./map-canvas-labels";
 import { drawForces, drawSettlements } from "./map-canvas-entities";
 import type { ForceFlagAsset } from "./army-standard";
+import { ATLAS } from "../../../../lib/palette";
 
-// CSS colours extracted from styles.css (hard-coded to avoid DOM reads each frame)
-const WATER_FILL = "#09233a";
-const TERRAIN_TINT = "rgba(58,72,56,0.35)";
-const RIVER_STROKE = "#84b4ca";
-const BORDER_STROKE = "#dc5d5d";
+// The atlas palette lives in lib/palette.ts, beside the stylesheet tokens it
+// must agree with; it is read from there rather than from the DOM each frame.
+const WATER_FILL = ATLAS.water;
+const RIVER_STROKE = ATLAS.rivers;
+const BORDER_STROKE = ATLAS.war;
 
 const RIVER_WIDTH: Record<string, number> = { minor: 0.55, major: 1.1, navigable: 1.55 };
 const RIVER_ALPHA: Record<string, number> = { minor: 0.7, major: 1, navigable: 1 };
@@ -105,15 +106,58 @@ function fillCacheCovers(cache: FillCache | null, world: StaticWorldGeometry, po
     screenPixelsPerUnit <= cache.builtForPixelsPerUnit * MAX_CACHE_UPSCALE;
 }
 
-function fillProvinces(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, world: StaticWorldGeometry, political: PoliticalMapState, provinces: readonly StaticProvince[]): void {
-  ctx.fillStyle = TERRAIN_TINT;
-  for (const province of provinces) ctx.fill(getProvincePath(world, province.id, province.svgPath));
+// ---------- A hand-coloured atlas ----------
+// Each power is a light wash over its land, and a strong band of the same
+// colour just inside its border -- the way an atlas colourist worked, and the
+// reason the relief still reads through the fills. The band is a wide stroke
+// along the province's outer edges, clipped to the province, so only its
+// inner half shows and neighbours never paint over one another.
+
+const _outerEdgeCache = new WeakMap<PoliticalMapState, Map<string, Path2D>>();
+
+/** Each owned province's edges that face another power, unclaimed land or the sea. */
+function outerEdges(political: PoliticalMapState): Map<string, Path2D> {
+  const cached = _outerEdgeCache.get(political);
+  if (cached) return cached;
+  const pieces = new Map<string, string[]>();
+  const add = (provinceId: string, svgPath: string) => {
+    const list = pieces.get(provinceId);
+    if (list) list.push(svgPath); else pieces.set(provinceId, [svgPath]);
+  };
+  for (const segment of political.borderSegments) {
+    if (segment.classification === "internal_province") continue;
+    if (political.ownerByProvince.get(segment.provinceA)) add(segment.provinceA, segment.svgPath);
+    if (segment.provinceB !== null && political.ownerByProvince.get(segment.provinceB)) add(segment.provinceB, segment.svgPath);
+  }
+  const edges = new Map([...pieces].map(([id, paths]) => [id, new Path2D(paths.join(""))]));
+  _outerEdgeCache.set(political, edges);
+  return edges;
+}
+
+function fillProvinces(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, world: StaticWorldGeometry, political: PoliticalMapState, provinces: readonly StaticProvince[], devicePixelsPerUnit: number): void {
+  const owned: StaticProvince[] = [];
   for (const province of provinces) {
     const owner = political.ownerByProvince.get(province.id);
-    if (owner) {
-      ctx.fillStyle = politicalColourWithAlpha(owner, 0.76, political.leaderByPolity);
-      ctx.fill(getProvincePath(world, province.id, province.svgPath));
-    }
+    if (!owner) continue;
+    owned.push(province);
+    ctx.fillStyle = politicalColourWithAlpha(owner, ATLAS.washAlpha, political.leaderByPolity);
+    ctx.fill(getProvincePath(world, province.id, province.svgPath));
+  }
+  const edges = outerEdges(political);
+  const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
+  const bandDevicePixels = Math.min(ATLAS.bandPixels * dpr, devicePixelsPerUnit * ATLAS.bandShareOfDegree);
+  // Twice the band's width: the clip keeps only the half inside.
+  ctx.lineWidth = (bandDevicePixels * 2) / devicePixelsPerUnit;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  for (const province of owned) {
+    const edge = edges.get(province.id);
+    if (!edge) continue;
+    ctx.save();
+    ctx.clip(getProvincePath(world, province.id, province.svgPath));
+    ctx.strokeStyle = politicalColourWithAlpha(political.ownerByProvince.get(province.id)!, ATLAS.bandAlpha, political.leaderByPolity);
+    ctx.stroke(edge);
+    ctx.restore();
   }
 }
 
@@ -155,7 +199,7 @@ function rebuildFillCache(
   ctx.clearRect(0, 0, offw, offh);
   ctx.setTransform(pixelsPerUnit, 0, 0, pixelsPerUnit, -rectVx * pixelsPerUnit, -rectVy * pixelsPerUnit);
   const rect = { minX: rectVx, maxX: rectVx + rectVw, minY: rectVy, maxY: rectVy + rectVh };
-  fillProvinces(ctx, world, political, provincesInRect(world, rect));
+  fillProvinces(ctx, world, political, provincesInRect(world, rect), pixelsPerUnit);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 
   _fillCache = { canvas, world, political, rectVx, rectVy, rectVw, rectVh, builtForPixelsPerUnit: screenPixelsPerUnit };
@@ -243,7 +287,7 @@ export function drawTerrainToCanvas(
     else if (!interacting) fillCache = rebuildFillCache(visibleRect, screenPixelsPerUnit, viewBox, world, political);
   }
   if (fillCache) ctx.drawImage(fillCache.canvas, fillCache.rectVx, fillCache.rectVy, fillCache.rectVw, fillCache.rectVh);
-  else fillProvinces(ctx, world, political, visibleProvinces);
+  else fillProvinces(ctx, world, political, visibleProvinces, screenPixelsPerUnit);
 
   // 6 — rivers (non-scaling stroke: visual width stays constant across zoom)
   ctx.strokeStyle = RIVER_STROKE;
@@ -284,9 +328,9 @@ export function drawTerrainToCanvas(
       const selected = selectionProvinceId === selectedProvinceId;
       const path = getProvincePath(world, province.id, province.svgPath);
       const exterior = getProvincePath(world, `${province.id}:exterior`, province.exteriorSvgPath);
-      ctx.fillStyle = selected ? "rgb(244 207 104 / 11%)" : "rgb(255 255 255 / 7%)";
+      ctx.fillStyle = selected ? "rgb(242 198 109 / 14%)" : "rgb(230 217 190 / 10%)";
       ctx.fill(path);
-      ctx.strokeStyle = selected ? "#f4cf68" : "#f5fbff";
+      ctx.strokeStyle = selected ? ATLAS.selected : ATLAS.hover;
       ctx.lineWidth = (selected ? .75 : .5) / m;
       ctx.lineJoin = "round";
       ctx.stroke(exterior);

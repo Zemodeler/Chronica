@@ -2,6 +2,7 @@
 
 import { useState, useTransition, useEffect } from "react";
 import { submitCharacterDeclaration, reviseCharacterDeclaration, confirmCharacterDeclaration } from "../../../actions";
+import { LampWait } from "../../../components/ui/lamp-wait";
 
 interface Props {
   readonly gameId: string;
@@ -14,6 +15,14 @@ type Step =
   | { kind: "revising"; confirmationDraft: string; canonicalName: string; origin: string; startingMoney: number; currencyName: string }
   | { kind: "confirmed" };
 
+function originLabel(origin: string): string {
+  return origin === "historical" ? "A historical figure" : origin === "hybrid" ? "A historical figure, extended" : "An invented character";
+}
+
+/**
+ * Who the player will be: they describe someone, the world researches them
+ * and writes back a draft, and they revise it or take it.
+ */
 export function CharacterDeclareClient({ gameId, gameTitle }: Props) {
   const [step, setStep] = useState<Step>({ kind: "input" });
   const [isPending, startTransition] = useTransition();
@@ -21,12 +30,14 @@ export function CharacterDeclareClient({ gameId, gameTitle }: Props) {
   const [coins, setCoins] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refreshCoins = () => {
     void fetch("/api/account/coins", { cache: "no-store" })
       .then((r) => r.json())
       .then((data: { coins: string | null }) => { if (data.coins !== null) setCoins(data.coins); })
       .catch(() => { /* non-critical */ });
-  }, []);
+  };
+
+  useEffect(refreshCoins, []);
 
   function handleDeclare(formData: FormData) {
     setError(null);
@@ -35,11 +46,11 @@ export function CharacterDeclareClient({ gameId, gameTitle }: Props) {
       if (result.status === "draft" && result.confirmationDraft) {
         setStep({ kind: "draft", confirmationDraft: result.confirmationDraft, canonicalName: result.canonicalName ?? "", origin: result.origin ?? "invented", startingMoney: result.startingMoney ?? 0, currencyName: result.currencyName ?? "money" });
         setCoins(null); // refresh after spending coins
-        void fetch("/api/account/coins", { cache: "no-store" }).then((r) => r.json()).then((d: { coins: string | null }) => { if (d.coins !== null) setCoins(d.coins); }).catch(() => {});
+        refreshCoins();
       } else if (result.status === "insufficient_coins") {
-        setError("You don't have enough coins. Top up your wallet in the Account page.");
+        setError("You don't have enough coins. Top up your wallet on the Account page.");
       } else {
-        setError(result.error ?? "Something went wrong. Please try again.");
+        setError(result.error ?? "Something went wrong. Try again.");
       }
     });
   }
@@ -50,190 +61,81 @@ export function CharacterDeclareClient({ gameId, gameTitle }: Props) {
       const result = await reviseCharacterDeclaration(formData);
       if (result.status === "draft" && result.confirmationDraft) {
         setStep({ kind: "draft", confirmationDraft: result.confirmationDraft, canonicalName: result.canonicalName ?? "", origin: result.origin ?? "invented", startingMoney: result.startingMoney ?? 0, currencyName: result.currencyName ?? "money" });
-        void fetch("/api/account/coins", { cache: "no-store" }).then((r) => r.json()).then((d: { coins: string | null }) => { if (d.coins !== null) setCoins(d.coins); }).catch(() => {});
+        refreshCoins();
       } else {
-        setError(result.error ?? "Something went wrong. Please try again.");
+        setError(result.error ?? "Something went wrong. Try again.");
       }
     });
   }
 
   if (confirming !== null) {
-    return (
-      <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "var(--background)", gap: "2rem" }}>
-        <style>{`
-          @keyframes chronicle-ring { 0% { transform: scale(0.85); opacity: 0.6; } 50% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(0.85); opacity: 0.6; } }
-          @keyframes chronicle-ring-2 { 0% { transform: scale(1); opacity: 0.3; } 50% { transform: scale(1.18); opacity: 0.6; } 100% { transform: scale(1); opacity: 0.3; } }
-          @keyframes chronicle-fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-        `}</style>
-        <div style={{ position: "relative", width: 72, height: 72 }}>
-          <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "2px solid var(--accent)", animation: "chronicle-ring 2s ease-in-out infinite" }} />
-          <div style={{ position: "absolute", inset: -12, borderRadius: "50%", border: "1px solid var(--accent)", animation: "chronicle-ring-2 2s ease-in-out 0.3s infinite" }} />
-          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.6rem" }}>◎</div>
-        </div>
-        <div style={{ textAlign: "center", animation: "chronicle-fade-in 0.4s ease both" }}>
-          <p style={{ margin: "0 0 0.4rem", color: "var(--text-muted)", fontSize: "0.85rem", textTransform: "uppercase", letterSpacing: "0.08em" }}>Entering the world as</p>
-          <p style={{ margin: "0 0 0.75rem", color: "var(--text-title)", fontWeight: 800, fontSize: "1.35rem" }}>{confirming}</p>
-          <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.82rem" }}>Preparing your chronicle…</p>
-        </div>
-      </div>
-    );
+    return <LampWait kicker="Entering the world as" name={confirming} note="Preparing your chronicle…" />;
   }
 
   return (
-    <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", background: "var(--background)" }}>
-      {/* Top bar */}
-      <header style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)", padding: "0 1.5rem", height: 52, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ color: "var(--text-title)", fontWeight: 800, fontSize: "1.1rem" }}>{gameTitle}</span>
-        {coins !== null && (
-          <span style={{ color: "var(--text-meta)", fontSize: "0.85rem" }}>
-            Coins: <strong style={{ color: "var(--text)" }}>{coins}</strong>
-          </span>
-        )}
+    <div className="declare">
+      <header className="declare__bar">
+        <span className="declare__title">{gameTitle}</span>
+        {coins !== null && <span className="declare__coins">{coins} coins</span>}
       </header>
 
-      {/* Main content */}
-      <main style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "2rem 1rem" }}>
-        <div style={{ width: "min(42rem, 100%)" }}>
-
+      <main className="declare__main" id="main-content">
+        <div className="declare__column">
           {step.kind === "input" && (
             <form action={handleDeclare}>
               <input type="hidden" name="gameId" value={gameId} />
-              <div style={{ marginBottom: "1.5rem" }}>
-                <h1 style={{ color: "var(--text-title)", fontSize: "1.5rem", margin: "0 0 0.5rem" }}>Who do you want to play as?</h1>
-                <p style={{ color: "var(--text-meta)", margin: 0, fontSize: "0.95rem" }}>
-                  Describe any character — a real historical figure, an invented person, or just a role. The more you write, the better.
-                </p>
-              </div>
-
+              <h1>Who do you want to play as?</h1>
+              <label className="declare__intro" htmlFor="declare-who">
+                Describe anyone: a real historical figure, a person of your own invention, or simply a role. The more you write, the better.
+              </label>
               <textarea
+                id="declare-who"
                 name="playerInput"
                 required
                 minLength={2}
                 rows={5}
                 disabled={isPending}
-                placeholder="Describe your character here…"
-                style={{
-                  width: "100%",
-                  padding: "0.75rem 1rem",
-                  background: "var(--surface-raised)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-control)",
-                  color: "var(--text)",
-                  fontSize: "1rem",
-                  resize: "vertical",
-                  fontFamily: "inherit",
-                  outline: "none",
-                }}
+                placeholder="A senator of an old family, short of money…"
               />
-
-              {error && (
-                <p style={{ color: "var(--danger)", marginTop: "0.75rem", fontSize: "0.9rem" }}>{error}</p>
-              )}
-
-              <div style={{ marginTop: "1rem", display: "flex", gap: "0.75rem", alignItems: "center" }}>
-                <button
-                  type="submit"
-                  disabled={isPending}
-                  style={{
-                    padding: "0.6rem 1.4rem",
-                    background: isPending ? "var(--surface-raised)" : "var(--accent)",
-                    color: "var(--text-title)",
-                    border: "none",
-                    borderRadius: "var(--radius-pill)",
-                    cursor: isPending ? "default" : "pointer",
-                    fontWeight: 600,
-                    fontSize: "0.95rem",
-                  }}
-                >
+              {error && <p className="declare__error" role="alert">{error}</p>}
+              <div className="declare__actions">
+                <button type="submit" className="btn btn--primary" disabled={isPending}>
                   {isPending ? "Researching…" : "Research this character"}
                 </button>
-                {isPending && (
-                  <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>This may take a few seconds</span>
-                )}
+                {isPending && <span className="declare__wait">This may take a few seconds.</span>}
               </div>
             </form>
           )}
 
           {(step.kind === "draft" || step.kind === "revising") && (
-            <div>
-              <div style={{ marginBottom: "1.25rem" }}>
-                <span style={{
-                  display: "inline-block",
-                  padding: "0.2rem 0.65rem",
-                  background: "var(--surface-raised)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-pill)",
-                  color: "var(--text-muted)",
-                  fontSize: "0.78rem",
-                  marginBottom: "0.75rem",
-                }}>
-                  {step.origin === "historical" ? "Historical figure" : step.origin === "hybrid" ? "Historical figure (extended)" : "Invented character"}
-                </span>
-                <h1 style={{ color: "var(--text-title)", fontSize: "1.4rem", margin: "0 0 0.75rem" }}>{step.canonicalName}</h1>
-                <p style={{ color: "var(--text-meta)", margin: "0 0 0.75rem", fontSize: "0.9rem" }}>
-                  Starting money: <strong style={{ color: "var(--text)" }}>{step.startingMoney.toLocaleString()} {step.currencyName}</strong>
-                </p>
-                <div style={{
-                  background: "var(--surface)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-card)",
-                  padding: "1.25rem 1.5rem",
-                  color: "var(--text)",
-                  lineHeight: 1.7,
-                  whiteSpace: "pre-wrap",
-                  fontSize: "0.97rem",
-                }}>
-                  {step.confirmationDraft}
-                </div>
+            <>
+              <div>
+                <p className="declare__origin">{originLabel(step.origin)}</p>
+                <h1>{step.canonicalName}</h1>
               </div>
+              <p className="declare__money">
+                Starting money: <strong>{step.startingMoney.toLocaleString()} {step.currencyName}</strong>
+              </p>
+              <div className="declare__draft">{step.confirmationDraft}</div>
 
-              {error && (
-                <p style={{ color: "var(--danger)", marginBottom: "0.75rem", fontSize: "0.9rem" }}>{error}</p>
-              )}
+              {error && <p className="declare__error" role="alert">{error}</p>}
 
               {step.kind === "revising" ? (
                 <form action={handleRevise}>
                   <input type="hidden" name="gameId" value={gameId} />
-                  <textarea
-                    name="revision"
-                    required
-                    rows={3}
-                    disabled={isPending}
-                    placeholder="What would you like to change or add?…"
-                    style={{
-                      width: "100%",
-                      padding: "0.75rem 1rem",
-                      background: "var(--surface-raised)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "var(--radius-control)",
-                      color: "var(--text)",
-                      fontSize: "1rem",
-                      resize: "vertical",
-                      fontFamily: "inherit",
-                      outline: "none",
-                      marginBottom: "0.75rem",
-                    }}
-                  />
-                  <div style={{ display: "flex", gap: "0.75rem" }}>
-                    <button
-                      type="submit"
-                      disabled={isPending}
-                      style={{ padding: "0.6rem 1.4rem", background: isPending ? "var(--surface-raised)" : "var(--accent)", color: "var(--text-title)", border: "none", borderRadius: "var(--radius-pill)", cursor: isPending ? "default" : "pointer", fontWeight: 600, fontSize: "0.95rem" }}
-                    >
+                  <label className="declare__intro" htmlFor="declare-revision">What would you change or add?</label>
+                  <textarea id="declare-revision" name="revision" required rows={3} disabled={isPending} placeholder="Ten years older, and in debt…" />
+                  <div className="declare__actions">
+                    <button type="submit" className="btn btn--primary" disabled={isPending}>
                       {isPending ? "Updating…" : "Update character"}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setStep({ ...step, kind: "draft" })}
-                      disabled={isPending}
-                      style={{ padding: "0.6rem 1.2rem", background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "var(--radius-pill)", cursor: "pointer", fontSize: "0.9rem" }}
-                    >
+                    <button type="button" className="btn btn--quiet" onClick={() => setStep({ ...step, kind: "draft" })} disabled={isPending}>
                       Cancel
                     </button>
                   </div>
                 </form>
               ) : (
-                <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+                <div className="declare__actions">
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
@@ -243,41 +145,22 @@ export function CharacterDeclareClient({ gameId, gameTitle }: Props) {
                     }}
                   >
                     <input type="hidden" name="gameId" value={gameId} />
-                    <button
-                      type="submit"
-                      disabled={isPending}
-                      style={{ padding: "0.6rem 1.6rem", background: "var(--accent)", color: "var(--text-title)", border: "none", borderRadius: "var(--radius-pill)", cursor: "pointer", fontWeight: 600, fontSize: "0.95rem" }}
-                    >
+                    <button type="submit" className="btn btn--primary" disabled={isPending}>
                       Play as {step.canonicalName}
                     </button>
                   </form>
-                  <button
-                    type="button"
-                    disabled={isPending}
-                    onClick={() => setStep({ ...step, kind: "revising" })}
-                    style={{ padding: "0.6rem 1.2rem", background: "transparent", color: "var(--text-meta)", border: "1px solid var(--border)", borderRadius: "var(--radius-pill)", cursor: "pointer", fontSize: "0.9rem" }}
-                  >
+                  <button type="button" className="btn btn--quiet" disabled={isPending} onClick={() => setStep({ ...step, kind: "revising" })}>
                     Revise
                   </button>
-                  <button
-                    type="button"
-                    disabled={isPending}
-                    onClick={() => { setStep({ kind: "input" }); setError(null); }}
-                    style={{ padding: "0.6rem 1.2rem", background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-pill)", cursor: "pointer", fontSize: "0.9rem" }}
-                  >
+                  <button type="button" className="btn btn--quiet" disabled={isPending} onClick={() => { setStep({ kind: "input" }); setError(null); }}>
                     Start over
                   </button>
                 </div>
               )}
 
-              {coins !== null && (
-                <p style={{ marginTop: "1rem", color: "var(--text-muted)", fontSize: "0.83rem" }}>
-                  Wallet: <strong>{coins}</strong> coins remaining
-                </p>
-              )}
-            </div>
+              {coins !== null && <p className="declare__wallet">{coins} coins left in your wallet.</p>}
+            </>
           )}
-
         </div>
       </main>
     </div>

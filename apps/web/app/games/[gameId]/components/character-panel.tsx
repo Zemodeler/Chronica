@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { PromiseReading } from "@chronica/shared";
+import { Sheet, type SheetSide } from "../../../components/ui/sheet";
+import { Era } from "../../../components/ui/era";
 
 type RelationCategory = "family" | "other";
 type FamilyRole = "parent" | "partner" | "sibling" | "child" | "other_relative";
 type FamilyView = "tree" | "list";
-type DetailKey = "location" | "culture" | "money" | "authority" | "reputation" | "origin" | "relations";
+type DetailKey = "location" | "culture" | "money" | "authority" | "reputation" | "origin" | "relations" | "promises";
 
 interface CharacterRelation {
   readonly name: string;
@@ -45,7 +48,7 @@ export interface CharacterPanelProps {
   readonly skills?: readonly string[];
 }
 
-const DETAIL_TITLES: Record<DetailKey, string> = { location: "Location", culture: "Culture", money: "Money", authority: "Authority", reputation: "Reputation", origin: "Origin", relations: "Key Relations" };
+const DETAIL_TITLES: Record<DetailKey, string> = { location: "Location", culture: "Culture", money: "Money", authority: "Authority", reputation: "Reputation", origin: "Origin", relations: "Key relations", promises: "Promises" };
 function inferredCategory(relation: CharacterRelation): RelationCategory {
   if (relation.category) return relation.category;
   return /\b(mother|father|parent|wife|husband|spouse|sister|brother|sibling|daughter|son|child|cousin|aunt|uncle|niece|nephew)\b/i.test(relation.relationship) ? "family" : "other";
@@ -67,13 +70,33 @@ function originLabel(origin: CharacterPanelProps["origin"]): string {
 
 function formatYear(year: number | null): string { return year === null ? "Unknown" : year < 0 ? `${Math.abs(year)} BCE` : `${year} CE`; }
 
-export function CharacterPanel(props: CharacterPanelProps & { readonly open: boolean; readonly onClose: () => void }) {
-  const { characterName, role, locationLabel, culture, relations, origin, moneyLabel, moneyBalance, moneyChanges, birthYearApprox, ageAtStart, authority, open, onClose } = props;
+/**
+ * The bronze mirror: who the player is, as the world has it written down.
+ *
+ * One sheet. The rows are the summary; choosing one opens its detail in the
+ * same sheet, with a way back, rather than a second panel pinned beside the
+ * first.
+ */
+export function CharacterPanel(props: CharacterPanelProps & { readonly gameId: string; readonly open: boolean; readonly onClose: () => void; readonly side: SheetSide }) {
+  const { characterName, role, locationLabel, culture, relations, origin, moneyLabel, moneyBalance, moneyChanges, birthYearApprox, ageAtStart, authority, open, onClose, side, gameId } = props;
   const [detail, setDetail] = useState<DetailKey | null>(null);
+  const [promises, setPromises] = useState<readonly PromiseReading[]>([]);
+  // Read each time the mirror is picked up: a promise made in conversation a
+  // moment ago should be there.
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    void fetch(`/api/games/${encodeURIComponent(gameId)}/promises`, { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { promises: PromiseReading[] } | null) => { if (live && data !== null) setPromises(data.promises); })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, [open, gameId]);
+  const yourPromises = promises.filter((promise) => promise.yours);
+  const pressing = yourPromises.filter((promise) => promise.pressing).length;
   const [relationsTab, setRelationsTab] = useState<RelationCategory>("family");
   const [familyView, setFamilyView] = useState<FamilyView>("tree");
   const [birthYearOpen, setBirthYearOpen] = useState(false);
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const authorityHoldings = authority ?? [];
   const traits = props.traits ?? [];
   const skills = props.skills ?? [];
@@ -81,56 +104,104 @@ export function CharacterPanel(props: CharacterPanelProps & { readonly open: boo
   const family = relations.filter((relation) => inferredCategory(relation) === "family");
   const others = relations.filter((relation) => inferredCategory(relation) === "other");
 
-  // Opened from the Office now, not from a button floating over the map, so
-  // the dialog follows a prop rather than owning the answer itself.
-  useEffect(() => {
-    if (open) { setDetail(null); dialogRef.current?.showModal(); }
-    else { dialogRef.current?.close(); }
-  }, [open]);
+  // Every time the mirror is picked up, it shows the whole person first.
+  useEffect(() => { if (open) setDetail(null); }, [open]);
 
-  function closePanel() { setDetail(null); onClose(); }
   function openDetail(next: DetailKey) { if (next === "relations") setRelationsTab(family.length > 0 ? "family" : "other"); setDetail(next); }
 
-  return <>
-    <dialog ref={dialogRef} onClose={closePanel} className="character-sheet-dialog" aria-label={`${characterName} character sheet`}>
-      <div className="character-sheet-scroll">
-        <header className="character-sheet-header"><div><h2>{characterName}</h2><p>{role}</p></div><button onClick={closePanel} aria-label="Close character panel" className="character-sheet-close">✕</button></header>
-        <div className="character-sheet-sections">
-          <FieldButton label="Location" value={locationLabel} onClick={() => openDetail("location")} />
-          <FieldButton label="Culture" value={culture} onClick={() => openDetail("culture")} />
-          <FieldButton label="Money" value={moneyLabel} onClick={() => openDetail("money")} />
-          <FieldButton label="Authority" value={authorityHoldings[0] ?? role} suffix={authorityHoldings.length > 1 ? `+${authorityHoldings.length - 1}` : undefined} onClick={() => openDetail("authority")} />
-          <FieldButton label="Reputation" value={reputationValue} onClick={() => openDetail("reputation")} />
-          <FieldButton label="Origin" value={originLabel(origin)} onClick={() => openDetail("origin")} />
-          <FieldButton label="Key Relations" value={relations.length === 0 ? "None recorded" : `${relations.length} named people`} onClick={() => openDetail("relations")} />
-        </div>
-      </div>
-      {detail && <aside className="character-detail-panel" aria-label={`${DETAIL_TITLES[detail]} details`}>
-        <header className="character-detail-header"><div><p>Character details</p><h3>{DETAIL_TITLES[detail]}</h3></div><button className="character-sheet-close" onClick={() => setDetail(null)} aria-label={`Close ${DETAIL_TITLES[detail]} details`}>✕</button></header>
-        <div className="character-detail-body">
-          {detail === "location" && <><p className="character-detail-value">{locationLabel}</p><p>Your position at the scenario opening.</p></>}
-          {detail === "culture" && <><p className="character-detail-value">{culture}</p><p>The cultural context used to ground this character’s identity and history.</p></>}
+  return (
+    <Sheet
+      label={`${characterName}'s character sheet`}
+      title={characterName}
+      subtitle={role}
+      width="ledger"
+      side={side}
+      open={open}
+      onClose={onClose}
+      className="character-sheet"
+    >
+      {detail === null ? (
+        <ul className="mirror__rows">
+          <li><Row label="Location" value={locationLabel} onClick={() => openDetail("location")} /></li>
+          <li><Row label="Culture" value={culture} onClick={() => openDetail("culture")} /></li>
+          <li><Row label="Money" value={moneyLabel} onClick={() => openDetail("money")} /></li>
+          <li><Row label="Authority" value={authorityHoldings[0] ?? role} suffix={authorityHoldings.length > 1 ? `and ${authorityHoldings.length - 1} more` : undefined} onClick={() => openDetail("authority")} /></li>
+          <li><Row label="Reputation" value={reputationValue} onClick={() => openDetail("reputation")} /></li>
+          <li><Row label="Origin" value={originLabel(origin)} onClick={() => openDetail("origin")} /></li>
+          <li><Row label="Key relations" value={relations.length === 0 ? "None recorded" : `${relations.length} named people`} onClick={() => openDetail("relations")} /></li>
+          {promises.length > 0 && (
+            <li>
+              <Row
+                label="Promises"
+                value={yourPromises.length === 0 ? `${promises.length} made to you` : `${yourPromises.length} you have made`}
+                suffix={pressing > 0 ? `${pressing} due soon` : undefined}
+                marked={pressing > 0}
+                onClick={() => openDetail("promises")}
+              />
+            </li>
+          )}
+        </ul>
+      ) : (
+        <section className="mirror__detail" aria-label={`${DETAIL_TITLES[detail]} details`}>
+          <button type="button" className="word-button mirror__back" onClick={() => setDetail(null)}>Back to {characterName}</button>
+          <h3>{DETAIL_TITLES[detail]}</h3>
+          {detail === "location" && <><p className="mirror__value">{locationLabel}</p><p className="mirror__note">Your position at the scenario opening.</p></>}
+          {detail === "culture" && <><p className="mirror__value">{culture}</p><p className="mirror__note">The cultural context used to ground this character’s identity and history.</p></>}
           {detail === "money" && <MoneyDetail moneyLabel={moneyLabel} balance={moneyBalance} changes={moneyChanges} />}
           {detail === "authority" && <AuthorityDetail role={role} authority={authorityHoldings} backgroundNote={props.authorityBackgroundNote ?? []} />}
           {detail === "reputation" && <ReputationDetail traits={traits} standing={props.standing ?? null} skills={skills} />}
           {detail === "origin" && <OriginDetail origin={origin} ageAtStart={ageAtStart} birthYearApprox={birthYearApprox} biography={props.biography} notableEvents={props.notableEvents} birthYearOpen={birthYearOpen} onToggleBirthYear={() => setBirthYearOpen((current) => !current)} />}
+          {detail === "promises" && <PromisesDetail promises={promises} />}
           {detail === "relations" && <RelationsDetail family={family} others={others} tab={relationsTab} onTabChange={setRelationsTab} familyView={familyView} onFamilyViewChange={setFamilyView} />}
-        </div>
-      </aside>}
-    </dialog>
-    {open && <div onClick={closePanel} className="character-sheet-backdrop" aria-hidden />}
-  </>;
+        </section>
+      )}
+    </Sheet>
+  );
 }
 
-function FieldButton({ label, value, suffix, onClick }: { label: string; value: string; suffix?: string | undefined; onClick: () => void }) {
-  return <button type="button" className="character-sheet-field" onClick={onClick}><span>{label}</span><strong>{value}</strong>{suffix && <em>{suffix}</em>}<b aria-hidden>›</b></button>;
+function Row({ label, value, suffix, marked = false, onClick }: { label: string; value: string; suffix?: string | undefined; marked?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" className="mirror__row" onClick={onClick}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {suffix !== undefined
+        ? <em className={marked ? "is-pressing" : undefined}>{marked && <span className="seal-dot" aria-hidden="true" />} {suffix}</em>
+        : <em aria-hidden="true" />}
+    </button>
+  );
+}
+
+/**
+ * What the player has promised and been promised. A promise of theirs falling
+ * due within a fortnight is marked: the world holds them to it.
+ */
+function PromisesDetail({ promises }: { promises: readonly PromiseReading[] }) {
+  return (
+    <>
+      <p className="mirror__note">The world holds a promise to its maker. Broken, it costs standing, money or safety.</p>
+      <ul className="mirror__list">
+        {promises.map((promise) => (
+          <li key={promise.id} className={promise.pressing ? "is-pressing" : undefined}>
+            <span>{promise.between}{promise.dueLabel !== null && <>, to be kept by <Era text={promise.dueLabel} /></>}</span>
+            <strong>{promise.description}</strong>
+            {promise.conditions !== null && <span>{promise.conditions}</span>}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
 }
 
 function MoneyDetail({ moneyLabel, balance, changes }: { moneyLabel: string; balance: number; changes: readonly MoneyChange[] }) {
   const recent = changes.slice(-5);
   const start = balance - recent.reduce((total, change) => total + change.amount, 0);
   const balances = recent.reduce<number[]>((series, change) => [...series, (series.at(-1) ?? start) + change.amount], [start]);
-  return <><p className="character-detail-value">{moneyLabel}</p><BalanceGraph balances={balances} hasChanges={changes.length > 0} />{changes.length > 0 && <ul className="character-detail-list">{recent.map((change) => <li key={change.id}><strong>{change.amount >= 0 ? "+" : ""}{change.amount.toLocaleString()}</strong><span>{change.label} · {change.whenLabel}</span></li>)}</ul>}<p className="character-detail-note">{changes.length === 0 ? "The graph will gain history as transactions occur." : "Balance history is shown from your personal-account transactions."}</p></>;
+  return <>
+    <p className="mirror__value">{moneyLabel}</p>
+    <BalanceGraph balances={balances} hasChanges={changes.length > 0} />
+    {changes.length > 0 && <ul className="mirror__list">{recent.map((change) => <li key={change.id}><strong>{change.amount >= 0 ? "+" : "−"}{Math.abs(change.amount).toLocaleString()}</strong><span>{change.label}, {change.whenLabel}</span></li>)}</ul>}
+    <p className="mirror__note">{changes.length === 0 ? "The graph will gain history as transactions occur." : "Balance history is shown from your personal-account transactions."}</p>
+  </>;
 }
 
 function BalanceGraph({ balances, hasChanges }: { balances: readonly number[]; hasChanges: boolean }) {
@@ -151,7 +222,7 @@ function BalanceGraph({ balances, hasChanges }: { balances: readonly number[]; h
       const low = Math.min(...balances); const high = Math.max(...balances); const range = high - low || 1;
       const pointAt = (value: number, index: number) => ({ x: 12 + index * ((width - 24) / Math.max(1, balances.length - 1)), y: hasChanges ? height - 14 - ((value - low) / range) * (height - 28) : height / 2 });
       ctx.strokeStyle = getComputedStyle(canvas).color;
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 2;
       ctx.lineCap = "round";
       ctx.beginPath();
       for (const [index, value] of balances.entries()) {
@@ -160,7 +231,7 @@ function BalanceGraph({ balances, hasChanges }: { balances: readonly number[]; h
       }
       ctx.stroke();
       const end = pointAt(balances.at(-1) ?? 0, balances.length - 1);
-      ctx.beginPath(); ctx.arc(end.x, end.y, 5, 0, Math.PI * 2); ctx.fillStyle = ctx.strokeStyle; ctx.fill();
+      ctx.beginPath(); ctx.arc(end.x, end.y, 4, 0, Math.PI * 2); ctx.fillStyle = ctx.strokeStyle; ctx.fill();
     };
     const observer = new ResizeObserver(draw);
     observer.observe(canvas);
@@ -173,9 +244,9 @@ function BalanceGraph({ balances, hasChanges }: { balances: readonly number[]; h
 function AuthorityDetail({ role, authority, backgroundNote }: { role: string; authority: readonly string[]; backgroundNote: readonly string[] }) {
   const entries = authority.length > 0 ? authority : [role];
   return <>
-    <p className="character-detail-value">{role}</p>
-    <ul className="character-detail-list">{entries.map((entry) => <li key={entry}><strong>{entry}</strong></li>)}</ul>
-    {backgroundNote.length > 0 && <p className="character-detail-note">Reputed background (unverified): {backgroundNote.join("; ")}</p>}
+    <p className="mirror__value">{role}</p>
+    <ul className="mirror__list">{entries.map((entry) => <li key={entry}><strong>{entry}</strong></li>)}</ul>
+    {backgroundNote.length > 0 && <p className="mirror__note">Reputed background, unverified: {backgroundNote.join("; ")}</p>}
   </>;
 }
 /**
@@ -188,27 +259,51 @@ function AuthorityDetail({ role, authority, backgroundNote }: { role: string; au
  */
 function ReputationDetail({ traits, standing, skills }: { traits: readonly string[]; standing: string | null; skills: readonly string[] }) {
   return <>
-    <p className="character-detail-value">{standing ?? "Of no particular standing yet"}</p>
-    <section className="origin-backstory">
+    <p className="mirror__value">{standing ?? "Of no particular standing yet"}</p>
+    <section className="mirror__section">
       <h4>Known for</h4>
       {traits.length === 0
-        ? <p className="character-detail-note">Nobody has settled on what you are like yet. Two people have to say the same thing before it sticks.</p>
-        : <ul className="character-detail-list">{traits.map((trait) => <li key={trait}><strong>{trait}</strong></li>)}</ul>}
+        ? <p className="mirror__note">Nobody has settled on what you are like yet. Two people have to say the same thing before it sticks.</p>
+        : <ul className="mirror__list">{traits.map((trait) => <li key={trait}><strong>{trait}</strong></li>)}</ul>}
     </section>
-    <section className="origin-backstory">
+    <section className="mirror__section">
       <h4>What they say you are good at</h4>
       {skills.length === 0
-        ? <p className="character-detail-note">Not yet established.</p>
-        : <ul className="character-detail-list">{skills.map((skill) => <li key={skill}><strong>{skill.charAt(0).toUpperCase()}{skill.slice(1)}</strong></li>)}</ul>}
+        ? <p className="mirror__note">Not yet established.</p>
+        : <ul className="mirror__list">{skills.map((skill) => <li key={skill}><strong>{skill.charAt(0).toUpperCase()}{skill.slice(1)}</strong></li>)}</ul>}
     </section>
   </>;
 }
 
-function OriginDetail({ origin, ageAtStart, birthYearApprox, biography, notableEvents, birthYearOpen, onToggleBirthYear }: { origin: CharacterPanelProps["origin"]; ageAtStart: number | null; birthYearApprox: number | null; biography: string; notableEvents: readonly string[]; birthYearOpen: boolean; onToggleBirthYear: () => void }) { return <><p className="character-detail-value">{originLabel(origin)}</p><div className="origin-age"><span>Age at scenario opening</span><strong>{ageAtStart === null ? "Unknown" : `c. ${ageAtStart}`}</strong></div><button type="button" className="origin-birth-year" onClick={onToggleBirthYear} aria-expanded={birthYearOpen}>Birth year <b>{birthYearOpen ? "−" : "+"}</b></button>{birthYearOpen && <p className="origin-birth-year-value">{formatYear(birthYearApprox)}</p>}<section className="origin-backstory"><h4>Backstory</h4><p>{biography}</p></section>{notableEvents.length > 0 && <section className="origin-backstory"><h4>Notable events</h4><ul className="character-detail-list">{notableEvents.map((event) => <li key={event}><strong>{event}</strong></li>)}</ul></section>}</>; }
+function OriginDetail({ origin, ageAtStart, birthYearApprox, biography, notableEvents, birthYearOpen, onToggleBirthYear }: { origin: CharacterPanelProps["origin"]; ageAtStart: number | null; birthYearApprox: number | null; biography: string; notableEvents: readonly string[]; birthYearOpen: boolean; onToggleBirthYear: () => void }) {
+  return <>
+    <p className="mirror__value">{originLabel(origin)}</p>
+    <dl className="mirror__facts">
+      <dt>Age at the opening</dt><dd>{ageAtStart === null ? "Unknown" : `About ${ageAtStart}`}</dd>
+      <dt>Born</dt>
+      <dd>
+        {birthYearOpen
+          ? formatYear(birthYearApprox)
+          : <button type="button" className="word-button" onClick={onToggleBirthYear} aria-expanded={birthYearOpen}>Show the year</button>}
+      </dd>
+    </dl>
+    <section className="mirror__section"><h4>Backstory</h4><p>{biography}</p></section>
+    {notableEvents.length > 0 && <section className="mirror__section"><h4>Notable events</h4><ul className="mirror__list">{notableEvents.map((event) => <li key={event}><strong>{event}</strong></li>)}</ul></section>}
+  </>;
+}
 
-function RelationsDetail({ family, others, tab, onTabChange, familyView, onFamilyViewChange }: { family: readonly CharacterRelation[]; others: readonly CharacterRelation[]; tab: RelationCategory; onTabChange: (tab: RelationCategory) => void; familyView: FamilyView; onFamilyViewChange: (view: FamilyView) => void }) { return <><div className="relation-tabs" role="tablist" aria-label="Key relation categories"><button type="button" role="tab" aria-selected={tab === "family"} onClick={() => onTabChange("family")}>Family ({family.length})</button><button type="button" role="tab" aria-selected={tab === "other"} onClick={() => onTabChange("other")}>Other NPCs ({others.length})</button></div>{tab === "family" && <div className="family-view-toggle" role="group" aria-label="Family view"><button type="button" aria-pressed={familyView === "tree"} onClick={() => onFamilyViewChange("tree")}>Family tree</button><button type="button" aria-pressed={familyView === "list"} onClick={() => onFamilyViewChange("list")}>List</button></div>}{tab === "family" ? familyView === "tree" ? <FamilyTree relations={family} /> : <RelationCards relations={family} emptyLabel="No family members are recorded." /> : <RelationCards relations={others} emptyLabel="No other significant NPCs are recorded." />}</>; }
+function RelationsDetail({ family, others, tab, onTabChange, familyView, onFamilyViewChange }: { family: readonly CharacterRelation[]; others: readonly CharacterRelation[]; tab: RelationCategory; onTabChange: (tab: RelationCategory) => void; familyView: FamilyView; onFamilyViewChange: (view: FamilyView) => void }) {
+  return <>
+    <div className="mirror__tabs" role="tablist" aria-label="Key relation categories">
+      <button type="button" role="tab" aria-selected={tab === "family"} onClick={() => onTabChange("family")}>Family ({family.length})</button>
+      <button type="button" role="tab" aria-selected={tab === "other"} onClick={() => onTabChange("other")}>Others ({others.length})</button>
+    </div>
+    {tab === "family" && <div className="mirror__toggle" role="group" aria-label="Family view"><button type="button" aria-pressed={familyView === "tree"} onClick={() => onFamilyViewChange("tree")}>Family tree</button><button type="button" aria-pressed={familyView === "list"} onClick={() => onFamilyViewChange("list")}>List</button></div>}
+    {tab === "family" ? familyView === "tree" ? <FamilyTree relations={family} /> : <RelationList relations={family} emptyLabel="No family members are recorded." /> : <RelationList relations={others} emptyLabel="No other significant people are recorded." />}
+  </>;
+}
 function FamilyTree({ relations }: { relations: readonly CharacterRelation[] }) {
-  if (relations.length === 0) return <p className="character-detail-note">No family members are recorded.</p>;
+  if (relations.length === 0) return <p className="mirror__note">No family members are recorded.</p>;
   const byRole = (role: FamilyRole) => relations.filter((relation) => inferredFamilyRole(relation) === role);
   const parents = byRole("parent"); const partners = byRole("partner"); const siblings = byRole("sibling"); const children = byRole("child"); const relatives = byRole("other_relative");
   return <div className="family-tree-diagram" aria-label="Family tree">
@@ -221,4 +316,4 @@ function FamilyTree({ relations }: { relations: readonly CharacterRelation[] }) 
 
 function TreeGeneration({ className, relations }: { className: string; relations: readonly CharacterRelation[] }) { return <div className={`family-tree-generation ${className}`}>{relations.map((relation) => <TreeNode key={`${relation.name}-${relation.relationship}`} name={relation.name} relationship={relation.relationship} />)}</div>; }
 function TreeNode({ name, relationship, self = false }: { name: string; relationship: string; self?: boolean }) { return <div className={`family-tree-node${self ? " family-tree-node--self" : ""}`}><strong>{name}</strong><span>{relationship}</span></div>; }
-function RelationCards({ relations, emptyLabel }: { relations: readonly CharacterRelation[]; emptyLabel: string }) { if (relations.length === 0) return <p className="character-detail-note">{emptyLabel}</p>; return <ul className="relation-cards">{relations.map((relation) => <li key={`${relation.name}-${relation.relationship}`}><strong>{relation.name}</strong><span>{relation.relationship}</span><p>{relation.notes}</p></li>)}</ul>; }
+function RelationList({ relations, emptyLabel }: { relations: readonly CharacterRelation[]; emptyLabel: string }) { if (relations.length === 0) return <p className="mirror__note">{emptyLabel}</p>; return <ul className="mirror__list">{relations.map((relation) => <li key={`${relation.name}-${relation.relationship}`}><strong>{relation.name}</strong><span>{relation.relationship}</span>{relation.notes.length > 0 && <span>{relation.notes}</span>}</li>)}</ul>; }

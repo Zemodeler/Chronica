@@ -17,6 +17,7 @@ The game accepts ambitious, conditional orders instead of a menu of verbs. The A
 - [Deletion plan](docs/plans/delete-chronicle-orders-turns.md) — a historical record of what the pre-loop wipe deleted and why.
 - [Product guide](docs/product.md) — what the game is and how it plays today.
 - [Architecture guide](docs/architecture.md) — how the system is put together.
+- [Design](DESIGN.md) — how the interface looks and why: the lamplit room, its tokens, type and parts.
 
 The documentation intentionally describes the current direction, not a chronological record of replaced proposals. Anything not yet built says so at the top.
 

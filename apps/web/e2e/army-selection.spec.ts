@@ -112,7 +112,7 @@ test.describe("selecting an army", () => {
 
     // Above the order bar, so its buttons can be pressed.
     await details(page).getByRole("button", { name: "Change standard" }).click();
-    await expect(page.getByRole("dialog", { name: /Choose a banner/ })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: /army standards/ })).toBeVisible();
   });
 
   test("armies sharing a province each open themselves", async ({ page }) => {
@@ -125,7 +125,7 @@ test.describe("selecting an army", () => {
     for (const [forceId, name] of [["campanian-legion", "Campanian legion of Rhegium"], ["allied-greek-hulls", "Allied Greek hulls"]] as const) {
       const flag = await standardOnScreen(page, geometry, forceId);
       await page.mouse.click(flag.x, flag.y);
-      await expect(details(page).locator("strong")).toHaveText(name);
+      await expect(details(page).locator("h2")).toHaveText(name);
     }
     // Not his: the Campanians answer to Decius Vibellius.
     await expect(details(page).getByRole("button", { name: "Rename" })).toHaveCount(1);
@@ -148,11 +148,11 @@ test.describe("selecting an army", () => {
     await details(page).getByRole("button", { name: "Rename" }).click();
     await details(page).getByLabel("New name").fill("Sacred Band of Tunis");
     await details(page).getByRole("button", { name: "Save" }).click();
-    await expect(details(page).locator("strong")).toHaveText("Sacred Band of Tunis");
+    await expect(details(page).locator("h2")).toHaveText("Sacred Band of Tunis");
 
     await details(page).getByRole("button", { name: "Change standard" }).click();
-    await page.getByRole("dialog", { name: /Choose a banner/ }).getByRole("button", { name: /Punic elephant/ }).click();
-    await expect(page.getByRole("dialog", { name: /Choose a banner/ })).toHaveCount(0);
+    await page.getByRole("dialog", { name: /army standards/ }).getByRole("button", { name: /Punic elephant/ }).click();
+    await expect(page.getByRole("dialog", { name: /army standards/ })).toHaveCount(0);
 
     // Not the tab's memory: the world's.
     const saved = await page.evaluate(async (id) => ((await (await fetch(`/api/games/${id}/overlay`)).json()) as { mapOverlay: DynamicMapOverlay }).mapOverlay.forces, gameId);
