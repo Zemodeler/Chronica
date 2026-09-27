@@ -405,11 +405,6 @@ export function GameShell({
     return () => clearInterval(interval);
   }, [hasActiveConflict, place, requestRedraw]);
 
-  const allianceLabels = useMemo(() => {
-    const names = new Map(overlay?.polities.map((polity) => [polity.polityId, polity.name]) ?? []);
-    return (overlay?.politicalRelations ?? []).map((relation) => `${names.get(relation.leaderPolityId) ?? relation.leaderPolityId} allied with ${names.get(relation.memberPolityId) ?? relation.memberPolityId}`);
-  }, [overlay]);
-
   useEffect(() => {
     let cancelled = false;
     // Respects the map route's Cache-Control (a few minutes), so refocusing
@@ -730,7 +725,7 @@ export function GameShell({
         <ForcesPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} side={sheetSideFor(roomStyle, "forces")} />
       )}
       {surface === "standing" && (
-        <StandingPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} allianceLabels={allianceLabels} side={sheetSideFor(roomStyle, "standing")} />
+        <StandingPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} side={sheetSideFor(roomStyle, "standing")} />
       )}
     </div>
   );
