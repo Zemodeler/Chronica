@@ -7,7 +7,9 @@ import {
   diversionShare,
   expectedPay,
   greedOf,
-  hopsBetween,
+  OFFICIAL_REACH_KM,
+  REFERENCE_PROVINCE_KM,
+  kmBetween,
   readDepartments,
   aptitude,
   stableHash,
@@ -336,11 +338,12 @@ function destinationFor(world: WorldState, person: Character): string {
   return patron?.personalAccountId ?? person.personalAccountId;
 }
 
-function hopsFrom(world: WorldState, person: Character, polityId: string | null): number {
+/** How far a man is from his power's capital, in reference provinces of road, at most eight. */
+function remotenessFrom(world: WorldState, person: Character, polityId: string | null): number {
   const capital = polityId === null ? null : world.map.polities.find((polity) => polity.id === polityId)?.capitalSettlementId ?? null;
   const capitalProvince = capital === null ? null : world.map.provinces.find((province) => province.settlements.some((settlement) => settlement.id === capital))?.id ?? null;
   if (capitalProvince === null || capitalProvince === person.locationProvinceId) return 0;
-  return hopsBetween(world, person.locationProvinceId, capitalProvince, 8) ?? 8;
+  return (kmBetween(world, person.locationProvinceId, capitalProvince, OFFICIAL_REACH_KM) ?? OFFICIAL_REACH_KM) / REFERENCE_PROVINCE_KM;
 }
 
 /**
@@ -413,7 +416,7 @@ function settleMoney(world: WorldState, toDay: number, before: WorldState): { wo
     if (collected > 0 && working.length > 0) {
       const honest = working.filter((post) => greedOf(post.person) < 25).length / working.length;
       for (const post of working) {
-        const share = diversionShare(greedOf(post.person), paidShare.get(post.person.id) ?? 0, hopsFrom(world, post.person, polityId));
+        const share = diversionShare(greedOf(post.person), paidShare.get(post.person.id) ?? 0, remotenessFrom(world, post.person, polityId));
         const take = Math.floor((collected / working.length) * share * (1 - honest / 2));
         if (take <= 0) continue;
         const to = destinationFor(world, post.person);
@@ -452,7 +455,7 @@ function settleMoney(world: WorldState, toDay: number, before: WorldState): { wo
     if (collected <= 0) continue;
     const owner = world.characters.find((character) => character.id === ownerId.id);
     const paidShare = contract.monthlyPay / Math.max(1, expectedPay("head", collected));
-    const take = Math.floor(collected * diversionShare(greedOf(hand), paidShare, owner === undefined ? 0 : hopsFrom(world, hand, owner.polityId)));
+    const take = Math.floor(collected * diversionShare(greedOf(hand), paidShare, owner === undefined ? 0 : remotenessFrom(world, hand, owner.polityId)));
     if (take <= 0) continue;
     const to = destinationFor(world, hand);
     const moved = move(contract.employerAccountId, to, take, "diversion", contract.id, `What ${hand.name} kept back from his master's estates`);
@@ -499,7 +502,7 @@ export function resolveAudits(world: WorldState, toDay: number): { world: WorldS
       const thief = world.characters.find((character) => character.id === row.byCharacterId);
       if (thief === undefined) return row;
       const care = (thief.skills.intrigue + aptitude(thief, "manipulation")) / 2;
-      const far = hopsFrom(world, thief, thief.polityId);
+      const far = remotenessFrom(world, thief, thief.polityId);
       const odds = Math.max(AUDIT_FLOOR, Math.min(AUDIT_CEILING, (0.5 + (eye - care) / 100 - 0.05 * far) * (1 + lift)));
       const roll = (stableHash([audit.id, row.id]) % 10_000) / 10_000;
       if (roll >= odds) return row;

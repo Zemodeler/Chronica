@@ -1,0 +1,233 @@
+{
+  "punic-italy-latium": {
+    "newId": "it-l865w",
+    "name": "Rome",
+    "settlement": "settlement-rome",
+    "point": [
+      12.4964,
+      41.9028
+    ],
+    "why": "the province holding Rome",
+    "regionProvinces": 42
+  },
+  "punic-italy-campanian-plain": {
+    "newId": "it-0m16s",
+    "name": "Capua",
+    "settlement": "settlement-capua",
+    "point": [
+      14.17,
+      41.03
+    ],
+    "why": "Capua, the heart of Campania (Naples is the neighbouring port)",
+    "regionProvinces": 35
+  },
+  "punic-italy-ligurian-coast": {
+    "newId": "cis-zdtxw",
+    "name": "Genua",
+    "settlement": "settlement-genua",
+    "point": [
+      8.95,
+      44.41
+    ],
+    "why": "Genua, the Ligurian port",
+    "regionProvinces": 7
+  },
+  "punic-italy-insubrian-plain": {
+    "newId": "cis-ski54",
+    "name": "Mediolanum",
+    "settlement": "settlement-mediolanum",
+    "point": [
+      9.19,
+      45.46
+    ],
+    "why": "Mediolanum, the Insubres capital",
+    "regionProvinces": 17
+  },
+  "punic-italy-middle-padus": {
+    "newId": "cis-7yz9i",
+    "name": "Felsina",
+    "settlement": "settlement-bononia",
+    "point": [
+      11.34,
+      44.5
+    ],
+    "why": "Felsina (Bononia), the Boii town",
+    "regionProvinces": 20
+  },
+  "punic-italy-venetian-lagoon": {
+    "newId": "cis-cwmqa",
+    "name": "Patavium",
+    "settlement": "settlement-patavium",
+    "point": [
+      11.88,
+      45.41
+    ],
+    "why": "Patavium, the Veneti city",
+    "regionProvinces": 16
+  },
+  "punic-italy-etrurian-uplands": {
+    "newId": "it-q8nfs",
+    "name": "Volsinii",
+    "settlement": "settlement-volsinii",
+    "point": [
+      11.88,
+      42.42
+    ],
+    "why": "Volsinii, the Etruscan league centre nearest Rome",
+    "regionProvinces": 35
+  },
+  "punic-italy-umbrian-valleys": {
+    "newId": "it-bz4up",
+    "name": "Iguvium",
+    "settlement": "settlement-iguvium",
+    "point": [
+      12.58,
+      43.35
+    ],
+    "why": "Iguvium, the Umbrian town",
+    "regionProvinces": 16
+  },
+  "punic-italy-picenum-coast": {
+    "newId": "it-p4o64",
+    "name": "Asculum",
+    "settlement": "settlement-asculum",
+    "point": [
+      13.57,
+      42.85
+    ],
+    "why": "Asculum, the Picene city",
+    "regionProvinces": 19
+  },
+  "punic-italy-marsian-highlands": {
+    "newId": "it-s70j7",
+    "name": "Corfinium",
+    "settlement": "settlement-corfinium",
+    "point": [
+      13.84,
+      42.12
+    ],
+    "why": "Corfinium, the Paelignian town",
+    "regionProvinces": 20
+  },
+  "punic-italy-samnium": {
+    "newId": "it-0988l",
+    "name": "Bovianum",
+    "settlement": "settlement-bovianum",
+    "point": [
+      14.48,
+      41.56
+    ],
+    "why": "Bovianum, the Samnite town",
+    "regionProvinces": 9
+  },
+  "punic-italy-apulian-coast": {
+    "newId": "it-t8ojd",
+    "name": "Tarentum",
+    "settlement": "settlement-tarentum",
+    "point": [
+      17.23,
+      40.47
+    ],
+    "why": "Tarentum, the great city of the Apulian coast (Arpi and Luceria lie inland)",
+    "regionProvinces": 31
+  },
+  "punic-italy-lucanian-uplands": {
+    "newId": "it-joh51",
+    "name": "Grumentum",
+    "settlement": "settlement-grumentum",
+    "point": [
+      15.91,
+      40.28
+    ],
+    "why": "Grumentum, the Lucanian town",
+    "regionProvinces": 24
+  },
+  "punic-italy-bruttian-highlands": {
+    "newId": "sic-5sjyb",
+    "name": "Rhegium",
+    "settlement": "settlement-rhegium",
+    "point": [
+      15.65,
+      38.11
+    ],
+    "why": "Rhegium, the toe of Italy the Rhegium storyline is about (Consentia lies inland)",
+    "regionProvinces": 27
+  },
+  "punic-italy-sallentine-peninsula": {
+    "newId": "it-jfiwo",
+    "name": "Brundisium",
+    "settlement": "settlement-brundisium",
+    "point": [
+      17.94,
+      40.64
+    ],
+    "why": "Brundisium, the Messapian port",
+    "regionProvinces": 13
+  },
+  "tun-13205935b88806172084765": {
+    "newId": "afr-9sdex",
+    "name": "Carthage",
+    "settlement": "settlement-carthage",
+    "point": [
+      10.33,
+      36.85
+    ],
+    "why": "Carthage",
+    "regionProvinces": 1
+  },
+  "ita-72843720b81376294924159-sicily-west": {
+    "newId": "sic-sq2mh",
+    "name": "Lilybaeum",
+    "settlement": "settlement-lilybaeum",
+    "point": [
+      12.95,
+      37.8
+    ],
+    "why": "Lilybaeum",
+    "regionProvinces": 10
+  },
+  "ita-72843720b81376294924159-sicily-northwest": {
+    "newId": "sic-77fvs",
+    "name": "Panormus",
+    "settlement": "settlement-panormus",
+    "point": [
+      13.36,
+      38.12
+    ],
+    "why": "Panormus",
+    "regionProvinces": 6
+  },
+  "ita-72843720b81376294924159-sicily-central": {
+    "newId": "sic-doquc",
+    "name": "Agrigentum",
+    "settlement": "settlement-agrigentum",
+    "point": [
+      13.5765,
+      37.311
+    ],
+    "why": "Agrigentum",
+    "regionProvinces": 17
+  },
+  "ita-72843720b81376294924159-sicily-southeast": {
+    "newId": "sic-ecyan",
+    "name": "Syracuse",
+    "settlement": "settlement-syracuse",
+    "point": [
+      15.287,
+      37.075
+    ],
+    "why": "Syracuse",
+    "regionProvinces": 16
+  },
+  "ita-72843720b81376294924159-sicily-northeast": {
+    "newId": "sic-q659z",
+    "name": "Messana",
+    "settlement": "settlement-messana",
+    "point": [
+      15.55,
+      38.19
+    ],
+    "why": "Messana, on the strait",
+    "regionProvinces": 10
+  }
+}

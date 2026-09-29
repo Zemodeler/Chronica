@@ -14,6 +14,7 @@ export * from "./map";
 export * from "./map-bindings";
 export * from "./agreements";
 export * from "./movement";
+export * from "./travel";
 export * from "./news";
 export * from "./nemesis";
 export * from "./field-peril";

@@ -103,3 +103,20 @@ export const GeoJsonMapSchema = z.object({
   }
 });
 export type GeoJsonMap = z.infer<typeof GeoJsonMapSchema>;
+
+/**
+ * The client's check of a map document the server has already validated: the
+ * shape, not every coordinate. A dense map is half a million positions, and
+ * running each through `GeoJsonMapSchema` cost the main thread a noticeable
+ * pause for a document nothing on the way could have changed.
+ */
+export function isGeoJsonMapDocument(value: unknown): value is GeoJsonMap {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { type?: unknown; features?: unknown };
+  if (candidate.type !== "FeatureCollection" || !Array.isArray(candidate.features) || candidate.features.length === 0) return false;
+  return candidate.features.every((feature: unknown) => {
+    if (typeof feature !== "object" || feature === null) return false;
+    const { id, geometry, properties } = feature as { id?: unknown; geometry?: { type?: unknown; coordinates?: unknown }; properties?: { kind?: unknown } };
+    return typeof id === "string" && typeof properties?.kind === "string" && typeof geometry?.type === "string" && Array.isArray(geometry.coordinates);
+  });
+}

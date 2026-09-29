@@ -1,7 +1,9 @@
 import {
   enemiesOf,
   groundToRetake,
-  hopsBetween,
+  REFERENCE_PROVINCE_KM,
+  describeKm,
+  kmBetween,
   allOffices,
   isOwnPurseGrant,
   buildAuthorityIndex,
@@ -350,26 +352,26 @@ export interface AmbientInput {
  * It costs no extra model call. Cognition is batched, so these people ride
  * along in the call the reactors were already making; only the prompt grows.
  */
-/** The nearest enemy army to any army this man commands, within one province. */
-function enemyContactOf(world: WorldState, characterId: string): { readonly hops: number; readonly enemy: string } | null {
+/** The nearest enemy army to any army this man commands, within a reference province. */
+function enemyContactOf(world: WorldState, characterId: string): { readonly km: number; readonly enemy: string } | null {
   const own = world.material.forces.filter((force) => force.commanderCharacterId === characterId);
-  let best: { hops: number; enemy: string } | null = null;
+  let best: { km: number; enemy: string } | null = null;
   for (const force of own) {
     const enemies = enemiesOf(world.polityAgreements, force.polityId);
     if (enemies.length === 0) continue;
     for (const other of world.material.forces) {
       if (!enemies.includes(other.polityId)) continue;
-      const hops = hopsBetween(world, force.locationId, other.locationId, 1);
-      if (hops === null || (best !== null && hops >= best.hops)) continue;
+      const km = kmBetween(world, force.locationId, other.locationId, REFERENCE_PROVINCE_KM);
+      if (km === null || (best !== null && km >= best.km)) continue;
       const where = world.map.provinces.find((province) => province.id === other.locationId)?.name ?? other.locationId;
-      best = { hops, enemy: `${other.name} at ${where}` };
+      best = { km, enemy: `${other.name} at ${where}` };
     }
   }
   return best;
 }
 
-/** The nearest lost ground or besieged city of his power his own army can reach in two provinces. */
-function woundWithinReach(world: WorldState, characterId: string): { readonly hops: number; readonly why: string } | null {
+/** The nearest lost ground or besieged city of his power his own army can reach in a few days. */
+function woundWithinReach(world: WorldState, characterId: string): { readonly km: number; readonly why: string } | null {
   const own = world.material.forces.filter((force) => force.commanderCharacterId === characterId);
   if (own.length === 0) return null;
   const polityId = own[0]!.polityId;
@@ -378,11 +380,11 @@ function woundWithinReach(world: WorldState, characterId: string): { readonly ho
     ...world.sieges.filter((siege) => siege.status === "active" && siege.defenderPolityId === polityId)
       .map((siege) => ({ provinceId: siege.provinceId, why: `a city of his power is under siege in ${world.map.provinces.find((province) => province.id === siege.provinceId)?.name ?? siege.provinceId}` })),
   ];
-  let best: { hops: number; why: string } | null = null;
+  let best: { km: number; why: string } | null = null;
   for (const place of places) {
     for (const force of own) {
-      const hops = hopsBetween(world, force.locationId, place.provinceId, 2);
-      if (hops !== null && (best === null || hops < best.hops)) best = { hops, why: `${place.why}, and ${force.name} can reach it` };
+      const km = kmBetween(world, force.locationId, place.provinceId, 2 * REFERENCE_PROVINCE_KM);
+      if (km !== null && (best === null || km < best.km)) best = { km, why: `${place.why}, and ${force.name} can reach it` };
     }
   }
   return best;
@@ -493,11 +495,11 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
     // nothing. The enemy in the same province will not wait for the rotation.
     const contact = enemyContactOf(world, character.id);
     if (contact !== null) {
-      score += contact.hops === 0 ? 30 : 20;
-      if (contact.hops === 0) pressing = true;
-      reasons.unshift(contact.hops === 0
+      score += contact.km === 0 ? 30 : 20;
+      if (contact.km === 0) pressing = true;
+      reasons.unshift(contact.km === 0
         ? `has the enemy in the same province: ${contact.enemy}`
-        : `has the enemy one province off: ${contact.enemy}`);
+        : `has the enemy about ${describeKm(contact.km)} off: ${contact.enemy}`);
     }
     // Ground his power lost, or a city of theirs under siege, within his army's
     // reach: the thing a beaten power's general is for. Near enough to strike
@@ -505,7 +507,7 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
     const wound = woundWithinReach(world, character.id);
     if (wound !== null) {
       score += 25;
-      if (wound.hops <= 1) pressing = true;
+      if (wound.km <= REFERENCE_PROVINCE_KM) pressing = true;
       reasons.unshift(wound.why);
     }
     if (character.polityId !== null && polityHasAims.has(character.polityId)) {

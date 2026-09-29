@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { Province } from "../world/map";
 import type { ProvinceMaterial } from "../material-state";
 import {
-  COUNTRYSIDE_BY_TERRAIN,
+  COUNTRYSIDE_PER_KM2,
+  REFERENCE_PROVINCE_AREA_KM2,
   deriveDefaultProvinceMaterial,
   ensureProvinceMaterial,
   applyRecruitmentToMaterial,
@@ -22,7 +23,6 @@ const province: Province = {
   ],
   controllerPolityId: "carthage",
   controlFirmnessBps: 8_000,
-  tier: "focus",
 };
 
 function material(overrides: Partial<ProvinceMaterial> = {}): ProvinceMaterial {
@@ -45,7 +45,10 @@ describe("deriveDefaultProvinceMaterial", () => {
   it("counts the countryside by its ground for a province with no settlements", () => {
     const empty: Province = { ...province, settlements: [], terrainId: "hills-uplands" };
     const result = deriveDefaultProvinceMaterial(empty, 0);
-    expect(result.population).toBe(COUNTRYSIDE_BY_TERRAIN["hills-uplands"]);
+    // Drawn without an area, it is the size a province was before areas were stated.
+    expect(result.population).toBe(40_000);
+    expect(deriveDefaultProvinceMaterial({ ...empty, areaKm2: 1_050 }, 0).population).toBe(Math.round(COUNTRYSIDE_PER_KM2["hills-uplands"]! * 1_050));
+    expect(deriveDefaultProvinceMaterial({ ...empty, areaKm2: REFERENCE_PROVINCE_AREA_KM2 }, 0).population).toBe(40_000);
     expect(result.availableManpower).toBeGreaterThan(0);
     // Ground the table does not know still has people on it.
     expect(deriveDefaultProvinceMaterial({ ...empty, terrainId: "marsh" }, 0).population).toBeGreaterThan(0);

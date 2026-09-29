@@ -72,7 +72,6 @@ describe("map presentation contracts", () => {
         controllerPolityId: "ROM",
         controlFirmnessBps: 8_500,
         terrainId: "farmland",
-        tier: "focus",
       }],
       settlements: [{
         settlementId: "roma",

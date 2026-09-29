@@ -38,10 +38,11 @@ export const CharacterScopeSchema = z
     /** The polity whose affairs they operate in, where they have one. */
     anchorPolityId: EntityIdSchema.nullable(),
     /**
-     * How far across the layer they reach, in graph steps. A knight's front is
-     * one or two provinces; a general's theatre is several.
+     * How far across the layer they reach, in kilometres by the map's own
+     * roads. A knight's front is a day or two's ride; a general's theatre is
+     * several hundred.
      */
-    reach: z.number().int().nonnegative().max(20),
+    reach: z.number().int().nonnegative().max(5_000),
     /** Route layer only: the nodes the character actually trades between. */
     routeProvinceIds: z.array(EntityIdSchema),
   })

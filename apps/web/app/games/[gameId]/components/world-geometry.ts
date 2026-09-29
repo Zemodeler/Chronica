@@ -2,12 +2,25 @@ import type { GeoJsonGeometry, GeoJsonMap, GeoJsonPosition } from "@chronica/sha
 import { geometryToSvgPath, projectCoordinate } from "./geo-projection";
 
 export interface WorldBounds { readonly minX: number; readonly minY: number; readonly maxX: number; readonly maxY: number; }
-export interface StaticProvince { readonly id: string; readonly name: string; readonly geometry: GeoJsonGeometry; readonly svgPath: string; /** Only the outside edge of a possibly multi-part territory, for hover/selection outlines. */ readonly exteriorSvgPath: string; readonly area: number; readonly centroid: GeoJsonPosition; readonly bounds: WorldBounds; readonly neighborIds: readonly string[]; /** Other provinces close enough to share a single political label. Never use for game adjacency. */ readonly labelNeighborIds: readonly string[]; }
-export interface SharedBoundary { readonly provinceA: string; readonly provinceB: string | null; readonly points: readonly [GeoJsonPosition, GeoJsonPosition]; readonly svgPath: string; }
+export interface StaticProvince {
+  readonly id: string; readonly name: string; readonly geometry: GeoJsonGeometry;
+  /** Built on first use: most provinces of a dense map are never drawn on their own. */
+  readonly svgPath: string;
+  /** Only the outside edge of a possibly multi-part territory, for hover/selection outlines. Built on first use. */
+  readonly exteriorSvgPath: string;
+  readonly area: number; readonly centroid: GeoJsonPosition; readonly bounds: WorldBounds; readonly neighborIds: readonly string[];
+  /** Other provinces close enough to share a single political label. Never use for game adjacency. */
+  readonly labelNeighborIds: readonly string[];
+}
+/**
+ * A run of consecutive edges shared by the same two provinces (`provinceB` null on a coast),
+ * in the order the provinces' rings list them. `points` are the run's vertices; `svgPath`
+ * draws each edge as its own `M..L..` subpath, so a dashed stroke restarts on every edge as it always has.
+ */
+export interface SharedBoundary { readonly provinceA: string; readonly provinceB: string | null; readonly points: readonly GeoJsonPosition[]; readonly svgPath: string; }
 export interface StaticSettlement { readonly id: string; readonly name: string; readonly type: string; readonly provinceId: string; readonly coordinate: GeoJsonPosition; readonly projected: readonly [number, number]; }
 export interface StaticRiver { readonly id: string; readonly className: string; readonly svgPath: string; readonly bounds: WorldBounds; }
 export interface StaticWorldGeometry { readonly provinces: readonly StaticProvince[]; readonly provinceById: ReadonlyMap<string, StaticProvince>; readonly sharedBoundaries: readonly SharedBoundary[]; readonly boundariesByProvince: ReadonlyMap<string, readonly SharedBoundary[]>; readonly settlements: readonly StaticSettlement[]; readonly rivers: readonly StaticRiver[]; }
-interface BoundaryOccurrence { readonly provinceId: string; readonly points: readonly [GeoJsonPosition, GeoJsonPosition]; }
 
 function ringCentroid(ring: readonly GeoJsonPosition[]) {
   let twiceArea = 0; let x = 0; let y = 0;
@@ -81,6 +94,109 @@ function boundsDistance(first: WorldBounds, second: WorldBounds) {
   return Math.hypot(dx, dy);
 }
 
+/** A uniform grid over bounding boxes, so a rectangle or a point finds its few candidates instead of scanning every province. */
+const GRID_CELL_DEGREES = 0.5;
+const gridKey = (cx: number, cy: number) => (cx + 8192) * 16384 + (cy + 8192);
+class BoundsGrid {
+  private readonly cells = new Map<number, number[]>();
+  private readonly stamp: Int32Array;
+  private generation = 0;
+  constructor(private readonly bounds: readonly WorldBounds[], private readonly cellSize: number) {
+    this.stamp = new Int32Array(bounds.length);
+    bounds.forEach((box, index) => {
+      if (!Number.isFinite(box.minX) || !Number.isFinite(box.maxX) || !Number.isFinite(box.minY) || !Number.isFinite(box.maxY)) return;
+      for (let cx = this.cell(box.minX); cx <= this.cell(box.maxX); cx++) for (let cy = this.cell(box.minY); cy <= this.cell(box.maxY); cy++) {
+        const key = gridKey(cx, cy);
+        const list = this.cells.get(key);
+        if (list) list.push(index); else this.cells.set(key, [index]);
+      }
+    });
+  }
+  private cell(value: number) { return Math.floor(value / this.cellSize); }
+  /** Indices of every box overlapping the rectangle (touching counts), ascending. */
+  query(minX: number, minY: number, maxX: number, maxY: number): number[] {
+    const found: number[] = [];
+    const generation = ++this.generation;
+    for (let cx = this.cell(minX); cx <= this.cell(maxX); cx++) for (let cy = this.cell(minY); cy <= this.cell(maxY); cy++) {
+      const list = this.cells.get(gridKey(cx, cy));
+      if (list === undefined) continue;
+      for (const index of list) {
+        if (this.stamp[index] === generation) continue;
+        this.stamp[index] = generation;
+        const box = this.bounds[index]!;
+        if (box.minX <= maxX && box.maxX >= minX && box.minY <= maxY && box.maxY >= minY) found.push(index);
+      }
+    }
+    return found.sort((a, b) => a - b);
+  }
+}
+const _grids = new WeakMap<StaticWorldGeometry, BoundsGrid>();
+function gridOf(world: StaticWorldGeometry): BoundsGrid {
+  let grid = _grids.get(world);
+  if (grid === undefined) { grid = new BoundsGrid(world.provinces.map((province) => province.bounds), GRID_CELL_DEGREES); _grids.set(world, grid); }
+  return grid;
+}
+
+/** Provinces whose bounds meet a geographic rectangle, in draw order. */
+export function provincesInRect(world: StaticWorldGeometry, minX: number, minLat: number, maxX: number, maxLat: number): StaticProvince[] {
+  return gridOf(world).query(minX, minLat, maxX, maxLat).map((index) => world.provinces[index]!);
+}
+
+/** The province under a point: the last drawn by default (it is on top), or the first drawn. */
+export function provinceAtPoint(world: StaticWorldGeometry, point: GeoJsonPosition, which: "topmost" | "first" = "topmost"): StaticProvince | undefined {
+  const candidates = gridOf(world).query(point[0], point[1], point[0], point[1]);
+  if (which === "first") { for (const index of candidates) if (provinceContains(world.provinces[index]!, point)) return world.provinces[index]; return undefined; }
+  for (let at = candidates.length - 1; at >= 0; at--) if (provinceContains(world.provinces[candidates[at]!]!, point)) return world.provinces[candidates[at]!];
+  return undefined;
+}
+
+function once<T>(build: () => T): () => T { let value: T | undefined; let built = false; return () => { if (!built) { value = build(); built = true; } return value as T; }; }
+
+function chainPath(points: readonly GeoJsonPosition[]): string {
+  const parts: string[] = [];
+  for (let index = 1; index < points.length; index++) parts.push(boundaryPath([points[index - 1]!, points[index]!]));
+  return parts.join("");
+}
+
+/** Numbers each distinct coordinate pair once. Open addressing over the doubles' own bits: a nested Map of floats spent most of the build here. */
+class VertexTable {
+  private static readonly view = new DataView(new ArrayBuffer(8));
+  private slots = new Int32Array(1 << 16).fill(-1);
+  private xs: number[] = []; private ys: number[] = [];
+  idOf(x: number, y: number): number {
+    const view = VertexTable.view;
+    view.setFloat64(0, x); let hash = Math.imul(view.getInt32(0) ^ 0x9e3779b9, 0x85ebca6b) ^ view.getInt32(4);
+    view.setFloat64(0, y); hash = Math.imul(hash ^ (hash >>> 15), 0xc2b2ae35) ^ view.getInt32(0); hash = Math.imul(hash ^ (hash >>> 13), 0x27d4eb2f) ^ view.getInt32(4);
+    hash ^= hash >>> 16;
+    const mask = this.slots.length - 1;
+    let slot = hash & mask;
+    for (;;) {
+      const id = this.slots[slot]!;
+      if (id === -1) break;
+      if (this.xs[id] === x && this.ys[id] === y) return id;
+      slot = (slot + 1) & mask;
+    }
+    const id = this.xs.length;
+    this.xs.push(x); this.ys.push(y);
+    this.slots[slot] = id;
+    if (this.xs.length * 2 > this.slots.length) this.grow();
+    return id;
+  }
+  private grow() {
+    const slots = new Int32Array(this.slots.length * 2).fill(-1); const mask = slots.length - 1;
+    const view = VertexTable.view;
+    for (let id = 0; id < this.xs.length; id++) {
+      view.setFloat64(0, this.xs[id]!); let hash = Math.imul(view.getInt32(0) ^ 0x9e3779b9, 0x85ebca6b) ^ view.getInt32(4);
+      view.setFloat64(0, this.ys[id]!); hash = Math.imul(hash ^ (hash >>> 15), 0xc2b2ae35) ^ view.getInt32(0); hash = Math.imul(hash ^ (hash >>> 13), 0x27d4eb2f) ^ view.getInt32(4);
+      hash ^= hash >>> 16;
+      let slot = hash & mask;
+      while (slots[slot] !== -1) slot = (slot + 1) & mask;
+      slots[slot] = id;
+    }
+    this.slots = slots;
+  }
+}
+
 /** Compiles immutable GeoJSON into reusable world-space map data.
  *
  * `geometryAliases` maps a gameplay province id with no polygon of its own
@@ -90,39 +206,94 @@ function boundsDistance(first: WorldBounds, second: WorldBounds) {
  * drawn twice and no area is double-counted; it exists purely so a force or
  * label at an aliased province still resolves to a real position instead of
  * silently vanishing.
+ *
+ * Built for maps of thousands of provinces: vertices are interned to integers so an
+ * edge is one number, path strings are built when first read, and label neighbours
+ * come from a grid rather than comparing every pair.
  */
 export function prepareStaticWorldGeometry(map: GeoJsonMap, geometryAliases?: ReadonlyMap<string, string>): StaticWorldGeometry {
-  const preliminary: Omit<StaticProvince, "neighborIds" | "labelNeighborIds">[] = []; const boundaries = new Map<string, BoundaryOccurrence[]>(); const settlements: StaticSettlement[] = []; const rivers: StaticRiver[] = [];
+  interface Prelim { readonly id: string; readonly name: string; readonly geometry: GeoJsonGeometry; readonly area: number; readonly centroid: GeoJsonPosition; readonly bounds: WorldBounds; }
+  const preliminary: Prelim[] = []; const settlements: StaticSettlement[] = []; const rivers: StaticRiver[] = [];
+
+  // Vertices interned by exact coordinates; an edge is the pair of vertex numbers.
+  const vertices = new VertexTable();
+  const vertexOf = ([x, y]: GeoJsonPosition) => vertices.idOf(x, y);
+  // Per edge, in order of first appearance: the province that wrote it first, the first
+  // *different* province to write it, how often it was written, and its two ends as first seen.
+  const edgeHead: number[] = []; const edgeLink: number[] = []; const edgeHigh: number[] = [];
+  const edgeFirst: number[] = []; const edgeOther: number[] = []; const edgeCount: number[] = [];
+  const edgeFrom: GeoJsonPosition[] = []; const edgeTo: GeoJsonPosition[] = []; const edgeFromId: number[] = []; const edgeToId: number[] = [];
+
   for (const feature of map.features) {
     if (feature.properties.kind === "province") {
-      preliminary.push({ id: feature.id, name: feature.properties.name, geometry: feature.geometry, svgPath: geometryToSvgPath(feature.geometry), exteriorSvgPath: exteriorSvgPath(feature.geometry), ...geometryMetrics(feature.geometry) });
-      for (const ring of geometryRings(feature.geometry)) for (let index = 0; index < ring.length - 1; index++) { const points = [ring[index]!, ring[index + 1]!] as const; const entries = boundaries.get(edgeKey(points[0], points[1])) ?? []; entries.push({ provinceId: feature.id, points }); boundaries.set(edgeKey(points[0], points[1]), entries); }
+      const provinceIndex = preliminary.length;
+      preliminary.push({ id: feature.id, name: feature.properties.name, geometry: feature.geometry, ...geometryMetrics(feature.geometry) });
+      for (const ring of geometryRings(feature.geometry)) {
+        let previousId = ring.length > 0 ? vertexOf(ring[0]!) : 0;
+        for (let index = 0; index < ring.length - 1; index++) {
+          const nextId = vertexOf(ring[index + 1]!);
+          const low = previousId < nextId ? previousId : nextId; const high = previousId < nextId ? nextId : previousId;
+          let existing = edgeHead[low] ?? -1;
+          while (existing !== -1 && edgeHigh[existing] !== high) existing = edgeLink[existing]!;
+          if (existing === -1) {
+            edgeLink.push(edgeHead[low] ?? -1); edgeHigh.push(high); edgeHead[low] = edgeFirst.length;
+            edgeFirst.push(provinceIndex); edgeOther.push(-1); edgeCount.push(1);
+            edgeFrom.push(ring[index]!); edgeTo.push(ring[index + 1]!); edgeFromId.push(previousId); edgeToId.push(nextId);
+          } else {
+            edgeCount[existing]!++;
+            if (edgeOther[existing] === -1 && edgeFirst[existing] !== provinceIndex) edgeOther[existing] = provinceIndex;
+          }
+          previousId = nextId;
+        }
+      }
     } else if (feature.properties.kind === "settlement" && feature.geometry.type === "Point") {
       const coordinate = feature.geometry.coordinates; settlements.push({ id: feature.id, name: feature.properties.name, type: feature.properties.type, provinceId: feature.properties.provinceId, coordinate, projected: projectCoordinate(coordinate[0], coordinate[1]) });
     } else if (feature.properties.kind === "river") rivers.push({ id: feature.id, className: feature.properties.class, svgPath: geometryToSvgPath(feature.geometry), bounds: geometryBounds(feature.geometry) });
   }
-  const neighbors = new Map(preliminary.map((province) => [province.id, new Set<string>()])); const sharedBoundaries: SharedBoundary[] = [];
-  for (const occurrences of boundaries.values()) {
-    const first = occurrences[0]!; const other = occurrences.find((candidate) => candidate.provinceId !== first.provinceId);
-    // A dissolved territory can retain separate source polygons. A repeated
-    // edge within that same territory is internal, not a coastline.
-    if (other === undefined && occurrences.length > 1) continue;
-    if (other) { neighbors.get(first.provinceId)?.add(other.provinceId); neighbors.get(other.provinceId)?.add(first.provinceId); }
-    sharedBoundaries.push({ provinceA: first.provinceId, provinceB: other?.provinceId ?? null, points: first.points, svgPath: boundaryPath(first.points) });
-  }
+
+  const neighbors = preliminary.map(() => new Set<number>());
+  const sharedBoundaries: SharedBoundary[] = [];
   const boundariesByProvince = new Map(preliminary.map((province) => [province.id, [] as SharedBoundary[]]));
-  for (const boundary of sharedBoundaries) {
+  let run: { a: number; b: number; points: GeoJsonPosition[]; lastId: number } | null = null;
+  const closeRun = () => {
+    if (run === null) return;
+    const points = run.points;
+    const path = once(() => chainPath(points));
+    const boundary: SharedBoundary = { provinceA: preliminary[run.a]!.id, provinceB: run.b === -1 ? null : preliminary[run.b]!.id, points, get svgPath() { return path(); } };
+    sharedBoundaries.push(boundary);
     boundariesByProvince.get(boundary.provinceA)?.push(boundary);
     if (boundary.provinceB !== null) boundariesByProvince.get(boundary.provinceB)?.push(boundary);
+    run = null;
+  };
+  for (let edge = 0; edge < edgeFirst.length; edge++) {
+    const a = edgeFirst[edge]!; const b = edgeOther[edge]!;
+    // A dissolved territory can retain separate source polygons. A repeated
+    // edge within that same territory is internal, not a coastline.
+    if (b === -1 && edgeCount[edge]! > 1) continue;
+    if (b !== -1) { neighbors[a]!.add(b); neighbors[b]!.add(a); }
+    if (run !== null && run.a === a && run.b === b && run.lastId === edgeFromId[edge]) { run.points.push(edgeTo[edge]!); run.lastId = edgeToId[edge]!; continue; }
+    closeRun();
+    run = { a, b, points: [edgeFrom[edge]!, edgeTo[edge]!], lastId: edgeToId[edge]! };
   }
-  const labelNeighbors = new Map(preliminary.map((province) => [province.id, new Set(neighbors.get(province.id) ?? [])]));
-  for (let firstIndex = 0; firstIndex < preliminary.length; firstIndex++) for (let secondIndex = firstIndex + 1; secondIndex < preliminary.length; secondIndex++) {
-    const first = preliminary[firstIndex]!; const second = preliminary[secondIndex]!;
-    if (boundsDistance(first.bounds, second.bounds) > LABEL_COMPONENT_GAP_DEGREES) continue;
-    labelNeighbors.get(first.id)?.add(second.id);
-    labelNeighbors.get(second.id)?.add(first.id);
-  }
-  const provinces = preliminary.map((province) => ({ ...province, neighborIds: [...(neighbors.get(province.id) ?? [])].sort(), labelNeighborIds: [...(labelNeighbors.get(province.id) ?? [])].sort() }));
+  closeRun();
+
+  const labelNeighbors = neighbors.map((set) => new Set(set));
+  const grid = new BoundsGrid(preliminary.map((province) => province.bounds), GRID_CELL_DEGREES);
+  preliminary.forEach((first, firstIndex) => {
+    const { minX, minY, maxX, maxY } = first.bounds;
+    if (!Number.isFinite(minX)) return;
+    for (const secondIndex of grid.query(minX - LABEL_COMPONENT_GAP_DEGREES, minY - LABEL_COMPONENT_GAP_DEGREES, maxX + LABEL_COMPONENT_GAP_DEGREES, maxY + LABEL_COMPONENT_GAP_DEGREES)) {
+      if (secondIndex <= firstIndex || boundsDistance(first.bounds, preliminary[secondIndex]!.bounds) > LABEL_COMPONENT_GAP_DEGREES) continue;
+      labelNeighbors[firstIndex]!.add(secondIndex);
+      labelNeighbors[secondIndex]!.add(firstIndex);
+    }
+  });
+  const idsSorted = (indices: ReadonlySet<number>) => [...indices].map((index) => preliminary[index]!.id).sort();
+  const provinces = preliminary.map((province, index): StaticProvince => {
+    const svgPath = once(() => geometryToSvgPath(province.geometry));
+    const exterior = once(() => exteriorSvgPath(province.geometry));
+    return { ...province, get svgPath() { return svgPath(); }, get exteriorSvgPath() { return exterior(); }, neighborIds: idsSorted(neighbors[index]!), labelNeighborIds: idsSorted(labelNeighbors[index]!) };
+  });
   const provinceById = new Map(provinces.map((province) => [province.id, province]));
   for (const [aliasId, realId] of geometryAliases ?? []) {
     if (provinceById.has(aliasId)) continue;

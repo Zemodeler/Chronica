@@ -7,7 +7,8 @@ import {
   atWar,
   createCanonicalNpc,
   economyOf,
-  hopsBetween,
+  OFFICIAL_REACH_KM,
+  kmBetween,
   isStanding,
   leaderOf,
   openWar,
@@ -325,15 +326,16 @@ function levyContingents(world: WorldState, war: PolityAgreement, ids: IdFactory
         });
         continue;
       }
-      const lands = next.material.provinceMaterial.filter((row) => next.map.provinces.some((province) => province.id === row.provinceId && province.controllerPolityId === ally));
+      const heldByAlly = new Set(next.map.provinces.filter((province) => province.controllerPolityId === ally).map((province) => province.id));
+      const lands = next.material.provinceMaterial.filter((row) => heldByAlly.has(row.provinceId));
       const available = lands.reduce((sum, row) => sum + row.availableManpower, 0);
       const men = Math.min(CONTINGENT_MAX, Math.floor(available * CONTINGENT_SHARE));
       if (men < CONTINGENT_MIN) continue;
       // Where it musters: its province nearest the leader's largest army.
       const army = [...next.material.forces].filter((force) => force.polityId === leader).sort((a, b) => fitOf(b) - fitOf(a) || a.id.localeCompare(b.id))[0];
       const muster = lands.map((row) => row.provinceId).sort()
-        .map((provinceId) => ({ provinceId, hops: army === undefined ? 0 : hopsBetween(next, provinceId, army.locationId, 8) ?? 99 }))
-        .sort((a, b) => a.hops - b.hops)[0]?.provinceId;
+        .map((provinceId) => ({ provinceId, km: army === undefined ? 0 : kmBetween(next, provinceId, army.locationId, OFFICIAL_REACH_KM) ?? OFFICIAL_REACH_KM * 2 }))
+        .sort((a, b) => a.km - b.km)[0]?.provinceId;
       if (muster === undefined) continue;
       let commander = next.characters.filter((character) => character.alive && character.polityId === ally && !next.material.forces.some((force) => force.commanderCharacterId === character.id))
         .sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))[0]?.id ?? null;

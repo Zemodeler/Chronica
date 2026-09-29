@@ -98,8 +98,9 @@ export default async function GamePage({
       gameId={world.gameId}
       gameTitle={world.gameTitle}
       elapsedStepLabel={world.dateLabel}
-      initialGeoJson={world.mapGeoJson}
+      mapVersion={world.mapVersion}
       initialOverlay={world.mapOverlay}
+      initialOverlayStamp={String(world.worldRevision)}
       baseImageUrl="/maps/natural-earth-ii-blue-oceans.png"
       characterPanel={characterPanel}
       playerCharacterId={chatCharacterId}

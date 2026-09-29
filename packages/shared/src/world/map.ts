@@ -16,8 +16,6 @@ export const CrossingTypeSchema = z.enum(["land", "river", "strait", "pass", "se
 export type CrossingType = z.infer<typeof CrossingTypeSchema>;
 
 /** Focus / Near / Far. Deterministic snapshot state, not a rendering hint (docs/13). */
-export const DetailTierSchema = z.enum(["focus", "near", "far"]);
-export type DetailTier = z.infer<typeof DetailTierSchema>;
 
 export const SettlementKindSchema = z.enum(["city", "town", "village", "fortress", "port"]);
 
@@ -114,7 +112,13 @@ export const ProvinceSchema = z
      * agreed; the Samnites rose three times.
      */
     yearning: z.object({ polityId: EntityIdSchema, bps: BasisPointsSchema, updatedAtStep: ElapsedStepSchema.default(0) }).strict().nullable().optional(),
-    tier: DetailTierSchema,
+    /**
+     * Whether it is fully simulated is read from the world, not stored
+     * (`liveProvinceIds`). Kept only so worlds and scenarios written with it
+     * still parse; nothing reads it.
+     */
+    /** Its ground in square kilometres, where the map states it; the countryside is counted from it (`peopleOf`). */
+    areaKm2: z.number().positive().finite().optional(),
     geo: ProvinceGeoSchema.optional(),
     /** Scenario-authored operational positions; omit to use the deterministic fallback (`warfare/position.ts`). */
     positions: z.array(PositionSchema).optional(),

@@ -3,6 +3,7 @@ import { WorldDeltaSchema, abortsTheTurn, isTimeout, type WorldDelta, type World
 import { extractJson } from "./json";
 import type { SimModelPort } from "./ports";
 import type { RejectedDelta } from "./apply/context";
+import { placeIndex, provincesNamedIn } from "./place-index";
 
 /**
  * A second chance at the deltas the engine could not carry out.
@@ -89,22 +90,30 @@ export interface DeltaRepairInput {
 /**
  * What a refused id could have meant.
  *
- * The map's ids are long, and a model copies the start of one; where that
- * start fits two provinces the engine rightly will not guess -- but it can
- * show both, and the repair can choose. Without this the same half-id came
- * back in the correction, because nothing in the refusal said what else to
- * write.
+ * Province ids are short and opaque, so a wrong one says nothing about which
+ * was meant; the act's own words do. Where a refusal names an id the world
+ * does not hold, the repair is shown the provinces the act's fields name --
+ * by province or by town -- and, for people and accounts, those whose id
+ * begins with what was written. Without this the same wrong id came back in
+ * the correction, because nothing in the refusal said what else to write.
  */
-function candidatesFor(reason: string, world: WorldState | undefined): string {
+function candidatesFor(rejection: RejectedDelta, world: WorldState | undefined): string {
   if (world === undefined) return "";
-  const named = [...reason.matchAll(/"([^"]{8,})"/g)].map((match) => match[1]!).filter((id) => !id.startsWith("local:"));
-  const places: { id: string; name: string }[] = [
+  const named = [...rejection.reason.matchAll(/"([^"]{5,})"/g)].map((match) => match[1]!).filter((id) => !id.startsWith("local:"));
+  if (named.length === 0) return "";
+  const index = placeIndex(world);
+  const words = Object.values(rejection.delta as Record<string, unknown>).filter((value): value is string => typeof value === "string").join(" ");
+  const provinces = [...provincesNamedIn(index, words)].filter((id) => !named.includes(id)).sort().slice(0, 4)
+    .map((id) => `${id} (${index.byId.get(id)?.name ?? id})`);
+  const people = [
     ...world.map.provinces.map((province) => ({ id: province.id, name: province.name })),
     ...world.characters.map((character) => ({ id: character.id, name: character.name })),
     ...world.material.accounts.map((account) => ({ id: account.id, name: `account of ${account.owner.id}` })),
   ];
-  const found = named.flatMap((id) => places.filter((place) => place.id !== id && place.id.startsWith(id)).slice(0, 4));
-  return found.length === 0 ? "" : `\n   COULD HAVE MEANT: ${found.map((place) => `${place.id} (${place.name})`).join("; ")}`;
+  const others = named.filter((id) => id.length >= 8).flatMap((id) => people.filter((place) => place.id !== id && place.id.startsWith(id)).slice(0, 4))
+    .map((place) => `${place.id} (${place.name})`);
+  const found = [...new Set([...provinces, ...others])];
+  return found.length === 0 ? "" : `\n   COULD HAVE MEANT: ${found.join("; ")}`;
 }
 
 export async function repairDeltas(input: DeltaRepairInput): Promise<DeltaRepairResult> {
@@ -113,7 +122,7 @@ export async function repairDeltas(input: DeltaRepairInput): Promise<DeltaRepair
 
   const complaints = repairable
     .slice(0, 8)
-    .map((rejection, index) => `${index + 1}. ${JSON.stringify(rejection.delta)}\n   REFUSED: ${rejection.reason}${candidatesFor(rejection.reason, input.world)}`)
+    .map((rejection, index) => `${index + 1}. ${JSON.stringify(rejection.delta)}\n   REFUSED: ${rejection.reason}${candidatesFor(rejection, input.world)}`)
     .join("\n\n");
 
   const message = `${input.worldText}\n\nThese changes were refused:\n\n${complaints}\n\nWrite them again, corrected.`;

@@ -1,5 +1,5 @@
 import type { DynamicMapOverlay } from "@chronica/shared";
-import type { StaticProvince, StaticWorldGeometry } from "./world-geometry";
+import { provincesInRect as provincesMeetingRect, type StaticProvince, type StaticWorldGeometry } from "./world-geometry";
 import { politicalColourWithAlpha, type PoliticalMapState } from "./political-geometry";
 import type { ViewportTransform } from "./map-viewport";
 import { drawPoliticalLabels } from "./map-canvas-labels";
@@ -136,11 +136,12 @@ function outerEdges(political: PoliticalMapState): Map<string, Path2D> {
 }
 
 function fillProvinces(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, world: StaticWorldGeometry, political: PoliticalMapState, provinces: readonly StaticProvince[], devicePixelsPerUnit: number): void {
-  const owned: StaticProvince[] = [];
+  const ownedByPolity = new Map<string, StaticProvince[]>();
   for (const province of provinces) {
     const owner = political.ownerByProvince.get(province.id);
     if (!owner) continue;
-    owned.push(province);
+    const owned = ownedByPolity.get(owner);
+    if (owned) owned.push(province); else ownedByPolity.set(owner, [province]);
     ctx.fillStyle = politicalColourWithAlpha(owner, ATLAS.washAlpha, political.leaderByPolity);
     ctx.fill(getProvincePath(world, province.id, province.svgPath));
   }
@@ -151,23 +152,29 @@ function fillProvinces(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingC
   ctx.lineWidth = (bandDevicePixels * 2) / devicePixelsPerUnit;
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
-  for (const province of owned) {
-    const edge = edges.get(province.id);
-    if (!edge) continue;
+  // One clip and one stroke per power, not per province: a power's provinces
+  // are disjoint, so clipping to all of them at once keeps exactly the halves
+  // of the edges that lie inside them.
+  for (const [polityId, owned] of ownedByPolity) {
+    const land = new Path2D();
+    const band = new Path2D();
+    for (const province of owned) {
+      const edge = edges.get(province.id);
+      if (!edge) continue;
+      land.addPath(getProvincePath(world, province.id, province.svgPath));
+      band.addPath(edge);
+    }
     ctx.save();
-    ctx.clip(getProvincePath(world, province.id, province.svgPath));
-    ctx.strokeStyle = politicalColourWithAlpha(political.ownerByProvince.get(province.id)!, ATLAS.bandAlpha, political.leaderByPolity);
-    ctx.stroke(edge);
+    ctx.clip(land);
+    ctx.strokeStyle = politicalColourWithAlpha(polityId, ATLAS.bandAlpha, political.leaderByPolity);
+    ctx.stroke(band);
     ctx.restore();
   }
 }
 
 function provincesInRect(world: StaticWorldGeometry, rect: VisibleWorldRect): StaticProvince[] {
   // Province bounds are geographic (latitude up); the rect is projected (y = -latitude).
-  return world.provinces.filter((p) =>
-    p.bounds.minX <= rect.maxX && p.bounds.maxX >= rect.minX &&
-    -p.bounds.maxY <= rect.maxY && -p.bounds.minY >= rect.minY,
-  );
+  return provincesMeetingRect(world, rect.minX, -rect.maxY, rect.maxX, -rect.minY);
 }
 
 function rebuildFillCache(

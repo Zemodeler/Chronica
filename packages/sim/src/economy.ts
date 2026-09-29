@@ -12,8 +12,9 @@ import {
   type ProvinceTargets,
   type ScenarioClock,
   type WorldState,
-  isQuietGround,
+  liveProvinceIds,
 } from "@chronica/shared";
+import { adjacentTo } from "@chronica/shared";
 
 /**
  * The land, reckoned by the calendar (VISION §6, §7).
@@ -143,11 +144,6 @@ export function reviewTheLand(input: LandInput): LandResult {
     const rows = new Map(world.material.provinceMaterial.map((row) => [row.provinceId, row]));
     const starvedIn = new Map<string, number>();
     const settledIn = new Map<string, { count: number; from: Set<string> }>();
-    const neighbours = new Map<string, string[]>();
-    for (const edge of world.map.edges) {
-      neighbours.set(edge.from, [...(neighbours.get(edge.from) ?? []), edge.to]);
-      neighbours.set(edge.to, [...(neighbours.get(edge.to) ?? []), edge.from]);
-    }
     const ids = [...rows.keys()].sort();
     for (let month = 0; month < months; month += 1) {
       for (const id of ids) {
@@ -161,8 +157,8 @@ export function reviewTheLand(input: LandInput): LandResult {
         const row = rows.get(id)!;
         const leaving = Math.floor(row.displacedPopulation * MIGRATION_SHARE);
         if (leaving <= 0) continue;
-        const refuge = (neighbours.get(id) ?? [])
-          .map((other) => rows.get(other))
+        const refuge = adjacentTo(world, id)
+          .map((other) => rows.get(other.provinceId))
           .filter((other): other is ProvinceMaterial => other !== undefined && other.stabilityBps >= REFUGE_BPS && other.foodSecurityBps >= REFUGE_BPS)
           .sort((a, b) => (b.stabilityBps + b.foodSecurityBps) - (a.stabilityBps + a.foodSecurityBps) || a.provinceId.localeCompare(b.provinceId))[0];
         if (refuge === undefined) continue;
@@ -187,8 +183,8 @@ export function reviewTheLand(input: LandInput): LandResult {
     };
 
     // A famine is history; a steady trickle of deaths in a lean month is not.
-    const quiet = new Set(world.map.provinces.filter(isQuietGround).map((province) => province.id));
-    const famines = [...starvedIn.entries()].filter(([provinceId, dead]) => dead >= 200 && !quiet.has(provinceId)).sort((a, b) => b[1] - a[1]).slice(0, 6);
+    const live = liveProvinceIds(world);
+    const famines = [...starvedIn.entries()].filter(([provinceId, dead]) => dead >= 200 && live.has(provinceId)).sort((a, b) => b[1] - a[1]).slice(0, 6);
     for (const [provinceId, dead] of famines) {
       const holder = world.map.provinces.find((province) => province.id === provinceId)?.controllerPolityId ?? null;
       facts.push({
@@ -202,7 +198,7 @@ export function reviewTheLand(input: LandInput): LandResult {
         significance: Math.min(75, 50 + Math.round(dead / 500)),
       });
     }
-    const arrivals = [...settledIn.entries()].filter(([provinceId, tally]) => tally.count >= 500 && !quiet.has(provinceId)).sort((a, b) => b[1].count - a[1].count).slice(0, 4);
+    const arrivals = [...settledIn.entries()].filter(([provinceId, tally]) => tally.count >= 500 && live.has(provinceId)).sort((a, b) => b[1].count - a[1].count).slice(0, 4);
     for (const [provinceId, tally] of arrivals) {
       facts.push({
         localId: `migrants_${provinceId}_${toDay}`.slice(0, 60),
@@ -252,11 +248,11 @@ function bringInTheHarvest(world: WorldState, year: number): Omit<LandResult, "m
   const glutted = new Map<string, string[]>();
   const controllerOf = new Map(world.map.provinces.map((province) => [province.id, province.controllerPolityId]));
   // The far edge's harvest feeds its people like any other, and is nobody's news.
-  const quiet = new Set(world.map.provinces.filter(isQuietGround).map((province) => province.id));
+  const live = liveProvinceIds(world);
   const provinceMaterial = world.material.provinceMaterial.map((row) => {
     const kind = harvestIn(row.provinceId, year);
     const sown = (row.productiveCapacityBps / 10_000) * (1 - row.warDamageBps / 20_000);
-    const holder = quiet.has(row.provinceId) ? null : controllerOf.get(row.provinceId) ?? null;
+    const holder = !live.has(row.provinceId) ? null : controllerOf.get(row.provinceId) ?? null;
     if (holder !== null && kind === "drought") failed.set(holder, [...(failed.get(holder) ?? []), row.provinceId]);
     if (holder !== null && kind === "bumper") glutted.set(holder, [...(glutted.get(holder) ?? []), row.provinceId]);
     return { ...row, foodSecurityBps: clampBps(byKind.get(kind)! * sown) };
@@ -279,7 +275,7 @@ function bringInTheHarvest(world: WorldState, year: number): Omit<LandResult, "m
       visibility: "public",
       discoveryState: "public",
       knowableInDays: 0,
-      significance: Math.min(70, 50 + provinceIds.length * 2),
+      significance: Math.min(70, 50 + Math.round(Math.log2(provinceIds.length + 1) * 4)),
     });
   }
   for (const [polityId, provinceIds] of [...glutted.entries()].sort((a, b) => hungry(b[1]) - hungry(a[1]) || a[0].localeCompare(b[0])).slice(0, 4)) {

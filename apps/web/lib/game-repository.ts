@@ -2,7 +2,7 @@ import "server-only";
 
 import { headers } from "next/headers";
 import { and, eq } from "drizzle-orm";
-import { allOffices, FactSchema, formatWorldDate, GameCreationSchema, type Fact, type GameCreation } from "@chronica/shared";
+import { allOffices, diffMapOverlay, FactSchema, formatWorldDate, GameCreationSchema, type DynamicMapOverlay, type Fact, type GameCreation, type MapOverlayDelta } from "@chronica/shared";
 import { MICRO_UNITS_PER_COIN } from "@chronica/billing";
 import {
   SlotCapError,
@@ -28,7 +28,8 @@ import {
 } from "@chronica/db";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { requiredDatabaseUrl } from "./database-url";
-import { builtInScenarioMap, namedByTheWorld } from "./built-in-scenario-maps";
+import { keptMapDocument, mapVersion, mapWireDocument } from "./built-in-scenario-maps";
+import { overlayHistoryKey, recallOverlay, rememberOverlay } from "./overlay-history";
 import { projectWorldView, type GameWorldView } from "./world-view";
 import { notablePeople, type NotablePerson } from "./notable-people";
 import { describeWorld, type WorldEntry } from "./world-catalogue";
@@ -62,7 +63,37 @@ export type Viewer = Readonly<{
 
 export interface GameWorldViewWithMap extends GameWorldView {
   readonly scenarioId: string;
-  readonly mapGeoJson?: ReturnType<typeof builtInScenarioMap>;
+  /** Names the map document to fetch (`/api/games/:id/map?v=`); it changes only when the map's names do. */
+  readonly mapVersion?: string | undefined;
+  /** The stored world's revision, which the overlay poll compares before reading anything. */
+  readonly worldRevision: number;
+}
+
+export type OverlayUpdate =
+  | { readonly stamp: string; readonly unchanged: true }
+  | { readonly stamp: string; readonly mapVersion?: string | undefined; readonly mapOverlay: DynamicMapOverlay }
+  | { readonly stamp: string; readonly mapVersion?: string | undefined; readonly delta: MapOverlayDelta };
+
+async function readWorldForPlayer(db: ReturnType<typeof createDatabase>["db"], gameId: string, userId: string, playerId: string, omitGeo: boolean): Promise<GameWorldViewWithMap | null> {
+  const view = await getWorldView(db, gameId);
+  if (view === undefined) return null;
+
+  const [player] = await db
+    .select({ characterId: schema.players.characterId })
+    .from(schema.players)
+    .where(eq(schema.players.id, playerId))
+    .limit(1);
+  const characterId = player?.characterId ?? view.world.characters[0]?.id ?? "";
+
+  // What has happened lately, for the armies known only by report.
+  const facts = (await listRecentFacts(db, gameId).catch(() => []))
+    .map((row) => FactSchema.safeParse(row.fact))
+    .flatMap((parsed): Fact[] => (parsed.success ? [parsed.data] : []));
+  const world = projectWorldView(view.world, {
+    gameId: view.gameId, gameTitle: view.gameTitle, clock: view.scenarioClock, offices: view.scenarioGovernment?.offices ?? [], facts, warfare: view.scenarioWarfare,
+  }, characterId);
+  rememberOverlay(overlayHistoryKey(userId, gameId), String(view.revision), world.mapOverlay);
+  return { ...world, scenarioId: view.world.pins.scenarioId, worldRevision: view.revision, mapVersion: omitGeo ? undefined : mapVersion(view.mapAssetId, view.world) };
 }
 
 async function viewerUserId(): Promise<string | null> {
@@ -216,34 +247,60 @@ export const gameRepository = {
     });
   },
 
-  /** `omitGeo` skips the multi-megabyte map document for callers that only want the overlay. */
+  /** `omitGeo` skips naming the map's version, for callers that have no use for the map. */
   async getWorld(gameId: string, omitGeo = false): Promise<GameWorldViewWithMap | null> {
     const userId = await viewerUserId();
     if (userId === null) throw new Error("This account cannot access the save.");
     return withDatabase(async (db) => {
       const playerId = await resolvePlayerId(db, gameId, userId);
       if (playerId === null) throw new Error("This account cannot access the save.");
+      return readWorldForPlayer(db, gameId, userId, playerId, omitGeo);
+    });
+  },
+
+  /**
+   * The map document at the version the page named, as the text sent to the
+   * client. A version this process has built is served after only the access
+   * check; otherwise the world is read to build it. `undefined` when there is no
+   * such map. The version returned is the current one, which differs from
+   * `wanted` when the map's names have moved on since the page was made.
+   */
+  async getMapDocument(gameId: string, wanted: string | null): Promise<{ readonly version: string; readonly body: string } | undefined> {
+    const userId = await viewerUserId();
+    if (userId === null) throw new Error("This account cannot access the save.");
+    return withDatabase(async (db) => {
+      const playerId = await resolvePlayerId(db, gameId, userId);
+      if (playerId === null) throw new Error("This account cannot access the save.");
+      const kept = wanted === null ? undefined : keptMapDocument(wanted);
+      if (wanted !== null && kept !== undefined) return { version: wanted, body: kept };
       const view = await getWorldView(db, gameId);
-      if (view === undefined) return null;
+      return view === undefined ? undefined : mapWireDocument(view.mapAssetId, view.world);
+    });
+  },
 
-      const [player] = await db
-        .select({ characterId: schema.players.characterId })
-        .from(schema.players)
-        .where(eq(schema.players.id, playerId))
-        .limit(1);
-      const characterId = player?.characterId ?? view.world.characters[0]?.id ?? "";
-
-      // What has happened lately, for the armies known only by report.
-      const facts = (await listRecentFacts(db, gameId).catch(() => []))
-        .map((row) => FactSchema.safeParse(row.fact))
-        .flatMap((parsed): Fact[] => (parsed.success ? [parsed.data] : []));
-      const world = projectWorldView(view.world, {
-        gameId: view.gameId, gameTitle: view.gameTitle, clock: view.scenarioClock, offices: view.scenarioGovernment?.offices ?? [], facts, warfare: view.scenarioWarfare,
-      }, characterId);
-      const mapGeoJson = omitGeo ? undefined : namedByTheWorld(builtInScenarioMap(view.mapAssetId), view.world);
-      return mapGeoJson === undefined
-        ? { ...world, scenarioId: view.world.pins.scenarioId }
-        : { ...world, scenarioId: view.world.pins.scenarioId, mapGeoJson };
+  /**
+   * The overlay as the client at `since` (a world revision it holds) needs it:
+   * nothing if the world has not moved -- answered from the revision column alone,
+   * without reading the world -- else what changed if that revision is remembered,
+   * else all of it.
+   */
+  async getOverlayUpdate(gameId: string, since: string | null): Promise<OverlayUpdate | null> {
+    const userId = await viewerUserId();
+    if (userId === null) throw new Error("This account cannot access the save.");
+    return withDatabase(async (db) => {
+      const playerId = await resolvePlayerId(db, gameId, userId);
+      if (playerId === null) throw new Error("This account cannot access the save.");
+      if (since !== null) {
+        const [stored] = await db.select({ revision: schema.gameWorlds.revision }).from(schema.gameWorlds).where(eq(schema.gameWorlds.gameId, gameId)).limit(1);
+        if (stored !== undefined && String(stored.revision) === since) return { stamp: since, unchanged: true };
+      }
+      const world = await readWorldForPlayer(db, gameId, userId, playerId, false);
+      if (world === null) return null;
+      const base = since === null ? undefined : recallOverlay(overlayHistoryKey(userId, gameId), since);
+      const stamp = String(world.worldRevision);
+      return base === undefined
+        ? { stamp, mapVersion: world.mapVersion, mapOverlay: world.mapOverlay }
+        : { stamp, mapVersion: world.mapVersion, delta: diffMapOverlay(base, world.mapOverlay) };
     });
   },
 

@@ -25,7 +25,7 @@ const row = (world: WorldState, id: string): ProvinceMaterial => world.material.
 /** A Roman province nobody garrisons, with men enough to rise -- and history enough to (the far edge never rises). */
 function quietRomanProvince(world: WorldState): string {
   const garrisoned = new Set(world.material.forces.map((force) => force.locationId));
-  const province = world.map.provinces.find((candidate) => candidate.controllerPolityId === "rome" && !isQuietGround(candidate) && !garrisoned.has(candidate.id) && row(world, candidate.id).availableManpower >= 1_000);
+  const province = world.map.provinces.find((candidate) => candidate.controllerPolityId === "rome" && !isQuietGround(world, candidate.id) && !garrisoned.has(candidate.id) && row(world, candidate.id).availableManpower >= 1_000);
   expect(province).toBeDefined();
   return province!.id;
 }

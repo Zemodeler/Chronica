@@ -63,7 +63,12 @@ import {
   type ForcePersonnelCategory,
   daysInSeason,
   monthOfDay,
-  strictHopsBetween,
+  strictKmBetween,
+  DETOUR_FACTOR,
+  adjacentTo,
+  describeKm,
+  MARCH_KM_PER_DAY,
+  FASTEST_MARCH_KM_PER_DAY,
   buildAuthorityIndex,
   checkAuthority,
   CharacterSocialEventSchema,
@@ -446,9 +451,6 @@ const REST_RECOVERY_BPS = 500;
 
 /** What walking out on a paid contract costs a man's name. */
 const WALKED_OUT_STANDING_BPS = 300;
-
-/** Days an army takes to cross one province on the march: a legion's fifteen or twenty miles a day over a region. */
-const MARCH_DAYS_PER_PROVINCE = 8;
 
 /** How many threads the world follows at once before it must close one. */
 const MAX_OPEN_STORYLINES = 12;
@@ -1237,7 +1239,7 @@ function setOutOn(
   force: Force,
   forceId: string,
   delta: Extract<WorldDelta, { op: "force_modify" }>,
-  hops: number,
+  km: number,
   days: number,
   carried: string | null,
   context: ApplyContext,
@@ -1272,14 +1274,14 @@ function setOutOn(
       provinceId: to, polityId: null, commanderCharacterRef: null, forceRef: forceId,
       beneficiaryAccountRef: null, cadenceDays: null, agreementKind: null, withPolityId: null,
     },
-    reason: carried === null ? `Marching ${hops} provinces.` : `Crossing ${carried}.`,
+    reason: carried === null ? `Marching about ${describeKm(km)}.` : `Crossing ${carried}.`,
   };
   const setOut = applyOne(world, journey, context, assignedIds, resolve, emitFact, emitAccount);
   emitFact({
     localId: `march_${forceId}`.slice(0, 60),
     kind: carried === null ? "march_begun" : "crossing_begun",
     summary: carried === null
-      ? `${force.name} set out from ${provinceName(force.locationId)} for ${provinceName(to)}, ${hops} provinces off: about ${days} days on the road.`
+      ? `${force.name} set out from ${provinceName(force.locationId)} for ${provinceName(to)}, about ${describeKm(km)} off: about ${days} days on the road.`
       : `${force.name} began crossing from ${provinceName(force.locationId)} to ${provinceName(to)} ${carried}: about ${days} days until the last of it is over.`,
     affectedRefs: [{ kind: "force", id: forceId }, { kind: "province", id: to }],
     visibility: "polity",
@@ -1879,7 +1881,7 @@ function applyOne(
         if (ferried !== null && ferried.by === null) reject(ferried.reason);
         // Never in one go past an enemy fleet: the crossing takes its days, and
         // is fought for when it is made (`crossings.ts`).
-        const inOneGo = ferried?.by === "sea" && ferried.ferry.trips === 1 && ferried.ferry.gatherHops === 0
+        const inOneGo = ferried?.by === "sea" && ferried.ferry.trips === 1 && ferried.ferry.gatherKm === 0
           && !enemyFleetOff(world, force, [force.locationId, delta.locationId], warfareWith(world, context.warfare));
         if (ferried?.by === "sea" && inOneGo) {
           escort = ferried.ferry.fleets;
@@ -1887,15 +1889,15 @@ function applyOne(
         }
         if (ferried?.by === "sea" && !inOneGo) {
           const days = CROSSING_DAYS + ferryDays(ferried.ferry);
-          return setOutOn(world, force, forceId, delta, 1, days, describeFerry(world, force, ferried.ferry), context, assignedIds, resolve, emitFact, emitAccount);
+          return setOutOn(world, force, forceId, delta, verdict.allowed ? verdict.edge.distance : 0, days, describeFerry(world, force, ferried.ferry), context, assignedIds, resolve, emitFact, emitAccount);
         }
         if (!verdict.allowed) {
           const provinceName = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
           if (verdict.refusal.kind === "crossing_not_admitted") {
             reject(`${force.name} cannot make the ${verdict.refusal.crossing} crossing from ${provinceName(force.locationId)} to ${provinceName(delta.locationId)}.`);
           }
-          const hops = verdict.refusal.kind === "not_adjacent" ? verdict.refusal.hops : null;
-          if (hops === null) {
+          const km = verdict.refusal.kind === "not_adjacent" ? verdict.refusal.km : null;
+          if (km === null) {
             reject(`${force.name} stands in ${provinceName(force.locationId)} and cannot reach ${provinceName(delta.locationId)}: no road at all leads there.`);
           }
           const passage = passageFor(world, force, delta.locationId, warfareWith(world, context.warfare), monthOf(context));
@@ -1912,10 +1914,10 @@ function applyOne(
           // seventh either way on top.
           const supplied = readDepartments(world).headLift({ kind: "polity", id: force.polityId }, "supply");
           // And winter, when the roads are mud and the passes snow.
-          const overPass = strictHopsBetween(world, force.locationId, delta.locationId, (crossing) => crossing === "land" || crossing === "river") === null;
-          const days = daysInSeason(Math.max(hops, Math.round(hops * MARCH_DAYS_PER_PROVINCE * (1 - (quartermaster === undefined ? 0 : skillShare(aptitude(quartermaster, "logistics"), 0.25)) - supplied))), monthOf(context), overPass);
+          const overPass = strictKmBetween(world, force.locationId, delta.locationId, (crossing) => crossing === "land" || crossing === "river", km * DETOUR_FACTOR) === null;
+          const days = daysInSeason(Math.max(Math.ceil(km / FASTEST_MARCH_KM_PER_DAY), Math.round((km / MARCH_KM_PER_DAY) * (1 - (quartermaster === undefined ? 0 : skillShare(aptitude(quartermaster, "logistics"), 0.25)) - supplied))), monthOf(context), overPass);
           const bySea = passage.by === "sea" ? passage.ferry : null;
-          return setOutOn(world, force, forceId, delta, hops, days + (bySea === null ? 0 : ferryDays(bySea)), bySea === null ? null : describeFerry(world, force, bySea), context, assignedIds, resolve, emitFact, emitAccount);
+          return setOutOn(world, force, forceId, delta, km, days + (bySea === null ? 0 : ferryDays(bySea)), bySea === null ? null : describeFerry(world, force, bySea), context, assignedIds, resolve, emitFact, emitAccount);
         }
       }
       const commanderId = delta.commanderCharacterRef === undefined ? undefined : required(delta.commanderCharacterRef, "The commander");
@@ -2306,7 +2308,7 @@ function applyOne(
       // Getting an army to where its enemy stands is movement, and movement is
       // somebody's decision. A battle is what happens once they are both there.
       if (attacker.locationId !== defender.locationId) {
-        reject(`${attacker.name} stands in ${attacker.locationId} and ${defender.name} in ${defender.locationId}; they cannot fight until one of them marches.`);
+        reject(`${attacker.name} stands in ${world.map.provinces.find((p) => p.id === attacker.locationId)?.name ?? attacker.locationId} and ${defender.name} in ${world.map.provinces.find((p) => p.id === defender.locationId)?.name ?? defender.locationId}; they cannot fight until one of them marches.`);
       }
       const living = (force: typeof attacker): number => force.personnel.reduce((sum, category) => sum + category.fit, 0);
       if (living(attacker) === 0 || living(defender) === 0) reject("An army with no men left in it cannot fight.");
@@ -2373,7 +2375,7 @@ function applyOne(
         const ally = world.material.forces.find((force) => force.id === id);
         if (ally === undefined) reject(`No force "${id}" exists to join the attack.`, "reference");
         if (ally.locationId !== attacker.locationId) {
-          reject(`${ally.name} is not on the field: it stands in ${ally.locationId}, and the battle is in ${attacker.locationId}.`);
+          reject(`${ally.name} is not on the field: it stands in ${world.map.provinces.find((p) => p.id === ally.locationId)?.name ?? ally.locationId}, and the battle is in ${world.map.provinces.find((p) => p.id === attacker.locationId)?.name ?? attacker.locationId}.`);
         }
         const sameSideAsDefender = civilStrife
           ? ally.commanderCharacterId === defender.commanderCharacterId || ally.controllerCharacterId === defender.controllerCharacterId
@@ -3812,7 +3814,7 @@ function applyOne(
       if (farming) {
         if (delta.provinceId === null) reject("A tax farm is the tax of a province; name which.", "reference");
         const province = world.map.provinces.find((candidate) => candidate.id === delta.provinceId);
-        if (province === undefined || province.controllerPolityId !== employer.owner.id) reject(`${delta.provinceId} is not a province of the power letting the farm.`, "reference");
+        if (province === undefined || province.controllerPolityId !== employer.owner.id) reject(`${province?.name ?? delta.provinceId} is not a province of the power letting the farm.`, "reference");
         const material = world.material.provinceMaterial.find((row) => row.provinceId === province.id);
         // What the province bears at the customary rate: the farmer's take,
         // counted against the province like the government's own tax.
@@ -4966,10 +4968,7 @@ function applyOne(
       // why Gaul is not taken from Latium.
       const standing = world.material.forces.some((force) => force.polityId === takerId && force.locationId === province.id);
       const held = new Set(world.map.provinces.filter((candidate) => candidate.controllerPolityId === takerId).map((candidate) => candidate.id));
-      const nextToHeldGround = world.map.edges.some((edge) => {
-        const touches = edge.from === province.id ? edge.to : edge.to === province.id ? edge.from : null;
-        return touches !== null && held.has(touches) && crossingAdmitted(world, edge, context.terrains ?? []);
-      });
+      const nextToHeldGround = adjacentTo(world, province.id).some(({ provinceId: touches, edge }) => held.has(touches) && crossingAdmitted(world, edge, context.terrains ?? []));
       if (!standing && !nextToHeldGround) {
         reject(`${takerId} has no army in ${province.name} and holds no ground next to it, so it cannot take the province.`);
       }

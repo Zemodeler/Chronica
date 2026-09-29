@@ -3,7 +3,7 @@ import { firstPunicWarScenario, punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, type WorldState } from "../index";
 import { buildStation, factsKnownToStation } from "../authority/station";
 import { emitFacts, factsKnownTo, factsVisibleTo, type Fact, type FactDraft } from "./facts";
-import { hopsBetween } from "./movement";
+import { kmBetween } from "./movement";
 import { MAX_NEWS_DAYS, newsArrivalsAt, newsArrivesAt, newsDaysBetween, whereItHappened, whereTheyHear } from "./news";
 
 /**
@@ -55,7 +55,7 @@ describe("the road news travels", () => {
     const small = WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
     const rome = provinceOf(small, "settlement-rome");
     const consulIn = small.characters.find((character) => character.id === "marcus-atilius")!.locationProvinceId;
-    expect(hopsBetween(small, rome, consulIn, 60)).toBeNull();
+    expect(kmBetween(small, rome, consulIn)).toBeNull();
     expect(newsDaysBetween(small, rome, consulIn)).toBe(0);
   });
 

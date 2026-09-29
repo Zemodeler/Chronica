@@ -127,7 +127,7 @@ function raiseTheMiserable(world: WorldState, input: UnrestInput): { world: Worl
     const row = rows.get(province.id);
     const holder = province.controllerPolityId;
     // The far edge suffers its misery without history: it does not rise.
-    if (row === undefined || holder === null || isQuietGround(province)) { counts.delete(province.id); continue; }
+    if (row === undefined || holder === null || isQuietGround(world, province.id)) { counts.delete(province.id); continue; }
     const pressed = (input.burdens.get(holder)?.stabilityShiftBps ?? 0) < 0;
     const hungry = row.foodSecurityBps < RISING_FAMINE_BPS;
     const foreign = native.has(province.id) && native.get(province.id) !== holder;
@@ -261,7 +261,7 @@ function marchOnTheCity(world: WorldState, input: UnrestInput, government: Gover
   for (const polity of [...world.map.polities].sort((a, b) => a.id.localeCompare(b.id))) {
     if (!isStanding(polity)) continue;
     // A power of the far edge alone makes no civil war: its generals are nobody's history.
-    if (!next.map.provinces.some((province) => province.controllerPolityId === polity.id && !isQuietGround(province))) continue;
+    if (!next.map.provinces.some((province) => province.controllerPolityId === polity.id && !isQuietGround(next, province.id))) continue;
     const legitimacy = next.material.polityLegitimacy.find((entry) => entry.polityId === polity.id)?.legitimacyBps ?? 5_000;
     if (legitimacy >= CIVIL_WAR_LEGITIMACY_BPS) continue;
     if (memory.civilWars.some((war) => (war.fromPolityId === polity.id || war.rebelPolityId === polity.id) && input.toDay - war.sinceStep < CIVIL_WAR_COOLDOWN_DAYS)) continue;

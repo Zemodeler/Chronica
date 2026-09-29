@@ -29,6 +29,7 @@ import {
   type TacticalPremise,
   type WorldState,
 } from "@chronica/shared";
+import { adjacentTo } from "@chronica/shared";
 import { handOverForcesOf, killCharacter } from "./mortality";
 import { divertFieldFates, openFieldPerils } from "./field-perils";
 import { summonToJudgment } from "./trials";
@@ -96,12 +97,7 @@ export interface EngagementResult {
 
 /** Every province sharing an edge with this one, in a stable order. */
 function neighboursOf(world: WorldState, provinceId: string): string[] {
-  const found = new Set<string>();
-  for (const edge of world.map.edges) {
-    if (edge.from === provinceId) found.add(edge.to);
-    if (edge.to === provinceId) found.add(edge.from);
-  }
-  return [...found].sort();
+  return [...new Set(adjacentTo(world, provinceId).map((next) => next.provinceId))].sort();
 }
 
 function commanderOf(world: WorldState, force: Force): Character | null {

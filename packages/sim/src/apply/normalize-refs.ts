@@ -1,19 +1,21 @@
 import { chestOf, treasuryOf, whoIsNamed, type WorldDelta, type WorldState } from "@chronica/shared";
+import { placeIndex, provinceNamedByWords, provinceNamedExactly, provincesNamedIn, withinHops, type PlaceIndex } from "../place-index";
 
 /**
  * The ways a model gets a reference almost right, put right before the engine
  * judges the act.
  *
  * Measured on a live run of real orders: most refusals the engine produced were
- * not the world saying no but a reference off by a little. The map's province
- * ids are long hashes, and a model copies the first half of one --
- * "punic-illyria-svn-3739544" for "punic-illyria-svn-3739544b2739881953900".
- * It pays a temple's keep "from the temple", which has no purse; it creates a
+ * not the world saying no but a reference off by a little. A model
+ * copies the first half of a long id, or writes a place by its name where an
+ * id was wanted. It pays a temple's keep "from the temple", which has no purse; it creates a
  * herald "in the Morini", a people, where a province was wanted. Each was a
  * refused act, a repair call, and often a lost half of the order -- for a
  * meaning nobody could mistake.
  *
- * Only unambiguous corrections: a prefix that fits exactly one thing, a
+ * Province ids are short and opaque, so a province is put right by what it is
+ * called (`place-index.ts`), never by the shape of its id. Only unambiguous
+ * corrections: a prefix that fits exactly one thing, a
  * holder that has exactly one account, a power that holds ground. Anything
  * that could mean two things is left to be refused and repaired.
  */
@@ -80,77 +82,14 @@ export function accountOf(world: WorldState, holderId: string): string | null {
   return accounts.length === 1 ? accounts[0]!.id : null;
 }
 
-/**
- * A province an invented id plainly names: "punic-italy-campania" for the
- * Campanian plain, "samnium-hills" for Samnium. Whole words of four letters
- * or more against the province names; only a single match counts.
- */
-/**
- * Words that describe any place and so identify none. Without this "the Nile
- * delta" was taken for the Rhone's -- the one word they shared was "delta".
- */
-const GENERIC_PLACE_WORDS = new Set([
-  "punic", "delta", "coast", "coastal", "plain", "plains", "hill", "hills", "upland", "uplands", "highlands", "mountains", "mountain",
-  "valley", "river", "mouth", "upper", "lower", "north", "south", "east", "west", "northern", "southern", "eastern", "western",
-  "central", "district", "county", "municipality", "region", "lands", "terrace", "gate", "heights", "forest", "passes", "island", "islands",
-]);
-
-function provinceByName(world: WorldState, value: string): string | null {
-  const words = value.toLowerCase().split(/[^a-z]+/).filter((word) => word.length >= 4 && !GENERIC_PLACE_WORDS.has(word));
-  if (words.length === 0) return null;
-  const hits = world.map.provinces.filter((province) => {
-    const name = province.name.toLowerCase();
-    return words.some((word) => name.split(/[^a-z]+/).some((part) => part.length >= 4 && !GENERIC_PLACE_WORDS.has(part) && (part.startsWith(word) || word.startsWith(part))));
-  });
-  return hits.length === 1 ? hits[0]!.id : null;
-}
-
-/**
- * A province written by its name, or its city's: "Messana", "Panormus and the
- * north-west". The whole name, or the one place a province is named for.
- */
-function provinceNamed(world: WorldState, value: string): string | null {
-  const wanted = value.trim().toLowerCase().replace(/[_-]+/g, " ");
-  if (wanted.length < 4) return null;
-  const whole = world.map.provinces.filter((province) => province.name.toLowerCase() === wanted
-    || province.settlements.some((settlement) => settlement.name.toLowerCase() === wanted));
-  if (whole.length === 1) return whole[0]!.id;
-  const named = world.map.provinces.filter((province) => placeWordsOf(province).includes(wanted));
-  return named.length === 1 ? named[0]!.id : null;
-}
-
-/** The words a province goes by in prose: the place it is named for, and its cities. */
-function placeWordsOf(province: WorldState["map"]["provinces"][number]): string[] {
-  const first = province.name.toLowerCase().split(/\s+and\s+|,/)[0]!.trim();
-  return [first, ...province.settlements.map((settlement) => settlement.name.toLowerCase())]
-    .filter((word) => word.length >= 4 && !GENERIC_PLACE_WORDS.has(word));
-}
-
 /** Where an act's own words say it happens: the provinces its reason and label name. */
-function placesSaidIn(delta: WorldDelta, world: WorldState): Set<string> {
+function placesSaidIn(delta: WorldDelta, index: PlaceIndex): Set<string> {
   const record = delta as Record<string, unknown>;
   const said = ["reason", "label", "summary", "title", "duties"]
     .map((key) => record[key])
     .filter((value): value is string => typeof value === "string")
-    .join(" ")
-    .toLowerCase();
-  if (said.length === 0) return new Set();
-  const found = new Set<string>();
-  for (const province of world.map.provinces) {
-    if (placeWordsOf(province).some((word) => new RegExp(`(^|[^a-z])${word.replace(/[^a-z ]/g, "")}($|[^a-z])`).test(said))) found.add(province.id);
-  }
-  return found;
-}
-
-/**
- * Two ids of one family, differing only in their last word: the map's
- * provinces of one island, "...-sicily-northeast" and "...-sicily-northwest".
- * The copying error that costs most, because both ids are real.
- */
-function siblings(a: string, b: string): boolean {
-  const left = a.split("-");
-  const right = b.split("-");
-  return a !== b && left.length >= 3 && left.length === right.length && left.slice(0, -1).join("-") === right.slice(0, -1).join("-");
+    .join(" ");
+  return said.length === 0 ? new Set() : provincesNamedIn(index, said);
 }
 
 /** Fields naming where an act goes, as against where it comes from. */
@@ -158,21 +97,22 @@ const DESTINATION_FIELDS = new Set(["locationId", "provinceId", "toProvinceId", 
 
 /** The power behind something that named a province or a city where a power was wanted. */
 function polityOf(world: WorldState, id: string): string | null {
-  const province = world.map.provinces.find((candidate) => candidate.id === id);
+  const index = placeIndex(world);
+  const province = index.byId.get(id);
   if (province !== undefined) return province.controllerPolityId;
-  return world.map.provinces.flatMap((candidate) => candidate.settlements).find((settlement) => settlement.id === id)?.controllerPolityId ?? null;
+  const home = index.provinceOfSettlement.get(id);
+  return home === undefined ? null : index.byId.get(home)?.settlements.find((settlement) => settlement.id === id)?.controllerPolityId ?? null;
 }
 
 /** A province for something that named a power or a city where a province was wanted. */
 function provinceOf(world: WorldState, id: string): string | null {
-  const city = world.map.provinces.find((province) => province.settlements.some((settlement) => settlement.id === id));
-  if (city !== undefined) return city.id;
+  const index = placeIndex(world);
+  const city = index.provinceOfSettlement.get(id);
+  if (city !== undefined) return city;
   const polity = world.map.polities.find((candidate) => candidate.id === id);
   if (polity === undefined) return null;
-  const capital = polity.capitalSettlementId === null
-    ? undefined
-    : world.map.provinces.find((province) => province.settlements.some((settlement) => settlement.id === polity.capitalSettlementId));
-  return capital?.id ?? world.map.provinces.find((province) => province.controllerPolityId === polity.id)?.id ?? null;
+  const capital = polity.capitalSettlementId === null ? undefined : index.provinceOfSettlement.get(polity.capitalSettlementId);
+  return capital ?? world.map.provinces.find((province) => province.controllerPolityId === polity.id)?.id ?? null;
 }
 
 /** Fields naming an army the act can do without: an ambush, allies in a battle. */
@@ -196,27 +136,17 @@ export function normalizeRefs(
     }
     return found;
   };
-  // The start of an id copied and the rest dropped, or the end kept and the
-  // start rewritten -- "punic-italy-sicily-southeast" for a province whose id
-  // ends "-sicily-southeast". Either fits one thing, or nothing is guessed.
+  // The start of a long id copied and the rest dropped. It fits one thing, or
+  // nothing is guessed. Province ids are too short for this to mean anything;
+  // provinces are found by name below.
   const byPrefix = (value: string): string | null => {
     const trimmed = value.replace(/[^A-Za-z0-9._:-]+$/, "");
-    if (trimmed.length >= MIN_PREFIX) {
-      const found = unique((id) => id.startsWith(trimmed));
-      if (found !== null) return found;
-    }
-    const parts = trimmed.split("-");
-    for (let drop = 1; drop < parts.length - 1; drop += 1) {
-      const tail = parts.slice(drop).join("-");
-      if (tail.length < 8) break;
-      const found = unique((id) => id.endsWith(`-${tail}`));
-      if (found !== null) return found;
-    }
-    return null;
+    return trimmed.length >= MIN_PREFIX ? unique((id) => id.startsWith(trimmed)) : null;
   };
+  const places = placeIndex(world);
   // Read once, and only when a province is in question.
   let said: Set<string> | null = null;
-  const saidPlaces = (): Set<string> => (said ??= placesSaidIn(delta, world));
+  const saidPlaces = (): Set<string> => (said ??= placesSaidIn(delta, places));
   // Where the act already stands or starts: the army's own ground, and any
   // other province the act names in a field of its own.
   let stands: Set<string> | null = null;
@@ -288,7 +218,7 @@ export function normalizeRefs(
       if (polity !== null) return polity;
     }
     const isAccount = world.material.accounts.some((account) => account.id === value);
-    const isProvince = world.map.provinces.some((province) => province.id === value);
+    const isProvince = places.byId.has(value);
     if (wantsAccount && !isAccount) {
       const account = accountOf(world, value) ?? (known.has(value) ? null : accountOf(world, byPrefix(value) ?? ""));
       if (account !== null) return account;
@@ -306,21 +236,20 @@ export function normalizeRefs(
     }
     if (wantsProvince && isProvince && DESTINATION_FIELDS.has(key)) {
       // A real province, and not the one the act's own words name. Hieron's
-      // squadron, sent to Messana, was written "...-sicily-northwest" for
-      // "...-sicily-northeast": thirty characters alike, and it sailed round
-      // the wrong side of the island into Panormus. Where the words name
-      // exactly one place, of the same family of ids as the one written, and
-      // not the one written, the words are what was meant.
+      // squadron, sent to Messana, was written with Panormus's id and sailed
+      // round the wrong side of the island. Where the words name exactly one
+      // place that lies close to the one written (two crossings), and not the
+      // one written, the words are what was meant.
       const said = saidPlaces();
       if (said.size > 0 && !said.has(value)) {
-        const meant = [...said].filter((id) => siblings(id, value) && !elsewhere().has(id));
+        const meant = [...said].filter((id) => withinHops(places, value, id, 2) && !elsewhere().has(id));
         if (meant.length === 1) return meant[0]!;
       }
     }
     if (wantsProvince && !isProvince) {
-      const named = provinceNamed(world, value);
+      const named = provinceNamedExactly(places, value);
       if (named !== null) return named;
-      const province = provinceOf(world, value) ?? (known.has(value) ? null : provinceOf(world, byPrefix(value) ?? "") ?? byPrefix(value) ?? provinceByName(world, value));
+      const province = provinceOf(world, value) ?? (known.has(value) ? null : provinceOf(world, byPrefix(value) ?? "") ?? byPrefix(value) ?? provinceNamedByWords(places, value));
       if (province !== null) return province;
     }
     if (known.has(value)) return value;
@@ -388,7 +317,7 @@ export function peopleNamedButNeverMade(
     // made and named after a tribe.
     const bare = value.replace(/^local:/, "");
     if (world.map.polities.some((polity) => polity.id === bare || polity.id.endsWith(`-${bare}`))
-      || world.map.provinces.some((province) => province.id === bare || province.id.endsWith(`-${bare}`))) return value;
+      || placeIndex(world).byId.has(bare) || provinceNamedExactly(placeIndex(world), bare) !== null) return value;
     const handle = value.replace(/^local:/, "").replace(/[^a-z0-9_-]/gi, "_").toLowerCase();
     toMake.set(handle, nameFrom(value));
     return `local:${handle}`;

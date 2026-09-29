@@ -12,7 +12,9 @@ import {
   warStanding,
   enemiesOf,
   groundToRetake,
-  hopsBetween,
+  ENEMY_NEAR_KM,
+  describeKm,
+  kmBetween,
   isDelivered,
   estimateMen,
   warsOf,
@@ -522,9 +524,6 @@ function describeMind(character: Character): string[] {
 const placeOf = (world: WorldState, provinceId: string): string =>
   `${world.map.provinces.find((province) => province.id === provinceId)?.name ?? provinceId} [${provinceId}]`;
 
-/** How far an enemy may be and still be something a commander has to answer. */
-const ENEMY_NEAR_HOPS = 2;
-
 /**
  * The wars their power is in, and the enemy close enough to matter.
  *
@@ -534,7 +533,7 @@ const ENEMY_NEAR_HOPS = 2;
  * fifteen times. A portrait listed a man's own army by a location id and never
  * mentioned that there was a war, or who was in it, or where.
  *
- * Armies within two provinces are the kind of thing scouts, merchants and
+ * Armies within a couple of days' ride are the kind of thing scouts, merchants and
  * rumour make known; further off, what they know is what they have been told.
  */
 function describeWars(character: Character, world: WorldState): string[] {
@@ -559,9 +558,9 @@ function describeWars(character: Character, world: WorldState): string[] {
   const from = [...new Set([character.locationProvinceId, ...own.map((force) => force.locationId)].filter((id): id is string => id !== null))];
   const near = world.material.forces
     .filter((force) => enemies.includes(force.polityId))
-    .map((force) => ({ force, hops: Math.min(...from.map((here) => hopsBetween(world, here, force.locationId, ENEMY_NEAR_HOPS) ?? Infinity)) }))
-    .filter((entry) => entry.hops <= ENEMY_NEAR_HOPS)
-    .sort((a, b) => a.hops - b.hops)
+    .map((force) => ({ force, km: Math.min(...from.map((here) => kmBetween(world, here, force.locationId, ENEMY_NEAR_KM) ?? Infinity)) }))
+    .filter((entry) => entry.km <= ENEMY_NEAR_KM)
+    .sort((a, b) => a.km - b.km)
     .slice(0, 6);
   // A war nobody is fighting. Rome was at war with the Campanians of Rhegium
   // for five months and no Roman army went near them: the only legions were
@@ -581,14 +580,14 @@ function describeWars(character: Character, world: WorldState): string[] {
         ...world.material.forces.filter((force) => force.polityId === enemy).map((force) => force.locationId),
       ];
       if (theirs.length === 0) continue;
-      const inReach = ours.some((force) => theirs.some((place) => (hopsBetween(world, force.locationId, place, ENEMY_NEAR_HOPS) ?? Infinity) <= ENEMY_NEAR_HOPS));
+      const inReach = ours.some((force) => theirs.some((place) => (kmBetween(world, force.locationId, place, ENEMY_NEAR_KM) ?? Infinity) <= ENEMY_NEAR_KM));
       if (!inReach) lines.push(`No army of their power stands within reach of ${polityName(enemy)}: to raise one or send one against them is the business of whoever may.`);
     }
   }
   // Ground their power lost in the war, and how far their own army is from it.
   for (const lost of groundToRetake(world, polityId).slice(0, 4)) {
-    const reach = own.map((force) => ({ force, hops: hopsBetween(world, force.locationId, lost.provinceId, ENEMY_NEAR_HOPS) })).filter((entry) => entry.hops !== null).sort((a, b) => a.hops! - b.hops!)[0];
-    lines.push(`Their power lost ${placeOf(world, lost.provinceId)} to ${polityName(lost.holderId)} ${lost.daysAgo} days ago${reach === undefined ? "" : `; ${reach.force.name} is ${reach.hops === 0 ? "there" : reach.hops === 1 ? "one province from it" : `${reach.hops} provinces from it`}`}.`);
+    const reach = own.map((force) => ({ force, km: kmBetween(world, force.locationId, lost.provinceId, ENEMY_NEAR_KM) })).filter((entry) => entry.km !== null).sort((a, b) => a.km! - b.km!)[0];
+    lines.push(`Their power lost ${placeOf(world, lost.provinceId)} to ${polityName(lost.holderId)} ${lost.daysAgo} days ago${reach === undefined ? "" : `; ${reach.force.name} is ${reach.km === 0 ? "there" : `about ${describeKm(reach.km!)} from it`}`}.`);
   }
   // Sieges their power lays or suffers, with the siege's id for "siege_lift".
   const sieges = world.sieges.filter((siege) => siege.status === "active" && (siege.besiegerPolityId === polityId || siege.defenderPolityId === polityId));
@@ -600,13 +599,13 @@ function describeWars(character: Character, world: WorldState): string[] {
   }
   if (near.length > 0) {
     // Counted as the player's own scouts would count them (`estimateMen`): by
-    // eye where they stand in the same province, by report a province or two
+    // eye where they stand in the same province, by report a day or two
     // off -- never the true muster, which a portrait printed to the man.
-    lines.push("Enemy forces near them:", ...near.map(({ force, hops }) => {
+    lines.push("Enemy forces near them:", ...near.map(({ force, km }) => {
       const fit = force.personnel.reduce((sum, category) => sum + category.fit, 0);
       const seenThisWeek = Math.floor(world.elapsedStep / 7);
-      const count = estimateMen(fit, hops === 0 ? "own_eyes" : "report", 0, [force.id, character.id, seenThisWeek]).label;
-      const where = hops === 0 ? "here, in the same province" : hops === 1 ? "one province off" : `${hops} provinces off`;
+      const count = estimateMen(fit, km === 0 ? "own_eyes" : "report", 0, [force.id, character.id, seenThisWeek]).label;
+      const where = km === 0 ? "here, in the same province" : `about ${describeKm(km)} off`;
       return `  - ${force.name} [${force.id}] of ${polityName(force.polityId)} — ${count} at ${placeOf(world, force.locationId)}, ${where}`;
     }));
   }

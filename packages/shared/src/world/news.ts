@@ -1,7 +1,9 @@
 import type { Fact } from "./facts";
 import type { WorldInstant } from "./instant";
-import type { CrossingType, ProvinceEdge } from "./map";
+import type { ProvinceEdge } from "./map";
+import { adjacentTo, kmFrom } from "./movement";
 import type { OrderPartyRef } from "./party-ref";
+import { NEWS_LAND_KM_PER_DAY, NEWS_PASS_KM_PER_DAY, NEWS_SEA_KM_PER_DAY, NEWS_WATER_MIN_DAYS } from "./travel";
 import type { WorldState } from "./world-state";
 
 /**
@@ -23,18 +25,21 @@ import type { WorldState } from "./world-state";
 export type NewsWorld = Pick<WorldState, "map" | "characters" | "material">;
 
 /**
- * Days a rider or a boat takes over one border. A province here is a region --
- * Latium, Bruttium, western Sicily -- and a courier on the roads makes one in
- * about two days; a strait is a morning's crossing, an open sea lane two days'
- * sail; a mountain pass is slower than the plain.
+ * Days a rider or a boat takes over one border, from how long the border is.
+ * A courier on the roads makes a reference province in about two days; a
+ * mountain pass is slower than the plain; a crossing by water is a morning at
+ * the least, and an open sea lane runs at a boat's pace. Read from kilometres,
+ * not borders, so a letter takes as long on a finely cut map as on a coarse one.
  */
-export const NEWS_DAYS_BY_CROSSING: Readonly<Record<CrossingType, number>> = {
-  land: 2,
-  river: 2,
-  pass: 3,
-  strait: 1,
-  sea_lane: 2,
-};
+export function newsDaysOver(edge: ProvinceEdge): number {
+  switch (edge.crossing) {
+    case "land":
+    case "river": return edge.distance / NEWS_LAND_KM_PER_DAY;
+    case "pass": return edge.distance / NEWS_PASS_KM_PER_DAY;
+    case "strait":
+    case "sea_lane": return Math.max(NEWS_WATER_MIN_DAYS, edge.distance / NEWS_SEA_KM_PER_DAY);
+  }
+}
 
 /**
  * However far, word gets there within a month. Beyond that the graph is
@@ -49,23 +54,35 @@ const sortKeyOf = (instant: WorldInstant): number => instant.day * MINUTES_PER_D
 // The graph changes only when a map is rebuilt, so what is walked once is kept
 // for as long as that edge list lives: a slice asks for hundreds of facts
 // read from a handful of places.
-const adjacencyByEdges = new WeakMap<readonly ProvinceEdge[], Map<string, { readonly to: string; readonly days: number }[]>>();
 const daysByEdges = new WeakMap<readonly ProvinceEdge[], Map<string, ReadonlyMap<string, number>>>();
+const componentsByEdges = new WeakMap<readonly ProvinceEdge[], Map<string, number>>();
 
-function adjacencyOf(edges: readonly ProvinceEdge[]): Map<string, { readonly to: string; readonly days: number }[]> {
-  const cached = adjacencyByEdges.get(edges);
+/** Which connected piece of the graph each province with an edge belongs to. */
+function componentsOf(world: NewsWorld): Map<string, number> {
+  const cached = componentsByEdges.get(world.map.edges);
   if (cached !== undefined) return cached;
-  const adjacency = new Map<string, { to: string; days: number }[]>();
-  for (const edge of edges) {
-    const days = NEWS_DAYS_BY_CROSSING[edge.crossing];
-    adjacency.set(edge.from, [...(adjacency.get(edge.from) ?? []), { to: edge.to, days }]);
-    adjacency.set(edge.to, [...(adjacency.get(edge.to) ?? []), { to: edge.from, days }]);
+  const component = new Map<string, number>();
+  let count = 0;
+  for (const edge of world.map.edges) {
+    for (const start of [edge.from, edge.to]) {
+      if (component.has(start)) continue;
+      const stack = [start];
+      component.set(start, count);
+      while (stack.length > 0) {
+        for (const next of adjacentTo(world, stack.pop()!)) {
+          if (component.has(next.provinceId)) continue;
+          component.set(next.provinceId, count);
+          stack.push(next.provinceId);
+        }
+      }
+      count += 1;
+    }
   }
-  adjacencyByEdges.set(edges, adjacency);
-  return adjacency;
+  componentsByEdges.set(world.map.edges, component);
+  return component;
 }
 
-/** Days by road from one province to every province there is a road to. */
+/** Days by road from one province to every province within a month's ride of it. */
 function newsDaysFrom(world: NewsWorld, fromProvinceId: string): ReadonlyMap<string, number> {
   const edges = world.map.edges;
   let bySource = daysByEdges.get(edges);
@@ -75,21 +92,7 @@ function newsDaysFrom(world: NewsWorld, fromProvinceId: string): ReadonlyMap<str
   }
   const cached = bySource.get(fromProvinceId);
   if (cached !== undefined) return cached;
-  // Crossings cost whole days, so a bucket per day is an exact Dijkstra.
-  const adjacency = adjacencyOf(edges);
-  const days = new Map<string, number>([[fromProvinceId, 0]]);
-  const buckets: string[][] = [[fromProvinceId]];
-  for (let day = 0; day < buckets.length; day += 1) {
-    for (const provinceId of buckets[day] ?? []) {
-      if (days.get(provinceId) !== day) continue;
-      for (const next of adjacency.get(provinceId) ?? []) {
-        const arrives = day + next.days;
-        if (arrives >= (days.get(next.to) ?? Infinity)) continue;
-        days.set(next.to, arrives);
-        (buckets[arrives] ??= []).push(next.to);
-      }
-    }
-  }
+  const days = kmFrom(world, fromProvinceId, { cost: newsDaysOver, budgetKm: MAX_NEWS_DAYS });
   bySource.set(fromProvinceId, days);
   return days;
 }
@@ -103,7 +106,11 @@ function newsDaysFrom(world: NewsWorld, fromProvinceId: string): ReadonlyMap<str
  */
 export function newsDaysBetween(world: NewsWorld, fromProvinceId: string, toProvinceId: string): number {
   if (fromProvinceId === toProvinceId) return 0;
-  return Math.min(MAX_NEWS_DAYS, newsDaysFrom(world, fromProvinceId).get(toProvinceId) ?? 0);
+  const components = componentsOf(world);
+  const here = components.get(fromProvinceId);
+  if (here === undefined || here !== components.get(toProvinceId)) return 0;
+  const days = newsDaysFrom(world, fromProvinceId).get(toProvinceId);
+  return days === undefined ? MAX_NEWS_DAYS : Math.min(MAX_NEWS_DAYS, Math.ceil(days));
 }
 
 interface Whereabouts {

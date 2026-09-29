@@ -1,6 +1,7 @@
 import type { Force } from "../material-state";
 import type { WorldState } from "../world/world-state";
 import { atWar, mayEnterWithoutLeave, sameConfederation } from "../world/agreements";
+import { adjacentTo, provinceOf } from "../world/movement";
 import { isWaterCrossing } from "./sea";
 
 /**
@@ -21,18 +22,17 @@ import { isWaterCrossing } from "./sea";
 export function retreatRoute(world: WorldState, force: Force, fromProvinceId: string, enemyPolityIds: ReadonlySet<string>, naval = false): string | null {
   const agreements = world.polityAgreements;
   const neighbours = new Set<string>();
-  for (const edge of world.map.edges) {
-    if (!naval && isWaterCrossing(edge.crossing)) continue;
-    if (edge.from === fromProvinceId) neighbours.add(edge.to);
-    else if (edge.to === fromProvinceId) neighbours.add(edge.from);
+  for (const next of adjacentTo(world, fromProvinceId)) {
+    if (!naval && isWaterCrossing(next.edge.crossing)) continue;
+    neighbours.add(next.provinceId);
   }
   const hostile = (polityId: string | null): boolean =>
     polityId !== null && polityId !== force.polityId && (enemyPolityIds.has(polityId) || atWar(agreements, force.polityId, polityId));
   const enemyHeld = (provinceId: string): boolean =>
-    hostile(world.map.provinces.find((province) => province.id === provinceId)?.controllerPolityId ?? null);
+    hostile(provinceOf(world, provinceId)?.controllerPolityId ?? null);
 
   const scored = [...neighbours].flatMap((provinceId) => {
-    const province = world.map.provinces.find((candidate) => candidate.id === provinceId);
+    const province = provinceOf(world, provinceId);
     if (province === undefined) return [];
     const holder = province.controllerPolityId;
     let score = 0;
@@ -49,9 +49,8 @@ export function retreatRoute(world: WorldState, force: Force, fromProvinceId: st
     }
     // Away from the enemy: his armies standing there, and his ground beyond it.
     if (world.material.forces.some((other) => other.locationId === provinceId && hostile(other.polityId))) score -= 80;
-    for (const edge of world.map.edges) {
-      const beyond = edge.from === provinceId ? edge.to : edge.to === provinceId ? edge.from : null;
-      if (beyond !== null && beyond !== fromProvinceId && enemyHeld(beyond)) score -= 10;
+    for (const { provinceId: beyond } of adjacentTo(world, provinceId)) {
+      if (beyond !== fromProvinceId && enemyHeld(beyond)) score -= 10;
     }
     return [{ provinceId, score }];
   });

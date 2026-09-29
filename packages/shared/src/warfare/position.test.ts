@@ -12,7 +12,6 @@ const province: Province = {
   ],
   controllerPolityId: "rome",
   controlFirmnessBps: 7_000,
-  tier: "focus",
 };
 
 describe("fallbackPositionsFor", () => {

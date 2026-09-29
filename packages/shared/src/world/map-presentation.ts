@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { BasisPointsSchema, EntityIdSchema } from "../material-state";
 import { GeoJsonPositionSchema } from "./geojson";
-import { DetailTierSchema, SettlementKindSchema } from "./map";
+import { SettlementKindSchema } from "./map";
 
 const MapColourSchema = z.string().regex(/^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$/, "Map colours must be six- or eight-digit hex values.");
 const ZoomSchema = z.number().finite().min(0).max(32);
@@ -119,7 +119,7 @@ export type MapPoliticalOwnership = z.infer<typeof MapPoliticalOwnershipSchema>;
 
 export const MapProvinceOverlaySchema = MapPoliticalOwnershipSchema.extend({
   terrainId: EntityIdSchema,
-  tier: DetailTierSchema,
+  /** Unused: liveness is read from the world (`liveProvinceIds`). Optional so older payloads parse. */
 }).strict();
 export type MapProvinceOverlay = z.infer<typeof MapProvinceOverlaySchema>;
 
@@ -290,3 +290,74 @@ export const DynamicMapOverlaySchema = z.object({
   }
 });
 export type DynamicMapOverlay = z.infer<typeof DynamicMapOverlaySchema>;
+
+/**
+ * What changed in a map overlay since a copy the client already holds.
+ *
+ * A dense map has thousands of province and settlement rows and almost none of
+ * them move between two polls, so only the rows that differ (and the ids that
+ * are gone) travel. The small parts -- polities, alliances, armies, conflicts --
+ * are sent whole. Applying a delta to the state it was cut against yields
+ * exactly the newer state.
+ */
+export const MapOverlayDeltaSchema = z.object({
+  revision: z.number().int().nonnegative(),
+  polities: z.array(MapPolityOverlaySchema),
+  politicalRelations: z.array(MapPolityRelationOverlaySchema),
+  forces: z.array(MapForceOverlaySchema),
+  conflicts: MapConflictsOverlaySchema,
+  provinces: z.object({ changed: z.array(MapProvinceOverlaySchema), removed: z.array(EntityIdSchema) }).strict(),
+  settlements: z.object({ changed: z.array(MapSettlementOverlaySchema), removed: z.array(EntityIdSchema) }).strict(),
+}).strict();
+export type MapOverlayDelta = z.infer<typeof MapOverlayDeltaSchema>;
+
+function keyedDelta<T>(base: readonly T[], next: readonly T[], keyOf: (row: T) => string): { changed: T[]; removed: string[] } {
+  const before = new Map(base.map((row) => [keyOf(row), JSON.stringify(row)]));
+  const changed: T[] = [];
+  for (const row of next) {
+    const key = keyOf(row);
+    const was = before.get(key);
+    before.delete(key);
+    if (was !== JSON.stringify(row)) changed.push(row);
+  }
+  return { changed, removed: [...before.keys()] };
+}
+
+function applyKeyedDelta<T>(base: readonly T[], delta: { readonly changed: readonly T[]; readonly removed: readonly string[] }, keyOf: (row: T) => string): T[] {
+  const removed = new Set(delta.removed);
+  const replacements = new Map(delta.changed.map((row) => [keyOf(row), row]));
+  const rows: T[] = [];
+  for (const row of base) {
+    const key = keyOf(row);
+    if (removed.has(key)) continue;
+    const replacement = replacements.get(key);
+    if (replacement === undefined) rows.push(row);
+    else { rows.push(replacement); replacements.delete(key); }
+  }
+  for (const row of replacements.values()) rows.push(row);
+  return rows;
+}
+
+export function diffMapOverlay(base: DynamicMapOverlay, next: DynamicMapOverlay): MapOverlayDelta {
+  return {
+    revision: next.revision,
+    polities: next.polities,
+    politicalRelations: next.politicalRelations,
+    forces: next.forces,
+    conflicts: next.conflicts,
+    provinces: keyedDelta(base.provinces, next.provinces, (row) => row.provinceId),
+    settlements: keyedDelta(base.settlements, next.settlements, (row) => row.settlementId),
+  };
+}
+
+export function applyMapOverlayDelta(base: DynamicMapOverlay, delta: MapOverlayDelta): DynamicMapOverlay {
+  return {
+    revision: delta.revision,
+    polities: delta.polities,
+    politicalRelations: delta.politicalRelations,
+    forces: delta.forces,
+    conflicts: delta.conflicts,
+    provinces: applyKeyedDelta(base.provinces, delta.provinces, (row) => row.provinceId),
+    settlements: applyKeyedDelta(base.settlements, delta.settlements, (row) => row.settlementId),
+  };
+}
