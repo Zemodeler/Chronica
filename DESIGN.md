@@ -172,6 +172,9 @@ The satellite relief is drawn as an engraved plate:
 
 - a sepia pass over the terrain, baked once into the raster bitmap when it
   loads, so no frame pays for it;
+- the relief itself sharp where the player looks: tiles of shaded relief
+  (`apps/web/app/games/[gameId]/components/relief-tiles.ts`) fetched only for
+  what is in view and toned the same way, over the whole-world raster;
 - flat ink-teal water;
 - each polity as a light wash with a strong band inside its border, like a
   hand-coloured atlas, in mineral pigments;

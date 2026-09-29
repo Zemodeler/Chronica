@@ -5,6 +5,7 @@ import { detachedFragmentProvinces, GROUP_STRENGTH, PROVINCE_LINE_RGB, provinceL
 import type { ViewportTransform } from "./map-viewport";
 import { drawPoliticalLabels } from "./map-canvas-labels";
 import { drawForces, drawSettlements } from "./map-canvas-entities";
+import type { ReliefLayer } from "./relief-tiles";
 import type { ForceFlagAsset } from "./army-standard";
 import { displayUnit } from "./map-display-unit";
 import { ATLAS } from "../../../../lib/palette";
@@ -302,6 +303,7 @@ export function drawTerrainToCanvas(
   hoveredProvinceId: string | null,
   interacting: boolean,
   requestRedraw: () => void,
+  relief: ReliefLayer | null = null,
 ): void {
   const ctx = canvas.getContext("2d");
   if (!ctx || containerW === 0 || containerH === 0) return;
@@ -344,6 +346,8 @@ export function drawTerrainToCanvas(
   ctx.fillStyle = WATER_FILL;
   ctx.fillRect(vx, vy, vw, vh);
   if (baseImage) ctx.drawImage(baseImage, -180, -90, 360, 180);
+  // The sharp relief over it, only where the player is looking.
+  relief?.draw(ctx, visibleRect, m * dpr);
   // Detail raster (Mediterranean inset)
   if (detailImage) ctx.drawImage(detailImage, -25, -72, 85, 57);
   ctx.restore();
