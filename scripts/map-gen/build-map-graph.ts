@@ -4,7 +4,7 @@
  *
  * Inputs (all in $MAP_GEN_DATA): `<in>.json` and `<in>.samples.json` from generate-provinces.cjs, `old-map.json`
  * (the 780-province map, frozen before the swap), and optionally scripts/map-gen/anatolia-polities.json.
- * Usage (cwd anywhere): MAP_GEN_DATA=<dir> tsx scripts/map-gen/build-map-graph.ts [in=v4] [out=<suffix>]
+ * Usage (cwd anywhere): MAP_GEN_DATA=<dir> tsx scripts/map-gen/build-map-graph.ts [in=v5] [out=<suffix>]
  * Writes packages/db/src/punic-wars-map-graph.ts, apps/web/public/maps/punic-wars-provinces.geojson and
  * scripts/map-gen/anchors.json; with out=<suffix> the same three files with `-<suffix>` before the extension.
  */
@@ -19,7 +19,7 @@ import { nameProvinces } from './map-region-names';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '../..');
 const DATA = process.env.MAP_GEN_DATA ?? join(ROOT, '.map-gen-data');
-const IN = process.argv.find((a) => a.startsWith('in='))?.slice(3) ?? 'v4';
+const IN = process.argv.find((a) => a.startsWith('in='))?.slice(3) ?? 'v5';
 const SUFFIX = process.argv.find((a) => a.startsWith('out='))?.slice(4);
 const tag = SUFFIX === undefined || SUFFIX === '' ? '' : `-${SUFFIX}`;
 const OUT_GRAPH = join(ROOT, `packages/db/src/punic-wars-map-graph${tag}.ts`);
@@ -38,6 +38,7 @@ interface Meta {
   coastKm: number;
   riverFrac: number;
   sandFrac: number;
+  wetFrac: number;
   adj: { n: number; km: number; elev: number }[];
 }
 interface Generated {
@@ -63,11 +64,12 @@ const samples = JSON.parse(readFileSync(join(DATA, `${IN}.samples.json`), 'utf8'
 const old = JSON.parse(readFileSync(join(DATA, 'old-map.json'), 'utf8')) as OldMap;
 // The polity files, one per theatre. Each lists its polities most-specific first; a province is tested against the list of its own theatre.
 // A polity named in two files (ptolemaic-egypt) is one polity: the later file's core replaces the earlier one's, and settlements and territory add up.
-const THEATRES = ['anatolia', 'egypt-arabia', 'levant-caucasus-iran'] as const;
+const THEATRES = ['anatolia', 'egypt-arabia', 'levant-caucasus-iran', 'iraq'] as const;
 type Theatre = (typeof THEATRES)[number];
 const territoryLists = new Map<Theatre, { id: string; rings: [number, number][][] }[]>();
 const definitions = new Map<string, AnatoliaPolity>();
 const absentFiles: string[] = [];
+const seleucidCities: AnatoliaSettlement[] = [];
 for (const theatre of THEATRES) {
   let file: AnatoliaPolity[];
   try {
@@ -77,6 +79,7 @@ for (const theatre of THEATRES) {
     continue;
   }
   territoryLists.set(theatre, file.map((p) => ({ id: p.id, rings: p.territory })));
+  seleucidCities.push(...(JSON.parse(readFileSync(join(HERE, `${theatre}-polities.json`), 'utf8')) as { seleucidCities?: AnatoliaSettlement[] }).seleucidCities ?? []);
   for (const p of file) {
     const before = definitions.get(p.id);
     // a later file may restate a polity it shares: what it says replaces, what it leaves null stands, settlements and territory add
@@ -88,6 +91,12 @@ for (const theatre of THEATRES) {
       territory: [...before.territory, ...p.territory],
     });
   }
+}
+// the cities the Iraq file gives the Seleucids are settlements of the one seleucid-empire, except two whose site is uncertain
+const UNCERTAIN_SITES = new Set(['settlement-apamea-tigris', 'settlement-charax-alexandria']);
+{
+  const seleucid = definitions.get('seleucid-empire');
+  if (seleucid !== undefined) seleucid.otherSettlements = [...seleucid.otherSettlements, ...seleucidCities.filter((c) => !UNCERTAIN_SITES.has(c.settlementId) && !seleucid.otherSettlements.some((o) => o.settlementId === c.settlementId) && c.settlementId !== seleucid.capital?.settlementId)];
 }
 const anatolia: AnatoliaPolity[] = [...definitions.values()];
 if (absentFiles.length > 0) console.log(`absent, so their provinces stay unowned: ${absentFiles.join(', ')}`);
@@ -182,6 +191,7 @@ const asiaMinors = polygonsOf(turkey.geometry).map((polygon) => polygon[0]!).fil
 // the settled countries of the eastern theatres, by their Natural Earth outlines
 const countryRings = (names: string[]): Ring[] => world.features.filter((f) => names.includes(f.properties.ADMIN)).flatMap((f) => polygonsOf(f.geometry).map((polygon) => polygon[0]!));
 const egyptArabiaRings = countryRings(['Egypt', 'Saudi Arabia']);
+const iraqRings = countryRings(['Iraq', 'Kuwait']);
 const levantRings = countryRings(['Syria', 'Lebanon', 'Israel', 'Palestine', 'Jordan', 'Georgia', 'Armenia', 'Azerbaijan', 'Iran']);
 const shareIn = (rings: Ring[], i: number): number => {
   const pts = samples[i]!;
@@ -189,7 +199,7 @@ const shareIn = (rings: Ring[], i: number): number => {
   for (let k = 0; k < pts.length; k += 2) if (rings.some((ring) => ringContains(ring, pts[k]!, pts[k + 1]!))) inside++;
   return inside / (pts.length / 2);
 };
-const theatreOf = (i: number): Theatre | null => (anatolianShare(i) >= 0.5 ? 'anatolia' : shareIn(egyptArabiaRings, i) >= 0.5 ? 'egypt-arabia' : shareIn(levantRings, i) >= 0.5 ? 'levant-caucasus-iran' : null);
+const theatreOf = (i: number): Theatre | null => (anatolianShare(i) >= 0.5 ? 'anatolia' : shareIn(egyptArabiaRings, i) >= 0.5 ? 'egypt-arabia' : shareIn(levantRings, i) >= 0.5 ? 'levant-caucasus-iran' : shareIn(iraqRings, i) >= 0.5 ? 'iraq' : null);
 const anatolianShare = (i: number): number => {
   const pts = samples[i]!;
   let inside = 0;
@@ -421,7 +431,7 @@ const shared = [...sharing.entries()].filter(([, ids]) => ids.length > 1);
 const terrain: string[] = P.map((p) => {
   if (p.coast) return 'coastal-plain';
   const lat = p.centroid[1];
-  if (lat < 34.5 && p.riverFrac < 0.02) return 'desert-steppe';
+  if (lat < 34.5 && p.riverFrac < 0.02 && p.wetFrac < 0.5) return 'desert-steppe';
   if (p.elevMean > 700 || p.slopeMKm > 90) return 'hills-uplands';
   return 'hills';
 });
@@ -800,6 +810,19 @@ const finalName = named.names;
 const nameKind = named.kinds;
 const formerNames = P.map((_, i) => (placeName[i] && placeName[i] !== finalName[i] ? [placeName[i]!] : []));
 
+// ---- the open desert belongs to no one: no settlement, no river or coast corridor, and 80 km from every town
+const unownedDesert: number[] = [];
+{
+  const towns: Point[] = settlements.filter((t) => t.provinceIndex >= 0).map((t) => [t.lon, t.lat]);
+  const hasTown = new Set(settlements.map((t) => t.provinceIndex));
+  for (let i = 0; i < N; i++) {
+    if (controller[i] === null || terrain[i] !== 'desert-steppe' || hasTown.has(i) || P[i]!.riverFrac >= 0.02 || P[i]!.coast) continue;
+    if (towns.some((t) => haversineKm(t, centreOf(i)) <= 80)) continue;
+    controller[i] = null;
+    unownedDesert.push(i);
+  }
+}
+
 // ---- polities that hold ground
 const holders = new Set(controller.filter((c): c is string => c !== null));
 const placedSettlements = new Set(settlements.filter((x) => x.provinceIndex >= 0).map((x) => x.id));
@@ -949,6 +972,7 @@ console.log(`provinces sharing settlements: ${shared.map(([i, ids]) => `${idOf[i
 console.log(`settlements beyond the map, dropped: ${offMap.join(', ') || 'none'}`);
 console.log(`off-map capitals: ${offMapPolities.join(', ') || 'none'}`);
 console.log(`crossings ${crossings.length}`);
+console.log(`open desert left to no one: ${unownedDesert.length}`);
 console.log(`smoothing: border edges between polities ${smoothing.edgesBefore} -> ${smoothing.edgesAfter}; land components ${smoothing.componentsBefore} -> ${smoothing.componentsAfter}; provinces flipped ${smoothing.flipped}, folded as exclaves ${smoothing.folded}`);
 console.log(`  settlements whose controller followed a folded province: ${smoothing.foldedSettlements.join('; ') || 'none'}`);
 console.log(`  polities still in several pieces on one landmass: ${smoothing.remainingSplits.join('; ') || 'none'}`);

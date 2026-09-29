@@ -84,14 +84,18 @@ export const REFERENCE_PROVINCE_AREA_KM2 = 7_000;
 export const COUNTRYSIDE_PER_KM2: Readonly<Record<string, number>> = {
   "coastal-plain": 80_000 / REFERENCE_PROVINCE_AREA_KM2,
   "hills-uplands": 40_000 / REFERENCE_PROVINCE_AREA_KM2,
+  // Herders and oasis-farmers: a province of desert holds a fifteenth of what a farming province does.
+  "desert-steppe": 3_500 / REFERENCE_PROVINCE_AREA_KM2,
 };
+/** However small or barren the ground, a well, a few tents or a hamlet: nowhere is counted empty. */
+const MIN_COUNTRYSIDE = 200;
 const COUNTRYSIDE_PER_KM2_OTHERWISE = 50_000 / REFERENCE_PROVINCE_AREA_KM2;
 
 /** How many people live in a province: its towns, or its countryside where it has none. */
 export function peopleOf(province: Pick<Province, "settlements" | "terrainId" | "areaKm2">): number {
   if (province.settlements.length === 0) {
     const density = COUNTRYSIDE_PER_KM2[province.terrainId] ?? COUNTRYSIDE_PER_KM2_OTHERWISE;
-    return Math.round(density * (province.areaKm2 ?? REFERENCE_PROVINCE_AREA_KM2));
+    return Math.max(MIN_COUNTRYSIDE, Math.round(density * (province.areaKm2 ?? REFERENCE_PROVINCE_AREA_KM2)));
   }
   return Math.max(0, province.settlements.reduce((total, settlement) => total + settlement.size * POPULATION_PER_SETTLEMENT_SIZE, 0));
 }

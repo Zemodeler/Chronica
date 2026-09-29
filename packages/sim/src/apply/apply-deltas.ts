@@ -5001,18 +5001,23 @@ function applyOne(
       const takingForce = world.material.forces.find(
         (force) => force.polityId === takerId && force.locationId === province.id,
       );
-      const sack = sackTheProvince(taken, {
-        provinceId: province.id,
-        takerPolityId: takerId,
-        takingForceId: takingForce?.id ?? null,
-        atStep,
-        cause: { kind: "action", id: province.id, explanation: `The taking of ${province.name}` },
-        transactionId: context.ids.next("txn"),
-      });
+      // Ground nobody held is claimed, not taken: there is no one to plunder.
+      const sack = province.controllerPolityId === null
+        ? { world: taken }
+        : sackTheProvince(taken, {
+          provinceId: province.id,
+          takerPolityId: takerId,
+          takingForceId: takingForce?.id ?? null,
+          atStep,
+          cause: { kind: "action", id: province.id, explanation: `The taking of ${province.name}` },
+          transactionId: context.ids.next("txn"),
+        });
       emitFact({
         localId: `province_${province.id}_${atStep}`.slice(0, 60),
         kind: "province_control_change",
-        summary: `${province.name}${province.controllerPolityId === null ? "" : `, held by ${polityName(world, province.controllerPolityId)},`} passed to ${polityName(world, takerId)}.`,
+        summary: province.controllerPolityId === null
+          ? `${polityName(world, takerId)} claimed ${province.name}, which no power had held.`
+          : `${province.name}, held by ${polityName(world, province.controllerPolityId)}, passed to ${polityName(world, takerId)}.`,
         affectedRefs: [
           { kind: "province", id: province.id },
           { kind: "polity", id: takerId },

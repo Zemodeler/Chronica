@@ -55,6 +55,16 @@ describe("deriveDefaultProvinceMaterial", () => {
   });
 });
 
+describe("the countryside of open ground", () => {
+  it("holds a fifteenth of what farmland of its size does in the desert", () => {
+    const desert: Province = { ...province, id: "the-steppe", terrainId: "desert-steppe", settlements: [], controllerPolityId: null, areaKm2: 1_400 };
+    const farms: Province = { ...desert, id: "the-farms", terrainId: "hills" };
+    const herders = deriveDefaultProvinceMaterial(desert, 0);
+    expect(herders.population).toBe(Math.round((COUNTRYSIDE_PER_KM2["desert-steppe"]!) * 1_400));
+    expect(herders.population * 10).toBeLessThan(deriveDefaultProvinceMaterial(farms, 0).population);
+  });
+});
+
 describe("ensureProvinceMaterial", () => {
   it("backfills a missing province and leaves an existing one untouched", () => {
     const otherProvince: Province = { ...province, id: "test-province-other", settlements: [] };

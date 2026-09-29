@@ -1,0 +1,585 @@
+{
+ "polities": [
+  {
+   "id": "marsh-peoples",
+   "name": "The marsh tribes of the Chaldean lowlands",
+   "reuseExisting": false,
+   "governmentForm": "tribal_confederation",
+   "cohesionBps": 2200,
+   "cohesionNote": "Equal to ligurians, hejaz-tribes and najd-tribes (2200): reed-country clans who answered to no common seat and paid the king little. Below qedar (2800), which at least has the sheikhs of Dumat.",
+   "capital": {
+    "settlementId": "settlement-bit-yakin",
+    "name": "Bit-Yakin (Chaldean tribal land, site unknown)",
+    "lon": 47.25,
+    "lat": 31.3,
+    "kind": "village",
+    "size": 6,
+    "fortificationLevel": 1
+   },
+   "otherSettlements": [
+    {
+     "settlementId": "settlement-hammar-landing",
+     "name": "Hammar marsh landing (placeholder)",
+     "lon": 46.85,
+     "lat": 31.0,
+     "kind": "village",
+     "size": 5,
+     "fortificationLevel": 1
+    },
+    {
+     "settlementId": "settlement-hawizeh-landing",
+     "name": "Hawizeh marsh landing (placeholder)",
+     "lon": 47.55,
+     "lat": 31.75,
+     "kind": "village",
+     "size": 5,
+     "fortificationLevel": 1
+    },
+    {
+     "settlementId": "settlement-central-marsh-landing",
+     "name": "Central marsh landing (placeholder)",
+     "lon": 47.0,
+     "lat": 31.65,
+     "kind": "village",
+     "size": 5,
+     "fortificationLevel": 1
+    }
+   ],
+   "ruler": null,
+   "notes": "Low-evidence placeholder of the same class as hejaz-tribes. Chaldean and Aramean tribes (Bit-Yakin, the Gambulu) lived in the marshes and are attested in Neo-Assyrian and Neo-Babylonian sources; the Hellenistic record for 270 names no ruler, seat or event, and Seleucid rule reached the marsh only nominally. Characene did not exist: Hyspaosines founded it in 141 BCE, after Antiochus IV refounded the Tigris-mouth city as Antiochia about 166-165. Fold into seleucid-empire if the lead wants no tribal actor here. Every settlement is a placeholder.",
+   "territory": [
+    [
+     [
+      46.6,
+      30.85
+     ],
+     [
+      46.9,
+      30.85
+     ],
+     [
+      47.2,
+      30.85
+     ],
+     [
+      47.55,
+      30.85
+     ],
+     [
+      47.9,
+      30.85
+     ],
+     [
+      47.85,
+      31.075
+     ],
+     [
+      47.8,
+      31.3
+     ],
+     [
+      47.675,
+      31.6
+     ],
+     [
+      47.55,
+      31.9
+     ],
+     [
+      47.35,
+      32.3
+     ],
+     [
+      46.9,
+      32.35
+     ],
+     [
+      46.5,
+      32.25
+     ],
+     [
+      46.3,
+      31.9
+     ],
+     [
+      46.3,
+      31.65
+     ],
+     [
+      46.3,
+      31.4
+     ],
+     [
+      46.4,
+      31.0
+     ],
+     [
+      46.6,
+      30.85
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "scenitae-arabs",
+   "name": "Arab tent-dwellers of the western Iraqi and Syrian steppe (Scenitae)",
+   "reuseExisting": false,
+   "governmentForm": "tribal_confederation",
+   "cohesionBps": 2200,
+   "cohesionNote": "Equal to hejaz-tribes and najd-tribes (2200) and below qedar (2800): camel and sheep herders on both banks of the middle Euphrates, each tribe its own chief, one name only in Greek geography.",
+   "capital": {
+    "settlementId": "settlement-ain-al-tamr",
+    "name": "Ain al-Tamr (Shithatha oasis)",
+    "lon": 43.62,
+    "lat": 32.6,
+    "kind": "village",
+    "size": 8,
+    "fortificationLevel": 1
+   },
+   "otherSettlements": [
+    {
+     "settlementId": "settlement-rutba-wells",
+     "name": "Rutba (Wadi Hauran wells, placeholder)",
+     "lon": 40.28,
+     "lat": 33.03,
+     "kind": "village",
+     "size": 5,
+     "fortificationLevel": 1
+    },
+    {
+     "settlementId": "settlement-salman-wells",
+     "name": "Sulman wells (southern desert)",
+     "lon": 44.53,
+     "lat": 30.49,
+     "kind": "village",
+     "size": 5,
+     "fortificationLevel": 1
+    },
+    {
+     "settlementId": "settlement-wadi-hauran-camp",
+     "name": "Wadi Hauran encampments (placeholder)",
+     "lon": 41.2,
+     "lat": 33.2,
+     "kind": "village",
+     "size": 5,
+     "fortificationLevel": 1
+    }
+   ],
+   "ruler": null,
+   "notes": "Xenophon's Arabs on the Euphrates (Anabasis 1.5) and Strabo's Scenitae (16.1.27) are the only Greek names; both are recalled, not re-read. The tribal names Tayy, Kalb and the rest are later or from Islamic sources and are not used; Rhambaei is a name from Gedrosia in Arrian, not Arabia. The ring reaches from the Wadi Hauran across the Hamad to the Euphrates' west bank as far as Kuwait's desert and abuts qedar at the Sirhan. Kuwait's mainland coast is in this ring: nothing Seleucid is known there except the fort on Failaka (Ikaros). Ain al-Tamr is an old oasis (Neo-Babylonian Shithatha); Rutba, Sulman and the Hauran camp are marked places only. Hira is a 3rd-century CE city: not used.",
+   "territory": [
+    [
+     [
+      38.85,
+      32.1
+     ],
+     [
+      39.6,
+      32.1
+     ],
+     [
+      40.6,
+      32.1
+     ],
+     [
+      41.6,
+      32.1
+     ],
+     [
+      42.6,
+      32.0
+     ],
+     [
+      43.05,
+      31.55
+     ],
+     [
+      43.95,
+      30.85
+     ],
+     [
+      43.45,
+      29.5
+     ],
+     [
+      43.45,
+      29.05
+     ],
+     [
+      48.05,
+      29.05
+     ],
+     [
+      48.05,
+      30.3
+     ],
+     [
+      46.6,
+      30.3
+     ],
+     [
+      45.9,
+      30.55
+     ],
+     [
+      45.2,
+      30.8
+     ],
+     [
+      44.75,
+      31.2
+     ],
+     [
+      44.4,
+      31.75
+     ],
+     [
+      44.1,
+      32.35
+     ],
+     [
+      43.85,
+      32.9
+     ],
+     [
+      43.4,
+      33.25
+     ],
+     [
+      42.8,
+      33.5
+     ],
+     [
+      42.3,
+      33.95
+     ],
+     [
+      41.5,
+      34.2
+     ],
+     [
+      40.9,
+      34.2
+     ],
+     [
+      39.9,
+      33.9
+     ],
+     [
+      38.95,
+      33.4
+     ],
+     [
+      38.85,
+      32.1
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "seleucid-empire",
+   "name": "Seleucid Empire",
+   "reuseExisting": true,
+   "governmentForm": "monarchy",
+   "cohesionBps": null,
+   "cohesionNote": "Unchanged (5500 in the Anatolian file). Babylonia is the richest and best-run core of the empire, the tax base, and holds Seleucia on the Tigris, but the empire's own 5500 covers the whole realm.",
+   "capital": {
+    "settlementId": "settlement-antioch-orontes",
+    "name": "Antioch on the Orontes",
+    "lon": 36.16,
+    "lat": 36.2,
+    "kind": "city",
+    "size": 75,
+    "fortificationLevel": 3
+   },
+   "otherSettlements": [],
+   "ruler": {
+    "name": "Antiochus I Soter",
+    "title": "King of the Seleucid Empire",
+    "note": "As in the other files. The eastern satrapies, Babylonia included, were run by his eldest son Seleucus as viceroy and co-regent from c. 275 until Antiochus put him to death in 268/7 (Wikipedia, Antiochus I Soter); Antiochus II followed as co-regent. Confidence medium.",
+    "confidence": "high"
+   },
+   "viceroy": {
+    "name": "Seleucus, eldest son of Antiochus I",
+    "title": "Viceroy of the upper satrapies",
+    "confidence": "medium"
+   },
+   "notes": "Iraq is the default holder, in three parts: Babylonia and the alluvium from Sippar to Ur; the Assyrian edge (Nineveh, Arbela, Ashur, Kirkuk) inside the Anatolian file's Seleucid ring; the Jazira with Nisibis. The settlements are in seleucidCities, not here. The west edge follows the Euphrates' west bank; the Arab ring and the marsh ring take precedence. The east edge abuts the Zagros Seleucid ring of the Levant/Iran file (Susiana, Media) and stops short of Atropatene. Zagros hill peoples (Cossaeans, Uxians) and Elymais have no independent polity in 270 (no king of Elymais before about 147) and stay inside the Seleucid rings of the Iran file.",
+   "territory": [
+    [
+     [
+      40.9,
+      37.25
+     ],
+     [
+      40.6,
+      36.3
+     ],
+     [
+      40.8,
+      35.4
+     ],
+     [
+      41.0,
+      34.5
+     ],
+     [
+      41.5,
+      34.2
+     ],
+     [
+      42.3,
+      33.95
+     ],
+     [
+      42.8,
+      33.5
+     ],
+     [
+      43.4,
+      33.25
+     ],
+     [
+      43.85,
+      32.9
+     ],
+     [
+      44.1,
+      32.35
+     ],
+     [
+      44.4,
+      31.75
+     ],
+     [
+      44.75,
+      31.2
+     ],
+     [
+      45.2,
+      30.8
+     ],
+     [
+      45.9,
+      30.55
+     ],
+     [
+      46.6,
+      30.3
+     ],
+     [
+      48.05,
+      30.3
+     ],
+     [
+      48.05,
+      30.45
+     ],
+     [
+      47.9,
+      31.5
+     ],
+     [
+      47.5,
+      32.4
+     ],
+     [
+      46.9,
+      32.8
+     ],
+     [
+      46.2,
+      33.2
+     ],
+     [
+      45.6,
+      34.0
+     ],
+     [
+      45.6,
+      34.5
+     ],
+     [
+      46.1,
+      35.3
+     ],
+     [
+      45.7,
+      35.9
+     ],
+     [
+      44.95,
+      36.65
+     ],
+     [
+      44.9,
+      37.1
+     ],
+     [
+      44.0,
+      37.1
+     ],
+     [
+      42.7,
+      37.1
+     ],
+     [
+      42.0,
+      37.25
+     ],
+     [
+      40.9,
+      37.25
+     ]
+    ]
+   ]
+  }
+ ],
+ "seleucidCities": [
+  {
+   "settlementId": "settlement-seleucia-tigris",
+   "name": "Seleucia on the Tigris",
+   "lon": 44.52,
+   "lat": 33.09,
+   "kind": "city",
+   "size": 85,
+   "fortificationLevel": 2
+  },
+  {
+   "settlementId": "settlement-babylon",
+   "name": "Babylon",
+   "lon": 44.42,
+   "lat": 32.54,
+   "kind": "city",
+   "size": 60,
+   "fortificationLevel": 3
+  },
+  {
+   "settlementId": "settlement-borsippa",
+   "name": "Borsippa",
+   "lon": 44.35,
+   "lat": 32.39,
+   "kind": "town",
+   "size": 25,
+   "fortificationLevel": 2
+  },
+  {
+   "settlementId": "settlement-kutha",
+   "name": "Kutha (Tell Ibrahim)",
+   "lon": 44.64,
+   "lat": 32.73,
+   "kind": "town",
+   "size": 12,
+   "fortificationLevel": 1
+  },
+  {
+   "settlementId": "settlement-sippar",
+   "name": "Sippar (Abu Habba)",
+   "lon": 44.25,
+   "lat": 33.06,
+   "kind": "town",
+   "size": 12,
+   "fortificationLevel": 2
+  },
+  {
+   "settlementId": "settlement-nippur",
+   "name": "Nippur",
+   "lon": 45.23,
+   "lat": 32.13,
+   "kind": "town",
+   "size": 15,
+   "fortificationLevel": 2
+  },
+  {
+   "settlementId": "settlement-uruk",
+   "name": "Uruk (Warka)",
+   "lon": 45.64,
+   "lat": 31.32,
+   "kind": "city",
+   "size": 30,
+   "fortificationLevel": 2
+  },
+  {
+   "settlementId": "settlement-larsa",
+   "name": "Larsa (Tell Senkereh)",
+   "lon": 45.85,
+   "lat": 31.24,
+   "kind": "town",
+   "size": 8,
+   "fortificationLevel": 1
+  },
+  {
+   "settlementId": "settlement-ur",
+   "name": "Ur",
+   "lon": 46.1,
+   "lat": 30.96,
+   "kind": "town",
+   "size": 8,
+   "fortificationLevel": 1
+  },
+  {
+   "settlementId": "settlement-apamea-tigris",
+   "name": "Apamea on the Tigris (site uncertain)",
+   "lon": 45.7,
+   "lat": 32.5,
+   "kind": "town",
+   "size": 15,
+   "fortificationLevel": 2
+  },
+  {
+   "settlementId": "settlement-charax-alexandria",
+   "name": "Alexandria on the Tigris (later Charax)",
+   "lon": 47.95,
+   "lat": 30.65,
+   "kind": "port",
+   "size": 8,
+   "fortificationLevel": 1
+  },
+  {
+   "settlementId": "settlement-ashur",
+   "name": "Ashur (Qal'at Sherqat)",
+   "lon": 43.26,
+   "lat": 35.46,
+   "kind": "town",
+   "size": 6,
+   "fortificationLevel": 1
+  },
+  {
+   "settlementId": "settlement-nineveh",
+   "name": "Nineveh (Kuyunjik)",
+   "lon": 43.15,
+   "lat": 36.36,
+   "kind": "town",
+   "size": 8,
+   "fortificationLevel": 1
+  },
+  {
+   "settlementId": "settlement-arbela",
+   "name": "Arbela (Erbil)",
+   "lon": 44.01,
+   "lat": 36.19,
+   "kind": "city",
+   "size": 25,
+   "fortificationLevel": 3
+  },
+  {
+   "settlementId": "settlement-karka-kirkuk",
+   "name": "Kirkuk (Karka de Beth Selok, Arrapha)",
+   "lon": 44.39,
+   "lat": 35.47,
+   "kind": "town",
+   "size": 12,
+   "fortificationLevel": 2
+  },
+  {
+   "settlementId": "settlement-nisibis",
+   "name": "Nisibis (Antioch in Mygdonia)",
+   "lon": 41.22,
+   "lat": 37.07,
+   "kind": "town",
+   "size": 25,
+   "fortificationLevel": 3
+  }
+ ],
+ "notes": "Seleucid cities of Iraq for the builder to add to seleucid-empire. Sizes on the scale of the existing Seleucid entries (Antioch 75, Ecbatana 70, Susa 60). Coordinates are from memory, good to about 0.05 deg; Apamea and Alexandria-on-the-Tigris sites are uncertain."
+}

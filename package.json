@@ -19,7 +19,7 @@
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "npm run test:e2e --workspace @chronica/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "maps:graph": "tsx scripts/map-gen/build-map-graph.ts in=v2 && tsx scripts/map-gen/resolve-extra-anchors.ts && tsx scripts/map-gen/describe-map-asset.ts",
+    "maps:graph": "tsx scripts/map-gen/build-map-graph.ts && tsx scripts/map-gen/resolve-extra-anchors.ts && tsx scripts/map-gen/describe-map-asset.ts",
     "maps:simplify": "node scripts/simplify-geojson.mjs",
     "validate:scenario": "tsx scripts/validate-scenario.ts",
     "play": "tsx scripts/hand-played-burst.mts",

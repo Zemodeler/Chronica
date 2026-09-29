@@ -174,7 +174,15 @@ describe("the Punic Wars map as authoritative world state", () => {
   const byId = new Map(provinces.map((province) => [province.id, province]));
   const terrains = new Map(punicWarsScenario.definition.map.terrains.map((terrain) => [terrain.id, terrain]));
 
-  it("carries every province the map draws a controller for, each with a declared holder", () => {
+  it("leaves unowned exactly the open desert: desert-steppe with no town in it", () => {
+    const unowned = provinces.filter((province) => province.controllerPolityId === null);
+    expect(unowned.length).toBeGreaterThan(0);
+    expect(unowned.filter((province) => province.terrainId !== "desert-steppe" || province.settlements.length > 0).map((province) => province.id)).toEqual([]);
+    // And it is never a place the story stands in.
+    for (const place of Object.values(PUNIC_IDS)) expect(byId.get(place)!.controllerPolityId, place).not.toBeNull();
+  });
+
+  it("carries every owned province with a declared holder", () => {
     expect(provinces.length).toBeGreaterThan(4_000);
     expect(new Set(provinces.map((province) => province.id)).size).toBe(provinces.length);
     // Every province knows how big it is, and where.
@@ -204,7 +212,7 @@ describe("the Punic Wars map as authoritative world state", () => {
   it("gives the east its powers too, each with ground, a cohesion and a government of its own", () => {
     const holders = new Set(provinces.map((province) => province.controllerPolityId));
     const east = ["armenia", "atropatene", "caspian-peoples", "caucasian-albania", "caucasian-iberia", "gerrha", "hejaz-tribes", "ituraeans", "judea", "kush", "lihyan",
-      "makran-tribes", "minaeans", "nabataeans", "najd-tribes", "qedar", "saba"];
+      "makran-tribes", "marsh-peoples", "scenitae-arabs", "minaeans", "nabataeans", "najd-tribes", "qedar", "saba"];
     for (const id of east) {
       const polity = world.map.polities.find((candidate) => candidate.id === id);
       expect(polity, `${id} is a polity of the world`).toBeDefined();

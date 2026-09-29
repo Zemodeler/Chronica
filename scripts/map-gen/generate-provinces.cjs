@@ -33,17 +33,19 @@ for(const f of gj.features){const g=f.geometry;if(!g)continue;const list=g.type=
  for(const p of list){for(const [x,y] of p[0]){if(x>=B.x0-1&&x<=B.x1+1&&y>=B.y0-1&&y<=B.y1+1){polys.push(p);break}}}}
 // Where seeds are thin but the land is not empty (Iran, the Levant, the Caucasus) the far-from-a-settlement rule is not applied,
 // except inside the named deserts; the sands of Arabia and the Sahara keep it.
-const WET_COUNTRIES=['Iran','Georgia','Armenia','Azerbaijan','Lebanon','Israel','Palestine','Syria','Jordan'];
+const WET_COUNTRIES=['Iran','Georgia','Armenia','Azerbaijan','Lebanon','Israel','Palestine','Syria','Jordan','Iraq'];
 const wetPolys=[];
 const ARID=[[[51.3,33.3],[52.5,35.2],[55.0,35.4],[57.5,35.2],[58.3,34.0],[57.0,33.0],[54.5,32.4],[52.0,32.6]],   // Dasht-e Kavir
  [[53.5,31.8],[57.0,32.5],[58.5,30.5],[57.5,28.5],[55.0,28.6],[53.3,30.0]],                                       // Yazd and Kerman
  [[58.0,33.8],[60.6,33.0],[61.0,30.5],[59.5,28.8],[57.6,30.0],[57.4,32.4]],                                       // Dasht-e Lut
  [[59.8,31.5],[63.8,31.0],[63.8,25.0],[57.0,25.0],[57.0,27.5],[59.5,28.5]],                                       // Sistan, Baluchistan, Makran
  [[34.0,29.4],[35.5,29.4],[35.5,31.4],[34.0,31.2]],                                                               // Negev
- [[36.8,29.4],[42.6,29.6],[42.6,34.8],[38.4,35.2],[37.6,33.5],[36.6,32.0]]];                                      // Transjordan steppe and the Syrian desert
+ [[36.8,29.4],[42.6,29.6],[42.6,34.8],[38.4,35.2],[37.6,33.5],[36.6,32.0]],                                      // Transjordan steppe and the Syrian desert
+ [[38.5,28.0],[42.0,28.0],[46.8,29.0],[46.3,30.4],[45.0,30.8],[44.2,31.4],[43.9,32.6],[42.9,33.3],[41.0,34.0],[38.8,32.2]],  // the Iraqi Hamad and Wadi Hauran, west of the Euphrates
+ [[46.5,28.5],[48.5,28.5],[48.5,30.2],[46.5,30.2]]];                                                                 // Kuwait                                      // Transjordan steppe and the Syrian desert
 // Anatolia, Egypt and Arabia: their outlines from Natural Earth 50m, added to the game's own coverage
 {const cj=JSON.parse(fs.readFileSync(path.join(ROOT,'apps/web/public/maps/natural-earth-50m-admin0-countries.geojson')));
- const added=[ARG.anatolia!=='0'?'Turkey':null,...(ARG.arabia!=='0'?['Egypt','Saudi Arabia','Syria','Lebanon','Israel','Palestine','Jordan','Georgia','Armenia','Azerbaijan','Iran']:[])];
+ const added=[ARG.anatolia!=='0'?'Turkey':null,...(ARG.arabia!=='0'?['Egypt','Saudi Arabia','Syria','Lebanon','Israel','Palestine','Jordan','Georgia','Armenia','Azerbaijan','Iran','Iraq','Kuwait']:[])];
  for(const f of cj.features){if(!added.includes(f.properties.ADMIN))continue;const g=f.geometry;const list=g.type==='Polygon'?[g.coordinates]:g.coordinates;
   for(const p of list){if(p[0].some(([x,y])=>x>=B.x0-1&&x<=B.x1+1&&y>=B.y0-1&&y<=B.y1+1)){polys.push(p);if(WET_COUNTRIES.includes(f.properties.ADMIN))wetPolys.push(p)}}}}
 const ringPath=r=>'M'+r.map(([x,y])=>{const [a,b]=lonlat2px(x,y);return a.toFixed(1)+','+b.toFixed(1)}).join('L')+'Z';
@@ -52,8 +54,25 @@ async function rasterSvg(inner){const svg=`<svg xmlns="http://www.w3.org/2000/sv
 (async()=>{
  const landBuf=await rasterSvg(polys.map(p=>`<path d="${p.map(ringPath).join('')}" fill="#fff" fill-rule="evenodd"/>`).join(''));
  const land=new Uint8Array(W*H);for(let i=0;i<W*H;i++)land[i]=landBuf[i]>127?1:0;
+ const boxMean=(src,R)=>{const tmp=new Float32Array(W*H),o=new Float32Array(W*H);const pr=new Float64Array(Math.max(W,H)+1);
+  for(let y=0;y<H;y++){pr[0]=0;for(let x=0;x<W;x++)pr[x+1]=pr[x]+src[y*W+x];for(let x=0;x<W;x++){const lo=Math.max(0,x-R),hi=Math.min(W-1,x+R);tmp[y*W+x]=(pr[hi+1]-pr[lo])/(hi-lo+1)}}
+  for(let x=0;x<W;x++){pr[0]=0;for(let y=0;y<H;y++)pr[y+1]=pr[y]+tmp[y*W+x];for(let y=0;y<H;y++){const lo=Math.max(0,y-R),hi=Math.min(H-1,y+R);o[y*W+x]=(pr[hi+1]-pr[lo])/(hi-lo+1)}}return o};
+ let sandBuf,ctryBuf,wetOuter=null;
+ // The Sahara and Arabia are masked by their natural continental outline, not by the game's old polygons or by national borders,
+ // so what survives there is decided by settlements, rivers and coast and its edges follow them, not a ruler.
+ {const cj=JSON.parse(fs.readFileSync(path.join(ROOT,'apps/web/public/maps/natural-earth-50m-admin0-countries.geojson')));
+  const inB=co=>co.some(([x,y])=>x>B.x0-.5&&x<B.x1+.5&&y>B.y0-.5&&y<B.y1+.5);
+  const BELT=['Libya','Algeria','Tunisia','Morocco','Western Sahara','Egypt','Sudan','Chad','Niger','Mali','Mauritania','Jordan','Syria','Iraq','Saudi Arabia','Kuwait','Israel','Palestine'];
+  let every='',belt='';
+  for(const f of cj.features){const gm=f.geometry;if(!gm)continue;const list=gm.type==='Polygon'?[gm.coordinates]:gm.type==='MultiPolygon'?gm.coordinates:[];
+   for(const p of list){if(!inB(p[0]))continue;const d=`<path d="${p.map(ringPath).join('')}" fill="#fff" fill-rule="evenodd"/>`;every+=d;if(BELT.includes(f.properties.ADMIN))belt+=d}}
+  ctryBuf=await rasterSvg(every);
+  if(ARG.belt!=='0'){const beltBuf=await rasterSvg(belt);const seaEarly=new Float32Array(W*H);for(let i=0;i<W*H;i++)seaEarly[i]=ctryBuf[i]>127?0:1;
+   const nearSea=boxMean(seaEarly,+(ARG.beltcoast??7));let added=0;
+   for(let y=0;y<H;y++){const la=rowLat(y);if(la<+(ARG.beltlo??20)||la>+(ARG.belthi??33))continue;
+    for(let x=0;x<W;x++){const i=y*W+x;if(!land[i]&&beltBuf[i]>127&&nearSea[i]<0.0005){land[i]=1;added++}}}
+   console.log('desert belt: natural land added, px',added)}}
  const land0=Uint8Array.from(land);   // the mask before lakes and gaps are cut: what is not land here is sea or off the map
- let sandBuf,ctryBuf;
  // lakes cut from land, rivers as barrier raster
  const inBox=co=>co.some(([x,y])=>x>B.x0-.5&&x<B.x1+.5&&y>B.y0-.5&&y<B.y1+.5);
  let lakeSvg='';{const s=await shp.open('data/awmc/inland water/'+fs.readdirSync('data/awmc/inland water').find(x=>x.endsWith('.shp')));
@@ -69,7 +88,7 @@ async function rasterSvg(inner){const svg=`<svg xmlns="http://www.w3.org/2000/sv
  lap(`raster ${W}x${H}, land px ${land.reduce((a,b)=>a+b,0)}, lake px ${lakes}, river lines ${nr}`);
  // ---- seeds
  // every town the eastern polity files name gets a seed of its own, first in line, so it is never cut away as empty desert
- const forced=[];if(ARG.arabia!=='0')for(const f of ['egypt-arabia-polities.json','levant-caucasus-iran-polities.json']){try{for(const pol of JSON.parse(fs.readFileSync(path.join(__dirname,f))).polities)for(const st of [pol.capital,...(pol.otherSettlements||[])])if(st&&!st.offMap&&isFinite(st.lon))forced.push([st.lon,st.lat,st.name,'polity-file:'+st.settlementId])}catch(e){}}
+ const forced=[];if(ARG.arabia!=='0')for(const f of ['egypt-arabia-polities.json','levant-caucasus-iran-polities.json','iraq-polities.json']){try{const file=JSON.parse(fs.readFileSync(path.join(__dirname,f)));for(const st of [...file.polities.flatMap(pol=>[pol.capital,...(pol.otherSettlements||[])]),...(file.seleucidCities||[]).filter(c=>!/apamea-tigris|charax-alexandria/.test(c.settlementId))])if(st&&!st.offMap&&isFinite(st.lon))forced.push([st.lon,st.lat,st.name,'polity-file:'+st.settlementId])}catch(e){}}
  const all=[...forced,...JSON.parse(fs.readFileSync(ARG.seeds||'seeds270.json'))];const seeds=[];const grid=new Map();const GC=Math.max(DEDUPE,FILL_R);
  const near=(x,y,r)=>{const gx=Math.floor(x/GC),gy=Math.floor(y/GC);for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const g=grid.get((gx+a)+','+(gy+b));if(g)for(const i of g){if(Math.hypot(seeds[i][0]-x,seeds[i][1]-y)<r)return true}}return false};
  const add=(x,y,name,src,lo,la,pid)=>{seeds.push([x,y,name,src,lo,la,pid]);const k=Math.floor(x/GC)+','+Math.floor(y/GC);if(!grid.has(k))grid.set(k,[]);grid.get(k).push(seeds.length-1)};
@@ -95,9 +114,7 @@ async function rasterSvg(inner){const svg=`<svg xmlns="http://www.w3.org/2000/sv
  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const [lo,la]=px2lonlat(x+.5,y+.5);const mx=((lo+180)/360*NT-TX0)*256,my=(tyf(la)-TY0)*256;
   const ix=Math.floor(mx),iy=Math.floor(my),fx=mx-ix,fy=my-iy;const g=(a,b)=>mos[Math.min(MH-1,Math.max(0,b))*MW+Math.min(MW-1,Math.max(0,a))];
   elev[y*W+x]=g(ix,iy)*(1-fx)*(1-fy)+g(ix+1,iy)*fx*(1-fy)+g(ix,iy+1)*(1-fx)*fy+g(ix+1,iy+1)*fx*fy}
- const boxMean=(src,R)=>{const tmp=new Float32Array(W*H),o=new Float32Array(W*H);const pr=new Float64Array(Math.max(W,H)+1);
-  for(let y=0;y<H;y++){pr[0]=0;for(let x=0;x<W;x++)pr[x+1]=pr[x]+src[y*W+x];for(let x=0;x<W;x++){const lo=Math.max(0,x-R),hi=Math.min(W-1,x+R);tmp[y*W+x]=(pr[hi+1]-pr[lo])/(hi-lo+1)}}
-  for(let x=0;x<W;x++){pr[0]=0;for(let y=0;y<H;y++)pr[y+1]=pr[y]+tmp[y*W+x];for(let y=0;y<H;y++){const lo=Math.max(0,y-R),hi=Math.min(H-1,y+R);o[y*W+x]=(pr[hi+1]-pr[lo])/(hi-lo+1)}}return o};
+
  // sea is a big negative-free plain; clamp so coasts do not read as cliffs
  for(let i=0;i<W*H;i++)if(!land[i])elev[i]=Math.max(0,elev[i]);
  const CR=+(ARG.crestr??9);const mean=boxMean(elev,CR);
@@ -117,18 +134,15 @@ async function rasterSvg(inner){const svg=`<svg xmlns="http://www.w3.org/2000/sv
   const wetBuf=await rasterSvg(wetPolys.map(p=>`<path d="${p.map(ringPath).join('')}" fill="#fff" fill-rule="evenodd"/>`).join(''));
   const aridBuf=await rasterSvg(ARID.map(r=>`<path d="${ringPath(r)}" fill="#fff"/>`).join(''));
   const wetMask=new Uint8Array(W*H);for(let i=0;i<W*H;i++)wetMask[i]=wetBuf[i]>127&&aridBuf[i]<=127?1:0;
+  wetOuter=wetMask;
   // far grid over real seeds
   const FG=new Map();const FC=200;for(let i=0;i<seeds.length;i++){const k=Math.floor(seeds[i][0]/FC)+','+Math.floor(seeds[i][1]/FC);if(!FG.has(k))FG.set(k,[]);FG.get(k).push(i)}
   // a lone seed keeps only a small disc; one with company keeps up to three quarters of the way to its nearest neighbour, so seeds do not swell into blobs
   const ISO=+(ARG.iso??54),LONE_R=+(ARG.lone??12);
   const seedR=seeds.map((s,i)=>{const gx=Math.floor(s[0]/FC),gy=Math.floor(s[1]/FC);let nn=Infinity;for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const g=FG.get((gx+a)+','+(gy+b));if(g)for(const j of g)if(j!==i)nn=Math.min(nn,Math.hypot(seeds[j][0]-s[0],seeds[j][1]-s[1]))}return nn>ISO?LONE_R:Math.max(LONE_R,nn*.75)});
-  const farFromSeed=(x,y,FAR,south)=>{const gx=Math.floor(x/FC),gy=Math.floor(y/FC);for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const g=FG.get((gx+a)+','+(gy+b));if(g)for(const i of g)if(Math.hypot(seeds[i][0]-x,seeds[i][1]-y)<(south?Math.min(FAR,seedR[i]):FAR))return false}return true};
+  const farFromSeed=(x,y,FAR,t)=>{const gx=Math.floor(x/FC),gy=Math.floor(y/FC);for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const g=FG.get((gx+a)+','+(gy+b));if(g)for(const i of g)if(Math.hypot(seeds[i][0]-x,seeds[i][1]-y)<(t>=1?FAR:Math.min(FAR,seedR[i]+(FAR-seedR[i])*t)))return false}return true};
   let cut={high:0,sand:0,south:0};
   // true sea from full country outlines (not just the game's coverage), so mask edges are not mistaken for coast
-  let ctrySvg='';{const cj=JSON.parse(fs.readFileSync(path.join(ROOT,'apps/web/public/maps/natural-earth-50m-admin0-countries.geojson')));
-   for(const f of cj.features){const g=f.geometry;if(!g)continue;const list=g.type==='Polygon'?[g.coordinates]:g.type==='MultiPolygon'?g.coordinates:[];
-    for(const p of list){if(!inBox(p[0]))continue;ctrySvg+=`<path d="${p.map(ringPath).join('')}" fill="#fff" fill-rule="evenodd"/>`}}}
-  ctryBuf=await rasterSvg(ctrySvg);
   const seaInd=new Float32Array(W*H);for(let i=0;i<W*H;i++)seaInd[i]=ctryBuf[i]>127?0:1;
   const coastNear=boxMean(seaInd,+(ARG.coast??12)),riverNear=boxMean(Float32Array.from(river),+(ARG.rivnear??8));
   const FAR0=+(ARG.far0??30),FSL=+(ARG.fslope??10),FLAT=+(ARG.flat??31);
@@ -139,7 +153,7 @@ async function rasterSvg(inner){const svg=`<svg xmlns="http://www.w3.org/2000/sv
    if(coastNear[i]>0.0005||riverNear[i]>0.0005){if(!high)continue}
    const sand=sandBuf[i]>127;
    const limit=high?Math.min(R,40):sand?Math.min(R,45):R;
-   if(!farFromSeed(x,y,limit,rowLat(y)<+(ARG.dry??35)))continue;
+   if(!farFromSeed(x,y,limit,Math.max(0,Math.min(1,(rowLat(y)-(+(ARG.dry??33)))/4))))continue;
    land[i]=0;if(high)cut.high++;else if(sand)cut.sand++;else cut.south++}}
   console.log('gap px',cut);}
  // poisson fill in random pixel order
@@ -191,7 +205,7 @@ async function rasterSvg(inner){const svg=`<svg xmlns="http://www.w3.org/2000/sv
  // southern discs: a lone seed's circle of kept land, or a knot of them, with no place of note in it, is not a country
  {const keepPts=[];try{for(const st of JSON.parse(fs.readFileSync(path.join(DATA,ARG.keep||'old-map.json'))).settlements)keepPts.push(lonlat2px(st.coordinate[0],st.coordinate[1]))}catch(e){}
   // the towns the polity files name (Dedan, Siwa, Tayma...) are oases worth a province
-  for(const f of fs.readdirSync(__dirname).filter(f=>/-polities\.json$/.test(f))){try{for(const pol of JSON.parse(fs.readFileSync(path.join(__dirname,f))).polities)for(const st of [pol.capital,...(pol.otherSettlements||[])])if(st&&isFinite(st.lon))keepPts.push(lonlat2px(st.lon,st.lat))}catch(e){}}
+  for(const f of fs.readdirSync(__dirname).filter(f=>/-polities\.json$/.test(f))){try{const file=JSON.parse(fs.readFileSync(path.join(__dirname,f)));for(const st of [...file.polities.flatMap(pol=>[pol.capital,...(pol.otherSettlements||[])]),...(file.seleucidCities||[]).filter(c=>!/apamea-tigris|charax-alexandria/.test(c.settlementId))])if(st&&isFinite(st.lon))keepPts.push(lonlat2px(st.lon,st.lat))}catch(e){}}
   const seen=new Uint8Array(W*H);let dropped=0,blobs=0;
   for(let i0=0;i0<W*H;i0++){if(lab[i0]<0||seen[i0])continue;const st=[i0],comp=[];seen[i0]=1;let per=0,sx=0,sy=0;
    while(st.length){const p=st.pop();comp.push(p);const x=p%W,y=(p/W)|0;sx+=x;sy+=y;
@@ -210,11 +224,11 @@ async function rasterSvg(inner){const svg=`<svg xmlns="http://www.w3.org/2000/sv
  // "sea" is empty in the game's land mask and within 3 px of empty ground in the country outlines, so cuts made for lakes, massifs and desert, and the edge of the mask inland, do not read as coast
  const ctryIn=new Float32Array(W*H);for(let i=0;i<W*H;i++)ctryIn[i]=ctryBuf[i]>127?1:0;
  const seaNear=boxMean(Float32Array.from(ctryIn,v=>1-v),3);const sea=new Uint8Array(W*H);for(let i=0;i<W*H;i++)sea[i]=(!land0[i]&&!lakeMask[i]&&seaNear[i]>0.0005)?1:0;
- const st=Array.from({length:n},()=>({px:0,area:0,lo:0,la:0,eSum:0,eMax:-1e9,sSum:0,riv:0,sand:0,coastKm:0,samples:[]}));
+ const st=Array.from({length:n},()=>({px:0,area:0,lo:0,la:0,eSum:0,eMax:-1e9,sSum:0,riv:0,sand:0,wet:0,coastKm:0,samples:[]}));
  for(let y=0;y<H;y++){const a=rowKm2(y),dx=rowDxKm(y),la=rowLat(y);for(let x=0;x<W;x++){const i=y*W+x,l=lab[i];if(l<0)continue;const c=st[l];
   c.px++;c.area+=a;const [lo]=px2lonlat(x+.5,y+.5);c.lo+=lo*a;c.la+=la*a;const e=elev[i];c.eSum+=e*a;if(e>c.eMax)c.eMax=e;
   if(x>0&&y>0&&x<W-1&&y<H-1){c.sSum+=Math.hypot((elev[i+1]-elev[i-1])/(2*dx),(elev[i+W]-elev[i-W])/(2*PXKM))*a}
-  if(river[i])c.riv++;if(sandBuf[i]>127)c.sand++;
+  if(river[i])c.riv++;if(sandBuf[i]>127)c.sand++;if(wetOuter&&wetOuter[i])c.wet++;
   if(x%4===2&&y%4===2)c.samples.push(+lo.toFixed(4),+la.toFixed(4));
   if(x>0&&sea[i-1])c.coastKm+=PXKM;if(x<W-1&&sea[i+1])c.coastKm+=PXKM;if(y>0&&sea[i-W])c.coastKm+=dx;if(y<H-1&&sea[i+W])c.coastKm+=dx}}
  for(let l=0;l<n;l++){const c=st[l];if(!c.samples.length){const [lo,la]=[c.lo/c.area,c.la/c.area];c.samples.push(+lo.toFixed(4),+la.toFixed(4))}}
@@ -302,7 +316,7 @@ async function rasterSvg(inner){const svg=`<svg xmlns="http://www.w3.org/2000/sv
  const provinces=feats.map(f=>{const c=st[f.l],sd=seeds[seedOf[f.l]];const [slo,sla]=sd[4]!==undefined?[sd[4],sd[5]]:px2lonlat(sd[0],sd[1]);
   const pop=v=>+v.toFixed(2);
   return{seed:{lon:+slo.toFixed(5),lat:+sla.toFixed(5),name:sd[2]||null,pleiades:sd[6]||null,src:sd[3]},areaKm2:Math.round(c.area),centroid:[+(c.lo/c.area).toFixed(5),+(c.la/c.area).toFixed(5)],
-   elevMean:Math.round(c.eSum/c.area),elevMax:Math.round(c.eMax),slopeMKm:pop(c.sSum/c.area),coast:c.coastKm>=2,coastKm:Math.round(c.coastKm/1.2),riverFrac:pop(c.riv/c.px),sandFrac:pop(c.sand/c.px),
+   elevMean:Math.round(c.eSum/c.area),elevMax:Math.round(c.eMax),slopeMKm:pop(c.sSum/c.area),coast:c.coastKm>=2,coastKm:Math.round(c.coastKm/1.2),riverFrac:pop(c.riv/c.px),sandFrac:pop(c.sand/c.px),wetFrac:pop(c.wet/c.px),
    adj:adjOf[f.l].filter(o=>idxOf.has(o.n)).map(o=>({n:idxOf.get(o.n),km:o.km,elev:o.elev})).sort((a_,b_)=>a_.n-b_.n)}});
  // a 4 px sea bitmap so the builder can tell water gaps from desert gaps
  const W4=Math.ceil(W/4),H4=Math.ceil(H/4);const seaBits=Buffer.alloc(Math.ceil(W4*H4/8));

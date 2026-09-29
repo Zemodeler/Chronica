@@ -1,5 +1,4 @@
 import {
-  alliesLedBy,
   applyRecruitmentToMaterial,
   boundedId,
   ensureProvinceMaterial,
@@ -75,7 +74,6 @@ export function levyCost(men: number): number {
 
 /** The provinces a power raises men from, in the order it draws on them: its own, never an ally's. */
 function poolsFor(world: WorldState, polityId: string, provinceId: string): string[] {
-  const allies = new Set(alliesLedBy(world.polityAgreements, polityId));
   const here = world.map.provinces.find((province) => province.id === provinceId)?.controllerPolityId ?? null;
   // How far a power sends for men: past this, a levy is a province's own.
   const reach = kmFrom(world, provinceId, { budgetKm: LEVY_REACH_KM });
@@ -85,7 +83,8 @@ function poolsFor(world: WorldState, polityId: string, provinceId: string): stri
     .filter((entry) => entry.km <= LEVY_REACH_KM)
     .sort((a, b) => a.km - b.km || a.id.localeCompare(b.id))
     .map((entry) => entry.id);
-  return [...(here !== null && allies.has(here) ? [] : [provinceId]), ...own];
+  // Its own people where the levy is raised on its own ground; never an ally's, a rival's or nobody's.
+  return [...(here === polityId ? [provinceId] : []), ...own];
 }
 
 export function raiseLevy(given: WorldState, request: LevyRequest): Levy {

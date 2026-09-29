@@ -61,6 +61,22 @@ const ticked = timed("runDeterministicTick (30 days, cold)", tickOnce);
 timed("runDeterministicTick (30 days, warm)", tickOnce);
 console.log(`${"  facts / notes".padEnd(44)} ${String(ticked.factProposals.length).padStart(5)} / ${ticked.notes.length}`);
 
+// A year, month by month, as a game runs it: the time it takes, and the longest note and fact the clock wrote.
+let year = material;
+let longest = 0;
+const yearFacts = new Map<string, number>();
+const yearStarted = performance.now();
+for (let month = 1; month <= 12; month++) {
+  const step = runDeterministicTick({ world: year, toDay: month * 30, ids: createIdFactory(`load-year-${month}`), warfare: definition.warfare, life: definition.life, clock: definition.clock, government: definition.government });
+  year = step.world;
+  for (const fact of step.factProposals) { longest = Math.max(longest, fact.summary.length); yearFacts.set(String(fact.kind), (yearFacts.get(String(fact.kind)) ?? 0) + 1); }
+  for (const note of step.notes) longest = Math.max(longest, note.length);
+}
+console.log(`${"runDeterministicTick (a year, 12 x 30 days)".padEnd(44)} ${(performance.now() - yearStarted).toFixed(1).padStart(9)} ms`);
+console.log(`${"  longest fact or note, characters".padEnd(44)} ${String(longest).padStart(9)}   facts by kind: ${JSON.stringify(Object.fromEntries(yearFacts))}`);
+const biggest = [...year.map.polities].map((polity) => ({ id: polity.id, held: year.map.provinces.filter((province) => province.controllerPolityId === polity.id).length })).sort((a, b) => b.held - a.held)[0]!;
+console.log(`${"  largest power".padEnd(44)} ${biggest.id} holds ${biggest.held} provinces`);
+
 const wire = timed("map wire document (first build)", () => mapWireDocument(PUNIC_WARS_MAP_ASSET_ID, material)!);
 console.log(`${"map wire document".padEnd(44)} ${megabytes(Buffer.byteLength(wire.body)).padStart(12)}`);
 timed("map wire document (kept)", () => mapWireDocument(PUNIC_WARS_MAP_ASSET_ID, material));

@@ -43,11 +43,11 @@ density of Imperator: Rome's territories, from open data. Plan and decisions:
 ```bash
 node scripts/map-gen/fetch-elevation.cjs
 node scripts/map-gen/pleiades-seeds.cjs x0=-18 x1=64 y0=15.5 y1=59 out=seeds270-v4.json
-node --max-old-space-size=14336 scripts/map-gen/generate-provinces.cjs out=v4 x0=-18 x1=64 y0=15.5 y1=59 \
+node --max-old-space-size=14336 scripts/map-gen/generate-provinces.cjs out=v5 x0=-18 x1=64 y0=15.5 y1=59 \
   nf=14 warp=2 ridge=1 crest=8 slope=4 min=140 seeds=seeds270-v4.json pin=scripts/map-gen/fill-pins.json
 ```
 
-Writes `v4.json` (rings per province in lon/lat), `v4.svg` and `v4.png`. (The window is the shipped map's; the exact knobs of the
+Writes `v5.json` (rings per province in lon/lat), `v5.svg` and `v5.png`. (The window is the shipped map's; the exact knobs of the
 shipped run were not recorded. `fill-pins.json` pins the filler seeds of an earlier run, so widening the window does not move
 them; `klat` is pinned for the same reason.)
 Useful knobs: `nf` noise size, `crest`/`slope` ridge weight, `fill` filler spacing
@@ -66,7 +66,7 @@ isolated islets under 30 km2 are dropped. The run prints the topology check (mat
 
 ```bash
 # from the repo root
-MAP_GEN_DATA=<dir> tsx scripts/map-gen/build-map-graph.ts in=v4
+MAP_GEN_DATA=<dir> tsx scripts/map-gen/build-map-graph.ts
 MAP_GEN_DATA=<dir> tsx scripts/map-gen/validate-map-graph.ts
 ```
 
@@ -98,3 +98,45 @@ size and walls in its `AUTHORED_TOWNS`. A city or town within 4 km of the AWMC c
   polity. Each anchor province keeps its old province's owner.
 - **Anchors** (`anchors.json`, `PUNIC_ANCHORS`): for every old id the scenario hard-codes, the new province holding the
   historically right point, with a justification; `PUNIC_OLD_REGION_PROVINCES` lists every new province that lay mostly in it.
+
+### Iraq, the desert belt and open desert (v5)
+
+- Iraq and Kuwait come from the Natural Earth outlines like the other eastern countries; Iraq is settled ground except the
+  Hamad and Wadi Hauran west of the Euphrates and Kuwait's desert (`ARID` in the generator). `iraq-polities.json` is the fourth
+  polity file; its `seleucidCities` join `seleucid-empire` (two cities of uncertain site are dropped).
+- Between lat 20 and 33 the Sahara and Arabia are masked by the natural land of their countries (`belt=0` turns it off), kept 7 px
+  from the sea, so what survives is decided by settlements, rivers and coast and not by the old polygons or by borders.
+  The lone-seed radius ramps from lat 33 to 37 instead of switching at 35, which had drawn a ruler-straight edge across Algeria.
+- Every province carries `wetFrac`; `desert-steppe` needs it under 0.5. A desert-steppe province with no settlement, no river
+  and no coast, 80 km or more from every town, has no controller (open desert). The validator allows nothing else unowned and
+  reports outer edges that keep one heading for over `STRAIGHT_KM` (default 60) km.
+- `fill-pins.json` pins the filler seeds of the latest run.
+
+## Relief tiles
+
+`build-relief-tiles.cjs` writes the sharp shaded relief under the atlas: an equirectangular tile pyramid,
+`apps/web/public/maps/relief/tiles/{z}/{x}/{y}.webp` and `tiles.json` (about 3 MB in all, webp quality 80).
+
+```bash
+MAP_GEN_DATA=<dir> node scripts/map-gen/build-relief-tiles.cjs           # bounds lon -25..66, lat 14..62 by default
+node scripts/map-gen/fetch-elevation.cjs x0=-25 x1=66 y0=14 y1=62         # first, for the Terrarium tiles that cover them
+```
+
+- **Grid.** World-aligned, 512 px tiles: z0 is 45 degrees to a tile and each level halves it; z3 is 5.625 degrees, 0.010986 degrees a
+  pixel, the native resolution of Terrarium z7 (1.2 km at the equator). A tile is `x = floor((lon + 180) / tileDegrees)`,
+  `y = floor((90 - lat) / tileDegrees)`. The client draws them straight into its lon/lat world space, so nothing is re-projected at
+  draw time (`relief-tiles.ts`); it fetches only the tiles in view and tones each like the base raster (`atlas-tone.ts`).
+- **Image.** Neutral, for the tone pass: land is Natural Earth II's own regional colour (land only, blurred until its shading is gone)
+  under a new hillshade from the elevation, peaks lightened toward rock and snow; sea is blue with depth shading. The elevation is
+  resampled from Web Mercator once, in memory.
+- **Coast.** The land polygons the provinces were grown on (`coverage.geojson` plus the Natural Earth 50m countries), rasterised at
+  full resolution, lakes (AWMC) cut out, lightly smoothed so the 1 km lattice leaves no staircase. Islands the polygons lack are kept
+  where the elevation is at least 8 m and no polygon is near. The relief and the province coasts register to within a pixel of z3.
+- **Edges.** The last degree of the box fades to transparent, so beyond it the whole-world Natural Earth II raster shows.
+
+### Credits
+
+The relief carries: elevation from the **AWS Open Data Terrain Tiles** (Mapzen Terrarium; derived from SRTM, GMTED2010, ETOPO1 and
+others: https://registry.opendata.aws/terrain-tiles/), colour from **Natural Earth II with Shaded Relief and Water** and coasts from
+the **Natural Earth 50m countries** (public domain, naturalearthdata.com), lakes and rivers from the **Ancient World Mapping Center**
+(ODbL), settlements from **Pleiades** (CC BY 3.0). The site footer names them.

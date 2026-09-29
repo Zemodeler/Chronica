@@ -54,7 +54,7 @@ function run(state: WorldState, days: number): { world: WorldState; facts: FactP
   return { world, facts };
 }
 
-describe("the siege of Messana", { timeout: 30_000 }, () => {
+describe("the siege of Messana", () => {
   it("is refused to a power not at war with the city", () => {
     const refused = applyDeltas(before(), [LAY], context);
     expect(refused.rejected[0]?.reason).toMatch(/not at war/);

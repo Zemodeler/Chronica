@@ -12,7 +12,7 @@ import { FIRST_PUNIC_WAR_VERSIONS, PUNIC_WARS_VERSIONS, currentBuiltInVersion } 
 
 /** The built-in Numidian map is a scenario-owned copy of the DEMO geography. */
 export const FIRST_PUNIC_WAR_MAP_ASSET_ID = "00000000-0000-4000-8000-000000000201";
-/** The 270 BCE map of 6,056 provinces (the 780-province map it replaced was ...0202). */
+/** The 270 BCE map of 6,321 provinces (the 780-province map it replaced was ...0202). */
 export const PUNIC_WARS_MAP_ASSET_ID = "00000000-0000-4000-8000-000000000203";
 
 export type PublicScenarioSummary = Readonly<{
