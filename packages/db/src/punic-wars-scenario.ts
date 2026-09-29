@@ -272,7 +272,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
       { id: "mountain-pass", label: "Mountain passes", allowedCrossings: ["pass"], water: false },
       { id: "desert-steppe", label: "Desert and steppe", allowedCrossings: ["land"], water: false },
     ],
-    provinceCount: { min: 779, max: 779 },
+    provinceCount: { min: 780, max: 780 },
   },
   /**
    * What a Roman of a given standing is worth, in the units this scenario's

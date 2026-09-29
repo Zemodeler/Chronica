@@ -66,3 +66,6 @@ desktop.ini
 eval-out/
 .pnpm-store/
 chronica-standards.zip
+
+# map generation inputs and outputs (scripts/map-gen)
+.map-gen-data/
