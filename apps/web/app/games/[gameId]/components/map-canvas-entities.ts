@@ -1,9 +1,11 @@
 import type { DynamicMapOverlay } from "@chronica/shared";
 import type { StaticWorldGeometry } from "./world-geometry";
-import { politicalColourWithAlpha } from "./political-geometry";
+import { leadersOf, politicalColourWithAlpha } from "./political-geometry";
 import { resolveMapForcePlacements } from "./map-dynamic-geometry";
 import { deriveForceConflictStatuses } from "./map-conflict-state";
-import { armyStandardBounds, armyStandardWidthForZoom, type ForceFlagAsset } from "./army-standard";
+import { FALLBACK_FORCE_FLAG, FORCES_VISIBLE_FROM_SCALE, armyStandardBounds, armyStandardWidthForZoom, fannedStandardCentre, type ForceFlagAsset } from "./army-standard";
+import { labelFontFamily } from "./map-fonts";
+import { ATLAS, TOKENS } from "../../../../lib/palette";
 
 interface VisibleWorldRect { minX: number; maxX: number; minY: number; maxY: number; }
 
@@ -16,40 +18,57 @@ interface VisibleWorldRect { minX: number; maxX: number; minY: number; maxY: num
 // targets positioned with the same math (armyStandardHitBounds) — only the
 // visuals moved.
 //
-// Mirrors the marker/label floor logic that used to live in geo-map.tsx:
-// world-space sizes hold a minimum on-screen size so nothing shrinks to
-// illegibility when zoomed out. A ceiling is also held on the settlement
-// marker (absent from the old SVG version, which just grew unboundedly with
-// zoom) — without one, a fixed world-space radius times a very high
-// pixels-per-degree rate at max zoom balloons into an oversized, blurry-edged
-// blob that swallows whatever's under it.
-const MIN_SETTLEMENT_PIXEL_RADIUS = 6;
-const MAX_SETTLEMENT_PIXEL_RADIUS = 22;
-const MIN_SETTLEMENT_LABEL_PIXEL_FONT = 4.5;
-// Screen-pixel gap between a marker's edge and its label's baseline. Must be
-// pixel-based (divided through by pixelsPerDegree at use, like the radius
-// constants above) rather than a flat world-space degree offset — a flat
-// degree gap is invisible at low zoom but balloons into a huge on-screen gap
-// at high zoom (nothing caps it the way MAX_SETTLEMENT_PIXEL_RADIUS caps the
-// marker), which is what made labels read as detached from their city.
+// Markers and their names are sized in on-screen pixels, times the display
+// unit (map-display-unit.ts), not in world degrees. A world-space size held
+// to a pixel floor sat on that floor for most of the zoom range and then shot
+// up to its ceiling within a few steps, and it read tiny on a large monitor.
+// Instead a marker grows gently with the zoom's octave, from its size zoomed
+// all the way out to a ceiling it keeps from about scale 32 inwards:
+//
+//   radius px = unit * type factor * clamp(9 + 1.4 * log2(scale), 9, 16)
+//
+// A capital is about 7 px on a laptop's map (unit 0.8) and 12 px on a large
+// monitor's (unit 1.3); its star reaches half as far again.
+const SETTLEMENT_PIXEL_RADIUS_FAR = 9;
+const SETTLEMENT_PIXEL_RADIUS_PER_OCTAVE = 1.4;
+const MAX_SETTLEMENT_PIXEL_RADIUS = 16;
+// A settlement's name is this many times its marker's radius, so the names
+// keep the markers' hierarchy, held between a legible floor and a ceiling so
+// it stops growing at deep zoom. A capital's name is about 10 px on a laptop
+// and 17 px on a large monitor zoomed out.
+const SETTLEMENT_LABEL_FONT_PER_RADIUS = 13 / 9;
+const MIN_SETTLEMENT_LABEL_PIXEL_FONT = 7;
+const MAX_SETTLEMENT_LABEL_PIXEL_FONT = 18;
+// Name sizes are held to half-pixel steps: a size that changed a little every
+// frame of a zoom would have the browser rasterise each name afresh each frame.
+const SETTLEMENT_LABEL_FONT_STEP = .5;
+// Screen-pixel gap between a marker's edge and the top of its label, times
+// the display unit. Pixel-based rather than a world-space offset, which would
+// balloon at high zoom and detach the name from its city.
 const SETTLEMENT_LABEL_GAP_PIXELS = 3;
+// The share of the font size a name's letters rise above the baseline.
+const SETTLEMENT_LABEL_ASCENT = .75;
+// Every capital's name claims its space before any other's; among capitals,
+// and among the rest, the more important goes first.
+const CAPITAL_LABEL_PRIORITY = 1_000_000;
 
 // Mirrors MapViewport's zoom bands (far < 2.5 <= medium < 5 <= close) and the
 // same-named CSS zoom-visibility rules that used to gate the SVG settlement
-// layer (styles.css, "Map: zoom-band visibility"): at "far" zoom only
-// capitals show, with no labels at all; at "medium" only settlements/towns
-// stay hidden and only capitals keep their label; "close" shows everything.
+// layer (styles/map.css): at "far" zoom only capitals show, with their
+// names; at "medium" towns and the like stay hidden and only capitals keep
+// their label; "close" shows everything.
 const MEDIUM_ZOOM_SCALE = 2.5;
 const CLOSE_ZOOM_SCALE = 5;
 
-const SETTLEMENT_DEFAULT_FILL = "#c8b88a";
-const SETTLEMENT_STROKE = "#10151f";
-const CAPITAL_STROKE = "#f4cf68";
-const SETTLEMENT_LABEL_FILL = "#dce8e5";
-const SETTLEMENT_LABEL_HALO = "rgba(10, 15, 20, 0.7)";
-const LABEL_FONT_FAMILY = '"Times New Roman", Times, serif';
-const SIEGE_STROKE = "#dc5d5d";
-const CONFLICT_COMBAT_STROKE = "#dc5d5d";
+// Towns in ink on the plate, like the region names; capitals ringed in lamp
+// gold; anything under siege or in battle in the war red. See lib/palette.ts.
+const SETTLEMENT_DEFAULT_FILL = TOKENS.papyrus;
+const SETTLEMENT_STROKE = TOKENS.ink;
+const CAPITAL_STROKE = TOKENS.lamp;
+const SETTLEMENT_LABEL_FILL = ATLAS.label;
+const SETTLEMENT_LABEL_HALO = ATLAS.labelHalo;
+const SIEGE_STROKE = ATLAS.war;
+const CONFLICT_COMBAT_STROKE = ATLAS.war;
 const CONFLICT_SIEGE_DEFENDER_STROKE = "#72c783";
 
 /** Triangle wave over [.55, 1] with a 1.8s period — matches the CSS
@@ -64,22 +83,29 @@ function settlementTypeBaseRadius(type: string): number {
   return type === "capital" ? .06 : type === "city" ? .035 : type === "town" ? .015 : type === "fort" || type === "port" ? .04 : .020;
 }
 
-function settlementRadius(type: string, pixelsPerDegree: number): number {
-  const base = settlementTypeBaseRadius(type);
-  const onScreenPixels = Math.min(Math.max(base * pixelsPerDegree, MIN_SETTLEMENT_PIXEL_RADIUS), MAX_SETTLEMENT_PIXEL_RADIUS);
-  return onScreenPixels / pixelsPerDegree;
+// Each type's share of a capital's marker: the square root of their world
+// radii, so the hierarchy (capital > port/fort > city > village > town) holds
+// without a town shrinking to a speck.
+function settlementTypeFactor(type: string): number {
+  return Math.sqrt(settlementTypeBaseRadius(type) / settlementTypeBaseRadius("capital"));
 }
 
-// A settlement's label size scales directly off the same per-type base radius
-// used for its marker above, so labels keep the exact size hierarchy the
-// markers already have (capital > port/fort > city > village > town). The
-// scale factor is calibrated so a capital's label renders at 0.175 world-space
-// units — half the former 0.35 world-space size — for every settlement of a
-// given type, everywhere, independent of polity ownership or territory shape.
-const LABEL_FONT_SIZE_PER_RADIUS_UNIT = 0.175 / settlementTypeBaseRadius("capital");
+/** A settlement marker's radius in CSS pixels at `scale`, for display unit `unit`. */
+export function settlementPixelRadius(type: string, scale: number, unit: number): number {
+  const octaves = Math.log2(Math.max(scale, 1));
+  const grown = Math.min(Math.max(SETTLEMENT_PIXEL_RADIUS_FAR + SETTLEMENT_PIXEL_RADIUS_PER_OCTAVE * octaves, SETTLEMENT_PIXEL_RADIUS_FAR), MAX_SETTLEMENT_PIXEL_RADIUS);
+  return unit * settlementTypeFactor(type) * grown;
+}
 
-function settlementLabelBaseFontSize(type: string): number {
-  return settlementTypeBaseRadius(type) * LABEL_FONT_SIZE_PER_RADIUS_UNIT;
+/** A settlement name's font size in CSS pixels at `scale`, for display unit `unit`. */
+export function settlementLabelPixelFont(type: string, scale: number, unit: number): number {
+  const size = Math.min(Math.max(settlementPixelRadius(type, scale, unit) * SETTLEMENT_LABEL_FONT_PER_RADIUS, MIN_SETTLEMENT_LABEL_PIXEL_FONT * unit), MAX_SETTLEMENT_LABEL_PIXEL_FONT * unit);
+  return Math.round(size / SETTLEMENT_LABEL_FONT_STEP) * SETTLEMENT_LABEL_FONT_STEP;
+}
+
+/** Whether a settlement's name is drawn at `scale`: a capital's always, any other's from close zoom. */
+export function settlementLabelShown(capital: boolean, scale: number): boolean {
+  return capital || scale >= CLOSE_ZOOM_SCALE;
 }
 
 function drawDiamond(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number): void {
@@ -114,11 +140,13 @@ export function drawSettlements(
   overlay: DynamicMapOverlay | null,
   scale: number,
   pixelsPerDegree: number,
+  unit: number,
   visibleRect: VisibleWorldRect,
   nowMs: number,
 ): void {
   const settlementOverlay = new Map((overlay?.settlements ?? []).map((s) => [s.settlementId, s]));
   const besiegedSettlementIds = new Set(overlay?.conflicts.sieges.map((siege) => siege.settlementId) ?? []);
+  const leaderByPolity = leadersOf(overlay?.politicalRelations ?? []);
   const showNonCapitals = scale >= MEDIUM_ZOOM_SCALE;
   const showTowns = scale >= CLOSE_ZOOM_SCALE;
   const pulse = pulseOpacity(nowMs);
@@ -144,8 +172,8 @@ export function drawSettlements(
       if (!showTowns && (settlement.type === "town" || settlement.type === "village" || settlement.type === "fort" || settlement.type === "port")) continue;
     }
 
-    const radius = settlementRadius(settlement.type, pixelsPerDegree);
-    const fill = state?.controllerPolityId ? politicalColourWithAlpha(state.controllerPolityId, .9) : SETTLEMENT_DEFAULT_FILL;
+    const radius = settlementPixelRadius(settlement.type, scale, unit) / pixelsPerDegree;
+    const fill = state?.controllerPolityId ? politicalColourWithAlpha(state.controllerPolityId, .9, leaderByPolity) : SETTLEMENT_DEFAULT_FILL;
     const underSiege = besiegedSettlementIds.has(settlement.id);
 
     ctx.fillStyle = fill;
@@ -167,17 +195,16 @@ export function drawSettlements(
     ctx.stroke();
     ctx.globalAlpha = 1;
 
-    // Far zoom: no labels at all. Medium zoom: only capitals keep theirs.
-    // (Mirrors the old `[data-zoom="far"] .map-settlement-label` and
-    // `[data-zoom="medium"] .map-settlement:not(.map-settlement-capital)
-    // .map-settlement-label { display: none; }` rules.)
-    if (!showNonCapitals) continue;
-    if (!capital && !showTowns) continue;
+    // Capitals are named at every zoom, the whole world included; other
+    // settlements only once close.
+    if (!settlementLabelShown(capital, scale)) continue;
 
-    const legibleFloor = MIN_SETTLEMENT_LABEL_PIXEL_FONT / pixelsPerDegree;
-    const labelSize = Math.max(settlementLabelBaseFontSize(settlement.type), legibleFloor);
-    const labelY = y + radius + SETTLEMENT_LABEL_GAP_PIXELS / pixelsPerDegree;
-    labelCandidates.push({ name: settlement.name, x, labelY, fontSize: labelSize, priority: capital ? Number.POSITIVE_INFINITY : (state?.importance ?? 50) });
+    const labelSize = settlementLabelPixelFont(settlement.type, scale, unit) / pixelsPerDegree;
+    // The baseline sits below the marker (a capital's star reaches 1.5 radii)
+    // by the gap plus the letters' own height, so the name never overprints it.
+    const markerReach = capital ? radius * 1.5 : radius;
+    const labelY = y + markerReach + SETTLEMENT_LABEL_GAP_PIXELS * unit / pixelsPerDegree + labelSize * SETTLEMENT_LABEL_ASCENT;
+    labelCandidates.push({ name: settlement.name, x, labelY, fontSize: labelSize, priority: (capital ? CAPITAL_LABEL_PRIORITY : 0) + (state?.importance ?? 50) });
   }
 
   // Most important settlement (capitals first, then by importance) claims
@@ -188,7 +215,7 @@ export function drawSettlements(
   ctx.fillStyle = SETTLEMENT_LABEL_FILL;
   const placedBoxes: { minX: number; maxX: number; minY: number; maxY: number }[] = [];
   for (const label of labelCandidates.sort((a, b) => b.priority - a.priority)) {
-    ctx.font = `500 ${label.fontSize}px ${LABEL_FONT_FAMILY}`;
+    ctx.font = `500 ${label.fontSize}px ${labelFontFamily()}`;
     const halfWidth = ctx.measureText(label.name).width / 2;
     const box = { minX: label.x - halfWidth, maxX: label.x + halfWidth, minY: label.labelY - label.fontSize, maxY: label.labelY };
     if (placedBoxes.some((p) => box.minX < p.maxX && box.maxX > p.minX && box.minY < p.maxY && box.maxY > p.minY)) continue;
@@ -226,15 +253,16 @@ export function drawForces(
   forceFlagUrls: ReadonlyMap<string, ForceFlagAsset>,
   scale: number,
   pixelsPerDegree: number,
+  unit: number,
   visibleRect: VisibleWorldRect,
   nowMs: number,
   requestRedraw: () => void,
 ): void {
-  // Mirrors `[data-zoom="far"] .layer-forces { display: none; }`.
-  if (scale < MEDIUM_ZOOM_SCALE) return;
+  // Too far out to draw an army; the hit test (geo-map.tsx) refuses the same.
+  if (scale < FORCES_VISIBLE_FROM_SCALE) return;
 
   const conflictByForceId = deriveForceConflictStatuses(overlay);
-  const armyStandardWidth = armyStandardWidthForZoom(pixelsPerDegree);
+  const armyStandardWidth = armyStandardWidthForZoom(pixelsPerDegree, unit);
   const pulse = pulseOpacity(nowMs);
   const placements = resolveMapForcePlacements(overlay?.forces ?? [], world, overlay ?? null);
   const forceById = new Map((overlay?.forces ?? []).map((force) => [force.forceId, force]));
@@ -245,10 +273,10 @@ export function drawForces(
     if (placement.group?.isPrimary === false) continue;
     const force = forceById.get(placement.forceId);
     if (!force) continue;
-    const { x, y } = placement;
+    const { x, y } = fannedStandardCentre(placement, armyStandardWidth);
     if (x < visibleRect.minX || x > visibleRect.maxX || y < visibleRect.minY || y > visibleRect.maxY) continue;
 
-    const asset = forceFlagUrls.get(force.forceId) ?? { url: "/maps/generic-merchant-ship-standard.png", aspectRatio: 4 / 3 };
+    const asset = forceFlagUrls.get(force.forceId) ?? FALLBACK_FORCE_FLAG;
     const bounds = armyStandardBounds(asset, x, y, armyStandardWidth);
     const conflict = conflictByForceId.get(force.forceId);
 
@@ -256,7 +284,7 @@ export function drawForces(
       const stroke = conflict.conflictClass === "siege-defender" ? CONFLICT_SIEGE_DEFENDER_STROKE : CONFLICT_COMBAT_STROKE;
       ctx.globalAlpha = pulse;
       ctx.strokeStyle = stroke;
-      ctx.lineWidth = 1.2 / pixelsPerDegree;
+      ctx.lineWidth = 1.2 * unit / pixelsPerDegree;
       const inset = .002;
       const rx = .006;
       ctx.beginPath();
@@ -272,15 +300,15 @@ export function drawForces(
     // besieging one settlement) carries a small count badge instead of a
     // second flag, per docs/19 Phase 3's "one marker with count/summary".
     if (placement.group && placement.group.size > 1) {
-      const badgeRadius = Math.max(4, armyStandardWidth * 0.16) / pixelsPerDegree;
+      const badgeRadius = Math.max(4 * unit, armyStandardWidth * pixelsPerDegree * 0.16) / pixelsPerDegree;
       const badgeX = bounds.x + bounds.width - badgeRadius * 0.4;
       const badgeY = bounds.y - badgeRadius * 0.4;
       ctx.beginPath();
-      ctx.fillStyle = "#1a1a1a";
+      ctx.fillStyle = TOKENS.ink;
       ctx.arc(badgeX, badgeY, badgeRadius, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = "#ffffff";
-      ctx.font = `${badgeRadius * 1.1}px sans-serif`;
+      ctx.fillStyle = TOKENS.vellum;
+      ctx.font = `600 ${badgeRadius * 1.1}px ${labelFontFamily()}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(String(placement.group.size), badgeX, badgeY);

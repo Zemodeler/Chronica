@@ -1,5 +1,9 @@
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema, SignedScoreSchema, VisibilitySchema } from "../material-state";
+import { PolityAgreementKindSchema, type PolityAgreementKind } from "./agreements";
+import { aptitude, skillShare } from "../characters/aptitude";
+import { leaning } from "../characters/traits";
+import type { Character } from "../characters/character";
 
 // Diplomacy: what one power says to another.
 //
@@ -57,6 +61,45 @@ export const DiplomaticMessageSchema = z
     /** Set when this message is itself a counter-offer to an earlier one. */
     inReplyToMessageId: EntityIdSchema.nullable().default(null),
     visibility: VisibilitySchema.default("polity"),
+    /**
+     * What accepting it would make: the agreements it offers (`offeredAgreementKinds`).
+     * Rome's letter taking Messana in "as an ally or as protected territory"
+     * was accepted in so many words and bound nobody, because an accepted
+     * letter was a letter and nothing more.
+     */
+    proposes: z.array(PolityAgreementKindSchema).max(4).optional(),
+    /** The agreement its acceptance opened, when it opened one. */
+    agreementId: EntityIdSchema.nullable().optional(),
+    /** How long what it offers lasts, when it is for a time: a truce of six months. */
+    forDays: z.number().int().positive().max(36_600).nullable().optional(),
+    /**
+     * The terms it offers, as treaty clauses (`agreement_open`'s): checked
+     * and carried out when it is accepted, not when it is written.
+     */
+    clauses: z.array(z.record(z.string(), z.unknown())).max(6).optional(),
+    /**
+     * What its sender does if it is refused or goes unanswered: an ultimatum's
+     * threat. Rome sent Syracuse "if you are not with us you are against us"
+     * and declared the war in the same breath, before Hieron could answer; the
+     * refusal that came afterwards arrived ten days after the battle.
+     */
+    onRefusal: z.enum(["war"]).nullable().optional(),
+    /**
+     * The day the letter was first put in front of the person who has to
+     * answer it. Silence is a refusal only once somebody has read it: seven
+     * of Rome's allies "refused by silence" letters they were never shown,
+     * because the burst jumped past the reply date before asking them.
+     */
+    putToRecipientOnDay: ElapsedStepSchema.nullable().optional(),
+    /**
+     * The day it reaches the person it is written to: the road from the
+     * writer to where the reader is (`newsDaysBetween`). A letter from Latium
+     * reached Syracuse the day it was written, and was answered by return.
+     * Until then it is in the courier's bag -- nobody can read it, answer it,
+     * or be counted silent on it. Absent on letters written before letters
+     * travelled, which were delivered the day they were sent.
+     */
+    deliveredOnDay: ElapsedStepSchema.nullable().optional(),
   })
   .strict()
   .superRefine((message, context) => {
@@ -68,6 +111,26 @@ export const DiplomaticMessageSchema = z
     }
   });
 export type DiplomaticMessage = z.infer<typeof DiplomaticMessageSchema>;
+
+/**
+ * The agreements a letter's acceptance can make: those it named, and the one
+ * its kind already means -- an offer of alliance accepted is an alliance.
+ */
+const MEANT_BY_KIND: Partial<Record<DiplomaticMessageKind, PolityAgreementKind>> = {
+  alliance_offer: "alliance",
+  peace_offer: "peace",
+  trade_offer: "trade_pact",
+  tribute_demand: "tributary",
+};
+
+export function offeredAgreementKinds(message: Pick<DiplomaticMessage, "kind" | "proposes">): readonly PolityAgreementKind[] {
+  const meant = MEANT_BY_KIND[message.kind];
+  return [...new Set([...(message.proposes ?? []), ...(meant === undefined ? [] : [meant])])];
+}
+
+/** Whether the letter is in its reader's hands by that day, rather than still on the road. */
+export const isDelivered = (message: Pick<DiplomaticMessage, "sentAtStep" | "deliveredOnDay">, day: number): boolean =>
+  (message.deliveredOnDay ?? message.sentAtStep) <= day;
 
 /** Messages nobody has answered yet, oldest first: the diplomatic debts of the world. */
 export function unansweredMessages(messages: readonly DiplomaticMessage[]): readonly DiplomaticMessage[] {
@@ -200,10 +263,40 @@ export function applyDiplomaticAnswerToStance(
   stances: readonly PolityStance[],
   message: Pick<DiplomaticMessage, "fromPolityId" | "toPolityId" | "answer" | "subject">,
   atStep: number,
+  /**
+   * The two people the letter passed between, where they are known. Diplomacy
+   * moved nothing in diplomacy: a Fabricius and a boor wrote the same letter.
+   * An answerer with a gift for it refuses without giving offence -- up to half
+   * the sting taken out, or half again added -- and a persuasive writer warms
+   * the power he writes to, a little, whatever it answers.
+   */
+  hands: {
+    readonly writer?: (Pick<Character, "skills"> & { readonly traits?: readonly string[] }) | undefined;
+    readonly answerer?: (Pick<Character, "skills"> & { readonly traits?: readonly string[] }) | undefined;
+    /**
+     * What the head of each side's foreign business adds, where the letter
+     * went in a power's name (`departments.ts` `headLift`): a seventh either
+     * way on the writer's warmth and on the answerer's tact.
+     */
+    readonly writerLift?: number;
+    readonly answererLift?: number;
+  } = {},
 ): readonly PolityStance[] {
   if (message.answer === null) return stances;
-  const shift = TRUST_SHIFT_BY_ANSWER[message.answer];
+  // A letter within one power -- a subject petitioning his own government --
+  // moves no trust between powers, because there is only the one.
+  if (message.fromPolityId === message.toPolityId) return stances;
+  const base = TRUST_SHIFT_BY_ANSWER[message.answer];
+  // A man's finer gift and his diplomacy at large count half each.
+  // And his nature: a man disposed to negotiate softens what he must refuse.
+  const tact = hands.answerer === undefined ? 50
+    : (aptitude(hands.answerer, "arbitration") + hands.answerer.skills.diplomacy) / 2 + leaning({ traits: hands.answerer.traits ?? [] }, "negotiation");
   const existing = findStance(stances, message.fromPolityId, message.toPolityId);
+  // A refusal stings the less from a tactful man; and where trust had been
+  // lost, a good answer from one wins it back the faster.
+  const shift = base < 0 && hands.answerer !== undefined ? Math.round(base * (1 - skillShare(tact, 0.5) - (hands.answererLift ?? 0)))
+    : base > 0 && hands.answerer !== undefined && (existing?.trustScore ?? 0) < 0 ? Math.round(base * (1 + Math.max(0, skillShare(tact, 0.5))))
+      : base;
   const updated: PolityStance = {
     polityId: message.fromPolityId,
     towardPolityId: message.toPolityId,
@@ -211,5 +304,19 @@ export function applyDiplomaticAnswerToStance(
     lastShiftReason: `${message.toPolityId} ${message.answer} "${message.subject}"`,
     lastShiftAtStep: atStep,
   };
-  return [...stances.filter((stance) => !(stance.polityId === message.fromPolityId && stance.towardPolityId === message.toPolityId)), updated];
+  let next = [...stances.filter((stance) => !(stance.polityId === message.fromPolityId && stance.towardPolityId === message.toPolityId)), updated];
+  // A warm man writes warmly: a sociable writer's letter is read a little kinder.
+  const warmth = hands.writer === undefined ? 0
+    : Math.round(skillShare((aptitude(hands.writer, "rhetoric") + hands.writer.skills.diplomacy) / 2, 6) * (1 + (hands.writerLift ?? 0)) + leaning({ traits: hands.writer.traits ?? [] }, "sociability") / 5);
+  if (warmth !== 0) {
+    const reader = findStance(next, message.toPolityId, message.fromPolityId);
+    next = [...next.filter((stance) => !(stance.polityId === message.toPolityId && stance.towardPolityId === message.fromPolityId)), {
+      polityId: message.toPolityId,
+      towardPolityId: message.fromPolityId,
+      trustScore: clampTrust((reader?.trustScore ?? 0) + warmth),
+      lastShiftReason: `${message.fromPolityId} wrote "${message.subject}"`.slice(0, 200),
+      lastShiftAtStep: atStep,
+    }];
+  }
+  return next;
 }

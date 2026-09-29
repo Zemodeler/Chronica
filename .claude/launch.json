@@ -4,9 +4,28 @@
     {
       "name": "Chronica Web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "Chronica Web (mock AI)",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "CHRONICA_AI_MODE=mock",
+        "npm",
+        "run",
+        "dev",
+        "--workspace",
+        "@chronica/web",
+        "--",
+        "-p",
+        "3200"
+      ],
+      "port": 3200
     }
   ]
 }

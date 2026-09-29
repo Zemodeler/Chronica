@@ -15,9 +15,11 @@ function canvasFor(mapAssetId: string | null): GeoJsonMap | undefined {
 export function canvasRegions(mapAssetId: string | null, world: WorldState): readonly CanvasRegion[] {
   const map = canvasFor(mapAssetId);
   if (map === undefined) return world.map.provinces.map(({ id, name }) => ({ id, name }));
+  // The world's name wins: the geometry's are modern (`namedByTheWorld`).
+  const named = new Map(world.map.provinces.map((province) => [province.id, province.name]));
   return map.features
     .filter((feature) => feature.properties.kind === "province")
-    .map((feature) => ({ id: feature.id, name: feature.properties.name ?? feature.id }));
+    .map((feature) => ({ id: feature.id, name: named.get(feature.id) ?? feature.properties.name ?? feature.id }));
 }
 
 function settlementKind(type: "capital" | "city" | "town" | "village" | "fort" | "port"): Settlement["kind"] {
@@ -69,7 +71,9 @@ export function materializeCanvasProvince(
   }) ?? [];
 
   const polities = materializedControllerId !== null && controller !== undefined && !world.map.polities.some((polity) => polity.id === materializedControllerId)
-    ? [...world.map.polities, { id: materializedControllerId, name: controller.name, capitalSettlementId: null }]
+    // A region materialised from the canvas is somebody's ground, and the
+    // peoples this reaches for are the ones the map names and nobody organised.
+    ? [...world.map.polities, { id: materializedControllerId, name: controller.name, capitalSettlementId: null, cohesionBps: 3_000, soldierPayPerThousand: null }]
     : world.map.polities;
 
   return {

@@ -1,9 +1,10 @@
 import { z } from "zod";
-import { EntityIdSchema } from "../material-state";
+import { EntityIdSchema, MaybeIdSchema } from "../material-state";
 import { FactDiscoveryStateSchema, FactVisibilitySchema } from "../world/facts";
 import { OrderPartyRefSchema } from "../world/party-ref";
 import { WatchPredicateSchema } from "../world/watch";
-import { LocalIdSchema, RefSchema } from "./refs";
+import { AmbitionKindSchema } from "../characters/character";
+import { LocalIdSchema, MaybeRefSchema, RefSchema } from "./refs";
 import { WorldDeltaSchema } from "./deltas";
 
 /**
@@ -15,7 +16,8 @@ import { WorldDeltaSchema } from "./deltas";
  * contract instead of a parallel NPC system that drifts from the player's.
  */
 
-const SummarySchema = z.string().trim().min(1).max(600);
+/** Named, so the schema says "Summary" where it wrote the same string nine times. */
+const SummarySchema = z.string().trim().min(1).max(600).meta({ id: "Summary" });
 
 /**
  * A fact the actor claims it made true. The model supplies judgment --
@@ -46,7 +48,7 @@ export const FactProposalSchema = z.object({
    */
   knownToRefs: z.array(OrderPartyRefSchema).max(16).default([]),
   /** The thread this belongs to, when it belongs to one: an existing storyline id or a "local:" handle opened in this answer. */
-  storylineRef: RefSchema.nullable().default(null),
+  storylineRef: MaybeRefSchema.default(null),
 });
 export type FactProposal = z.infer<typeof FactProposalSchema>;
 /** The same, before defaults: what the engine itself writes when it records a consequence the model did not author. */
@@ -57,7 +59,7 @@ export const DelegationProposalSchema = z.object({
   localId: LocalIdSchema,
   issuerRef: OrderPartyRefSchema,
   recipientRef: OrderPartyRefSchema,
-  claimedAuthorityGrantRef: RefSchema.nullable().default(null),
+  claimedAuthorityGrantRef: MaybeRefSchema.default(null),
   instruction: SummarySchema,
 });
 export type DelegationProposal = z.infer<typeof DelegationProposalSchema>;
@@ -80,7 +82,7 @@ export const ScheduledEventProposalSchema = z.object({
   visibility: FactVisibilitySchema.default("public"),
   significance: z.number().int().min(0).max(100).default(35),
   knownToRefs: z.array(OrderPartyRefSchema).max(8).default([]),
-  storylineRef: RefSchema.nullable().default(null),
+  storylineRef: MaybeRefSchema.default(null),
 });
 export type ScheduledEventProposal = z.infer<typeof ScheduledEventProposalSchema>;
 
@@ -96,7 +98,7 @@ export const ScheduledEventPayloadSchema = z
     visibility: FactVisibilitySchema.default("public"),
     significance: z.number().int().min(0).max(100).default(35),
     knownTo: z.array(OrderPartyRefSchema).max(8).default([]),
-    storylineId: EntityIdSchema.nullable().default(null),
+    storylineId: MaybeIdSchema.default(null),
   })
   .loose();
 export type ScheduledEventPayload = z.infer<typeof ScheduledEventPayloadSchema>;
@@ -123,10 +125,36 @@ export const FactDiscoveryProposalSchema = z
   .strict();
 export type FactDiscoveryProposal = z.infer<typeof FactDiscoveryProposalSchema>;
 
+/**
+ * One sentence the actor actually said out loud, and what occasioned it.
+ *
+ * The Chronicle wants the thing a chronicle has and a report does not: a line
+ * of somebody's own voice, set apart from the prose. The obvious way to get one
+ * is to let the historian write it, and that is the wrong way -- a model asked
+ * for an epigram will supply an epigram every time, all of them in the same
+ * voice, none of them anybody's.
+ *
+ * So it comes from the person. An actor who has just done something may offer
+ * what they said while doing it; the Chronicle publishes at most one of them,
+ * and only when the facts it belongs to are facts the reader can see. An actor
+ * with nothing memorable to say leaves it null, which is the usual case.
+ */
+export const UtteranceSchema = z
+  .object({
+    /** Their own words, not reported speech. No quotation marks -- the record adds those. */
+    line: z.string().trim().min(1).max(220),
+    /** When and to whom, for the attribution line: "upon his election as consul". */
+    occasion: z.string().trim().min(1).max(120),
+  })
+  .strict();
+export type Utterance = z.infer<typeof UtteranceSchema>;
+
 export const ProposalSchema = z
   .object({
     /** What the actor did, in its own words -- the raw material a Chronicle is later written from. */
     narrativeSummary: SummarySchema,
+    /** Something worth quoting, if the moment had one in it. Almost always null. */
+    utterance: UtteranceSchema.nullable().default(null),
     /**
      * VISION §8: where an intent could not be met in full. Friction is the
      * answer to "build 200 warships", not a refusal.
@@ -188,6 +216,20 @@ export const OrchestratorOutputSchema = ProposalSchema.extend({
     .object({
       summary: SummarySchema,
       domains: z.array(z.string().trim().min(1).max(40)).max(8).default([]),
+      /**
+       * Each thing the order asked for, and the facts of this answer that say
+       * it was done -- or why it could not be. "Take control of the conquered
+       * Sicilian lands under my governorship" was one sentence of an order
+       * whose other sentences produced a letter and reinforcements, and it
+       * vanished: the record answers an order, and the order had an answer.
+       * A part with no fact that came to be and no reason is answered by the
+       * engine as having come to nothing.
+       */
+      parts: z.array(z.object({
+        said: z.string().trim().min(1).max(200),
+        factLocalIds: z.array(z.string().trim().min(1).max(80)).max(6).default([]),
+        whyNot: z.string().trim().min(1).max(300).nullable().default(null),
+      }).strict()).max(10).default([]),
     })
     .strict(),
   /**
@@ -206,6 +248,20 @@ export const OrchestratorOutputSchema = ProposalSchema.extend({
     .max(12)
     .default([]),
   /** VISION §23's three outcomes. Also advisory -- pressure and budget decide. */
+  /**
+   * What the world does beside the order, rather than because of it: THE
+   * WORLD STIRS carried out, DUE NOW falling due, empty countries filled, and
+   * any other power's people getting on with their own business. `deltas` is
+   * the order and what it caused.
+   *
+   * They were one list, so the engine could not tell "the Carthaginian fleet
+   * put to sea", which the world may say, from "the Carthaginian fleet turned
+   * back because a Roman told it to", which it may not -- and the second was
+   * carried out every time it was written. What is in `deltas` and acts on
+   * another power's men, money or offices now needs them to answer to the
+   * person giving the order.
+   */
+  worldDeltas: z.array(WorldDeltaSchema).max(24).default([]),
   outcome: z.enum(["continue", "chronicle", "player_decision"]),
   playerDecision: PlayerDecisionSchema.nullable().default(null),
   /**
@@ -215,6 +271,33 @@ export const OrchestratorOutputSchema = ProposalSchema.extend({
   watch: WatchProposalSchema.nullable().default(null),
 }).strict();
 export type OrchestratorOutput = z.infer<typeof OrchestratorOutputSchema>;
+
+/**
+ * Something a person means to go on pursuing, worked out as steps (gap §5).
+ *
+ * Only a person thinking for himself writes one, which is why it lives on the
+ * cognition answer and not in the delta union: the world voice has no plans
+ * of its own to lay, and every character the orchestrator's schema grows is
+ * paid on every order.
+ */
+export const PlanProposalSchema = z
+  .object({
+    /** What they are after. An ambition they already hold, named the same way, is planned again. */
+    ambition: z.string().trim().min(1).max(200),
+    kind: AmbitionKindSchema.default("other"),
+    steps: z
+      .array(z.object({
+        act: z.string().trim().min(1).max(200),
+        /** Days from now by which it should be done. */
+        inDays: z.number().int().min(1).max(730),
+        /** What it has to wait for, if anything. */
+        when: WatchPredicateSchema.nullable().default(null),
+      }).strict())
+      .min(1)
+      .max(4),
+  })
+  .strict();
+export type PlanProposal = z.infer<typeof PlanProposalSchema>;
 
 /** One batched call answers for several actors at once (VISION §29's call budget). */
 export const CognitionOutputSchema = z
@@ -226,9 +309,15 @@ export const CognitionOutputSchema = z
           /** Reasoning from that actor's knowledge alone (VISION §28) -- kept for inspection, never applied. */
           reasoning: SummarySchema,
           proposal: ProposalSchema,
+          plan: PlanProposalSchema.nullable().default(null),
+          /** Steps of their own plan this answer carries out, by the ids in their section. */
+          stepsTaken: z.array(EntityIdSchema).max(2).default([]),
         }),
       )
-      .max(6)
+      // The cap the router's own budget is allowed to fill. It was six, which
+      // the default budget hit exactly, so raising the cast without raising this
+      // would have silently discarded whoever came last.
+      .max(12)
       .default([]),
   })
   .strict();

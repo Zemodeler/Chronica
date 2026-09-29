@@ -19,7 +19,8 @@
  */
 import { writeFileSync } from "node:fs";
 import { punicWarsGeoJson } from "../../apps/web/lib/punic-wars-geojson";
-import { PUNIC_WARS_CONTROL_MANIFEST, PUNIC_WARS_MAP_POLITIES } from "../../apps/web/lib/punic-wars-map-territory";
+import { CAPITAL_POLITY_BY_SETTLEMENT, PUNIC_WARS_CONTROL_MANIFEST, PUNIC_WARS_MAP_POLITIES, settlementControllerFor } from "../../apps/web/lib/punic-wars-map-territory";
+import { ancientRegionOf, namingScopeOf, qualifyByPosition, WHOLLY_MODERN } from "./ancient-province-names";
 
 type Point = readonly number[];
 
@@ -274,6 +275,56 @@ while (joined.size < components.length) {
 const nameById = new Map(provinceFeatures.map((feature) => [feature.id, repairEncoding((feature.properties as { name?: string }).name ?? feature.id)]));
 
 /**
+ * The province names of 270 BC (`ancient-province-names.ts`). A modern unit's
+ * name is replaced by the ancient region it lay in, qualified by where in the
+ * region it lies when the region holds several; a name already given by hand
+ * stands. Two provinces may not share a name.
+ */
+function centroidOf(id: string): { lon: number; lat: number } {
+  let area = 0;
+  let lon = 0;
+  let lat = 0;
+  for (const ring of ringsById.get(id) ?? []) {
+    for (let index = 0; index + 1 < ring.length; index++) {
+      const [x0, y0] = ring[index]!;
+      const [x1, y1] = ring[index + 1]!;
+      const cross = x0! * y1! - x1! * y0!;
+      area += cross;
+      lon += (x0! + x1!) * cross;
+      lat += (y0! + y1!) * cross;
+    }
+  }
+  if (area !== 0) return { lon: lon / (3 * area), lat: lat / (3 * area) };
+  const points = (ringsById.get(id) ?? []).flat();
+  return { lon: points.reduce((sum, point) => sum + point[0]!, 0) / Math.max(1, points.length), lat: points.reduce((sum, point) => sum + point[1]!, 0) / Math.max(1, points.length) };
+}
+
+const byRegion = new Map<string, { id: string; lon: number; lat: number }[]>();
+const unnamed: string[] = [];
+for (const record of PUNIC_WARS_CONTROL_MANIFEST) {
+  const sourceName = nameById.get(record.provinceId) ?? record.provinceId;
+  const region = ancientRegionOf(record.provinceId, sourceName);
+  if (region === null) {
+    const scope = namingScopeOf(record.provinceId);
+    if (scope !== null && WHOLLY_MODERN.has(scope)) unnamed.push(`${record.provinceId} (${sourceName})`);
+    continue;
+  }
+  byRegion.set(region, [...(byRegion.get(region) ?? []), { id: record.provinceId, ...centroidOf(record.provinceId) }]);
+}
+if (unnamed.length > 0) throw new Error(`no ancient name for ${unnamed.length} modern unit(s): ${unnamed.join(", ")}`);
+const ancientNameById = new Map<string, string>();
+for (const [region, members] of [...byRegion.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+  for (const [id, name] of qualifyByPosition(region, [...members].sort((a, b) => a.id.localeCompare(b.id)))) ancientNameById.set(id, name);
+}
+const provinceNameOf = (id: string): string => ancientNameById.get(id) ?? nameById.get(id) ?? id;
+{
+  const holders = new Map<string, string[]>();
+  for (const record of PUNIC_WARS_CONTROL_MANIFEST) holders.set(provinceNameOf(record.provinceId), [...(holders.get(provinceNameOf(record.provinceId)) ?? []), record.provinceId]);
+  const shared = [...holders.entries()].filter(([, ids]) => ids.length > 1);
+  if (shared.length > 0) throw new Error(`province names shared: ${shared.map(([name, ids]) => `${name} (${ids.join(", ")})`).join("; ")}`);
+}
+
+/**
  * The settlements the map already draws, carried into the world with the
  * province that holds them.
  *
@@ -294,8 +345,8 @@ const fortification = (type: string): number => (type === "fort" ? 3 : type === 
 const settlements = punicWarsGeoJson.features.flatMap((feature) => {
   if (feature.properties.kind !== "settlement") return [];
   const properties = feature.properties as { name?: string; provinceId: string; type: string };
-  const controllerPolityId = controllerByProvince.get(properties.provinceId);
-  if (controllerPolityId === undefined) return [];
+  if (!controllerByProvince.has(properties.provinceId)) return [];
+  const controllerPolityId = settlementControllerFor(feature.id, properties.provinceId)!;
   return [{
     id: feature.id,
     name: repairEncoding(properties.name ?? feature.id),
@@ -308,25 +359,19 @@ const settlements = punicWarsGeoJson.features.flatMap((feature) => {
 }).sort((a, b) => a.id.localeCompare(b.id));
 
 /**
- * A capital is a fact about a polity, and the map records four beyond the ones
- * the scenario authored by hand: Cirta, Volubilis, Garama and Cyrene. Naming
- * them matters past display -- a polity holding a named capital is one the
- * world will give a leader to before it gets around to the hill tribes.
+ * A capital is a fact about a polity. Naming it matters past display -- a
+ * polity holding a named capital is one the world will give a leader to before
+ * it gets around to the hill tribes. The polities the scenario authors by hand
+ * set their own and are filtered out of this file's list there.
  */
-const CAPITAL_BY_SETTLEMENT: Readonly<Record<string, string>> = {
-  "settlement-cirta": "numidian-kingdoms",
-  "settlement-volubilis": "mauretanian-peoples",
-  "settlement-garama": "garamantes",
-  "settlement-cyrene": "ptolemaic-cyrenaica",
-};
 const capitalByPolity = new Map<string, string>();
-for (const [settlementId, polityId] of Object.entries(CAPITAL_BY_SETTLEMENT)) {
+for (const [settlementId, polityId] of Object.entries(CAPITAL_POLITY_BY_SETTLEMENT)) {
   if (settlements.some((settlement) => settlement.id === settlementId)) capitalByPolity.set(polityId, settlementId);
 }
 
 const provinces = PUNIC_WARS_CONTROL_MANIFEST.map((record) => ({
   id: record.provinceId,
-  name: nameById.get(record.provinceId) ?? record.provinceId,
+  name: provinceNameOf(record.provinceId),
   terrainId: terrainById.get(record.provinceId) ?? "hills-uplands",
   controllerPolityId: record.controllerPolityId,
   // Rome and Carthage hold their own ground harder than the peoples whose

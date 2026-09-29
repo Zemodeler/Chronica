@@ -1,0 +1,100 @@
+/*
+ * The lamplit room: every colour, face and measure the interface uses.
+ * DESIGN.md says why. The canvas map takes the same colours from
+ * lib/palette.ts, and palette.test.ts keeps the two in step.
+ */
+@layer tokens {
+  :root {
+    color-scheme: dark;
+
+    /* The room */
+    --soot: #15110D;
+    --umber: #2A211A;
+    --umber-high: #3A2E24;
+    --wax: #2B2419;
+    --vellum: #E6D9BE;
+    --vellum-high: #F4ECDA;
+    --dust: #A8977C;
+
+    /* Documents */
+    --papyrus: #E6D8BA;
+    --papyrus-shade: #D9C9A6;
+    --ink: #231B14;
+    --ink-faded: #5E4D3B;
+
+    /* Touch and news */
+    --bronze: #B98B4A;
+    --bronze-high: #D2A566;
+    --bronze-deep: #7A5626;
+    --bronze-hover: #C99A58;
+    --lamp: #F2C66D;
+    --lamp-core: #FFF3C8;
+    --lamp-rim: #C9993F;
+
+    /* Harm that cannot be undone: deleting a save, a refused form. Not the
+       seal, which is the world asking; this is the site warning. */
+    --danger: #C0534A;
+    --danger-ink: #E3A69E;
+    --danger-deep: #8A2A22;
+
+    /* The seal, by culture. The shell sets data-culture; outside a game the
+       seal is the neutral earth. */
+    --seal-roman: #8F2320;
+    --seal-carthaginian: #5B2A5E;
+    --seal-greek: #2F5A8A;
+    --seal-gallic: #7A4A1E;
+    --seal-neutral: #6B5A45;
+    --seal: var(--seal-neutral);
+    /* What works in the player's favour, in a why note: a quiet olive, never a signal green. */
+    --in-favour: #7D9A5A;
+
+    /* Faces, from next/font in layout.tsx, with real fallbacks behind them. */
+    --font-serif: var(--font-alegreya), "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --font-sans: var(--font-alegreya-sans), "Gill Sans", "Segoe UI", system-ui, sans-serif;
+    --font-caps: var(--font-alegreya-sc), var(--font-alegreya), Georgia, serif;
+
+    /* A 1.25 scale from 15px. The step below it stops at 13px: nothing a
+       player has to read is set smaller. */
+    --step--1: .8125rem;
+    --step-0: .9375rem;
+    --step-1: 1.172rem;
+    --step-2: 1.465rem;
+    --step-3: 1.831rem;
+    --step-4: 2.289rem;
+    --step-5: 2.861rem;
+    --reading: 1.1875rem;
+
+    /* Measures */
+    --lintel: 3.25rem;
+    --radius: 3px;
+    --shadow-lift: 0 1.25rem 3.5rem rgb(0 0 0 / 55%);
+    --ease: cubic-bezier(.2, .7, .2, 1);
+
+    /* The surface a thing sits on decides its ink. Components read these, so
+       the same button or rule works on the dark of the room and on papyrus. */
+    --fg: var(--vellum);
+    --fg-muted: var(--dust);
+    --edge: var(--bronze);
+    --rule: rgb(230 217 190 / 14%);
+    --field: var(--umber);
+  }
+
+  [data-culture="roman"] { --seal: var(--seal-roman); }
+  [data-culture="carthaginian"] { --seal: var(--seal-carthaginian); }
+  [data-culture="greek"] { --seal: var(--seal-greek); }
+  [data-culture="gallic"] { --seal: var(--seal-gallic); }
+  [data-culture="neutral"] { --seal: var(--seal-neutral); }
+
+  .on-papyrus, .account-dialog {
+    --danger-ink: var(--danger-deep);
+    --danger: var(--danger-deep);
+  }
+  .on-papyrus {
+    --fg: var(--ink);
+    --fg-muted: var(--ink-faded);
+    --edge: var(--bronze-deep);
+    --rule: rgb(35 27 20 / 16%);
+    --field: rgb(255 255 255 / 38%);
+    color: var(--fg);
+  }
+}

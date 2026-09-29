@@ -37,15 +37,15 @@ export const syracuseDemoSettlement: GeoJsonMapFeature = {
   },
 };
 
-export const agrigentumFortDemoSettlement: GeoJsonMapFeature = {
+export const agrigentumDemoSettlement: GeoJsonMapFeature = {
   type: "Feature",
-  id: "settlement-agrigentum-fort",
+  id: "settlement-agrigentum",
   geometry: { type: "Point", coordinates: [13.5765, 37.311] },
   properties: {
     kind: "settlement",
-    name: "Fort Agrigentum",
+    name: "Agrigentum",
     provinceId: "ita-72843720b81376294924159-sicily-west",
-    type: "fort",
+    type: "city",
   },
 };
 

@@ -9,6 +9,7 @@ import {
   forwardRef,
   type ReactNode,
   type WheelEvent,
+  type MouseEvent,
   type PointerEvent,
   type KeyboardEvent,
 } from "react";
@@ -17,6 +18,9 @@ const MIN_SCALE = 1;
 const MAX_SCALE = 80;
 const ZOOM_STEP = 1.35;
 const PAN_PX = 40;
+// How far a pressed pointer travels before it is a drag rather than a click.
+// Below it the map stays put, so a hand's tremor still selects a province.
+const DRAG_THRESHOLD_PX = 4;
 const MEDIUM_THRESHOLD = 2.5;
 const CLOSE_THRESHOLD = 5;
 // Wheel deltas vary dramatically between a mouse wheel and a trackpad.  An
@@ -25,6 +29,9 @@ const CLOSE_THRESHOLD = 5;
 const WHEEL_ZOOM_SENSITIVITY = 0.0025;
 const MIN_WHEEL_FACTOR = 0.7;
 const MAX_WHEEL_FACTOR = 1.4;
+// How long after the last pan/zoom input the map counts as settled. While it
+// is not, the terrain renderer may not start an expensive cache rebuild.
+const SETTLE_MS = 150;
 
 export interface ViewportTransform {
   scale: number;
@@ -33,10 +40,9 @@ export interface ViewportTransform {
 }
 
 export interface MapViewportHandle {
-  /** Trigger an immediate canvas redraw using the current live transform. */
-  redrawCanvas: () => void;
-  /** Return the current container size in CSS pixels (unaffected by zoom). */
-  containerSize: () => { w: number; h: number } | null;
+  /** Ask for a canvas repaint on the next frame. Any number of requests in
+   *  one frame, from a gesture, a data change or the pulse, paint once. */
+  requestRedraw: () => void;
   /** Return the current live viewport transform. */
   liveTransform: () => ViewportTransform;
 }
@@ -47,6 +53,8 @@ export type DrawCanvasFn = (
   transform: ViewportTransform,
   containerW: number,
   containerH: number,
+  /** True while a pan or zoom is still under way (see SETTLE_MS). */
+  interacting: boolean,
 ) => void;
 
 function deriveZoomBand(scale: number): "far" | "medium" | "close" {
@@ -75,6 +83,8 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
     const liveRef = useRef<ViewportTransform>(transform);
     const zoomBandRef = useRef(deriveZoomBand(transform.scale));
     const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const interactingRef = useRef(false);
     const rafRef = useRef<number | null>(null);
 
     // Keep the draw callback in a ref so applyTransform always calls the latest version
@@ -101,18 +111,35 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
       hasPanned: boolean;
     } | null>(null);
 
-    const scheduleCanvasDraw = useCallback((t: ViewportTransform) => {
-      if (!drawCanvasRef.current || !canvasRef.current || !containerRef.current) return;
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-      const canvas = canvasRef.current;
-      const container = containerRef.current;
+    // Set when a gesture panned, so the click the browser fires at the end of
+    // it does not also select whatever province the pointer came to rest on.
+    const swallowClickRef = useRef(false);
+
+    // One pending frame at most: every caller only marks the canvas dirty,
+    // and the frame paints the live transform as it stands by then.
+    const requestRedraw = useCallback(() => {
+      if (rafRef.current !== null) return;
       rafRef.current = requestAnimationFrame(() => {
         rafRef.current = null;
-        if (drawCanvasRef.current) {
-          drawCanvasRef.current(canvas, t, container.clientWidth, container.clientHeight);
+        const canvas = canvasRef.current;
+        const container = containerRef.current;
+        if (drawCanvasRef.current && canvas && container) {
+          drawCanvasRef.current(canvas, liveRef.current, container.clientWidth, container.clientHeight, interactingRef.current);
         }
       });
     }, []);
+
+    // Every pan/zoom input restarts the settle timer; when it runs out, one
+    // more paint lets the renderer do the work it deferred during the gesture.
+    const markInteracting = useCallback(() => {
+      interactingRef.current = true;
+      if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = setTimeout(() => {
+        settleTimerRef.current = null;
+        interactingRef.current = false;
+        requestRedraw();
+      }, SETTLE_MS);
+    }, [requestRedraw]);
 
     // Write the CSS transform directly to the DOM — zero React re-renders per frame
     const applyTransform = useCallback((t: ViewportTransform) => {
@@ -121,8 +148,8 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
       if (wrapper) {
         wrapper.style.transform = `translate(${t.tx}px, ${t.ty}px) scale(${t.scale})`;
       }
-      scheduleCanvasDraw(t);
-    }, [scheduleCanvasDraw]);
+      requestRedraw();
+    }, [requestRedraw]);
 
     const setPanning = useCallback((panning: boolean) => {
       containerRef.current?.toggleAttribute("data-panning", panning);
@@ -146,19 +173,9 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
     const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
 
     useImperativeHandle(ref, () => ({
-      redrawCanvas() {
-        const canvas = canvasRef.current;
-        const container = containerRef.current;
-        if (canvas && container && drawCanvasRef.current) {
-          drawCanvasRef.current(canvas, liveRef.current, container.clientWidth, container.clientHeight);
-        }
-      },
-      containerSize() {
-        const c = containerRef.current;
-        return c ? { w: c.clientWidth, h: c.clientHeight } : null;
-      },
+      requestRedraw,
       liveTransform() { return liveRef.current; },
-    }), []);
+    }), [requestRedraw]);
 
     // Set initial CSS transform and canvas before first paint
     useLayoutEffect(() => {
@@ -181,23 +198,34 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
     useEffect(() => {
       const container = containerRef.current;
       if (!container || typeof ResizeObserver === "undefined") return;
-      let resizeFrame: number | null = null;
-      const observer = new ResizeObserver(() => {
-        if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
-        resizeFrame = requestAnimationFrame(() => {
-          resizeFrame = null;
-          scheduleCanvasDraw(liveRef.current);
-        });
-      });
+      const observer = new ResizeObserver(requestRedraw);
       observer.observe(container);
-      return () => {
-        observer.disconnect();
-        if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
+      return () => observer.disconnect();
+    }, [requestRedraw]);
+
+    // Moving the window to a screen of another pixel density changes
+    // devicePixelRatio without resizing anything, which left the canvas at
+    // the old backing-store resolution. A resolution query matches only the
+    // current ratio, so it is re-armed for the new one each time it fires.
+    useEffect(() => {
+      if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+      let query: MediaQueryList | null = null;
+      const arm = () => {
+        query?.removeEventListener("change", onChange);
+        query = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+        query.addEventListener("change", onChange);
       };
-    }, [scheduleCanvasDraw]);
+      function onChange() {
+        arm();
+        requestRedraw();
+      }
+      arm();
+      return () => query?.removeEventListener("change", onChange);
+    }, [requestRedraw]);
 
     useEffect(() => () => {
       if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
+      if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     }, []);
 
@@ -216,10 +244,11 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
           tx: cx - ratio * (cx - live.tx),
           ty: cy - ratio * (cy - live.ty),
         };
+        markInteracting();
         applyTransform(next);
         commitTransform(next);
       },
-      [applyTransform, commitTransform],
+      [applyTransform, commitTransform, markInteracting],
     );
 
     const handleWheel = useCallback(
@@ -268,7 +297,6 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
           centerY: e.clientY,
           hasPanned: false,
         };
-        container.setPointerCapture(e.pointerId);
         return;
       }
 
@@ -281,7 +309,9 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
         startTy: live.ty,
         hasPanned: false,
       };
-      container.setPointerCapture(e.pointerId);
+      // No pointer capture yet. Captured to the frame, the click that ends a
+      // press is dispatched to the frame and never reaches the map's own
+      // click handler, so capture waits until the press becomes a drag.
     }, []);
 
     const handlePointerMove = useCallback((e: PointerEvent) => {
@@ -291,6 +321,7 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
         if (pinch.pointers.size === 2 && pinch.initialDistance > 0) {
           if (!pinch.hasPanned) {
             pinch.hasPanned = true;
+            for (const id of pinch.pointers.keys()) containerRef.current?.setPointerCapture(id);
             setPanning(true);
             onPanStart?.();
           }
@@ -312,6 +343,7 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
             tx: cx - ratio * (cx - pinch.initialTx),
             ty: cy - ratio * (cy - pinch.initialTy),
           };
+          markInteracting();
           applyTransform(next);
           commitTransform(next);
         }
@@ -321,21 +353,25 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
       if (!dragRef.current || dragRef.current.pointerId !== e.pointerId) return;
       // Panning never changes zoom band — apply to DOM only, no React re-render
       if (!dragRef.current.hasPanned) {
+        if (Math.hypot(e.clientX - dragRef.current.startX, e.clientY - dragRef.current.startY) < DRAG_THRESHOLD_PX) return;
         dragRef.current.hasPanned = true;
+        containerRef.current?.setPointerCapture(e.pointerId);
         setPanning(true);
         onPanStart?.();
       }
+      markInteracting();
       applyTransform({
         scale: liveRef.current.scale,
         tx: dragRef.current.startTx + (e.clientX - dragRef.current.startX),
         ty: dragRef.current.startTy + (e.clientY - dragRef.current.startY),
       });
-    }, [applyTransform, commitTransform, onPanStart, setPanning]);
+    }, [applyTransform, commitTransform, markInteracting, onPanStart, setPanning]);
 
     const handlePointerUp = useCallback((e: PointerEvent) => {
       if (pinchRef.current) {
         pinchRef.current.pointers.delete(e.pointerId);
         if (pinchRef.current.pointers.size === 0) {
+          swallowClickRef.current = pinchRef.current.hasPanned;
           pinchRef.current = null;
           setPanning(false);
           onTransformChange(liveRef.current);
@@ -343,11 +379,26 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
         return;
       }
       if (dragRef.current?.pointerId === e.pointerId) {
+        swallowClickRef.current = dragRef.current.hasPanned;
         dragRef.current = null;
         setPanning(false);
         onTransformChange(liveRef.current);
       }
     }, [onTransformChange, setPanning]);
+
+    // A pan whose click never came must not eat the next real one. Cleared in
+    // the capture phase, because a press on an army standard stops before it
+    // bubbles up to `handlePointerDown`, and a pan that ended just before it
+    // then ate the click that should have opened the army.
+    const handlePointerDownCapture = useCallback(() => {
+      swallowClickRef.current = false;
+    }, []);
+
+    const handleClickCapture = useCallback((e: MouseEvent) => {
+      if (!swallowClickRef.current) return;
+      swallowClickRef.current = false;
+      e.stopPropagation();
+    }, []);
 
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
       let next: ViewportTransform | null = null;
@@ -362,20 +413,23 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
         case "-":          e.preventDefault(); next = { ...live, scale: clampScale(live.scale / ZOOM_STEP) }; break;
       }
       if (next) {
+        markInteracting();
         applyTransform(next);
         onTransformChange(next);
       }
-    }, [applyTransform, onTransformChange]);
+    }, [applyTransform, markInteracting, onTransformChange]);
 
     return (
       <figure
         ref={containerRef}
         className="map-frame map-frame-interactive"
         onWheel={handleWheel}
+        onPointerDownCapture={handlePointerDownCapture}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        onClickCapture={handleClickCapture}
         onKeyDown={handleKeyDown}
         tabIndex={0}
         role="application"

@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { BasisPointsSchema, EntityIdSchema } from "../material-state";
+import { GovernmentFormSchema } from "../political-parts";
+import { BasisPointsSchema, ElapsedStepSchema, EntityIdSchema } from "../material-state";
 import { AdministrationRecordSchema, ClaimRecordSchema, ControlRecordSchema, OccupationRecordSchema } from "./authority-records";
 
 // The province graph is the map (ADR-0015).
@@ -98,6 +99,21 @@ export const ProvinceSchema = z
     controllerPolityId: EntityIdSchema.nullable(),
     /** How firmly it is held. Control is a degree, not a flag. */
     controlFirmnessBps: BasisPointsSchema,
+    /**
+     * Who held it last, and when they lost it, where it was taken in war: what
+     * a beaten power means to take back. The Mamertines lost Messana and went
+     * on "provisioning" it; Syracuse, at war with its new master, was never
+     * told there was a city to retake.
+     */
+    lostBy: z.object({ polityId: EntityIdSchema, atStep: ElapsedStepSchema }).strict().nullable().optional(),
+    /**
+     * Whom its people want to belong to instead, and how much: ground handed
+     * over by surrender or treaty keeps its old loyalty, and it grows under a
+     * loose hold and hard times until, at 10 000, they rise for it
+     * (`sim/polity-end.ts`). A power that submitted is not a power that
+     * agreed; the Samnites rose three times.
+     */
+    yearning: z.object({ polityId: EntityIdSchema, bps: BasisPointsSchema, updatedAtStep: ElapsedStepSchema.default(0) }).strict().nullable().optional(),
     tier: DetailTierSchema,
     geo: ProvinceGeoSchema.optional(),
     /** Scenario-authored operational positions; omit to use the deterministic fallback (`warfare/position.ts`). */
@@ -138,9 +154,69 @@ export const PolitySchema = z
     id: EntityIdSchema,
     name: z.string().trim().min(1).max(120),
     capitalSettlementId: EntityIdSchema.nullable(),
+    /**
+     * How far this power acts as one thing.
+     *
+     * Rome answers as a state: one Senate decides and the provinces follow. The
+     * Boii answer as forty chieftains who happen to share a name, and an
+     * agreement struck with one of them binds nobody else. Both were modelled
+     * identically -- as a polity with a capital and a foreign policy -- so a
+     * confederation of tribes behaved like a republic with a chancellery.
+     *
+     * 10 000 is a state whose centre speaks for the whole; 2 000 is a name on a
+     * map that a dozen peoples are filed under. It is read where the difference
+     * actually shows: who answers for the power, what they believe they answer
+     * for, and how firmly its ground can be held once taken.
+     *
+     * Defaulted rather than required, so a scenario written before this existed
+     * keeps working and simply describes states -- which is what it meant.
+     */
+    cohesionBps: BasisPointsSchema.default(7_000),
+    /**
+     * What this power pays its soldiers: coin a month for every thousand men.
+     *
+     * An army's pay is a flat line in the books, and whoever raised new men
+     * had only the treasury's totals to price them from, so every new legion's
+     * wage was a guess. Null where the scenario says nothing.
+     */
+    soldierPayPerThousand: z.number().int().nonnegative().nullable().default(null),
+    /**
+     * The seed of its constitution: what sort of government it had when the
+     * world first met it. Only the seed -- the parts it grows into are its
+     * chambers, offices and succession rules, and those change by law and by
+     * force (`sim/constitutions.ts`). Null is read from its cohesion.
+     */
+    governmentForm: GovernmentFormSchema.nullable().optional(),
+    /**
+     * The day it ceased to be, and how: given up to a victor by surrender
+     * ("absorbed", into `absorbedByPolityId`), or gone with nothing left to it
+     * ("extinct"). Nothing ever ended a power: the Mamertines lost Messana and
+     * their only province and went on declaring wars and writing letters.
+     * A power that has ended can be restored by a rising (`sim/polity-end.ts`).
+     */
+    endedAtStep: ElapsedStepSchema.nullable().optional(),
+    endedHow: z.enum(["absorbed", "extinct"]).nullable().optional(),
+    absorbedByPolityId: EntityIdSchema.nullable().optional(),
+    /** Since when it has held no ground: a power with no ground and no army ends. */
+    landlessSinceStep: ElapsedStepSchema.nullable().optional(),
   })
   .strict();
 export type Polity = z.infer<typeof PolitySchema>;
+
+/** Whether a power still exists. */
+export const isStanding = (polity: Pick<Polity, "endedAtStep">): boolean => polity.endedAtStep == null;
+
+/** In words, for a prompt: how far a power's centre speaks for the whole of it. */
+export function cohesionInWords(cohesionBps: number): string {
+  if (cohesionBps >= 7_000) return "acts as one state";
+  if (cohesionBps >= 4_500) return "acts together, loosely";
+  if (cohesionBps >= 2_500) return "acts as a confederation whose parts often go their own way";
+  return "is a name on the map; each place in it answers for itself";
+}
+
+/** Below this, a power has no centre that can bind the rest of it. */
+export const LOOSE_COHESION_BPS = 4_500;
+
 
 /**
  * A declared political tie at the start of a scenario.  It is intentionally

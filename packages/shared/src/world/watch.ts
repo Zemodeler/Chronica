@@ -23,7 +23,17 @@ import { EntityIdSchema, MoneyAmountSchema } from "../material-state";
 // The web app renders these as a small form, never as a text box that silently
 // fails to match. Growing the union is ordinary work in packages/sim.
 
-export const WatchPredicateSchema = z.discriminatedUnion("kind", [
+/**
+ * The arms, as a tuple, so a second language can be built over the same ones.
+ *
+ * A mechanic (`world/mechanic.ts`) reads the world by these arms and by more
+ * of its own -- a province's order, a purse, a relation, a war. Those cannot
+ * be added here: this union is a named `$def` inside the orchestrator's prompt,
+ * and every arm added to it is paid for in the prompt's ceiling. So the arms
+ * are exported and the wider union is assembled elsewhere; one evaluator
+ * (`sim/watch.ts`) reads both.
+ */
+export const WATCH_ARMS = [
   /** An army arrives somewhere. The commonest watch, and the reason for the rest. */
   z
     .object({
@@ -35,6 +45,30 @@ export const WatchPredicateSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** A place changes hands, whoever took it. */
   z.object({ kind: z.literal("province_control_changes"), provinceId: EntityIdSchema }).strict(),
+  /**
+   * An army reaches a named piece of ground *inside* a province: the ward
+   * behind the outer wall, the pass, the ford, the siege line.
+   *
+   * A province is too coarse for the thing players actually write. "When the
+   * Carthaginians are through the first wall, fire it" is not a condition about
+   * north-western Sicily; the enemy has been in north-western Sicily for a
+   * month. It is a condition about one position, which is why it could not be
+   * expressed until positions could be occupied.
+   */
+  z
+    .object({
+      kind: z.literal("force_enters_position"),
+      positionId: EntityIdSchema,
+      /** Only this polity's forces, or any force not the watcher's when omitted. */
+      polityId: EntityIdSchema.optional(),
+    })
+    .strict(),
+  /**
+   * A city changes hands. "Should Hadrumentum fall" is a sentence half the
+   * orders in a campaign hang on, and a province changing hands is not the same
+   * event -- a garrison can hold a city whose countryside has gone.
+   */
+  z.object({ kind: z.literal("settlement_control_changes"), settlementId: EntityIdSchema }).strict(),
   /**
    * "Rome mobilises": a polity's total fit headcount crosses a threshold.
    *
@@ -74,6 +108,34 @@ export const WatchPredicateSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** A named person dies. Succession, ransom and revenge all key off this. */
   z.object({ kind: z.literal("character_dies"), characterId: EntityIdSchema }).strict(),
+  /**
+   * A question is settled: a vote on a command, a law, a war. "Once I receive
+   * the command of the Sicilian front, raise Legio II" hung on the Senate's
+   * vote, and there was no way to say so -- the clause was dropped, and the
+   * order to merge Legio II into Legio I met a legion that did not exist.
+   */
+  z
+    .object({
+      kind: z.literal("question_decided"),
+      procedureId: EntityIdSchema,
+      /** Carried or rejected; either, when omitted. */
+      outcome: z.enum(["passed", "failed"]).optional(),
+    })
+    .strict(),
+  /**
+   * A letter between two powers is answered. "If Syracuse refuses, attack"
+   * hung on Hieron's reply, and there was no way to say so: the refusal came
+   * and the order never fired.
+   */
+  z
+    .object({
+      kind: z.literal("letter_answered"),
+      fromPolityId: EntityIdSchema,
+      toPolityId: EntityIdSchema,
+      /** Silence counts as refusal. Any answer, when omitted. */
+      answer: z.enum(["accepted", "refused"]).optional(),
+    })
+    .strict(),
   /** A named office falls vacant, or is filled. */
   z
     .object({
@@ -82,7 +144,16 @@ export const WatchPredicateSchema = z.discriminatedUnion("kind", [
       vacant: z.boolean(),
     })
     .strict(),
-]);
+] as const;
+
+export const WatchPredicateSchema = z.discriminatedUnion("kind", [...WATCH_ARMS]).meta({
+  // Named, so the orchestrator's schema states it once and points at it from
+  // both places it is used -- the ruler's own watch and a contingency's
+  // trigger -- instead of inlining the same two thousand characters twice.
+  // Only this one is named, and by a word a model can read; the blanket
+  // alternative (`reused: "ref"`) names everything `__schema0`.
+  id: "WatchPredicate",
+});
 export type WatchPredicate = z.infer<typeof WatchPredicateSchema>;
 
 export const WatchConditionSchema = z

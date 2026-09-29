@@ -1,10 +1,16 @@
 import "server-only";
 
 import {
+  armiesInSight,
+  buildStation,
   DynamicMapOverlaySchema,
+  factsKnownToStation,
   formatWorldDate,
   type DynamicMapOverlay,
+  type Fact,
+  type Office,
   type ScenarioClock,
+  type ScenarioWarfareRules,
   type WorldState,
 } from "@chronica/shared";
 
@@ -49,6 +55,8 @@ export interface GameWorldView {
    * simulation can accept orders from.
    */
   readonly viewerCharacterId: string | null;
+  /** Which power they belong to. Public by nature, and what furnishes their room. */
+  readonly viewerPolityId: string | null;
   /** The world's own date, e.g. "1 March 264 BC". Replaces the old turn counter. */
   readonly dateLabel: string;
   readonly provinces: readonly ProvinceView[];
@@ -63,12 +71,25 @@ export interface WorldViewMeta {
   readonly gameId: string;
   readonly gameTitle: string;
   readonly clock: ScenarioClock | undefined;
+  /** The scenario's offices, so a consul's station is a consul's. */
+  readonly offices: readonly Office[];
+  /** What has happened lately, for the armies reported where nobody can see them. */
+  readonly facts: readonly Fact[];
+  /** The scenario's troop kinds, so a fleet on the map is counted in ships. */
+  readonly warfare?: ScenarioWarfareRules | undefined;
 }
 
 const NO_ACCOUNT: AccountView = { id: "no-account", label: "No personal account", balance: 0, recentChanges: [] };
 
-function projectOverlay(world: WorldState): DynamicMapOverlay {
-  const polityNames = new Map(world.map.polities.map((polity) => [polity.id, polity.name]));
+function projectOverlay(world: WorldState, viewerCharacterId: string | null, offices: readonly Office[], facts: readonly Fact[], warfare?: ScenarioWarfareRules): DynamicMapOverlay {
+  // A power's own armies are on its rolls; anyone else's is on the map only
+  // where the viewer could know of it, at the count their sources give
+  // (`armiesInSight`). Nobody in particular sees nobody's.
+  const station = viewerCharacterId === null || !world.characters.some((character) => character.id === viewerCharacterId)
+    ? null
+    : buildStation({ world, characterId: viewerCharacterId, offices });
+  const sighted = new Map((station === null ? [] : armiesInSight(world, station, factsKnownToStation(facts, station, world.instant, world), warfare))
+    .map((army) => [army.forceId, army]));
   const characterNames = new Map(world.characters.map((character) => [character.id, character.name]));
 
   return DynamicMapOverlaySchema.parse({
@@ -76,7 +97,17 @@ function projectOverlay(world: WorldState): DynamicMapOverlay {
     // simulated time has moved, which is the only thing that can change it.
     revision: world.elapsedStep,
     polities: world.map.polities.map((polity) => ({ polityId: polity.id, name: polity.name })),
-    politicalRelations: [],
+    // Who follows whom, read from the treaties themselves: a foedus names its
+    // leader second, and an alliance of equals is shown as led by its first party.
+    politicalRelations: world.polityAgreements
+      .filter((agreement) => agreement.status === "active" && agreement.visibility === "public" && (agreement.kind === "foedus" || agreement.kind === "alliance"))
+      .map((agreement) => ({
+        id: agreement.id,
+        kind: "alliance" as const,
+        leaderPolityId: agreement.kind === "foedus" ? agreement.otherPolityId : agreement.polityId,
+        memberPolityId: agreement.kind === "foedus" ? agreement.polityId : agreement.otherPolityId,
+        sourceNote: agreement.terms,
+      })),
     provinces: world.map.provinces.map((province) => ({
       provinceId: province.id,
       controllerPolityId: province.controllerPolityId,
@@ -98,14 +129,19 @@ function projectOverlay(world: WorldState): DynamicMapOverlay {
         damaged: false,
       })),
     ),
-    forces: world.material.forces.map((force) => ({
+    forces: world.material.forces.flatMap((force) => {
+      const army = sighted.get(force.id);
+      return army === undefined ? [] : [{ force, army }];
+    }).map(({ force, army }) => ({
       forceId: force.id,
-      provinceId: force.locationId,
+      provinceId: army.provinceId,
       ownerPolityId: force.polityId,
       name: force.name,
       commanderLabel: characterNames.get(force.commanderCharacterId) ?? null,
-      strengthLabel: `${force.authorizedStrength.toLocaleString()} men`,
+      strengthLabel: army.strengthLabel,
       relation: "neutral",
+      ...(force.standardId === undefined ? {} : { flagAssetId: force.standardId }),
+      commandable: viewerCharacterId !== null && (force.commanderCharacterId === viewerCharacterId || force.controllerCharacterId === viewerCharacterId),
       selected: false,
       movement: null,
     })),
@@ -116,12 +152,14 @@ function projectOverlay(world: WorldState): DynamicMapOverlay {
 export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerCharacterId: string): GameWorldView {
   const polityNames = new Map(world.map.polities.map((polity) => [polity.id, polity.name]));
   const viewer = world.characters.find((character) => character.id === viewerCharacterId);
+  const mapOverlay = projectOverlay(world, viewer?.id ?? null, meta.offices, meta.facts, meta.warfare);
 
   const provinces: ProvinceView[] = world.map.provinces.map((province) => {
     const controllerLabel = province.controllerPolityId === null
       ? "Uncontrolled"
       : polityNames.get(province.controllerPolityId) ?? province.controllerPolityId;
-    const stationed = world.material.forces.filter((force) => force.locationId === province.id);
+    // What the map shows standing there, and nothing it does not.
+    const stationed = mapOverlay.forces.filter((force) => force.provinceId === province.id);
     return {
       id: province.id,
       name: province.name,
@@ -155,9 +193,10 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
     gameId: meta.gameId,
     gameTitle: meta.gameTitle,
     viewerCharacterId: viewer?.id ?? null,
+    viewerPolityId: viewer?.polityId ?? null,
     dateLabel: meta.clock === undefined ? `Day ${world.elapsedStep}` : formatWorldDate(world.instant, meta.clock),
     provinces,
-    mapOverlay: projectOverlay(world),
+    mapOverlay,
     material: { currencyName: world.material.currency.name, personalAccount },
   };
 }

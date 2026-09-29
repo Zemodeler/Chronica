@@ -5,6 +5,6 @@ export * from "./character-social";
 export * from "./dialogue";
 export * from "./games";
 export * from "./shared-knowledgebase";
-export * from "./ui-state";
 export * from "./world";
+export * from "./repin";
 export * from "../built-in-scenarios";

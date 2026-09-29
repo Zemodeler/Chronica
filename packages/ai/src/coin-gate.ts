@@ -1,5 +1,5 @@
 import { calculateCoinUsage } from "@chronica/billing";
-import { authorizeCoinHold, settleCoinHold, releaseCoinHold, getCoinWalletSnapshot, type ChronicaDatabase } from "@chronica/db";
+import { authorizeCoinHold, settleCoinHold, releaseCoinHold, getCoinWalletSnapshot, CoinHoldRefusedError, type ChronicaDatabase } from "@chronica/db";
 import type { AiOperation } from "@chronica/shared";
 import { randomUUID } from "node:crypto";
 import type {
@@ -31,13 +31,28 @@ const MODEL_TOKEN_RATES: Record<string, ModelTokenRate> = {
     cacheReadMicroUnitsPerMillionTokens: 20_000n,
     cacheWriteMicroUnitsPerMillionTokens: 0n,
   },
+  "gpt-6-luna": {
+    inputMicroUnitsPerMillionTokens: 100_000n,
+    outputMicroUnitsPerMillionTokens: 500_000n,
+    cacheReadMicroUnitsPerMillionTokens: 10_000n,
+    cacheWriteMicroUnitsPerMillionTokens: 0n,
+  },
   "gpt-5.6-sol": {
     inputMicroUnitsPerMillionTokens: 4_000_000n,
     outputMicroUnitsPerMillionTokens: 20_000_000n,
     cacheReadMicroUnitsPerMillionTokens: 400_000n,
     cacheWriteMicroUnitsPerMillionTokens: 0n,
   },
+  "gpt-6-sol": {
+    inputMicroUnitsPerMillionTokens: 2_000_000n,
+    outputMicroUnitsPerMillionTokens: 10_000_000n,
+    cacheReadMicroUnitsPerMillionTokens: 200_000n,
+    cacheWriteMicroUnitsPerMillionTokens: 0n,
+  },
 };
+// Azure reports its deployment name as the model, so each deployment is priced
+// as the model it serves.
+MODEL_TOKEN_RATES["gpt-6-ad"] = MODEL_TOKEN_RATES["gpt-6-luna"]!;
 
 // Conservative overestimate for the hold — settled to the actual model's cost.
 const HOLD_RATE = {
@@ -65,6 +80,25 @@ export class AiParseError extends Error {
   }
 }
 
+/**
+ * Settles a hold, and gives the coins back if settlement itself fails.
+ *
+ * The call succeeded, so the fair outcome is a charge; but a hold whose
+ * settlement died is a hold nobody is coming back for, and the coins it
+ * reserves stay unspendable until the stale sweep finds them. Releasing it
+ * forgoes one call's charge to keep the wallet honest now. The failure is
+ * still thrown, with its own name, so the caller sees what happened.
+ */
+async function settleOrGiveBack(db: ChronicaDatabase, operation: AiOperation, holdId: string, settlement: Parameters<typeof settleCoinHold>[1]): Promise<void> {
+  try {
+    await settleCoinHold(db, settlement);
+  } catch (error) {
+    console.error(`[ai] settling the ${operation} hold failed; releasing it instead:`, error);
+    await releaseCoinHold(db, holdId).catch(() => { /* best effort */ });
+    throw error;
+  }
+}
+
 export async function callWithCoinGate(
   db: ChronicaDatabase,
   userId: string,
@@ -75,8 +109,17 @@ export async function callWithCoinGate(
   validate?: (content: string) => boolean,
   options?: { maxRetries?: number },
 ): Promise<AiCallResult> {
+  // Nothing to reserve and nothing to charge: a person is answering.
+  if (adapter.free === true) return adapter.call(operation, prompts.system, prompts.user);
+
   // Fast pre-check: refuse immediately if wallet is empty (before touching holds).
+  // Timed with everything else we do around the call: three database round
+  // trips per model call is a number worth being able to see next to the
+  // provider's own latency rather than guessing at.
+  let ledgerMs = 0;
+  const openedAt = performance.now();
   const snapshot = await getCoinWalletSnapshot(db, userId);
+  ledgerMs += performance.now() - openedAt;
   if (snapshot.availableMicroUnits === 0n) throw new InsufficientCoinsError();
 
   const maxHold = calculateCoinUsage(HOLD_RATE, {
@@ -93,20 +136,28 @@ export async function callWithCoinGate(
     const idempotencyKey = `${operation}:${gameId}:${workId}`;
 
     let holdId: string;
+    const heldAt = performance.now();
     try {
       const hold = await authorizeCoinHold(db, { gameId, workId, maximumMicroUnits: maxHold, idempotencyKey });
       holdId = hold.holdId;
-    } catch {
-      throw new InsufficientCoinsError();
+    } catch (error) {
+      // Only a refusal is "out of coins". Anything else the ledger throws is
+      // its own kind of failure and keeps its own name: a database deadlock
+      // once wore this message in front of a player with a full wallet.
+      if (error instanceof CoinHoldRefusedError) throw new InsufficientCoinsError();
+      throw error;
     }
+    ledgerMs += performance.now() - heldAt;
 
     let result: AiCallResult;
+    const calledAt = performance.now();
     try {
       result = await adapter.call(operation, prompts.system, prompts.user);
     } catch (error) {
       await releaseCoinHold(db, holdId).catch(() => { /* best effort */ });
       throw error;
     }
+    const providerMs = performance.now() - calledAt;
 
     if (validate !== undefined && !validate(result.content)) {
       await releaseCoinHold(db, holdId).catch(() => { /* best effort */ });
@@ -125,7 +176,8 @@ export async function callWithCoinGate(
       cacheWriteTokens: result.cacheWriteTokens,
     });
 
-    await settleCoinHold(db, {
+    const settledAt = performance.now();
+    await settleOrGiveBack(db, operation, holdId, {
       holdId,
       callId: `${workId}:settled`,
       operation,
@@ -139,8 +191,9 @@ export async function callWithCoinGate(
       providerCostMicroUnits,
       coinChargeMicroUnits,
     });
+    ledgerMs += performance.now() - settledAt;
 
-    logDevAiCost(operation, result, { providerCostMicroUnits, coinChargeMicroUnits });
+    logDevAiCost(operation, result, { providerCostMicroUnits, coinChargeMicroUnits }, { providerMs, ledgerMs });
     return result;
   }
 
@@ -170,7 +223,11 @@ export async function callWithToolsAndCoinGate(
   messages: readonly AiConversationMessage[],
   tools: readonly AiToolDefinition[],
 ): Promise<AiToolCallResult> {
+  if (adapter.free === true) return adapter.callWithTools(operation, systemPrompt, messages, tools);
+  let ledgerMs = 0;
+  const openedAt = performance.now();
   const snapshot = await getCoinWalletSnapshot(db, userId);
+  ledgerMs += performance.now() - openedAt;
   if (snapshot.availableMicroUnits === 0n) throw new InsufficientCoinsError();
 
   const maxHold = calculateCoinUsage(HOLD_RATE, {
@@ -182,6 +239,7 @@ export async function callWithToolsAndCoinGate(
 
   const workId = randomUUID();
   let holdId: string;
+  const heldAt = performance.now();
   try {
     const hold = await authorizeCoinHold(db, {
       gameId,
@@ -190,17 +248,21 @@ export async function callWithToolsAndCoinGate(
       idempotencyKey: `${operation}:${gameId}:${workId}`,
     });
     holdId = hold.holdId;
-  } catch {
-    throw new InsufficientCoinsError();
+  } catch (error) {
+    if (error instanceof CoinHoldRefusedError) throw new InsufficientCoinsError();
+    throw error;
   }
+  ledgerMs += performance.now() - heldAt;
 
   let result: AiToolCallResult;
+  const calledAt = performance.now();
   try {
     result = await adapter.callWithTools(operation, systemPrompt, messages, tools);
   } catch (error) {
     await releaseCoinHold(db, holdId).catch(() => { /* best effort */ });
     throw error;
   }
+  const providerMs = performance.now() - calledAt;
 
   const actualRate = MODEL_TOKEN_RATES[result.model] ?? MODEL_TOKEN_RATES["gpt-5.6-sol"]!;
   const { providerCostMicroUnits, coinChargeMicroUnits } = calculateCoinUsage(actualRate, {
@@ -210,7 +272,8 @@ export async function callWithToolsAndCoinGate(
     cacheWriteTokens: result.cacheWriteTokens,
   });
 
-  await settleCoinHold(db, {
+  const settledAt = performance.now();
+  await settleOrGiveBack(db, operation, holdId, {
     holdId,
     callId: `${workId}:settled`,
     operation,
@@ -224,7 +287,8 @@ export async function callWithToolsAndCoinGate(
     providerCostMicroUnits,
     coinChargeMicroUnits,
   });
+  ledgerMs += performance.now() - settledAt;
 
-  logDevAiCost(operation, result, { providerCostMicroUnits, coinChargeMicroUnits });
+  logDevAiCost(operation, result, { providerCostMicroUnits, coinChargeMicroUnits }, { providerMs, ledgerMs });
   return result;
 }

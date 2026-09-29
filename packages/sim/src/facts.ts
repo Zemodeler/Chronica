@@ -1,13 +1,18 @@
 import {
   addMinutes,
   emitFacts,
+  fitStrengthOf,
   type Fact,
   type FactDraft,
   type FactProposalDraft,
+  type Force,
   type OrderPartyRef,
   type WorldInstant,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+
+/** The longest summary `FactSchema` admits. */
+const FACT_SUMMARY_MAX = 600;
 
 /**
  * Turns the model's fact proposals into canonical `Fact`s.
@@ -28,6 +33,12 @@ export interface MaterializeFactsInput {
   readonly causalDepth: number;
   /** localId → assigned id, so a fact can name what this batch created. */
   readonly assignedIds: ReadonlyMap<string, string>;
+  /**
+   * The armies as they stand now, so a fact naming one keeps what it was when
+   * it happened (`Fact.forcesAsReported`). Left out, nothing is kept, and a
+   * later reader's count of those men falls back on today's.
+   */
+  readonly forces?: readonly Force[] | undefined;
 }
 
 export interface MaterializedFacts {
@@ -54,28 +65,44 @@ export function materializeFacts(input: MaterializeFactsInput): MaterializedFact
 
   const drafts: FactDraft[] = input.proposals.map((proposal) => {
     const timed = proposal.discoveryState === "delayed" || proposal.discoveryState === "rumoured" || proposal.discoveryState === "intercepted";
+    const knowableAtInstant = timed ? addMinutes(input.now, (proposal.knowableInDays ?? 0) * 1440) : null;
+    const affectedEntities = (proposal.affectedRefs ?? []).map(resolveParty);
+    const forcesAsReported = affectedEntities
+      .flatMap((ref) => {
+        const force = ref.kind === "force" ? input.forces?.find((candidate) => candidate.id === ref.id) : undefined;
+        return force === undefined ? [] : [{ forceId: force.id, men: fitStrengthOf(force), locationId: force.locationId }];
+      })
+      .slice(0, 8);
     return {
       time: input.now,
       atStep: input.atStep,
       kind: proposal.kind,
-      summary: proposal.summary,
-      affectedEntities: (proposal.affectedRefs ?? []).map(resolveParty),
+      // The record's cap on a summary is the schema's, and a model's proposal
+      // arrives already within it; an engine-made one -- a project completed
+      // with a long account of what it produced -- once ran past it and
+      // failed the whole burst. The engine's facts are cut to fit, never
+      // refused: nothing the tick says may end a turn.
+      summary: proposal.summary.length > FACT_SUMMARY_MAX ? `${proposal.summary.slice(0, FACT_SUMMARY_MAX - 1).trimEnd()}…` : proposal.summary,
+      affectedEntities,
       resourceChanges: [],
       authorityChange: undefined,
       visibility: proposal.visibility,
       discovery: {
         state: proposal.discoveryState,
-        knowableAtInstant: timed ? addMinutes(input.now, (proposal.knowableInDays ?? 0) * 1440) : null,
-        // The people in the room know it the moment it happens. Without this a
-        // private fact was known to nobody, its author included, so a plotter
-        // could never be woken by their own plot.
-        discoveredBy: (proposal.knownToRefs ?? []).map((ref) => ({ observerRef: resolveParty(ref), atInstant: input.now, via: "witnessed" as const })),
+        knowableAtInstant,
+        // The people it names as knowing it know it once it can be known at
+        // all. Without this a private fact was known to nobody, its author
+        // included, so a plotter could never be woken by their own plot. Not
+        // before: a delayed letter's reader was stamped as knowing it the day
+        // it was written.
+        discoveredBy: (proposal.knownToRefs ?? []).map((ref) => ({ observerRef: resolveParty(ref), atInstant: knowableAtInstant ?? input.now, via: "witnessed" as const })),
       },
       evidence: null,
       eligibleReactionScopes: [],
       sourceEventId: null,
       sourceActionId: null,
       causalDepth: input.causalDepth,
+      ...(forcesAsReported.length === 0 ? {} : { forcesAsReported }),
     };
   });
 

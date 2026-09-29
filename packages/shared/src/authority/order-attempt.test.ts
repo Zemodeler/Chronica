@@ -8,12 +8,13 @@ import {
   receiveOrderAttempt,
   recordOrderAttemptConsequences,
   type OrderAttempt,
+  type OrderStanding,
 } from "./order-attempt";
 
 const authorized: AuthorityCheckResult = { authorized: true, grant: null, standing: "lawful", reason: "Authorized by office grant." };
 const unauthorized: AuthorityCheckResult = { authorized: false, grant: null, standing: null, reason: "No command grant over this force." };
 
-function baseAttempt(authorityCheck: AuthorityCheckResult): OrderAttempt {
+function baseAttempt(authorityCheck: AuthorityCheckResult, standing: OrderStanding = "binding"): OrderAttempt {
   return issueOrderAttempt({
     id: "attempt-1",
     actionId: "action-1",
@@ -21,6 +22,8 @@ function baseAttempt(authorityCheck: AuthorityCheckResult): OrderAttempt {
     recipientRef: { kind: "character", id: "commander-1" },
     claimedAuthorityGrantId: null,
     authorityCheck,
+    instruction: "Hold the strait and let nothing cross.",
+    standing,
     issuedAtStep: 1,
   });
 }
@@ -66,8 +69,8 @@ describe("decideOrderAttempt: the garrison-gate case (docs/32 test plan)", () =>
     expect(decided.decidedAtStep).toBeNull();
   });
 
-  it("a corrupt commander complying with an unauthorized order is recorded as SUBVERTED, never accepted -- the order can never silently gain lawful power", () => {
-    const received = receiveOrderAttempt(baseAttempt(unauthorized));
+  it("a commander complying with somebody who had no business commanding him is recorded as SUBVERTED, never accepted -- the order can never silently gain lawful power", () => {
+    const received = receiveOrderAttempt(baseAttempt(unauthorized, "presumptuous"));
     const decided = decideOrderAttempt(received, "accept", "The commander is sympathetic to the soldier's cause.", 2);
     expect(decided.status).toBe("subverted");
     expect(decided.status).not.toBe("accepted");
@@ -78,6 +81,23 @@ describe("decideOrderAttempt: the garrison-gate case (docs/32 test plan)", () =>
     const received = receiveOrderAttempt(baseAttempt(authorized));
     const decided = decideOrderAttempt(received, "accept", "A lawful command.", 2);
     expect(decided.status).toBe("accepted");
+  });
+
+  it("granting a request from somebody who was asking is agreement, not subversion", () => {
+    // The coercion used to fire on every unauthorized attempt, which under the
+    // standing model is every willingly granted request -- so a quartermaster
+    // who agreed to a merchant's reasonable ask was recorded as subverting the
+    // chain of command.
+    const received = receiveOrderAttempt(baseAttempt(unauthorized, "requested"));
+    const decided = decideOrderAttempt(received, "accept", "It costs me nothing and he pays well.", 2);
+    expect(decided.status).toBe("accepted");
+  });
+
+  it("refusing is an answer, whatever standing the asker had", () => {
+    for (const standing of ["binding", "requested", "presumptuous"] as const) {
+      const received = receiveOrderAttempt(baseAttempt(unauthorized, standing));
+      expect(decideOrderAttempt(received, "refuse", "No.", 2).status).toBe("refused");
+    }
   });
 
   it("the commander can betray by ignoring the order entirely", () => {
@@ -121,7 +141,7 @@ describe("completeOrderAttempt / abandonOrderAttempt", () => {
 
 describe("recordOrderAttemptConsequences", () => {
   it("appends fact refs without disturbing anything else", () => {
-    const received = receiveOrderAttempt(baseAttempt(unauthorized));
+    const received = receiveOrderAttempt(baseAttempt(unauthorized, "presumptuous"));
     const subverted = decideOrderAttempt(received, "accept", "Complied anyway.", 2);
     const withConsequences = recordOrderAttemptConsequences(subverted, ["fact-legitimacy-1", "fact-evidence-1"]);
     expect(withConsequences.consequenceFactRefs).toEqual(["fact-legitimacy-1", "fact-evidence-1"]);

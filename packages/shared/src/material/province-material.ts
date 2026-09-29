@@ -1,6 +1,6 @@
 import type { WorldState } from "../world/world-state";
 import type { Province } from "../world/map";
-import type { ProvinceMaterial } from "../material-state";
+import type { ProvinceLevel, ProvinceMaterial } from "../material-state";
 
 // Background material society (docs/14 Phase 2).
 //
@@ -16,28 +16,78 @@ import type { ProvinceMaterial } from "../material-state";
 //
 // Every function here is pure and deterministic: same input, same output,
 // so a replay matches exactly. Detailed updates (recruitment, taxation, war
-// damage) are applied by the workflow or pipeline step that caused them, to
-// the one province affected; `applyCoarseRecoveryTick` is the cheap,
+// damage) are applied by whatever caused them -- a levy (`sim/levies.ts`), a
+// battle, a sack, an army foraging (`sim/campaign.ts`) -- to the one province
+// affected; `applyCoarseRecoveryTick` is the cheap,
 // bounded pass every *other* province gets once per turn instead.
 
-/** A settlement's coarse "size" scales to population at roughly a market town per unit. */
-const POPULATION_PER_SETTLEMENT_SIZE = 400;
+/**
+ * Who lives in a province, counted from its towns.
+ *
+ * A settlement's size counted its townsfolk, about 400 a unit, and nobody
+ * else: Latium held 40 000 people and Etruria 36 000, so every levy of the
+ * first war found "no more men of age to give" within two months, where
+ * Polybius's lists of 225 give Rome and its allies some 700 000 men of
+ * military age. Nine in ten of those men lived on the land. A town's unit is
+ * now its townsfolk and the country that feeds them -- ten times the town --
+ * which puts Roman Italy near the three million free people the census
+ * figures imply, and Rome's own ground near a million.
+ */
+const TOWNSFOLK_PER_SETTLEMENT_SIZE = 400;
+const COUNTRY_FOLK_PER_TOWNSMAN = 9;
+const POPULATION_PER_SETTLEMENT_SIZE = TOWNSFOLK_PER_SETTLEMENT_SIZE * (1 + COUNTRY_FOLK_PER_TOWNSMAN);
+/**
+ * Of the people, the men a power can call up at once without emptying the
+ * fields: a third of those of military age, who were about a quarter of the
+ * people. Rome at its utmost, after Cannae, had about that under arms.
+ */
 const MANPOWER_FRACTION_OF_POPULATION = 0.08;
-const TAX_CAPACITY_PER_POPULATION = 0.5;
+/**
+ * Of the people, those who come of age for the call-up in a year: a pool bled
+ * dry fills again over six or seven years, as Rome's did after Cannae. It
+ * refilled in months, at a twentieth of a percent of the people a day.
+ */
+const MEN_OF_AGE_PER_YEAR = 0.012;
+/**
+ * What a head pays in a month, before the rate and the reach of the power that
+ * taxes it. It was half a coin when a province counted only its townsfolk; the
+ * country people counted since pay a tenth of that each, so what the land
+ * yields is what it was.
+ */
+const TAX_CAPACITY_PER_POPULATION = 0.5 / (1 + COUNTRY_FOLK_PER_TOWNSMAN);
 const BASELINE_PRODUCTIVE_CAPACITY_BPS = 10_000;
 const BASELINE_FOOD_SECURITY_BPS = 8_000;
 const BASELINE_STABILITY_BPS = 7_000;
-
 function clampBps(value: number): number {
   return Math.max(0, Math.min(10_000, Math.round(value)));
 }
 
-/** A province with no authored material state gets one derived from its settlements. */
+/**
+ * The country people of a province the map drew no town in, by its ground.
+ *
+ * Population was counted from towns alone, and 738 of the world's 780
+ * provinces -- every one far from the war -- were drawn without any. They
+ * held nobody: no bread for an army, no man for a levy, no coin for a tax.
+ * These are villages and farms, a thinner people than a town's hinterland:
+ * a coastal plain about as many as a middling Italian town and its country,
+ * the hills half -- a few people to the square kilometre across a region the
+ * size of a modern county, as the Iron Age north carried.
+ */
+export const COUNTRYSIDE_BY_TERRAIN: Readonly<Record<string, number>> = {
+  "coastal-plain": 80_000,
+  "hills-uplands": 40_000,
+};
+const COUNTRYSIDE_OTHERWISE = 50_000;
+
+/** How many people live in a province: its towns, or its countryside where it has none. */
+export function peopleOf(province: Pick<Province, "settlements" | "terrainId">): number {
+  if (province.settlements.length === 0) return COUNTRYSIDE_BY_TERRAIN[province.terrainId] ?? COUNTRYSIDE_OTHERWISE;
+  return Math.max(0, province.settlements.reduce((total, settlement) => total + settlement.size * POPULATION_PER_SETTLEMENT_SIZE, 0));
+}
+
+/** A province with no authored material state gets one derived from its settlements, or its countryside. */
 export function deriveDefaultProvinceMaterial(province: Province, atStep: number): ProvinceMaterial {
-  const population = Math.max(
-    0,
-    province.settlements.reduce((total, settlement) => total + settlement.size * POPULATION_PER_SETTLEMENT_SIZE, 0),
-  );
+  const population = peopleOf(province);
   return {
     provinceId: province.id,
     population,
@@ -52,6 +102,45 @@ export function deriveDefaultProvinceMaterial(province: Province, atStep: number
   };
 }
 
+/**
+ * What a province's people can pay in a month, as the calendar reckons it
+ * (`sim/economy.ts`): a twentieth of a coin a head, as much of it as they can make, and
+ * none of what war has burned. A fresh province reckons to exactly what it was
+ * derived with.
+ */
+export function reckonTaxCapacity(material: Pick<ProvinceMaterial, "population" | "productiveCapacityBps" | "warDamageBps">): number {
+  return Math.max(0, Math.floor(material.population * TAX_CAPACITY_PER_POPULATION * (material.productiveCapacityBps / 10_000) * (1 - material.warDamageBps / 10_000)));
+}
+
+/**
+ * What a province can yield in a month, whether or not its material row has
+ * been written yet. Rows are backfilled lazily, so an opening world has none,
+ * and anything reading `taxCapacity` straight off the rows saw zero everywhere
+ * until the first tick. Null for a province that does not exist.
+ */
+export function provinceTaxCapacity(world: WorldState, provinceId: string): number | null {
+  const row = world.material.provinceMaterial.find((material) => material.provinceId === provinceId);
+  if (row !== undefined) return row.taxCapacity;
+  const province = world.map.provinces.find((candidate) => candidate.id === provinceId);
+  return province === undefined ? null : deriveDefaultProvinceMaterial(province, world.elapsedStep).taxCapacity;
+}
+
+/** One of a province's levels, in basis points, from its material row or the default a province without one would have. Null for no such province. */
+export function provinceLevel(world: WorldState, provinceId: string, level: ProvinceLevel): number | null {
+  const row = world.material.provinceMaterial.find((material) => material.provinceId === provinceId)
+    ?? (() => {
+      const province = world.map.provinces.find((candidate) => candidate.id === provinceId);
+      return province === undefined ? undefined : deriveDefaultProvinceMaterial(province, world.elapsedStep);
+    })();
+  if (row === undefined) return null;
+  switch (level) {
+    case "stability": return row.stabilityBps;
+    case "food_security": return row.foodSecurityBps;
+    case "productive_capacity": return row.productiveCapacityBps;
+    case "war_damage": return row.warDamageBps;
+  }
+}
+
 export function findProvinceMaterial(world: WorldState, provinceId: string): ProvinceMaterial | undefined {
   return world.material.provinceMaterial.find((material) => material.provinceId === provinceId);
 }
@@ -64,17 +153,40 @@ export function findProvinceMaterial(world: WorldState, provinceId: string): Pro
 export function ensureProvinceMaterial(world: WorldState, atStep: number): WorldState {
   const known = new Set(world.material.provinceMaterial.map((material) => material.provinceId));
   const missing = world.map.provinces.filter((province) => !known.has(province.id));
-  if (missing.length === 0) return world;
+  // A save written before the countryside was counted holds its townless
+  // provinces at nobody. One untouched since -- no war, no refugees, no man
+  // raised -- is filled in once; any province something has happened in keeps
+  // what happened to it.
+  const townless = new Map(world.map.provinces.filter((province) => province.settlements.length === 0).map((province) => [province.id, province]));
+  const uncounted = (row: ProvinceMaterial): boolean => row.population === 0 && row.availableManpower === 0
+    && row.warDamageBps === 0 && row.displacedPopulation === 0 && townless.has(row.provinceId);
+  const refill = world.material.provinceMaterial.some(uncounted);
+  if (missing.length === 0 && !refill) return world;
   return {
     ...world,
     material: {
       ...world.material,
       provinceMaterial: [
-        ...world.material.provinceMaterial,
+        ...(refill
+          ? world.material.provinceMaterial.map((row) => (uncounted(row) ? { ...deriveDefaultProvinceMaterial(townless.get(row.provinceId)!, row.lastMaterialUpdateStep), stabilityBps: row.stabilityBps, foodSecurityBps: row.foodSecurityBps } : row))
+          : world.material.provinceMaterial),
         ...missing.map((province) => deriveDefaultProvinceMaterial(province, atStep)),
       ],
     },
   };
+}
+
+/**
+ * Ground at the edge of the drawn world, whose people eat, pay and serve but
+ * make no history of their own: no harvest news, no famine news, no rising, no
+ * civil war. The Chronicle is Rome's and Carthage's, not the Aargau's.
+ *
+ * The map's own detail tier is not enough: "far" is how finely the map draws
+ * a place, and Latium and Carthage are drawn "far" too. The edge is far ground
+ * the map drew no town in -- countryside and nothing else.
+ */
+export function isQuietGround(province: Pick<Province, "tier" | "settlements"> | undefined): boolean {
+  return province !== undefined && province.tier === "far" && province.settlements.length === 0;
 }
 
 /** Recruitment draws down available manpower and briefly dents productive capacity. */
@@ -88,32 +200,6 @@ export function applyRecruitmentToMaterial(material: ProvinceMaterial, recruits:
     availableManpower: material.availableManpower - actual,
     productiveCapacityBps: clampBps(material.productiveCapacityBps - Math.min(2_000, capacityHitBps)),
     lastMaterialUpdateStep: atStep,
-  };
-}
-
-export interface TaxationDrawResult {
-  readonly material: ProvinceMaterial;
-  readonly collected: number;
-}
-
-/**
- * Taxation and requisition both draw against `taxCapacity`, scaled down by
- * how stable the province currently is -- an unstable province simply
- * cannot yield what its capacity alone would suggest -- and the draw itself
- * costs some stability, more so the larger a bite it takes.
- */
-export function applyTaxationDraw(material: ProvinceMaterial, requestedAmount: number, atStep: number): TaxationDrawResult {
-  const stabilityFactor = material.stabilityBps / 10_000;
-  const available = Math.floor(material.taxCapacity * stabilityFactor);
-  const collected = Math.max(0, Math.min(requestedAmount, available));
-  const unrestBps = available > 0 ? clampBps((collected / available) * 1_500) : 0;
-  return {
-    material: {
-      ...material,
-      stabilityBps: clampBps(material.stabilityBps - unrestBps),
-      lastMaterialUpdateStep: atStep,
-    },
-    collected,
   };
 }
 
@@ -162,8 +248,41 @@ function foodShortagePressure(material: ProvinceMaterial, stepsIdle: number): { 
   };
 }
 
+/**
+ * Where a province settles back to, where something standing there has moved
+ * it: a temple makes a calmer place, a granary a better-fed one, a tyrant's
+ * law a sullen one. Shifts in basis points from the ordinary baseline; the
+ * manpower figure multiplies the share of people who can be called up.
+ */
+export interface ProvinceTargets {
+  readonly stabilityShiftBps?: number;
+  readonly foodSecurityShiftBps?: number;
+  readonly productiveCapacityShiftBps?: number;
+  readonly manpowerShift?: number;
+  /**
+   * How fast order and food come back to the ordinary level, as a multiple
+   * of the usual rate: good courts settle quarrels before they become
+   * unrest, and a good grain office feeds a city back (`world/departments.ts`).
+   */
+  readonly stabilityRecoveryScale?: number;
+  readonly foodRecoveryScale?: number;
+}
+
+/**
+ * One step toward a level. Without a standing effect, as it always was: only
+ * upward, toward the baseline, so a province lifted above it by events stays
+ * lifted. With one, both ways, because the thing standing there is what the
+ * province now settles to -- a law that lowers order must pull it down.
+ */
+function toward(value: number, baseline: number, shift: number | undefined, recoveryBps: number): number {
+  if (shift === undefined || shift === 0) return value + Math.min(recoveryBps, baseline - value > 0 ? recoveryBps : 0);
+  const target = clampBps(baseline + shift);
+  if (value < target) return value + Math.min(recoveryBps, target - value);
+  return value - Math.min(recoveryBps, value - target);
+}
+
 /** The bounded, cheap update every province NOT otherwise affected this turn gets. */
-export function applyCoarseRecoveryTick(material: ProvinceMaterial, atStep: number): ProvinceMaterial {
+export function applyCoarseRecoveryTick(material: ProvinceMaterial, atStep: number, targets?: ProvinceTargets): ProvinceMaterial {
   const stepsIdle = Math.max(0, atStep - material.lastMaterialUpdateStep);
   if (stepsIdle === 0) return material;
   // Bounded per call regardless of how long a province went unattended --
@@ -172,87 +291,22 @@ export function applyCoarseRecoveryTick(material: ProvinceMaterial, atStep: numb
   const baselinePopulation = Math.max(material.population, 1);
   const resettlement = Math.min(material.displacedPopulation, Math.floor(baselinePopulation * 0.01) + stepsIdle);
   const shortage = foodShortagePressure(material, stepsIdle);
+  const manpowerShare = MANPOWER_FRACTION_OF_POPULATION * Math.max(0, 1 + (targets?.manpowerShift ?? 0));
   return {
     ...material,
     displacedPopulation: material.displacedPopulation - resettlement + shortage.newlyDisplaced,
-    foodSecurityBps: clampBps(material.foodSecurityBps + Math.min(recoveryBps, BASELINE_FOOD_SECURITY_BPS - material.foodSecurityBps > 0 ? recoveryBps : 0)),
-    stabilityBps: clampBps(material.stabilityBps + Math.min(recoveryBps, BASELINE_STABILITY_BPS - material.stabilityBps > 0 ? recoveryBps : 0) - shortage.stabilityErosionBps),
-    productiveCapacityBps: clampBps(material.productiveCapacityBps + Math.min(recoveryBps, BASELINE_PRODUCTIVE_CAPACITY_BPS - material.productiveCapacityBps > 0 ? recoveryBps : 0)),
+    foodSecurityBps: clampBps(toward(material.foodSecurityBps, BASELINE_FOOD_SECURITY_BPS, targets?.foodSecurityShiftBps, Math.round(recoveryBps * (targets?.foodRecoveryScale ?? 1)))),
+    stabilityBps: clampBps(toward(material.stabilityBps, BASELINE_STABILITY_BPS, targets?.stabilityShiftBps, Math.round(recoveryBps * (targets?.stabilityRecoveryScale ?? 1))) - shortage.stabilityErosionBps),
+    productiveCapacityBps: clampBps(toward(material.productiveCapacityBps, BASELINE_PRODUCTIVE_CAPACITY_BPS, targets?.productiveCapacityShiftBps, recoveryBps)),
     warDamageBps: clampBps(material.warDamageBps - recoveryBps),
+    // Men come of age as the people grow (`MEN_OF_AGE_PER_YEAR`), so a
+    // province bled by a levy fills its rolls again over years, not months --
+    // and a larger one faster than a small one.
     availableManpower: Math.min(
-      Math.floor(material.population * MANPOWER_FRACTION_OF_POPULATION),
-      material.availableManpower + Math.floor(recoveryBps / 10),
+      Math.floor(material.population * manpowerShare),
+      material.availableManpower + Math.max(Math.floor(recoveryBps / 10), Math.floor((material.population * MEN_OF_AGE_PER_YEAR * Math.min(stepsIdle, 30)) / 365)),
     ),
     lastMaterialUpdateStep: atStep,
-  };
-}
-
-/** Coarse, deterministic severity per kind of military event, pending Phase 3's real battle engine. */
-const WAR_EVENT_SEVERITY_BPS: Record<string, number> = {
-  start_battle: 1_200,
-  start_siege: 1_000,
-  end_siege_captured: 4_000,
-  blockade_port: 500,
-};
-
-export interface ExecutedInvocationLike {
-  readonly actionId: string;
-  readonly parameters: Record<string, unknown>;
-}
-
-/**
- * Apply coarse war damage for this turn's executed military workflows, to
- * exactly the provinces they affected. A real deterministic battle/siege
- * engine (docs/14 Phase 3) will replace these fixed severities with ones
- * derived from the actual engagement; until then, an event still happening
- * is preferable to material state that never reacts to war at all.
- */
-export function applyWarDamageForExecutedWorkflows(
-  world: WorldState,
-  executed: readonly ExecutedInvocationLike[],
-  atStep: number,
-): { world: WorldState; affectedProvinceIds: Set<string> } {
-  const affected = new Set<string>();
-  let provinceMaterial = world.material.provinceMaterial;
-
-  const provinceIdForForce = (forceId: unknown): string | undefined =>
-    typeof forceId === "string" ? world.material.forces.find((f) => f.id === forceId)?.locationId : undefined;
-  const provinceIdForSettlement = (settlementId: unknown): string | undefined =>
-    typeof settlementId === "string"
-      ? world.map.provinces.find((p) => p.settlements.some((s) => s.id === settlementId))?.id
-      : undefined;
-
-  const strike = (provinceId: string | undefined, severityBps: number) => {
-    if (!provinceId) return;
-    const material = provinceMaterial.find((m) => m.provinceId === provinceId);
-    if (!material) return;
-    affected.add(provinceId);
-    provinceMaterial = provinceMaterial.map((m) =>
-      m.provinceId === provinceId ? applyWarDamage(m, { severityBps }, atStep) : m,
-    );
-  };
-
-  for (const invocation of executed) {
-    if (invocation.actionId === "start_battle") {
-      strike(provinceIdForForce(invocation.parameters["attackingForceId"]), WAR_EVENT_SEVERITY_BPS["start_battle"]!);
-    } else if (invocation.actionId === "start_siege") {
-      strike(provinceIdForSettlement(invocation.parameters["settlementId"]), WAR_EVENT_SEVERITY_BPS["start_siege"]!);
-    } else if (invocation.actionId === "end_siege" && invocation.parameters["successfulCapture"] === true) {
-      strike(provinceIdForSettlement(invocation.parameters["settlementId"]), WAR_EVENT_SEVERITY_BPS["end_siege_captured"]!);
-    } else if (invocation.actionId === "blockade_port") {
-      strike(provinceIdForSettlement(invocation.parameters["settlementId"]), WAR_EVENT_SEVERITY_BPS["blockade_port"]!);
-    } else if (invocation.actionId === "recruit_from_province") {
-      const provinceId = invocation.parameters["provinceId"];
-      if (typeof provinceId === "string") affected.add(provinceId);
-    } else if (invocation.actionId === "collect_emergency_taxation") {
-      const provinceId = invocation.parameters["provinceId"];
-      if (typeof provinceId === "string") affected.add(provinceId);
-    }
-  }
-
-  return {
-    world: { ...world, material: { ...world.material, provinceMaterial } },
-    affectedProvinceIds: affected,
   };
 }
 
@@ -267,6 +321,7 @@ export function advanceProvinceMaterial(
   world: WorldState,
   atStep: number,
   affectedProvinceIds: ReadonlySet<string>,
+  targets: ReadonlyMap<string, ProvinceTargets> = new Map(),
 ): WorldState {
   const backfilled = ensureProvinceMaterial(world, atStep);
   return {
@@ -274,7 +329,7 @@ export function advanceProvinceMaterial(
     material: {
       ...backfilled.material,
       provinceMaterial: backfilled.material.provinceMaterial.map((material) =>
-        affectedProvinceIds.has(material.provinceId) ? material : applyCoarseRecoveryTick(material, atStep),
+        affectedProvinceIds.has(material.provinceId) ? material : applyCoarseRecoveryTick(material, atStep, targets.get(material.provinceId)),
       ),
     },
   };

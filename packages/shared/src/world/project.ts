@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { PolityAgreementKindSchema } from "./agreements";
+import { StandingEffectSchema, StandingUpkeepSchema } from "./standing-effects";
+import { StructureKindSchema } from "./structure";
 import { ElapsedStepSchema, EntityIdSchema, MoneyAmountSchema } from "../material-state";
 import { OrderPartyRefSchema } from "./party-ref";
 
@@ -49,11 +51,17 @@ export const ProjectCompletionOutcomeSchema = z
     commanderCharacterId: EntityIdSchema.nullable().default(null),
     /** For "force_move": the army that arrives somewhere when the journey ends. */
     forceId: EntityIdSchema.nullable().default(null),
+    /** For "force": the kind of troops raised -- "warship" for a fleet. Absent is infantry. */
+    categoryId: EntityIdSchema.optional(),
     beneficiaryAccountId: EntityIdSchema.nullable().default(null),
     cadenceDays: z.number().int().positive().max(36_600).nullable().default(null),
     /** For "agreement": what the two powers end up standing in, and with whom. */
     agreementKind: PolityAgreementKindSchema.nullable().default(null),
     withPolityId: EntityIdSchema.nullable().default(null),
+    /** For "structure": what kind of building it is, what it goes on doing, and who pays to keep it. */
+    structureKind: StructureKindSchema.optional(),
+    effects: z.array(StandingEffectSchema).max(6).optional(),
+    upkeep: StandingUpkeepSchema.nullable().optional(),
   })
   .strict();
 export type ProjectCompletionOutcome = z.infer<typeof ProjectCompletionOutcomeSchema>;
@@ -68,6 +76,15 @@ export const ProjectSchema = z
     sponsorEntityRef: OrderPartyRefSchema,
     label: z.string().trim().min(1).max(160),
     status: ProjectStatusSchema,
+    /** Who pays each stage. Null falls back to the sponsor's own account. */
+    fundingAccountId: EntityIdSchema.nullable().optional(),
+    /**
+     * Who has charge of the work. Named by the engine when the order named
+     * nobody (`chooseOverseer`), so a ruler does not have to put a man over
+     * every fleet and granary himself; the men a finished force produces
+     * answer to him when the outcome names no commander.
+     */
+    overseerCharacterId: EntityIdSchema.nullable().optional(),
     /** The `MoneyReservation` funding this project, once one has been opened. */
     reservationId: EntityIdSchema.nullable().default(null),
     milestones: z.array(ProjectMilestoneSchema).min(1).max(20),

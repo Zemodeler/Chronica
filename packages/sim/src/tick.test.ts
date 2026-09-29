@@ -3,8 +3,10 @@ import { firstPunicWarScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, type WorldState } from "@chronica/shared";
 import { createIdFactory } from "./ports";
 import { runDeterministicTick } from "./tick";
+import { withMiddlingManagers } from "./middling-managers";
 
-const base = (): WorldState => WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
+// Middling tax men: revenue here is counted, not collected well or badly.
+const base = (): WorldState => withMiddlingManagers(WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld)));
 const tick = (world: WorldState, toDay: number) => runDeterministicTick({ world, toDay, ids: createIdFactory("tick") });
 const balance = (world: WorldState, id: string) => world.material.accounts.find((account) => account.id === id)!.balance;
 
@@ -241,7 +243,10 @@ describe("what a finished project leaves behind", () => {
     // and left the field army exactly where it had started.
     const state = base();
     const marching = state.material.forces[0]!;
-    const destination = state.map.provinces.find((province) => province.id !== marching.locationId)!.id;
+    // Somewhere the map actually joins to: a march is allowed to cross several
+    // provinces, not to arrive somewhere there is no way to.
+    const edge = state.map.edges.find((candidate) => candidate.from === marching.locationId || candidate.to === marching.locationId)!;
+    const destination = edge.from === marching.locationId ? edge.to : edge.from;
     const ready = projectWith(
       { kind: "force_move", label: "Forced march north", amount: 0, provinceId: destination, polityId: null, commanderCharacterId: null, forceId: marching.id, beneficiaryAccountId: null, cadenceDays: null, agreementKind: null, withPolityId: null },
       state,
@@ -250,6 +255,30 @@ describe("what a finished project leaves behind", () => {
     const result = tick(ready, state.instant.day + 10);
     expect(result.world.material.forces.find((force) => force.id === marching.id)!.locationId).toBe(destination);
     expect(result.factProposals.find((fact) => fact.kind === "project_completed")!.summary).toContain("arrived");
+  });
+
+  it("does not land an army somewhere the map offers no way to", () => {
+    // `force_modify` was made to respect the map; a scheduled march was the way
+    // around it, and put an army anywhere on the map in a single step.
+    const state = base();
+    const marching = state.material.forces[0]!;
+    const reachable = new Set([marching.locationId]);
+    for (let pass = 0; pass < 20; pass += 1) {
+      for (const edge of state.map.edges) {
+        if (reachable.has(edge.from)) reachable.add(edge.to);
+        if (reachable.has(edge.to)) reachable.add(edge.from);
+      }
+    }
+    const marooned = state.map.provinces.find((province) => !reachable.has(province.id));
+    if (marooned === undefined) return; // A fully connected map has nowhere to test this.
+
+    const ready = projectWith(
+      { kind: "force_move", label: "A march to nowhere", amount: 0, provinceId: marooned.id, polityId: null, commanderCharacterId: null, forceId: marching.id, beneficiaryAccountId: null, cadenceDays: null, agreementKind: null, withPolityId: null },
+      state,
+    );
+    const result = tick(ready, state.instant.day + 10);
+    expect(result.world.material.forces.find((force) => force.id === marching.id)!.locationId).toBe(marching.locationId);
+    expect(result.factProposals.find((fact) => fact.kind === "project_completed")!.summary).toContain("produced nothing");
   });
 
   it("produces nothing rather than an invalid world when the outcome names a dead man", () => {
@@ -483,5 +512,96 @@ describe("a project that produces nothing", () => {
 
     expect(result.factProposals.map((proposal) => proposal.kind)).toContain("project_completed");
     expect(result.factProposals.find((proposal) => proposal.kind === "project_completed")!.summary).toContain("produced nothing it was meant to");
+  });
+});
+
+describe("a letter nobody answered", () => {
+  it("records the silence as the refusal it is, not as a date that passed", () => {
+    // "Roman Republic Lets the Term on Messanan Protection Expire" was a real
+    // headline, over a passage that said at length that nothing had happened.
+    // Refusing by saying nothing is a refusal, and a chronicler can write one.
+    const state = base();
+    const [from, to] = state.map.polities;
+    if (from === undefined || to === undefined) return;
+    const waiting: WorldState = {
+      ...state,
+      diplomacy: [{
+        id: "letter-1",
+        kind: "letter" as const,
+        fromPolityId: from.id,
+        toPolityId: to.id,
+        fromCharacterId: state.characters[0]!.id,
+        toCharacterId: null,
+        subject: "Renewed protection and aid for Messana",
+        terms: "Rome asks whether the old protection stands.",
+        sentAtStep: state.instant.day,
+        replyDueByStep: state.instant.day + 5,
+        status: "awaiting_reply",
+        answer: null,
+        answerText: null,
+        answeredAtStep: null,
+        inReplyToMessageId: null,
+        visibility: "polity",
+      }],
+    };
+
+    const result = tick(waiting, state.instant.day + 10);
+    const silence = result.factProposals.find((fact) => fact.kind === "diplomatic_silence")!;
+    expect(silence).toBeDefined();
+    expect(silence.summary).toContain("refused");
+    expect(silence.summary).not.toContain("run out");
+    // A refusal is worth as much as any other answer.
+    expect(silence.significance).toBeGreaterThanOrEqual(45);
+  });
+});
+
+describe("a term that ends", () => {
+  it("empties the seat on the day, and says so", () => {
+    // `termExpiresAtStep` has been on every seat since the character system was
+    // written and nothing ever read it, so a consulship held for a year was
+    // held for ever -- while `deriveOfficeGrants` expired the grant on the same
+    // date, leaving a man who was the consul everywhere and held none of the
+    // consul's powers.
+    const state = base();
+    const seat = state.material.officeSeats.find((candidate) => candidate.status === "held" && candidate.holderCharacterId !== null);
+    if (seat === undefined) return;
+    const holderId = seat.holderCharacterId!;
+
+    const expiring: WorldState = {
+      ...state,
+      characters: state.characters.map((character) => (character.id === holderId ? { ...character, officeId: seat.officeId } : character)),
+      material: {
+        ...state.material,
+        officeSeats: state.material.officeSeats.map((candidate) =>
+          candidate.id === seat.id ? { ...candidate, termExpiresAtStep: state.instant.day + 5 } : candidate),
+      },
+    };
+
+    const result = tick(expiring, state.instant.day + 10);
+    const after = result.world.material.officeSeats.find((candidate) => candidate.id === seat.id)!;
+    expect(after.status).toBe("vacant");
+    expect(after.holderCharacterId).toBeNull();
+    expect(after.vacancyCause).toBe("term_expired");
+    // And the mirror, which the seat cannot reach on its own.
+    expect(result.world.characters.find((character) => character.id === holderId)!.officeId).toBeNull();
+    // A magistracy changing hands on the calendar is how a republic differs
+    // from a reign, and worth the reader knowing.
+    expect(result.factProposals.find((fact) => fact.kind === "office_term_ended")!.summary).toContain("laid down");
+  });
+
+  it("leaves a term that has not run alone", () => {
+    const state = base();
+    const seat = state.material.officeSeats.find((candidate) => candidate.status === "held");
+    if (seat === undefined) return;
+    const later: WorldState = {
+      ...state,
+      material: {
+        ...state.material,
+        officeSeats: state.material.officeSeats.map((candidate) =>
+          candidate.id === seat.id ? { ...candidate, termExpiresAtStep: state.instant.day + 500 } : candidate),
+      },
+    };
+    const result = tick(later, state.instant.day + 10);
+    expect(result.world.material.officeSeats.find((candidate) => candidate.id === seat.id)!.status).toBe("held");
   });
 });

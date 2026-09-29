@@ -2,14 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { Province } from "../world/map";
 import type { ProvinceMaterial } from "../material-state";
 import {
+  COUNTRYSIDE_BY_TERRAIN,
   deriveDefaultProvinceMaterial,
   ensureProvinceMaterial,
   applyRecruitmentToMaterial,
-  applyTaxationDraw,
   applyWarDamage,
   applyCoarseRecoveryTick,
   advanceProvinceMaterial,
-  applyWarDamageForExecutedWorkflows,
   findProvinceMaterial,
 } from "./province-material";
 
@@ -36,17 +35,20 @@ function material(overrides: Partial<ProvinceMaterial> = {}): ProvinceMaterial {
 describe("deriveDefaultProvinceMaterial", () => {
   it("derives population from settlement size", () => {
     const result = deriveDefaultProvinceMaterial(province, 5);
-    expect(result.population).toBe(55 * 400);
+    // A town unit is its townsfolk and the country that feeds them: 400 and 3 600.
+    expect(result.population).toBe(55 * 4_000);
     expect(result.availableManpower).toBeGreaterThan(0);
     expect(result.availableManpower).toBeLessThan(result.population);
     expect(result.lastMaterialUpdateStep).toBe(5);
   });
 
-  it("derives zero population for a province with no settlements", () => {
-    const empty: Province = { ...province, settlements: [] };
+  it("counts the countryside by its ground for a province with no settlements", () => {
+    const empty: Province = { ...province, settlements: [], terrainId: "hills-uplands" };
     const result = deriveDefaultProvinceMaterial(empty, 0);
-    expect(result.population).toBe(0);
-    expect(result.availableManpower).toBe(0);
+    expect(result.population).toBe(COUNTRYSIDE_BY_TERRAIN["hills-uplands"]);
+    expect(result.availableManpower).toBeGreaterThan(0);
+    // Ground the table does not know still has people on it.
+    expect(deriveDefaultProvinceMaterial({ ...empty, terrainId: "marsh" }, 0).population).toBeGreaterThan(0);
   });
 });
 
@@ -62,7 +64,7 @@ describe("ensureProvinceMaterial", () => {
     const result = ensureProvinceMaterial(world, 10);
     expect(result.material.provinceMaterial).toHaveLength(2);
     expect(findProvinceMaterial(result, province.id)?.population).toBe(999);
-    expect(findProvinceMaterial(result, otherProvince.id)?.population).toBe(0);
+    expect(findProvinceMaterial(result, otherProvince.id)?.population).toBe(deriveDefaultProvinceMaterial(otherProvince, 10).population);
   });
 
   it("is a no-op when every province already has material state", () => {
@@ -87,23 +89,6 @@ describe("applyRecruitmentToMaterial", () => {
     const before = material({ availableManpower: 100 });
     const after = applyRecruitmentToMaterial(before, 10_000, 1);
     expect(after.availableManpower).toBe(0);
-  });
-});
-
-describe("applyTaxationDraw", () => {
-  it("collects less from a less stable province, and costs it further stability", () => {
-    const stable = material({ taxCapacity: 1_000, stabilityBps: 10_000 });
-    const unstable = material({ taxCapacity: 1_000, stabilityBps: 3_000 });
-    const stableDraw = applyTaxationDraw(stable, 1_000, 1);
-    const unstableDraw = applyTaxationDraw(unstable, 1_000, 1);
-    expect(stableDraw.collected).toBeGreaterThan(unstableDraw.collected);
-    expect(stableDraw.material.stabilityBps).toBeLessThan(stable.stabilityBps);
-  });
-
-  it("collects nothing from a province with no tax capacity", () => {
-    const broke = material({ taxCapacity: 0 });
-    const draw = applyTaxationDraw(broke, 500, 1);
-    expect(draw.collected).toBe(0);
   });
 });
 
@@ -165,32 +150,5 @@ describe("advanceProvinceMaterial", () => {
     const result = advanceProvinceMaterial(world, 10, new Set(["a"]));
     expect(findProvinceMaterial(result, "a")?.stabilityBps).toBe(1_000); // affected this turn — left alone here
     expect(findProvinceMaterial(result, "b")?.stabilityBps).toBeGreaterThan(1_000); // recovers
-  });
-});
-
-describe("applyWarDamageForExecutedWorkflows", () => {
-  it("strikes the besieged settlement's province on start_siege and marks it affected", () => {
-    const world = {
-      map: { provinces: [province], edges: [], polities: [], politicalRelations: [] },
-      material: { provinceMaterial: [material()], forces: [] },
-    } as never;
-
-    const result = applyWarDamageForExecutedWorkflows(world, [
-      { actionId: "start_siege", parameters: { settlementId: "drepanum-city", invadingForceIds: ["f1"] } },
-    ], 3);
-
-    expect(result.affectedProvinceIds.has(province.id)).toBe(true);
-    expect(findProvinceMaterial(result.world, province.id)?.warDamageBps).toBeGreaterThan(0);
-  });
-
-  it("ignores an unrelated workflow", () => {
-    const world = {
-      map: { provinces: [province], edges: [], polities: [], politicalRelations: [] },
-      material: { provinceMaterial: [material()], forces: [] },
-    } as never;
-    const result = applyWarDamageForExecutedWorkflows(world, [
-      { actionId: "add_gold", parameters: { accountId: "acc-1", amount: 10 } },
-    ], 3);
-    expect(result.affectedProvinceIds.size).toBe(0);
   });
 });

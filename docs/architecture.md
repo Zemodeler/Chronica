@@ -45,7 +45,9 @@ anywhere in the system.
 One player order produces one **burst**. `runSimulationBurst` (`packages/sim/src/burst.ts`):
 
 1. **Catch up.** `runDeterministicTick` applies everything that fell due since the last order —
-   revenue, wages, project milestones — with no model call.
+   revenue (no more than a power's lands can bear, `material/taxation.ts`), wages, project
+   milestones, office terms and the elections that refill them (`sim/src/elections.ts`) — with no
+   model call.
 2. **Orchestrate.** One model call reads a bounded world slice and the order, and returns a
    proposal: deltas, facts, delegations, scheduled events.
 3. **Apply.** `applyDeltas` validates and applies it, assigning every id.
@@ -71,7 +73,8 @@ still applies. A delta beyond the actor's authority is applied anyway and record
 
 ## Persistence
 
-Six tables, split by lifetime rather than by turn (migration `0034_simulation_loop.sql`):
+Seven tables, split by lifetime rather than by turn (migration `0034_simulation_loop.sql`, and
+`0037_delta_audit.sql` for the last):
 
 | Table | Holds |
 | --- | --- |
@@ -81,10 +84,64 @@ Six tables, split by lifetime rather than by turn (migration `0034_simulation_lo
 | `simulation_bursts` | one run of the loop, for inspection afterwards |
 | `chronicle_checkpoints` | what the player was shown |
 | `player_decisions` | forks needing the player's own authority |
+| `delta_audit` | every act refused, ignored or carried out with a detail the engine filled in; never shown to the player |
 
 `commitBurst` writes all of it in one transaction under one revision bump, behind an advisory lock —
 the conversation path writes world state too, and a slow burst must not interleave with a fast
 conversation.
+
+`delta_audit` exists because a refusal filed as unreadable (`"reference"`) never reaches the Chronicle,
+so an order refused for want of a detail no player would know simply did less than it said, and nobody
+saw it. `npm run audit:deltas` ranks what the engine refuses and fills, with ids taken out of the
+reasons (`--order` for the order's own acts, `--kind reference` for the unreadable). The fills come
+from `packages/sim/src/apply/fill-gaps.ts`: for an actor's own act, a payer that names no account is
+his purse (his treasury where the name says public money), and a place that names no province is where
+he stands. Never a null, a recipient, a target or a destination.
+
+What no other act fits is an arrangement (`generic_entity_create`), and three things keep that honest:
+
+- **It has a price when it pays.** An arrangement with an income effect costs `VENTURE_PRICE_MONTHS` of
+  what it clears each month (income less keep), paid down or bought on credit like a venture, and is kept
+  from its owner's account unless somebody else was named. An update pays only for what it adds. Before,
+  an income arrangement with no keep was money every month for nothing.
+- **An unreadable act of the order's is kept, not dropped.** What is still refused as `"reference"` after
+  the repair, if it set something going (a venture, a holding, an income, a project, an arrangement), is
+  kept as an arrangement owned by the actor where he stands, at that price
+  (`packages/sim/src/apply/keep-as-arrangement.ts`). A payment, a march, a battle or a letter is never
+  kept this way: that would put in the world something that did not happen.
+- **An order that left nothing is still something he is doing.** If no act of the order was carried out
+  and none was refused by the world, and the order was not a question, the burst records a `"pursuit"`
+  arrangement labelled with the order's intent: one per person, the latest replacing the last, with no
+  effects and no cost. It is what the next order's slice shows him doing.
+
+All three are written to `delta_audit` (kinds `kept` and `pursuit`).
+
+Two faults the first live run of private orders found (`scripts/eval-orders`, chains `trade-rome`,
+`trade-syracuse`, `private-life`), and what now stops them:
+
+- **A reference written as a bare id** (`"marcus-metellus"` where `{kind, id}` is wanted) is wrapped with
+  its kind from the world, or from what minted the handle in the same answer, before salvage drops
+  anything (`packages/sim/src/bare-refs.ts`, in both the orchestrator and cognition parsers). Salvage
+  gives up past twelve complaints, and three whole answers in seven were lost to nothing else.
+- **The world's business written into the order**: an act of the order's that makes a force or a
+  person for another power with the actor nowhere in it (not commanding, answering for or paying it,
+  directly or through anything else the order made) is judged as the world's
+  (`packages/sim/src/apply/misfiled.ts`, audit kind `refiled`). Left in the order, the Ligurians' new army
+  was headlined as a merchant raising men who would not follow him.
+- And a fill: the actor's own money paid to no account the world has is money spent (`toAccountRef: null`).
+
+The second run found more, and each is now handled where it arises:
+
+- References written `"character:decius-vibellius"` lose the kind prefix (`normalizeRefs`), and a
+  `{kind, id}` written where the id alone was wanted becomes the id (`wrapBareRefs`).
+- Parsing puts right and salvages in up to three rounds (`readLeniently`): dropping a gathering's only
+  event leaves an empty list, which the next round drops, instead of losing the whole answer.
+- A person named in `employeeRef` and never made is made, like any other person named.
+- An unreadable private income is kept as what yields it: trade as a one-market venture, land as a
+  holding, at those acts' prices; anything else as an arrangement.
+- The world does not spend the player's own purse. A world act (not the order's) paying from it is
+  refused: a narrator seed asking "who paid for the games" answered "the merchant" and spent the money
+  his order needed. The world can still ruin him through what it does to his trade, land and name.
 
 Scenario definitions and their starting worlds live in `scenario_versions`, and those rows are
 **immutable**. Changing a scenario file does nothing to an existing database until a new version is

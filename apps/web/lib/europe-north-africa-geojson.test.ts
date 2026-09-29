@@ -21,10 +21,22 @@ describe("Europe and North Africa demo map features", () => {
 
   it("adds Naples and Syracuse as city anchors on the active map", () => {
     const cities = europeNorthAfricaGeoJson.features.filter((feature) => feature.properties.kind === "settlement");
-    expect(cities.map((feature) => feature.properties.name).sort()).toEqual(["Caralis", "Fort Agrigentum", "Naples", "Rome", "Syracuse"]);
+    expect(cities.map((feature) => feature.properties.name).sort()).toEqual(["Agrigentum", "Caralis", "Naples", "Rome", "Syracuse"]);
     expect(cities.find((feature) => feature.id === "settlement-rome")?.properties).toMatchObject({ type: "capital" });
-    expect(cities.find((feature) => feature.id === "settlement-agrigentum-fort")?.properties).toMatchObject({ type: "fort" });
+    expect(cities.find((feature) => feature.id === "settlement-agrigentum")?.properties).toMatchObject({ type: "city" });
     expect(cities.find((feature) => feature.id === "settlement-caralis")?.properties).toMatchObject({ provinceId: "ita-72843720b81376294924159", type: "city" });
+  });
+
+  it("cuts Messapia from Apulia along a frontier that wanders, not a surveyor's line", () => {
+    const provinces = europeNorthAfricaGeoJson.features.filter((feature) => feature.properties.kind === "province");
+    const messapia = provinces.find((feature) => feature.id === "ita-local-messapia");
+    const apulia = provinces.find((feature) => feature.properties.name === "Puglia");
+    expect(messapia?.properties.name).toBe("Sallentine Peninsula");
+    const ringOf = (feature: typeof messapia) => (feature?.geometry.type === "MultiPolygon" ? feature.geometry.coordinates[0]![0]! : []);
+    const shared = new Set(ringOf(apulia).map(([x, y]) => `${x},${y}`));
+    const frontier = ringOf(messapia).filter(([x, y]) => shared.has(`${x},${y}`));
+    // The two halves share every vertex of the frontier exactly, so they border each other.
+    expect(frontier.length).toBeGreaterThan(40);
   });
 
   it("splits Sicilia into five playable provinces", () => {
@@ -45,7 +57,7 @@ describe("Europe and North Africa demo map features", () => {
       "Panormus and the north-west",
       "Syracuse and the south-east",
     ]);
-    expect(remainingIslands?.properties).toMatchObject({ kind: "province", name: "Sardegna e isole" });
+    expect(remainingIslands?.properties).toMatchObject({ kind: "province", name: "Sardinia" });
   });
 
   it("uses compact German government districts instead of the 16 large state provinces", () => {
@@ -67,7 +79,8 @@ describe("Europe and North Africa demo map features", () => {
 
   it("uses detailed local source boundaries for France and mainland Italy", () => {
     expect(europeNorthAfricaGeoJson.features.filter((feature) => feature.id.startsWith("fra-local-") && feature.properties.kind === "province")).toHaveLength(96);
-    expect(europeNorthAfricaGeoJson.features.filter((feature) => feature.id.startsWith("ita-local-") && feature.properties.kind === "province")).toHaveLength(18);
+    // Eighteen mainland regions, with Puglia cut in two at the Messapian frontier.
+    expect(europeNorthAfricaGeoJson.features.filter((feature) => feature.id.startsWith("ita-local-") && feature.properties.kind === "province")).toHaveLength(19);
   });
 
   it("condenses all of Attica into a single Athens territory", () => {
@@ -88,8 +101,8 @@ describe("Europe and North Africa demo map features", () => {
       .map((feature) => feature.properties.name);
 
     expect(greekProvinceNames).toEqual(expect.arrayContaining([
-      "Acarnania", "Achaea", "Aetolia", "Midelion", "Argos", "Boeotia", "Thebes", "Corinthia", "Elis", "Euboea",
-      "Messenia", "Phocis", "Sparta", "Megalopolis", "Eastern Crete", "Western Crete", "Cyclades", "Dodecanese", "Aeolis", "Ionia", "Ionian Islands",
+      "Acarnania", "Achaea", "Aetolia", "Arcadia", "Argos", "Boeotia", "Thebes", "Corinthia", "Elis", "Euboea",
+      "Messenia", "Phocis", "Sparta", "Megalopolis", "Eastern Crete", "Western Crete", "Cyclades", "Rhodes", "Aeolis", "Ionia", "Ionian Islands",
     ]));
     // The old "Acarnanian Islands" micro-merge is now folded into the bigger Ionian Islands region.
     expect(greekProvinceNames).not.toEqual(expect.arrayContaining(["Acarnanian Islands"]));

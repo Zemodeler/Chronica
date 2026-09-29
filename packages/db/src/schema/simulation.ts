@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, bigserial, boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { games } from "./game";
 import { users } from "./auth";
 
@@ -97,8 +97,68 @@ export const simulationBursts = pgTable("simulation_bursts", {
   accumulatedSignificance: integer("accumulated_significance").notNull().default(0),
   error: text("error"),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  /** Last sign of life from the process running it. A running row that stops beating is abandoned, whatever its age. */
+  heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+  /** Last time the burst got somewhere: a stage reported, a call answered, a passage written (0042). Alive and stuck is abandoned too. */
+  progressAt: timestamp("progress_at", { withTimezone: true }),
   endedAt: timestamp("ended_at", { withTimezone: true }),
-}, (table) => [index("simulation_bursts_game_idx").on(table.gameId, table.startedAt)]);
+  /** Every call not made, answer not read and field dropped, as `{ stage, reason }` (0042). */
+  skipped: jsonb("skipped").notNull().$type<unknown>().default(sql`'[]'::jsonb`),
+  /** The historian's calls, counted apart from the simulation's `modelCalls` budget (which includes them in its total). */
+  chronicleCalls: integer("chronicle_calls").notNull().default(0),
+  /** The client's own id for the order, so a resubmission finds this burst instead of opening another (0042). */
+  idempotencyKey: text("idempotency_key"),
+}, (table) => [
+  index("simulation_bursts_game_idx").on(table.gameId, table.startedAt),
+  // One burst at a time per world, kept here rather than by a read before the insert (0040).
+  uniqueIndex("simulation_bursts_one_running_idx").on(table.gameId).where(sql`${table.status} = 'running'`),
+  uniqueIndex("simulation_bursts_idempotency_idx").on(table.gameId, table.idempotencyKey).where(sql`${table.idempotencyKey} IS NOT NULL`),
+]);
+
+/**
+ * What a running burst has to say for itself, in order: where the world has
+ * got to (`progress`) and the passages of the record written so far
+ * (`chronicle_entry`). The client polls this by id; nothing here is the
+ * record, which is committed with the burst.
+ */
+export const burstProgress = pgTable("burst_progress", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  burstId: uuid("burst_id").notNull().references(() => simulationBursts.id, { onDelete: "cascade" }),
+  gameId: uuid("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  payload: jsonb("payload").notNull().$type<unknown>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [index("burst_progress_burst_idx").on(table.burstId, table.id)]);
+
+/**
+ * Every act a burst did not carry out as the model wrote it: refused by the
+ * world, refused as unreadable, ignored by the men it was given to, or carried
+ * out with a detail the engine answered itself.
+ *
+ * Not the player's record and never shown to them. It is the engine's own
+ * account of where it and the model disagree, kept so the refusals nobody
+ * sees -- "no account merchant-purse exists" -- can be counted, and the ones
+ * that keep turning up fixed at their source.
+ */
+export const deltaAudit = pgTable("delta_audit", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  gameId: uuid("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+  burstId: uuid("burst_id").notNull().references(() => simulationBursts.id, { onDelete: "cascade" }),
+  actorKind: text("actor_kind").notNull(),
+  actorId: text("actor_id").notNull(),
+  op: text("op").notNull(),
+  /** "world", "reference", "ignored" or "assumed". */
+  kind: text("kind").notNull(),
+  ofTheOrder: boolean("of_the_order").notNull(),
+  /** "first" as written, "repair" for the corrected attempt. */
+  attempt: text("attempt").notNull(),
+  reason: text("reason").notNull(),
+  delta: jsonb("delta").notNull().$type<unknown>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("delta_audit_burst_idx").on(table.burstId),
+  index("delta_audit_kind_op_idx").on(table.kind, table.op),
+]);
 
 /** What the player has actually been told (VISION §25) -- never the whole record, only what reached them. */
 export const chronicleCheckpoints = pgTable("chronicle_checkpoints", {
@@ -109,15 +169,37 @@ export const chronicleCheckpoints = pgTable("chronicle_checkpoints", {
   toInstantSortKey: bigint("to_instant_sort_key", { mode: "number" }).notNull(),
   /** Where this entry sits among the entries one burst produced. */
   ordinal: integer("ordinal").notNull().default(0),
+  /** "narrated" was written by a historian; "recorded" was struck from the books. */
+  kind: text("kind").notNull().default("narrated"),
   title: text("title").notNull(),
   body: text("body").notNull(),
   factIds: jsonb("fact_ids").notNull().$type<unknown>().default(sql`'[]'::jsonb`),
   /** Who and what the entry is about, so the record can be read by subject. */
   subjects: jsonb("subjects").notNull().$type<unknown>().default(sql`'[]'::jsonb`),
+  /** The few of those worth printing on the entry's face. */
+  tags: jsonb("tags").notNull().$type<unknown>().default(sql`'[]'::jsonb`),
+  /** What moved on the map, among the things this entry is about. */
+  changes: jsonb("changes").notNull().$type<unknown>().default(sql`'[]'::jsonb`),
+  /** The one line of somebody's own voice, where the report had one. */
+  quote: jsonb("quote").$type<unknown>(),
+  /**
+   * The threads of history (`world.storylines`) this entry belongs to, so a
+   * thread's history can be told from what the player actually read. A
+   * storyline keeps only its last sixteen facts, so its own list cannot be
+   * the join.
+   */
+  storylineIds: jsonb("storyline_ids").notNull().$type<unknown>().default(sql`'[]'::jsonb`),
   stopReason: text("stop_reason").notNull(),
   readAt: timestamp("read_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [index("chronicle_checkpoints_game_idx").on(table.gameId, table.toInstantSortKey, table.ordinal)]);
+
+/** Threads of history the player has chosen to follow: marks on the calendar line. */
+export const followedThreads = pgTable("followed_threads", {
+  gameId: uuid("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+  storylineId: text("storyline_id").notNull(),
+  followedAt: timestamp("followed_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [uniqueIndex("followed_threads_game_storyline_idx").on(table.gameId, table.storylineId)]);
 
 /** VISION §23 outcome C: the rare development that genuinely needs the player's own authority. */
 export const playerDecisions = pgTable("player_decisions", {

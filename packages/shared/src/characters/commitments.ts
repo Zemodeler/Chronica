@@ -1,3 +1,4 @@
+import { boundedId } from "../determinism";
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema, VisibilitySchema, type MaterialWorldState } from "../material-state";
 import type { Character } from "./character";
@@ -317,7 +318,7 @@ export function breakCommitment(
   const pressureResult = createPressure(
     { characters: world.characters, characterPressures: world.characterPressures },
     {
-      id: `${commitment.id}:breach-pressure`,
+      id: boundedId(commitment.id, "breach-pressure"),
       characterId: commitment.promisorCharacterId,
       kind: commitment.breachPressureKind,
       intensity: 55,

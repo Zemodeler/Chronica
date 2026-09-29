@@ -1,0 +1,57 @@
+# The guardrails the repository claims, run on every push.
+#
+# Nothing here reaches a model provider or a database: no secrets are read,
+# the AI adapter is pinned to the deterministic mock, and every test in the
+# repository runs against scripted ports and in-memory worlds. The e2e suite
+# (Playwright, needs a database and a browser) is not run here.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CHRONICA_AI_MODE: mock
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  gates:
+    name: Determinism, docs, lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g npm@11.16.0
+      - run: npm ci
+      # No clock and no entropy in the code a burst replays.
+      - run: node scripts/check-sim-purity.mjs
+      - run: npm run docs:check
+      - run: npm run typecheck
+      - run: npm run lint
+
+  test:
+    name: Tests (${{ matrix.workspace }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: ["@chronica/shared", "@chronica/sim", "@chronica/db", "@chronica/ai", "@chronica/billing", "@chronica/web"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g npm@11.16.0
+      - run: npm ci
+      - run: npm run test -w ${{ matrix.workspace }}

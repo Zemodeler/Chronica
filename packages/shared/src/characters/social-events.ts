@@ -90,6 +90,27 @@ export const PressureChangeProposalSchema = z
   });
 export type PressureChangeProposal = z.infer<typeof PressureChangeProposalSchema>;
 
+/**
+ * One person's judgment of another's character (slice 11).
+ *
+ * The observer is always somebody in the event. Two independent observers make
+ * it true; one makes it an opinion on the record, which is the whole of the
+ * "the people around you decide" rule.
+ */
+export const TraitObservationProposalSchema = z
+  .object({
+    /** Whose character is being judged. */
+    subjectCharacterId: EntityIdSchema,
+    /** Who is judging. Must be a participant, and never the subject. */
+    observerCharacterId: EntityIdSchema,
+    /** An id from the trait registry. Anything else is something the engine has no word for. */
+    traitId: EntityIdSchema,
+    /** What they saw, in their own words. */
+    note: z.string().trim().min(1).max(200),
+  })
+  .strict();
+export type TraitObservationProposal = z.infer<typeof TraitObservationProposalSchema>;
+
 /** A fact worth sharing into a knowledge pool. Informational only -- carries no state mutation. */
 export const KnowledgeClaimProposalSchema = z
   .object({
@@ -152,6 +173,8 @@ export const CharacterSocialEventSchema = z
     proposedBeliefs: z.array(BeliefProposalSchema).max(8).default([]),
     /** Character-sim phase 2: pressure lifecycle changes this event may trigger. */
     pressureChanges: z.array(PressureChangeProposalSchema).max(4).default([]),
+    /** Slice 11: what the people in this event now think somebody is like. */
+    observedTraits: z.array(TraitObservationProposalSchema).max(4).default([]),
     commitmentProposal: CommitmentProposalSchema.nullable(),
     /** Set only for kind = "discovery": the character this event introduces. */
     introducedCharacter: CharacterSchema.nullable(),

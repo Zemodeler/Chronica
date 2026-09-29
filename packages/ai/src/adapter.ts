@@ -83,6 +83,14 @@ export interface AiToolCallResult extends AiCallResult {
 }
 
 export interface AiAdapter {
+  /**
+   * An adapter that spends nothing: its answers come from a person, not a
+   * provider (`adapters/hand.ts`). The coin gate lets its calls through
+   * without a hold -- there is nothing to reserve, and a hold left waiting on
+   * a person would outlive the stale-hold sweep. The mock adapter is not
+   * free: its tests exist to exercise the gate.
+   */
+  readonly free?: boolean;
   call(operation: AiOperation, systemPrompt: string, userMessage: string): Promise<AiCallResult>;
   /**
    * One step of a tool-using conversation. Implementations must return the

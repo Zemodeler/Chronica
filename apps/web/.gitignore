@@ -1,0 +1,5 @@
+# Playwright's own output: failure traces, and the screenshots the look spec
+# takes so a person can see the room without running the suite.
+test-results/
+playwright-report/
+shots/

@@ -130,19 +130,6 @@ export const SendChatMessageResponseSchema = z
   .strict();
 export type SendChatMessageResponse = z.infer<typeof SendChatMessageResponseSchema>;
 
-export const PatchUiStateRequestSchema = z
-  .object({
-    selectedThreadId: EntityIdSchema.nullable().optional(),
-  })
-  .strict()
-  .refine((value) => value.selectedThreadId !== undefined, {
-    message: "At least one field must be set.",
-  });
-export type PatchUiStateRequest = z.infer<typeof PatchUiStateRequestSchema>;
-
-export const PatchUiStateResponseSchema = z.object({ ok: z.literal(true) }).strict();
-export type PatchUiStateResponse = z.infer<typeof PatchUiStateResponseSchema>;
-
 /** @deprecated Use CoinAmountStringSchema. */
 export const CreditAmountStringSchema = CoinAmountStringSchema;
 

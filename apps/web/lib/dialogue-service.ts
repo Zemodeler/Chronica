@@ -1,4 +1,5 @@
 import "server-only";
+import { afterTheTalks, negotiationBetween, negotiationBrief } from "./peace-talks";
 
 import { z } from "zod";
 import { createAiAdapter, callWithCoinGate, InsufficientCoinsError } from "@chronica/ai";
@@ -42,10 +43,16 @@ import {
   createCanonicalNpc,
   linkCanonicalCharacters,
   getActivePressures,
+  inTheSameRegion,
   isCharacterReachable,
   NEUTRAL_MIND,
   opinionLabel,
   queryBeliefs,
+  whoMayBeReached,
+  whoIsNamed,
+  type AccessStep,
+  type Office,
+  type WorldState,
 } from "@chronica/shared";
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
@@ -197,6 +204,15 @@ const ProposeSocialEventsResponseSchema = z.object({
     pressureChange: ProposedPressureChangeSchema.nullable().default(null),
     /** Only a promise the NPC just made to the player -- never on the player's behalf. */
     commitmentProposal: ProposedCommitmentSchema.nullable().default(null),
+    /**
+     * What the NPC now thinks the player is like (slice 11). Only ever the
+     * NPC judging the player: a conversation is the NPC's own experience of
+     * them, and the player does not get to decide who they are.
+     */
+    observedTraits: z.array(z.object({
+      traitId: z.string().trim().min(1).max(60),
+      note: z.string().trim().min(1).max(200),
+    })).max(2).default([]),
   })).max(3),
 });
 
@@ -216,11 +232,13 @@ Respond ONLY with JSON matching this schema:
       "visibility": "public" | "polity" | "private",
       "proposedBeliefs": [ { "subjectEntityId": "id this is about, or null", "claim": "third-person statement", "kind": "fact"|"rumour"|"suspicion"|"secret", "channel": "direct_witness"|"event_participant"|"private_disclosure"|"trusted_report", "recipientCharacterIds": ["${npcCharacterId}" and/or "${playerCharacterId}" -- only these two ids] } ],
       "pressureChange": { "action": "create"|"refresh"|"resolve", "kind": "debt"|"threat"|"grief"|"illness"|"political_danger"|"family_obligation"|"opportunity"|"humiliation"|"military_emergency", "intensity": 0-100, "label": "short reason" } | null,
-      "commitmentProposal": { "actionKind": "payment"|"military_support"|"political_support"|"information_sharing"|"protection"|"office_favour"|"other", "promisedResult": "what was actually promised, in the NPC's own words", "conditions": "any stated condition, or empty string", "amount": integer or null (only for "payment", the exact amount if a specific number was promised) } | null
+      "commitmentProposal": { "actionKind": "payment"|"military_support"|"political_support"|"information_sharing"|"protection"|"office_favour"|"other", "promisedResult": "what was actually promised, in the NPC's own words", "conditions": "any stated condition, or empty string", "amount": integer or null (only for "payment", the exact amount if a specific number was promised) } | null,
+      "observedTraits": [ { "traitId": "cautious"|"bold"|"ambitious"|"dutiful"|"vengeful"|"sociable"|"disciplined"|"deceitful"|"compassionate"|"cruel", "note": "what in this exchange showed it" } ]
     }
   ]
 }
 "pressureChange" may only ever describe a pressure on "${npcCharacterId}" (the NPC speaking), never on "${playerCharacterId}" or anyone else -- omit it (null) unless this exchange concretely changes what the NPC is under pressure from.
+"observedTraits" is what "${npcCharacterId}" now thinks "${playerCharacterId}" is like, on the evidence of this exchange alone -- never the reverse, and never a trait you merely expect of somebody in their position. Leave it empty unless they actually showed it here; most exchanges show nothing. It takes two different people to make a trait stick, so one observation is an opinion, which is the point.
 "commitmentProposal" may only ever describe a promise "${npcCharacterId}" just made to "${playerCharacterId}" -- never a promise on the player's behalf, and only when the NPC's reply contains an explicit, concrete commitment (not a vague offer of sympathy). Omit it (null) otherwise.
 Return { "events": [] } if nothing consequential happened.`;
 }
@@ -345,6 +363,14 @@ async function proposeAndPersistSocialEvents(
       visibility: draft.visibility,
       knownByCharacterIds: [npcCharacterId, playerCharacterId],
       relationCauses: draft.relationCauses as RelationCauseProposal[],
+      // The NPC judging the player, never the reverse: a conversation is the
+      // NPC's own experience of them, and nobody decides their own character.
+      observedTraits: draft.observedTraits.map((observed) => ({
+        subjectCharacterId: playerCharacterId,
+        observerCharacterId: npcCharacterId,
+        traitId: observed.traitId,
+        note: observed.note,
+      })),
       knowledgeClaims: [],
       proposedBeliefs,
       pressureChanges,
@@ -459,6 +485,7 @@ async function extractAndPropagateKnowledge(
       visibility: "private",
       knownByCharacterIds: [npcCharacterId],
       relationCauses: [],
+      observedTraits: [],
       knowledgeClaims: [],
       proposedBeliefs: [{
         subjectEntityId: null,
@@ -743,9 +770,13 @@ export async function generateDialogueReply(input: DialogueCallInput & { readonl
     pressures: getActivePressures({ characterPressures }, npcCharacterId),
     beliefs: queryBeliefs({ characterBeliefs }, npcCharacterId),
   };
+  // Peace talks, where this is one: the envoy is told how the war stands and
+  // what his side will bear, and bargains from there (`peace-talks.ts`).
+  const talksView = await getWorldView(db, gameId);
+  const talks = talksView === undefined ? null : negotiationBetween(talksView.world, talksView.scenarioGovernment?.offices ?? [], npcCharacterId, playerCharacterId);
   const systemPrompt = buildDialogueSystemPrompt(
     kb, playerCharacterName, playerCharacterId, playerKnowledgebase, channel, period, recentMessages, worldCharacters, mindContext, opinion,
-  );
+  ) + (talks === null || talksView === undefined ? "" : `\n\n${negotiationBrief(talks, talksView.world)}`);
   const operation = continuityTier === "ordinary" ? "dialogue_ordinary" : "dialogue_principal";
 
   const adapter = createAiAdapter();
@@ -774,6 +805,18 @@ export async function generateDialogueReply(input: DialogueCallInput & { readonl
       // A failure here costs the consequences, not the reply the player is
       // waiting on; the events stay "proposed" and can be applied later.
       console.warn("[conversation] failed to apply social consequences:", error);
+    }
+  }
+  // Terms agreed in so many words are put to the engine, and what came of it
+  // is the envoy's next line: the treaty sealed, or refused as more than his
+  // council will bear.
+  if (talks !== null) {
+    try {
+      const said = recentMessages.slice(-6).map((message) => `${message.isPlayerMessage ? "Player" : "Envoy"}: ${message.body}`).join("\n");
+      const sealed = await afterTheTalks({ db, userId, gameId, envoyId: npcCharacterId, playerId: playerCharacterId, conversation: `${said}\nPlayer: ${playerMessageBody}\nEnvoy: ${npcBody}` });
+      if (sealed !== null) await appendMessage(db, sessionId, npcCharacterId, false, sealed);
+    } catch (error) {
+      console.warn("[peace-talks] failed to settle the talks:", error);
     }
   }
   const updatedMemory = buildUpdatedMemory(kb.conversationMemory, playerMessageBody, npcBody, currentStep, proposedEvents.length > 0);
@@ -847,14 +890,53 @@ interface DiscoverContactInput {
 }
 
 interface DiscoverContactOutput {
-  status: "found" | "choice" | "unavailable";
+  /** "letter": they are out of the player's region, and are written to rather than spoken with. */
+  status: "found" | "choice" | "unavailable" | "letter";
   sessionId?: string;
+  characterId?: string;
   knownName?: string;
   explanation?: string;
   candidates?: { characterId: string; name: string; roleLabel: string }[];
+  /**
+   * What it would take, when station is what is in the way.
+   *
+   * Never empty when access is what refused: the last rung is always "write",
+   * so a refusal is a door to knock on rather than a lock (slice 10).
+   */
+  ladder?: { rung: string; label: string; throughCharacterId: string | null }[];
 }
 
 const normalizeContactQuery = (value: string): string => value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * Whether the player's own character can get a hearing from this one.
+ *
+ * Checked at every branch that would open a session, and **before the coin
+ * gate**: charging a player for a refusal is worse than either the charge or
+ * the refusal. `whoSeeksThePlayer` is deliberately not routed through this --
+ * that is the world reaching toward the player, and it is the main way
+ * somebody with no station acquires anybody at all.
+ */
+function accessCheck(
+  world: WorldState,
+  offices: readonly Office[],
+  playerCharacterId: string,
+  targetCharacterId: string,
+  introducedCharacterIds: ReadonlySet<string>,
+): DiscoverContactOutput | null {
+  const verdict = whoMayBeReached({
+    world, offices, reacherId: playerCharacterId, targetId: targetCharacterId,
+    channel: "correspondence",
+    orderAttempts: world.orderAttempts,
+    introducedCharacterIds,
+  });
+  if (verdict.reachable) return null;
+  return {
+    status: "unavailable",
+    explanation: verdict.reason ?? "You have no way to reach him yet.",
+    ladder: verdict.ladder.map((step: AccessStep) => ({ rung: step.rung, label: step.label, throughCharacterId: step.throughCharacterId })),
+  };
+}
 
 export async function discoverContact(input: DiscoverContactInput): Promise<DiscoverContactOutput> {
   const {
@@ -864,6 +946,7 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
 
   const worldView = await getWorldView(db, gameId);
   if (!worldView) return { status: "unavailable", explanation: "This world is unavailable." };
+  const offices = worldView.scenarioGovernment?.offices ?? [];
   // Candidates resolve exclusively from canonical `world.characters`, plus any
   // NPC a discovery event has already introduced but turn resolution has not
   // yet folded into the snapshot -- so a person discovered moments ago in
@@ -876,19 +959,37 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
     ...pendingDiscoveries.map((event) => ({ character: event.introducedCharacter, roleLabel: event.introducedProfile?.roleLabel ?? "contact" })),
   ];
   const unique = [...new Map(candidates.map((candidate) => [candidate.character.id, candidate])).values()];
+  // Somebody an intermediary introduced a moment ago is introduced, whatever
+  // the snapshot still says. Otherwise the ladder's own payoff is barred by
+  // the ladder.
+  const introduced = new Set(pendingDiscoveries.map((event) => event.introducedCharacter.id));
+  // Speaking is for the room. Somebody out of the player's region is found,
+  // and written to; no conversation is opened with them.
+  const meet = async (character: Pick<Character, "id" | "name" | "locationProvinceId">): Promise<DiscoverContactOutput> => {
+    if (!inTheSameRegion(character, { locationProvinceId: playerLocationProvinceId })) {
+      return { status: "letter", characterId: character.id, knownName: character.name };
+    }
+    const session = await findOrOpenSession(db, gameId, playerId, character.id);
+    return { status: "found", sessionId: session.id, knownName: character.name };
+  };
   if (characterId) {
     const selected = unique.find((candidate) => candidate.character.id === characterId && candidate.character.alive);
     if (!selected) return { status: "unavailable", explanation: "That contact is no longer available." };
+    const barred = accessCheck(worldView.world, offices, playerCharacterId, selected.character.id, introduced);
+    if (barred !== null) return barred;
     await getOrCreateNpcKnowledgebase(db, gameId, playerId, selected.character.id, {
       canonicalName: selected.character.name,
       role: selected.roleLabel,
       locationProvinceId: selected.character.locationProvinceId,
     });
-    const session = await findOrOpenSession(db, gameId, playerId, selected.character.id);
-    return { status: "found", sessionId: session.id, knownName: selected.character.name };
+    return meet(selected.character);
   }
   const normalized = normalizeContactQuery(query);
-  const matches = unique.filter((candidate) => candidate.character.alive && (
+  // The one person the name means, spelt as the player spelt it: "Hiero II"
+  // is Hieron II. Missed here, the validator was never shown the king and a
+  // second "Hiero II" was made -- of Rome, where the player stood.
+  const named = whoIsNamed(unique.filter((candidate) => candidate.character.alive).map((candidate) => ({ ...candidate, id: candidate.character.id, name: candidate.character.name })), query);
+  const matches = named !== null ? [named] : unique.filter((candidate) => candidate.character.alive && (
     normalizeContactQuery(candidate.character.name).includes(normalized)
     || normalized.includes(normalizeContactQuery(candidate.character.name))
     || normalizeContactQuery(candidate.roleLabel).includes(normalized)
@@ -896,7 +997,8 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
   ));
   if (matches.length === 1) {
     const match = matches[0]!;
-    const session = await findOrOpenSession(db, gameId, playerId, match.character.id);
+    const barred = accessCheck(worldView.world, offices, playerCharacterId, match.character.id, introduced);
+    if (barred !== null) return barred;
     // Lazily enrich world characters that haven't been profiled yet.
     const existingKb = await getOrCreateNpcKnowledgebase(db, gameId, playerId, match.character.id, {
       canonicalName: match.character.name,
@@ -914,9 +1016,20 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
       });
       if (profile !== null) await updateNpcKnowledgebase(db, existingKb.id, profile);
     }
-    return { status: "found", sessionId: session.id, knownName: match.character.name };
+    return meet(match.character);
   }
-  if (matches.length > 1) return { status: "choice", candidates: matches.slice(0, 8).map((match) => ({ characterId: match.character.id, name: match.character.name, roleLabel: match.roleLabel })) };
+  if (matches.length > 1) {
+    const withinReach = matches.filter((match) => accessCheck(worldView.world, offices, playerCharacterId, match.character.id, introduced) === null);
+    // Offering a name and then refusing it is the worst of both. If none of
+    // them is within reach, refuse once, with the ladder for the nearest.
+    if (withinReach.length === 0) return accessCheck(worldView.world, offices, playerCharacterId, matches[0]!.character.id, introduced)!;
+    if (withinReach.length === 1) {
+      const only = withinReach[0]!;
+      await getOrCreateNpcKnowledgebase(db, gameId, playerId, only.character.id, { canonicalName: only.character.name, role: only.roleLabel });
+      return meet(only.character);
+    }
+    return { status: "choice", candidates: withinReach.slice(0, 8).map((match) => ({ characterId: match.character.id, name: match.character.name, roleLabel: match.roleLabel })) };
+  }
 
   const existingKbs = await listNpcKnowledgebases(db, gameId, playerId);
   const existingContactNames = existingKbs.map((kb) => kb.canonicalName);
@@ -969,8 +1082,7 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
       role: existing.roleLabel,
       locationProvinceId: existing.character.locationProvinceId,
     });
-    const existingSession = await findOrOpenSession(db, gameId, playerId, existing.character.id);
-    return { status: "found", sessionId: existingSession.id, knownName: existing.character.name };
+    return meet(existing.character);
   }
 
   // Discovery reveals a person who is already a complete canonical NPC.  The
@@ -1003,6 +1115,7 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
     visibility: "private",
     knownByCharacterIds: [playerCharacterId, npcCharacterId],
     relationCauses: [],
+    observedTraits: [],
     knowledgeClaims: [],
     proposedBeliefs: [],
     pressureChanges: [],
@@ -1019,8 +1132,6 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
     locationProvinceId: parsed.locationProvinceId,
     relationshipLabel: "neutral",
   });
-  const session = await findOrOpenSession(db, gameId, playerId, npcCharacterId, "correspondence");
-
   if (newKb.biography === null) {
     const historicalContext = await lookupHistoricalFigure(parsed.name, parsed.roleLabel, period);
     const enrichedProfile = await enrichNpcProfileViaAi(userId, gameId, {
@@ -1036,7 +1147,7 @@ export async function discoverContact(input: DiscoverContactInput): Promise<Disc
     }
   }
 
-  return { status: "found", sessionId: session.id, knownName: parsed.name };
+  return meet({ id: npcCharacterId, name: parsed.name, locationProvinceId: province.id });
 }
 
 export async function createDialogueGroup(db: ChronicaDatabase, gameId: string, playerId: string, participantIds: string[]) {

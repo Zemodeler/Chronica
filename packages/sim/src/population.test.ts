@@ -3,7 +3,17 @@ import { punicWarsScenario } from "@chronica/db";
 import { WorldStateSchema, emitFacts, type Fact, type FactDraft, type WorldState } from "@chronica/shared";
 import { findPolityGaps } from "./population";
 
-const world = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
+/**
+ * The opening world with its minor powers emptied again. Every power has been
+ * seated with a ruler since scenario v34; these are about what the world owes
+ * a country that has lost everybody, which still happens -- to a people whose
+ * last chief dies, or one a war has broken up.
+ */
+const world = (): WorldState => {
+  const opening = WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
+  const authored = new Set(["rome", "carthage", "syracuse", "mamertines", "rhegium-campanians"]);
+  return { ...opening, characters: opening.characters.filter((character) => character.polityId === null || authored.has(character.polityId)) };
+};
 
 let counter = 0;
 function factAbout(polityId: string): Fact {
