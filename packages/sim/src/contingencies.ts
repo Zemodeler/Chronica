@@ -99,6 +99,7 @@ export interface ContingencyReviewInput {
   readonly toDay: number;
   readonly ids: IdFactory;
   readonly warfare?: ScenarioWarfareRules | undefined;
+  readonly playerCharacterId?: string | null | undefined;
 }
 
 export interface ContingencyReviewResult {
@@ -291,6 +292,7 @@ function springTrap(
       warfare: warfareWith(next, input.warfare),
       battleId: input.ids.next("battle"),
       seed: `${plan.id}:${input.toDay}`,
+      playerCharacterId: input.playerCharacterId ?? null,
     }, 0);
     next = engagement.world;
     facts.push(...engagement.facts);
@@ -339,7 +341,9 @@ function standTo(
     facts: [{
       localId: nextLocalId("plan_stood_to"),
       kind: "contingency_met",
-      summary: `The thing ${plan.label} was waiting on has happened.`,
+      summary: (plan.standingOrder == null
+        ? `The thing ${plan.label} was waiting on has happened.`
+        : `The thing ${plan.label} was waiting on has happened, and the order given for it stands: "${plan.standingOrder}"`).slice(0, 600),
       affectedRefs: [{ kind: "character", id: plan.ownerCharacterId }],
       visibility: "polity",
       discoveryState: "polity",

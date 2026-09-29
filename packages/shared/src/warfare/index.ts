@@ -4,3 +4,6 @@ export * from "./battle-resolver";
 export * from "./position";
 export * from "./sea";
 export * from "./troop-categories";
+export * from "./passage";
+export * from "./seasons";
+export * from "./retreat";

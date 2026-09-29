@@ -1,5 +1,6 @@
 import { ScenarioDefinitionSchema, WorldStateSchema, type GovernmentForm, type ScenarioDefinition, type Settlement, type WorldState } from "@chronica/shared";
 import { PUNIC_WARS_GRAPH_EDGES, PUNIC_WARS_GRAPH_POLITIES, PUNIC_WARS_GRAPH_PROVINCES, PUNIC_WARS_GRAPH_SETTLEMENTS } from "./punic-wars-map-graph";
+import { foundingPeople, romanSenators, withFinerSkills } from "./punic-wars-rulers";
 
 export const PUNIC_WARS_SCENARIO_ID = "00000000-0000-4000-8000-000000000102";
 export const PUNIC_WARS_SLUG = "punic-wars";
@@ -196,12 +197,41 @@ const romanOffices = [
 ];
 
 const carthaginianReqs = ["req-alive", "req-carthage-polity", "req-not-disqualified", "req-free-born", "req-male"];
+
+/** Departments the world opens with (v35): formed long ago, and as experienced as a department can be. */
+const seeded = (id: string, polityId: string, name: string, levers: string[], officeIds: string[], extra: { headOfficeId?: string; gates?: { institutionId: string; act: string }[] } = {}) => ({
+  id, scope: { kind: "polity", id: polityId }, name, levers, officeIds,
+  headOfficeId: extra.headOfficeId ?? null, deputyOfficeIds: [], pay: "honorary",
+  foundedAtStep: 0, formsAtStep: 0, experienceDays: 3_600, countedAtStep: 0,
+  mechanicRuleId: null, standingEntityId: null, effects: [], gates: extra.gates ?? [], origin: "scenario", abolishedAtStep: null,
+});
+const SEEDED_DEPARTMENTS = [
+  // The quaestors kept the treasury in the temple of Saturn, and paid out
+  // nothing the Senate had not voted.
+  seeded("rome-aerarium", "rome", "The Treasury of Saturn", ["tax_roll"], ["roman-quaestor"], { gates: [{ institutionId: "roman-senate", act: "spend" }] }),
+  // The census, the rolls of the tribes, and the public contracts let every
+  // five years -- the roads, the sewers, the collection of the rents.
+  seeded("rome-censorship", "rome", "The Censorship", ["audit", "public_works_cost"], ["roman-censor"], { gates: [{ institutionId: "roman-senate", act: "spend" }] }),
+  // The markets and the corn of the city.
+  seeded("rome-aediles", "rome", "The Aediles", ["grain"], ["roman-aedile"]),
+  seeded("rome-praetor", "rome", "The Urban Praetor's Court", ["courts"], ["roman-praetor"], { headOfficeId: "roman-praetor" }),
+  seeded("rome-pontiffs", "rome", "The College of Pontiffs", ["public_rites"], ["roman-pontiff"], { headOfficeId: "roman-pontifex-maximus" }),
+  // Carthage's revenues were counted by its own officers of the accounts, and
+  // spent as the elders allowed.
+  seeded("carthage-accounts", "carthage", "The Office of the Accounts", ["tax_roll", "public_works_cost"], ["carthaginian-accountant"], { gates: [{ institutionId: "carthaginian-council", act: "spend" }] }),
+  // The court of the council that judged the generals when they came home.
+  seeded("carthage-hundred-and-four", "carthage", "The Hundred and Four", ["courts"], ["carthaginian-judge"], { gates: [{ institutionId: "carthaginian-hundred-and-four", act: "judge_commander" }] }),
+  seeded("carthage-priests", "carthage", "The Priests of Baal Hammon", ["public_rites"], ["carthaginian-priest"]),
+];
 const otherPowersOffices = [
   // Two suffetes a year, elected by the citizens: Carthage's consuls.
   office({ id: "carthaginian-suffete", label: "Carthaginian suffete", polityId: "carthage", kind: "magistracy", rank: 2, seatCount: 2, termDays: 365, authorisedActionIds: IMPERIUM, treasuryAccountId: "carthage-treasury", treasuryPermissions: ["view", "propose_spending"], successionRuleId: "carthaginian-election", eligibilityRequirementIds: [...carthaginianReqs, "req-standing-6000"] }),
   office({ id: "carthaginian-elder", label: "Carthaginian elder", polityId: "carthage", kind: "membership", seatCount: 30, enrolsFormerMagistrates: true, authorisedActionIds: CIVIL, successionRuleId: "carthaginian-appointment", eligibilityRequirementIds: carthaginianReqs }),
   // The court that judged generals, drawn from the council.
   office({ id: "carthaginian-judge", label: "Judge of the Hundred and Four", polityId: "carthage", kind: "membership", seatCount: 104, authorisedActionIds: CIVIL, successionRuleId: "carthaginian-appointment", eligibilityRequirementIds: carthaginianReqs }),
+  // Punic inscriptions name a chief of the accounts, the rab mahshabim, over
+  // the city's revenues: the office Hannibal would fight as suffete.
+  office({ id: "carthaginian-accountant", label: "Officer of the Accounts", polityId: "carthage", kind: "magistracy", rank: 1, seatCount: 3, authorisedActionIds: MAGISTRATE, treasuryAccountId: "carthage-treasury", treasuryPermissions: ["view", "propose_spending"], successionRuleId: "carthaginian-appointment", eligibilityRequirementIds: carthaginianReqs }),
   office({ id: "carthaginian-priest", label: "Priest of Baal Hammon", polityId: "carthage", kind: "priesthood", seatCount: 10, authorisedActionIds: CIVIL, successionRuleId: "carthaginian-appointment", eligibilityRequirementIds: carthaginianReqs }),
   office({ id: "syracusan-friend", label: "Friend of the King of Syracuse", polityId: "syracuse", kind: "membership", seatCount: 20, authorisedActionIds: CIVIL, successionRuleId: "syracusan-appointment", eligibilityRequirementIds: ["req-alive", "req-syracuse-polity", "req-not-disqualified", "req-not-enslaved", "req-male"] }),
   office({ id: "syracusan-strategos", label: "Syracusan strategos", polityId: "syracuse", kind: "magistracy", rank: 1, seatCount: 3, authorisedActionIds: IMPERIUM, successionRuleId: "syracusan-appointment", eligibilityRequirementIds: ["req-alive", "req-syracuse-polity", "req-not-disqualified", "req-not-enslaved", "req-male"] }),
@@ -347,9 +377,11 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
         politiesExist: ["rome", "carthage", "mamertines"],
         afterPressureIds: ["messana-invites-a-protector"],
         atPeace: [{ polityId: "rome", otherPolityId: "carthage" }],
+        // Only once one of them is actually there.
+        forcesPresent: [{ polityIds: ["rome", "carthage"], provinceId: "ita-72843720b81376294924159-sicily-northeast" }],
       },
       target: { polityId: "rome", provinceId: "ita-72843720b81376294924159-sicily-northeast", otherPolityId: "carthage" },
-      brief: "A protector has been asked for at Messana, and one of the great powers has moved -- a garrison put ashore, a fleet standing into the strait, a magistrate sent to take the city's submission. The other will not have it: the strait is three miles wide and whoever holds both sides of it holds everything that passes. Decide which of them crossed, what the other did about it, and who in each government carried the argument. Open the war itself with \"agreement_open\" of kind \"war\" between rome and carthage, record the breaking as a public fact naming both powers and Messana, and give the men who pushed for it a \"character_intent_set\". Do not fight it here -- opening it is the whole of this, and the campaign belongs to the people who will have to make it.",
+      brief: "A protector has been asked for at Messana, and one of the great powers has moved -- a garrison put ashore, a fleet standing into the strait, a magistrate sent to take the city's submission. The other will not have it: the strait is three miles wide and whoever holds both sides of it holds everything that passes. The power that crossed is named below. Decide what the other did about it, and who in each government carried the argument. Open the war itself with \"agreement_open\" of kind \"war\" between rome and carthage, record the breaking as a public fact naming both powers and Messana, and give the men who pushed for it a \"character_intent_set\". Do not fight it here -- opening it is the whole of this, and the campaign belongs to the people who will have to make it.",
     },
     {
       id: "a-fleet-can-be-copied",
@@ -593,7 +625,7 @@ const DEFAULT_COHESION = 3_000;
 const cohesionFor = (polityId: string): number => COHESION_BY_POLITY[polityId] ?? DEFAULT_COHESION;
 
 /**
- * What sort of government each power had in 270 (scenario v33): the seed its
+ * What sort of government each power had in 270 (scenario v33; leaders seated from v34): the seed its
  * constitution grows from (`sim/constitutions.ts`). Rome, Carthage, Syracuse,
  * the Mamertines and the Campanians of Rhegium have their chambers written out
  * below; everyone else is grown from this word, varied by a seed. A people not
@@ -631,9 +663,34 @@ for (const settlement of PUNIC_WARS_GRAPH_SETTLEMENTS) {
   else existing.push({ ...settlement });
 }
 
-const initialWorld: WorldState = WorldStateSchema.parse({
+/**
+ * The opening world with somebody in every chair (`punic-wars-rulers.ts`,
+ * scenario v34): the five powers written out below keep their own people, and
+ * every other power that holds ground is given its ruler, seated, by name.
+ */
+function withFoundingPeople<T extends {
+  readonly map: { readonly polities: readonly { id: string; name: string; capitalSettlementId: string | null; cohesionBps: number; governmentForm?: GovernmentForm | null }[]; readonly provinces: readonly { id: string; controllerPolityId: string | null; settlements: readonly { id: string }[] }[] };
+  readonly characters: readonly unknown[];
+  readonly material: { readonly accounts: readonly unknown[]; readonly officeSeats: readonly unknown[] };
+}>(raw: T): unknown {
+  const founding = foundingPeople(raw.map.polities, raw.map.provinces, WRITTEN_OUT, governmentFormFor);
+  // The Senate's own named men, seated after the four the scenario always had.
+  const senate = romanSenators(raw.material.officeSeats.filter((seat) => (seat as { officeId?: string }).officeId === "roman-senator").length);
+  return {
+    ...raw,
+    characters: [...raw.characters, ...founding.characters, ...senate.characters].map((character) => withFinerSkills(character as { id: string; name: string; skills: Record<string, unknown> })),
+    material: {
+      ...raw.material,
+      accounts: [...raw.material.accounts, ...founding.accounts, ...senate.accounts],
+      officeSeats: [...raw.material.officeSeats, ...founding.officeSeats, ...senate.officeSeats],
+    },
+  };
+}
+const WRITTEN_OUT: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse", "mamertines", "rhegium-campanians"]);
+
+const initialWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 33, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 35, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   map: {
@@ -719,7 +776,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
     // A bold, embattled spokesman under active military pressure -- distinct temperament and drives
     // from Hieron II despite a similar martial skill, so their dialogue and any future decisions read
     // as different people under different pressure, not palette-swapped stat blocks.
-    { id: "mamertine-spokesman", name: "Mamertine spokesman", cultureId: "italic", faithId: "faith-italic", dynastyId: null, locationProvinceId: "ita-72843720b81376294924159-sicily-northeast", polityId: "mamertines", ageYearsAtStart: 35, officeId: "mamertine-leader", personalAccountId: "mamertine-purse", skills: { martial: 60, intrigue: 45, learning: 35, piety: 45, stewardship: 45, diplomacy: 50, body: 70, subSkills: {} }, traits: ["bold", "vengeful"], mind: { drives: { security: 70, status: 45, wealth: 40, family: 55, faith: 40, duty: 55, revenge: 55 }, temperament: { boldness: 70, caution: 30, honesty: 50, sociability: 45, discipline: 40, cruelty: 45 }, riskTolerance: 70, values: [], taboos: [], currentPressures: ["mamertine-pressure-spokesman"] }, healthBps: 8_500, prestigeBps: 5_500, relations: [{ subjectCharacterId: "hieron-ii", causes: [{ id: "mamertine-hieron-fear", label: "Syracusan forces press their border at Messana.", score: -12, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null, dimensions: { fear: 30, trust: -10 } }] }], ambitions: [{ id: "hold-messana", label: "Hold Messana", kind: "restoration", targetId: "settlement-messana", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
+    { id: "mamertine-spokesman", name: "Statius Mettius", cultureId: "italic", faithId: "faith-italic", dynastyId: null, locationProvinceId: "ita-72843720b81376294924159-sicily-northeast", polityId: "mamertines", ageYearsAtStart: 35, officeId: "mamertine-leader", personalAccountId: "mamertine-purse", skills: { martial: 60, intrigue: 45, learning: 35, piety: 45, stewardship: 45, diplomacy: 50, body: 70, subSkills: {} }, traits: ["bold", "vengeful"], mind: { drives: { security: 70, status: 45, wealth: 40, family: 55, faith: 40, duty: 55, revenge: 55 }, temperament: { boldness: 70, caution: 30, honesty: 50, sociability: 45, discipline: 40, cruelty: 45 }, riskTolerance: 70, values: [], taboos: [], currentPressures: ["mamertine-pressure-spokesman"] }, healthBps: 8_500, prestigeBps: 5_500, relations: [{ subjectCharacterId: "hieron-ii", causes: [{ id: "mamertine-hieron-fear", label: "Syracusan forces press their border at Messana.", score: -12, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null, dimensions: { fear: 30, trust: -10 } }] }], ambitions: [{ id: "hold-messana", label: "Hold Messana", kind: "restoration", targetId: "settlement-messana", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
     // The men who actually held Rome, Syracuse and Carthage in 270 BCE, so the
     // opening world is a political situation rather than one consul and three
     // placeholders. Each is here because the year gives them something to be
@@ -747,6 +804,13 @@ const initialWorld: WorldState = WorldStateSchema.parse({
   // has its own stake in whether Messana falls to Syracuse or holds.
   storylines: [{ id: "rhegium-recovery", title: "Rhegium and the Campanian Legion", participantIds: ["gaius-genucius", "decius-vibellius", "manius-curius"], provinceId: "punic-italy-bruttian-highlands", phase: "escalating", stakes: "Rome must retake a city its own garrison murdered and kept, in front of every ally watching how the Republic treats a broken oath.", history: ["The Campanian legion sent to hold Rhegium killed its citizens and took the city for itself.", "The Senate has resolved that the matter be ended."], nextDevelopment: "The consular army turns south, or the Senate finds someone else to send.", visibility: "public", updatedAtStep: 0 }, { id: "mamertine-syracusan-crisis", title: "The Messana Crisis", participantIds: ["hieron-ii", "mamertine-spokesman", "hanno-carthage"], provinceId: "ita-72843720b81376294924159-sicily-northeast", phase: "escalating", stakes: "Syracuse seeks to contain the Mamertines without drawing Rome and Carthage into a wider war.", history: ["Hieron II's forces pressure the Mamertines around the Strait of Messana.", "Carthage watches the strait for any opening or threat to its own position in Sicily."], nextDevelopment: "Envoys may seek outside support if the local balance collapses.", visibility: "public", updatedAtStep: 0 }],
   conflicts: { battles: [], sieges: [], wars: [] },
+  // Who is in charge of what beneath the consuls and the suffetes (v35,
+  // docs/plans/departments.md). Named once, as the sources have them; every
+  // other power opens with its ruler holding all of it. What Rome's consuls
+  // keep is the war, the watch and the state's letters -- the Republic had no
+  // ministry of any of them. Old institutions open with the ten years of
+  // experience a department can have.
+  departments: SEEDED_DEPARTMENTS,
   // Rome is already at war with the men holding Rhegium: the Senate has
   // resolved the matter be ended, and the army is marching. Saying so in state
   // is what lets the assault happen at all.
@@ -886,15 +950,17 @@ const initialWorld: WorldState = WorldStateSchema.parse({
         polityId: "rome",
         name: "Senate",
         votingBlocs: [
-          { id: "patrician-bloc", name: "Patrician bloc", representedInterest: "landed nobility", weight: 60, baseSupport: 20, yesThreshold: 15, noThreshold: -15, causes: [], interests: ["nobles", "landed"] },
-          { id: "popular-bloc", name: "Popular bloc", representedInterest: "the people", weight: 40, baseSupport: -10, yesThreshold: 15, noThreshold: -15, causes: [], interests: ["commons"] },
+          { id: "patrician-bloc", name: "The patrician houses", representedInterest: "landed nobility", weight: 60, baseSupport: 20, yesThreshold: 15, noThreshold: -15, causes: [], interests: ["nobles", "landed"] },
+          { id: "popular-bloc", name: "The plebeian new men", representedInterest: "the people", weight: 40, baseSupport: -10, yesThreshold: 15, noThreshold: -15, causes: [], interests: ["commons"] },
         ],
         // Former magistrates: the world's factions, clients and the landed sit here too.
+        // Every chamber here decides by the votes cast. A bloc that abstains
+        // is undecided, and counting it against sank a fleet 49 to none.
         franchise: "council",
         totalVotingWeight: 100,
         quorumBps: 5_000,
         passageThresholdBps: 5_001,
-        denominator: "total",
+        denominator: "cast",
       },
       // The assemblies of the Roman people, which elected the magistrates and
       // passed the laws. The centuries were weighted by wealth: the equites and
@@ -911,7 +977,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
         totalVotingWeight: 193,
         quorumBps: 5_000,
         passageThresholdBps: 5_001,
-        denominator: "total",
+        denominator: "cast",
       },
       // Thirty-three tribes since 299, four urban and twenty-nine rural, one
       // vote each. The same tribes without the patricians were the plebeian
@@ -928,7 +994,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
         totalVotingWeight: 33,
         quorumBps: 5_000,
         passageThresholdBps: 5_001,
-        denominator: "total",
+        denominator: "cast",
       },
       // Carthage (v33). The council of elders -- the "senate" the Greeks and
       // Romans wrote of, some three hundred men of the great houses -- decided
@@ -946,7 +1012,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
         totalVotingWeight: 100,
         quorumBps: 5_000,
         passageThresholdBps: 5_001,
-        denominator: "present",
+        denominator: "cast",
         powers: ["laws", "war", "taxes", "constitution"],
         advisory: false,
         franchise: "council",
@@ -962,7 +1028,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
         totalVotingWeight: 104,
         quorumBps: 5_000,
         passageThresholdBps: 5_001,
-        denominator: "present",
+        denominator: "cast",
         powers: ["judgment"],
         advisory: false,
         franchise: "council",
@@ -1043,7 +1109,7 @@ const initialWorld: WorldState = WorldStateSchema.parse({
         totalVotingWeight: 100,
         quorumBps: 5_000,
         passageThresholdBps: 5_001,
-        denominator: "present",
+        denominator: "cast",
         advisory: true,
         franchise: "council",
       },
@@ -1182,6 +1248,9 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { id: "mamertine-garrison", name: "Mamertine garrison", polityId: "mamertines", commanderCharacterId: "mamertine-spokesman", controllerCharacterId: "mamertine-spokesman", locationId: "ita-72843720b81376294924159-sicily-northeast", authorizedStrength: 1_600, personnel: [{ categoryId: "infantry", label: "Mercenaries", fit: 1_400, unavailable: [] }], moraleBps: 7_000, cohesionBps: 7_000, fatigueBps: 1_000, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "mamertine-soldiery", payArrearsPeriods: 0, history: [] },
     ],
   },
-});
+}));
 
 export const punicWarsScenario = { definition, initialWorld } as const;
+
+/** What the v34 migration of a save needs to seat the same people the opening world has. */
+export const punicWarsFounding = { writtenOut: WRITTEN_OUT, formOf: governmentFormFor } as const;

@@ -85,7 +85,6 @@ interface ChamberSpec {
   readonly blocs: readonly BlocSpec[];
   readonly quorumBps: number;
   readonly passageThresholdBps: number;
-  readonly denominator: "total" | "present" | "cast";
   /** A chamber key: where a rejected magistrate's question goes next. */
   readonly refersTo?: string;
 }
@@ -161,13 +160,13 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
         key: "council", name: pick(s("council"), ["Royal Council", "Council of the King's Friends", "Council of the Court"]),
         powers: ALL_CHAMBER_POWERS, advisory: true, franchise: "council",
         blocs: [bloc("friends", "The king's friends", "the crown", ["crown"], 40, 20), bloc("houses", "The great houses", "the nobility", ["nobles", "landed"], 60, 0)],
-        quorumBps: 5_000, passageThresholdBps: 5_001, denominator: "cast",
+        quorumBps: 5_000, passageThresholdBps: 5_001,
       };
       const assembly: ChamberSpec = {
         key: "assembly", name: pick(s("assembly-name"), ["Assembly of the People", "Gathering of the Freemen"]),
         powers: ["war", "laws"], advisory: true, franchise: "citizens",
         blocs: [bloc("people", "The people", "the common people", ["commons"], 100, 0)],
-        quorumBps: 4_000, passageThresholdBps: 5_001, denominator: "cast",
+        quorumBps: 4_000, passageThresholdBps: 5_001,
       };
       return {
         form, rulerKey: "ruler",
@@ -190,14 +189,14 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
             key: "council", name: pick(s("council"), ["Council of Elders", "Great Council", "Council of the Hundred", "Gerousia"]),
             powers: ["laws", "war", "taxes", "constitution", "judgment"], advisory: false, franchise: "council",
             blocs: [bloc("old-houses", "The old houses", "the nobility", ["nobles", "landed"], 55, 15), bloc("new-men", "The new men", "the merchants", ["merchants"], 45, 0)],
-            quorumBps: 5_000, passageThresholdBps: 5_001, denominator: "present",
+            quorumBps: 5_000, passageThresholdBps: 5_001,
             ...(referral ? { refersTo: "assembly" } : {}),
           },
           {
             key: "assembly", name: pick(s("assembly"), ["Assembly of Citizens", "Popular Assembly", "Assembly of the People"]),
             powers: referral ? ["elections", "laws", "war"] : ["elections"], advisory: false, franchise: "citizens",
             blocs: [bloc("propertied", "The propertied", "the landowners", ["landed"], 60, 5), bloc("poorer", "The poorer citizens", "the common people", ["commons"], 40, -5)],
-            quorumBps: 4_000, passageThresholdBps: 5_001, denominator: "cast",
+            quorumBps: 4_000, passageThresholdBps: 5_001,
           },
         ],
         offices: [
@@ -217,13 +216,13 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
             key: "assembly", name: pick(s("assembly"), ["Assembly of the People", "Ekklesia", "Assembly of Citizens"]),
             powers: ALL_CHAMBER_POWERS, advisory: false, franchise: "citizens",
             blocs: [bloc("propertied", "The propertied", "the landowners and merchants", ["landed", "merchants"], 40, 5), bloc("people", "The common people", "the common people", ["commons"], 60, 0)],
-            quorumBps: 3_000, passageThresholdBps: 5_001, denominator: "cast",
+            quorumBps: 3_000, passageThresholdBps: 5_001,
           },
           {
             key: "council", name: pick(s("council"), ["Council", "Boule", "Council of Five Hundred"]),
             powers: ["judgment", "taxes"], advisory: false, franchise: "council",
             blocs: [bloc("councillors", "The councillors", "the well-to-do", ["merchants", "landed"], 100, 5)],
-            quorumBps: 5_000, passageThresholdBps: 5_001, denominator: "present",
+            quorumBps: 5_000, passageThresholdBps: 5_001,
           },
         ],
         offices: [
@@ -242,13 +241,13 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
         powers: ALL_CHAMBER_POWERS, advisory: false, franchise: "chiefs",
         blocs: [bloc("war-band", "The war-bands", "the warriors", ["soldiers"], 30, 10)],
         // Near-unanimity: a gathering that outvotes a tribe does not bind it.
-        quorumBps: 6_000, passageThresholdBps: between(s("unanimity"), 6_000, 7_500), denominator: "present",
+        quorumBps: 6_000, passageThresholdBps: between(s("unanimity"), 6_000, 7_500),
       };
       const host: ChamberSpec = {
         key: "host", name: pick(s("host"), ["Assembly of the Warriors", "Host in Arms"]),
         powers: ["war", "elections"], advisory: true, franchise: "soldiers",
         blocs: [bloc("young", "The young warriors", "the warriors", ["soldiers"], 100, 15)],
-        quorumBps: 3_000, passageThresholdBps: 5_001, denominator: "cast",
+        quorumBps: 3_000, passageThresholdBps: 5_001,
       };
       return {
         form, rulerKey: "ruler",
@@ -269,13 +268,13 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
             key: "assembly", name: pick(s("assembly"), ["Assembly of the Soldiers", "Assembly of the Company", "Host in Assembly"]),
             powers: ALL_CHAMBER_POWERS, advisory: false, franchise: "soldiers",
             blocs: [bloc("old-hands", "The old hands", "the veterans", ["soldiers", "veterans"], 60, 10), bloc("young", "The younger men", "the soldiers", ["soldiers"], 40, 5)],
-            quorumBps: 4_000, passageThresholdBps: 5_001, denominator: "cast",
+            quorumBps: 4_000, passageThresholdBps: 5_001,
           },
           {
             key: "council", name: pick(s("council"), ["Council of Captains", "Council of Officers"]),
             powers: ALL_CHAMBER_POWERS, advisory: true, franchise: "council",
             blocs: [bloc("captains", "The captains", "the officers", ["soldiers"], 100, 5)],
-            quorumBps: 5_000, passageThresholdBps: 5_001, denominator: "present",
+            quorumBps: 5_000, passageThresholdBps: 5_001,
           },
         ],
         offices: [
@@ -294,13 +293,13 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
             key: "synod", name: pick(s("synod"), ["Synod of the League", "Federal Assembly", "Council of the Cities"]),
             powers: ALL_CHAMBER_POWERS, advisory: false, franchise: "cities",
             blocs: [bloc("federal", "The federal party", "the league's officers", ["nobles"], 30, 10)],
-            quorumBps: 5_000, passageThresholdBps: 5_001, denominator: "present",
+            quorumBps: 5_000, passageThresholdBps: 5_001,
           },
           {
             key: "council", name: pick(s("council"), ["Federal Council", "Council of Magistrates"]),
             powers: ["laws", "taxes", "judgment"], advisory: false, franchise: "council",
             blocs: [bloc("magistrates", "The magistrates of the cities", "the nobility", ["nobles", "landed"], 100, 5)],
-            quorumBps: 5_000, passageThresholdBps: 5_001, denominator: "present",
+            quorumBps: 5_000, passageThresholdBps: 5_001,
           },
         ],
         offices: [
@@ -319,13 +318,13 @@ export function templateFor(polity: Polity, form: GovernmentForm): ConstitutionT
             key: "college", name: pick(s("college"), ["College of Priests", "Council of the Temple"]),
             powers: ALL_CHAMBER_POWERS, advisory: false, franchise: "priests",
             blocs: [bloc("senior", "The senior priests", "the priesthood", ["priests"], 60, 10), bloc("estates", "The temple's landholders", "the temple lands", ["priests", "landed"], 40, 0)],
-            quorumBps: 5_000, passageThresholdBps: 5_001, denominator: "present",
+            quorumBps: 5_000, passageThresholdBps: 5_001,
           },
           {
             key: "faithful", name: pick(s("faithful"), ["Assembly of the Faithful", "Gathering at the Temple"]),
             powers: ["laws"], advisory: true, franchise: "citizens",
             blocs: [bloc("faithful", "The faithful", "the common people", ["commons", "priests"], 100, 5)],
-            quorumBps: 3_000, passageThresholdBps: 5_001, denominator: "cast",
+            quorumBps: 3_000, passageThresholdBps: 5_001,
           },
         ],
         offices: [
@@ -437,7 +436,10 @@ function build(polity: Polity, template: ConstitutionTemplate, treasuryAccountId
       totalVotingWeight: votingBlocs.reduce((sum, bloc) => sum + bloc.weight, 0),
       quorumBps: chamber.quorumBps,
       passageThresholdBps: chamber.passageThresholdBps,
-      denominator: chamber.denominator,
+      // A bloc that abstains is undecided, not against: every bloc always
+      // sits, so a count over the whole house or those present failed a
+      // measure 49 to none with 51 abstaining. Only votes cast decide.
+      denominator: "cast" as const,
       powers: [...chamber.powers],
       advisory: chamber.advisory,
       franchise: chamber.franchise,
@@ -985,6 +987,8 @@ export function keepThrones(input: KeepThronesInput): { world: WorldState; facts
   const facts: FactProposalDraft[] = [];
   const rules = allSuccessionRules(world, input.government.successionRules);
   for (const polity of world.map.polities) {
+    // A power that is no more has no throne to keep (`polity-end.ts`).
+    if (polity.endedAtStep != null) continue;
     const office = rulerOfficeOf(world, polity.id, input.government);
     if (office === null) continue;
     const rule = rules.find((candidate) => candidate.id === office.successionRuleId);

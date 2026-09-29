@@ -1,4 +1,4 @@
-import { treasuryOf, type OrderPartyRef, type WorldDelta, type WorldState } from "@chronica/shared";
+import { treasuryOf, type FactProposal, type OrderPartyRef, type WorldDelta, type WorldState } from "@chronica/shared";
 import { accountOf } from "./normalize-refs";
 
 /**
@@ -158,4 +158,71 @@ export function fillGaps(
   }
 
   return assumed.length === 0 ? { delta, assumed } : { delta: out as unknown as WorldDelta, assumed };
+}
+
+/**
+ * What only the engine can make true, and the act that makes it so.
+ *
+ * A model writes history as prose, and some of that prose is the engine's to
+ * say. "Hieron's army laid siege to Messana" stood in the record on day 9 with
+ * no siege behind it: nothing starved the city, nothing reported on it, and the
+ * siege the world actually held began on day 28. A battle told with no battle
+ * fought, an army said to have moved that stands where it stood, a city said
+ * to have fallen that its old masters still hold -- each is a fact the world
+ * then contradicts. So a fact of one of these kinds stands only beside the act
+ * that makes it true. Without one it becomes that act where the fact says
+ * plainly which army -- a siege is laid by an army standing at the walls, and
+ * the engine judges it like any other -- and is otherwise left out. The act,
+ * once carried out, tells itself.
+ */
+const ENGINE_OWNED: readonly { readonly kinds: RegExp; readonly op: WorldDelta["op"]; readonly also?: WorldDelta["op"] }[] = [
+  { kinds: /^(siege|siege_laid|siege_begun|siege_opened|siege_started|besieged|city_besieged|investment)$/, op: "siege_lay" },
+  { kinds: /^(battle|battle_fought|battle_won|battle_lost|engagement|pitched_battle|clash|skirmish|defeat_in_battle|victory_in_battle)$/, op: "force_engage" },
+  { kinds: /^(province_taken|province_captured|province_conquered|province_control_change|city_taken|city_captured|city_fell|city_falls|city_surrendered|conquest)$/, op: "province_control_set", also: "settlement_control_set" },
+  { kinds: /^(force_moved|force_movement|army_moved|army_marched|army_arrived|fleet_moved|fleet_movement|fleet_arrived|troop_movement|march|march_begun|crossing|crossing_begun)$/, op: "force_modify" },
+];
+
+export interface FactsAndTheirActs {
+  /** The facts that stand: every one not of an engine-owned kind, and those whose act is in the answer. */
+  readonly facts: readonly FactProposal[];
+  /** Acts made from facts that named their army, to be judged with the rest. */
+  readonly acts: readonly WorldDelta[];
+  /** What was left out, and why, for the audit. */
+  readonly dropped: readonly string[];
+}
+
+export function actsBehindFacts(
+  facts: readonly FactProposal[],
+  deltas: readonly WorldDelta[],
+  world: WorldState,
+  /** The player's armies are moved by the player: a fact about them is never made into an act. */
+  playerCharacterId: string | null,
+): FactsAndTheirActs {
+  const kept: FactProposal[] = [];
+  const acts: WorldDelta[] = [];
+  const dropped: string[] = [];
+  const mentions = (delta: WorldDelta, id: string): boolean => JSON.stringify(delta).includes(`"${id}"`);
+  for (const fact of facts) {
+    const owned = ENGINE_OWNED.find((entry) => entry.kinds.test(fact.kind.trim().toLowerCase()));
+    if (owned === undefined) {
+      kept.push(fact);
+      continue;
+    }
+    const forces = fact.affectedRefs.filter((ref) => ref.kind === "force").map((ref) => world.material.forces.find((force) => force.id === ref.id)).filter((force) => force !== undefined);
+    const behind = deltas.some((delta) => (delta.op === owned.op || delta.op === owned.also)
+      && (delta.op !== "force_modify" || delta.locationId !== undefined)
+      && (forces.length === 0 || forces.some((force) => mentions(delta, force.id))));
+    if (behind) {
+      kept.push(fact);
+      continue;
+    }
+    const theirs = forces.length === 1 && forces[0]!.controllerCharacterId !== playerCharacterId && forces[0]!.commanderCharacterId !== playerCharacterId;
+    if (owned.op === "siege_lay" && theirs) {
+      acts.push({ op: "siege_lay", localId: `siege_${fact.localId}`.slice(0, 60), forceRef: forces[0]!.id, settlementId: null, reason: fact.summary.slice(0, 300) });
+      dropped.push(`"${fact.kind}" is the engine's to tell: made into the siege it describes, for ${forces[0]!.name}.`);
+      continue;
+    }
+    dropped.push(`"${fact.kind}" ("${fact.summary.slice(0, 80)}") asserted what only the engine makes true, with no "${owned.op}" behind it; left out.`);
+  }
+  return { facts: kept, acts, dropped };
 }

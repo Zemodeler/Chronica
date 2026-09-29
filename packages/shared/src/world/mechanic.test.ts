@@ -40,7 +40,9 @@ describe("the mechanic schema", () => {
     const printed = JSON.stringify(z.toJSONSchema(WatchPredicateSchema, { io: "input" }));
     expect(printed).not.toContain("province_level_above");
     expect(printed).not.toContain("at_war");
-    expect(WatchPredicateSchema.options).toHaveLength(10);
+    // Twelve: "question_decided" and "letter_answered" were added as watch arms in their own right --
+    // "once the Senate gives me the command", "if Syracuse refuses", are things to be woken for.
+    expect(WatchPredicateSchema.options).toHaveLength(12);
   });
 
   it("tests a province by each level it has", () => {

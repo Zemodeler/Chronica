@@ -6,4 +6,5 @@ export * from "./dialogue";
 export * from "./games";
 export * from "./shared-knowledgebase";
 export * from "./world";
+export * from "./repin";
 export * from "../built-in-scenarios";

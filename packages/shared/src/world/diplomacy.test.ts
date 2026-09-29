@@ -155,3 +155,20 @@ describe("applyDiplomaticAnswerToStance", () => {
     expect(stances[0]?.trustScore).toBeLessThanOrEqual(100);
   });
 });
+
+describe("the men a letter passes between", () => {
+  const hand = (diplomacy: number, traits: string[] = []) => ({ skills: { martial: 50, intrigue: 50, learning: 50, piety: 50, stewardship: 50, diplomacy, body: 50, subSkills: {} }, traits });
+  const distrust: PolityStance = { polityId: "carthage", towardPolityId: "rome", trustScore: -40, lastShiftReason: "An old war.", lastShiftAtStep: 0 };
+  const accepted = message({ id: "m1", status: "answered", answer: "accepted", answeredAtStep: 1 });
+
+  it("wins lost trust back the faster for a diplomat's answer", () => {
+    const clumsy = applyDiplomaticAnswerToStance([distrust], accepted, 1, { answerer: hand(40) }).find((stance) => stance.polityId === "carthage")!;
+    const gifted = applyDiplomaticAnswerToStance([distrust], accepted, 1, { answerer: hand(90) }).find((stance) => stance.polityId === "carthage")!;
+    expect(gifted.trustScore).toBeGreaterThan(clumsy.trustScore);
+  });
+
+  it("is read the kinder from a sociable writer", () => {
+    const warmth = (traits: string[]) => applyDiplomaticAnswerToStance([], accepted, 1, { writer: hand(50, traits) }).find((stance) => stance.polityId === "rome")?.trustScore ?? 0;
+    expect(warmth(["sociable"])).toBeGreaterThan(warmth([]));
+  });
+});

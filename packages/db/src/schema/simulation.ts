@@ -99,11 +99,20 @@ export const simulationBursts = pgTable("simulation_bursts", {
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   /** Last sign of life from the process running it. A running row that stops beating is abandoned, whatever its age. */
   heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+  /** Last time the burst got somewhere: a stage reported, a call answered, a passage written (0042). Alive and stuck is abandoned too. */
+  progressAt: timestamp("progress_at", { withTimezone: true }),
   endedAt: timestamp("ended_at", { withTimezone: true }),
+  /** Every call not made, answer not read and field dropped, as `{ stage, reason }` (0042). */
+  skipped: jsonb("skipped").notNull().$type<unknown>().default(sql`'[]'::jsonb`),
+  /** The historian's calls, counted apart from the simulation's `modelCalls` budget (which includes them in its total). */
+  chronicleCalls: integer("chronicle_calls").notNull().default(0),
+  /** The client's own id for the order, so a resubmission finds this burst instead of opening another (0042). */
+  idempotencyKey: text("idempotency_key"),
 }, (table) => [
   index("simulation_bursts_game_idx").on(table.gameId, table.startedAt),
   // One burst at a time per world, kept here rather than by a read before the insert (0040).
   uniqueIndex("simulation_bursts_one_running_idx").on(table.gameId).where(sql`${table.status} = 'running'`),
+  uniqueIndex("simulation_bursts_idempotency_idx").on(table.gameId, table.idempotencyKey).where(sql`${table.idempotencyKey} IS NOT NULL`),
 ]);
 
 /**
@@ -173,10 +182,24 @@ export const chronicleCheckpoints = pgTable("chronicle_checkpoints", {
   changes: jsonb("changes").notNull().$type<unknown>().default(sql`'[]'::jsonb`),
   /** The one line of somebody's own voice, where the report had one. */
   quote: jsonb("quote").$type<unknown>(),
+  /**
+   * The threads of history (`world.storylines`) this entry belongs to, so a
+   * thread's history can be told from what the player actually read. A
+   * storyline keeps only its last sixteen facts, so its own list cannot be
+   * the join.
+   */
+  storylineIds: jsonb("storyline_ids").notNull().$type<unknown>().default(sql`'[]'::jsonb`),
   stopReason: text("stop_reason").notNull(),
   readAt: timestamp("read_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [index("chronicle_checkpoints_game_idx").on(table.gameId, table.toInstantSortKey, table.ordinal)]);
+
+/** Threads of history the player has chosen to follow: marks on the calendar line. */
+export const followedThreads = pgTable("followed_threads", {
+  gameId: uuid("game_id").notNull().references(() => games.id, { onDelete: "cascade" }),
+  storylineId: text("storyline_id").notNull(),
+  followedAt: timestamp("followed_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [uniqueIndex("followed_threads_game_storyline_idx").on(table.gameId, table.storylineId)]);
 
 /** VISION §23 outcome C: the rare development that genuinely needs the player's own authority. */
 export const playerDecisions = pgTable("player_decisions", {

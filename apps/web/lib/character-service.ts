@@ -15,12 +15,8 @@ import {
   ScenarioDefinitionSchema,
   WorldStateSchema,
   clampWealth,
-  deriveAuthoritySummary,
   createCanonicalNpc,
   describeWealthBands,
-  skillsInWords,
-  standingInWords,
-  traitsInWords,
   linkCanonicalCharacters,
   materializePlayerCharacter,
   type CharacterKnowledgebase,
@@ -34,7 +30,6 @@ import { getAuthentication, isAuthenticationConfigured } from "./authentication"
 import { headers } from "next/headers";
 import { relationshipLabelForScore, scoreForDeclaredConnection } from "./relationship-score";
 import { canvasRegions, materializeCanvasProvince } from "./canvas-world";
-import { materializeDeclaredPlayer, withPlayerWorld } from "./player-world";
 
 // The fixture demo game uses a plain string ID, not a UUID, so no DB queries
 // are valid against it. All service functions return early for this ID.
@@ -687,74 +682,6 @@ export async function getCharacterPanelData(gameId: string): Promise<CharacterKn
     const playerId = await resolvePlayerInGame(db, gameId, userId);
     if (playerId === null) return null;
     return await getCharacterKnowledgebase(db, gameId, playerId);
-  } finally {
-    await close();
-  }
-}
-
-/**
- * Who the world thinks this person is (slice 11).
- *
- * Deliberately reverses the rule at the top of
- * `app/api/games/[gameId]/character/route.ts`: "AI-only skill data must never
- * cross this boundary", which meant the panel could tell a player nothing
- * about their own abilities at all. The rule was protecting the wrong thing.
- * A number invites optimisation and a person does not have one -- but the
- * player being unable to find out whether they are any good with an army was
- * never the point of it. The numbers stay behind the boundary; the judgment
- * crosses it, in the register the rest of the game is written in.
- *
- * Traits and standing come from canonical world state rather than from the
- * declaration, because both are now things other people decide.
- *
- * Only ever about the viewer's own character. It took a characterId and had
- * no session check of any kind, so it would happily have read any NPC in the
- * world -- full skills, no gate on whether the player had ever met them.
- * Nobody pointed it at one, and nothing stopped them. Now it answers for the
- * signed-in player and returns nothing for anybody else; what the player may
- * learn about *other* people goes through `readPerson`, which is built for
- * exactly that question and answers it in hearsay.
- */
-export async function getCharacterReputation(
-  gameId: string,
-  characterId: string,
-): Promise<{ readonly traits: readonly string[]; readonly standing: string | null; readonly skills: readonly string[] }> {
-  const empty = { traits: [], standing: null, skills: [] };
-  if (gameId === DEMO_GAME_ID) return empty;
-  const read = await withPlayerWorld(gameId, ({ world, characterId: viewerId }) => {
-    if (viewerId === null || viewerId !== characterId) return empty;
-    const character = world.characters.find((candidate) => candidate.id === viewerId);
-    if (character === undefined) return empty;
-    return {
-      traits: traitsInWords(character.traits),
-      standing: standingInWords(character.prestigeBps),
-      skills: skillsInWords(character.skills),
-    };
-  });
-  return read ?? empty;
-}
-
-/**
- * Canonical Authority projection (character-sim phase 6): concise,
- * server-derived labels for what `characterId` can presently and visibly
- * exercise, replacing the free-text AI-generated `knowledgebase.authority` as
- * the source of the personal screen's Authority field. Never reads
- * `knowledgebase.authority` -- see `deriveAuthoritySummary`.
- */
-export async function getPlayerAuthoritySummary(gameId: string, characterId: string): Promise<readonly string[]> {
-  if (gameId === DEMO_GAME_ID) return [];
-  const { db, close } = createDatabase(requiredDatabaseUrl());
-  try {
-    const view = await getWorldView(db, gameId);
-    if (view === undefined) return [];
-    // Before the first turn commits there is no snapshot, so the world here is
-    // the scenario's authored initial world -- which knows nothing about a
-    // character the player declared. Reading Authority straight off it always
-    // answered "No current public office", whatever the player had declared
-    // themselves to be. Project the player in first, exactly as resolution
-    // does, so the screen and the simulation agree from turn zero.
-    const world = await materializeDeclaredPlayer(db, gameId, view.world, characterId, view.scenarioGovernment, view.mapAssetId);
-    return deriveAuthoritySummary(world, characterId, view.scenarioGovernment);
   } finally {
     await close();
   }

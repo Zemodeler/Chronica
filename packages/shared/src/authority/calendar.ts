@@ -1,8 +1,10 @@
 import { buildStation, CLAIMED_OFFICE_SOURCE_REF, holdsPolityStanding, type Station } from "./station";
 import type { Office } from "../characters/character";
 import { AGREEMENT_KIND_IN_WORDS } from "../world/agreements";
+import { knowsAgreement, treatyViewer } from "./treaty-knowledge";
 import type { WorldState } from "../world/world-state";
 import { formatWorldDate, type ScenarioClock } from "../world/clock";
+import { isDelivered } from "../world/diplomacy";
 
 /**
  * What is coming, as this person could know it: the next few dated things
@@ -96,13 +98,14 @@ export function whatComesNext(
     else add(`project:${project.id}`, project.targetCompletionStep, clip(`${project.label}: due to be finished`), false);
   }
 
-  // Your power's dated treaties: what everyone may know, and the rest if you govern.
+  // Your power's dated treaties, as far as you may know of them.
+  const viewer = treatyViewer(world, characterId, offices);
   for (const agreement of world.polityAgreements) {
     if (agreement.status !== "active" || agreement.untilStep === null) continue;
     const other = agreement.polityId === station.polityId ? agreement.otherPolityId
       : agreement.otherPolityId === station.polityId ? agreement.polityId : null;
     if (other === null) continue;
-    if (agreement.visibility !== "public" && !governs) continue;
+    if (!knowsAgreement(viewer, agreement)) continue;
     const otherName = polityName(other);
     add(`agreement:${agreement.id}`, agreement.untilStep,
       `The ${AGREEMENT_KIND_IN_WORDS[agreement.kind]}${otherName === null ? "" : ` with ${otherName}`} ends`, false);
@@ -110,7 +113,7 @@ export function whatComesNext(
 
   // Letters waiting on your answer, or on your government's if you speak for it.
   for (const message of world.diplomacy) {
-    if (message.status !== "awaiting_reply") continue;
+    if (message.status !== "awaiting_reply" || !isDelivered(message, world.elapsedStep)) continue;
     const toYou = message.toCharacterId === characterId;
     const toYourGovernment = governs && message.toPolityId === station.polityId && message.toCharacterId === null;
     if (!toYou && !toYourGovernment) continue;

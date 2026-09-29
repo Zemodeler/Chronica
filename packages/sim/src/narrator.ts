@@ -219,8 +219,6 @@ interface Archetype {
   readonly needsAdversary?: boolean;
   /** Befalls an army or a fleet, and is not offered when there is none to befall. */
   readonly needsForce?: boolean;
-  /** Of those, the ones that only make sense at sea. */
-  readonly needsFleet?: boolean;
   /**
    * Happens off a coast, and is not offered inland. A live run sank a grain
    * fleet "off Hunedoara", in the Carpathians: the storm could land on any
@@ -241,18 +239,6 @@ const place = (target: NarratorSeed["target"]): string => `${target.provinceName
 const power = (target: NarratorSeed["target"]): string => `${target.polityName} [${target.polityId}]`;
 const other = (target: NarratorSeed["target"]): string => `${target.otherPolityName} [${target.otherPolityId}]`;
 const host = (target: NarratorSeed["target"]): string => `${target.forceName} [${target.forceId}]`;
-
-/**
- * What an army lost, and how the engine is told.
- *
- * `force_attrition` takes a share of the men actually present rather than a
- * number, so a brief says "one in twenty" and cannot drown more men than are
- * aboard. Every one of these ends with the reminder that the count belongs to
- * the engine: the author who writes the casualties into a fact of their own
- * has written them twice.
- */
-const ATTRITION_TAIL =
-  'Take the men with "force_attrition" -- its "lossBps" is the share of those still fit, so 500 is one in twenty -- and let it lower their morale in the same delta. The engine counts the dead and records them; do not write the number into a fact of your own.';
 
 const PERSON_PROBLEM_TAIL =
   'Decide what it actually is. Put it on them with "character_pressure_set" and, where they now mean to do something about it, "character_intent_set"; record what has already happened as a fact naming them.';
@@ -328,8 +314,7 @@ const ARCHETYPES: readonly Archetype[] = [
   // Everything above is trouble, and a record of nothing but trouble reads
   // like a crisis rather than a place. These are the ordinary business of a
   // province: cheap, one-shot, no thread, and half of them good news.
-  { kind: "world_event", name: "harvest", weight: 7, oneShot: true, secretTwelfths: 0,
-    brief: (t, s) => `The year has turned in ${place(t)}: ${magnitude(s, "a fair harvest and a quiet market", "a harvest better than anyone expected (food security +1200, stability +400)", "a glut -- granaries full, grain cheap, and the men who bought early ruined (food security +2500, stability +600)")}. Move it with "province_material_shift" and record it as a public fact naming the province. Nobody need do anything about it.` },
+  // The harvest is not drawn: it comes in every year in its month, rolled by the engine (`economy.ts`).
   { kind: "world_event", name: "games", weight: 6, oneShot: true, secretTwelfths: 0,
     brief: (t, s) => `${place(t)} is holding ${magnitude(s, "its usual festival", "games somebody paid a great deal for", "a spectacle the whole province has come in for")}. Decide who paid and what they got for it: a public fact naming the province, a "legitimacy_shift" or a "social_events" entry for whoever's name is on it, and a "province_material_shift" if the city is the better for it. Somebody's standing is bought here, cheaply or dearly.` },
   { kind: "world_event", name: "building", weight: 6, oneShot: true, secretTwelfths: 0,
@@ -342,15 +327,10 @@ const ARCHETYPES: readonly Archetype[] = [
   // ── What happens to armies ─────────────────────────────────────────────
   //
   // None of this could happen before: trouble had no way to name a force, and
-  // the ground-picker preferred provinces with no garrison in them. An army
-  // was the one thing in the world that only a battle could touch, in a period
-  // when disease and hunger emptied more camps than battles did.
-  { kind: "world_event", name: "camp_sickness", weight: 9, oneShot: false, secretTwelfths: 0, needsForce: true,
-    brief: (t, s) => `Sickness has broken out among ${host(t)}, in camp at ${place(t)}: ${magnitude(s, "a fever running through the lines (one in fifty gone, morale -600)", "a serious outbreak the surgeons cannot hold (one in sixteen gone, morale -1500)", "a camp emptying faster than it can bury its dead (one in seven gone, morale -2500)")}. ${ATTRITION_TAIL} Record it as a fact naming the force and where it stands; it will run for weeks, so schedule its next turn citing that fact.` },
-  { kind: "world_event", name: "storm_at_sea", weight: 8, oneShot: true, secretTwelfths: 0, needsForce: true, needsFleet: true,
-    brief: (t, s) => `Weather has caught ${host(t)} off ${place(t)}: ${magnitude(s, "a blow that scatters the squadron and drowns a few crews (one in fifty gone, morale -500)", "a gale that puts ships on the rocks (one in twelve gone, morale -1800)", "a storm that breaks the fleet -- hulls lost with all aboard (one in five gone, morale -3000)")}. ${ATTRITION_TAIL} Record it as a public fact naming the fleet and the waters; a fleet this broken may also need "force_modify" to put it into a harbour it can refit in.` },
-  { kind: "world_event", name: "supply_failure", weight: 7, oneShot: false, secretTwelfths: 0, needsForce: true,
-    brief: (t, s) => `The supply of ${host(t)} at ${place(t)} has failed: ${magnitude(s, "short rations and grumbling", "the convoys are not arriving and the men are on half", "nothing has come through for weeks and they are eating the baggage animals")}. Set "provisionStatus" with "force_modify" -- "shortage" or, if it is grave, "critical" -- and lower their morale. ${s === "grave" ? `Men are dying of it: ${ATTRITION_TAIL}` : ""} Record it as a fact naming the force, and say whose business it is to fix -- a "character_pressure_set" on whoever feeds them.` },
+  // the ground-picker preferred provinces with no garrison in them. Hunger,
+  // camp fever and storms at sea are the engine's now (`campaign.ts`,
+  // `crossings.ts`): arithmetic on the season and the ground, not a story the
+  // model is asked to tell. What is left here asks somebody to decide.
   { kind: "world_event", name: "mutiny", weight: 6, oneShot: false, secretTwelfths: 0, needsForce: true,
     brief: (t, s) => `${host(t)} at ${place(t)} has turned on its own discipline: ${magnitude(s, "an officer defied in front of the men", "companies refusing to march until they are paid", "the camp in open mutiny, with a ringleader")}. Decide what they want -- their arrears are the usual answer, and PAY tells you whether they are owed. Lower their morale with "force_modify"; ${s === "grave" ? `create the ringleader with "character_create" and give him a "character_intent_set", and take the men who walk away with "force_attrition" (cause "desertion").` : `put it on their commander with "character_pressure_set".`} Record it as a fact naming the force and its commander.` },
 
@@ -358,6 +338,13 @@ const ARCHETYPES: readonly Archetype[] = [
     brief: (t, s) => `A prophet is drawing crowds in ${place(t)}: ${magnitude(s, "a preacher the magistrates are watching", "a movement with followers in every town", "a faith that answers to nobody but its leader")}. Create the leader with "character_create" under ${power(t)} and the movement with "generic_entity_create" (kind "faction"), record the stir as a fact, and plant what they mean to do with "character_intent_set".` },
 ];
 
+
+/** The forces of these powers with men standing in the province: who has actually arrived. */
+function standingIn(world: WorldState, polityIds: readonly string[], provinceId: string): WorldState["material"]["forces"][number][] {
+  return world.material.forces.filter((force) => polityIds.includes(force.polityId)
+    && force.locationId === provinceId
+    && force.personnel.some((category) => category.fit > 0));
+}
 
 /**
  * Which of the period's pressures the world still looks like.
@@ -387,6 +374,7 @@ export function livePressures(world: WorldState, pressures: readonly ScenarioHis
     if (!when.politiesExist.every(exists)) return false;
     if (!when.atWar.every((pair) => atWar(pair.polityId, pair.otherPolityId))) return false;
     if (when.atPeace.some((pair) => atWar(pair.polityId, pair.otherPolityId))) return false;
+    if (!when.forcesPresent.every((presence) => standingIn(world, presence.polityIds, presence.provinceId).length > 0)) return false;
     return when.polityHolds.every((claim) =>
       claim.provinceIds.every((provinceId) =>
         world.map.provinces.some((province) => province.id === provinceId && province.controllerPolityId === claim.polityId)));
@@ -566,15 +554,13 @@ function chooseForce(
   input: NarratorInput,
   tension: TensionReading,
   seedCount: number,
-  mustBeFleet: boolean,
 ): WorldState["material"]["forces"][number] | null {
   const { world } = input;
   const busy = recentlyNamed(input.facts, world.instant.day);
   const home = landsAtHome(tension.comfort, input.gameId, seedCount);
 
   const eligible = world.material.forces
-    .filter((force) => force.personnel.reduce((sum, category) => sum + category.fit, 0) > 0)
-    .filter((force) => !mustBeFleet || isNaval(force, input));
+    .filter((force) => force.personnel.reduce((sum, category) => sum + category.fit, 0) > 0);
   if (eligible.length === 0) return null;
 
   const side = eligible.filter((force) => (force.polityId === input.ownPolityId) === home);
@@ -751,7 +737,7 @@ function circleOf(world: WorldState, playerCharacterId: string): string[] {
 /** What can befall a man and his house. The country's plagues and wars are the country's; these are his. */
 const PERSONAL_ARCHETYPES = new Set(["debt", "rivalry", "opportunity", "illness", "family_obligation", "accusation", "inheritance", "conspiracy"]);
 /** And what can befall the ground he lives off. */
-const ESTATE_ARCHETYPES = new Set(["fire", "harvest", "market"]);
+const ESTATE_ARCHETYPES = new Set(["fire", "market"]);
 
 function personalSeeds(input: NarratorInput, firstOrdinal: number, count: number): NarratorSeed[] {
   const { world } = input;
@@ -888,7 +874,7 @@ function seedAt(input: NarratorInput, tension: TensionReading, seedCount: number
 
   let target: NarratorSeed["target"];
   if (archetype.needsForce === true) {
-    const force = chooseForce(input, tension, seedCount, archetype.needsFleet === true);
+    const force = chooseForce(input, tension, seedCount);
     // An army for it to happen to, or it does not happen. A brief naming
     // "null" would be carried out anyway, on nobody.
     if (force === null) return null;
@@ -959,9 +945,17 @@ const ORDINARY_TROUBLE_WEIGHT = 40;
 /** A seed carrying the age's own shape, targeted where the pressure says. */
 function seedFromPressure(world: WorldState, pressure: ScenarioHistoricalPressure, input: NarratorInput, seedCount: number): NarratorSeed | null {
   const province = pressure.target.provinceId === null ? undefined : world.map.provinces.find((candidate) => candidate.id === pressure.target.provinceId);
-  const polityId = pressure.target.polityId ?? province?.controllerPolityId ?? null;
+  // Whose men are standing where the pressure waited for them: the power that
+  // moved, which the brief is told rather than left to guess.
+  const arrived = pressure.when.forcesPresent.flatMap((presence) => standingIn(world, presence.polityIds, presence.provinceId));
+  const mover = arrived[0]?.polityId ?? null;
+  const named = [pressure.target.polityId, pressure.target.otherPolityId];
+  const polityId = mover ?? pressure.target.polityId ?? province?.controllerPolityId ?? null;
+  const otherId = mover !== null && named.includes(mover) ? named.find((id) => id !== null && id !== mover) ?? null : pressure.target.otherPolityId;
   const polity = polityId === null ? undefined : world.map.polities.find((candidate) => candidate.id === polityId);
-  const other = pressure.target.otherPolityId === null ? undefined : world.map.polities.find((candidate) => candidate.id === pressure.target.otherPolityId);
+  const other = otherId === null ? undefined : world.map.polities.find((candidate) => candidate.id === otherId);
+  const nameOf = (id: string): string => world.map.polities.find((candidate) => candidate.id === id)?.name ?? id;
+  const standing = arrived.length === 0 ? "" : ` Who has actually crossed, which is not yours to choose: ${arrived.map((force) => `${force.name} of ${nameOf(force.polityId)}`).join(", ")}.`;
   if (pressure.kind !== "person_problem" && province === undefined && polity === undefined) return null;
 
   return {
@@ -988,7 +982,7 @@ function seedFromPressure(world: WorldState, pressure: ScenarioHistoricalPressur
     inPlayerRealm: polityId !== null && polityId === input.ownPolityId,
     repeated: false,
     why: `The age has been pulling this way: ${pressure.label}.`,
-    brief: pressure.brief,
+    brief: `${pressure.brief}${standing}`,
     pressureId: pressure.id,
   };
 }
@@ -1092,15 +1086,11 @@ interface EngineWork {
   readonly food?: readonly [number, number, number];
   readonly stability?: readonly [number, number, number];
   readonly productive?: readonly [number, number, number];
-  readonly news: (place: string, severity: SeedSeverity) => string;
+  readonly news: (place: string, severity: SeedSeverity, winter: boolean) => string;
   readonly significance: readonly [number, number, number];
 }
 
 const ENGINE_WORK: Readonly<Record<string, EngineWork>> = {
-  harvest: {
-    food: [400, 1200, 2500], stability: [100, 400, 600], significance: [15, 25, 35],
-    news: (place, s) => magnitude(s, `${place} brought in a fair harvest, and the market was quiet.`, `${place} brought in a harvest better than anyone had expected.`, `${place} brought in a glut: the granaries full, grain cheap, and the men who had bought early ruined.`),
-  },
   grain_fleet_lost: {
     food: [-400, -900, -1500], stability: [-100, -300, -600], significance: [20, 35, 50],
     news: (place, s) => magnitude(s, `A storm off ${place} took a few grain ships.`, `A storm off ${place} took the season's grain convoy.`, `A storm off ${place} took the grain fleet and the ships that guarded it.`),
@@ -1111,7 +1101,11 @@ const ENGINE_WORK: Readonly<Record<string, EngineWork>> = {
   },
   road_or_pass: {
     food: [-150, -400, -800], stability: [-100, -250, -500], significance: [15, 25, 40],
-    news: (place, s) => magnitude(s, `A bridge came down in ${place}, and traffic went by the ford instead.`, `The pass through ${place} was shut, and the traffic went round.`, `The way through ${place} closed for the season, and everything that moved on it stopped.`),
+    // Closed "for the season" only in the season that closes roads: the same
+    // news in July was a road shutting for a winter that was five months off.
+    news: (place, s, winter) => magnitude(s, `A bridge came down in ${place}, and traffic went by the ford instead.`, `The pass through ${place} was shut, and the traffic went round.`, winter
+      ? `The way through ${place} closed for the season, and everything that moved on it stopped.`
+      : `A landslip closed the way through ${place}, and everything that moved on it stopped.`),
   },
 };
 
@@ -1122,7 +1116,7 @@ const bySeverity = (values: readonly [number, number, number] | undefined, sever
  * What the engine does for this seed itself, or null when it is the model's to
  * carry out. Its deltas are the world's own acts; its fact is public news.
  */
-export function engineWork(seed: NarratorSeed): { readonly deltas: readonly WorldDelta[]; readonly fact: FactProposalDraft } | null {
+export function engineWork(seed: NarratorSeed, winter = false): { readonly deltas: readonly WorldDelta[]; readonly fact: FactProposalDraft } | null {
   const work = ENGINE_WORK[seed.archetype];
   const provinceId = seed.target.provinceId;
   if (work === undefined || provinceId === null || seed.secret) return null;
@@ -1130,7 +1124,7 @@ export function engineWork(seed: NarratorSeed): { readonly deltas: readonly Worl
   const stability = bySeverity(work.stability, seed.severity);
   const productive = bySeverity(work.productive, seed.severity);
   const place = seed.target.provinceName ?? provinceId;
-  const news = work.news(place, seed.severity);
+  const news = work.news(place, seed.severity, winter);
   return {
     deltas: [{
       op: "province_material_shift",

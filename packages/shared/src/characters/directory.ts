@@ -1,5 +1,6 @@
 import { peopleYouKnow, type PersonReading } from "./acquaintance";
 import { whoMayBeReached } from "./access";
+import { inTheSameRegion } from "./reachability";
 import { allOffices, type Office } from "./character";
 import { buildStation } from "../authority/station";
 import type { WorldState } from "../world/world-state";
@@ -19,7 +20,7 @@ import type { ScenarioClock } from "../world/clock";
  */
 
 export type DirectoryHow = "speaking" | PersonReading["how"] | "public";
-export type DirectoryReach = "here" | "letter" | "out_of_reach";
+export type DirectoryReach = "here" | "letter";
 
 export interface DirectoryEntry {
   readonly id: string;
@@ -29,9 +30,12 @@ export interface DirectoryEntry {
   readonly whereLabel: string | null;
   readonly how: DirectoryHow;
   readonly reach: DirectoryReach;
-  /** "Here in Latium", "By letter", or why not. */
+  /** "Here in Latium" or "By letter". */
   readonly reachLabel: string;
-  /** What it would take, when they cannot be reached yet. */
+  /**
+   * What it would take to be heard in person, when a letter is all there is
+   * yet. Never the writing itself: the tray is where that is done.
+   */
   readonly ladder: readonly string[];
   /** What the player knows of them, for the dossier. Empty for a public figure only. */
   readonly knownFor: readonly string[];
@@ -84,8 +88,10 @@ export function lettersDirectory(input: DirectoryInput): readonly DirectoryGroup
     const verdict = whoMayBeReached({
       world, offices, reacherId: viewerId, targetId: character.id, channel: "correspondence", orderAttempts: world.orderAttempts,
     });
-    const sameProvince = character.locationProvinceId !== null && character.locationProvinceId === viewer.locationProvinceId;
-    const reach: DirectoryReach = !verdict.reachable ? "out_of_reach" : sameProvince ? "here" : "letter";
+    // Somebody in the same region who will give you a hearing is spoken
+    // with. Anybody else is written to -- you may always write to anybody --
+    // and answers, or does not, when the world next moves.
+    const reach: DirectoryReach = verdict.reachable && inTheSameRegion(character, viewer) ? "here" : "letter";
     const here = provinceName(character.locationProvinceId);
     const family = person?.ties.some((tie) => FAMILY.has(tie.kind)) ?? false;
 
@@ -106,8 +112,8 @@ export function lettersDirectory(input: DirectoryInput): readonly DirectoryGroup
       whereLabel: person?.whereLabel ?? null,
       how: speaking.has(character.id) ? "speaking" : person?.how ?? "public",
       reach,
-      reachLabel: reach === "here" ? `Here${here === null ? "" : ` in ${here}`}` : reach === "letter" ? "By letter" : verdict.reason ?? "Out of reach for now",
-      ladder: verdict.reachable ? [] : verdict.ladder.map((step) => step.label),
+      reachLabel: reach === "here" ? `Here${here === null ? "" : ` in ${here}`}` : "By letter",
+      ladder: verdict.reachable ? [] : verdict.ladder.filter((step) => step.rung !== "write").map((step) => step.label),
       knownFor: person?.knownForLabels ?? [],
       standingLabel: person?.standingLabel ?? null,
       opinionLabel: person?.yourOpinionLabel ?? null,

@@ -8,6 +8,7 @@ import {
   SignedScoreSchema,
 } from "../material-state";
 import { CharacterMindSchema, NEUTRAL_MIND } from "./mind";
+import { LessonSchema, MAX_LESSONS } from "./mind-drift";
 import { WatchPredicateSchema } from "../world/watch";
 
 // Characters (docs/08).
@@ -179,6 +180,21 @@ export const CharacterSkillsSchema = z
     subSkills: CharacterSubSkillsSchema,
   })
   .strict();
+
+/**
+ * What a man's gifts have been, beside what they are: the best each finer
+ * skill has reached (it never falls below half of that), when each was last
+ * put to use (one unused for a year starts to go), and the last yearly
+ * reckoning of what age and disuse have done (`sim/skill-decline.ts`).
+ */
+export const SkillRecordSchema = z
+  .object({
+    peaks: CharacterSubSkillsSchema.default({}),
+    usedAtStep: z.record(z.string(), z.number().int().nonnegative()).default({}),
+    reviewedAtStep: z.number().int().nonnegative().nullable().default(null),
+  })
+  .strict();
+export type SkillRecord = z.infer<typeof SkillRecordSchema>;
 export type CharacterSkills = z.infer<typeof CharacterSkillsSchema>;
 
 export const CharacterSchema = z
@@ -220,6 +236,7 @@ export const CharacterSchema = z
     personalAccountId: EntityIdSchema,
 
     skills: CharacterSkillsSchema,
+    skillRecord: SkillRecordSchema.optional(),
     traits: z.array(EntityIdSchema),
     healthBps: BasisPointsSchema,
     prestigeBps: BasisPointsSchema,
@@ -236,6 +253,8 @@ export const CharacterSchema = z
      * schema-level default alone.
      */
     mind: CharacterMindSchema.default(NEUTRAL_MIND),
+    /** What has happened to him since his last life review, which that review moves his mind by (`mind-drift.ts`). */
+    lessons: z.array(LessonSchema).max(MAX_LESSONS).optional(),
 
     /** Named heir, where the succession law uses one. */
     heirCharacterId: EntityIdSchema.nullable(),
@@ -256,6 +275,8 @@ export const CharacterSchema = z
      * requirement kind (character-sim phase 4).
      */
     disqualifyingStatuses: z.array(EntityIdSchema).default([]),
+    /** When each ailment among them passes (`ailments.ts`); written with the ailment. */
+    ailmentsUntil: z.array(z.object({ status: EntityIdSchema, untilStep: ElapsedStepSchema }).strict()).optional(),
 
     /**
      * Every office this person has held, and when they last held it: the

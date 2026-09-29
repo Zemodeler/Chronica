@@ -55,7 +55,7 @@ export interface OfficeObjectDefinition {
 export const OFFICE_OBJECTS: readonly OfficeObjectDefinition[] = [
   { id: "council", name: "The writing desk", does: "Give an order.", rect: { x: 560, y: 470, w: 480, h: 260 } },
   { id: "chronicle", name: "The shelf of annals", does: "Turn back through the record.", rect: { x: 90, y: 120, w: 300, h: 300 } },
-  { id: "books", name: "The ledger stand", does: "Read the books.", rect: { x: 90, y: 470, w: 240, h: 260 } },
+  { id: "books", name: "The ledger stand", does: "Read the books you keep for others.", rect: { x: 90, y: 470, w: 240, h: 260 } },
   { id: "purse", name: "The strongbox", does: "Count what is yours.", rect: { x: 370, y: 560, w: 150, h: 170 } },
   { id: "people", name: "The letter tray", does: "Read your correspondence, and ask after people.", rect: { x: 1080, y: 560, w: 220, h: 170 } },
   { id: "forces", name: "The arms rack", does: "Count the men you command.", rect: { x: 1340, y: 430, w: 180, h: 300 } },

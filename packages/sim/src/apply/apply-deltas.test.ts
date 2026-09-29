@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario, punicWarsScenario } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldStateSchema, allOffices, buildAuthorityIndex, localRef, vacateOfficesOf, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
+import { ScenarioDefinitionSchema, WorldStateSchema, advanceWorldTo, allOffices, buildAuthorityIndex, localRef, vacateOfficesOf, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
 import { createIdFactory } from "../ports";
 import { applyDeltas } from "./apply-deltas";
 import type { ApplyContext } from "./context";
@@ -669,7 +669,9 @@ describe("borrowing", () => {
     const loan = result.world.material.loans[0]!;
     const servicing = result.world.material.obligations.find((obligation) => obligation.id === loan.serviceObligationId)!;
     expect(servicing.kind).toBe("debt_service");
-    expect(servicing.amount).toBe(24);
+    // The interest, and a twenty-fourth of the principal: paid back over its term.
+    expect(servicing.amount).toBe(24 + Math.ceil(300 / 24));
+    expect(servicing.remainingPeriods).toBe(24);
     // Below army pay: a state short of money starves its creditors first.
     expect(servicing.priority).toBeLessThan(500);
   });
@@ -815,11 +817,18 @@ describe("battle", () => {
   });
 
   it("keeps the paper strength honest with the men who are left", () => {
+    // The dead, the deserters and the wounded who will never come back come
+    // off the establishment; the rest of the wounded are still the army's, in
+    // the surgeons' tents until they mend.
     const before = facing();
     const { roman, punic } = sides(before);
     const result = applyDeltas(before, [give(roman.id, punic.id)], context());
-    for (const force of result.world.material.forces) {
-      expect(force.authorizedStrength).toBe(Math.max(1, force.personnel.reduce((sum, category) => sum + category.fit, 0)));
+    for (const was of before.material.forces) {
+      const force = result.world.material.forces.find((candidate) => candidate.id === was.id)!;
+      const gone = force.history.slice(was.history.length)
+        .filter((event) => event.kind === "battle_death" || event.kind === "desertion" || event.kind === "wounds_death")
+        .reduce((sum, event) => sum + event.count, 0);
+      expect(force.authorizedStrength).toBe(Math.max(1, was.authorizedStrength - gone));
     }
   });
 
@@ -1065,6 +1074,10 @@ describe("letters between powers", () => {
     ...overrides,
   });
 
+  /** The world on the day the last letter sent reaches its reader. */
+  const whenItArrives = (state: WorldState): WorldState =>
+    advanceWorldTo(state, { day: Math.max(state.instant.day, ...state.diplomacy.map((message) => message.deliveredOnDay ?? 0)), minute: state.instant.minute });
+
   it("puts a letter in the world that somebody has to answer", () => {
     const result = applyDeltas(world(), [send()], context());
 
@@ -1072,15 +1085,29 @@ describe("letters between powers", () => {
     const letter = result.world.diplomacy[0]!;
     expect(letter.status).toBe("awaiting_reply");
     expect(letter.toPolityId).toBe("syracuse");
-    // Days in, a step out: the model never states a date.
-    expect(letter.replyDueByStep).toBe(result.world.elapsedStep + 30);
+    // Days in, a step out: the model never states a date. The days run from
+    // when it reaches Syracuse, not from when it was written.
+    expect(letter.deliveredOnDay).toBeGreaterThanOrEqual(result.world.elapsedStep);
+    expect(letter.replyDueByStep).toBe(letter.deliveredOnDay! + 30);
+  });
+
+  it("cannot be answered while it is still on the road", () => {
+    const sent = applyDeltas(world(), [send()], context());
+    const letter = sent.world.diplomacy[0]!;
+    expect(letter.deliveredOnDay).toBeGreaterThan(sent.world.elapsedStep);
+    const early = applyDeltas(
+      sent.world,
+      [{ op: "diplomatic_message_answer", messageRef: letter.id, answer: "accepted", answerText: "Agreed.", reason: "It suits us." }],
+      context({ actorRef: { kind: "character", id: "hieron" } }),
+    );
+    expect(early.rejected[0]?.reason).toMatch(/has not reached/);
   });
 
   it("moves the sender's trust by how the answer came back", () => {
     const sent = applyDeltas(world(), [send()], context());
     const letterId = sent.world.diplomacy[0]!.id;
     const answered = applyDeltas(
-      sent.world,
+      whenItArrives(sent.world),
       [{ op: "diplomatic_message_answer", messageRef: letterId, answer: "refused", answerText: "Syracuse will not bind itself to Rome.", reason: "It would cost more than it buys." }],
       context({ actorRef: { kind: "character", id: "hieron" } }),
     );
@@ -1095,7 +1122,8 @@ describe("letters between powers", () => {
     const sent = applyDeltas(world(), [send()], context());
     const letterId = sent.world.diplomacy[0]!.id;
     const answer: WorldDelta = { op: "diplomatic_message_answer", messageRef: letterId, answer: "accepted", answerText: "Agreed.", reason: "It suits us." };
-    const once = applyDeltas(sent.world, [answer], context());
+    const once = applyDeltas(whenItArrives(sent.world), [answer], context());
+    expect(once.rejected).toHaveLength(0);
     const twice = applyDeltas(once.world, [answer], context());
 
     expect(twice.rejected).toHaveLength(1);

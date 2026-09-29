@@ -4,6 +4,7 @@ import type {
   Office,
   SuccessionRule,
   OrderPartyRef,
+  ScenarioClock,
   ScenarioWarfareRules,
   ScenarioWealthRules,
   TerrainDefinition,
@@ -34,6 +35,11 @@ export interface ApplyContext {
    * behaviour for a scenario that declares no terrain rules at all.
    */
   readonly terrains?: readonly TerrainDefinition[] | undefined;
+  /**
+   * The scenario's calendar, so a march knows it is winter (`warfare/seasons.ts`).
+   * Omitted, there are no seasons.
+   */
+  readonly clock?: ScenarioClock | undefined;
   /**
    * What a person of a given standing is worth here. Omitted, the engine's
    * own coarse bands apply -- which is still better than believing whatever

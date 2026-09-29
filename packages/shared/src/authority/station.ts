@@ -1,7 +1,9 @@
-import { buildAuthorityIndex, deriveOfficeGrants, isActive, type AuthorityGrant } from "./authority-grant";
+import { buildAuthorityIndex, deriveOfficeGrants, isActive, type AuthorityGrant, type AuthorityIndex } from "./authority-grant";
 import type { AuthorityDomain } from "./vocabulary";
 import { allOffices, type Office } from "../characters/character";
 import { factsKnownTo, type Fact } from "../world/facts";
+import type { NewsWorld } from "../world/news";
+import { isDelivered } from "../world/diplomacy";
 import type { WorldInstant } from "../world/instant";
 import type { WorldState } from "../world/world-state";
 import { accountLabel } from "../material/account-names";
@@ -61,7 +63,7 @@ export interface Station {
   readonly holdingIds: ReadonlySet<string>;
   /** Ground they stand on, hold in, or have an army in. */
   readonly provinceIds: ReadonlySet<string>;
-  /** People they have a relation, a commitment or a promise with, either way round. */
+  /** People they have a relation, a commitment or a promise with, either way round, and the men they serve with. */
   readonly knownCharacterIds: ReadonlySet<string>;
   /** Matters they are caught up in. */
   readonly storylineIds: ReadonlySet<string>;
@@ -71,6 +73,12 @@ export interface StationInput {
   readonly world: WorldState;
   readonly characterId: string;
   readonly offices: readonly Office[];
+  /**
+   * The authority index, when the caller already built it for this world: the
+   * attention router asks for every character's station each round, and the
+   * index is the same for all of them.
+   */
+  readonly authority?: AuthorityIndex | undefined;
 }
 
 /** Marks a grant that exists for sight alone. It must never reach an authority check. */
@@ -123,7 +131,7 @@ export function buildStation(input: StationInput): Station {
   const character = world.characters.find((candidate) => candidate.id === characterId);
   const polityId = character?.polityId ?? null;
 
-  const index = buildAuthorityIndex(world.material, world.authorityGrants, offices, world.elapsedStep);
+  const index = input.authority ?? buildAuthorityIndex(world.material, world.authorityGrants, offices, world.elapsedStep);
   const held = index.grants.filter((grant) => grant.holder.kind === "character" && grant.holder.id === characterId);
   const claimed = character?.officeId == null ? [] : grantsFromClaimedOffice(world, characterId, character.officeId, offices);
   const grants = [...held, ...claimed].filter((grant) => isActive(grant, world.elapsedStep));
@@ -214,6 +222,13 @@ export function buildStation(input: StationInput): Station {
           ? [attempt.issuerRef.id]
           : []),
   ]);
+  // The men one serves beside, and under: a soldier knows his centurion and
+  // his tent-mates, and news of them is his news.
+  for (const force of world.material.forces) {
+    if (!forceIds.has(force.id)) continue;
+    knownCharacterIds.add(force.commanderCharacterId);
+    for (const memberId of force.memberCharacterIds) knownCharacterIds.add(memberId);
+  }
   knownCharacterIds.delete(characterId);
 
   const storylineIds = new Set(
@@ -283,9 +298,24 @@ export const knowsPerson = (station: Station, characterId: string): boolean =>
  * for a whole power is briefed on its figures whether or not he has dealt
  * with them personally. It is sight, not acquaintance, and the two were one
  * predicate until something needed to ask the other question.
+ *
+ * Its own power's figures, not the world's. The hatch once opened on every
+ * character alive, so a consul read what every Carthaginian suffete and
+ * Gallic chieftain privately meant to do. A foreigner is reached the way
+ * anybody is: by having dealt with him, written to him or been written to, or
+ * standing in the same province.
  */
-export const reachesPerson = (station: Station, characterId: string): boolean =>
-  knowsPerson(station, characterId) || holdsPolityStanding(station);
+export function reachesPerson(station: Station, characterId: string, world: Pick<WorldState, "characters" | "diplomacy" | "elapsedStep">): boolean {
+  if (knowsPerson(station, characterId)) return true;
+  const person = world.characters.find((candidate) => candidate.id === characterId);
+  if (person === undefined) return false;
+  if (holdsPolityStanding(station) && station.polityId !== null && person.polityId === station.polityId) return true;
+  const viewer = world.characters.find((candidate) => candidate.id === station.characterId);
+  if (viewer !== undefined && viewer.locationProvinceId === person.locationProvinceId) return true;
+  return world.diplomacy.some((message) =>
+    (message.fromCharacterId === characterId && message.toCharacterId === station.characterId && isDelivered(message, world.elapsedStep))
+    || (message.fromCharacterId === station.characterId && message.toCharacterId === characterId));
+}
 
 /**
  * What a person knows, narrowed from what their government knows.
@@ -298,10 +328,11 @@ export const reachesPerson = (station: Station, characterId: string): boolean =>
  *
  * A polity-scoped fact survives for somebody with polity standing -- the
  * government does read its own dispatches -- or when it names something their
- * station actually reaches.
+ * station actually reaches. Given the world, all of it waits on the road from
+ * where it happened to where they are (`newsArrivesAt`).
  */
-export function factsKnownToStation(facts: readonly Fact[], station: Station, atInstant: WorldInstant): Fact[] {
-  const known = factsKnownTo(facts, { kind: "character", id: station.characterId }, station.polityId, atInstant);
+export function factsKnownToStation(facts: readonly Fact[], station: Station, atInstant: WorldInstant, world?: NewsWorld): Fact[] {
+  const known = factsKnownTo(facts, { kind: "character", id: station.characterId }, station.polityId, atInstant, world);
   if (holdsPolityStanding(station)) return known;
   const reaches = (id: string): boolean =>
     id === station.characterId

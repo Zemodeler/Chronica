@@ -5,6 +5,7 @@ import type { ViewportTransform } from "./map-viewport";
 import { drawPoliticalLabels } from "./map-canvas-labels";
 import { drawForces, drawSettlements } from "./map-canvas-entities";
 import type { ForceFlagAsset } from "./army-standard";
+import { displayUnit } from "./map-display-unit";
 import { ATLAS } from "../../../../lib/palette";
 
 // The atlas palette lives in lib/palette.ts, beside the stylesheet tokens it
@@ -239,6 +240,10 @@ export function drawTerrainToCanvas(
   if (!ctx || containerW === 0 || containerH === 0) return;
 
   const dpr = window.devicePixelRatio || 1;
+  // Every fixed on-screen size below (markers, names, label floors, army
+  // standards) is multiplied by this, so a large monitor's map is not dotted
+  // with a laptop's specks (see map-display-unit.ts).
+  const unit = displayUnit(containerW, containerH);
   const pw = Math.round(containerW * dpr);
   const ph = Math.round(containerH * dpr);
   if (canvas.width !== pw || canvas.height !== ph) {
@@ -339,14 +344,14 @@ export function drawTerrainToCanvas(
 
   // 8 — political territory name labels, blitted from per-label bitmaps
   // (see map-canvas-labels.ts for why they are not drawn as text per frame)
-  drawPoliticalLabels(ctx, political, m, dpr, visibleRect, interacting, requestRedraw);
+  drawPoliticalLabels(ctx, political, m, dpr, transform.scale, unit, visibleRect, interacting, requestRedraw);
 
   // 9-10 — settlements and army/fleet standards (see map-canvas-entities.ts
   // for why these moved off the SVG layer too). `m` is CSS pixels per world
   // degree, the same rate the old SVG floor logic converted through.
   const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
-  drawSettlements(ctx, world, overlay, transform.scale, m, visibleRect, nowMs);
-  drawForces(ctx, world, overlay, forceFlagUrls, transform.scale, m, visibleRect, nowMs, requestRedraw);
+  drawSettlements(ctx, world, overlay, transform.scale, m, unit, visibleRect, nowMs);
+  drawForces(ctx, world, overlay, forceFlagUrls, transform.scale, m, unit, visibleRect, nowMs, requestRedraw);
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }

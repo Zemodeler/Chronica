@@ -1,4 +1,7 @@
 import {
+  aptitude,
+  readDepartments,
+  officeholderPolity,
   INJURIES,
   PLOT_MAX_DAYS,
   PLOT_MAX_ODDS_BPS,
@@ -19,8 +22,11 @@ import {
   type ScenarioLifeRules,
   type WorldState,
   deriveRelationDimension,
+  computeOpinion,
+  leaning,
 } from "@chronica/shared";
 import { killCharacter } from "./mortality";
+import { hisMasters, kinOf, remember, teach, type Grievance } from "./grievances";
 import type { IdFactory } from "./ports";
 
 /**
@@ -125,10 +131,18 @@ export function plotOdds(world: WorldState, input: PlotOddsInput): { successOdds
   let odds = BASE_ODDS_BPS[input.kind];
   // Whose hand it is. A hired professional is the difference between a plot and
   // a grudge, which is why `agentCharacterRef` exists at all.
-  odds += fromSkill(hand.skills.intrigue);
+  // The hand's intrigue, and his gift for working on people: half each.
+  odds += fromSkill((hand.skills.intrigue + aptitude(hand, "manipulation")) / 2);
   odds += boughtWith(input.spend);
-  // The mark's own wits, and the people his standing keeps around him.
-  odds -= fromSkill(input.target.skills.intrigue);
+  // The mark's own wits, and the people his standing keeps around him -- and
+  // his informers: a man who runs spies hears of the knife before it falls.
+  // A man in the state's service is watched over by the state's own watch as
+  // well: whichever is the sharper, his informers or its.
+  const inCharge = readDepartments(world);
+  const ownWits = (input.target.skills.intrigue + aptitude(input.target, "espionage")) / 2;
+  const guardedBy = officeholderPolity(world, input.target.id, input.target.polityId);
+  const watched = guardedBy === null ? ownWits : Math.max(ownWits, inCharge.skill({ kind: "polity", id: guardedBy }, "watch"));
+  odds -= fromSkill(watched);
   odds -= Math.round((input.target.prestigeBps / 10_000) * GUARDED_BY_PRESTIGE_BPS);
 
   // Where he is and what he is doing. A man on campaign sleeps in a tent among
@@ -148,19 +162,33 @@ export function plotOdds(world: WorldState, input: PlotOddsInput): { successOdds
 
   // A sick or broken man is easier to finish than a sound one.
   odds += Math.round(((10_000 - input.target.healthBps) / 10_000) * 500);
+  // What sort of men they are. A bold hand strikes harder and talks more; a
+  // careless mark walks where a cautious one would not.
+  odds += leaning(hand, "risk") * 15 + leaning(input.target, "risk") * 10;
 
   // How quiet it is. Money buys silence up to the point where it starts buying
   // accomplices instead, and every extra hand is another mouth.
   const secrecy = Math.max(500, Math.min(9_500,
     5_000
-    + fromSkill(hand.skills.intrigue)
+    // Keeping it quiet is a spymaster's craft more than a schemer's.
+    + fromSkill((hand.skills.intrigue + aptitude(hand, "espionage")) / 2)
     - Math.round(boughtWith(input.spend) / 2)
-    - (input.agent === null ? 1_000 : 0),
+    - (input.agent === null ? 1_000 : 0)
+    // A disciplined man keeps his counsel, a rash one does not, and a liar is
+    // better at not being found out than an honest man is.
+    + (leaning(hand, "discipline") - leaning(hand, "risk") - leaning(hand, "honesty")) * 20,
   ));
 
+  // A plot the state lays -- its sponsor sits in one of its offices -- is as
+  // good as the head of its secret work makes all such work: a seventh
+  // better, or worse, whoever's hand it is.
+  const layingPower = officeholderPolity(world, input.sponsor.id, input.sponsor.polityId);
+  const lift = layingPower === null ? 0 : inCharge.headLift({ kind: "polity", id: layingPower }, "covert");
+  const lifted = Math.round(odds * (1 + lift));
+
   return {
-    successOddsBps: Math.max(PLOT_MIN_ODDS_BPS, Math.min(PLOT_MAX_ODDS_BPS, odds)),
-    secrecyBps: secrecy,
+    successOddsBps: Math.max(PLOT_MIN_ODDS_BPS, Math.min(PLOT_MAX_ODDS_BPS, lifted)),
+    secrecyBps: Math.max(500, Math.min(9_500, Math.round(secrecy * (1 + lift)))),
   };
 }
 
@@ -466,6 +494,7 @@ function springPlot(
       knowableInDays: 0,
       significance: 90,
     });
+    next = tracedTo(next, plot, target, input.toDay);
   } else {
     facts.push({
       localId: nextLocalId("plot_nothing"),
@@ -481,6 +510,23 @@ function springPlot(
   }
 
   return { world: closePlot(next, plot.id, outcome, input.toDay), facts, died: killed };
+}
+
+/**
+ * A plot traced to the man who paid for it, and what everyone who cares now
+ * thinks of him: the mark, the mark's blood, and the men of the mark's power
+ * who sit in its offices. The mark learns what it is to be hunted -- or, where
+ * he had thought the man a friend, to be betrayed.
+ */
+function tracedTo(world: WorldState, plot: CovertPlot, target: Character, atDay: number): WorldState {
+  const sponsor = plot.sponsorCharacterId;
+  const friend = computeOpinion(target, sponsor) >= 20;
+  const grievances: Grievance[] = [
+    { subjectCharacterId: target.id, targetCharacterId: sponsor, label: "He paid to have me killed.", score: -20, dimensions: { trust: -60, affection: -40, fear: 15 }, decayPerYearBps: 0 },
+    ...kinOf(world, target.id).map((kin) => ({ subjectCharacterId: kin, targetCharacterId: sponsor, label: `He paid to have ${target.name} killed.`, score: -15, dimensions: { trust: -40, affection: -30 }, decayPerYearBps: 200 })),
+    ...hisMasters(world, target.polityId).filter((id) => id !== sponsor).map((id) => ({ subjectCharacterId: id, targetCharacterId: sponsor, label: `The attempt on ${target.name} was traced to him.`, score: -8, dimensions: { trust: -15, reputation: -10 } })),
+  ];
+  return teach(remember(world, grievances, atDay, `${plot.id}:traced`), target.id, friend ? "betrayed" : "plotted_against", atDay);
 }
 
 /**

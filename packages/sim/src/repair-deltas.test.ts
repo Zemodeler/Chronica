@@ -181,8 +181,8 @@ describe("a refused id that was cut short", () => {
         kind: "reference",
       }],
     });
-    expect(seen[0]!.message).toContain("punic-illyria-svn-3739544b2739881953900 (Zahodna Slovenija)");
-    expect(seen[0]!.message).toContain("punic-illyria-svn-3739544b32704473481330 (Vzhodna)");
+    expect(seen[0]!.message).toContain("punic-illyria-svn-3739544b2739881953900 (Carni)");
+    expect(seen[0]!.message).toContain("punic-illyria-svn-3739544b32704473481330 (South-eastern Taurisci)");
   });
 });
 

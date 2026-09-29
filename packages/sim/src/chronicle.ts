@@ -1,8 +1,14 @@
 import { z } from "zod";
 import {
   factsKnownTo,
+  newsArrivesAt,
+  newsDaysBetween,
+  whereItHappened,
+  whereTheyHear,
+  MAX_NEWS_DAYS,
   formatWorldDate,
   type Fact,
+  type NewsWorld,
   type OrderPartyRef,
   type ScenarioClock,
   type WorldChange,
@@ -113,6 +119,22 @@ export const WINDOW_MAX_ENTRIES = 3;
 export const OWN_BUSINESS_FLOOR = 25;
 
 /**
+ * What is always told when it is the reader's own: a vote of his own chamber,
+ * a turn in a siege his side lays or suffers, a war begun. Each was cut by the
+ * per-window cap or declined as "a matter that has only gone on", and a consul
+ * whose Senate voted three times in a day read about one vote, and about his
+ * two-month siege of Messana nothing at all.
+ */
+export const MUST_TELL: ReadonlySet<string> = new Set([
+  "motion_passed", "motion_failed", "motion_vetoed", "motion_referred", "council_advised", "council_overruled",
+  "siege_laid", "siege_progress", "siege_ended", "siege_lifted", "war_declared", "city_taken", "province_control_change", "order_part_unanswered", "senate_speech",
+  // A treaty broken, an ally's call, a province or an army rising: the engine's own turns of fortune (`treaties.ts`, `unrest.ts`).
+  "treaty_breached", "call_to_arms", "rising", "civil_war",
+  // A promise broken is always told to the two it was between (`promises.ts`).
+  "promise_broken",
+]);
+
+/**
  * What a thread must weigh before it is written up at all.
  *
  * Deliberately high. Significance is the acting party's own judgment of what it
@@ -147,8 +169,37 @@ const MAX_REPORTED_THREADS = 2;
  */
 const MAX_SEEN_THREADS = 3;
 
-/** How many subjects an entry shows on its face. The rest stay on the record, unshown. */
-const MAX_TAGS = 3;
+/**
+ * How many subjects an entry shows on its face. The rest stay on the record,
+ * unshown. Four, not three: a battle is two commanders and two powers, and at
+ * three one of them was always missing -- usually the reader's own.
+ */
+const MAX_TAGS = 4;
+
+/**
+ * What the reader's own business must weigh for a headline of its own, when it
+ * neither answers the order, holds a battle, nor must be told.
+ *
+ * Above the floor and under this, a matter is told -- but beside the other
+ * small matters of the same days, in one passage, rather than each under its
+ * own headline. A live reign read "Titus Genucius Sponsors His Own
+ * Nomination" and "Rome Begins Surveying Messana's Defences" as entries of a
+ * sentence each; a chronicler gathers those into one paragraph of the
+ * month's business.
+ */
+export const OWN_HEADLINE_FLOOR = DEFAULT_ENTRY_THRESHOLD;
+
+/**
+ * How far away the wider world's news may happen and still be told on its
+ * ordinary bar, in days by road from the nearest ground the reader's power
+ * holds. Beyond it the bar rises, until at `FAR_NEWS_DAYS` only what weighs
+ * `FAR_NEWS_WEIGHT` travels: a Roman consul read of a fire consuming the
+ * heart of a Carpathian valley, at the weight of a local fire. A king's death
+ * or a war far off still reaches him; the fire does not.
+ */
+const NEAR_NEWS_DAYS = 6;
+const FAR_NEWS_DAYS = 14;
+const FAR_NEWS_WEIGHT = 70;
 
 /**
  * Bookkeeping the historian must never see, whoever it happened to.
@@ -166,135 +217,75 @@ export const NEVER_PUBLISHED: ReadonlySet<string> = new Set(["engine_rejection",
 /** Ids are for the engine. A summary carrying one must not reach the prose. */
 const ID_IN_BRACKETS = /\s*\[[A-Za-z0-9][A-Za-z0-9._:-]*\]/g;
 
-export const CHRONICLE_SYSTEM_PROMPT = `You are a historian writing the record of a reign, from surviving documents.
+export const CHRONICLE_SYSTEM_PROMPT = `You are a historian of the ancient world writing the history of a reign
+from the documents that survive: dispatches, letters, the Senate's minutes,
+reports from the field. You write for readers who want to know what happened,
+who did it, and why -- the way Livy or Polybius would tell it, plainly and
+with an eye for the telling detail.
 
 You will be given a date range and one or more numbered THREADS. A thread is a
-single matter -- one war, one embassy, one quarrel -- and each gets its own
+single matter -- one war, one embassy, one vote -- and each gets its own
 passage under its own headline.
 
-THE HEADLINE
+THE HEADLINE says who did what, like an index entry: "Legate Refuses Antuvi
+Leave to Cross into Samnium", "Etruscan Envoys Sue for Peace After Sutrium",
+"Agathocles of Syracuse Assassinated". A person or a body, and the deed.
+Capitalised as a title; never a date, never a bare noun phrase.
 
-A headline says who did what, the way a chronicler's index entry does: "Legate
-Refuses Antuvi Leave to Cross into Samnium", "Etruscan Envoys Sue for Peace
-After Sutrium", "Agathocles of Syracuse Assassinated". Name a person or a body,
-and name the deed. Capitalise it as a title. It is never a date, never a summary
-of the whole period, and never a bare noun phrase like "The March North".
+THE PASSAGE tells the matter in the order it happened, in the past tense.
+Its length is the matter's: a single decision is told in two or three
+sentences, a battle or an embassy that went back and forth in a paragraph or
+two. Say each thing once, and stop when the last thing that happened has been
+told -- no summing up, no moral, no word on what it means or what may come.
 
-THE PASSAGE
+Tell what people did and why they did it: what they wanted, what they argued,
+what it cost them, what they found. Name them in full at first mention, with
+their office -- "the consul Gaius Genucius Clepsina" -- and by one name after.
+Put arguments into indirect speech rather than inventing dialogue. Where a
+thread has several people, give each his part.
 
-Past tense, third person. A thread holding more than one thing that happened
-runs to at least a hundred and eighty words, and may run to three hundred and
-twenty. A thread holding a single small fact may be shorter, but rarely under
-eighty.
+Tell what happened, not what did not. The documents are written by clerks who
+guard themselves -- "without conceding allegiance", "made no pledge", "no
+engagement was ordered", "the order alone did not ensure the walls would fall".
+Leave all of that out. A refusal is an event, and so is a decision to wait;
+the absence of something is not, and neither is anything a clerk says to
+cover himself.
 
-The way to fill that room is more of what happened, and never more ways of
-saying it. Who was there, what it cost, how long it took, what they argued,
-what they carried, what they found when they arrived, who was left behind, what
-was said when it was done. You have been given the facts of the matter and the
-accounts people gave of it -- work through them rather than summarising them.
-An event told in one sentence and then explained in three has been told once and
-padded twice.
+Numbers are for the reader, not the ledger. Round the large ones as a
+historian would -- "some seven and a half thousand men", "about six hundred
+fell" -- and keep the small ones exact. Give each figure once; never total up
+what you have already given.
 
-Three things are padding, and all three are worse than being brief. Do not
-restate a paragraph you have already written. Do not reach into another thread
-for more to say. And never write about the record itself -- not "was recorded
-as", not "the matter stood in the review as", not "was thus recorded not as a
-delay but as a destruction", not "his name was attached to the offer". The
-record is what you are writing; a chronicler who describes his own filing has
-stopped writing history.
+Write only from what the thread gives you. You may give it the colour of its
+time and place -- the season, the ground, the kind of men involved -- but not a
+single event, number or motive it does not contain. A thread marked as news
+reaching the court is second-hand: tell it as the court heard it ("word came
+from Syracuse that"). Keep the threads apart; a passage names nothing that is
+not in its own thread.
 
-Name people in full at first mention, with rank or office -- "Military Tribune
-Gaius Julius Antuvi", not "the tribune". Afterwards one name will do.
+Write as a historian, never as a clerk: none of "project", "milestone",
+"status", "authorized strength", "field force", "recognized", "the two
+decisions", nor of writing about the record itself ("was recorded as"). No
+headings, lists, advice, or address to the reader.
 
-Use the numbers you are given, exactly as given: seven thousand men, three
-riders lost, fifty galleys. Never invent a number you were not given.
-
-Where a thread gives you several people, give each of them their moment: what
-they did, and why they thought it would work. A passage that names three men and
-follows only one has wasted the other two.
-
-Put what people argued into indirect speech -- "Antuvi argued that the two
-garrisons together could force a battle; the legate answered that stripping both
-would leave the frontier open" -- rather than inventing dialogue for them.
-
-ONE MATTER TO A PASSAGE
-
-A thread is one matter, and a passage tells that one. A rising in Campania is not
-part of an embassy to Syracuse however heavily it weighs on the men who sent it:
-if it is not in this thread, it does not appear here. Some other passage has it,
-or the record will come to it later.
-
-The exception is a thread marked as part of a longer matter. That matter may be
-named, because the record has already told it.
-
-This binds hardest at the end of a passage. Do not close by reaching for another
-thread -- "Syracuse had still not answered", "the rising continued to threaten",
-"the crisis might lessen sympathy". Those matters have their own passages, and
-what they are doing is not this one's business.
-
-SAY IT ONCE
-
-Every sentence carries something the ones before it did not.
-
-Do not end with a sentence that restates the passage. Do not tell the reader
-where the matter now stands, what it means, what it threatens, or what it makes
-more urgent. Do not sum up, and do not count up ("the two decisions", "both
-measures"). A passage stops when the last thing that happened has been written
-down, and not one sentence later.
-
-Never write about what is missing. Not that a battle was not reported, that an
-answer had not come, that a thing was still awaited, that something remained
-unresolved, or that the account says nothing of some other matter. Silence in a
-thread is not news in it.
-
-Never write what might happen next. No "could", "might", "was expected to",
-"would soon", "leaving him to", "while the authorities could". You are writing
-what happened, and what happened next will be written when it has.
-
-WHAT COUNTS AS AN EVENT
-
-A person choosing something is an event, even when nothing moved. A legate
-refusing a request, a council failing to agree, a fleet putting to sea for a
-shore it has not yet reached -- these happened, and they belong in the record.
-
-An absence is not an event. Never write that nothing of note occurred, that
-someone took no action, that a thing could not yet happen, or that a sum was
-unchanged. Where a thread holds only such non-events, write about the decision
-inside it instead.
-
-WHAT YOU MAY DRAW ON
-
-Write only from what you are given. You have no other sources: if something is
-not listed, it is not known to have happened, and you must not imply it,
-foreshadow it, or hint that anything is being concealed. Absence of evidence is
-not something the passage should gesture at.
-
-A thread marked as news reaching the court is second-hand. Write it as the court
-learned it -- "word came from Syracuse that", "merchants out of Massalia
-reported" -- and do not give it the certainty of something witnessed.
-
-Keep the threads apart. A passage may name only what appears in its own thread:
-if Carthage is not in thread 2, thread 2 does not mention Carthage.
-
-VOICE
-
-Write as a chronicler, not as a clerk. Reach for the concrete: the pass they
-crossed, the season they crossed it in, what the men carried, what it cost, what
-was said when it was done. One hard detail is worth three sentences about
-consequence.
-
-Never use the vocabulary of administration. Not "project", "milestone",
-"status", "state", "recognized", "possessed", "authorized strength", "field
-force", "consequential action", "supply position", "the two decisions", "adding
-weight to", "the precise manner", "still required arrangement", "sought to
-govern". Name the people, the places and the deeds instead.
-
-Do not address the reader, do not use headings or lists, and do not offer advice
-on what should be done next. You are recording what happened, not advising a
-ruler.
+THE QUOTATION. Where a passage turns on a moment somebody faced -- a death, a
+victory, an oath, a refusal, a last stand, a verdict, a bargain struck -- give
+it the one line said then, in "quote". Most passages have none; leave it out
+rather than force one. The speaker is a person in that thread, named exactly as
+the thread names them; the one whose reign this is may speak too, when the
+moment is theirs. Words recorded at the time come first. Otherwise write what
+the moment made them say:
+- under twenty words, in their own voice and of their own age: laconic and
+  concrete, with an edge -- a soldier's joke, a threat with no adjectives, a
+  cold sum, a plain image. The line men repeated afterwards.
+- never a slogan, a modern turn of phrase, a speech about history or the gods'
+  plan, or an explanation of what is happening; never a famous saying reused.
+The occasion is where and to whom, briefly: "to his guard, as the Numidians
+closed on the ford".
 
 Answer with JSON and nothing else:
-{"entries":[{"thread":1,"title":"...","body":"..."}]}`;
+{"entries":[{"thread":1,"title":"...","body":"...","quote":{"speaker":"...","line":"...","occasion":"..."}}]}
+"quote" may be left out.`;
 
 const ChronicleOutputSchema = z
   .object({
@@ -304,6 +295,16 @@ const ChronicleOutputSchema = z
           thread: z.number().int().positive(),
           title: z.string().trim().min(1).max(120),
           body: z.string().trim().min(1),
+          quote: z
+            .object({
+              speaker: z.string().trim().min(1).max(120),
+              line: z.string().trim().min(1).max(220),
+              occasion: z.string().trim().min(1).max(160),
+            })
+            .nullable()
+            .optional()
+            // A quotation that does not read is dropped, never the passage with it.
+            .catch(null),
         }),
       )
       .max(MAX_ENTRIES),
@@ -337,11 +338,11 @@ export interface UtteranceLine {
 export interface BattleAccountLine {
   readonly factIds: readonly string[];
   readonly provinceName: string;
-  readonly sides: readonly { readonly name: string; readonly attacking: boolean; readonly strength: number; readonly commander: string }[];
+  readonly sides: readonly { readonly name: string; readonly attacking: boolean; readonly strength: number; readonly unit?: "men" | "ships"; readonly commander: string }[];
   readonly phases: readonly { readonly phase: string; readonly summary: string; readonly attacker: number; readonly defender: number }[];
   readonly tactics: readonly string[];
   readonly refusedTactics: readonly string[];
-  readonly losses: readonly { readonly name: string; readonly dead: number; readonly deserted: number; readonly wounded: number }[];
+  readonly losses: readonly { readonly name: string; readonly unit?: "men" | "ships"; readonly dead: number; readonly deserted: number; readonly wounded: number }[];
   readonly commanders: readonly { readonly name: string; readonly outcome: string }[];
   /** Named men in the ranks; absent on accounts written before armies had any. */
   readonly members?: readonly { readonly name: string; readonly force: string; readonly outcome: string }[];
@@ -371,6 +372,13 @@ export interface ChronicleInput {
   readonly facts: readonly Fact[];
   readonly from: WorldInstant;
   readonly to: WorldInstant;
+  /**
+   * The world the record is written in, for the road: news from Sicily reaches
+   * a reader in Rome days after it happened, and is told when it arrives
+   * (`newsArrivesAt`). Left out, a fact is known when it happened, or when its
+   * own `knowableAtInstant` says.
+   */
+  readonly world?: (NewsWorld & { readonly projects?: WorldState["projects"] }) | undefined;
   /** What the actors said they were doing, for colour the bare facts lack. */
   readonly narrative: readonly NarrativeLine[];
   readonly frictions: readonly NarrativeLine[];
@@ -490,6 +498,8 @@ export interface ChronicleEntry {
   /** What moved on the map, among the things this entry is about. */
   readonly changes: readonly WorldChange[];
   readonly quote: EntryQuote | null;
+  /** The threads of history it belongs to, as the reader could know them. */
+  readonly storylineIds?: readonly string[];
   readonly fromInstantSortKey: number;
   readonly toInstantSortKey: number;
 }
@@ -516,6 +526,10 @@ interface Thread {
   /** A fight, where this thread holds one. Written at length, and never cut. */
   readonly battle: BattleAccountLine | null;
   readonly weight: number;
+  /** The heaviest single fact in it: a pile of small things is still small (`OWN_BUSINESS_FLOOR`). */
+  readonly peak: number;
+  /** A decision or a turn of a siege on the reader's own side: always told (`MUST_TELL`). */
+  readonly mustTell: boolean;
   /** The reader's own business, told for less than the world's (`OWN_BUSINESS_FLOOR`) and never held as a repeat. */
   readonly ours: boolean;
   /** Their country's business, which is told for less than the wider world's. */
@@ -526,6 +540,8 @@ interface Thread {
   readonly orderFacts: number;
   /** Who is who among the people in it, so two of them cannot become one. */
   readonly people: readonly string[];
+  /** Several small matters of the reader's own, gathered into one passage (`OWN_HEADLINE_FLOOR`). */
+  readonly digest: boolean;
 }
 
 /**
@@ -537,18 +553,29 @@ interface Thread {
  * to a government whose own people are in it.
  */
 function matterOf(facts: readonly Fact[], storylines: readonly WorldStoryline[], observer: OrderPartyRef, observerPolityId: string | null, polityOf: (characterId: string) => string | null): string | null {
+  const storyline = mattersOf(facts, storylines, observer, observerPolityId, polityOf)[0];
+  return storyline === undefined ? null : `"${storyline.title}" (${storyline.phase})`;
+}
+
+/**
+ * Every storyline these facts belong to, as the observer could know it:
+ * linked by the engine (`causalFactIds`), or matched by who and where.
+ */
+function mattersOf(facts: readonly Fact[], storylines: readonly WorldStoryline[], observer: OrderPartyRef, observerPolityId: string | null, polityOf: (characterId: string) => string | null): WorldStoryline[] {
   const named = new Set(facts.flatMap((fact) => fact.affectedEntities.map((entity) => entity.id)));
+  const factIds = new Set(facts.map((fact) => fact.id));
+  const found: WorldStoryline[] = [];
   for (const storyline of storylines) {
-    if (storyline.phase === "closed") continue;
     const knowable =
       storyline.visibility === "public"
       || (storyline.visibility === "polity" && storyline.participantIds.some((id) => observerPolityId !== null && polityOf(id) === observerPolityId))
       || (observer.kind === "character" && storyline.participantIds.includes(observer.id));
     if (!knowable) continue;
+    const linked = storyline.causalFactIds.some((id) => factIds.has(id));
     const overlap = storyline.participantIds.filter((id) => named.has(id)).length + (storyline.provinceId !== null && named.has(storyline.provinceId) ? 1 : 0);
-    if (overlap >= 2) return `"${storyline.title}" (${storyline.phase})`;
+    if (linked || (storyline.phase !== "closed" && overlap >= 2)) found.push(storyline);
   }
-  return null;
+  return found;
 }
 
 const keyOf = (ref: OrderPartyRef): string => `${ref.kind}:${ref.id}`;
@@ -557,6 +584,13 @@ const sortKeyOf = (instant: WorldInstant): number => instant.day * 1440 + instan
 /** Strips the engine's own handles out of a line written for a person to read. */
 function readable(line: string): string {
   return line.replace(ID_IN_BRACKETS, "").replace(/\s{2,}/g, " ").trim();
+}
+
+/** A letter the observer, or their government, wrote: its first person and its first power are the writer's. */
+function writtenBy(letter: Fact, observer: OrderPartyRef, observerPolityId: string | null): boolean {
+  const writer = letter.affectedEntities.find((entity) => entity.kind === "character");
+  const power = letter.affectedEntities.find((entity) => entity.kind === "polity");
+  return (observer.kind === "character" && writer?.id === observer.id) || (observerPolityId !== null && power?.id === observerPolityId);
 }
 
 /**
@@ -574,8 +608,24 @@ function selectFacts(
   ownEntityIds: ReadonlySet<string> | null,
   to: WorldInstant,
   weightOf: (fact: Fact) => number,
+  world: NewsWorld | undefined,
+  orderFactIds: ReadonlySet<string>,
 ): { readonly fact: Fact; readonly reported: boolean }[] {
-  const known = new Set(factsKnownTo(facts, observer, observerPolityId, to));
+  // The answer to the reader's own order is his own act, and a man does not
+  // wait on the road to learn what he did: the rest of the world's news does.
+  //
+  // Nor does a man wait to learn what he wrote. A letter is on the road until
+  // its reader has it, and the engine dates it so; its writer read of his own
+  // letter a window after the model's word that he had sent it, and the one
+  // act was told twice (`sameLetters`).
+  const ownLetters = new Map(facts
+    .filter((fact) => fact.kind === "letter_sent" && writtenBy(fact, observer, observerPolityId))
+    .map((fact): [Fact, Fact] => [{ ...fact, discovery: { ...fact.discovery, state: fact.visibility, knowableAtInstant: null } }, fact]));
+  const known = new Set([
+    ...factsKnownTo(facts, observer, observerPolityId, to, world),
+    ...factsKnownTo(facts.filter((fact) => orderFactIds.has(fact.id)), observer, observerPolityId, to),
+    ...factsKnownTo([...ownLetters.keys()], observer, observerPolityId, to).map((copy) => ownLetters.get(copy)!),
+  ]);
   const toKey = sortKeyOf(to);
   const selected: { fact: Fact; reported: boolean }[] = [];
 
@@ -610,9 +660,9 @@ function selectFacts(
     // check below decides when it gets here.
     if (fact.discovery.state === "private") continue;
     if (weightOf(fact) < DISTANT_NEWS_THRESHOLD) continue;
-    // Word has to get here. A fact with a travel time keeps it.
-    const knowableAt = fact.discovery.knowableAtInstant;
-    if (knowableAt !== null && sortKeyOf(knowableAt) > toKey) continue;
+    // Word has to get here: the road from where it happened, and never
+    // before its own travel time.
+    if (newsArrivesAt(world, fact, observer) > toKey) continue;
     selected.push({ fact, reported: true });
   }
 
@@ -646,7 +696,99 @@ function selectFacts(
  * actually did was fuse every separate thing their reign was doing into a single
  * entry, which is the same failure one level up.
  */
-function splitIntoThreads(facts: readonly Fact[], observerPolityId: string | null, orderFactIds: ReadonlySet<string> = new Set()): Fact[][] {
+/**
+ * A speech told twice is one speech. The engine records every speech in a
+ * chamber (`senate_speech`, with the words); the model, answering the same
+ * man, often writes its own "publicly supported the fleet budget" beside it.
+ * The two landed in different threads and the Chronicle printed Cursor's
+ * speech of 27 August twice, and gave Dentatus a speech he never made.
+ * A model's fact about a man backing or opposing a question is dropped when the
+ * engine recorded him speaking that day.
+ */
+function withoutEchoes(facts: readonly Fact[]): Fact[] {
+  const spoke = new Set(facts
+    .filter((fact) => fact.kind === "senate_speech")
+    .flatMap((fact) => fact.affectedEntities.filter((entity) => entity.kind === "character").map((entity) => `${entity.id}@${fact.time.day}`)));
+  if (spoke.size === 0) return [...facts];
+  return facts.filter((fact) => {
+    if (fact.kind === "senate_speech" || !/(support|advoca|speech|oppos|spoke)/u.test(fact.kind)) return true;
+    const people = fact.affectedEntities.filter((entity) => entity.kind === "character");
+    return !(people.length > 0 && people.every((person) => spoke.has(`${person.id}@${fact.time.day}`)));
+  });
+}
+
+/**
+ * A letter told twice is one letter. The engine records every letter sent
+ * (`letter_sent`: its writer, its reader, both powers); the model, writing the
+ * same act, often records its own "appealed to Hiero for the strait" beside
+ * it. The two named different things -- a man and a power, a power and a
+ * man -- and became two entries about one letter. Unlike a speech, the
+ * model's fact is kept, since it often says why the letter was written; the
+ * two are made one matter instead.
+ *
+ * Pairs, by index: a letter and a fact of the diplomatic kind, within a few
+ * days of it, naming its writer and its reader or the reader's power -- not
+ * the reader's own power, which every Roman fact names.
+ */
+function sameLetters(facts: readonly Fact[], observerPolityId: string | null): [number, number][] {
+  const pairs: [number, number][] = [];
+  facts.forEach((letter, letterIndex) => {
+    if (letter.kind !== "letter_sent") return;
+    const people = letter.affectedEntities.filter((entity) => entity.kind === "character").map((entity) => entity.id);
+    const powers = letter.affectedEntities.filter((entity) => entity.kind === "polity").map((entity) => entity.id);
+    const writer = people[0];
+    if (writer === undefined) return;
+    // The first power is the writer's, the second the reader's, when there is one.
+    const readers = new Set([...people.slice(1), ...powers.slice(1).filter((id) => id !== observerPolityId)]);
+    if (readers.size === 0) return;
+    facts.forEach((echo, echoIndex) => {
+      if (echoIndex === letterIndex || echo.kind === "letter_sent") return;
+      if (!LETTER_WORDS.test(echo.kind) && !LETTER_WORDS.test(echo.summary)) return;
+      if (Math.abs(echo.time.day - letter.time.day) > SAME_LETTER_DAYS) return;
+      const named = new Set(echo.affectedEntities.map((entity) => entity.id));
+      if (named.has(writer) && [...readers].some((id) => named.has(id))) pairs.push([letterIndex, echoIndex]);
+    });
+  });
+  return pairs;
+}
+
+/** What the model calls writing to somebody. */
+const LETTER_WORDS = /(appeal|letter|embass|envoy|message|dispatch|petition|propos|overture|ultimatum|demand|request|diplomat|offer|negotiat|summon|invit|wrote|writes)/iu;
+
+/** How far apart a letter and the model's word of it may be dated and still be one act. */
+const SAME_LETTER_DAYS = 3;
+
+/**
+ * What a project belongs to: the army it moves or raises, the man over it, the
+ * ground it ends on, what it has made. A project's own facts name the project
+ * alone, so "Legio I completes its crossing" and "the squadron arrives" were
+ * entries of their own beside the thread of the very army and order they
+ * finished. Named through these, they join it.
+ */
+function projectRelations(world: ChronicleInput["world"], observerPolityId: string | null): (fact: Fact) => string[] {
+  const projects = new Map((world?.projects ?? []).map((project) => [project.id, project]));
+  if (projects.size === 0) return () => [];
+  return (fact) => fact.affectedEntities.flatMap((entity) => {
+    const project = entity.kind === "project" ? projects.get(entity.id) : undefined;
+    if (project === undefined) return [];
+    const outcome = project.completionOutcome;
+    return [
+      project.overseerCharacterId ?? null,
+      project.sponsorEntityRef.id,
+      outcome?.forceId ?? null,
+      outcome?.provinceId ?? null,
+      outcome?.commanderCharacterId ?? null,
+      ...project.linkedEntityIds,
+    ].filter((id): id is string => id !== null && id !== observerPolityId);
+  });
+}
+
+function splitIntoThreads(
+  facts: readonly Fact[],
+  observerPolityId: string | null,
+  orderFactIds: ReadonlySet<string> = new Set(),
+  relatedOf: (fact: Fact) => readonly string[] = () => [],
+): Fact[][] {
   const hubKey = observerPolityId === null ? null : `polity:${observerPolityId}`;
 
   const parent = new Map<number, number>();
@@ -674,7 +816,13 @@ function splitIntoThreads(facts: readonly Fact[], observerPolityId: string | nul
     // and a raid in Lucania up as a single entry. A nameless fact that did not
     // come from the order is its own matter.
     if (fact.affectedEntities.length === 0 && orderFactIds.has(fact.id)) nameless.push(index);
-    for (const entity of fact.affectedEntities) {
+    // A fact about a question before a chamber is about that question, and
+    // joins its thread by the question alone. Three votes in one sitting --
+    // transports carried, war taxes refused, an emergency declared -- all
+    // named their sponsor and were written up as one entry; each is its own
+    // decision, and its own entry.
+    const question = fact.affectedEntities.find((entity) => entity.kind === "procedure");
+    for (const entity of question === undefined ? fact.affectedEntities : [question]) {
       const subject = keyOf(entity);
       if (subject === hubKey) continue;
       const seen = firstSeenBySubject.get(subject);
@@ -683,6 +831,19 @@ function splitIntoThreads(facts: readonly Fact[], observerPolityId: string | nul
     }
   });
   for (const index of nameless) union(nameless[0]!, index);
+  // What a fact belongs to without naming it: a project's army and ground.
+  const firstSeenById = new Map<string, number>();
+  for (const [subject, index] of firstSeenBySubject) {
+    const id = subject.slice(subject.indexOf(":") + 1);
+    if (!firstSeenById.has(id)) firstSeenById.set(id, index);
+  }
+  facts.forEach((fact, index) => {
+    for (const id of relatedOf(fact)) {
+      const seen = firstSeenById.get(id);
+      if (seen !== undefined) union(seen, index);
+    }
+  });
+  for (const [letter, echo] of sameLetters(facts, observerPolityId)) union(letter, echo);
 
   const components = new Map<number, Fact[]>();
   facts.forEach((fact, index) => {
@@ -693,6 +854,33 @@ function splitIntoThreads(facts: readonly Fact[], observerPolityId: string | nul
   });
   return [...components.values()];
 }
+
+/**
+ * A headline for an entry the historian did not write: its first fact's first
+ * clause, which says who did what. The period it covered was printed instead,
+ * and "21 June 270 BC – 22 June 270 BC" over three votes is a date, not news.
+ */
+function headlineOf(facts: readonly Fact[]): string | null {
+  const first = facts.map((fact) => readable(fact.summary).trim()).find((summary) => summary.length > 0);
+  if (first === undefined) return null;
+  const clause = first.split(/(?<=[.;:])\s|,\s(?=\d)/)[0]!.replace(/[.;:,\s]+$/, "");
+  if (clause.length <= HEADLINE_MAX) return clause.length === 0 ? null : clause;
+  // Too long to stand whole: cut where the sentence itself pauses -- a comma,
+  // or before "when", "so that", "toward" -- never mid-phrase. "Blasio
+  // directed Legio I to prepare successive portions for embarkation toward
+  // Messana when the transports" was a headline stopped by a character count.
+  const within = clause.slice(0, HEADLINE_MAX + 1);
+  const pauses = [...within.matchAll(/,\s|\s(?=(?:when|while|after|before|until|so that|because|once|if|toward|towards|for|to|and|but|with|from|in|at|on)\s)/gu)]
+    .map((match) => match.index)
+    .filter((index) => index >= 30);
+  let title = pauses.length === 0 ? within.slice(0, within.lastIndexOf(" ")) : within.slice(0, pauses[pauses.length - 1]);
+  // Nor does a headline end on a word that promises more.
+  title = title.replace(/(?:\s+(?:the|a|an|of|to|toward|towards|for|and|or|but|when|with|from|in|at|on|by|his|her|its|their))+$/iu, "").replace(/[,;:\s]+$/u, "");
+  return title.length === 0 ? null : title;
+}
+
+/** The longest a headline taken from the facts' own words may run. */
+const HEADLINE_MAX = 110;
 
 /** Everything the entry is about, deterministically ordered. */
 function subjectsOf(facts: readonly Fact[]): OrderPartyRef[] {
@@ -718,37 +906,67 @@ const TAG_RANK: Readonly<Record<string, number>> = { polity: 0, province: 1, cha
  * The few subjects worth printing on the entry's face.
  *
  * Every subject is kept on the record; showing all eight taught the reader to
- * skip the row. So the ones shown are those that most identify the matter: the
- * powers involved, then where, then who. Ranked by kind before frequency --
- * ranking by frequency first put an army and a senate motion on an entry whose
- * headline was about the Senate, because the motion happened to be named twice.
- * The observer's own government goes last among equals; they know who they are.
+ * skip the row. So the ones shown are those that most identify the matter:
+ * who led it, then the powers in it, then where, then who else. Ranked by kind
+ * before frequency -- ranking by frequency first put an army and a senate
+ * motion on an entry whose headline was about the Senate, because the motion
+ * happened to be named twice.
+ *
+ * Who led it comes first because frequency picked the wrong man: a naval
+ * battle Hannibal Gisco won was tagged with Decius Vibellius, who was named in
+ * more of its facts, and not with him. A battle's commanders lead; elsewhere
+ * the one the weightiest fact names first, which is the one who acted.
+ *
+ * The reader's own power is tagged like any other party. Sorted last, it was
+ * the first dropped, and a Roman war read as a Carthaginian one. And a name
+ * is shown once: the Boii are a people and a province, and "Boii, Boii" is
+ * two tags saying one thing.
  */
 function tagsOf(
   facts: readonly Fact[],
-  subjects: readonly OrderPartyRef[],
+  battle: BattleAccountLine | null,
+  weightOf: (fact: Fact) => number,
   observerPolityId: string | null,
   nameOf: (ref: OrderPartyRef) => string | null,
 ): EntryTag[] {
   const mentions = new Map<string, number>();
+  const all = new Map<string, OrderPartyRef>();
   for (const fact of facts) {
-    for (const entity of fact.affectedEntities) mentions.set(keyOf(entity), (mentions.get(keyOf(entity)) ?? 0) + 1);
+    for (const entity of fact.affectedEntities) {
+      mentions.set(keyOf(entity), (mentions.get(keyOf(entity)) ?? 0) + 1);
+      all.set(keyOf(entity), entity);
+    }
   }
-  const own = (ref: OrderPartyRef): number => (ref.kind === "polity" && ref.id === observerPolityId ? 1 : 0);
-  return [...subjects]
+  const commanders = new Set(battle === null ? [] : [...battle.commanders.map((commander) => commander.name), ...battle.sides.map((side) => side.commander)]);
+  const heaviest = [...facts].sort((a, b) => weightOf(b) - weightOf(a))[0];
+  const actor = battle !== null ? undefined : heaviest?.affectedEntities.find((entity) => entity.kind === "character");
+  const lead = (ref: OrderPartyRef): number =>
+    ref.kind === "character" && ((commanders.size > 0 && commanders.has(nameOf(ref) ?? "")) || (actor !== undefined && ref.id === actor.id)) ? 0 : 1;
+  const own = (ref: OrderPartyRef): number => (ref.kind === "polity" && ref.id === observerPolityId ? 0 : 1);
+  const ranked = [...all.values()]
     .filter((ref) => TAG_RANK[ref.kind] !== undefined)
     // A handle the engine never resolved names nothing. It reached the record
     // through a fact that referred to something its own batch did not create.
     .filter((ref) => !ref.id.startsWith("local:"))
     .sort((a, b) =>
-      own(a) - own(b)
+      lead(a) - lead(b)
       || (TAG_RANK[a.kind] ?? 9) - (TAG_RANK[b.kind] ?? 9)
+      || own(a) - own(b)
       || (mentions.get(keyOf(b)) ?? 0) - (mentions.get(keyOf(a)) ?? 0)
-      || a.id.localeCompare(b.id))
-    .slice(0, MAX_TAGS)
+      || a.id.localeCompare(b.id));
+  const tags: EntryTag[] = [];
+  const shown = new Set<string>();
+  for (const ref of ranked) {
     // Named here rather than in the browser. An id is the engine's handle: the
     // reader was being offered "force-e98084fc-...-4" as a way into the record.
-    .map((ref) => ({ kind: ref.kind, id: ref.id, label: nameOf(ref) ?? ref.id }));
+    const label = nameOf(ref) ?? ref.id;
+    const same = label.trim().toLowerCase();
+    if (shown.has(same)) continue;
+    shown.add(same);
+    tags.push({ kind: ref.kind, id: ref.id, label });
+    if (tags.length === MAX_TAGS) break;
+  }
+  return tags;
 }
 
 /** The fight itself, in the order it happened, for a passage that has to earn a death. */
@@ -760,14 +978,14 @@ function renderBattle(battle: BattleAccountLine): string[] {
     "point even where it changes nothing strategically.",
     `The field: ${battle.provinceName}. It ended in ${battle.outcome.replace(/_/g, " ")}.`,
     "Who fought:",
-    ...battle.sides.map((side) => `  - ${side.name}, ${side.attacking ? "attacking" : "defending"}, ${side.strength} men under ${side.commander}`),
+    ...battle.sides.map((side) => `  - ${side.name}, ${side.attacking ? "attacking" : "defending"}, ${side.strength} ${side.unit ?? "men"} under ${side.commander}`),
     "How it went, in order:",
     ...battle.phases.map((phase) => `  - ${phase.phase}: ${phase.summary} (weight ${phase.attacker} against ${phase.defender})`),
   ];
   if (battle.tactics.length > 0) lines.push("What was tried:", ...battle.tactics.map((tactic) => `  - ${tactic}`));
   if (battle.refusedTactics.length > 0) lines.push("What the ground would not allow:", ...battle.refusedTactics.map((refused) => `  - ${refused}`));
   if (battle.losses.length > 0) {
-    lines.push("What it cost:", ...battle.losses.map((loss) => `  - ${loss.name}: ${loss.dead} dead, ${loss.deserted} deserted, ${loss.wounded} wounded`));
+    lines.push("What it cost:", ...battle.losses.map((loss) => `  - ${loss.name}: ${loss.unit === "ships" ? `${loss.dead} ships sunk or taken, ${loss.deserted} slipped away, ${loss.wounded} damaged and laid up` : `${loss.dead} dead, ${loss.deserted} deserted, ${loss.wounded} wounded`}`));
   }
   if (battle.commanders.length > 0) lines.push("The commanders:", ...battle.commanders.map((commander) => `  - ${commander.name} was ${commander.outcome}`));
   if ((battle.members ?? []).length > 0) {
@@ -780,7 +998,7 @@ function renderBattle(battle: BattleAccountLine): string[] {
   return lines;
 }
 
-function renderThread(thread: Thread, index: number): string {
+function renderThread(thread: Thread, index: number, said: readonly UtteranceLine[] = []): string {
   const lines = [`THREAD ${index + 1}${thread.reported ? " (news reaching the court; nobody here witnessed it)" : ""}`];
   if (thread.matter !== null) lines.push(`Part of a longer matter: ${thread.matter}.`);
   // Who is who, stated rather than inferred. A historian given "Furius" and
@@ -794,9 +1012,13 @@ function renderThread(thread: Thread, index: number): string {
   if (thread.narrative.length > 0) lines.push("Accounts given at the time:", ...thread.narrative.map((line) => `- ${readable(line)}`));
   if (thread.frictions.length > 0) lines.push("Difficulties reported:", ...thread.frictions.map((line) => `- ${readable(line)}`));
   if (thread.battle !== null) lines.push(...renderBattle(thread.battle));
+  if (said.length > 0) lines.push("Words recorded at the time:", ...said.map((line) => `- ${line.speaker}, ${line.occasion}: ${line.line}`));
   // How to tell it, carried with the matter rather than added to the
   // historian's standing instructions: an order nobody obeyed is comedy, and
   // told in the register of a campaign it reads as one.
+  if (thread.digest) {
+    lines.push("Register: these are several small matters of the same days, gathered into one passage. Tell each in a sentence or two, in the order they happened; the headline names the chief of them.");
+  }
   if (thread.facts.some((fact) => fact.kind === "order_ignored")) {
     lines.push("Register: somebody gave orders to people who did not have to take them. Tell it with a straight face and a dry wit; the joke is in the facts.");
   }
@@ -808,7 +1030,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   // An unweighted fact cannot be ruled out: where no weight was recorded, the
   // bar is treated as met rather than as failed.
   const weightOf = (fact: Fact): number => input.significanceByFactId?.get(fact.id) ?? threshold;
-  const selected = selectFacts(input.facts, input.observer, input.observerPolityId, input.ownEntityIds ?? null, input.to, weightOf);
+  const selected = selectFacts(input.facts, input.observer, input.observerPolityId, input.ownEntityIds ?? null, input.to, weightOf, input.world, input.orderFactIds ?? new Set());
   if (selected.length === 0) return { entries: [], calls: 0, carried: [...input.facts] };
 
   const visible = selected.map((entry) => entry.fact);
@@ -833,7 +1055,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   const frictions = input.frictions.filter(firsthand);
   const utterances = (input.utterances ?? []).filter((line) => publishable(line) && witnessed(line));
 
-  const grouped = splitIntoThreads(visible, input.observerPolityId, input.orderFactIds);
+  const grouped = splitIntoThreads(withoutEchoes(visible), input.observerPolityId, input.orderFactIds, projectRelations(input.world, input.observerPolityId));
   const polityOf = (characterId: string): string | null => input.polityOfCharacter?.(characterId) ?? null;
 
   /**
@@ -876,7 +1098,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
     input.ownEntityIds !== undefined
     && facts.some((fact) => fact.affectedEntities.some((entity) => input.ownEntityIds!.has(entity.id)));
 
-  const built: Thread[] = grouped.map((facts) => {
+  const threadOf = (facts: readonly Fact[], digest = false): Thread => {
     const ids = new Set(facts.map((fact) => fact.id));
     const belongs = (line: { readonly factIds: readonly string[] }): boolean => line.factIds.some((factId) => ids.has(factId));
     return {
@@ -888,6 +1110,8 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
       // makes the matter the court's own.
       reported: facts.every((fact) => reportedIds.has(fact.id)),
       weight: facts.reduce((sum, fact) => sum + weightOf(fact), 0),
+      peak: Math.max(...facts.map(weightOf)),
+      mustTell: isOurs(facts) && facts.some((fact) => MUST_TELL.has(fact.kind)),
       ours: isOurs(facts),
       home: isHome(facts),
       // Witnessed only. A fight the court heard of at second hand is news of a
@@ -907,11 +1131,76 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
       people: [...new Set(facts.flatMap((fact) => fact.affectedEntities.filter((entity) => entity.kind === "character").map((entity) => entity.id)))]
         .flatMap((id) => {
           const described = input.describePerson?.(id) ?? null;
-          return described === null ? [] : [described];
+          if (described === null) return [];
+          // So the historian knows whose reign this is, and that they may be quoted.
+          return [input.observer.kind === "character" && input.observer.id === id ? `${described} -- the one whose reign this history is` : described];
         })
         .slice(0, 8),
+      digest,
     };
-  });
+  };
+  const unfolded = grouped.map((facts) => threadOf(facts));
+
+  /**
+   * The reign's small business, told where it belongs.
+   *
+   * Every thread used to get its own headline, and a matter the reader's side
+   * was named in was told whatever it weighed, so the record filled with
+   * entries of one sentence: an order's side-effects, a candidate's
+   * nomination, a survey begun. Two folds instead, both only of what is
+   * slight -- never a battle, never what must be told, never anything heavy
+   * enough for a headline of its own:
+   *
+   * - what the order did, beyond its main answer, joins the answer: it is the
+   *   same order, and one passage tells it;
+   * - the rest of the reign's small matters in the same window are gathered
+   *   into one passage of the month's business, rather than each told alone.
+   *
+   * What is lighter than `OWN_BUSINESS_FLOOR` is not gathered: it waits, as
+   * before, for the matter it belongs to.
+   */
+  const slight = (thread: Thread): boolean => thread.battle === null && !thread.mustTell && thread.peak < OWN_HEADLINE_FLOOR;
+  const byTime = (a: Fact, b: Fact): number => sortKeyOf(a.time) - sortKeyOf(b.time);
+  const answerAmong = (threads: readonly Thread[]): Thread | null =>
+    threads.filter((thread) => thread.answersTheOrder).reduce<Thread | null>((best, thread) => (best === null || thread.orderFacts > best.orderFacts ? thread : best), null);
+  const lead = answerAmong(unfolded);
+  const toOrder = lead === null ? [] : unfolded.filter((thread) => thread !== lead && thread.ours && thread.orderFacts > 0 && slight(thread));
+  const answered = lead === null || toOrder.length === 0 ? lead : threadOf([...lead.facts, ...toOrder.flatMap((thread) => thread.facts)].sort(byTime));
+  const afterOrder = [...(answered === null ? [] : [answered]), ...unfolded.filter((thread) => thread !== lead && !toOrder.includes(thread))];
+  const small = afterOrder.filter((thread) => thread !== answered && thread.ours && slight(thread) && thread.peak >= OWN_BUSINESS_FLOOR);
+  const built: Thread[] = small.length < 2
+    ? afterOrder
+    : [...afterOrder.filter((thread) => !small.includes(thread)), threadOf(small.flatMap((thread) => thread.facts).sort(byTime), true)];
+
+  /**
+   * How far off a thread happened, in days by road from the nearest place the
+   * reader hears things: where they stand, their power's seat, the ground it
+   * holds. Null when that cannot be told -- no world, or a matter that happened
+   * nowhere in particular -- and then no distance applies.
+   */
+  const world = input.world;
+  const seats = world === undefined ? [] : [...new Set([
+    whereTheyHear(world, input.observer),
+    ...(input.observerPolityId === null ? [] : [
+      whereTheyHear(world, { kind: "polity", id: input.observerPolityId }),
+      ...world.map.provinces.filter((province) => province.controllerPolityId === input.observerPolityId).map((province) => province.id),
+    ]),
+  ].filter((seat): seat is string => seat !== null))];
+  const daysOff = (thread: Thread): number | null => {
+    if (world === undefined || seats.length === 0) return null;
+    const places = [...new Set(thread.facts.flatMap((fact) => whereItHappened(world, fact)))];
+    if (places.length === 0) return null;
+    // The road measures nothing between places it does not join: those are far.
+    const road = (from: string, to: string): number => (from === to ? 0 : newsDaysBetween(world, from, to) || MAX_NEWS_DAYS);
+    return Math.min(...places.flatMap((place) => seats.map((seat) => road(place, seat))));
+  };
+  /** Whether the wider world's matter is weighty enough for how far off it happened. */
+  const carriesThisFar = (thread: Thread): boolean => {
+    const days = daysOff(thread);
+    if (days === null || days <= NEAR_NEWS_DAYS) return true;
+    const share = Math.min(1, (days - NEAR_NEWS_DAYS) / (FAR_NEWS_DAYS - NEAR_NEWS_DAYS));
+    return thread.peak >= threshold + (FAR_NEWS_WEIGHT - threshold) * share;
+  };
 
   const byWeight = (a: Thread, b: Thread): number =>
     b.weight - a.weight || sortKeyOf(a.facts[0]!.time) - sortKeyOf(b.facts[0]!.time) || a.facts[0]!.id.localeCompare(b.facts[0]!.id);
@@ -941,7 +1230,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
    */
   const alreadyTold = (input.recentSubjects ?? []).map((subjects) => new Set(subjects));
   const everyoneTold = new Set(alreadyTold.flatMap((told) => [...told]));
-  const movedIds = new Set((input.changes ?? []).map((change) => change.id));
+  const movedIds = new Set((input.changes ?? []).filter((change) => change.routine !== true).map((change) => change.id));
   const echoing = (thread: Thread): boolean => {
     if (thread.battle !== null || alreadyTold.length === 0) return false;
     const subjects = subjectsOf(thread.facts);
@@ -959,8 +1248,8 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
 
   const ours = built.filter((thread) => thread.ours).sort(byWeight);
   const home = built.filter((thread) => !thread.ours && thread.home && !thread.reported && thread.weight >= HOME_THRESHOLD && !echoing(thread)).sort(byWeight);
-  const seen = built.filter((thread) => !thread.ours && !thread.home && !thread.reported && thread.weight >= threshold && !echoing(thread)).sort(byWeight);
-  const hearsay = built.filter((thread) => !thread.ours && thread.reported && thread.weight >= threshold && !echoing(thread)).sort(byWeight);
+  const seen = built.filter((thread) => !thread.ours && !thread.home && !thread.reported && thread.weight >= threshold && carriesThisFar(thread) && !echoing(thread)).sort(byWeight);
+  const hearsay = built.filter((thread) => !thread.ours && thread.reported && thread.weight >= threshold && carriesThisFar(thread) && !echoing(thread)).sort(byWeight);
 
   const banded = [...ours, ...home.slice(0, MAX_HOME_THREADS), ...seen.slice(0, MAX_SEEN_THREADS), ...hearsay.slice(0, MAX_REPORTED_THREADS)];
   // The answer to the order and any battle are never cut: the cap is for the
@@ -976,10 +1265,12 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   // fact" alone made a harvest in Picenum an answer to "send ten galleys".
   // The rest of the order's matters compete on weight like anything else, and
   // are carried into the next window when cut.
-  const answering = banded.filter((thread) => thread.answersTheOrder);
-  const answer = answering.length === 0 ? [] : [answering.reduce((best, thread) => (thread.orderFacts > best.orderFacts ? thread : best))];
-  const fights = banded.filter((thread) => !answer.includes(thread) && thread.battle !== null);
-  const rest = banded.filter((thread) => !answer.includes(thread) && thread.battle === null && (!thread.ours || thread.weight >= OWN_BUSINESS_FLOOR));
+  const chosen = answerAmong(banded);
+  const answer = chosen === null ? [] : [chosen];
+  const fights = banded.filter((thread) => !answer.includes(thread) && (thread.battle !== null || thread.mustTell));
+  // The floor is met by one thing worth telling, never by a heap of small ones:
+  // three "reviewed the legion's readiness" of ten each were a told entry.
+  const rest = banded.filter((thread) => !answer.includes(thread) && !fights.includes(thread) && (!thread.ours || thread.peak >= OWN_BUSINESS_FLOOR));
   let threads = [...answer, ...fights, ...rest.slice(0, Math.max(0, maxEntries - answer.length - fights.length))];
   // A record that goes blank teaches the reader to stop opening it. This fires
   // only when the bands would have produced nothing at all, which is a
@@ -1001,7 +1292,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   // The order's own answer is dated the day it was given, and so comes first
   // without being put first.
   const knowableKey = (fact: Fact): number =>
-    Math.max(sortKeyOf(fact.time), fact.discovery.knowableAtInstant === null ? 0 : sortKeyOf(fact.discovery.knowableAtInstant));
+    newsArrivesAt(input.orderFactIds?.has(fact.id) === true ? undefined : input.world, fact, input.observer);
   const firstKnowable = (thread: Thread): number => Math.min(...thread.facts.map(knowableKey));
   threads.sort((a, b) => firstKnowable(a) - firstKnowable(b) || a.facts[0]!.id.localeCompare(b.facts[0]!.id));
   const toldIds = new Set(threads.flatMap((thread) => thread.facts.map((fact) => fact.id)));
@@ -1024,27 +1315,63 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
         "out entirely rather than rephrasing it. Write it only when something in",
         "it has actually changed -- ground taken, a man dead, a decision made,",
         "an army broken -- and then write the change, not the situation.",
+        "They are listed only so they are not repeated: never bring one of them",
+        "into a passage whose own facts do not name it.",
       ].join("\n"),
     ]),
   ];
 
   const changes = input.changes ?? [];
+  /**
+   * The provinces that changed hands this window: what a power's count of
+   * provinces is about, so an entry that tells one of them may show it.
+   */
+  const handsChanged = new Set(changes.filter((change) => change.kind === "province").map((change) => change.id));
+  /**
+   * Whether this entry's own facts made this change.
+   *
+   * A change the entry's facts do not name is a change the reader was never
+   * told about, which is what keeps the change list from being the leak the
+   * prose is so carefully prevented from being. But naming was not enough on
+   * its own: the treasury is Rome's, and every entry naming Rome carried the
+   * month's taxes. So a change with a recorded cause goes to the entry whose
+   * facts name that cause -- the project, the force, the procedure -- or,
+   * where the cause is a handle no fact names (a battle, a pay obligation), to
+   * the entry that names the thing itself on the day it moved. The world's
+   * routine goes to nobody. And the reader's own power, which every entry of
+   * his names, claims a change only for the answer to his order, or for a
+   * province this entry tells changing hands.
+   */
+  const madeBy = (change: WorldChange, thread: Thread): boolean => {
+    if (change.routine === true) return false;
+    const named = new Set(thread.facts.flatMap((fact) => fact.affectedEntities.map((entity) => entity.id)));
+    const hub = input.observerPolityId;
+    const namesIt = [change.id, ...(change.claimedBy ?? [])].some((id) =>
+      named.has(id)
+      && (id !== hub || answer.includes(thread) || (change.kind === "polity" && [...handsChanged].some((provinceId) => named.has(provinceId)))));
+    const causes = change.causes ?? [];
+    if (causes.length === 0) return namesIt;
+    const handles = new Set([
+      ...named,
+      ...thread.facts.flatMap((fact) => [fact.id, fact.sourceActionId, fact.sourceEventId].filter((id): id is string => id !== null)),
+    ]);
+    if (causes.some((cause) => handles.has(cause.id))) return true;
+    const days = new Set(thread.facts.flatMap((fact) => [fact.time.day, fact.atStep]));
+    return namesIt && causes.some((cause) => days.has(cause.day));
+  };
   const entryOf = (thread: Thread, title: string, body: string): ChronicleEntry => {
     const keys = thread.facts.map((fact) => sortKeyOf(fact.time));
     const subjects = subjectsOf(thread.facts);
-    const named = new Set(thread.facts.flatMap((fact) => fact.affectedEntities.map((entity) => entity.id)));
     return {
       kind: "narrated",
       title,
       body,
       factIds: thread.facts.map((fact) => fact.id),
       subjects,
-      tags: tagsOf(thread.facts, subjects, input.observerPolityId, (ref) => input.nameOf?.(ref) ?? null),
-      // A change the entry's own facts do not name is a change the reader was
-      // never told about. Gating here is what keeps the change list from being
-      // the leak the prose is so carefully prevented from being.
-      changes: changes.filter((change) => named.has(change.id)),
+      tags: tagsOf(thread.facts, thread.battle, weightOf, input.observerPolityId, (ref) => input.nameOf?.(ref) ?? null),
+      changes: changes.filter((change) => madeBy(change, thread)),
       quote: null,
+      storylineIds: mattersOf(thread.facts, input.storylines ?? [], input.observer, input.observerPolityId, polityOf).map((storyline) => storyline.id),
       fromInstantSortKey: Math.min(...keys, sortKeyOf(input.to)),
       toInstantSortKey: Math.max(...keys, sortKeyOf(input.from)),
     };
@@ -1053,7 +1380,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   // A failed narration must not cost the player the record itself: fall back to
   // the plain facts, under the period as a title, rather than losing the span.
   const plainly = (thread: Thread): ChronicleEntry =>
-    entryOf(thread, period, thread.facts.map((fact) => readable(fact.summary)).join("\n\n"));
+    entryOf(thread, headlineOf(thread.facts) ?? period, thread.facts.map((fact) => readable(fact.summary)).join("\n\n"));
 
   // One matter to a call, and every matter written, the light ones too. A
   // light home thread was once printed in its facts' own words to save its
@@ -1081,13 +1408,44 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   // on the threads themselves, so a passage can be handed out the moment it
   // is written rather than held until every passage is in and compared.
   const quoted = chooseQuote(threads, utterances);
+  // Every line somebody is recorded saying in this report, by whom: a line the
+  // historian puts in one man's mouth that another man said is not a quotation.
+  // Cursor's "a fleet built by measure is better than a strait left open"
+  // came back as Dentatus's "a measured fleet serves Rome better than an open
+  // strait", under a passage about the Anio waterworks.
+  const spokenLines: readonly { speaker: string; line: string }[] = [
+    ...utterances.map((utterance) => ({ speaker: utterance.speaker, line: utterance.line })),
+    ...threads.flatMap((thread) => thread.facts.flatMap((fact) => {
+      const speaker = fact.affectedEntities.find((entity) => entity.kind === "character");
+      const name = speaker === undefined ? null : input.nameOf?.(speaker) ?? null;
+      return name === null ? [] : [...fact.summary.matchAll(/"([^"]{12,})"/gu)].map((match) => ({ speaker: name, line: match[1]! }));
+    })),
+  ];
+  const saidIn = (thread: Thread): UtteranceLine[] => {
+    const ids = new Set(thread.facts.map((fact) => fact.id));
+    return utterances.filter((utterance) => utterance.factIds.some((factId) => ids.has(factId))).slice(0, 4);
+  };
+  /** Who may be quoted in a passage: the people in its facts, and anyone recorded speaking in it. */
+  const speakersIn = (thread: Thread): Set<string> => new Set([
+    ...thread.facts.flatMap((fact) => fact.affectedEntities.filter((entity) => entity.kind === "character").map((entity) => input.nameOf?.(entity) ?? null)),
+    ...saidIn(thread).map((utterance) => utterance.speaker),
+  ].filter((name): name is string => name !== null));
   const results: (ChronicleEntry | null | undefined)[] = threads.map(() => undefined);
+  let quotesGiven = 0;
   let handedOut = 0;
   let handing: Promise<void> = Promise.resolve();
   const handOut = (): void => {
     // Everything written up to the first gap, in order, once.
     while (handedOut < results.length && results[handedOut] !== undefined) {
-      const entry = results[handedOut];
+      let entry = results[handedOut];
+      // A report where everybody says something memorable is one where nobody
+      // does: the first few, in the order they are read.
+      if (entry !== null && entry !== undefined && entry.quote !== null) {
+        if (quotesGiven >= MAX_QUOTES_PER_REPORT) {
+          entry = { ...entry, quote: null };
+          results[handedOut] = entry;
+        } else quotesGiven += 1;
+      }
       handedOut += 1;
       if (entry !== null && entry !== undefined && input.onEntry !== undefined) {
         const give = input.onEntry;
@@ -1096,7 +1454,13 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
     }
   };
   await mapWithLimit(threads, CHRONICLE_CONCURRENCY, async (thread, index): Promise<void> => {
-    const userMessage = [...head, "", renderThread(thread, 0)].join("\n\n");
+    // The answer to the order is news by definition: the player gave it this
+    // turn. Shown the last report's titles, the historian judged "Clepsina
+    // kept Legio I before Messana" the same thing again and declined it, and
+    // with it went the merchants he could not hire and the Legio II he could
+    // not merge -- the order left no trace at all.
+    const answering = answer.includes(thread) || thread.mustTell;
+    const userMessage = [...(answering ? head.slice(0, 1) : head), "", renderThread(thread, 0, saidIn(thread))].join("\n\n");
     let entry: ChronicleEntry | null;
     try {
       const raw = await input.port.complete("compose_chronicle", CHRONICLE_SYSTEM_PROMPT, userMessage);
@@ -1108,12 +1472,19 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
         // -- told what the last report said, she judged this the same thing.
         // That is a decision, not a failure, and the record honours it: the
         // thread is dropped, not printed as bare facts under a period title.
-        entry = passage === undefined ? null : entryOf(thread, passage.title, passage.body.trim());
+        entry = passage === undefined
+          ? (answering ? plainly(thread) : null)
+          : entryOf(thread, passage.title, passage.body.trim());
+        const own = passage?.quote ?? null;
+        if (entry !== null && own !== null && speakersIn(thread).has(own.speaker) && !borrowedLine(own, spokenLines)) {
+          entry = { ...entry, quote: { line: unquoted(own.line), speaker: own.speaker, occasion: own.occasion } };
+        }
       }
     } catch {
       entry = plainly(thread);
     }
-    if (entry !== null && quoted !== null && quoted.index === index) {
+    // Words somebody actually said, where the historian gave none of her own.
+    if (entry !== null && entry.quote === null && quoted !== null && quoted.index === index) {
       entry = { ...entry, quote: { line: quoted.utterance.line, speaker: quoted.utterance.speaker, occasion: quoted.utterance.occasion } };
     }
     results[index] = entry;
@@ -1132,6 +1503,31 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
  * was the database pool, which has since been widened.
  */
 const CHRONICLE_CONCURRENCY = 6;
+
+/** How many passages of one report may carry a quotation. */
+const MAX_QUOTES_PER_REPORT = 3;
+
+/** The record adds the quotation marks; a line that brought its own loses them. */
+/** Words to compare lines by: lower case, stems of five letters, the small words left out. */
+function stemsOf(line: string): Set<string> {
+  return new Set(line.toLowerCase().split(/[^\p{L}]+/u).filter((word) => word.length > 3).map((word) => word.slice(0, 5)));
+}
+
+/** The historian's line is one somebody else was recorded saying, more or less. */
+function borrowedLine(quote: { speaker: string; line: string }, spoken: readonly { speaker: string; line: string }[]): boolean {
+  const mine = stemsOf(quote.line);
+  if (mine.size < 3) return false;
+  return spoken.some((said) => {
+    if (said.speaker === quote.speaker) return false;
+    const theirs = stemsOf(said.line);
+    const shared = [...mine].filter((stem) => theirs.has(stem)).length;
+    return shared / new Set([...mine, ...theirs]).size >= 0.4;
+  });
+}
+
+function unquoted(line: string): string {
+  return line.trim().replace(/^["'“‘]+|["'”’]+$/g, "").trim();
+}
 
 /**
  * Runs `work` over `items`, at most `limit` at a time, answering in input order.

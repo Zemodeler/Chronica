@@ -4,6 +4,7 @@ import { readTheBooks } from "../material/books";
 import { musterTheForces } from "../material/forces";
 import type { WorldState } from "../world/world-state";
 import type { ScenarioClock } from "../world/clock";
+import type { ScenarioWarfareRules } from "../warfare/battle";
 import { whatComesNext } from "./calendar";
 import { lettersAwaitingYou } from "./letters-awaiting";
 import { ordersUnderWay } from "./under-way";
@@ -38,6 +39,7 @@ export function roomStates(
   characterId: string | null,
   offices: readonly Office[] = [],
   clock?: ScenarioClock,
+  warfare?: ScenarioWarfareRules,
 ): RoomStates {
   if (characterId === null) return {};
   const states: RoomStates = {};
@@ -50,31 +52,47 @@ export function roomStates(
       : { says: underWay.length === 1 ? "One order under way" : `${underWay.length} orders under way`, marked: false };
   }
 
-  const books = readTheBooks(world, characterId, offices);
-  if (books.income.length > 0 || books.expenditure.length > 0) {
-    const ledger: RoomObjectState = books.arrears > 0
+  // The ledger stand and the strongbox read different books (books.ts): what
+  // the player keeps for somebody else, and what is his own.
+  const ledgerOf = (books: ReturnType<typeof readTheBooks>): RoomObjectState | undefined => {
+    if (books.income.length === 0 && books.expenditure.length === 0) {
+      if (books.accounts.length === 0) return undefined;
+      const held = books.accounts.reduce((sum, account) => sum + account.balance, 0);
+      return { says: `${money(held)} in hand`, marked: false };
+    }
+    return books.arrears > 0
       ? { says: `Behind on payments: ${money(books.arrears)} owed`, marked: true }
       : books.surplus < 0
         ? { says: `Short ${money(-books.surplus)} a month`, marked: true }
         : books.pressure?.hard === true
           ? { says: "The taxes press hard on the land", marked: true }
           : { says: `${money(books.surplus)} a month to spare`, marked: false };
-    states.books = ledger;
-    states.purse = ledger;
-  }
+  };
+  const kept = ledgerOf(readTheBooks(world, characterId, offices, "kept"));
+  if (kept !== undefined) states.books = kept;
+  const own = ledgerOf(readTheBooks(world, characterId, offices, "own"));
+  if (own !== undefined) states.purse = own;
 
-  const muster = musterTheForces(world, characterId, offices, clock);
+  const muster = musterTheForces(world, characterId, offices, clock, warfare);
   if (muster.forces.length > 0) {
     const troubled = muster.forces.find((force) =>
       force.payStatus !== "Paid" && force.payStatus !== "Paid out of what they take"
       || force.provisionLabel === "starving" || force.provisionLabel === "short of supply"
       || (force.authorizedStrength > 0 && force.fitStrength / force.authorizedStrength < 0.6));
-    const men = muster.forces.reduce((sum, force) => sum + force.fitStrength, 0);
+    // Ships are counted as ships: a squadron's hulls are not men.
+    const armies = muster.forces.filter((force) => !force.naval);
+    const fleets = muster.forces.filter((force) => force.naval);
+    const men = armies.reduce((sum, force) => sum + force.fitStrength, 0);
+    const ships = fleets.reduce((sum, force) => sum + force.fitStrength, 0);
+    const counted = [
+      ...(armies.length > 0 ? [`${money(men)} men`] : []),
+      ...(fleets.length > 0 ? [`${money(ships)} ${ships === 1 ? "ship" : "ships"}`] : []),
+    ].join(" and ");
     states.forces = troubled !== undefined
       ? { says: `The ${troubled.name.replace(/^the\s+/i, "")}: ${troubleOf(troubled)}`, marked: true }
       : muster.forces.length === 1
-        ? { says: `${money(men)} men at ${muster.forces[0]!.locationLabel}`, marked: false }
-        : { says: `${money(men)} men in ${muster.forces.length} forces`, marked: false };
+        ? { says: `${counted} at ${muster.forces[0]!.locationLabel}`, marked: false }
+        : { says: `${counted} in ${muster.forces.length} forces`, marked: false };
   }
 
   // The seal case: what is coming for the office itself.

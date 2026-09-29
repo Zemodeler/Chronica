@@ -1,5 +1,6 @@
 import { InsufficientCoinsError, createAiAdapter, createTimedPort } from "@chronica/ai";
 import {
+  BurstNoLongerRunningError,
   WorldRevisionConflictError,
   WorldWouldNotLoadError,
   appendBurstProgress,
@@ -7,11 +8,13 @@ import {
   expireStaleHolds,
   factRowOf,
   failBurst,
+  findBurstByIdempotencyKey,
   findRunningBurst,
   getOpenDecision,
   getWorldView,
   heartbeatBurst,
   listPendingEvents,
+  markBurstProgress,
   listRecentFacts,
   reapStaleBursts,
   schema,
@@ -21,9 +24,10 @@ import {
   type ChronicaDatabase,
 } from "@chronica/db";
 import { FactSchema, abortsTheTurn, formatWorldDate, type Fact, type Office, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
-import { DEFAULT_BUDGET, closeTheBooks, createWindowWriter, runSimulationBurst, type AnsweredDecision, type BurstProgress, type ChronicleEntry } from "@chronica/sim";
+import { DEFAULT_BUDGET, closeTheBooks, createWindowWriter, runSimulationBurst, type AnsweredDecision, type BurstProgress, type BurstResult, type ChronicleEntry, type SimModelPort } from "@chronica/sim";
 import { eq } from "drizzle-orm";
-import { ABANDONED_ERROR, BURST_STALE_MS, HEARTBEAT_MS, STALE_HOLD_MS } from "./burst-status";
+import { ABANDONED_ERROR, BURST_DEADLINE_MS, HEARTBEAT_MS, STALE_HOLD_MS, livenessAt } from "./burst-status";
+import { unopenableSave } from "./save-errors";
 
 /**
  * One turn, from the order to the commit, with no request around it.
@@ -66,7 +70,11 @@ export interface BurstJob {
   readonly askedAs: string | undefined;
 }
 
-export type PreparedBurst = { readonly status: "ready"; readonly job: BurstJob } | { readonly status: "error"; readonly message: string };
+export type PreparedBurst =
+  | { readonly status: "ready"; readonly job: BurstJob }
+  /** The same order, sent again under the same client id: the burst the first send opened, whatever became of it. */
+  | { readonly status: "existing"; readonly burstId: string }
+  | { readonly status: "error"; readonly message: string };
 
 /** Everything the request must settle before the burst is handed off. */
 export async function prepareBurst(
@@ -81,31 +89,48 @@ export async function prepareBurst(
     readonly answeredDecision?: AnsweredDecision | undefined;
     readonly resolvesDecision?: { readonly id: string; readonly optionId: string } | undefined;
     readonly askedAs?: string | undefined;
+    /** The client's own id for this order: sent twice, it finds the first burst rather than paying for a second. */
+    readonly idempotencyKey?: string | undefined;
   },
 ): Promise<PreparedBurst> {
   const { gameId, userId, playerId, characterId } = input;
-  // What an earlier process left behind: a burst that stopped beating, and
-  // the coins a call it never finished still holds. Cleared before the guards
-  // are read, so a dead burst never refuses a live order.
-  const now = Date.now();
+  const key = input.idempotencyKey;
+  if (key !== undefined) {
+    const sent = await findBurstByIdempotencyKey(db, gameId, key);
+    if (sent !== undefined) return { status: "existing", burstId: sent.id };
+  }
+  // What an earlier process left behind: a burst that stopped beating or
+  // stopped getting anywhere, and the coins a call it never finished still
+  // holds. Cleared before the guards are read, so a dead burst never refuses
+  // a live order.
+  const now = new Date();
   const [reaped, expired] = await Promise.all([
-    reapStaleBursts(db, gameId, new Date(now - BURST_STALE_MS), ABANDONED_ERROR),
-    expireStaleHolds(db, new Date(now - STALE_HOLD_MS)),
+    reapStaleBursts(db, gameId, livenessAt(now), ABANDONED_ERROR),
+    expireStaleHolds(db, new Date(now.getTime() - STALE_HOLD_MS)),
   ]);
   if (reaped > 0 || expired > 0) console.warn(`[game ${gameId}] cleared ${reaped} abandoned burst(s) and ${expired} stale coin hold(s)`);
   // Everything the turn reads, in one round of the database rather than seven.
-  const [view, open, running, factRows, queueRows, recentSubjects, recentTitles] = await Promise.all([
-    getWorldView(db, gameId),
-    getOpenDecision(db, gameId),
-    findRunningBurst(db, gameId, new Date(Date.now() - BURST_STALE_MS)),
-    listRecentFacts(db, gameId),
-    listPendingEvents(db, gameId),
-    subjectsOfRecentReports(db, gameId),
-    titlesOfRecentReports(db, gameId),
-  ]);
+  let read;
+  try {
+    read = await Promise.all([
+      getWorldView(db, gameId),
+      getOpenDecision(db, gameId),
+      findRunningBurst(db, gameId, livenessAt(now)),
+      listRecentFacts(db, gameId),
+      listPendingEvents(db, gameId),
+      subjectsOfRecentReports(db, gameId),
+      titlesOfRecentReports(db, gameId),
+    ]);
+  } catch (error) {
+    // A save that will not open is refused here, with a sentence that says
+    // so, rather than escaping the request as a 500.
+    const unopenable = unopenableSave(error);
+    if (unopenable === null) throw error;
+    console.error(`[game ${gameId}] ${error instanceof Error ? error.message : String(error)}`);
+    return { status: "error", message: unopenable };
+  }
+  const [view, open, running, factRows, queueRows, recentSubjects, recentTitles] = read;
   if (view === undefined) return { status: "error", message: "This world has no state to act on yet." };
-  if (view.scenarioClock === undefined) return { status: "error", message: "This scenario declares no clock." };
-  if (view.scenarioWarfare === undefined) return { status: "error", message: "This scenario declares no rules of war." };
   // An answer carries its own decision, and is the one order allowed to run
   // while one is open -- it is what closes it.
   if (input.answeredDecision === undefined && open !== undefined) return { status: "error", message: "A decision is waiting on you before the world can move on." };
@@ -117,8 +142,13 @@ export async function prepareBurst(
 
   const actorRef: OrderPartyRef = { kind: "character", id: characterId };
   const actorPolityId = view.world.characters.find((character) => character.id === characterId)?.polityId ?? null;
-  const burstId = await startBurst(db, { gameId, playerUserId: userId, orderText: input.orderText ?? "(time passes)" });
-  if (burstId === null) return alreadyMoving;
+  const burstId = await startBurst(db, { gameId, playerUserId: userId, orderText: input.orderText ?? "(time passes)", idempotencyKey: key ?? null });
+  if (burstId === null) {
+    // Refused by one of the two unique indexes: another burst running, or
+    // this very order sent twice in the same breath and the other send won.
+    const sent = key === undefined ? undefined : await findBurstByIdempotencyKey(db, gameId, key);
+    return sent === undefined ? alreadyMoving : { status: "existing", burstId: sent.id };
+  }
   return {
     status: "ready",
     job: {
@@ -130,7 +160,7 @@ export async function prepareBurst(
       actorPolityId,
       view,
       // Offices are scenario data, not world state, and authority derivation needs them.
-      offices: view.scenarioGovernment?.offices ?? [],
+      offices: view.scenarioGovernment.offices,
       knownFacts: factRows.flatMap((row) => {
         const parsed = FactSchema.safeParse(row.fact);
         return parsed.success ? [parsed.data] : [];
@@ -186,28 +216,55 @@ export interface RunHooks {
  * Runs a prepared burst to its commit, or to a `failed` row that says why.
  *
  * Never throws for the player's sake: whatever goes wrong, the burst row ends
- * in a state the page can read. It heartbeats while it runs so a process that
- * dies mid-turn is found out by its silence rather than by a clock.
+ * in a state the page can read. Two signs of life go to the row while it
+ * runs. The heartbeat says the process is alive, on a timer; progress says
+ * the burst is getting somewhere, and moves only when a stage is reported, a
+ * model call answers or a passage is written. A process that dies is found out
+ * by its silence, and one alive but stuck by its lack of progress -- either
+ * way the row is reaped, and a commit arriving after that is refused.
+ *
+ * And a burst that is getting somewhere slowly is told to stop at
+ * `burstDeadlineMs`: between hops, keeping what it has done.
  */
 export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hooks: RunHooks = {}): Promise<void> {
   const { gameId, burstId, userId, actorRef, actorPolityId, view, offices } = job;
-  const heartbeat = setInterval(() => { void heartbeatBurst(db, burstId).catch(() => undefined); }, HEARTBEAT_MS);
+  // Set once the row says the burst is no longer running -- reaped by a page
+  // that judged it dead -- so the work stops rather than running on to a
+  // commit that will be refused.
+  let reaped = false;
+  const beat = (alive: Promise<boolean>, what: string): void => {
+    void alive.then((running) => { if (!running) reaped = true; }, (error: unknown) => { console.warn(`[burst ${burstId}] could not record ${what}:`, error); });
+  };
+  const heartbeat = setInterval(() => beat(heartbeatBurst(db, burstId), "a heartbeat"), HEARTBEAT_MS);
+  const progressed = (): void => beat(markBurstProgress(db, burstId), "progress");
   const say = (line: ProgressLine): void => {
     hooks.onProgress?.(line);
-    // Fire and forget: the burst never waits on its own commentary.
-    void appendBurstProgress(db, { gameId, burstId, kind: "progress", payload: line }).catch(() => undefined);
+    progressed();
+    // Not awaited: the burst never waits on its own commentary. A line that
+    // cannot be written is said in the log, never swallowed.
+    void appendBurstProgress(db, { gameId, burstId, kind: "progress", payload: line })
+      .catch((error: unknown) => { console.warn(`[burst ${burstId}] a progress line was not recorded:`, error); });
   };
   const fail = async (message: string): Promise<void> => {
-    await failBurst(db, burstId, message).catch(() => undefined);
+    await failBurst(db, burstId, message).catch((error: unknown) => { console.error(`[burst ${burstId}] could not record its own failure:`, error); });
     if (job.askedAs !== undefined) await restoreAskingCharacter(db, job.playerId, job.askedAs);
   };
 
   try {
     const timed = createTimedPort({ db, userId, gameId, adapter: createAiAdapter() });
-    const port = timed.port;
+    // Every answered call is progress, whichever stage asked for it.
+    const port: SimModelPort = {
+      complete: async (operation, system, user) => {
+        const answer = await timed.port.complete(operation, system, user);
+        progressed();
+        return answer;
+      },
+    };
     const turnStartedAt = performance.now();
+    const deadline = burstDeadlineMs();
+    const deadlineAt = deadline === null ? null : Date.now() + deadline;
     const from = view.world.instant;
-    const clock = view.scenarioClock!;
+    const clock = view.scenarioClock;
 
     // The record is written window by window while the burst runs, and each
     // passage is handed to the page the moment it exists. The commit writes
@@ -240,7 +297,8 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
             quote: entry.quote,
             factIds: entry.factIds,
           },
-        }).catch(() => undefined);
+        }).catch((error: unknown) => { console.warn(`[burst ${burstId}] a written passage was not handed to the page (the commit still keeps it):`, error); });
+        progressed();
       },
     });
 
@@ -248,16 +306,16 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
     try {
       result = await runSimulationBurst({
         world: view.world,
-        clock: view.scenarioClock!,
+        clock,
         offices,
         // How those offices are filled, so a consulship that runs out is
         // refilled by election rather than left empty for good.
-        ...(view.scenarioGovernment === undefined ? {} : { successionRules: view.scenarioGovernment.successionRules }),
-        warfare: view.scenarioWarfare!,
-        ...(view.scenarioMap === undefined ? {} : { terrains: view.scenarioMap.terrains }),
-        ...(view.scenarioLife === undefined ? {} : { life: view.scenarioLife }),
-        ...(view.scenarioWealth === undefined ? {} : { wealth: view.scenarioWealth }),
-        ...(view.scenarioHistoricalPressures === undefined ? {} : { historicalPressures: view.scenarioHistoricalPressures }),
+        successionRules: view.scenarioGovernment.successionRules,
+        warfare: view.scenarioWarfare,
+        terrains: view.scenarioMap.terrains,
+        life: view.scenarioLife,
+        wealth: view.scenarioWealth,
+        historicalPressures: view.scenarioHistoricalPressures,
         burstId,
         gameId,
         actorRef,
@@ -270,6 +328,9 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
         knownFacts: job.knownFacts,
         queue: job.queue,
         port,
+        // Stop between hops once the burst has run too long, or once the row
+        // says it has been given up; what was done so far is kept.
+        shouldStop: () => reaped || (deadlineAt !== null && Date.now() > deadlineAt),
         ...(cognitionShardsFromEnv() === undefined ? {} : { budget: { ...DEFAULT_BUDGET, cognitionShards: cognitionShardsFromEnv() } }),
       });
     } catch (error) {
@@ -312,6 +373,9 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
     if (result.salvaged.length > 0) {
       console.warn(`[burst ${burstId}] dropped ${result.salvaged.length} thing(s) to keep the answer: ${result.salvaged.join(", ")}`);
     }
+    if (result.stopReason === "deadline") {
+      console.warn(`[burst ${burstId}] stopped ${reaped ? "because its row was given up" : `at its deadline (${Math.round((deadline ?? 0) / 1000)}s)`}; committing what it had done`);
+    }
 
     say({ stage: "committing", line: "The record is entered." });
     try {
@@ -332,6 +396,11 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
           outcome: result.outcome,
           stopReason: result.stopReason,
           accumulatedSignificance: result.accumulatedSignificance,
+          // Everything the burst set down, kept with it rather than only
+          // printed below: what the budget turned away, what could not be
+          // read, and what was dropped to keep an answer.
+          skipped: workNotDone(result),
+          chronicleCalls: chronicle.calls,
         },
         ...(entries.length === 0 ? {} : {
           checkpoints: entries.map((entry) => ({
@@ -362,6 +431,13 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
       });
     } catch (error) {
       if (error instanceof WorldRevisionConflictError) { await fail("The world moved while your order was being carried out. Try again."); return; }
+      // Given up while it worked, and the page already told the player so.
+      // Nothing to write: the row already says failed.
+      if (error instanceof BurstNoLongerRunningError) {
+        console.warn(`[burst ${burstId}] ${error.message}`);
+        if (job.askedAs !== undefined) await restoreAskingCharacter(db, job.playerId, job.askedAs);
+        return;
+      }
       if (error instanceof WorldWouldNotLoadError) {
         console.error(`[burst ${burstId}] ${error.message}`);
         await fail("Something in this turn would have damaged the save, so it was not kept. Your world is as it was; try the order again.");
@@ -392,7 +468,7 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
     // What the turn actually cost in seconds, per stage: the only place the
     // call budget and the player's wait are written down together.
     console.log(
-      `[burst ${burstId}] ${((performance.now() - turnStartedAt) / 1000).toFixed(1)}s total | ${timed.summary()} | ${result.iterations} rounds, ${result.modelCalls + chronicle.calls} calls${result.mechanicCalls === 0 ? "" : ` (+${result.mechanicCalls} for rules)`}, stopped on ${result.stopReason}${result.parseFailures.length === 0 ? "" : `, ${result.parseFailures.length} unreadable`}${result.skipped.length === 0 ? "" : ` | skipped: ${(["cognition", "reconcile", "repair"] as const).map((stage) => `${stage} ×${result.skipped.filter((skip) => skip.stage === stage).length}`).join(", ")}`}`,
+      `[burst ${burstId}] ${((performance.now() - turnStartedAt) / 1000).toFixed(1)}s total | ${timed.summary()} | ${result.iterations} rounds, ${result.modelCalls + chronicle.calls} calls${result.mechanicCalls === 0 ? "" : ` (+${result.mechanicCalls} for rules)`}, stopped on ${result.stopReason}${result.parseFailures.length === 0 ? "" : `, ${result.parseFailures.length} unreadable`}${result.skipped.length === 0 ? "" : ` | skipped: ${[...new Set(result.skipped.map((skip) => skip.stage))].map((stage) => `${stage} ×${result.skipped.filter((skip) => skip.stage === stage).length}`).join(", ")}`}`,
     );
 
     if (hooks.afterCommit !== undefined) {
@@ -409,6 +485,35 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
   } finally {
     clearInterval(heartbeat);
   }
+}
+
+/**
+ * Everything a burst set down, as the rows `simulation_bursts.skipped` keeps:
+ * calls the budget or the router turned away, answers that could not be
+ * read, and fields dropped to keep an answer. Nothing here is the player's.
+ */
+export function workNotDone(result: Pick<BurstResult, "skipped" | "parseFailures" | "salvaged">): { stage: string; reason: string }[] {
+  return [
+    ...result.skipped.map((skip) => ({ stage: skip.stage, reason: skip.reason })),
+    ...result.parseFailures.map((reason) => ({ stage: "unreadable", reason })),
+    ...result.salvaged.map((reason) => ({ stage: "salvaged", reason })),
+  ];
+}
+
+/**
+ * How long the simulation may run before it is told to stop, in ms, or null
+ * for no deadline. `CHRONICA_BURST_DEADLINE_MS` overrides it (0 turns it
+ * off). A burst answered by hand waits on a person, not a provider, so it has
+ * none unless one is asked for.
+ */
+export function burstDeadlineMs(env: Readonly<Record<string, string | undefined>> = process.env): number | null {
+  const raw = env.CHRONICA_BURST_DEADLINE_MS?.trim();
+  if (raw !== undefined && raw.length > 0) {
+    const ms = Number(raw);
+    return Number.isFinite(ms) && ms > 0 ? ms : null;
+  }
+  if (env.CHRONICA_AI_MODE === "hand") return null;
+  return BURST_DEADLINE_MS;
 }
 
 /** `CHRONICA_COGNITION_SHARDS`: 2, 3 or 4 calls for a large cast, to measure against the default (plan §1 F). Unset means the default. */

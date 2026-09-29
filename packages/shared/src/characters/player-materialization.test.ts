@@ -266,3 +266,28 @@ describe("who a declared player is, as they declared it", () => {
     expect(projected.material.forces.some((force) => force.commanderCharacterId === PLAYER)).toBe(false);
   });
 });
+
+describe("who a declared man is, from what was said of him", () => {
+  it("carries the traits his declaration names, a mind that agrees with them, finer skills of his own, and a consul's standing", () => {
+    const declared = knowledgebase({
+      biography: "A senator of the Papirii, bold in the field and ruthless with those who cross him, elected consul for the year and charged with Rome's answer to the Mamertine appeal from Messana.",
+    });
+    const placed = materializePlayerCharacter(withSecondChairEmpty(), PLAYER, declared, government);
+    const player = placed.characters.find((character) => character.id === PLAYER)!;
+    expect(player.traits).toEqual(["bold", "cruel"]);
+    const undescribed = materializePlayerCharacter(withSecondChairEmpty(), PLAYER, knowledgebase(), government).characters.find((character) => character.id === PLAYER)!;
+    expect(player.mind.temperament.boldness).toBe(Math.min(100, undescribed.mind.temperament.boldness + 10));
+    expect(player.mind.temperament.cruelty).toBe(undescribed.mind.temperament.cruelty + 12);
+    // Every finer skill written, each within fifteen of the skill it belongs to.
+    expect(Object.keys(player.skills.subSkills)).toHaveLength(14);
+    expect(Math.abs(player.skills.subSkills.rhetoric! - 60)).toBeLessThanOrEqual(15);
+    // A consul is not a ploughman.
+    expect(player.prestigeBps).toBeGreaterThanOrEqual(5_500);
+  });
+
+  it("starts a freedman low, whatever he declares himself", () => {
+    const freedman = knowledgebase({ role: "A freedman potter of Ostia", socioEconomicClass: "Freedman", legalStatus: "freed" });
+    const placed = materializePlayerCharacter(world(), PLAYER, freedman, government);
+    expect(placed.characters.find((character) => character.id === PLAYER)!.prestigeBps).toBe(1_500);
+  });
+});

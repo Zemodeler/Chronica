@@ -35,6 +35,7 @@ import { CovertPlotKindSchema } from "../world/covert-plot";
 import { WatchPredicateSchema } from "../world/watch";
 import { TacticalPremiseSchema } from "../warfare/tactical-modifier";
 import { EffectBandSchema, StandingEffectSchema } from "../world/standing-effects";
+import { StandardLeverSchema } from "../world/departments";
 import { StructureKindSchema } from "../world/structure";
 import { PositionTypeSchema } from "../world/map";
 import { DiplomaticAnswerSchema, DiplomaticMessageKindSchema } from "../world/diplomacy";
@@ -136,6 +137,59 @@ const ObligationUpsertSchema = z.object({
 }).strict();
 
 /**
+ * One stage of a project, and what it costs when it falls due.
+ *
+ * `.strict()`, and the one place in the vocabulary where strictness is worth
+ * a whole delta: the obvious misspelling is `cost`, an unknown key was
+ * stripped in silence, and the milestone then fell due for nothing. A
+ * fortress, a fleet and four months of mercenary pay all came free, with no
+ * refusal, no friction, and nothing in the record to say the treasury had been
+ * spared. Better to lose the delta and be told than to keep it and be lied to.
+ */
+const ProjectStageSchema = z.object({
+  label: TitleSchema,
+  dueInDays: DayOffsetSchema,
+  costAmount: MoneySchema.default(0),
+}).strict().meta({ id: "ProjectStage" });
+
+/**
+ * What exists when the last milestone falls. A naval expansion that completes
+ * and produces no ships has not happened. Omit it only for an effort whose
+ * whole product is that it took place.
+ */
+const ProjectOutcomeSchema = z
+  .object({
+    kind: z.enum(["force", "structure", "income_source", "force_move", "agreement", "transfer", "none"]),
+    label: TitleSchema,
+    /** Men for a force, garrison capacity for a structure, revenue per period for an income source, the sum handed over for a transfer. */
+    amount: z.number().int().nonnegative().max(10_000_000).default(0),
+    provinceId: MaybeIdSchema.default(null),
+    polityId: MaybeIdSchema.default(null),
+    commanderCharacterRef: MaybeRefSchema.default(null),
+    /** For "force_move": the army that arrives at "provinceId" when the journey ends. */
+    forceRef: MaybeRefSchema.default(null),
+    /** For "force": what kind of troops, "warship" for hulls. A fleet built as infantry is no fleet. */
+    categoryId: EntityIdSchema.optional(),
+    /**
+     * For "agreement": what the two powers end up standing in, and who they
+     * are. An embassy that arrives, is heard, and produces nothing has not
+     * happened -- "a protector for Messana was secured" with nobody named as
+     * the protector is a project reporting itself complete while leaving the
+     * world exactly as it was.
+     */
+    agreementKind: PolityAgreementKindSchema.nullable().default(null),
+    withPolityId: MaybeIdSchema.default(null),
+    beneficiaryAccountRef: MaybeRefSchema.default(null),
+    cadenceDays: DaysSchema.nullable().default(null),
+    /** For "structure": what kind of building, what it goes on doing, and who pays its keep. */
+    structureKind: StructureKindSchema.optional(),
+    effects: z.array(StandingEffectSchema).max(6).optional(),
+    upkeep: UpkeepRefSchema.nullable().optional(),
+  })
+  .strict()
+  .meta({ id: "ProjectOutcome" });
+
+/**
  * VISION §8: an overambitious order does not fail, it becomes a project with
  * friction. Milestones are what let §17's queue schedule four months of
  * recruitment without reasoning through four months.
@@ -147,62 +201,8 @@ const ProjectCreateSchema = z.object({
   label: TitleSchema,
   sponsorRef: OrderPartyRefSchema,
   fundingAccountRef: MaybeRefSchema,
-  milestones: z
-    .array(
-      z.object({
-        label: TitleSchema,
-        dueInDays: DayOffsetSchema,
-        /**
-         * What this stage costs when it falls due.
-         *
-         * `.strict()`, and the one place in the vocabulary where strictness is
-         * worth a whole delta: the obvious misspelling is `cost`, an unknown
-         * key was stripped in silence, and the milestone then fell due for
-         * nothing. A fortress, a fleet and four months of mercenary pay all
-         * came free, with no refusal, no friction, and nothing in the record to
-         * say the treasury had been spared. Better to lose the delta and be
-         * told than to keep it and be lied to.
-         */
-        costAmount: MoneySchema.default(0),
-      }).strict(),
-    )
-    .min(1)
-    .max(20),
-  /**
-   * What exists when the last milestone falls. A naval expansion that completes
-   * and produces no ships has not happened. Omit it only for an effort whose
-   * whole product is that it took place.
-   */
-  completionOutcome: z
-    .object({
-      kind: z.enum(["force", "structure", "income_source", "force_move", "agreement", "transfer", "none"]),
-      label: TitleSchema,
-      /** Men for a force, garrison capacity for a structure, revenue per period for an income source, the sum handed over for a transfer. */
-      amount: z.number().int().nonnegative().max(10_000_000).default(0),
-      provinceId: MaybeIdSchema.default(null),
-      polityId: MaybeIdSchema.default(null),
-      commanderCharacterRef: MaybeRefSchema.default(null),
-      /** For "force_move": the army that arrives at "provinceId" when the journey ends. */
-      forceRef: MaybeRefSchema.default(null),
-      /**
-       * For "agreement": what the two powers end up standing in, and who they
-       * are. An embassy that arrives, is heard, and produces nothing has not
-       * happened -- "a protector for Messana was secured" with nobody named as
-       * the protector is a project reporting itself complete while leaving the
-       * world exactly as it was.
-       */
-      agreementKind: PolityAgreementKindSchema.nullable().default(null),
-      withPolityId: MaybeIdSchema.default(null),
-      beneficiaryAccountRef: MaybeRefSchema.default(null),
-      cadenceDays: DaysSchema.nullable().default(null),
-      /** For "structure": what kind of building, what it goes on doing, and who pays its keep. */
-      structureKind: StructureKindSchema.optional(),
-      effects: z.array(StandingEffectSchema).max(6).optional(),
-      upkeep: UpkeepRefSchema.nullable().optional(),
-    })
-    .strict()
-    .nullable()
-    .default(null),
+  milestones: z.array(ProjectStageSchema).min(1).max(20),
+  completionOutcome: ProjectOutcomeSchema.nullable().default(null),
   reason: ReasonSchema,
 }).strict();
 
@@ -823,6 +823,40 @@ const EnactmentProposalSchema = z
       .strict()
       .optional(),
     body: z.object({ name: NameSchema }).strict().optional(),
+    /**
+     * A department: who is in charge of a piece of the state's work. Founding
+     * one takes that work off whoever had it -- the ruler, or an older
+     * department -- once it has had a month to organise. Name the levers it
+     * holds; offices it names that do not exist are made, with an empty seat
+     * each, and called what their ids say. What no lever says goes in "effects".
+     */
+    department: z
+      .object({
+        /** Absent founds a new one. */
+        departmentRef: MaybeRefSchema.optional(),
+        name: NameSchema.optional(),
+        levers: z.array(StandardLeverSchema).optional(),
+        headOfficeId: EntityIdSchema.optional(),
+        officeIds: z.array(EntityIdSchema).optional(),
+        deputyOfficeIds: z.array(EntityIdSchema).optional(),
+        pay: z.enum(["honorary", "salaried"]).optional(),
+        effects: z.array(StandingEffectSchema).max(4).optional(),
+        abolish: z.boolean().default(false),
+      })
+      .strict()
+      .optional(),
+    /**
+     * A work the measure pays for -- a fleet, a road, a levy -- begun the day
+     * it passes. The Senate voted a fleet 119 to 0 and not a keel was laid,
+     * because carrying it changed nothing.
+     */
+    project: z.object({
+      kind: z.string().trim().min(1).max(80),
+      label: TitleSchema,
+      fundingAccountRef: MaybeRefSchema,
+      milestones: z.array(ProjectStageSchema).min(1).max(20),
+      completionOutcome: ProjectOutcomeSchema.nullable().default(null),
+    }).strict().optional(),
     /** One man excused the ladder -- age, the rung below, the gap -- for one office, for a year. */
     waiver: z.object({ characterRef: RefSchema, officeId: EntityIdSchema }).strict().optional(),
     /**
@@ -932,6 +966,12 @@ const PoliticalSupportSetSchema = z.object({
   influenceWeight: z.number().int().min(0).max(10_000),
   reasonKind: SupportReasonKindSchema,
   reasonLabel: LabelSchema,
+  /**
+   * What he said in the house, in his own words, when he spoke rather than
+   * only voted: "a war tax in a year of dear grain will lose us the plebs".
+   * Recorded as a speech; the debate is told as it happened, before the vote.
+   */
+  words: z.string().trim().min(1).max(240).nullable().optional(),
   visibility: VisibilitySchema.default("polity"),
   reason: ReasonSchema,
 }).strict();
@@ -1429,7 +1469,7 @@ const FamilyTieSetSchema = z.object({
 const ServiceContractOpenSchema = z.object({
   op: z.literal("service_contract_open"),
   localId: LocalIdSchema,
-  role: z.enum(["mercenary", "assassin", "envoy", "engineer", "physician", "tax_farmer", "gladiator", "retainer"]),
+  role: z.enum(["mercenary", "assassin", "envoy", "engineer", "physician", "tax_farmer", "gladiator", "retainer", "steward", "agent"]),
   label: TitleSchema,
   employerAccountRef: RefSchema,
   employeeRef: RefSchema,
@@ -1438,6 +1478,13 @@ const ServiceContractOpenSchema = z.object({
   termDays: DayOffsetSchema.nullable().default(null),
   duties: z.string().trim().min(1).max(400),
   forceRef: MaybeRefSchema.default(null),
+  /**
+   * The men or ships a hired captain brings, when no force of his stands yet:
+   * the engine raises them under him, answering to whoever hired them. A
+   * "mercenary" names this or "forceRef" -- a shipmaster hired alone once
+   * drew 100 a month and carried nobody.
+   */
+  company: z.object({ categoryId: EntityIdSchema, strength: z.number().int().positive().max(100_000) }).strict().nullable().default(null),
   provinceId: MaybeIdSchema.default(null),
   counterpartPolityId: MaybeRefSchema.default(null),
   reason: ReasonSchema,
@@ -1533,6 +1580,26 @@ const ForceRaidSchema = z.object({
 }).strict();
 
 
+/** What a treaty makes happen (`agreement_open`'s clauses), and what a letter offering one offers. */
+const TreatyClauseSchema = z.discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("indemnity"),
+        payerPolityId: RefSchema,
+        /** Each period's payment, in the world's money. */
+        amount: MoneySchema,
+        cadenceDays: z.number().int().positive().max(3_660),
+        periods: z.number().int().min(1).max(100),
+      }).strict(),
+      z.object({ kind: z.literal("cession"), provinceId: EntityIdSchema, toPolityId: RefSchema }).strict(),
+      z.object({ kind: z.literal("hostage"), characterRef: RefSchema, heldByPolityId: RefSchema }).strict(),
+      /**
+       * Surrender (deditio): the power gives itself up to the other party. Its
+       * ground, people and money become the victor's, its army is disbanded,
+       * and it is no more -- though its people remember (`sim/polity-end.ts`).
+       */
+      z.object({ kind: z.literal("submission"), polityId: RefSchema, toPolityId: RefSchema }).strict(),
+    ]).meta({ id: "TreatyClause" });
+
 /**
  * One power writing to another (VISION §24).
  *
@@ -1564,6 +1631,25 @@ const DiplomaticMessageSendSchema = z.object({
   /** Set when this is itself the answer to an earlier letter. */
   inReplyToRef: MaybeRefSchema.default(null),
   visibility: VisibilitySchema.default("polity"),
+  /**
+   * The agreements accepting this would make, when it offers any: an ally
+   * taken in ("alliance", "foedus"), a city put under protection
+   * ("protectorate"), a peace, tribute. An offer of alliance, peace or trade,
+   * or a demand for tribute, already means its own. Empty for a letter that
+   * only says something.
+   */
+  proposes: z.array(PolityAgreementKindSchema).max(4).optional(),
+  /**
+   * The terms of the peace or treaty it offers, carried out if it is accepted:
+   * provinces ceded, an indemnity, hostages, a surrender.
+   */
+  clauses: z.array(TreatyClauseSchema).max(6).optional(),
+  /**
+   * What the sender does if it is refused, or no answer comes by
+   * "replyWithinDays": "war" for an ultimatum whose threat is war. The engine
+   * carries it out when the answer is known -- not before it is asked.
+   */
+  onRefusal: z.enum(["war"]).nullable().optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -1602,18 +1688,7 @@ const AgreementOpenSchema = z.object({
    * it is paid off or the treaty ends.
    */
   clauses: z
-    .array(z.discriminatedUnion("kind", [
-      z.object({
-        kind: z.literal("indemnity"),
-        payerPolityId: RefSchema,
-        /** Each period's payment, in the world's money. */
-        amount: MoneySchema,
-        cadenceDays: z.number().int().positive().max(3_660),
-        periods: z.number().int().min(1).max(100),
-      }).strict(),
-      z.object({ kind: z.literal("cession"), provinceId: EntityIdSchema, toPolityId: RefSchema }).strict(),
-      z.object({ kind: z.literal("hostage"), characterRef: RefSchema, heldByPolityId: RefSchema }).strict(),
-    ]))
+    .array(TreatyClauseSchema)
     .max(6)
     .optional(),
   /** A truce with a term ends by itself. Null runs until somebody ends it. */
@@ -1712,6 +1787,45 @@ const ContingencyArmSchema = z.object({
   ambushForceRef: MaybeRefSchema.default(null),
   /** How long it keeps. Null for a plan that waits as long as it must. */
   expiresInDays: DayOffsetSchema.nullable().default(null),
+  /** For "stand_to": what the order said to do then, in its own words. */
+  standingOrder: z.string().trim().min(1).max(400).nullable().optional(),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * Laying a siege (`world/siege.ts`): an army standing in an enemy's province
+ * invests the city, and the engine starves it from then on -- reporting every
+ * fortnight, and opening its gates when it can hold no longer. The army has to
+ * be there, and its power at war with the city's. "settlementId" names the
+ * city; null invests the province's strongholds at large.
+ */
+const SiegeLaySchema = z.object({
+  op: z.literal("siege_lay"),
+  localId: LocalIdSchema,
+  forceRef: RefSchema,
+  settlementId: MaybeIdSchema.default(null),
+  reason: ReasonSchema,
+}).strict();
+
+/** Raising a siege: the army marches off, or terms are made. Leaving the province raises it anyway. */
+const SiegeLiftSchema = z.object({
+  op: z.literal("siege_lift"),
+  siegeRef: RefSchema,
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * Sending a man to go through the books: of one of the state's departments,
+ * or of a household's estates and trade. It takes a month or three; whether
+ * it finds anything depends on how well he looks and how well it was hidden.
+ */
+const AuditOpenSchema = z.object({
+  op: z.literal("audit_open"),
+  localId: LocalIdSchema,
+  auditorCharacterRef: RefSchema,
+  /** The department gone through. Absent, "householdOwnerRef" names whose estates. */
+  departmentRef: MaybeRefSchema.optional(),
+  householdOwnerRef: MaybeRefSchema.optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -1735,6 +1849,13 @@ const DiplomaticMessageAnswerSchema = z.object({
   answer: DiplomaticAnswerSchema,
   /** The recipient's own words, and the reason it went the way it did. */
   answerText: z.string().trim().min(1).max(1_200),
+  /**
+   * Accepting: which of the agreements the letter offered is taken up, where
+   * it offered more than one. The engine opens it; null takes the only one.
+   */
+  agreementKind: PolityAgreementKindSchema.nullable().optional(),
+  /** For tribute, protection and foedus: the power that pays, is protected, or follows. Null means the power accepting. */
+  boundPolityId: MaybeRefSchema.optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -1788,6 +1909,9 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   CovertPlotOpenSchema,
   ContingencyArmSchema,
   ContingencyDisarmSchema,
+  AuditOpenSchema,
+  SiegeLaySchema,
+  SiegeLiftSchema,
   FamilyTieSetSchema,
   CharacterDeathSchema,
   LegalStatusSetSchema,
@@ -1848,6 +1972,9 @@ export const WORLD_DELTA_OPS = [
   "covert_plot_open",
   "contingency_arm",
   "contingency_disarm",
+  "audit_open",
+  "siege_lay",
+  "siege_lift",
   "force_raid",
   "family_tie_set",
   "character_death",
@@ -1919,6 +2046,11 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   // in advance. It is judged exactly as ordering it on the day would be.
   contingency_arm: "military",
   contingency_disarm: "military",
+  // Going through the books is the fiscal power at its plainest.
+  audit_open: "fiscal",
+  // A siege is an army's work, judged as ordering the army would be.
+  siege_lay: "military",
+  siege_lift: "military",
   // Marrying and adopting are a family's business, and its head's.
   family_tie_set: "social",
   // Putting a man to death is the judicial power at its plainest; a duel or a

@@ -21,7 +21,8 @@ export const GovernmentFormSchema = z.enum([
   "soldier_commune",
   "league",
   "temple_state",
-]);
+  // Named, so a model's schema writes the list once (see `AgreementKind`).
+]).meta({ id: "GovernmentForm" });
 export type GovernmentForm = z.infer<typeof GovernmentFormSchema>;
 
 export const GOVERNMENT_FORM_IN_WORDS: Record<GovernmentForm, string> = {
@@ -81,6 +82,7 @@ export const BlocInterestSchema = z.enum([
   "faction",
   "clients",
   "loyalists",
+  "war_weary",
 ]);
 export type BlocInterest = z.infer<typeof BlocInterestSchema>;
 
@@ -136,6 +138,8 @@ export const INTEREST_CONCERN: Readonly<Record<BlocInterest, Row>> = {
   faction: {},
   clients: {},
   loyalists: { strengthen_ruler: 40, weaken_ruler: -30 },
+  // A city tired of its war: for any end to it, and against whatever feeds it.
+  war_weary: { peace: 70, war: -70, levy: -30, taxes: -15, spending: -10 },
 };
 
 /** Interests that lean by their leader's word rather than by the table. */
@@ -192,4 +196,5 @@ export const INTEREST_IN_WORDS: Record<BlocInterest, string> = {
   faction: "its leader",
   clients: "its patron",
   loyalists: "the fallen government",
+  war_weary: "an end to the war",
 };

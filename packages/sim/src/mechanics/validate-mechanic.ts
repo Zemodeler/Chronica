@@ -12,6 +12,7 @@ import {
 } from "@chronica/shared";
 import { polityOfScope } from "../apply/apply-deltas";
 import type { ReadableRefs } from "./refs";
+import { commands } from "./instantiate";
 
 /**
  * Whether a rule the model wrote is one the engine will run.
@@ -62,6 +63,7 @@ export function validateMechanic(draft: MechanicDraft, world: WorldState, refs: 
       case "arrears_reach": return exists.obligation(predicate.obligationId) ? null : `no obligation "${predicate.obligationId}"`;
       case "character_dies": return exists.character(predicate.characterId) ? null : `no person "${predicate.characterId}"`;
       case "office_vacant": return exists.office(predicate.officeId) ? null : `no office "${predicate.officeId}"`;
+      case "question_decided": return world.material.politicalProcedures.some((procedure) => procedure.id === predicate.procedureId) ? null : `no question "${predicate.procedureId}"`;
       case "province_level_above":
       case "province_level_below": return provinceIds.has(predicate.provinceId) ? null : `"${predicate.provinceId}" is not a province this rule may read`;
       case "account_above": return accountIds.has(predicate.accountId) ? null : `"${predicate.accountId}" is not an account this rule may read`;
@@ -77,6 +79,8 @@ export function validateMechanic(draft: MechanicDraft, world: WorldState, refs: 
         if (!polityIds.has(predicate.polityId) || !polityIds.has(predicate.otherPolityId)) return "a war names a power this rule may not read";
         return predicate.polityId === predicate.otherPolityId ? "a war needs two powers" : null;
       case "force_strength_above": return forceIds.has(predicate.forceId) ? null : `"${predicate.forceId}" is not an army this rule may read`;
+      case "in_months": return null;
+      case "letter_answered": return exists.polity(predicate.fromPolityId) && exists.polity(predicate.toPolityId) ? null : "a letter names a power that does not exist";
     }
   };
 
@@ -114,6 +118,14 @@ export function validateMechanic(draft: MechanicDraft, world: WorldState, refs: 
   for (const effect of draft.effects) {
     const fault = effectFault(effect, { accountIds, provinceIds, polityIds, characterIds });
     if (fault !== null) return { ok: false, reason: fault };
+    // An army is the owner's to touch only while he commands it -- checked again at every firing.
+    if (effect.op === "force_shift") {
+      if (effect.quantity === "men" && effect.direction === "raise") return { ok: false, reason: "a rule does not raise men: a levy does" };
+      if (!forceIds.has(effect.forceId) || !commands({ ownerRef: refs.owner }, world, effect.forceId)) {
+        dropped.push(`an order to ${effect.forceId}: ${refs.owner.id} does not command it`);
+        continue;
+      }
+    }
     if (effect.op === "money_transfer" && !ownedAccounts.has(effect.fromAccountId)) {
       const warrant = warrantFor(effect.fromAccountId, world, refs, offices);
       if (warrant === null) {
@@ -142,6 +154,8 @@ function effectFault(effect: MechanicEffect, known: { accountIds: Set<string>; p
     case "polity_stance_shift":
       if (!known.polityIds.has(effect.polityId) || !known.polityIds.has(effect.towardPolityId)) return "a stance names a power this rule may not change";
       return effect.polityId === effect.towardPolityId ? "a stance needs two powers" : null;
+    // Command is checked by the caller, which may drop it rather than refuse the rule.
+    case "force_shift": return null;
     case "relation_shift":
       if (!known.characterIds.has(effect.subjectCharacterId) || !known.characterIds.has(effect.targetCharacterId)) return "a relation names somebody this rule may not change";
       return effect.subjectCharacterId === effect.targetCharacterId ? "a relation needs two people" : null;

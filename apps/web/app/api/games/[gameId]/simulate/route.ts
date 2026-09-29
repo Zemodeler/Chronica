@@ -1,3 +1,4 @@
+import { orSaveNeedsRepair } from "../../../../../lib/save-errors";
 import { TIME_SPANS, getGameView, startDetachedBurst } from "../../../../../lib/simulation-service";
 
 /**
@@ -21,9 +22,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ gam
   const requestedSpan = field("spanDays");
   const spanDays = typeof requestedSpan === "number" && (TIME_SPANS as readonly number[]).includes(requestedSpan) ? requestedSpan : undefined;
   if (waiting && spanDays === undefined) return Response.json({ error: "Say how long to wait." }, { status: 400 });
+  // The page's own id for this order. Sent again -- a retry after the
+  // connection dropped -- it finds the burst the first send opened.
+  const requestId = field("requestId");
+  const idempotencyKey = typeof requestId === "string" && /^[A-Za-z0-9_-]{8,100}$/.test(requestId) ? requestId : undefined;
 
   const text = orderText.trim();
-  const outcome = await startDetachedBurst(gameId, text.length === 0 ? null : text, { spanDays });
+  const outcome = await startDetachedBurst(gameId, text.length === 0 ? null : text, { spanDays, idempotencyKey });
   if (outcome.status === "error") {
     const busy = outcome.message.startsWith("The world is already moving");
     return Response.json({ error: outcome.message }, { status: busy ? 409 : 400 });
@@ -33,7 +38,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ gam
 
 export async function GET(_request: Request, { params }: { params: Promise<{ gameId: string }> }) {
   const { gameId } = await params;
-  const view = await getGameView(gameId);
-  if (view === null) return Response.json({ error: "Unauthorized." }, { status: 401 });
-  return Response.json(view, { headers: { "Cache-Control": "private, no-store" } });
+  return orSaveNeedsRepair(gameId, async () => {
+    const view = await getGameView(gameId);
+    if (view === null) return Response.json({ error: "Unauthorized." }, { status: 401 });
+    return Response.json(view, { headers: { "Cache-Control": "private, no-store" } });
+  });
 }

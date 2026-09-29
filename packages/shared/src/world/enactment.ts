@@ -2,6 +2,7 @@ import { z } from "zod";
 import { EntityIdSchema } from "../material-state";
 import { StandingEffectSchema, StandingUpkeepSchema } from "./standing-effects";
 import { ChamberPowerSchema, FranchiseSchema, GovernmentFormSchema } from "../political-parts";
+import { LeverIdSchema } from "./departments";
 
 /**
  * A change to the constitution itself, as parts (`sim/constitutions.ts`).
@@ -73,6 +74,33 @@ export const EnactmentSchema = z
     body: z.object({ name: z.string().trim().min(1).max(120) }).strict().nullable().default(null),
     /** The constitution changed, as parts. */
     constitution: ConstitutionAmendmentSchema.nullable().optional(),
+    /**
+     * A department founded, reformed or abolished (`world/departments.ts`):
+     * who is in charge of what. Null leaves every department as it was.
+     */
+    department: z
+      .object({
+        /** Null founds a new one. */
+        departmentId: EntityIdSchema.nullable().default(null),
+        name: z.string().trim().min(1).max(120).nullable().default(null),
+        /** Null keeps what it had; a new one with none is given what its name says, or a standing effect. */
+        levers: z.array(LeverIdSchema).max(12).nullable().default(null),
+        offices: z.array(z.object({
+          officeId: EntityIdSchema,
+          officeLabel: z.string().trim().min(1).max(120).nullable().default(null),
+          role: z.enum(["head", "officer", "deputy"]).default("officer"),
+          seats: z.number().int().min(1).max(12).nullable().default(null),
+        }).strict()).max(8).default([]),
+        pay: z.enum(["honorary", "salaried"]).nullable().default(null),
+        /** What it goes on doing that no lever says. */
+        effects: z.array(StandingEffectSchema).max(4).default([]),
+        abolish: z.boolean().default(false),
+      })
+      .strict()
+      .nullable()
+      .default(null),
+    /** A work it pays for, kept "proposed" until it passes and begun then. */
+    projectId: EntityIdSchema.nullable().default(null),
     /** A man excused the ladder for one office (`resolveEligibility`). */
     waiver: z.object({ characterId: EntityIdSchema, officeId: EntityIdSchema }).strict().nullable().default(null),
     /** Set when it was carried out, so it is never carried out twice. */

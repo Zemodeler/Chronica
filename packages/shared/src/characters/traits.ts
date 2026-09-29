@@ -194,6 +194,8 @@ export interface TraitObservationOutcome {
   readonly observations: readonly TraitObservation[];
   /** Traits that just reached corroboration, with the people who said so. */
   readonly confirmed: readonly { readonly characterId: string; readonly traitId: string; readonly observerCharacterIds: readonly string[] }[];
+  /** Traits two people have now seen the opposite of: no longer who somebody is. */
+  readonly lost: readonly { readonly characterId: string; readonly traitId: string; readonly contradictedBy: string; readonly observerCharacterIds: readonly string[] }[];
   /** Why an observation was not recorded, for the record rather than for a rejection. */
   readonly refused: readonly { readonly traitId: string; readonly reason: string }[];
 }
@@ -212,9 +214,12 @@ export function observeTraits(
   atStep: number,
   nextId: (prefix: string) => string,
 ): TraitObservationOutcome {
-  const observations = [...existing];
+  let observations = [...existing];
   const confirmed: { characterId: string; traitId: string; observerCharacterIds: string[] }[] = [];
+  const lost: { characterId: string; traitId: string; contradictedBy: string; observerCharacterIds: string[] }[] = [];
   const refused: { traitId: string; reason: string }[] = [];
+  const shed = new Map<string, Set<string>>();
+  const heldNow = (characterId: string): readonly string[] => traitsOf(characterId).filter((held) => !shed.get(characterId)?.has(held));
 
   for (const proposal of proposals) {
     const definition = TRAIT_REGISTRY[proposal.traitId];
@@ -226,21 +231,18 @@ export function observeTraits(
       refused.push({ traitId: proposal.traitId, reason: "Nobody observes themselves into a character." });
       continue;
     }
-    const already = traitsOf(proposal.characterId);
+    const already = heldNow(proposal.characterId);
     if (already.includes(proposal.traitId)) continue;
-    if (already.length >= MAX_TRAITS) {
-      refused.push({ traitId: proposal.traitId, reason: "The world has said enough about this person." });
-      continue;
-    }
-    // A man is not both cautious and bold. The trait he already has stands:
-    // it took two people to put it there, and one person's contrary opinion
-    // does not unmake it.
-    const clashes = already.some((held) => {
+    // A man is not both cautious and bold. The trait he already has stands
+    // against one person's contrary opinion -- it took two people to put it
+    // there -- and falls to two, the same as it came: a "cautious" man two
+    // people have seen charge is no longer known for caution.
+    const contradicted = already.filter((held) => {
       const heldDefinition = TRAIT_REGISTRY[held];
       return definition.incompatibleTraitIds.includes(held) || heldDefinition?.incompatibleTraitIds.includes(proposal.traitId) === true;
     });
-    if (clashes) {
-      refused.push({ traitId: proposal.traitId, reason: "It contradicts what they are already known to be." });
+    if (contradicted.length === 0 && already.length >= MAX_TRAITS) {
+      refused.push({ traitId: proposal.traitId, reason: "The world has said enough about this person." });
       continue;
     }
     const seen = observations.some(
@@ -259,6 +261,32 @@ export function observeTraits(
       atStep,
     }));
 
+    if (contradicted.length > 0) {
+      for (const held of contradicted) {
+        // Only what was seen since he was last seen to be it counts against it.
+        const since = Math.max(-1, ...observations
+          .filter((observation) => observation.characterId === proposal.characterId && observation.traitId === held)
+          .map((observation) => observation.atStep));
+        const opposes = (traitId: string): boolean => TRAIT_REGISTRY[held]?.incompatibleTraitIds.includes(traitId) === true
+          || TRAIT_REGISTRY[traitId]?.incompatibleTraitIds.includes(held) === true;
+        const against = new Set(observations
+          .filter((observation) => observation.characterId === proposal.characterId && observation.atStep >= since && opposes(observation.traitId))
+          .map((observation) => observation.observerCharacterId));
+        if (against.size < TRAIT_CORROBORATION) {
+          refused.push({ traitId: proposal.traitId, reason: "It contradicts what they are already known to be; one voice does not unmake it." });
+          continue;
+        }
+        lost.push({ characterId: proposal.characterId, traitId: held, contradictedBy: proposal.traitId, observerCharacterIds: [...against] });
+        shed.set(proposal.characterId, new Set([...(shed.get(proposal.characterId) ?? []), held]));
+        // What was said of him before is spent: it has to be seen again by two
+        // new people before it is who he is again.
+        observations = observations.filter((observation) => !(observation.characterId === proposal.characterId && observation.traitId === held));
+      }
+      // The opposite is not who he is yet. It is on record, and the next
+      // person to see it makes it so.
+      continue;
+    }
+
     const observers = observations
       .filter((observation) => observation.characterId === proposal.characterId && observation.traitId === proposal.traitId)
       .map((observation) => observation.observerCharacterId);
@@ -267,7 +295,18 @@ export function observeTraits(
     }
   }
 
-  return { observations, confirmed, refused };
+  return { observations, confirmed, lost, refused };
+}
+
+/**
+ * Which way somebody's character pulls on one kind of decision: the sum of
+ * what his traits say about it, within ±20 for each. `leaning(man, "risk")`
+ * is +10 for a bold man, -10 for a cautious one, 0 for anybody the world has
+ * said nothing about. Every deterministic choice a trait should colour reads
+ * through this, so a trait means the same thing everywhere.
+ */
+export function leaning(character: { readonly traits: readonly string[] }, context: string): number {
+  return character.traits.reduce((sum, id) => sum + (TRAIT_REGISTRY[id]?.decisionModifiers[context] ?? 0), 0);
 }
 
 export function getTraitDefinition(id: string): TraitDefinition | undefined {

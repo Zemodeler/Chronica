@@ -1,12 +1,18 @@
 import {
+  aptitude,
+  skillShare,
   classifyLifeStage,
   createPressure,
   currentAgeYears,
   findPlayerSuccessors,
+  applyLegacy,
+  boundedId,
+  portionFrom,
   settleEstate,
   stableHash,
   vacateOfficesOf,
   deriveRelationDimension,
+  driftMind,
   type Character,
   type FactProposalDraft,
   type ScenarioLifeRules,
@@ -131,6 +137,11 @@ export function exposureMultiplier(world: WorldState, character: Character): num
 
   if (character.disqualifyingStatuses.includes("captured")) exposure *= 1.5;
 
+  // A hard constitution shrugs off what lays another man low: a third less
+  // exposed at best, a third more at worst. Body was read by the duel and
+  // nothing else, so the frailest senator lived as long as the hardest soldier.
+  exposure *= 1 - skillShare(aptitude(character, "endurance"), 0.35);
+
   return Math.min(MAX_EXPOSURE, exposure);
 }
 
@@ -139,6 +150,17 @@ function openPerilFor(world: WorldState, characterId: string): WorldStoryline | 
   return world.storylines.find(
     (storyline) => storyline.phase !== "closed" && storyline.seedKey === `peril:${characterId}`,
   );
+}
+
+/**
+ * What a man has become since his last review: his mind moved a little by
+ * what happened to him, the traits it no longer bears out let go, and the
+ * lessons spent (`mind-drift.ts`).
+ */
+function grownBy(character: Character): Partial<Character> {
+  if (character.lessons === undefined || character.lessons.length === 0) return {};
+  const grown = driftMind(character.mind, character.traits, character.lessons);
+  return { mind: grown.mind, traits: [...grown.traits], lessons: [] };
 }
 
 /**
@@ -189,7 +211,7 @@ export function reviewLives(input: LifeReviewInput): LifeReviewResult {
       world = {
         ...world,
         characters: world.characters.map((candidate) => (candidate.id === living.id
-          ? { ...candidate, nextLifeReviewAtStep: due + interval }
+          ? { ...candidate, nextLifeReviewAtStep: due + interval, ...grownBy(candidate) }
           : candidate)),
       };
       if (stage === undefined) continue;
@@ -429,29 +451,133 @@ export function killCharacter(
 
   const settled = settleEstate(next, characterId, atStep);
   next = {
-    ...next,
-    material: {
-      ...settled.material,
-      inheritanceTransfers: [...settled.material.inheritanceTransfers, ...settled.transfers],
-    },
-    storylines: next.storylines.map((storyline) => (storyline.seedKey === `peril:${characterId}`
+    ...settled.world,
+    storylines: settled.world.storylines.map((storyline) => (storyline.seedKey === `peril:${characterId}` || storyline.seedKey === `field:${characterId}`
       ? { ...storyline, phase: "closed" as const, closedAtStep: atStep, updatedAtStep: atStep }
       : storyline)),
   };
+  // The principal heir takes up the house's friendships and its feuds.
+  const principal = settled.beneficiaryIds[0];
+  if (principal !== undefined) next = applyLegacy(next, characterId, principal, atStep);
+  const inheritance = estateFacts(next, person, settled, atStep);
+  next = inheritance.world;
 
   return {
     world: next,
     facts: [{
       localId: `death_${characterId}_${atStep}`,
       kind: "death",
-      summary: `${person.name} is dead. ${cause}`,
+      summary: `${person.name} is dead. ${cause}`.slice(0, 600),
       affectedRefs: [{ kind: "character", id: characterId }],
       visibility: "public",
       discoveryState: "public",
       knowableInDays: 0,
       significance: 90,
+    }, ...inheritance.facts],
+  };
+}
+
+/**
+ * What the will said, in the record: who took what, and a thread when nobody
+ * could. A dead man's money moving is the kind of thing a city talks about,
+ * and an heirless estate is the kind of thing men go to law, or to war, over.
+ */
+function estateFacts(
+  world: WorldState,
+  person: Character,
+  settled: ReturnType<typeof settleEstate>,
+  atStep: number,
+): { world: WorldState; facts: FactProposalDraft[] } {
+  if (settled.estateId === null) return { world, facts: [] };
+  const name = (id: string): string => world.characters.find((character) => character.id === id)?.name ?? id;
+  const titleOf = (id: string): string => world.material.holdings.find((holding) => holding.id === id)?.title
+    ?? world.material.ventures.find((venture) => venture.id === id)?.title ?? id;
+  const affected = [{ kind: "character" as const, id: person.id }, ...settled.beneficiaryIds.slice(0, 6).map((id) => ({ kind: "character" as const, id }))];
+  if (settled.heirless) {
+    const land = settled.transfers.filter((transfer) => transfer.assetKind === "holding").map((transfer) => titleOf(transfer.assetId));
+    const storylineId = boundedId(settled.estateId, "unclaimed");
+    const storyline: WorldStoryline = {
+      id: storylineId,
+      title: `The unclaimed estate of ${person.name}`.slice(0, 160),
+      participantIds: [person.id],
+      provinceId: person.locationProvinceId,
+      phase: "escalating",
+      stakes: `Who can make good a claim to what ${person.name} left${land.length === 0 ? "" : ` -- ${land.slice(0, 3).join(", ")}`}, and whether the state keeps it.`.slice(0, 320),
+      history: [`${person.name} died with no heir the law would recognise.`],
+      nextDevelopment: "Whether a kinsman, a creditor or a friend of the house comes forward with a claim.",
+      visibility: "polity",
+      origin: "world",
+      openedByRef: null,
+      openedAtStep: atStep,
+      updatedAtStep: atStep,
+      closedAtStep: null,
+      causalFactIds: [],
+      seedKey: `estate:${person.id}`.slice(0, 80),
+    };
+    return {
+      world: land.length === 0 ? world : { ...world, storylines: [...world.storylines, storyline] },
+      facts: [{
+        localId: `estate_${person.id}_${atStep}`,
+        kind: "estate_escheated",
+        summary: `${person.name} left no heir. ${settled.coin > 0 ? `${settled.escheatedToAccountId === null ? "The coin lies sealed" : `${settled.coin} in coin went to the state`}` : "There was little coin"}${land.length === 0 ? "." : `, and ${land.join(", ")} ${land.length === 1 ? "waits" : "wait"} for somebody to claim ${land.length === 1 ? "it" : "them"}.`}`.slice(0, 600),
+        affectedRefs: affected,
+        visibility: "polity",
+        discoveryState: "polity",
+        knowableInDays: 1,
+        significance: land.length === 0 ? 35 : 55,
+      }],
+    };
+  }
+  const parts = settled.portions.map((portion) => {
+    const things = [
+      portion.coin > 0 ? `${portion.coin} in coin` : null,
+      ...[...portion.holdingIds, ...portion.ventureIds].map(titleOf),
+      portion.dependantIds.length > 0 ? `${portion.dependantIds.length} of the household's people` : null,
+      portion.debtIds.length > 0 ? `${portion.debtIds.length === 1 ? "a debt" : `${portion.debtIds.length} debts`} to pay` : null,
+    ].filter((thing): thing is string => thing !== null);
+    return `${name(portion.beneficiaryId)} ${things.length === 0 ? "the name and little else" : things.join(", ")}`;
+  });
+  return {
+    world,
+    facts: [{
+      localId: `estate_${person.id}_${atStep}`,
+      kind: "inheritance",
+      summary: `${settled.reason} To ${parts.join("; to ")}.`.slice(0, 600),
+      affectedRefs: affected,
+      visibility: "polity",
+      discoveryState: "polity",
+      knowableInDays: 1,
+      significance: settled.coin > 0 || settled.portions.some((portion) => portion.holdingIds.length > 0) ? 50 : 25,
     }],
   };
+}
+
+/**
+ * The player takes up the house of the man he was.
+ *
+ * The principal heir had the dead man's friends and feuds written to him at
+ * the death; a successor the player chose from further out gets them now. And
+ * the rival who was set against the house turns on its new head, rather than
+ * standing about with a dead man for an enemy while the engine picks the new
+ * one a stranger.
+ */
+export function takeUpTheHouse(world: WorldState, predecessorId: string, successorId: string): WorldState {
+  let next = applyLegacy(world, predecessorId, successorId, world.elapsedStep);
+  const live = next.nemeses.find((nemesis) => nemesis.targetCharacterId === predecessorId && nemesis.retiredAtStep === null);
+  const alreadyHasOne = next.nemeses.some((nemesis) => nemesis.targetCharacterId === successorId && nemesis.retiredAtStep === null);
+  if (live === undefined || alreadyHasOne) return next;
+  if (live.characterId === successorId) {
+    // The rival is the one the player now is: the quarrel is over.
+    return { ...next, nemeses: next.nemeses.map((nemesis) => (nemesis.id === live.id ? { ...nemesis, retiredAtStep: next.elapsedStep } : nemesis)) };
+  }
+  next = {
+    ...next,
+    nemeses: next.nemeses.map((nemesis) => (nemesis.id === live.id ? { ...nemesis, targetCharacterId: successorId } : nemesis)),
+    storylines: next.storylines.map((storyline) => (storyline.id === live.storylineId && !storyline.participantIds.includes(successorId)
+      ? { ...storyline, participantIds: [...storyline.participantIds, successorId].slice(0, 12), updatedAtStep: next.elapsedStep }
+      : storyline)),
+  };
+  return next;
 }
 
 /**
@@ -499,6 +625,30 @@ export function handOverForcesOf(world: WorldState, characterId: string, onlyOfO
 }
 
 /**
+ * What taking up this person means in coin and land, from the settlement
+ * already made: a choice between an heir with the farms and a kinsman with a
+ * purse is not the same choice as between two names.
+ */
+function inheritanceInWords(world: WorldState, deadCharacterId: string, person: Character): string {
+  const portion = portionFrom(world, deadCharacterId, person.id);
+  const { He, his } = pronouns(person);
+  const purse = world.material.accounts.find((account) => account.id === person.personalAccountId)?.balance ?? 0;
+  if (portion === null) return `${He} inherits nothing of the house; ${his} own purse holds ${purse}.`;
+  const title = (id: string): string => world.material.holdings.find((holding) => holding.id === id)?.title
+    ?? world.material.ventures.find((venture) => venture.id === id)?.title ?? id;
+  const things = [
+    portion.coin > 0 ? `${portion.coin} in coin` : null,
+    ...[...portion.holdingIds, ...portion.ventureIds].map(title),
+    portion.dependantIds.length > 0 ? `${portion.dependantIds.length} of the household's people` : null,
+  ].filter((thing): thing is string => thing !== null);
+  const owing = portion.debtIds
+    .map((id) => world.material.obligations.find((obligation) => obligation.id === id))
+    .filter((obligation) => obligation !== undefined)
+    .reduce((sum, obligation) => sum + obligation.amount, 0);
+  return `${He} inherits ${things.length === 0 ? "the name and little else" : things.join(", ")}${owing > 0 ? `, and debts of ${owing} each time they fall due` : ""}; ${his} purse now holds ${purse}.`;
+}
+
+/**
  * Who the player takes up next, as the decision that pre-empts every other.
  *
  * There is always at least one option. A dead end is the one thing the branch's
@@ -520,7 +670,7 @@ export function successionDecision(
     return {
       id: `succeed-${id}`,
       label: person.name,
-      summary: `${person.name}, aged ${currentAgeYears(person, atStep)}${office}. What ${pronouns(person).he} inherits is what is left.`,
+      summary: `${person.name}, aged ${currentAgeYears(person, atStep)}${office}. ${inheritanceInWords(world, deadCharacterId, person)}`.slice(0, 600),
     };
   };
 

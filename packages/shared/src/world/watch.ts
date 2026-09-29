@@ -108,6 +108,34 @@ export const WATCH_ARMS = [
     .strict(),
   /** A named person dies. Succession, ransom and revenge all key off this. */
   z.object({ kind: z.literal("character_dies"), characterId: EntityIdSchema }).strict(),
+  /**
+   * A question is settled: a vote on a command, a law, a war. "Once I receive
+   * the command of the Sicilian front, raise Legio II" hung on the Senate's
+   * vote, and there was no way to say so -- the clause was dropped, and the
+   * order to merge Legio II into Legio I met a legion that did not exist.
+   */
+  z
+    .object({
+      kind: z.literal("question_decided"),
+      procedureId: EntityIdSchema,
+      /** Carried or rejected; either, when omitted. */
+      outcome: z.enum(["passed", "failed"]).optional(),
+    })
+    .strict(),
+  /**
+   * A letter between two powers is answered. "If Syracuse refuses, attack"
+   * hung on Hieron's reply, and there was no way to say so: the refusal came
+   * and the order never fired.
+   */
+  z
+    .object({
+      kind: z.literal("letter_answered"),
+      fromPolityId: EntityIdSchema,
+      toPolityId: EntityIdSchema,
+      /** Silence counts as refusal. Any answer, when omitted. */
+      answer: z.enum(["accepted", "refused"]).optional(),
+    })
+    .strict(),
   /** A named office falls vacant, or is filled. */
   z
     .object({

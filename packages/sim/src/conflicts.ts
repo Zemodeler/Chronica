@@ -55,6 +55,16 @@ export function siegesFromProjects(world: WorldState): MapConflictsOverlay["sieg
     if (invading.length === 0) continue;
     sieges.push({ settlementId, invadingForceIds: invading.slice(0, 8), defendingForceIds: [] });
   }
+  // A siege the engine keeps (`sieges.ts`), drawn on its city -- or, laid
+  // against a province at large, on the province's first city.
+  for (const siege of world.sieges) {
+    if (siege.status !== "active") continue;
+    const province = world.map.provinces.find((candidate) => candidate.id === siege.provinceId);
+    const settlementId = siege.settlementId ?? province?.settlements[0]?.id;
+    if (settlementId === undefined || sieges.some((drawn) => drawn.settlementId === settlementId)) continue;
+    const defending = world.material.forces.filter((force) => force.locationId === siege.provinceId && force.polityId === siege.defenderPolityId).map((force) => force.id);
+    sieges.push({ settlementId, invadingForceIds: [siege.forceId], defendingForceIds: defending.slice(0, 8) });
+  }
   return sieges;
 }
 

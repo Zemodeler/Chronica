@@ -18,6 +18,7 @@ function accountName(world: WorldState, id: string): string | null {
 }
 
 const level = (name: string): string => name.replace(/_/g, " ");
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"] as const;
 
 export function predicateInWords(predicate: MechanicPredicate, world: WorldState): string {
   switch (predicate.kind) {
@@ -33,6 +34,7 @@ export function predicateInWords(predicate: MechanicPredicate, world: WorldState
     case "arrears_reach": return `arrears on ${predicate.obligationId} reach ${predicate.periods} month(s)`;
     case "character_dies": return `${named(world, predicate.characterId)} dies`;
     case "office_vacant": return `${predicate.officeId} is ${predicate.vacant ? "vacant" : "filled"}`;
+    case "question_decided": return `the question ${predicate.procedureId} is ${predicate.outcome === undefined ? "decided" : predicate.outcome === "passed" ? "carried" : "rejected"}`;
     case "province_level_above": return `${level(predicate.level)} in ${named(world, predicate.provinceId)} is above ${predicate.bps} bps`;
     case "province_level_below": return `${level(predicate.level)} in ${named(world, predicate.provinceId)} is below ${predicate.bps} bps`;
     case "relation_above": return `${named(world, predicate.subjectCharacterId)}'s ${predicate.dimension} for ${named(world, predicate.targetCharacterId)} is above ${predicate.score}`;
@@ -40,6 +42,8 @@ export function predicateInWords(predicate: MechanicPredicate, world: WorldState
     case "polity_trust_above": return `${named(world, predicate.polityId)}'s trust of ${named(world, predicate.towardPolityId)} is above ${predicate.score}`;
     case "polity_trust_below": return `${named(world, predicate.polityId)}'s trust of ${named(world, predicate.towardPolityId)} is below ${predicate.score}`;
     case "at_war": return `${named(world, predicate.polityId)} is ${predicate.atWar ? "at war" : "at peace"} with ${named(world, predicate.otherPolityId)}`;
+    case "letter_answered": return `${named(world, predicate.toPolityId)} ${predicate.answer === undefined ? "answers" : predicate.answer === "accepted" ? "accepts" : "refuses"} a letter from ${named(world, predicate.fromPolityId)}`;
+    case "in_months": return `it is ${predicate.months.map((month) => MONTHS[month - 1] ?? String(month)).join(" or ")}`;
   }
 }
 
@@ -57,6 +61,9 @@ export function effectInWords(effect: MechanicEffect, world: WorldState): string
     case "province_material_shift": return `${level(effect.quantity)} in ${named(world, effect.provinceId)} ${effect.direction === "raise" ? "rises" : "falls"} a ${effect.band} step`;
     case "legitimacy_shift": return `${named(world, effect.polityId)}'s legitimacy ${effect.direction === "raise" ? "rises" : "falls"} a ${effect.band} step`;
     case "polity_stance_shift": return `${named(world, effect.polityId)}'s trust of ${named(world, effect.towardPolityId)} ${effect.direction === "raise" ? "rises" : "falls"} a ${effect.band} step`;
+    case "force_shift": return effect.quantity === "men"
+      ? `${named(world, effect.forceId)} loses a ${effect.band} share of its men`
+      : `${named(world, effect.forceId)}'s ${effect.quantity} ${effect.direction === "raise" ? "rises" : "falls"} a ${effect.band} step`;
     case "relation_shift": return `${named(world, effect.subjectCharacterId)}'s ${effect.dimension} for ${named(world, effect.targetCharacterId)} ${effect.direction === "raise" ? "rises" : "falls"} a ${effect.band} step`;
   }
 }

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { UnderWayItem } from "@chronica/shared";
 import { Sheet } from "../../../components/ui/sheet";
 import { Era } from "../../../components/ui/era";
-import { TIME_SPANS, latestReport, type GameViewController } from "./use-game-view";
+import { TIME_SPANS, coinDifference, latestReport, purseIsSpent, type GameViewController, type Purse } from "./use-game-view";
 
 /**
  * The Council: where you speak to the world.
@@ -25,27 +25,46 @@ import { TIME_SPANS, latestReport, type GameViewController } from "./use-game-vi
  * long it has been, rather than spinning.
  */
 export function CouncilPanel({
-  gameId,
   controller,
+  draft = null,
+  onDraftTaken,
   onClose,
   onOpenChronicle,
+  underWay = [],
 }: {
   readonly gameId: string;
   readonly controller: GameViewController;
+  /** What his orders are doing, from the room (`ordersUnderWay`). */
+  readonly underWay?: readonly UnderWayItem[];
+  /** Words another sheet has begun for the order box. */
+  readonly draft?: string | null;
+  readonly onDraftTaken?: () => void;
   readonly onClose: () => void;
   readonly onOpenChronicle: () => void;
 }) {
   const { view, busy, error, progress } = controller;
-  const [order, setOrder] = useState("");
+  const [order, setOrder] = useState(draft ?? "");
+  // Taken once, with the caret after it, so the player writes straight on.
+  useEffect(() => {
+    if (draft === null) return;
+    onDraftTaken?.();
+    requestAnimationFrame(() => {
+      const box = document.getElementById("sim-order") as HTMLTextAreaElement | null;
+      box?.setSelectionRange(box.value.length, box.value.length);
+    });
+    // Only on arrival: the draft is what the desk was opened with.
+  }, []);
   // Empty means "as far as the order takes it", which the engine judges.
   const [span, setSpan] = useState<number | "">("");
   const latest = latestReport(view.chronicle);
   const spanDays = span === "" ? undefined : span;
   const { elapsed, stamps } = useMovingClock(busy, progress.length);
+  // Nothing can be sent from an empty purse; say so before the click, not after.
+  const spentOut = purseIsSpent(view.coins);
 
   const send = async () => {
     const text = order.trim();
-    if (text.length === 0 || busy) return;
+    if (text.length === 0 || busy || spentOut) return;
     await controller.send(text, { spanDays });
     setOrder("");
   };
@@ -53,7 +72,7 @@ export function CouncilPanel({
   // Time let pass with no order at all. It still moves the world and its
   // people, so it still costs what their answers cost.
   const wait = async () => {
-    if (busy) return;
+    if (busy || spentOut) return;
     await controller.send("", { wait: true, spanDays: spanDays ?? 30 });
   };
 
@@ -114,7 +133,7 @@ export function CouncilPanel({
           </section>
         )}
 
-        {!busy && <UnderWay gameId={gameId} revision={view.chronicle.length} />}
+        {!busy && <UnderWay items={underWay} />}
 
         {view.decision === null && (
           <form className="tablet" onSubmit={(event) => { event.preventDefault(); void send(); }}>
@@ -147,13 +166,14 @@ export function CouncilPanel({
               <span>pass.</span>
             </div>
             <div className="tablet__actions">
-              <button type="button" className="btn btn--quiet" disabled={busy} onClick={() => void wait()}>
+              <button type="button" className="btn btn--quiet" disabled={busy || spentOut} onClick={() => void wait()}>
                 Let {TIME_SPANS.find((choice) => choice.days === (spanDays ?? 30))?.label ?? "a month"} pass
               </button>
-              <button type="submit" className="btn btn--primary" disabled={busy || order.trim().length === 0}>
+              <button type="submit" className="btn btn--primary" disabled={busy || spentOut || order.trim().length === 0}>
                 {busy ? "The world is moving…" : "Send"}
               </button>
             </div>
+            <Reckoning purse={view.coins} lastTurnCost={controller.lastTurnCost} />
           </form>
         )}
 
@@ -164,19 +184,33 @@ export function CouncilPanel({
 }
 
 /**
+ * What turns have cost, under the order. A turn is billed by what the world's
+ * people had to think, so it has no price until it is over; the desk says
+ * what the last one came to and how much of the save's allowance is left.
+ */
+function Reckoning({ purse, lastTurnCost }: { readonly purse: Purse | undefined; readonly lastTurnCost: string | null }) {
+  if (purse === undefined) return null;
+  if (purse.available === "0") {
+    return <p className="tablet__purse is-empty" role="status">Your wallet is empty, so nothing more can be sent. <a href="/account">Add coins</a> and come back to the desk.</p>;
+  }
+  if (purse.spent !== null && purse.cap !== null && coinDifference(purse.cap, purse.spent) === "0") {
+    return <p className="tablet__purse is-empty" role="status">This save has spent all {purse.cap} of the coins it was allowed, so nothing more can be sent.</p>;
+  }
+  return (
+    <p className="tablet__purse">
+      {lastTurnCost !== null && <>Your last order cost {lastTurnCost} {lastTurnCost === "1" ? "coin" : "coins"}. </>}
+      {purse.spent !== null && purse.cap !== null
+        ? <>This save has spent {purse.spent} of its {purse.cap} coins; you have {purse.available} in your wallet.</>
+        : <>You have {purse.available} coins in your wallet.</>}
+    </p>
+  );
+}
+
+/**
  * What the player's orders are doing: one line each, a stalled one marked in
  * the seal colour. Nothing under way, nothing shown.
  */
-function UnderWay({ gameId, revision }: { readonly gameId: string; readonly revision: number }) {
-  const [items, setItems] = useState<readonly UnderWayItem[]>([]);
-  useEffect(() => {
-    let live = true;
-    void fetch(`/api/games/${encodeURIComponent(gameId)}/under-way`, { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: { items: UnderWayItem[] } | null) => { if (live && data !== null) setItems(data.items); })
-      .catch(() => undefined);
-    return () => { live = false; };
-  }, [gameId, revision]);
+function UnderWay({ items }: { readonly items: readonly UnderWayItem[] }) {
   if (items.length === 0) return null;
   return (
     <section className="under-way" aria-labelledby="under-way-heading">

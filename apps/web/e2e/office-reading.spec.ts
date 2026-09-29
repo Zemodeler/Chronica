@@ -22,6 +22,22 @@ test.describe("what the player is allowed to read", () => {
     const panel = page.getByRole("dialog", { name: /your forces/i });
     await expect(panel).toBeVisible();
     await expect(panel.locator(".muster__force").first()).toBeVisible({ timeout: 60_000 });
+    // Armies and ships each have their ribbon, and a fleet is never counted in men.
+    await expect(panel.getByRole("tab", { name: /^Armies/ })).toBeVisible();
+    await expect(panel.getByRole("tab", { name: /^Ships/ })).toBeVisible();
+    // A force is its name until it is clicked.
+    const first = panel.locator(".muster__name").first();
+    await expect(first).toHaveAttribute("aria-expanded", "false");
+    await first.click();
+    await expect(first).toHaveAttribute("aria-expanded", "true");
+    await expect(panel.locator(".muster__details")).toBeVisible();
+    if (process.env.CHRONICA_E2E_SHOTS) await panel.screenshot({ path: `${process.env.CHRONICA_E2E_SHOTS}/muster-armies.png` });
+    await panel.getByRole("tab", { name: /^Ships/ }).click();
+    const ships = await panel.innerText();
+    expect(ships).not.toMatch(/\d[\d,]* men,/);
+    if (process.env.CHRONICA_E2E_SHOTS) await panel.screenshot({ path: `${process.env.CHRONICA_E2E_SHOTS}/muster-ships.png` });
+    await panel.getByRole("tab", { name: /^Armies/ }).click();
+    await panel.locator(".muster__name").first().click();
 
     const text = await panel.innerText();
     expect(text).not.toMatch(A_SCORE);

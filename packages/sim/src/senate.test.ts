@@ -76,6 +76,25 @@ describe("a question before the Senate", () => {
     expect(counted.world.genericEntities.some((entity) => entity.kind === "law")).toBe(true);
   });
 
+  it("is carried by the votes cast, however many abstain", () => {
+    // The fleet for the southern allies: 49 for, none against, 51 undecided.
+    // Counted over the whole house it failed, as if the undecided had voted no.
+    const { world, id } = warTaxes();
+    const reweighed: WorldState = { ...world, material: { ...world.material, institutions: world.material.institutions.map((institution) => (institution.id !== "roman-senate" ? institution : {
+      ...institution,
+      votingBlocs: institution.votingBlocs.map((bloc) => ({ ...bloc, weight: bloc.id === "patrician-bloc" ? 49 : 51 })),
+    })) } };
+    const counted = vote(reweighed, 30);
+    const settled = question(counted.world, id);
+    const record = counted.world.material.voteRecords.find((candidate) => candidate.id === settled.voteRecordId)!;
+    expect(record).toMatchObject({ yesWeight: 49, noWeight: 0, abstainWeight: 51 });
+    expect(settled.outcome).toBe("passed");
+  });
+
+  it("every chamber of the opening decides by the votes cast", () => {
+    expect(opening().material.institutions.map((institution) => [institution.id, institution.denominator]).filter(([, denominator]) => denominator !== "cast")).toEqual([]);
+  });
+
   it("is turned by what its people say", () => {
     const { world, id } = warTaxes();
     // The Populars' leaders come out against it, and two of the first men of
@@ -96,6 +115,22 @@ describe("a question before the Senate", () => {
     const { world, id } = warTaxes();
     const late = vote(world, 90);
     expect(question(late.world, id).resolvedAtStep).toBe(90);
+  });
+
+  it("counts an appointment to a command no election fills", () => {
+    // "Assign command of the Sicilian front to Clepsina", filed as a question
+    // about a seat: left to the elections, which fill no such seat, it was
+    // still gathering support forty days past its vote.
+    const opened = applyDeltas(opening(), [WorldDeltaSchema.parse({
+      op: "political_procedure_open", localId: "command", type: "appointment", institutionRef: "roman-senate", sponsorCharacterRef: "gaius-genucius",
+      subjectKind: "office_seat", subjectRef: null, label: "Assign command of the Sicilian front to Gaius Genucius Clepsina", resolutionMechanism: "vote", deadlineInDays: 15,
+      reason: "The consul asks for the Sicilian command.",
+    })], context());
+    expect(opened.rejected).toEqual([]);
+    const id = opened.assignedIds.get("command")!;
+    const counted = vote(opened.world, 20);
+    expect(question(counted.world, id).resolvedAtStep).toBe(20);
+    expect(["passed", "failed"]).toContain(question(counted.world, id).outcome);
   });
 
   it("cannot be carried by whoever writes the order", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { firstPunicWarScenario, punicWarsScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, type ScenarioLifeRules, type WorldState } from "@chronica/shared";
-import { PERIL_MUST_STAND_DAYS, exposureMultiplier, killCharacter, reviewLives, successionDecision } from "./mortality";
+import { PERIL_MUST_STAND_DAYS, exposureMultiplier, killCharacter, reviewLives, successionDecision, takeUpTheHouse } from "./mortality";
 import { createIdFactory } from "./ports";
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
@@ -165,5 +165,38 @@ describe("who the player becomes", () => {
     expect(decision.prompt).toContain(someone.name);
     // The id is what tells the application who is asking next.
     for (const option of decision.options) expect(option.id.startsWith("succeed-")).toBe(true);
+  });
+});
+
+describe("taking up the house", () => {
+  const fresh = (): WorldState => WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
+
+  it("settles the estate on the heir the day the man dies, and the choice of who follows says what each got", () => {
+    const killed = killCharacter(fresh(), "marcus-atilius", "Killed in the field.", 10);
+    expect(killed.facts.some((fact) => fact.kind === "inheritance")).toBe(true);
+    const minor = killed.world.material.accounts.find((account) => account.id === "marcus-minor-purse")!;
+    expect(minor.balance).toBeGreaterThanOrEqual(1_200);
+    const ids = killed.world.material.inheritanceTransfers.map((transfer) => transfer.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const decision = successionDecision(killed.world, "marcus-atilius", 10);
+    expect(decision.options[0]!.summary).toMatch(/inherits \d+ in coin/);
+  });
+
+  it("turns the house's rival on its new head, and hands him the house's friends and feuds", () => {
+    let world = fresh();
+    world = {
+      ...world,
+      characters: world.characters.map((character) => (character.id === "hanno"
+        ? { ...character, relations: [...character.relations, { subjectCharacterId: "marcus-atilius", causes: [{ id: "old-feud", label: "Burned his ships", score: -40, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null }] }] }
+        : character)),
+      storylines: [...world.storylines, { id: "feud-thread", title: "Hanno against the Atilii", participantIds: ["hanno", "marcus-atilius"], provinceId: null, phase: "escalating", stakes: "Who breaks first.", history: [], nextDevelopment: "More.", visibility: "polity", origin: "world", openedByRef: null, openedAtStep: 0, updatedAtStep: 0, closedAtStep: null, causalFactIds: [], seedKey: null }],
+      nemeses: [{ id: "nemesis-1", characterId: "hanno", targetCharacterId: "marcus-atilius", arena: "military", storylineId: "feud-thread", chosenAtStep: 0, retiredAtStep: null, reason: "He commands against us." }],
+    };
+    const dead = killCharacter(world, "marcus-atilius", "Killed in the field.", 10).world;
+    const taken = takeUpTheHouse(dead, "marcus-atilius", "marcus-atilius-minor");
+    expect(taken.nemeses[0]!.targetCharacterId).toBe("marcus-atilius-minor");
+    expect(taken.storylines.find((storyline) => storyline.id === "feud-thread")!.participantIds).toContain("marcus-atilius-minor");
+    const feud = taken.characters.find((character) => character.id === "hanno")!.relations.find((relation) => relation.subjectCharacterId === "marcus-atilius-minor");
+    expect(feud?.causes.some((cause) => cause.score < 0 && cause.label.includes("Marcus Atilius"))).toBe(true);
   });
 });

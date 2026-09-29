@@ -1,5 +1,9 @@
 import {
   addMinutes,
+  calendarDateOf,
+  normalizeName,
+  spelledAlike,
+  whoIsNamed,
   assessOrderStanding,
   advanceWorldTo,
   factsKnownTo,
@@ -22,6 +26,8 @@ import {
   type TerrainDefinition,
   type StopReason,
   nemesisOf,
+  MAX_NEWS_DAYS,
+  newsArrivalsAt,
   type WatchProposal,
   type WorldDelta,
   type WorldInstant,
@@ -31,20 +37,23 @@ import { applyDeltas } from "./apply/apply-deltas";
 import type { BattleAccount } from "./battle";
 import type { ApplyResult, AuthorityBreach, RejectedDelta } from "./apply/context";
 import { keepAsArrangement } from "./apply/keep-as-arrangement";
-import { whereTheActorIs } from "./apply/fill-gaps";
+import { actsBehindFacts, whereTheActorIs } from "./apply/fill-gaps";
 import { kindsIn } from "./bare-refs";
 import { misfiledWorldActs } from "./apply/misfiled";
-import { routeAmbientActors, routeAttention, type RoutedActor } from "./attention";
+import { routeAmbientActors, routeAttention } from "./attention";
 import { renderCharacterPortrait, runCognition } from "./cognition";
 import { materializeFacts } from "./facts";
+import { answerByTemper } from "./insubordination";
+import { recordActiveIntents } from "./intents";
 import { decideNarratorSeeds, engineWork, recordSeedsOffered, seedParticipants, seedWasTaken, type NarratorSeed } from "./narrator";
 import { chooseNemesis, conductInWords, nemesisStance, recordNemesis, retireNemesis, shouldRetire, stanceInWords } from "./nemesis";
 import { orchestrate } from "./orchestrate";
 import { describeBreach, findWhoWouldNotice, noticersAsRefs } from "./oversight";
 import { createIdFactory, type SimModelPort } from "./ports";
-import { NEVER_PUBLISHED, type NarrativeLine, type UtteranceLine } from "./chronicle";
+import { NEVER_PUBLISHED, OWN_BUSINESS_FLOOR, type NarrativeLine, type UtteranceLine } from "./chronicle";
 import { buildWorldSlice, renderWorldSlice, type AnsweredDecision, type SliceEvent } from "./slice";
-import { successionDecision } from "./mortality";
+import { successionDecision, takeUpTheHouse } from "./mortality";
+import { fieldDecision, playerPlight, resolveFieldPerils } from "./field-perils";
 import { factsNamingRefusals, reconcileFacts } from "./reconcile-facts";
 import { repairDeltas, worthRepairing } from "./repair-deltas";
 import { runDeterministicTick } from "./tick";
@@ -56,8 +65,9 @@ import { readableRefsFor } from "./mechanics/refs";
 import { runMechanics } from "./mechanics/run-mechanics";
 import { validateMechanic } from "./mechanics/validate-mechanic";
 import { writeMechanic } from "./mechanics/write-mechanic";
-import { addressWaitingLetters } from "./letters";
+import { aLetterWaitsOnItsReader, addressWaitingLetters, lettersOwed, markLettersPut, nextReplyDueKey } from "./letters";
 import { dueSteps, emptyPlanTally, layPlan, markWoken, nextPlanDay, settleOverdueSteps, takeSteps, type PlanTally } from "./plans";
+import { claimPromisesKept } from "./promises";
 import { debatersOf, electiveOfficesOf, voteCalendarDays } from "./senate";
 import { ensureConstitutions } from "./constitutions";
 
@@ -252,6 +262,12 @@ export interface BurstInput {
    * allowed to fail the burst, and never handed anything it could mutate.
    */
   readonly onWindowClosed?: ((window: WindowSnapshot) => void) | undefined;
+  /**
+   * Asked before each hop; true stops the burst there, with what it has done
+   * kept (stop reason `deadline`). The caller owns the clock -- the engine
+   * never reads one -- so a burst-level deadline lives with whoever runs it.
+   */
+  readonly shouldStop?: (() => boolean) | undefined;
 }
 
 /**
@@ -285,6 +301,17 @@ export interface WindowSnapshot {
   readonly orderFactIds: readonly string[];
   /** The last window of the burst: the clock will not move again, so it has the room to tell what the pool carried to it. */
   readonly final: boolean;
+}
+
+/**
+ * A model call the burst decided not to make, or work it set down, and why.
+ * Every one is kept with the burst (`simulation_bursts.skipped`), never only
+ * printed: a stage that keeps turning up here is a budget, a prompt or a
+ * router to look at.
+ */
+export interface BurstSkip {
+  readonly stage: "cognition" | "reconcile" | "repair" | "fact_places" | "engine_facts" | "mechanic";
+  readonly reason: string;
 }
 
 export interface BurstResult {
@@ -346,7 +373,7 @@ export interface BurstResult {
    */
   readonly salvaged: readonly string[];
   /** Every model call the burst decided not to make, and why. Logged, never silent. */
-  readonly skipped: readonly { readonly stage: "cognition" | "reconcile" | "repair"; readonly reason: string }[];
+  readonly skipped: readonly BurstSkip[];
   /** Every act refused, ignored or filled in, pass by pass, for the audit (see `AuditEntry`). */
   readonly audit: readonly AuditEntry[];
   /** How far people's plans moved in this burst, and how much of what they did belonged to one (gap §5). */
@@ -406,13 +433,90 @@ function pursuitOf(world: WorldState, actorRef: OrderPartyRef, summary: string, 
     : { op: "generic_entity_update", entityRef: current.id, label, attributes, retire: false, reason: "What the order set him to doing now." };
 }
 
+/**
+ * Acts that change only a mind or a story: what somebody means, believes or
+ * thinks of a power, and a thread moved on in words. An answer made only of
+ * these, or of facts alone, changed nothing in the world.
+ */
+const CHANGES_NOTHING: ReadonlySet<string> = new Set(["character_intent_set", "belief_set", "polity_stance_shift", "storyline_advance"]);
+
+/**
+ * The most a fact may weigh when the answer that wrote it changed nothing.
+ *
+ * "Decius reviewed the legion's readiness", "Hieron renewed discreet inquiries",
+ * "Curius reaffirmed his recommendation": fifteen of each in one campaign, every
+ * one a fact, every one told. A man who only reviewed is not news; below
+ * `OWN_BUSINESS_FLOOR` it is kept on record and told only if something joins it.
+ */
+const IDLE_FACT_WEIGHT = 10;
+
+/**
+ * A fact's reference to something that exists, where it names it by name or by
+ * a slug of its name. Only unambiguous readings; anything else is left as
+ * written.
+ */
+function resolveFactRef<T extends { readonly kind: string; readonly id: string }>(world: WorldState, ref: T): T {
+  if (ref.id.startsWith("local:")) return ref;
+  const spoken = ref.id.replace(/[-_]+/g, " ");
+  if (ref.kind === "character") {
+    if (world.characters.some((character) => character.id === ref.id)) return ref;
+    const named = whoIsNamed(world.characters, spoken);
+    return named === null ? ref : { ...ref, id: named.id };
+  }
+  if (ref.kind === "polity") {
+    if (world.map.polities.some((polity) => polity.id === ref.id)) return ref;
+    const matches = world.map.polities.filter((polity) => normalizeName(polity.name) === normalizeName(spoken) || spelledAlike(polity.name, spoken));
+    return matches.length === 1 ? { ...ref, id: matches[0]!.id } : ref;
+  }
+  return ref;
+}
+
 /** What became of an order's own acts in one proposal. */
 interface OrderActs {
+  /** Acts of any kind the world took from this answer that changed more than a mind (`CHANGES_NOTHING`). */
+  readonly changed: number;
+  /** The answer's own facts that came to be, by the localIds it gave them. */
+  readonly factLocalIds: ReadonlySet<string>;
+  /** Why the order's acts the world would not have were refused. */
+  readonly refusals: readonly string[];
   readonly carriedOut: number;
   /** Refused because the world would not have it, or ignored by those ordered: the order was tried. */
   readonly refusedByTheWorld: number;
   /** Refused for any reason, the engine's included: the order was written, and none of it stood. */
   readonly refused: number;
+  /** Each of the order's own acts, in its own words, and what became of it -- so each part of the order is judged by its own. */
+  readonly ownActs?: readonly { readonly said: string; readonly carried: boolean; readonly refusal: string | null }[];
+}
+
+/** An act's own prose: its reason, label, duties, subject -- every field written in words rather than ids. */
+function wordsOfAct(delta: WorldDelta): string {
+  return Object.values(delta as Record<string, unknown>).filter((value): value is string => typeof value === "string" && value.includes(" ")).join(" ");
+}
+
+/** The words that tell one part of an order from another. */
+const PART_FILLER = new Set(["that", "this", "with", "from", "into", "have", "make", "sure", "them", "they", "their", "there", "will", "shall", "would", "could", "should", "about", "which", "when", "then", "than", "only", "does", "tell", "send", "order", "ordered"]);
+
+/**
+ * Which part of an order an act belongs to: the one its words share most with,
+ * two words or one long one, or none. A shipmaster hired "using personal money
+ * if Rome does not support it" is the part that said so, not the part that
+ * argued the fleet before the Senate.
+ */
+export function partOfAct(parts: readonly string[], act: string): number | null {
+  const stems = (text: string): Set<string> => new Set(text.toLowerCase().split(/[^a-z]+/)
+    .filter((word) => word.length >= 4 && !PART_FILLER.has(word)).map((word) => word.slice(0, 5)));
+  const ours = stems(act);
+  let best: number | null = null;
+  let bestScore = 0;
+  for (const [index, part] of parts.entries()) {
+    const shared = [...stems(part)].filter((stem) => ours.has(stem));
+    const long = shared.length === 1 && part.toLowerCase().split(/[^a-z]+/).some((word) => word.length >= 6 && word.startsWith(shared[0]!));
+    if ((shared.length >= 2 || long) && shared.length > bestScore) {
+      best = index;
+      bestScore = shared.length;
+    }
+  }
+  return best;
 }
 
 /** How long a reaction takes to form, when nothing scheduled says otherwise. */
@@ -497,7 +601,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   const breaches: AuthorityBreach[] = [];
   const parseFailures: string[] = [];
   const salvaged: string[] = [];
-  const skipped: { stage: "cognition" | "reconcile" | "repair"; reason: string }[] = [];
+  const skipped: BurstSkip[] = [];
   let ambientOnlyRounds = 0;
   /** Who the passage of time took, so the burst can end on the question of who follows. */
   const deadThisBurst = new Set<string>();
@@ -540,7 +644,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // as it now stands -- a chieftain the world has just given the Boii is
     // somebody the order may write to. Only the orchestrator has two lists; an
     // actor thinking for himself has only his own acts.
-    const worldDeltas = proposal.worldDeltas ?? [];
+    // A fact only the engine can make true stands beside its act, or becomes it (`actsBehindFacts`).
+    const behind = actsBehindFacts(proposal.facts, [...(proposal.worldDeltas ?? []), ...proposal.deltas], world, input.actorRef.kind === "character" ? input.actorRef.id : null);
+    for (const reason of behind.dropped) skipped.push({ stage: "engine_facts", reason });
+    const worldDeltas = [...(proposal.worldDeltas ?? []), ...(proposal.worldDeltas === undefined ? [] : behind.acts)];
     // The world's own business written into the order is the world's, whichever
     // list it arrived in (`misfiledWorldActs`). Left where it stands, so what
     // it makes is made before whatever in the order names it.
@@ -550,6 +657,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       audit.push({ actorRef, op: delta.op, kind: "refiled", ofTheOrder: false, attempt: "first", reason: "Written into the order, but it makes something for another power with the actor nowhere in it: judged as the world's.", delta });
     }
     const aliveBefore = new Set(world.characters.filter((character) => character.alive).map((character) => character.id));
+    const stoodBefore = new Map(world.material.forces.map((force) => [force.id, force.locationId]));
     const applyContext = (assignedIds?: ReadonlyMap<string, string>, order: ReadonlySet<WorldDelta> | undefined = orderDeltas) => ({
       now: world.instant,
       actorRef,
@@ -558,6 +666,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       warfare: input.warfare,
       ...(input.terrains === undefined ? {} : { terrains: input.terrains }),
       ...(input.wealth === undefined ? {} : { wealth: input.wealth }),
+      clock: input.clock,
       ids,
       gameId: input.gameId,
       actsForTheWorld,
@@ -566,7 +675,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       ...(assignedIds === undefined ? {} : { assignedIds }),
     });
 
-    let result = applyDeltas(world, [...worldDeltas, ...proposal.deltas], applyContext());
+    let result = applyDeltas(world, [...worldDeltas, ...proposal.deltas, ...(proposal.worldDeltas === undefined ? behind.acts : [])], applyContext());
     recordAudit(result, actorRef, "first");
     /** The order's own acts the engine could not read, as they stand after every attempt. */
     const unreadable = (pass: ApplyResult) => pass.rejected.filter((rejection) => rejection.kind === "reference" && rejection.ofTheOrder === true);
@@ -587,6 +696,9 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const repairable = referenceRejections.filter(worthRepairing);
     if (referenceRejections.length > 0 && repairable.length === 0) {
       skipped.push({ stage: "repair", reason: `${referenceRejections.length} refusal(s) no correction can cure: ${referenceRejections.map((rejection) => rejection.reason.slice(0, 80)).join(" | ")}` });
+    }
+    if (repairable.length > 0 && modelCalls >= budget.maxModelCalls) {
+      skipped.push({ stage: "repair", reason: `the call budget is spent (${modelCalls} of ${budget.maxModelCalls}); ${repairable.length} refusal(s) left uncorrected: ${repairable.map((rejection) => rejection.reason.slice(0, 80)).join(" | ")}` });
     }
     if (repairable.length > 0 && modelCalls < budget.maxModelCalls) {
       const repair = await repairDeltas({ port: input.port, worldText: sliceText, rejected: repairable, world });
@@ -667,6 +779,11 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     for (const id of aliveBefore) {
       if (world.characters.some((character) => character.id === id && !character.alive)) deadThisBurst.add(id);
     }
+    // A battle that left the ruler surrounded ends the report on the question.
+    if (playerDecision === null && input.actorRef.kind === "character") {
+      const plight = playerPlight(world, input.actorRef.id);
+      if (plight !== undefined) playerDecision = fieldDecision(world, plight);
+    }
 
     // A fact that belongs to a secret thread is secret, whatever the model
     // wrote in its visibility field: the thread's participants are the people
@@ -681,7 +798,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // it. A fact naming a handle this batch never assigned goes with the thing
     // it was about.
     const madeReal = (ref: string): boolean => !ref.startsWith("local:") || resolveStrict(ref) !== null;
-    const aboutRealThings = proposal.facts.filter((fact) =>
+    const aboutRealThings = behind.facts.filter((fact) =>
       fact.affectedRefs.every((ref) => madeReal(ref.id)) && (fact.storylineRef === null || madeReal(fact.storylineRef)));
     // And a fact about a refused act on something that does exist -- "a sum
     // left the consul's chest" beside a chest that stayed shut -- is taken
@@ -709,6 +826,9 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     if (result.rejected.length > 0 && aboutRealThings.length > 0 && naming.length === 0) {
       skipped.push({ stage: "reconcile", reason: `${result.rejected.length} refusal(s), and none of ${aboutRealThings.length} fact(s) names them` });
     }
+    if (naming.length > 0 && modelCalls >= budget.maxModelCalls) {
+      skipped.push({ stage: "reconcile", reason: `the call budget is spent (${modelCalls} of ${budget.maxModelCalls}); ${naming.length} fact(s) still name what was refused` });
+    }
     if (naming.length > 0 && modelCalls < budget.maxModelCalls) {
       const reconciled = await reconcileFacts({ port: input.port, facts: naming, refused: result.rejected });
       modelCalls += reconciled.calls;
@@ -718,7 +838,36 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       const asked = new Set(naming.map((fact) => fact.localId));
       happened = aboutRealThings.flatMap((fact) => (!asked.has(fact.localId) ? [fact] : kept.has(fact.localId) ? [rewritten.get(fact.localId)!] : []));
     }
-    const keptSecret = happened.map((fact) => {
+    // An answer to a letter is on record already, in the answerer's own words
+    // (`letter_answered`). The same refusal written again as the model's own
+    // "diplomatic_reply" was told twice, a day apart, under two headlines.
+    const answeredBy = new Set(result.applied.flatMap((entry) => {
+      if (entry.delta.op !== "diplomatic_message_answer") return [];
+      const messageRef = entry.delta.messageRef;
+      const message = world.diplomacy.find((candidate) => candidate.id === (result.assignedIds.get(messageRef.replace(/^local:/, "")) ?? messageRef));
+      return message === undefined ? [] : [message.toPolityId];
+    }));
+    const unrepeated = answeredBy.size === 0 ? happened : happened.filter((fact) =>
+      !(/(reply|refus|answer|accept|counter|declin)/i.test(fact.kind)
+        && fact.affectedRefs.some((ref) => answeredBy.has(ref.id) || answeredBy.has(world.characters.find((character) => character.id === ref.id)?.polityId ?? ""))));
+    // Named as the model named them: "roman-republic" for Rome, the consul by
+    // his name. Unresolved, a fact about Rome was invisible to Rome's own
+    // consul, and its tag printed the slug.
+    const resolvedRefs = unrepeated.map((fact) => ({ ...fact, affectedRefs: fact.affectedRefs.map((ref) => resolveFactRef(world, ref)) }))
+      // An army is where it is. A fact naming the Carthaginian fleet and
+      // Lilybaeum, with the fleet in Africa, put it in Sicily in the record; a
+      // province named beside an army is the army's ground -- where it stands,
+      // or stood before this answer moved it -- or it is dropped from the fact.
+      .map((fact) => {
+        const forces = fact.affectedRefs.filter((ref) => ref.kind === "force").map((ref) => world.material.forces.find((force) => force.id === ref.id)).filter((force) => force !== undefined);
+        if (forces.length === 0) return fact;
+        const ground = new Set(forces.flatMap((force) => [force.locationId, stoodBefore.get(force.id) ?? force.locationId]));
+        const astray = fact.affectedRefs.filter((ref) => ref.kind === "province" && !ground.has(ref.id));
+        if (astray.length === 0) return fact;
+        skipped.push({ stage: "fact_places", reason: `"${fact.summary.slice(0, 80)}" named ${astray.map((ref) => ref.id).join(", ")}, where none of its armies stands; dropped from the fact.` });
+        return { ...fact, affectedRefs: fact.affectedRefs.filter((ref) => !astray.includes(ref)) };
+      });
+    const keptSecret = resolvedRefs.map((fact) => {
       if (fact.storylineRef === null) return fact;
       const storyline = world.storylines.find((candidate) => candidate.id === resolveId(fact.storylineRef!));
       if (storyline === undefined || storyline.visibility !== "private" || fact.visibility === "private") return fact;
@@ -765,6 +914,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const materialized = materializeFacts({
       proposals: [...keptSecret, ...result.factProposals, ...breachFacts],
       now: world.instant,
+      forces: world.material.forces,
       atStep: world.elapsedStep,
       ids,
       causalDepth,
@@ -818,6 +968,26 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         factIds: describes,
       });
     }
+    // What a man said in the house is quotable as what he said, tied to the
+    // speech the engine recorded -- and only by the man who said it.
+    if (!actsForTheWorld && actorRef.kind === "character") {
+      for (const entry of result.applied) {
+        const said = entry.delta;
+        if (said.op !== "political_support_set" || said.words == null || said.supporterKind !== "character") continue;
+        const words = said.words;
+        const questionId = result.assignedIds.get(said.procedureRef.replace(/^local:/, "")) ?? said.procedureRef;
+        const speech = materialized.facts.find((fact) => fact.kind === "senate_speech" && fact.affectedEntities.some((entity) => entity.id === actorRef.id));
+        if (speech === undefined) continue;
+        const question = world.material.politicalProcedures.find((procedure) => procedure.id === questionId);
+        utterances.push({
+          actorRef,
+          speaker: world.characters.find((character) => character.id === actorRef.id)?.name ?? actorRef.id,
+          line: words,
+          occasion: question === undefined ? "in the Senate" : `speaking on "${question.label}"`.slice(0, 160),
+          factIds: [speech.id],
+        });
+      }
+    }
     for (const line of [
       ...proposal.frictions,
       ...result.rejected.filter((rejection) => rejection.kind === "world").map((rejection) => rejection.reason),
@@ -844,7 +1014,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
           visibility: ignored ? "public" : isWorldFriction ? "polity" : "private",
           discoveryState: ignored ? "public" : isWorldFriction ? "polity" : "private",
           knowableInDays: 0,
-          significance: ignored ? 30 : isWorldFriction ? 5 : 0,
+          // A part of the ruler's own order the world would not have is his
+          // business, and weighs what his business must to be told
+          // (`OWN_BUSINESS_FLOOR`); the world's own frictions stay small.
+          significance: ignored ? 30 : isWorldFriction ? (rejection.ofTheOrder === true ? OWN_BUSINESS_FLOOR : 5) : 0,
           knownToRefs: isWorldFriction || ignored ? [actorRef] : [],
         }],
         now: world.instant,
@@ -885,6 +1058,15 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
 
     applyDiscoveries(proposal.discoveries, causalDepth);
     world = recordDelegations(world, proposal.delegations, ids, result.assignedIds, input.offices);
+    // A man handed an order his temper will not let him carry out answers it
+    // before he is ever asked (`insubordination.ts`).
+    const tempered = answerByTemper(world, input.actorRef.kind === "character" ? [input.actorRef.id] : []);
+    world = tempered.world;
+    if (tempered.facts.length > 0) {
+      const defied = materializeFacts({ proposals: tempered.facts, now: world.instant, atStep: world.elapsedStep, ids, causalDepth, assignedIds: result.assignedIds });
+      newFacts.push(...defied.facts);
+      for (const [factId, weight] of defied.significanceByFactId) significanceByFactId.set(factId, weight);
+    }
     // Every arrangement this proposal set going that is not a law is a
     // candidate for a mechanic the model could write once and the engine run
     // for ever (plan §2). Counted whether or not a writer exists, so the
@@ -906,9 +1088,17 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       await offerMechanics(candidates, actorRef, actText);
     }
     return {
+      changed: result.applied.filter((entry) => !CHANGES_NOTHING.has(entry.delta.op)).length,
+      factLocalIds: new Set(keptSecret.map((fact) => fact.localId)),
+      refusals: result.rejected.filter((rejection) => rejection.ofTheOrder === true && rejection.kind !== "reference").map((rejection) => rejection.reason),
       carriedOut: result.applied.filter((entry) => entry.ofTheOrder === true).length,
       refusedByTheWorld: result.rejected.filter((rejection) => rejection.ofTheOrder === true && rejection.kind !== "reference").length,
       refused: result.rejected.filter((rejection) => rejection.ofTheOrder === true).length,
+      ownActs: [
+        ...result.applied.filter((entry) => entry.ofTheOrder === true).map((entry) => ({ said: wordsOfAct(entry.delta), carried: true, refusal: null })),
+        ...result.rejected.filter((rejection) => rejection.ofTheOrder === true && rejection.kind !== "reference")
+          .map((rejection) => ({ said: wordsOfAct(rejection.delta), carried: false, refusal: rejection.reason })),
+      ],
     };
   };
 
@@ -964,7 +1154,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   let planFactSerial = 0;
   const tickTo = (toDay: number): void => {
     const ticked = runDeterministicTick({
-      world, toDay, ids, warfare: input.warfare,
+      world, toDay, ids, warfare: input.warfare, clock: input.clock,
       ...(input.life === undefined ? {} : { life: input.life }),
       ...(input.successionRules === undefined ? {} : { government: { offices: input.offices, successionRules: input.successionRules } }),
       playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
@@ -995,10 +1185,16 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // burst ends: the deltas of this hop are still being applied, and the
     // Chronicle writes the death before the player is asked who follows.
     for (const id of ticked.died) deadThisBurst.add(id);
+    // And so does an ambush that sprang on him while the days went by.
+    if (playerDecision === null && input.actorRef.kind === "character") {
+      const plight = playerPlight(world, input.actorRef.id);
+      if (plight !== undefined) playerDecision = fieldDecision(world, plight);
+    }
     if (ticked.factProposals.length > 0) {
       const materialized = materializeFacts({
         proposals: ticked.factProposals,
         now: world.instant,
+        forces: world.material.forces,
         atStep: world.elapsedStep,
         ids,
         causalDepth: 0,
@@ -1021,7 +1217,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // Then the rules the world wrote, on the world the tick left: real deltas
     // through the applier, with the context the tick does not have.
     const ruled = runMechanics({
-      world, toDay, ids, recentFacts: newFacts.slice(factsSeenByMechanics), ledger: debitLedger,
+      world, toDay, ids, recentFacts: newFacts.slice(factsSeenByMechanics), ledger: debitLedger, month: calendarDateOf({ day: toDay, minute: 0 }, input.clock).month,
       apply: {
         offices: input.offices, warfare: input.warfare, gameId: input.gameId,
         ...(input.terrains === undefined ? {} : { terrains: input.terrains }),
@@ -1088,7 +1284,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         audit.push({ actorRef, op: candidate.delta.op, kind: "mechanic", ofTheOrder: candidate.ofTheOrder, attempt: candidate.attempt, reason: `${entity.id}: ${mechanicInWords(checked.draft, world)}.${dropped}`, delta: candidate.delta });
         return true;
       };
-      if (mechanicCalls >= budget.maxMechanicCalls) continue;
+      if (mechanicCalls >= budget.maxMechanicCalls) {
+        skipped.push({ stage: "mechanic", reason: `${entity.id}: ${mechanicCalls} call(s) for rules already made this burst (of ${budget.maxMechanicCalls}); it stands without one` });
+        continue;
+      }
       const ownerText = ownerCharacterId !== null && ownerCharacterId === (input.actorRef.kind === "character" ? input.actorRef.id : null) && sliceText.length > 0
         ? sliceText
         : ownerCharacterId === null ? `The power ${owner.id}.` : renderCharacterPortrait(ownerCharacterId, world.characters.find((character) => character.id === ownerCharacterId)?.name ?? ownerCharacterId, world, input.clock);
@@ -1119,9 +1318,17 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // march in motion and then walks the world to its arrival must see the
     // arrival happen; before, only events inherited from earlier bursts could
     // fire, so the burst arrived on the day and nothing occurred.
-    const due = [...input.queue, ...scheduled].filter((event) => !firedEventIds.includes(event.id) && event.dueInstantSortKey <= nowKey());
+    const arrived = [...input.queue, ...scheduled].filter((event) => !firedEventIds.includes(event.id) && event.dueInstantSortKey <= nowKey());
+    if (arrived.length === 0) return;
+    for (const event of arrived) firedEventIds.push(event.id);
+    // Retired without a word: an event whose matter has since been settled,
+    // and an event that only restates a work's own stage. "The first stage of
+    // the Senate's 150-ship fleet falls due" fired and was chronicled weeks
+    // after the Senate had voted the fleet down and the work was cancelled;
+    // and a stage that does fall due is the tick's to report, not a second
+    // announcement of the same day.
+    const due = arrived.filter((event) => stillStands(world, event));
     if (due.length === 0) return;
-    for (const event of due) firedEventIds.push(event.id);
 
     // An event fires as it was scheduled to be known. It used to fire as public
     // news naming nobody, whatever it was: a secret's next step became an
@@ -1150,6 +1357,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         };
       }),
       now: world.instant,
+      forces: world.material.forces,
       atStep: world.elapsedStep,
       ids,
       causalDepth: 0,
@@ -1166,6 +1374,57 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // see a world that already reflects it.
   tickTo(world.instant.day);
   fireDueEvents();
+
+  // ── Taking up the house ────────────────────────────────────────────────
+  //
+  // The answer to "whose eyes do you see through now?" changes who is asking,
+  // and the world has to follow him rather than the man he was: the house's
+  // friends and enemies become his, and so does the rival who was set against
+  // it. The slice is built for the actor this burst was given, so everything
+  // else -- purse, land, office, what he may do -- is already his.
+  const answeredOption = input.answeredDecision?.optionId ?? null;
+  const predecessorId = input.answeredDecision?.predecessorId ?? null;
+  if (answeredOption !== null && answeredOption.startsWith("succeed-") && predecessorId !== null && input.actorRef.kind === "character" && predecessorId !== input.actorRef.id) {
+    world = takeUpTheHouse(world, predecessorId, input.actorRef.id);
+  }
+
+  // ── Whoever was left surrounded when the last report closed ─────────────
+  //
+  // A man cut off on a lost field learns his fate at the start of the next
+  // report, never in the one that left him there. The player's is decided by
+  // the answer he just gave; everybody else's by his own nature.
+  let diedAtOnce = false;
+  if (world.fieldPerils.some((peril) => peril.resolvedAtStep === null)) {
+    const ended = resolveFieldPerils({
+      world,
+      atStep: world.elapsedStep,
+      playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
+      answeredOptionId: answeredOption,
+    });
+    world = ended.world;
+    const materialized = materializeFacts({
+      proposals: ended.facts,
+      now: world.instant,
+      forces: world.material.forces,
+      atStep: world.elapsedStep,
+      ids,
+      causalDepth: 0,
+      assignedIds: new Map(),
+    });
+    newFacts.push(...materialized.facts);
+    for (const [factId, weight] of materialized.significanceByFactId) significanceByFactId.set(factId, weight);
+    significance += materialized.significance;
+    world = linkFactsToStorylines(world, materialized.storylineByFactId);
+    for (const said of ended.utterances) {
+      const factId = materialized.factIds.get(said.factLocalId);
+      if (factId === undefined) continue;
+      utterances.push({ actorRef: { kind: "character", id: said.characterId }, speaker: said.speaker, line: said.line, occasion: said.occasion, factIds: [factId] });
+    }
+    for (const id of ended.died) deadThisBurst.add(id);
+    diedAtOnce = input.actorRef.kind === "character" && ended.died.includes(input.actorRef.id);
+    // The report is his death; nothing else is waited for.
+    if (diedAtOnce && input.actorRef.kind === "character") playerDecision = successionDecision(world, input.actorRef.id, world.instant.day);
+  }
 
   // ── The ruler's antagonist ──────────────────────────────────────────────
   //
@@ -1237,7 +1496,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const order = input.orderText.trim().replace(/\s+/g, " ");
     const quoted = order.length > 300 ? `${order.slice(0, 297)}...` : order;
     const obstacles = answer.filter((fact) => fact.kind === "engine_rejection" || fact.kind === "execution_friction").map((fact) => fact.summary);
-    const outcome = orchestration.parseFailure !== null && answer.length === 0
+    const outcome = orchestrationUnreadable && answer.length === 0
       ? "Word of it went out, and nothing came back that anyone could make sense of."
       : obstacles.length > 0
         ? `It could not be done as given: ${obstacles.slice(0, 3).join(" ")}`
@@ -1263,6 +1522,56 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     newFacts.push(...answered.facts);
     for (const [factId, weight] of answered.significanceByFactId) significanceByFactId.set(factId, weight);
   };
+
+  /**
+   * Every part of the order answered, not only the order.
+   *
+   * `answerTheOrder` speaks when nothing of the order reached its giver. An
+   * order of three sentences whose first two came to something and whose
+   * third -- a governorship -- came to nothing was answered, and the third was
+   * never mentioned again. Each part the orchestrator read and could show no
+   * fact for is said, with its reason where it gave one, or the engine's.
+   */
+  const answerTheParts = (parts: readonly { readonly said: string; readonly factLocalIds: readonly string[]; readonly whyNot: string | null }[], acts: OrderActs): void => {
+    if (input.orderText === null || orchestrationUnreadable) return;
+    const who = world.characters.find((character) => character.id === input.actorRef.id)?.name ?? "The ruler";
+    // Each act of the order to the part it answers, by its words. A refusal
+    // is the answer of the part it belongs to and of no other: the Senate's
+    // vote once stood as the reason for every part of an order whose contract
+    // and letter had both been done.
+    const own = (acts.ownActs ?? []).map((act) => ({ ...act, part: partOfAct(parts.map((part) => part.said), act.said) }));
+    const unanswered = parts.map((part, index) => ({ part, index })).filter(({ part, index }) =>
+      !part.factLocalIds.some((localId) => acts.factLocalIds.has(localId))
+      && !own.some((act) => act.part === index && act.carried));
+    if (unanswered.length === 0) return;
+    const whyNot = (index: number): string => {
+      const refused = own.find((act) => act.part === index && act.refusal !== null)?.refusal
+        // A one-part order owns every refusal it met.
+        ?? (parts.length === 1 ? acts.refusals[0] : undefined);
+      return refused === undefined ? "Nothing came of it." : `It could not be done: ${refused}`;
+    };
+    const told = materializeFacts({
+      proposals: unanswered.slice(0, 6).map(({ part, index }) => ({
+        localId: `order_part_${index}`,
+        kind: "order_part_unanswered",
+        summary: `${who} ordered: "${part.said}" ${part.whyNot ?? whyNot(index)}`.slice(0, 600),
+        affectedRefs: [input.actorRef],
+        visibility: "private" as const,
+        discoveryState: "private" as const,
+        knowableInDays: 0,
+        knownToRefs: [input.actorRef],
+        significance: 30,
+      })),
+      now: world.instant,
+      atStep: world.elapsedStep,
+      ids,
+      causalDepth: 0,
+      assignedIds: new Map(),
+    });
+    newFacts.push(...told.facts);
+    for (const [factId, weight] of told.significanceByFactId) significanceByFactId.set(factId, weight);
+  };
+  let orchestrationUnreadable = false;
 
   // ── Iteration 0: the player's order ────────────────────────────────────
   const threadOf = (event: PendingEvent): string | undefined => {
@@ -1312,7 +1621,9 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // is shown only the ones that need somebody to decide something.
   const offeredSeeds: NarratorSeed[] = [];
   for (const seed of seeds) {
-    const work = engineWork(seed);
+    // November to March: the months that shut passes and close roads.
+    const month = calendarDateOf(world.instant, input.clock).month;
+    const work = engineWork(seed, month >= 11 || month <= 3);
     if (work === null) {
       offeredSeeds.push(seed);
       continue;
@@ -1351,62 +1662,74 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     narratorSeeds: offeredSeeds,
   });
 
-  sliceText = renderWorldSlice(slice);
-  report({ kind: "orchestrating" });
-  const orchestration = await orchestrate(input.port, slice, kindsIn(world));
-  modelCalls += orchestration.calls;
-  iterations += 1;
-  if (orchestration.parseFailure !== null) parseFailures.push(orchestration.parseFailure);
-  salvaged.push(...orchestration.salvaged);
-  const factsBefore = newFacts.length;
-  const acts = await applyProposal(orchestration.output, input.actorRef, 0, true);
-  // An order that left nothing in the world -- no act carried out, none the
-  // world refused -- is still something the player is now doing. Without a
-  // trace, "I start selling cutlery in Rome" answered only in prose was
-  // forgotten by the next order: nothing in the world said he sold anything.
-  // One pursuit per person, the latest replacing the last; it does nothing and
-  // costs nothing, and it is what a later act can build on. A question asks
-  // for nothing to be done, and an unreadable answer is already its own fault.
-  // Nor does a wait: the web's "let a month pass" sends no order text at all.
-  if (
-    acts.carriedOut === 0 && acts.refusedByTheWorld === 0
-    && input.orderText !== null && input.answeredDecision === undefined
-    && orchestration.parseFailure === null && !/\?\s*$/.test(input.orderText.trim())
-    && input.actorRef.kind === "character"
-  ) {
-    const pursuing = pursuitOf(world, input.actorRef, orchestration.output.intent.summary, input.orderText);
-    const recorded = applyDeltas(world, [pursuing], {
-      now: world.instant, actorRef: input.actorRef, offices: input.offices, ...(input.successionRules === undefined ? {} : { successionRules: input.successionRules }), warfare: input.warfare, ids, gameId: input.gameId,
-      ...(input.terrains === undefined ? {} : { terrains: input.terrains }),
-    });
-    if (recorded.applied.length > 0) {
-      world = recorded.world;
-      audit.push({ actorRef: input.actorRef, op: pursuing.op, kind: "pursuit", ofTheOrder: true, attempt: "floor", reason: `The order left nothing in the world; recorded as a pursuit: "${orchestration.output.intent.summary}".`, delta: pursuing });
-      if (pursuing.op === "generic_entity_create") {
-        const madeId = recorded.assignedIds.get("pursuit") ?? "pursuit";
-        audit.push({ actorRef: input.actorRef, op: pursuing.op, kind: "mechanic_candidate", ofTheOrder: true, attempt: "floor", reason: `${madeId}: a pursuit the world could be asked to write a mechanic for.`, delta: pursuing });
-        await offerMechanics([{ entityId: madeId, delta: pursuing, attempt: "floor", ofTheOrder: true }], input.actorRef, input.orderText);
+  // A ruler who died at the opening of this report gives no order in it: the
+  // report is his death, and the question of who follows.
+  let orderFactIds: readonly string[] = [];
+  let priorityCharacterIds: string[] = [];
+  if (!diedAtOnce) {
+    sliceText = renderWorldSlice(slice);
+    report({ kind: "orchestrating" });
+    const orchestration = await orchestrate(input.port, slice, kindsIn(world));
+    modelCalls += orchestration.calls;
+    iterations += 1;
+    if (orchestration.parseFailure !== null) parseFailures.push(orchestration.parseFailure);
+    orchestrationUnreadable = orchestration.parseFailure !== null;
+    salvaged.push(...orchestration.salvaged);
+    const factsBefore = newFacts.length;
+    const acts = await applyProposal(orchestration.output, input.actorRef, 0, true);
+    // An order that left nothing in the world -- no act carried out, none the
+    // world refused -- is still something the player is now doing. Without a
+    // trace, "I start selling cutlery in Rome" answered only in prose was
+    // forgotten by the next order: nothing in the world said he sold anything.
+    // One pursuit per person, the latest replacing the last; it does nothing and
+    // costs nothing, and it is what a later act can build on. A question asks
+    // for nothing to be done, and an unreadable answer is already its own fault.
+    // Nor does a wait: the web's "let a month pass" sends no order text at all.
+    if (
+      acts.carriedOut === 0 && acts.refusedByTheWorld === 0
+      && input.orderText !== null && input.answeredDecision === undefined
+      && orchestration.parseFailure === null && !/\?\s*$/.test(input.orderText.trim())
+      && input.actorRef.kind === "character"
+    ) {
+      const pursuing = pursuitOf(world, input.actorRef, orchestration.output.intent.summary, input.orderText);
+      const recorded = applyDeltas(world, [pursuing], {
+        now: world.instant, actorRef: input.actorRef, offices: input.offices, ...(input.successionRules === undefined ? {} : { successionRules: input.successionRules }), warfare: input.warfare, ids, gameId: input.gameId,
+        ...(input.terrains === undefined ? {} : { terrains: input.terrains }),
+      });
+      if (recorded.applied.length > 0) {
+        world = recorded.world;
+        audit.push({ actorRef: input.actorRef, op: pursuing.op, kind: "pursuit", ofTheOrder: true, attempt: "floor", reason: `The order left nothing in the world; recorded as a pursuit: "${orchestration.output.intent.summary}".`, delta: pursuing });
+        if (pursuing.op === "generic_entity_create") {
+          const madeId = recorded.assignedIds.get("pursuit") ?? "pursuit";
+          audit.push({ actorRef: input.actorRef, op: pursuing.op, kind: "mechanic_candidate", ofTheOrder: true, attempt: "floor", reason: `${madeId}: a pursuit the world could be asked to write a mechanic for.`, delta: pursuing });
+          await offerMechanics([{ entityId: madeId, delta: pursuing, attempt: "floor", ofTheOrder: true }], input.actorRef, input.orderText);
+        }
+      } else {
+        recordAudit(recorded, input.actorRef, "floor");
       }
-    } else {
-      recordAudit(recorded, input.actorRef, "floor");
     }
+    answerTheOrder(newFacts.slice(factsBefore), acts);
+    answerTheParts(orchestration.output.intent.parts, acts);
+    orderFactIds = newFacts.slice(factsBefore).map((fact) => fact.id);
+    windowOrderFactIds = orderFactIds;
+    if (orchestration.output.playerDecision !== null) playerDecision = orchestration.output.playerDecision;
+
+    // Who the stirrings landed on decides who is asked first what they do about
+    // it. The ledger was written when they were offered: a batch is not
+    // re-offered, so there is nothing further to record here.
+    priorityCharacterIds = offeredSeeds
+      .filter((seed) => seedWasTaken(world, newFacts.slice(factsBefore), seed))
+      .flatMap((seed) => seedParticipants(world, seed))
+      .filter((id) => input.actorRef.kind !== "character" || id !== input.actorRef.id);
+
+    // An open-ended order says what would end it. The world then carries on until
+    // that happens rather than until this burst runs out of things to do.
+    watch = orchestration.output.watch;
   }
-  answerTheOrder(newFacts.slice(factsBefore), acts);
-  const orderFactIds = newFacts.slice(factsBefore).map((fact) => fact.id);
-  windowOrderFactIds = orderFactIds;
-  if (orchestration.output.playerDecision !== null) playerDecision = orchestration.output.playerDecision;
-
-  // Who the stirrings landed on decides who is asked first what they do about
-  // it. The ledger was written when they were offered: a batch is not
-  // re-offered, so there is nothing further to record here.
-  const priorityCharacterIds: string[] = offeredSeeds
-    .filter((seed) => seedWasTaken(world, newFacts.slice(factsBefore), seed))
-    .flatMap((seed) => seedParticipants(world, seed))
-    .filter((id) => input.actorRef.kind !== "character" || id !== input.actorRef.id);
-
-  // An open-ended order says what would end it. The world then carries on until
-  // that happens rather than until this burst runs out of things to do.
-  watch = orchestration.output.watch;
+  // Left surrounded by the order's own battle: the report ends on it, whatever
+  // else the world meant to ask.
+  const plightNow = playerPlight(world, playerId);
+  if (plightNow !== undefined) playerDecision = fieldDecision(world, plightNow);
 
   // ── Advancing the world ────────────────────────────────────────────────
   //
@@ -1461,6 +1784,13 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       stopReason = "max_span";
       break;
     }
+    // Told from outside that the burst has run too long. Stopped between
+    // hops, where the world is whole: everything so far is kept and
+    // chronicled, and the rest of the span is the next order's.
+    if (input.shouldStop?.() === true) {
+      stopReason = "deadline";
+      break;
+    }
     // Time is walked in hops, and a hop that nobody answers costs nothing but
     // arithmetic. The cap is a guard against a pathological queue, not a budget.
     if (hops >= budget.maxHops) {
@@ -1477,8 +1807,11 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // three months off on the calendar, the burst jumped straight to it, and
     // both kings "refused by silence" letters they were never shown.
     // Older news arrives at depth 0 (see `reactTo`); this burst's only while a reaction to it is still allowed.
+    // Word reaches each of them on its own day (`newsArrivalsAt`): the day it
+    // was fought is not the day Carthage hears of it.
+    const seats = seatsOfThoseWhoAnswer(world, input.actorRef);
     const arrivals = [...input.knownFacts, ...newFacts.filter((fact) => fact.causalDepth < budget.maxCausalDepth)]
-      .flatMap((fact) => (fact.discovery.knowableAtInstant === null ? [] : [fact.discovery.knowableAtInstant.day * 1440 + fact.discovery.knowableAtInstant.minute]));
+      .flatMap((fact) => (fact.discovery.knowableAtInstant === null || fact.time.day + MAX_NEWS_DAYS < world.instant.day ? [] : newsArrivalsAt(world, fact, seats)));
     const nextScheduled = [...input.queue, ...scheduled]
       .map((event) => event.dueInstantSortKey)
       .concat(planDay === undefined ? [] : [planDay * 1440])
@@ -1498,7 +1831,17 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // month goes by in one step rather than two days at a time, each of which
     // would stop to ask the world's people what they make of nothing.
     const idle = input.spanDays === undefined ? reactionKey : ceilingKey;
-    const targetKey = Math.min(hops === 1 ? reactionKey : nextScheduled ?? idle, ceilingKey);
+    // A reply date caps a jump but never lengthens the walk: it is the day the
+    // tick decides silence, and a jump from 20 May to a project in mid-July
+    // had every letter due in June refused by silence in one step.
+    const replyDueKey = nextReplyDueKey(world, nowKey()) ?? Number.MAX_SAFE_INTEGER;
+    // A letter its reader has still to be shown, or has read past its term,
+    // is settled within days, not at the next thing on the calendar -- while
+    // there is still a call to pay him with.
+    const readerKey = modelCalls < budget.maxModelCalls && aLetterWaitsOnItsReader(world, input.actorRef.kind === "character" ? [input.actorRef.id] : [])
+      ? reactionKey
+      : Number.MAX_SAFE_INTEGER;
+    const targetKey = Math.min(hops === 1 ? reactionKey : nextScheduled ?? idle, replyDueKey, readerKey, ceilingKey);
 
     // The clock is about to move: everything written so far is dated at or
     // before this instant, and nothing written after can land before it. The
@@ -1521,9 +1864,12 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       chainNewsFrom = factsSeenByLastRound;
       chainNewsAfterKey = lastRoundKey;
     }
+    // News to this chain if word of it reached any of those who answer since
+    // the chain's last look -- by the road, not the day it happened.
+    const answeringSeats = seatsOfThoseWhoAnswer(world, input.actorRef);
     const arrivedSince = (fact: Fact): boolean => {
-      const at = fact.discovery.knowableAtInstant;
-      return at !== null && at.day * 1440 + at.minute > chainNewsAfterKey;
+      if (fact.discovery.knowableAtInstant === null) return false;
+      return newsArrivalsAt(world, fact, answeringSeats).some((key) => key > chainNewsAfterKey && key <= nowKey());
     };
     // Old news arriving now is news to this chain, at its first depth; old
     // news long since answered is not news at all.
@@ -1544,7 +1890,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
 
     // Actors who care but do not warrant a model call still record what they
     // mean to do about it, so their intent is visible to the next burst.
-    world = recordActiveIntents(world, attention.active, ids);
+    world = recordActiveIntents(world, attention.active, attention.focused, ids);
 
     // The world elsewhere moves too: people with their own business, chosen
     // without reference to anything the player did. They ride along in the
@@ -1557,11 +1903,16 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // calendar that his own business has somewhere to go.
     const due = dueSteps(world, input.clock, playerCharacterIds);
     // Who owes the world something now: a plan's step, or their word on a
-    // question about to be voted. Both wake a man as pressing, once a round.
+    // question about to be voted, or a letter he has not yet read. Each wakes
+    // a man as pressing, once a round; a man owed two is told both.
     const wanted = new Map<string, string>([
       ...debatersOf(world, input.offices, world.instant.day, playerCharacterIds, input.successionRules ?? []),
       ...due.map((entry) => [entry.ownerId, entry.why] as const),
     ]);
+    for (const [readerId, why] of lettersOwed(world, input.clock, playerCharacterIds)) {
+      const already = wanted.get(readerId);
+      wanted.set(readerId, already === undefined ? why : `${already}; and ${why}`);
+    }
     const ambient = routeAmbientActors({
       world,
       facts: [...input.knownFacts, ...newFacts],
@@ -1620,6 +1971,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       // the wheel back rather than a world that went quiet. A span he asked
       // for is his to have, so there a later chain is skipped instead.
       if (spent && !reactionsSpent && (chain === 1 || input.spanDays === undefined)) {
+        skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: chain ${chain}, the budget is spent and the burst stops; ${asking.length} left unasked` });
         stopReason = "budget_exhausted";
         break;
       }
@@ -1652,6 +2004,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       }
       const woken = due.filter((entry) => castIds.has(entry.ownerId));
       world = markWoken(world, woken);
+      world = markLettersPut(world, castIds);
       plans.woken += woken.length;
       const cognition = await runCognition(
         input.port, asking, world, input.clock,
@@ -1666,16 +2019,26 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       salvaged.push(...cognition.salvaged);
       for (const actor of cognition.output.actors) {
         const factsBeforeActor = newFacts.length;
-        await applyProposal(actor.proposal, actor.actorRef, causalDepth);
+        const acts = await applyProposal(actor.proposal, actor.actorRef, causalDepth);
+        // Said and not done: kept, and weighed as what it was.
+        if (acts.changed === 0) {
+          for (const fact of newFacts.slice(factsBeforeActor)) {
+            significanceByFactId.set(fact.id, Math.min(significanceByFactId.get(fact.id) ?? IDLE_FACT_WEIGHT, IDLE_FACT_WEIGHT));
+          }
+        }
         // A plan is laid, and a step taken, only by a person who was asked --
         // never by the player, who is in no cast, and never by somebody the
         // answer merely named. Steps first: they name the plan as it stood.
         if (actor.actorRef.kind !== "character" || !castIds.has(actor.actorRef.id)) continue;
         const ownerId = actor.actorRef.id;
         for (const fact of newFacts.slice(factsBeforeActor)) authorOf.set(fact.id, ownerId);
-        const leftAMark = newFacts.length > factsBeforeActor;
+        // A step is done when the world changed, not when a sentence was
+        // written: "reviewed the legion's readiness" satisfied any step there
+        // was, and Decius reviewed it for four months while Rome and Rhegium
+        // stood at war.
+        const leftAMark = acts.changed > 0;
         const took = takeSteps(world, ownerId, actor.stepsTaken, leftAMark);
-        world = took.world;
+        world = claimPromisesKept(took.world, ownerId, actor.stepsTaken, leftAMark);
         plans.taken += took.taken;
         let laid = false;
         if (actor.plan !== null) {
@@ -1760,49 +2123,6 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   };
 }
 
-/**
- * Records what the actors who care -- but do not warrant a model call -- mean
- * to do about it (VISION §19's "active" tier).
- *
- * Without this the router's middle tier was computed and thrown away every
- * burst. An intent is cheap, deterministic, and visible to the next burst's
- * slice, so a senator who has been quietly alarmed twice is on the record as
- * such before he ever becomes worth a call of his own.
- */
-function recordActiveIntents(world: WorldState, active: readonly RoutedActor[], ids: { next(prefix: string): string }): WorldState {
-  const wanting = active.filter(
-    (actor) => !world.characterIntents.some((intent) => intent.actorCharacterId === actor.characterId && intent.status === "proposed"),
-  ).slice(0, 6);
-  if (wanting.length === 0) return world;
-
-  return {
-    ...world,
-    characterIntents: [
-      ...world.characterIntents,
-      ...wanting.map((actor) => ({
-        id: ids.next("intent"),
-        actorCharacterId: actor.characterId,
-        sourceGoalId: null,
-        sourcePlotId: null,
-        sourceCommitmentId: null,
-        actionType: "prepare" as const,
-        targetIds: [],
-        rationale: `Watching events: ${actor.why}.`,
-        prerequisites: [],
-        intendedWorkflowIds: [],
-        priority: Math.min(100, actor.score),
-        status: "proposed" as const,
-        createdAtStep: world.elapsedStep,
-        reviewedAtStep: null,
-        expiresAtStep: null,
-        visibility: "private" as const,
-        sourceEventIds: [],
-        resolutionReason: null,
-      })),
-    ],
-  };
-}
-
 /** A stored id, as a party the facts can name -- or null when nothing in the world answers to it any more. */
 function inferPartyRef(world: WorldState, id: string): OrderPartyRef | null {
   if (world.characters.some((character) => character.id === id)) return { kind: "character", id };
@@ -1878,4 +2198,40 @@ function recordDelegations(
       };
     });
   return { ...world, orderAttempts: [...world.orderAttempts, ...attempts] };
+}
+
+/**
+ * Where the people who answer events stand: every living man in an office or
+ * at the head of an army, the player aside. The calendar stops when word
+ * reaches one of these places, since that is when somebody can be asked.
+ */
+function seatsOfThoseWhoAnswer(world: WorldState, actorRef: OrderPartyRef): Set<string> {
+  const player = actorRef.kind === "character" ? actorRef.id : null;
+  const commanders = new Set(world.material.forces.map((force) => force.commanderCharacterId));
+  const seats = new Set<string>();
+  for (const character of world.characters) {
+    if (!character.alive || character.id === player) continue;
+    if (character.officeId !== null || commanders.has(character.id)) seats.add(character.locationProvinceId);
+  }
+  return seats;
+}
+
+/** What the tick says of a work on its own day; a scheduled copy of it is an echo. */
+const TICK_REPORTS: ReadonlySet<string> = new Set(["project_milestone", "project_completed", "project_shortfall"]);
+const SETTLED_PROJECTS: ReadonlySet<string> = new Set(["completed", "cancelled", "failed"]);
+const SETTLED_STAGES: ReadonlySet<string> = new Set(["resolved", "withdrawn"]);
+
+/** Whether a scheduled event is still news when its moment comes. */
+export function stillStands(world: WorldState, event: { readonly kind: string; readonly payload?: unknown }): boolean {
+  const payload = ScheduledEventPayloadSchema.safeParse(event.payload ?? {});
+  const subjects = payload.success ? payload.data.subjectIds : [];
+  // A work's stages and its end are the tick's to report, from the work itself
+  // (`tick.ts`), so they happen when the work does and not when somebody once
+  // guessed it would -- and never for a work that was cancelled.
+  if (TICK_REPORTS.has(event.kind)) return false;
+  const projects = subjects.flatMap((id) => world.projects.filter((project) => project.id === id));
+  if (projects.some((project) => SETTLED_PROJECTS.has(project.status))) return false;
+  const procedures = subjects.flatMap((id) => world.material.politicalProcedures.filter((procedure) => procedure.id === id));
+  if (procedures.some((procedure) => SETTLED_STAGES.has(procedure.stage))) return false;
+  return true;
 }

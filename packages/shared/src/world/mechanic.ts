@@ -34,9 +34,9 @@ import { WATCH_ARMS } from "./watch";
  *
  * All plain states, read as "yes" or "no", so a trigger on one fires only on
  * the edge from no to yes -- the guard every watch arm has to keep by hand is
- * kept here by construction. There is no month-of-year arm: the evaluator has
- * no clock, and a calendar is scenario data; `monthly` and a term cover what a
- * season would.
+ * kept here by construction. `in_months` is the season: true in the months
+ * named, read against the scenario's calendar where the evaluator is given it
+ * (`sim/mechanics/run-mechanics.ts`), and never true where it is not.
  */
 export const MECHANIC_ARMS = [
   z.object({ kind: z.literal("province_level_above"), provinceId: EntityIdSchema, level: ProvinceLevelSchema, bps: BasisPointsSchema }).strict(),
@@ -50,6 +50,8 @@ export const MECHANIC_ARMS = [
   z.object({ kind: z.literal("at_war"), polityId: EntityIdSchema, otherPolityId: EntityIdSchema, atWar: z.boolean() }).strict(),
   /** The mirror of the watch's `force_strength_below`. */
   z.object({ kind: z.literal("force_strength_above"), forceId: EntityIdSchema, headcount: z.number().int().nonnegative() }).strict(),
+  /** The calendar month is one of these, 1-12: a winter toll, a summer fair. */
+  z.object({ kind: z.literal("in_months"), months: z.array(z.number().int().min(1).max(12)).min(1).max(12) }).strict(),
 ] as const;
 
 /** One predicate language: everything a watch can test, and everything a mechanic can. `sim/watch.ts` reads both. */
@@ -79,20 +81,28 @@ export type MechanicAmount = z.infer<typeof MechanicAmountSchema>;
 const DirectionSchema = z.enum(["raise", "lower"]);
 
 /**
- * What a firing may do: templates over ops the applier already runs. No
- * force ops (men die in battles, not in side doors), nothing that creates,
- * and no income from the outside world -- that is the arrangement's own
- * `income` standing effect, already priced.
+ * What a firing may do: templates over ops the applier already runs. Nothing
+ * that creates, no income from the outside world -- that is the arrangement's
+ * own `income` standing effect, already priced -- and nothing that moves
+ * ground: who holds a province or a city is settled by arms and treaties, and
+ * a rule that could hand one over would be a side door around both. An army
+ * can be touched only by its own commander's rule (warranted by command, as a
+ * debit is by authority), and only in its spirits and its numbers: a rule may
+ * wear men away, never raise them. Belief spreads by the arrangement's own
+ * `conversion` standing effect, which already runs every month.
  */
 export const MechanicEffectSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("money_transfer"), fromAccountId: EntityIdSchema, toAccountId: EntityIdSchema.nullable(), amount: MechanicAmountSchema }).strict(),
   z.object({
     op: z.literal("province_material_shift"), provinceId: EntityIdSchema,
-    quantity: z.enum(["stability", "food_security", "productive_capacity", "war_damage", "available_manpower"]),
+    /** `population` moves the people themselves -- and, with them, what the province can pay (`reckonTaxCapacity`). */
+    quantity: z.enum(["stability", "food_security", "productive_capacity", "war_damage", "available_manpower", "population"]),
     direction: DirectionSchema, band: EffectBandSchema,
   }).strict(),
   z.object({ op: z.literal("legitimacy_shift"), polityId: EntityIdSchema, direction: DirectionSchema, band: EffectBandSchema }).strict(),
   z.object({ op: z.literal("polity_stance_shift"), polityId: EntityIdSchema, towardPolityId: EntityIdSchema, direction: DirectionSchema, band: EffectBandSchema }).strict(),
+  /** An army the rule's owner commands: its morale, its cohesion, or men worn away ("men" is lowered only). */
+  z.object({ op: z.literal("force_shift"), forceId: EntityIdSchema, quantity: z.enum(["morale", "cohesion", "men"]), direction: DirectionSchema, band: EffectBandSchema }).strict(),
   /** Instantiated as one `social_events` relation cause. */
   z.object({
     op: z.literal("relation_shift"), subjectCharacterId: EntityIdSchema, targetCharacterId: EntityIdSchema,
@@ -208,6 +218,12 @@ export const mechanicWorth = {
   provinceBps: { slight: 100, marked: 250, great: 500 } as const,
   /** Of the province's population. */
   manpowerShare: { slight: 0.005, marked: 0.01, great: 0.02 } as const,
+  /** Of the province's people, born, drawn in or driven off: a few months' growth at most. */
+  populationShare: { slight: 0.001, marked: 0.0025, great: 0.005 } as const,
+  /** An army's morale or cohesion, as a night's rest or a good speech moves it. */
+  forceBps: { slight: 200, marked: 500, great: 1_000 } as const,
+  /** Of an army's fit men, worn away: a hard march, not a battle. */
+  forceLossBps: { slight: 50, marked: 150, great: 300 } as const,
   legitimacyBps: { slight: 50, marked: 150, great: 300 } as const,
   trust: { slight: 2, marked: 5, great: 10 } as const,
   /** Within `relationCauses`' own ±20. */

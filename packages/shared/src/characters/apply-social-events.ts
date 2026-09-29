@@ -26,6 +26,8 @@ export interface ApplySocialEventsOutcome {
   readonly introducedProfiles: readonly CharacterProfile[];
   /** Traits that two people have now independently seen, so they are who somebody is. */
   readonly traitsConfirmed: readonly { readonly characterId: string; readonly traitId: string; readonly observerCharacterIds: readonly string[] }[];
+  /** Traits two people have now seen the opposite of, so they are no longer who somebody is. */
+  readonly traitsLost: readonly { readonly characterId: string; readonly traitId: string; readonly contradictedBy: string }[];
 }
 
 function findRelation(character: Character, targetCharacterId: string): DirectedRelation | undefined {
@@ -93,6 +95,7 @@ export function applySocialEvents(
   let commitments: readonly Commitment[] = world.commitments;
   let traitObservations: readonly TraitObservation[] = world.traitObservations;
   const traitsConfirmed: { characterId: string; traitId: string; observerCharacterIds: readonly string[] }[] = [];
+  const traitsLost: { characterId: string; traitId: string; contradictedBy: string }[] = [];
   const appliedIds: string[] = [];
   const rejectedIds: { id: string; reason: string }[] = [];
   const introducedProfiles: CharacterProfile[] = [];
@@ -373,6 +376,12 @@ export function applySocialEvents(
           ? { ...candidate, traits: [...candidate.traits, entry.traitId].slice(0, MAX_TRAITS) }
           : candidate));
       }
+      for (const entry of outcome.lost) {
+        traitsLost.push({ characterId: entry.characterId, traitId: entry.traitId, contradictedBy: entry.contradictedBy });
+        characters = characters.map((candidate) => (candidate.id === entry.characterId
+          ? { ...candidate, traits: candidate.traits.filter((held) => held !== entry.traitId) }
+          : candidate));
+      }
     }
 
     appliedIds.push(event.id);
@@ -393,5 +402,6 @@ export function applySocialEvents(
     rejectedIds,
     introducedProfiles,
     traitsConfirmed,
+    traitsLost,
   };
 }

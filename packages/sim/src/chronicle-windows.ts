@@ -83,6 +83,8 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
     ownEntityIds: ownSideOf(world, observer.id, observerPolityId),
     personalEntityIds: personallyTouchedBy(world, observer.id, observerPolityId, offices),
     storylines: world.storylines,
+    // Where everybody is when the window closes, for the road news travels.
+    world,
   });
 
   // The record is indexed by the day a matter entered it, and a page has

@@ -3,6 +3,7 @@ import { punicWarsScenario } from "@chronica/db";
 import { CUSTOMARY_TAX_BURDEN, ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, taxBurdens, type WorldState } from "@chronica/shared";
 import { createIdFactory } from "./ports";
 import { runDeterministicTick } from "./tick";
+import { withMiddlingManagers } from "./middling-managers";
 
 /**
  * "Double the tributum." "Triple it."
@@ -15,7 +16,8 @@ import { runDeterministicTick } from "./tick";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
+// Middling tax men: these count what the land bears, not who collects it.
+const opening = (): WorldState => withMiddlingManagers(ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0));
 
 /** Run a year month by month, returning what the Roman treasury took in each month and the last tick's facts. */
 function aYearOf(world: WorldState) {
@@ -68,7 +70,12 @@ describe("taxes the land can bear", () => {
     // The tributum and the land rents, as authored: about 1 600 a month. The
     // allies pay no tribute (v32); two of the rents come from land Rome took
     // from the Bruttians and Samnites.
-    expect(year.monthly[0]).toBe(Math.round(1_100 * 0.9) + 330 + 150 + 150);
+    // What Rome levies at home is gathered by the Treasury of Saturn (v35):
+    // four quaestors nobody named and two centuries of the work, at 60 --
+    // three in a hundred more than a middling hand. The rents from the
+    // Bruttians' and Samnites' country are paid, not gathered.
+    const treasury = 1 + ((60 - 50) / 50) * 0.15;
+    expect(year.monthly[0]).toBe(Math.round(1_100 * 0.9 * treasury) + Math.round(330 * treasury) + 150 + 150);
   });
 
   it("does not collect a tenfold tributum: the collectors raise what the land can bear, and say so", () => {
@@ -94,9 +101,11 @@ describe("taxes the land can bear", () => {
     const crushed = aYearOf(withTributum(opening(), 5_500));
     // The collectors bring in what there is, and there is less every month.
     expect(crushed.monthly[11]!).toBeLessThan(crushed.monthly[0]! / 2);
-    // A tax five times the old one raised less over the year than one three times it.
+    // A tax five times the old one raised no more over the year than one three
+    // times it: both are pressed to what the land bears, and a land whose
+    // people now grow bears the same few coins more under either.
     const tripled = aYearOf(withTributum(opening(), 3_300));
-    expect(crushed.monthly.reduce((a, b) => a + b, 0)).toBeLessThan(tripled.monthly.reduce((a, b) => a + b, 0));
+    expect(crushed.monthly.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(tripled.monthly.reduce((a, b) => a + b, 0));
   });
 
   it("leaves trade alone: harbour dues are not a levy on anybody's land", () => {

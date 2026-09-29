@@ -32,6 +32,12 @@ const CHEST = "roman-field-army-chest";
  * changes hands. Both are fixture, so that what is under test here is only
  * who pays the army and out of what.
  */
+/** Somewhere the legion can stand that is not Rhegium. */
+const NEXT_DOOR = (world: WorldState): string => {
+  const edge = world.map.edges.find((candidate) => candidate.from === RHEGIUM || candidate.to === RHEGIUM)!;
+  return edge.from === RHEGIUM ? edge.to : edge.from;
+};
+
 function atRhegium(): WorldState {
   const opening = WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
   return {
@@ -43,8 +49,10 @@ function atRhegium(): WorldState {
     },
     material: {
       ...opening.material,
-      forces: opening.material.forces.map((force) =>
-        force.id === "roman-field-army" ? { ...force, locationId: RHEGIUM } : force),
+      // The ground only: with the Campanian legion standing on it too, the two
+      // armies now meet (`contact.ts`), and a battle's plunder is not the pay.
+      forces: opening.material.forces.map((force) => (force.id === "roman-field-army" ? { ...force, locationId: RHEGIUM }
+        : force.id === "campanian-legion" ? { ...force, locationId: NEXT_DOOR(opening) } : force)),
     },
   };
 }

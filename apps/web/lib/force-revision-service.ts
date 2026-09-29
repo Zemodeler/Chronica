@@ -4,7 +4,7 @@ import { WorldRevisionConflictError, commitBurst, failBurst, findRunningBurst, g
 import type { WorldDelta } from "@chronica/shared";
 import { applyDeltas, createIdFactory } from "@chronica/sim";
 import { standardsForPolity } from "./army-standards";
-import { BURST_STALE_MS } from "./burst-status";
+import { livenessAt } from "./burst-status";
 import { resolveContext } from "./simulation-service";
 
 /**
@@ -40,10 +40,9 @@ export async function reviseForce(gameId: string, forceId: string, revision: For
   try {
     const [view, running] = await Promise.all([
       getWorldView(db, gameId),
-      findRunningBurst(db, gameId, new Date(Date.now() - BURST_STALE_MS)),
+      findRunningBurst(db, gameId, livenessAt(new Date())),
     ]);
     if (view === undefined) return refuse(404, "This world has no state yet.");
-    if (view.scenarioWarfare === undefined) return refuse(409, "This scenario declares no rules of war.");
     const force = view.world.material.forces.find((candidate) => candidate.id === forceId);
     if (force === undefined) return refuse(404, "There is no such army.");
     // The same test the station uses for "his army": the man who leads it in

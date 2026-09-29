@@ -24,7 +24,8 @@ export const FamilyLinkKindSchema = z.enum([
   "household_head",
   "household_member",
   "dependant",
-]);
+  // Named, so a model's schema writes the list once (see `AgreementKind`).
+]).meta({ id: "FamilyKind" });
 export type FamilyLinkKind = z.infer<typeof FamilyLinkKindSchema>;
 
 const RECIPROCAL_KIND: Record<FamilyLinkKind, FamilyLinkKind> = {

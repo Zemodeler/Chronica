@@ -1,3 +1,4 @@
+import { spreadSubSkills } from "./aptitude";
 import type { Character, CharacterSkills } from "./character";
 import { deriveDefaultMind } from "./mind";
 import { stableHash } from "../determinism";
@@ -40,10 +41,12 @@ export function createCanonicalNpc(
 
   const purse = openCharacterAccount(world.material, input.characterId);
   if (purse === null) return null;
-  const skills = input.skills ?? {
+  const given = input.skills ?? {
     martial: 35, intrigue: 45, learning: 45, piety: 35,
     stewardship: 45, diplomacy: 55, body: 45, subSkills: {},
   };
+  // Everybody made has finer skills of their own (`spreadSubSkills`).
+  const skills = { ...given, subSkills: spreadSubSkills(input.characterId, given, given.subSkills) };
   const officeId = input.officeId ?? null;
   const age = Math.max(0, Math.min(120, Math.round(input.ageYearsAtStart ?? 35)));
   const cultureId = input.cultureId ?? "culture-local";
@@ -64,7 +67,7 @@ export function createCanonicalNpc(
     personalAccountId: purse.accountId,
     skills,
     traits: [],
-    mind: deriveDefaultMind({ officeId, skills, ageYears: age, cultureId }),
+    mind: deriveDefaultMind({ id: input.characterId, officeId, skills, ageYears: age, cultureId }),
     alive: true,
     healthBps: 10_000,
     prestigeBps: input.prestigeBps ?? 3_000,

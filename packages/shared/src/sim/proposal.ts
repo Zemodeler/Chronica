@@ -216,6 +216,20 @@ export const OrchestratorOutputSchema = ProposalSchema.extend({
     .object({
       summary: SummarySchema,
       domains: z.array(z.string().trim().min(1).max(40)).max(8).default([]),
+      /**
+       * Each thing the order asked for, and the facts of this answer that say
+       * it was done -- or why it could not be. "Take control of the conquered
+       * Sicilian lands under my governorship" was one sentence of an order
+       * whose other sentences produced a letter and reinforcements, and it
+       * vanished: the record answers an order, and the order had an answer.
+       * A part with no fact that came to be and no reason is answered by the
+       * engine as having come to nothing.
+       */
+      parts: z.array(z.object({
+        said: z.string().trim().min(1).max(200),
+        factLocalIds: z.array(z.string().trim().min(1).max(80)).max(6).default([]),
+        whyNot: z.string().trim().min(1).max(300).nullable().default(null),
+      }).strict()).max(10).default([]),
     })
     .strict(),
   /**

@@ -1,6 +1,7 @@
 import { ScenarioDefinitionSchema, WorldStateSchema, type ScenarioDefinition, type WorldState } from "@chronica/shared";
 
-export { PUNIC_WARS_SCENARIO_ID, PUNIC_WARS_SLUG, punicWarsScenario } from "./punic-wars-scenario";
+export { PUNIC_WARS_SCENARIO_ID, PUNIC_WARS_SLUG, punicWarsScenario, punicWarsFounding } from "./punic-wars-scenario";
+export { foundingPeople, romanSenators, seatFoundingPeopleInto, withFinerSkills, type SeatingReport } from "./punic-wars-rulers";
 
 export const CHRONICA_SYSTEM_USER_ID = "00000000-0000-4000-8000-000000000001";
 export const FIRST_PUNIC_WAR_SCENARIO_ID = "00000000-0000-4000-8000-000000000101";
@@ -138,13 +139,13 @@ const initialWorld: WorldState = WorldStateSchema.parse({
         polityId: "rome",
         name: "Senate",
         votingBlocs: [
-          { id: "patrician-bloc", name: "Patrician bloc", representedInterest: "landed nobility", weight: 60, baseSupport: 20, yesThreshold: 15, noThreshold: -15, causes: [] },
-          { id: "popular-bloc", name: "Popular bloc", representedInterest: "the people", weight: 40, baseSupport: -10, yesThreshold: 15, noThreshold: -15, causes: [] },
+          { id: "patrician-bloc", name: "The patrician houses", representedInterest: "landed nobility", weight: 60, baseSupport: 20, yesThreshold: 15, noThreshold: -15, causes: [] },
+          { id: "popular-bloc", name: "The plebeian new men", representedInterest: "the people", weight: 40, baseSupport: -10, yesThreshold: 15, noThreshold: -15, causes: [] },
         ],
         totalVotingWeight: 100,
         quorumBps: 5_000,
         passageThresholdBps: 5_001,
-        denominator: "total",
+        denominator: "cast",
       },
     ],
     reservedPowers: [],
@@ -157,8 +158,8 @@ const initialWorld: WorldState = WorldStateSchema.parse({
       { id: "req-not-disqualified", kind: "not_disqualified", label: "Must carry no disqualifying status", params: {} },
     ],
     politicalGroups: [
-      { id: "patrician-bloc", name: "Patrician bloc", polityId: "rome", type: "faction", leaderCharacterId: "marcus-atilius", platform: ["Defend the incumbent command"], resourceAccountId: null, publicReputationBps: 6_000, active: true },
-      { id: "popular-bloc", name: "Popular bloc", polityId: "rome", type: "faction", leaderCharacterId: "quintus-fabius", platform: ["Hold commanders accountable for reverses"], resourceAccountId: null, publicReputationBps: 4_000, active: true },
+      { id: "patrician-bloc", name: "The patrician houses", polityId: "rome", type: "faction", leaderCharacterId: "marcus-atilius", platform: ["Defend the incumbent command"], resourceAccountId: null, publicReputationBps: 6_000, active: true },
+      { id: "popular-bloc", name: "The plebeian new men", polityId: "rome", type: "faction", leaderCharacterId: "quintus-fabius", platform: ["Hold commanders accountable for reverses"], resourceAccountId: null, publicReputationBps: 4_000, active: true },
     ],
     groupMemberships: [
       { characterId: "marcus-atilius", groupId: "patrician-bloc", role: "leader", influenceBps: 8_000, loyaltyBps: 70, visibility: "polity", joinedAtStep: 0, leftAtStep: null, joinProvenanceEventId: null, leaveProvenanceEventId: null },

@@ -48,10 +48,10 @@ export function keepAsArrangement(delta: WorldDelta, world: WorldState, actorRef
   const purse = actorRef.kind === "character" ? accountOf(world, actorRef.id) : null;
   if (delta.op === "income_source_upsert" && purse !== null && place !== null) {
     if (delta.kind === "trade") {
-      return { op: "trade_venture_open", localId, title: name.slice(0, 120), ownerCharacterRef: actorRef.id, fromProvinceId: place, toProvinceId: place, band: "slight", paidFromAccountRef: purse, reason } as WorldDelta;
+      return { op: "trade_venture_open", localId, title: name.slice(0, 120), ownerCharacterRef: actorRef.id, fromProvinceId: place, toProvinceId: place, band: "slight", paidFromAccountRef: purse, reason };
     }
     if (delta.kind === "land") {
-      return { op: "holding_create", localId, title: name.slice(0, 120), provinceId: place, holderCharacterRef: actorRef.id, band: "slight", priceFromAccountRef: purse, reason } as WorldDelta;
+      return { op: "holding_create", localId, title: name.slice(0, 120), provinceId: place, holderCharacterRef: actorRef.id, band: "slight", priceFromAccountRef: purse, reason };
     }
   }
   const band = EffectBandSchema.safeParse(written.band);
@@ -71,5 +71,5 @@ export function keepAsArrangement(delta: WorldDelta, world: WorldState, actorRef
     effects,
     upkeep: null,
     reason,
-  } as WorldDelta;
+  };
 }

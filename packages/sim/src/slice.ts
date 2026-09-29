@@ -1,6 +1,7 @@
 import { findPolityGaps } from "./population";
 import type { NarratorSeed } from "./narrator";
 import { renderCharacterPortrait } from "./cognition";
+import { isOpenIntent, mostPressingFirst } from "./intents";
 import { ruleInWords } from "./mechanics/mechanic-words";
 import { forecastInWords, isChamberQuestion, voteDayOf } from "./senate";
 import { rulerOf, rulerOfficeOf, sovereignChamberOf } from "./constitutions";
@@ -14,11 +15,16 @@ import {
   alliesLedBy,
   allTroopCategories,
   bandStrength,
+  strangerStrength,
   buildStation,
   currentAgeYears,
   describeAuthority,
   factsKnownToStation,
   holdsPolityStanding,
+  isDelivered,
+  agreementIsOpen,
+  knowsAgreement,
+  treatyViewer,
   reachesPerson,
   seesAccount,
   seesForce,
@@ -36,6 +42,8 @@ import {
   effectInWords,
   taxBurdenInWords,
   taxBurdens,
+  obligationAmountNow,
+  polityGrainPriceBps,
 } from "@chronica/shared";
 
 /**
@@ -72,6 +80,10 @@ export interface AnsweredDecision {
   readonly prompt: string;
   readonly label: string;
   readonly summary: string;
+  /** Which option it was: a succession names the new character, a plight in the field names the choice. */
+  readonly optionId?: string | undefined;
+  /** Who was asking when the question was put, where the answer changes who asks next. */
+  readonly predecessorId?: string | undefined;
 }
 
 export interface WorldSliceInput {
@@ -129,6 +141,8 @@ export interface WorldSlice {
     readonly portrait: string;
     /** What their grants actually permit, in words. */
     readonly permitted: readonly string[];
+    /** Surrounded, cut off or a prisoner: the one fact that bounds everything else they do. */
+    readonly plight: string | null;
   };
   readonly economy: readonly { readonly id: string; readonly label: string; readonly balance: number }[];
   readonly monthlyIncome: number;
@@ -189,6 +203,8 @@ export interface WorldSlice {
    * the watch language was careful to avoid.
    */
   readonly standingPlans: readonly { readonly id: string; readonly label: string; readonly effect: string; readonly where: string }[];
+  /** Sieges this power lays or suffers, with how near each city is to yielding. */
+  readonly sieges: readonly { readonly id: string; readonly line: string }[];
   /** The kinds of soldier this world has, for an order that reinforces an army with one. */
   readonly troopKinds: readonly { readonly id: string; readonly label: string }[];
   readonly politics: readonly { readonly id: string; readonly name: string; readonly office: string | null; readonly age: number; readonly faith: string | null;
@@ -216,6 +232,8 @@ export interface WorldSlice {
     readonly subject: string;
     readonly terms: string;
     readonly dueInDays: number | null;
+    /** Days until it reaches its reader, while it is still on the road; null once there. */
+    readonly arrivesInDays: number | null;
   }[];
   /**
    * What each polity is trying to do (VISION §11), including foreign ones.
@@ -243,6 +261,8 @@ export interface WorldSlice {
     readonly availableManpower: number;
     /** Men our allies by foedus could send when called: they fight our wars, so their levies are ours to ask for. */
     readonly alliedManpower: number;
+    /** What bread costs across our ground, 10 000 its ordinary price: it makes every army dearer or cheaper to keep. */
+    readonly grainPriceBps: number;
     readonly strained: readonly {
       readonly id: string;
       readonly name: string;
@@ -295,6 +315,8 @@ export interface WorldSlice {
     /** For a question the chamber counts: how each bloc leans and how it would go today. Null where they are not party to it. */
     readonly forecast: string | null;
   }[];
+  /** Questions settled lately, and whether settling them did anything -- so a carried one is carried out, not asked again. */
+  readonly decided: readonly { readonly id: string; readonly label: string; readonly outcome: string; readonly daysAgo: number; readonly began: string | null }[];
   /** Land, and the gap between who owns it and who holds it. */
   readonly holdings: readonly { readonly id: string; readonly title: string; readonly holder: string; readonly holderId: string; readonly control: number; readonly territoryId: string; readonly monthlyYield: number | null }[];
   /**
@@ -346,7 +368,7 @@ export interface WorldSlice {
   readonly foreignPowers: readonly { readonly id: string; readonly name: string; readonly provinces: number; readonly cohesion: string; readonly leaders: readonly string[]; readonly forces: readonly string[] }[];
   /** Countries holding land with nobody to speak or fight for them (VISION §5). */
   readonly populationGaps: readonly { readonly polityId: string; readonly name: string; readonly needsLeader: boolean; readonly needsForce: boolean; readonly provinceIds: readonly string[]; readonly why: string }[];
-  readonly projects: readonly { readonly id: string; readonly label: string; readonly status: string; readonly nextMilestone: { readonly id: string; readonly label: string } | null }[];
+  readonly projects: readonly { readonly id: string; readonly label: string; readonly status: string; readonly overseer: string | null; readonly nextMilestone: { readonly id: string; readonly label: string } | null }[];
   readonly intents: readonly { readonly actor: string; readonly action: string; readonly rationale: string }[];
   /** Ids are printed: a discovery has to name the fact it uncovered, and nothing else ever showed one. */
   readonly recentHistory: readonly { readonly id: string; readonly summary: string; readonly significance: number }[];
@@ -370,6 +392,40 @@ export interface WorldSlice {
     readonly secret: boolean;
   }[];
   readonly seeds: readonly NarratorSeed[];
+}
+
+/**
+ * Where the actor cannot simply do as they please, said before anything else.
+ *
+ * A man surrounded on a hill does not dine in the Forum that evening, and a
+ * prisoner of Carthage does not march his legion: the world must not narrate
+ * either, and it will unless it is told plainly.
+ */
+function plightOf(world: WorldState, actor: WorldState["characters"][number]): string | null {
+  const standing = world.fieldPerils.find((peril) => peril.characterId === actor.id && peril.resolvedAtStep === null);
+  const place = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
+  const polity = (id: string): string => world.map.polities.find((candidate) => candidate.id === id)?.name ?? id;
+  if (standing !== undefined) {
+    return [
+      `${standing.plight === "encircled" ? "SURROUNDED" : "CUT OFF"}: ${actor.name} is ${standing.plight === "encircled" ? "surrounded" : "cut off from the army"} at ${place(standing.provinceId)} with ${standing.companions} men, and ${world.material.forces.find((force) => force.id === standing.enemyForceId)?.name ?? polity(standing.enemyPolityId)} all round.`,
+      "  How it ends is the engine's, decided at the opening of the next report. Nothing ordered now reaches past the enemy around them.",
+    ].join("\n");
+  }
+  if (actor.disqualifyingStatuses.includes("captured")) {
+    const taken = [...world.fieldPerils].reverse().find((peril) => peril.characterId === actor.id && peril.outcome === "captured");
+    return [
+      `A PRISONER: ${actor.name} is held${taken === undefined ? "" : ` by ${polity(taken.enemyPolityId)}`} at ${place(actor.locationProvinceId)}, and commands nothing.`,
+      "  They can talk, write, bargain, promise and pay; a ransom, an exchange or an escape is how a prisoner goes free, and their captors decide whether it works.",
+    ].join("\n");
+  }
+  // Sick in bed is no prison, but it is not a march either.
+  if (actor.disqualifyingStatuses.includes("incapacitated")) {
+    return [
+      `ILL: ${actor.name} is ill and keeps to the house at ${place(actor.locationProvinceId)}.`,
+      "  They can see people, write, and give orders for others to carry out; they cannot ride, fight or travel until they are on their feet again.",
+    ].join("\n");
+  }
+  return null;
 }
 
 export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
@@ -410,10 +466,12 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   const speaksForTheGovernment = station !== null && holdsPolityStanding(station);
   const reachesAccount = (accountId: string): boolean => station === null || seesAccount(station, accountId);
   const reachesForce = (forceId: string): boolean => station === null || seesForce(station, forceId);
+  /** What the actor has heard, for how well they can count another power's men. */
+  const knownToActor = station === null ? [] : factsKnownToStation(input.facts, station, world.instant, world);
   // reachesPerson, not knowsPerson: someone who speaks for a whole power is
   // briefed on its figures whether or not he has dealt with them. Sight, not
-  // acquaintance.
-  const knowsThem = (characterId: string): boolean => station === null || reachesPerson(station, characterId);
+  // acquaintance -- and of his own power's figures, not the world's.
+  const knowsThem = (characterId: string): boolean => station === null || reachesPerson(station, characterId, world);
 
   // Money the actor's side actually holds, biggest first: a slice that leads
   // with a pauper's purse tells the model nothing about whether an order is
@@ -457,7 +515,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   const monthlyExpenditure = Math.round(
     world.material.obligations
       .filter((obligation) => obligation.active && reachesAccount(obligation.payerAccountId))
-      .reduce((sum, obligation) => sum + perDay(obligation.amount, obligation.cadenceSteps) * 30, 0),
+      .reduce((sum, obligation) => sum + perDay(obligationAmountNow(world, obligation), obligation.cadenceSteps) * 30, 0),
   );
 
   const military = world.material.forces
@@ -585,6 +643,15 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
 
   // A private man's own plans, not his government's traps: he was shown every
   // armed plan his power had laid, and wrote orders as though they were his.
+  const sieges = world.sieges
+    .filter((siege) => siege.status === "active" && (ownPolity === null || siege.besiegerPolityId === ownPolity || siege.defenderPolityId === ownPolity))
+    .slice(0, CAPS.standingPlans)
+    .map((siege) => {
+      const besieger = world.material.forces.find((force) => force.id === siege.forceId)?.name ?? siege.forceId;
+      const city = world.map.provinces.flatMap((province) => province.settlements).find((settlement) => settlement.id === siege.settlementId)?.name
+        ?? provinceName(siege.provinceId) ?? siege.provinceId;
+      return { id: siege.id, line: `${besieger} before ${city}, ${world.elapsedStep - siege.startedAtStep} days, ${Math.round(siege.pressureBps / 100)}% of the way to its yielding` };
+    });
   const standingPlans = world.contingencies
     .filter((plan) => plan.status === "armed" && (ownPolity === null || plan.ownerPolityId === ownPolity)
       && (speaksForTheGovernment || station === null || plan.ownerCharacterId === station.characterId))
@@ -626,9 +693,12 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   // What this world's powers have standing between them. §27 asks the slice to
   // carry active wars; before agreements existed the answer to "are we at war?"
   // was a trust score and a guess.
+  // A private one only for those who govern a power party to it, or did; a
+  // war, a peace or a truce for everybody (`treaty-knowledge.ts`).
+  const treatyReader = station === null ? null : treatyViewer(world, station.characterId, input.offices);
   const visibleAgreements = world.polityAgreements
     .filter((agreement) => agreement.status === "active")
-    .filter((agreement) => agreement.visibility === "public" || ownPolity === null || agreement.polityId === ownPolity || agreement.otherPolityId === ownPolity);
+    .filter((agreement) => ownPolity === null || (treatyReader === null ? agreementIsOpen(agreement) || agreement.polityId === ownPolity || agreement.otherPolityId === ownPolity : knowsAgreement(treatyReader, agreement)));
   // A leader's allies are one fact, not one treaty each: eight foedera listed
   // apart pushed the war at Rhegium out of the capped list.
   const confederations = [...new Set(visibleAgreements.filter((agreement) => agreement.kind === "foedus").map((agreement) => agreement.otherPolityId))]
@@ -656,6 +726,8 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   const letters = world.diplomacy
     .filter((message) => message.status === "awaiting_reply")
     .filter((message) => ownPolity === null || message.fromPolityId === ownPolity || message.toPolityId === ownPolity)
+    // One still on the road to us has not come; one of ours on the road is ours to know of.
+    .filter((message) => message.fromPolityId === ownPolity || isDelivered(message, world.elapsedStep))
     // A power's correspondence belongs to whoever answers for the power. A
     // private man reads the letters he sent and the letters sent to him.
     .filter((message) =>
@@ -673,6 +745,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       subject: message.subject,
       terms: message.terms,
       dueInDays: message.replyDueByStep === null ? null : message.replyDueByStep - world.elapsedStep,
+      arrivesInDays: isDelivered(message, world.elapsedStep) ? null : message.deliveredOnDay! - world.elapsedStep,
     }));
 
   // Basis points are the engine's unit and a hundredth of a point is not a
@@ -717,6 +790,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     population: ourMaterial.reduce((sum, material) => sum + material.population, 0),
     availableManpower: ourMaterial.reduce((sum, material) => sum + material.availableManpower, 0),
     alliedManpower: world.material.provinceMaterial.filter((material) => alliedProvinceIds.has(material.provinceId)).reduce((sum, material) => sum + material.availableManpower, 0),
+    grainPriceBps: ownPolity === null ? 10_000 : polityGrainPriceBps(world, ownPolity),
     // The worst-off first: a province at its baseline needs no line of prompt.
     strained: [...ourMaterial]
       .sort((a, b) => (a.foodSecurityBps + a.stabilityBps - a.warDamageBps) - (b.foodSecurityBps + b.stabilityBps - b.warDamageBps))
@@ -817,6 +891,25 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
         supportWeight: party ? positions.filter((position) => position.position === "support").reduce((sum, position) => sum + position.influenceWeight, 0) : null,
         opposeWeight: party ? positions.filter((position) => position.position === "oppose").reduce((sum, position) => sum + position.influenceWeight, 0) : null,
         forecast: party ? forecastInWords(world, procedure, input.offices) : null,
+      };
+    });
+
+  // The Senate carried a fleet 119 to 0, and three months later the consul
+  // was sent back to ask it again: a settled question left the slice the day
+  // it was settled.
+  const decided = world.material.politicalProcedures
+    .filter((procedure) => procedure.stage === "resolved" && procedure.resolvedAtStep !== null && world.elapsedStep - procedure.resolvedAtStep <= 365)
+    .filter((procedure) => procedure.institutionId !== null && ourInstitutionIds.has(procedure.institutionId) && procedure.subjectKind !== "office_seat")
+    .sort((a, b) => b.resolvedAtStep! - a.resolvedAtStep!)
+    .slice(0, 4)
+    .map((procedure) => {
+      const projectId = world.enactments.find((enactment) => enactment.procedureId === procedure.id)?.projectId;
+      return {
+        id: procedure.id,
+        label: procedure.label,
+        outcome: procedure.outcome ?? "resolved",
+        daysAgo: world.elapsedStep - procedure.resolvedAtStep!,
+        began: world.projects.find((project) => project.id === projectId)?.label ?? null,
       };
     });
 
@@ -971,7 +1064,9 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       forces: world.material.forces
         .filter((force) => force.polityId === polity.id)
         .slice(0, 4)
-        .map((force) => `${force.name}${force.outlaw === true ? " (outlaw)" : ""} [${force.id}] — ${force.personnel.reduce((sum, category) => sum + category.fit, 0)} men at ${provinceName(force.locationId)} [${force.locationId}]`),
+        // Another power's numbers are a guess, and as good as the source: the
+        // model hears what the character could, never the true count.
+        .map((force) => `${force.name}${force.outlaw === true ? " (outlaw)" : ""} [${force.id}] — ${station === null ? `${force.personnel.reduce((sum, category) => sum + category.fit, 0)} men` : strangerStrength(force, station.provinceIds, knownToActor, station.characterId, world.elapsedStep).label.replace("unknown to you", "strength unknown")} at ${provinceName(force.locationId)} [${force.locationId}]`),
     }))
     .filter((power) => power.provinces > 0 || power.leaders.length > 0 || power.forces.length > 0)
     .sort((a, b) => {
@@ -990,14 +1085,16 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       id: project.id,
       label: project.label,
       status: project.status,
+      overseer: project.overseerCharacterId == null ? null : world.characters.find((character) => character.id === project.overseerCharacterId)?.name ?? null,
       nextMilestone: (() => {
         const pending = project.milestones.find((milestone) => milestone.status === "pending");
         return pending === undefined ? null : { id: pending.id, label: pending.label };
       })(),
     }));
 
-  const intents = world.characterIntents
-    .filter((intent) => intent.status === "proposed" || intent.status === "prepared")
+  // The most pressing first, newest among equals: this took the first eight
+  // ever written, which were the oldest and long since stale.
+  const intents = mostPressingFirst(world.characterIntents.filter(isOpenIntent))
     // What a man means to do is known to the people who deal with him. This
     // line showed every Roman's private plan to every other Roman.
     .filter((intent) => knowsThem(intent.actorCharacterId))
@@ -1007,8 +1104,8 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   // Only what this actor could actually know -- narrowed from what their
   // government knows, which is a different and much larger thing.
   const recentHistory = (station === null
-    ? factsKnownTo(input.facts, input.actorRef, ownPolity, world.instant)
-    : factsKnownToStation(input.facts, station, world.instant))
+    ? factsKnownTo(input.facts, input.actorRef, ownPolity, world.instant, world)
+    : factsKnownToStation(input.facts, station, world.instant, world))
     .slice(-CAPS.facts)
     .map((fact) => ({ id: fact.id, summary: fact.summary, significance: 0 }));
 
@@ -1060,6 +1157,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
         ? ""
         : renderCharacterPortrait(input.actorRef.id, actor.name, world, input.clock, { others: [] }),
       permitted: actor === undefined ? [] : describeAuthority(buildStation({ world, characterId: input.actorRef.id, offices: input.offices }), world),
+      plight: actor === undefined ? null : plightOf(world, actor),
     },
     economy: accounts,
     monthlyIncome,
@@ -1071,6 +1169,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     populationGaps,
     provinces,
     standingPlans,
+    sieges,
     troopKinds,
     faiths: world.faiths.slice(0, CAPS.faiths).map((faith) => faith.name),
     politics,
@@ -1083,6 +1182,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     constitution,
     institutions,
     council,
+    decided,
     factions,
     holdings,
     debts,
@@ -1114,6 +1214,7 @@ export function renderWorldSlice(slice: WorldSlice): string {
     "",
   );
   if (slice.actor.portrait.length > 0) lines.push(slice.actor.portrait, "");
+  if (slice.actor.plight !== null) lines.push(slice.actor.plight, "");
   lines.push(
     "WHAT THIS PERSON MAY DO:",
     ...(slice.actor.permitted.length === 0
@@ -1160,6 +1261,7 @@ export function renderWorldSlice(slice: WorldSlice): string {
   }));
   section("PLANS STANDING", slice.standingPlans.map((plan) =>
     `${plan.label} [${plan.id}] — ${plan.effect === "spring_trap" ? "prepared, and springs by itself" : "waiting to raise the alarm"}, in ${plan.where}`));
+  section("SIEGES", slice.sieges.map((siege) => `${siege.line} [${siege.id}]`));
   section("KINDS OF SOLDIER", slice.troopKinds.length === 0 ? [] : [
     `${slice.troopKinds.map((kind) => `${kind.label} [${kind.id}]`).join("; ")}. A kind not listed here can be taken into an army anyway -- name it and say what sort of troops they are.`,
   ]);
@@ -1181,18 +1283,117 @@ export function renderWorldSlice(slice: WorldSlice): string {
     const arms = power.forces.length === 0 ? "no forces known in the field" : power.forces.join("; ");
     return `${power.name} [${power.id}] — ${power.provinces} province(s), ${power.cohesion}. ${people}. ${arms}`;
   }));
+  section("PEOPLE", slice.politics.map((person) => `${person.name} [${person.id}]${person.office === null ? "" : `, ${person.office}`}, aged ${person.age}${person.faith === null ? "" : `, of ${person.faith}`}${person.standing === null ? "" : `, ${person.standing}`}`));
+  section(
+    "POLITICAL STANDING",
+    slice.standing.map((entry) => {
+      const confidence = entry.confidence === null ? "" : `, confidence in its institutions ${entry.confidence}/100`;
+      const why = entry.causes.length === 0 ? "" : ` — ${entry.causes.join("; ")}`;
+      return `${entry.name} [${entry.id}]: legitimacy ${entry.legitimacy}/100${confidence}${why}`;
+    }),
+  );
+  section(
+    "CONSTITUTION",
+    slice.constitution === null ? [] : [
+      `It is ${slice.constitution.form}. ${slice.constitution.ruler === null ? "It has no single head." : `Its head: ${slice.constitution.ruler}.`} ${slice.constitution.sovereign === null ? "No chamber holds the constitution: its ruler decrees changes to it." : `Only the ${slice.constitution.sovereign} may change the constitution.`}`,
+      ...(slice.constitution.lastChange === null ? [] : [`Last changed: ${slice.constitution.lastChange}`]),
+      ...slice.constitution.customs.map((custom) => `Custom: ${custom}.`),
+    ],
+  );
+  section(
+    "INSTITUTIONS",
+    slice.institutions.flatMap((institution) => [
+      `${institution.name} [${institution.id}] — ${institution.advisory ? "advises the ruler; its count binds nobody" : `${institution.threshold}/100 of the weight needed to carry a question`}${institution.powers === null ? "" : `; decides only ${institution.powers}`}`,
+      ...institution.blocs.map((bloc) => `  ${bloc.name} [${bloc.id}] — weight ${bloc.weight}, ${bloc.wants === null ? `speaks for ${bloc.interest}` : `for ${bloc.wants}`}`),
+    ]),
+  );
+  section("FACTIONS", slice.factions.map((faction) =>
+    `${faction.name} [${faction.id}] — ${faction.kind}${faction.strength === null ? "" : `, strength ${faction.strength}/100`}${faction.leader === null ? "" : `, led by ${faction.leader}`}, ${faction.members} member(s)${faction.platform === null ? "" : `; wants: ${faction.platform}`}`));
+  section(
+    "BEFORE THE COUNCIL",
+    slice.council.map((question) => {
+      const where = question.institution === null ? "decided by its sponsor" : `before the ${question.institution}`;
+      const when = question.dueInDays === null ? "" : `, due in ${question.dueInDays} days`;
+      // A counted question says how the house leans; any other, the weight declared.
+      const tally = question.forecast !== null
+        ? ` ${question.forecast[0]!.toUpperCase()}${question.forecast.slice(1)}`
+        : question.supportWeight === null || question.opposeWeight === null
+          ? ""
+          : ` For ${question.supportWeight}, against ${question.opposeWeight}.`;
+      return `${question.label} [${question.id}] — ${question.type}, ${where}, raised by ${question.sponsor}${when}.${tally}`;
+    }),
+  );
+  section("DECIDED", slice.decided.map((question) =>
+    `${question.label} [${question.id}] — ${question.outcome} ${question.daysAgo} days ago; ${question.began === null ? "it began nothing, so doing what it allowed is an order of its own" : `began ${question.began}`}.`));
+  section(
+    "THE COUNTRY",
+    slice.country.provinces === 0
+      ? []
+      : [
+        slice.country.governs
+          ? `${slice.country.provinces} province(s), ${slice.country.population} people, ${slice.country.availableManpower} men available to raise${slice.country.alliedManpower > 0 ? `, and ${slice.country.alliedManpower} more our allies send by foedus when a war opens` : ""}.`
+          : `${slice.country.provinces} province(s), ${slice.country.population} people.`,
+        // Said only when it is news: bread at its ordinary price is no line of prompt.
+        ...(Math.abs(slice.country.grainPriceBps - 10_000) < 1_500 ? [] : [`Grain sells at ${Math.round(slice.country.grainPriceBps / 100)}% of its ordinary price${slice.country.grainPriceBps > 10_000 ? ": bread is dear, and armies cost more to keep" : ": bread is cheap"}.`]),
+        ...slice.country.strained.map((province) =>
+          slice.country.governs
+            ? `${province.name} [${province.id}] — ${province.manpower} men, food ${province.food}/100, order ${province.stability}/100, war damage ${province.warDamage}/100, taxable ${province.taxCapacity}`
+            : `${province.name} [${province.id}] — food ${province.food}/100, order ${province.stability}/100, war damage ${province.warDamage}/100`),
+      ],
+  );
+  section(
+    "DEBTS",
+    slice.debts.map((debt) => {
+      const behind = debt.arrears === 0 ? "" : `, ${debt.arrears} in arrears`;
+      return `${debt.outstanding} owed to ${debt.lender} [${debt.id}] at ${debt.interest}% — ${debt.perPeriod} a period${behind}, ${debt.status}. ${debt.terms}`;
+    }),
+  );
+  section("TRADE", slice.trade.map((route) =>
+    `${route.label} [${route.id}] — ${route.amount} a period from ${route.counterparty}${route.active ? "" : ", cut off"}`));
+  section(
+    "STANDING ARRANGEMENTS",
+    slice.arrangements.map((entity) => {
+      const owner = entity.owner === null ? "" : `, under ${entity.owner}`;
+      const detail = entity.attributes.length === 0 ? "" : ` — ${entity.attributes.join(", ")}`;
+      const does = entity.effects.length === 0 ? "" : `; ${entity.effects.join(", ")}`;
+      const rule = entity.rule === null ? "" : `; rule: ${entity.rule}`;
+      return `${entity.label} [${entity.id}] (${entity.kind}${owner})${entity.retired ? ", repealed" : ""}${entity.lapsed ? ", fallen into disuse" : ""}${detail}${does}${rule}`;
+    }),
+  );
+  section("LANDS AND HOLDINGS", slice.holdings.map((holding) =>
+    `${holding.title} [${holding.id}] in ${holding.territoryId} — held in law by ${holding.holder} [${holding.holderId}], held in fact ${holding.control}/100${holding.monthlyYield === null ? "" : `, yielding ~${holding.monthlyYield} a month`}`));
+  section("DIPLOMACY", slice.diplomacy.map((stance) => `toward ${stance.toward}: trust ${stance.trust} (${stance.why})`));
+  section("WHERE THE POWERS STAND", [
+    ...slice.confederations.map((confederation) =>
+      `${confederation.leader} leads by foedus${confederation.ours ? " (ours)" : ""}: ${confederation.allies.join(", ")} — men when called, no tribute, no war or peace of their own`),
+    ...slice.agreements.map((agreement) => {
+      const term = agreement.endsInDays === null ? "" : `, for another ${agreement.endsInDays} day(s)`;
+      return `[${agreement.id}] ${agreement.kind}${agreement.ours ? " (ours)" : ""}: ${agreement.between} — ${agreement.terms}${term}`;
+    }),
+  ]);
+  section("LETTERS AWAITING AN ANSWER", slice.letters.map((letter) => {
+    const due = letter.dueInDays === null ? "no term set" : letter.dueInDays < 0 ? `overdue by ${-letter.dueInDays} day(s)` : `answer wanted within ${letter.dueInDays} day(s)`;
+    const road = letter.arrivesInDays === null ? "" : `, still on the road: it reaches them in ${letter.arrivesInDays} day(s)`;
+    return `[${letter.id}] ${letter.kind} ${letter.ours ? `we sent to ${letter.to}` : `${letter.from} sent us`} — ${letter.subject}: ${letter.terms} (${due}${road})`;
+  }));
+  section("STANDING INTENTIONS", slice.intents.map((intent) => `${intent.actor} means to ${intent.action}: ${intent.rationale}`));
+  section("ORDERS AWAITING AN ANSWER", slice.openOrders.map((order) => `${order.id} to ${order.recipient} — ${order.status}`));
+  section("RECENT HISTORY (only what is known to them)", slice.recentHistory.map((entry) => `${entry.summary} [${entry.id}]`));
   // ── The world's own half ───────────────────────────────────────────────
   //
-  // Three of the sections below exist for the orchestrator *as the world*, not
+  // Everything from here on exists for the orchestrator *as the world*, not
   // for the person whose order it is answering: a foreign power's private aims,
-  // the threads the world is following (secret ones included), and the
-  // directives telling it to people a country or start something. Their own
-  // comments say so. Filtering them would not make the reader less omniscient;
-  // it would make the world incoherent, and send the model back to inventing
-  // placeholder ids for what it could no longer see.
+  // the threads the world is following (secret ones included), the directives
+  // telling it to people a country or start something, every power's projects
+  // and the whole world's calendar. Their own comments say so. Filtering them
+  // would not make the reader less omniscient; it would make the world
+  // incoherent, and send the model back to inventing placeholder ids for what
+  // it could no longer see.
   //
-  // So they are labelled instead. The reader has not been told any of this, and
-  // the model is told that plainly.
+  // So they are labelled instead, and they come last. The header once stood in
+  // the middle, and fourteen sections of what the actor did know -- his
+  // people, his letters, his own recent history -- followed it under the words
+  // "they have been told none of what follows".
   lines.push(
     "── THE WORLD ITSELF ──",
     `  Yours to move, and not ${slice.actor.name}'s to know. They have been told none of what`,
@@ -1248,99 +1449,8 @@ export function renderWorldSlice(slice: WorldSlice): string {
       );
     }
   }
-  section("PEOPLE", slice.politics.map((person) => `${person.name} [${person.id}]${person.office === null ? "" : `, ${person.office}`}, aged ${person.age}${person.faith === null ? "" : `, of ${person.faith}`}${person.standing === null ? "" : `, ${person.standing}`}`));
-  section(
-    "POLITICAL STANDING",
-    slice.standing.map((entry) => {
-      const confidence = entry.confidence === null ? "" : `, confidence in its institutions ${entry.confidence}/100`;
-      const why = entry.causes.length === 0 ? "" : ` — ${entry.causes.join("; ")}`;
-      return `${entry.name} [${entry.id}]: legitimacy ${entry.legitimacy}/100${confidence}${why}`;
-    }),
-  );
-  section(
-    "CONSTITUTION",
-    slice.constitution === null ? [] : [
-      `It is ${slice.constitution.form}. ${slice.constitution.ruler === null ? "It has no single head." : `Its head: ${slice.constitution.ruler}.`} ${slice.constitution.sovereign === null ? "No chamber holds the constitution: its ruler decrees changes to it." : `Only the ${slice.constitution.sovereign} may change the constitution.`}`,
-      ...(slice.constitution.lastChange === null ? [] : [`Last changed: ${slice.constitution.lastChange}`]),
-      ...slice.constitution.customs.map((custom) => `Custom: ${custom}.`),
-    ],
-  );
-  section(
-    "INSTITUTIONS",
-    slice.institutions.flatMap((institution) => [
-      `${institution.name} [${institution.id}] — ${institution.advisory ? "advises the ruler; its count binds nobody" : `${institution.threshold}/100 of the weight needed to carry a question`}${institution.powers === null ? "" : `; decides only ${institution.powers}`}`,
-      ...institution.blocs.map((bloc) => `  ${bloc.name} [${bloc.id}] — weight ${bloc.weight}, ${bloc.wants === null ? `speaks for ${bloc.interest}` : `for ${bloc.wants}`}`),
-    ]),
-  );
-  section("FACTIONS", slice.factions.map((faction) =>
-    `${faction.name} [${faction.id}] — ${faction.kind}${faction.strength === null ? "" : `, strength ${faction.strength}/100`}${faction.leader === null ? "" : `, led by ${faction.leader}`}, ${faction.members} member(s)${faction.platform === null ? "" : `; wants: ${faction.platform}`}`));
-  section(
-    "BEFORE THE COUNCIL",
-    slice.council.map((question) => {
-      const where = question.institution === null ? "decided by its sponsor" : `before the ${question.institution}`;
-      const when = question.dueInDays === null ? "" : `, due in ${question.dueInDays} days`;
-      // A counted question says how the house leans; any other, the weight declared.
-      const tally = question.forecast !== null
-        ? ` ${question.forecast[0]!.toUpperCase()}${question.forecast.slice(1)}`
-        : question.supportWeight === null || question.opposeWeight === null
-          ? ""
-          : ` For ${question.supportWeight}, against ${question.opposeWeight}.`;
-      return `${question.label} [${question.id}] — ${question.type}, ${where}, raised by ${question.sponsor}${when}.${tally}`;
-    }),
-  );
-  section(
-    "THE COUNTRY",
-    slice.country.provinces === 0
-      ? []
-      : [
-        slice.country.governs
-          ? `${slice.country.provinces} province(s), ${slice.country.population} people, ${slice.country.availableManpower} men available to raise${slice.country.alliedManpower > 0 ? `, and ${slice.country.alliedManpower} more our allies owe us by foedus (a levy there draws on their provinces)` : ""}.`
-          : `${slice.country.provinces} province(s), ${slice.country.population} people.`,
-        ...slice.country.strained.map((province) =>
-          slice.country.governs
-            ? `${province.name} [${province.id}] — ${province.manpower} men, food ${province.food}/100, order ${province.stability}/100, war damage ${province.warDamage}/100, taxable ${province.taxCapacity}`
-            : `${province.name} [${province.id}] — food ${province.food}/100, order ${province.stability}/100, war damage ${province.warDamage}/100`),
-      ],
-  );
-  section(
-    "DEBTS",
-    slice.debts.map((debt) => {
-      const behind = debt.arrears === 0 ? "" : `, ${debt.arrears} in arrears`;
-      return `${debt.outstanding} owed to ${debt.lender} [${debt.id}] at ${debt.interest}% — ${debt.perPeriod} a period${behind}, ${debt.status}. ${debt.terms}`;
-    }),
-  );
-  section("TRADE", slice.trade.map((route) =>
-    `${route.label} [${route.id}] — ${route.amount} a period from ${route.counterparty}${route.active ? "" : ", cut off"}`));
-  section(
-    "STANDING ARRANGEMENTS",
-    slice.arrangements.map((entity) => {
-      const owner = entity.owner === null ? "" : `, under ${entity.owner}`;
-      const detail = entity.attributes.length === 0 ? "" : ` — ${entity.attributes.join(", ")}`;
-      const does = entity.effects.length === 0 ? "" : `; ${entity.effects.join(", ")}`;
-      const rule = entity.rule === null ? "" : `; rule: ${entity.rule}`;
-      return `${entity.label} [${entity.id}] (${entity.kind}${owner})${entity.retired ? ", repealed" : ""}${entity.lapsed ? ", fallen into disuse" : ""}${detail}${does}${rule}`;
-    }),
-  );
-  section("LANDS AND HOLDINGS", slice.holdings.map((holding) =>
-    `${holding.title} [${holding.id}] in ${holding.territoryId} — held in law by ${holding.holder} [${holding.holderId}], held in fact ${holding.control}/100${holding.monthlyYield === null ? "" : `, yielding ~${holding.monthlyYield} a month`}`));
-  section("DIPLOMACY", slice.diplomacy.map((stance) => `toward ${stance.toward}: trust ${stance.trust} (${stance.why})`));
-  section("WHERE THE POWERS STAND", [
-    ...slice.confederations.map((confederation) =>
-      `${confederation.leader} leads by foedus${confederation.ours ? " (ours)" : ""}: ${confederation.allies.join(", ")} — men when called, no tribute, no war or peace of their own`),
-    ...slice.agreements.map((agreement) => {
-      const term = agreement.endsInDays === null ? "" : `, for another ${agreement.endsInDays} day(s)`;
-      return `[${agreement.id}] ${agreement.kind}${agreement.ours ? " (ours)" : ""}: ${agreement.between} — ${agreement.terms}${term}`;
-    }),
-  ]);
-  section("LETTERS AWAITING AN ANSWER", slice.letters.map((letter) => {
-    const due = letter.dueInDays === null ? "no term set" : letter.dueInDays < 0 ? `overdue by ${-letter.dueInDays} day(s)` : `answer wanted within ${letter.dueInDays} day(s)`;
-    return `[${letter.id}] ${letter.kind} ${letter.ours ? `we sent to ${letter.to}` : `${letter.from} sent us`} — ${letter.subject}: ${letter.terms} (${due})`;
-  }));
   section("ACTIVE PROJECTS", slice.projects.map((project) =>
-    `${project.label} [${project.id}] — ${project.status}${project.nextMilestone === null ? "" : `, next: ${project.nextMilestone.label} [${project.nextMilestone.id}]`}`));
-  section("STANDING INTENTIONS", slice.intents.map((intent) => `${intent.actor} means to ${intent.action}: ${intent.rationale}`));
-  section("ORDERS AWAITING AN ANSWER", slice.openOrders.map((order) => `${order.id} to ${order.recipient} — ${order.status}`));
-  section("RECENT HISTORY (only what is known to them)", slice.recentHistory.map((entry) => `${entry.summary} [${entry.id}]`));
+    `${project.label} [${project.id}] — ${project.status}${project.overseer === null ? "" : `, in ${project.overseer}'s hands`}${project.nextMilestone === null ? "" : `, next: ${project.nextMilestone.label} [${project.nextMilestone.id}]`}`));
   const threadOf = (event: SliceEvent): string => (event.thread === undefined ? "" : ` (thread: ${event.thread})`);
   section("DUE NOW", slice.dueEvents.map((event) => `${event.kind}: ${event.summary}${threadOf(event)}`));
   section("SCHEDULED AHEAD", slice.pendingEvents.map((event) => `in ${event.dueInDays} days — ${event.kind}: ${event.summary}${threadOf(event)}`));

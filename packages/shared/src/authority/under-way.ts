@@ -92,6 +92,9 @@ export function ordersUnderWay(
       && (reservation === undefined || reservation.status !== "active" || reservation.remainingAmount < next.milestone.costAmount);
 
     const parts: string[] = [];
+    // Who has it in hand, so the player can see that somebody does.
+    const overseer = project.overseerCharacterId == null ? undefined : world.characters.find((character) => character.id === project.overseerCharacterId);
+    if (overseer !== undefined && overseer.id !== characterId) parts.push(`In ${overseer.name}'s hands.`);
     if (next !== undefined) parts.push(overdue ? `${next.milestone.label}: overdue.` : `Next: ${lowerFirst(next.milestone.label)}, ${when(next.due)}.`);
     else if (project.targetCompletionStep !== null) parts.push(`Due to be finished ${when(project.targetCompletionStep)}.`);
     if (reservation !== undefined) parts.push(`${money(reservation.reservedAmount - reservation.remainingAmount)} of ${money(reservation.reservedAmount)} spent.`);

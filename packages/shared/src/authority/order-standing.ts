@@ -76,6 +76,30 @@ export function assessOrderStanding(input: OrderStandingInput): OrderStandingVer
     return { standing: "binding", grant: null, reason: `${title}, who holds the army you command.` };
   }
 
+  // A magistrate of the same power who stands as high as the issuer -- his
+  // colleague in the same office, or above him on the ladder -- is not reached
+  // by the issuer's power over their country. Consul Clepsina's command over
+  // Rome made his colleague Blasio a man "under whom you serve"; Blasio took
+  // the order as binding, and spent the season advocating on it.
+  const magistracyOf = (characterId: string): Office | undefined => offices.find(
+    (office) => (office.kind ?? "magistracy") === "magistracy"
+      && world.material.officeSeats.some((seat) => seat.status === "held" && seat.holderCharacterId === characterId && seat.officeId === office.id),
+  );
+  const issuerMagistracy = magistracyOf(issuerRef.id);
+  const recipientMagistracy = magistracyOf(recipientRef.id);
+  if (
+    issuerMagistracy !== undefined
+    && recipientMagistracy !== undefined
+    && recipientMagistracy.polityId === recipient.polityId
+    && (recipientMagistracy.id === issuerMagistracy.id
+      || (recipientMagistracy.rank !== undefined && issuerMagistracy.rank !== undefined && recipientMagistracy.rank >= issuerMagistracy.rank))
+  ) {
+    const relation = recipientMagistracy.id === issuerMagistracy.id
+      ? `your colleague as ${issuerMagistracy.label}`
+      : `${issuerMagistracy.label}, while you are ${recipientMagistracy.label}`;
+    return { standing: "requested", grant: null, reason: `${name(issuerRef.id)}, ${relation}. He has no authority over you: he is asking.` };
+  }
+
   // 2. A standing grant somebody actually wrote, reaching this man's power.
   const overTheirPower = issuerGrants.find(
     (grant) => grant.scope.kind === "polity"

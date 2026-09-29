@@ -2,6 +2,7 @@ import { projectCoordinate } from "./geo-projection";
 import { derivePoliticalLabels, type PoliticalLabelLayout } from "./political-labels";
 import type { PoliticalMapState } from "./political-geometry";
 import { labelFontFamily, whenLabelFontReady } from "./map-fonts";
+import { FAR_ZOOM_SCALE } from "./map-display-unit";
 import { ATLAS } from "../../../../lib/palette";
 
 // Ink on the plate, lifted off the relief by a thin paper-coloured halo.
@@ -52,17 +53,21 @@ function pointAtDistance(table: ReturnType<typeof buildArcLengthTable>, dist: nu
   return { x: x0 + (x1 - x0) * segT, y: y0 + (y1 - y0) * segT, angle: Math.atan2(y1 - y0, x1 - x0) };
 }
 
-/** Where each character of a label sits, along its curve. */
-function layoutCharacters(label: PoliticalLabelLayout): { char: string; x: number; y: number; angle: number }[] {
+/**
+ * Where each character of a label sits, along its curve. `offset` slides the
+ * run of characters along the path from its centred position, in world units;
+ * the caller keeps it within the path's spare length (see slideRoom).
+ */
+function layoutCharacters(label: PoliticalLabelLayout, offset = 0): { char: string; x: number; y: number; angle: number }[] {
   const text = label.name.toUpperCase();
   if (text.length === 0) return [];
   const p0 = projectCoordinate(label.pathPoints[0][0], label.pathPoints[0][1]);
   const p1 = projectCoordinate(label.pathPoints[1][0], label.pathPoints[1][1]);
   const p2 = projectCoordinate(label.pathPoints[2][0], label.pathPoints[2][1]);
   const table = buildArcLengthTable(p0, p1, p2);
-  const startDist = (table.total - label.usableLength) / 2;
+  const startDist = (table.total - label.usableLength) / 2 + offset;
   const step = text.length > 1 ? label.usableLength / (text.length - 1) : 0;
-  return [...text].map((char, i) => ({ char, ...pointAtDistance(table, text.length === 1 ? table.total / 2 : startDist + i * step) }));
+  return [...text].map((char, i) => ({ char, ...pointAtDistance(table, text.length === 1 ? table.total / 2 + offset : startDist + i * step) }));
 }
 
 function drawCurvedLabel(ctx: OffscreenCanvasRenderingContext2D, label: PoliticalLabelLayout, characters: ReturnType<typeof layoutCharacters>): void {
@@ -111,35 +116,125 @@ const KEEP_LEVELS = LEVELS_PER_OCTAVE * 2;
 // overlap one already placed is dropped: a stack of names where every one
 // is unreadable is worse than one name you can read. Worked out once per
 // zoom level and cached, since it depends on nothing else.
+//
+// At far zoom the guaranteed set (political-labels.ts) is placed before any
+// other name. When two of them collide, both are stepped down toward their
+// floor; if that is not enough, the newcomer slides along its path; only
+// then is it dropped. The rest fill in around them as before.
 
 // Each character's footprint, as a fraction of the font size either side of
 // its anchor. A little wider than the glyph so neighbours keep some air.
 const CHARACTER_HALF_BOX = .55;
 
-interface PlacedLabel { readonly label: PoliticalLabelLayout; readonly characters: ReturnType<typeof layoutCharacters>; }
+// Each step down multiplies a colliding guaranteed label's size by this,
+// until it reaches its floor.
+const GUARANTEED_STEP_DOWN = .85;
+// Positions tried either side of the centre when sliding along the path.
+const SLIDE_STEPS = 4;
+// A backstop on the stepping loop; .85 reaches a fifth of the size in ten.
+const MAX_STEPS_DOWN = 12;
+
+export interface PlacedLabel { readonly label: PoliticalLabelLayout; readonly characters: ReturnType<typeof layoutCharacters>; }
 interface Box { minX: number; minY: number; maxX: number; maxY: number; }
+interface Footprint { readonly entry: PlacedLabel; readonly bounds: Box; readonly boxes: readonly Box[]; }
+interface Slot { footprint: Footprint; readonly original: PoliticalLabelLayout; }
 
 const overlaps = (a: Box, b: Box) => a.minX < b.maxX && a.maxX > b.minX && a.minY < b.maxY && a.maxY > b.minY;
 
-function placeLabels(political: PoliticalMapState, cssPixelsPerDegree: number): PlacedLabel[] {
-  const placed: { entry: PlacedLabel; bounds: Box; boxes: Box[] }[] = [];
-  for (const label of derivePoliticalLabels(political, cssPixelsPerDegree).sort((a, b) => b.priority - a.priority)) {
-    const characters = layoutCharacters(label);
-    if (characters.length === 0) continue;
-    const half = label.fontSize * CHARACTER_HALF_BOX;
-    const boxes = characters.map(({ x, y }) => ({ minX: x - half, minY: y - half, maxX: x + half, maxY: y + half }));
-    const bounds = boxes.reduce((acc, b) => ({ minX: Math.min(acc.minX, b.minX), minY: Math.min(acc.minY, b.minY), maxX: Math.max(acc.maxX, b.maxX), maxY: Math.max(acc.maxY, b.maxY) }));
-    const collides = placed.some((other) => overlaps(bounds, other.bounds) && boxes.some((box) => overlaps(box, other.bounds) && other.boxes.some((o) => overlaps(box, o))));
-    if (!collides) placed.push({ entry: { label, characters }, bounds, boxes });
+function footprint(label: PoliticalLabelLayout, offset = 0): Footprint | null {
+  const characters = layoutCharacters(label, offset);
+  if (characters.length === 0) return null;
+  const half = label.fontSize * CHARACTER_HALF_BOX;
+  const boxes = characters.map(({ x, y }) => ({ minX: x - half, minY: y - half, maxX: x + half, maxY: y + half }));
+  const bounds = boxes.reduce((acc, b) => ({ minX: Math.min(acc.minX, b.minX), minY: Math.min(acc.minY, b.minY), maxX: Math.max(acc.maxX, b.maxX), maxY: Math.max(acc.maxY, b.maxY) }));
+  return { entry: { label, characters }, bounds, boxes };
+}
+
+const collide = (a: Footprint, b: Footprint) => overlaps(a.bounds, b.bounds) && a.boxes.some((box) => overlaps(box, b.bounds) && b.boxes.some((o) => overlaps(box, o)));
+
+/** A label at `factor` of its full size (never below its floor), its characters drawn in along the same path. */
+function steppedDown(label: PoliticalLabelLayout, factor: number): PoliticalLabelLayout {
+  const floorFactor = label.minFontSize / label.fontSize;
+  if (factor >= 1 || floorFactor >= 1) return label;
+  // Exactly the floor once clamped, so "at the floor" compares exactly.
+  if (factor <= floorFactor) return { ...label, fontSize: label.minFontSize, usableLength: label.usableLength * floorFactor };
+  return { ...label, fontSize: label.fontSize * factor, usableLength: label.usableLength * factor };
+}
+
+/** How far a label's run of characters may slide either way before leaving its path. */
+function slideRoom(label: PoliticalLabelLayout): number {
+  return Math.max(0, (label.pathLength - label.usableLength) / 2);
+}
+
+function placeGuaranteed(slots: Slot[], label: PoliticalLabelLayout): void {
+  const first = footprint(label);
+  if (!first) return;
+  const blockers = slots.filter((slot) => collide(first, slot.footprint));
+  if (blockers.length === 0) { slots.push({ footprint: first, original: label }); return; }
+  const others = slots.filter((slot) => !blockers.includes(slot));
+  const clear = (candidate: Footprint, shrunk: readonly Footprint[]) => !others.some((slot) => collide(candidate, slot.footprint)) && !shrunk.some((b) => collide(candidate, b));
+  const commit = (candidate: Footprint, shrunk: readonly Footprint[]) => {
+    blockers.forEach((slot, index) => { slot.footprint = shrunk[index]!; });
+    slots.push({ footprint: candidate, original: label });
+  };
+  // Step the newcomer and every label it hits down together, never growing
+  // one already stepped further.
+  const shrinkBlockers = (factor: number) => blockers.map((slot) => {
+    const current = slot.footprint.entry.label;
+    const next = steppedDown(slot.original, factor);
+    return next.fontSize < current.fontSize ? footprint(next) ?? slot.footprint : slot.footprint;
+  });
+  let factor = 1;
+  let atFloor = label.minFontSize >= label.fontSize && blockers.every((slot) => slot.original.minFontSize >= slot.footprint.entry.label.fontSize);
+  for (let attempt = 0; !atFloor && attempt < MAX_STEPS_DOWN; attempt++) {
+    factor *= GUARANTEED_STEP_DOWN;
+    const candidateLabel = steppedDown(label, factor);
+    const candidate = footprint(candidateLabel);
+    if (!candidate) return;
+    const shrunk = shrinkBlockers(factor);
+    if (clear(candidate, shrunk)) { commit(candidate, shrunk); return; }
+    atFloor = candidateLabel.fontSize <= label.minFontSize && blockers.every((slot) => slot.original.minFontSize >= steppedDown(slot.original, factor).fontSize);
   }
-  return placed.map((p) => p.entry);
+  // At the floor, slide along the path, nearest positions first.
+  const floor = steppedDown(label, 0);
+  const shrunk = shrinkBlockers(0);
+  const room = slideRoom(floor);
+  for (let step = 0; step <= SLIDE_STEPS; step++) for (const sign of step === 0 ? [0] : [1, -1]) {
+    const candidate = footprint(floor, sign * room * step / SLIDE_STEPS);
+    if (candidate && clear(candidate, shrunk)) { commit(candidate, shrunk); return; }
+  }
+}
+
+/**
+ * Chooses which political labels are drawn and where, for one zoom level:
+ * the guaranteed set first (see placeGuaranteed), then the rest, most
+ * important first, each dropped if it would overlap one already placed.
+ */
+export function placeLabels(political: PoliticalMapState, cssPixelsPerDegree: number, scale?: number, unit = 1): PlacedLabel[] {
+  return placeLabelLayouts(derivePoliticalLabels(political, cssPixelsPerDegree, scale === undefined ? undefined : { scale, unit }));
+}
+
+/** placeLabels for labels already derived. */
+export function placeLabelLayouts(derived: readonly PoliticalLabelLayout[]): PlacedLabel[] {
+  const labels = [...derived].sort((a, b) => b.priority - a.priority);
+  const slots: Slot[] = [];
+  for (const label of labels) if (label.guaranteed) placeGuaranteed(slots, label);
+  for (const label of labels) {
+    if (label.guaranteed) continue;
+    const candidate = footprint(label);
+    if (candidate && !slots.some((slot) => collide(candidate, slot.footprint))) slots.push({ footprint: candidate, original: label });
+  }
+  return slots.map((slot) => slot.footprint.entry);
 }
 
 interface LabelBitmap { readonly canvas: OffscreenCanvas; readonly x: number; readonly y: number; readonly w: number; readonly h: number; }
 
-// political → level → the placed labels, and their bitmaps by label id
-interface LabelLevel { readonly placed: readonly PlacedLabel[]; readonly bitmaps: Map<string, LabelBitmap> }
-const _labelCache = new WeakMap<PoliticalMapState, Map<number, LabelLevel>>();
+// political → level key → the placed labels, and their bitmaps by label id.
+// A level's key is its zoom step, the display unit and whether it is far zoom
+// (where the guaranteed set applies): the same screen resolution lays labels
+// out differently on a different-sized map, so a resize never reuses them.
+interface LabelLevel { readonly level: number; readonly unit: number; readonly placed: readonly PlacedLabel[]; readonly bitmaps: Map<string, LabelBitmap> }
+const _labelCache = new WeakMap<PoliticalMapState, Map<string, LabelLevel>>();
 // Bitmaps made before the label face loaded are in the fallback face; they
 // are all thrown away once, when it arrives.
 let _labelFontReady = false;
@@ -163,13 +258,16 @@ function renderLabelBitmap({ label, characters }: PlacedLabel, devicePixelsPerUn
  * Draws political territory name labels onto the terrain canvas.
  * `pixelsPerDegree` is the CSS-pixel-per-world-degree rate (the canvas
  * transform's scale `m`, without devicePixelRatio — the size thresholds in
- * political-labels.ts are calibrated in CSS px).
+ * political-labels.ts are calibrated in CSS px). `scale` is the viewport's
+ * zoom and `unit` the display unit (map-display-unit.ts).
  */
 export function drawPoliticalLabels(
   ctx: CanvasRenderingContext2D,
   political: PoliticalMapState,
   pixelsPerDegree: number,
   dpr: number,
+  scale: number,
+  unit: number,
   visibleRect: VisibleWorldRect,
   interacting: boolean,
   requestRedraw: () => void,
@@ -182,10 +280,12 @@ export function drawPoliticalLabels(
     levels?.clear();
   }
   if (!levels) { levels = new Map(); _labelCache.set(political, levels); }
-  for (const cached of levels.keys()) if (Math.abs(cached - level) > KEEP_LEVELS) levels.delete(cached);
-  let current = levels.get(level);
-  if (!current) { current = { placed: placeLabels(political, devicePixelsPerUnit / dpr), bitmaps: new Map() }; levels.set(level, current); }
-  const nearestLevels = [...levels.keys()].filter((l) => l !== level).sort((a, b) => Math.abs(a - level) - Math.abs(b - level));
+  const far = scale < FAR_ZOOM_SCALE;
+  const key = `${level}:${unit}:${far ? "far" : "near"}`;
+  for (const [cachedKey, cached] of levels) if (Math.abs(cached.level - level) > KEEP_LEVELS || cached.unit !== unit) levels.delete(cachedKey);
+  let current = levels.get(key);
+  if (!current) { current = { level, unit, placed: placeLabels(political, devicePixelsPerUnit / dpr, scale, unit), bitmaps: new Map() }; levels.set(key, current); }
+  const nearestLevels = [...levels.values()].filter((l) => l !== current).sort((a, b) => Math.abs(a.level - level) - Math.abs(b.level - level));
 
   const deadline = performance.now() + LABEL_RENDER_BUDGET_MS;
   let deferred = false;
@@ -195,7 +295,7 @@ export function drawPoliticalLabels(
     if (mx < visibleRect.minX || mx > visibleRect.maxX || my < visibleRect.minY || my > visibleRect.maxY) continue;
     let bitmap = current.bitmaps.get(label.id);
     if (bitmap === undefined) {
-      const fallback = nearestLevels.map((l) => levels.get(l)!.bitmaps.get(label.id)).find((b) => b !== undefined);
+      const fallback = nearestLevels.map((l) => l.bitmaps.get(label.id)).find((b) => b !== undefined);
       // While moving, only a label with nothing to show yet gets a new
       // bitmap; one that is over budget appears a frame or two later.
       if ((!interacting || fallback === undefined) && performance.now() < deadline) {

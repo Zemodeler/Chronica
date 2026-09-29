@@ -219,13 +219,15 @@ describe("Marcus goes to Egypt for a wife", () => {
 });
 
 describe("the world's own generals are as good as the world says", () => {
-  it("makes Antigonus Gonatas a gifted soldier and not a man of martial 35", () => {
+  it("makes Craterus a gifted soldier and not a man of martial 35", () => {
+    // Gonatas himself has been seated in Macedon since v34; his half-brother
+    // Craterus, who held Corinth for him, is the world's to make.
     const result = order("gaius-furius", [{
-      op: "character_create", localId: "gonatas", name: "Antigonus Gonatas", polityId: "macedon", provinceId: null, age: 55,
-      officeLabel: "King of Macedon", traits: [], skills: { martial: "gifted", diplomacy: "able" },
-      generatedBecause: "Macedon needs its king.",
+      op: "character_create", localId: "craterus", name: "Craterus", polityId: "macedon", provinceId: null, age: 45,
+      officeLabel: null, traits: [], skills: { martial: "gifted", diplomacy: "able" },
+      generatedBecause: "Macedon's general at Corinth.",
     }]);
-    const gonatas = result.world.characters.find((character) => character.name === "Antigonus Gonatas")!;
+    const gonatas = result.world.characters.find((character) => character.name === "Craterus")!;
     expect(gonatas.skills.martial).toBe(72);
     expect(gonatas.skills.diplomacy).toBe(60);
   });

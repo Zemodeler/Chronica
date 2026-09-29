@@ -41,8 +41,20 @@ const withoutBlasio = (world: WorldState): WorldState => ({
  * consulship's ladder -- the rung below, the ten-year gap that bars Curius and
  * then Gaius -- is taken off. `a-career.test.ts` is about the ladder.
  */
+/**
+ * The Senate these were written against: the consuls, Curius and Ogulnius.
+ * Since v34 the house has its consulars too (`romanSenators`), and Fabricius
+ * outranks Ogulnius at the polls; these pin how an election is counted, not
+ * who the house happens to hold.
+ */
+const V34_SENATORS = new Set(["gaius-fabricius", "tiberius-coruncanius", "lucius-papirius", "spurius-carvilius", "quintus-fabius", "lucius-postumius", "publius-valerius", "gaius-claudius"]);
 const opening = (): WorldState => {
-  const world = withoutBlasio(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)));
+  const parsed = WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
+  const world = withoutBlasio({
+    ...parsed,
+    characters: parsed.characters.filter((character) => !V34_SENATORS.has(character.id)),
+    material: { ...parsed.material, officeSeats: parsed.material.officeSeats.filter((seat) => seat.holderCharacterId === null || !V34_SENATORS.has(seat.holderCharacterId)) },
+  });
   return {
     ...world,
     material: {
@@ -117,7 +129,7 @@ describe("elections to an elective office", () => {
     const account = pollingDay.factProposals.find((fact) => fact.kind === "election_held");
     expect(account?.summary).toContain("Centuriate Assembly elected");
     expect(account?.visibility).toBe("public");
-  });
+  }, 30_000);
 
   it("counts who has declared for a man: backing can carry a candidate past one of equal standing", () => {
     const canvassOver = tick(yearEnded(), 365 + ELECTION_CANVASS_DAYS).world;

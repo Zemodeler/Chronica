@@ -24,7 +24,8 @@ checks their position. The Chronicle is the one surface built for reading at
 length.
 
 Chronica is a desktop-browser game. Layouts take a `min-width` floor
-(1200px for the game) rather than responsive breakpoints. Accessibility is
+(1200px for the game, 1024px for the site) rather than responsive
+breakpoints. Accessibility is
 still required on its own terms: real controls, a sensible tab order, visible
 focus, and labels a screen reader can use.
 
@@ -45,8 +46,16 @@ read CSS variables cheaply, so it takes the same values from
 | `--dust` | `#A8977C` | muted text on dark (6.6:1 on soot) |
 | `--bronze` | `#B98B4A` | interactive edges on dark (6.1:1 on soot) |
 | `--bronze-deep` | `#7A5626` | interactive edges on papyrus (4.7:1) |
+| `--bronze-hover` | `#C99A58` | a primary button under the pointer |
 | `--lamp` | `#F2C66D` | new and unread |
+| `--lamp-core`, `--lamp-rim` | `#FFF3C8`, `#C9993F` | the flame and the lamp-gold badge |
+| `--vellum-high` | `#F4ECDA` | vellum text under the pointer |
+| `--danger`, `--danger-ink` | `#C0534A`, `#E3A69E` | harm that cannot be undone, on dark: deleting a save, a refused form |
+| `--danger-deep` | `#8A2A22` | the same on papyrus; `.on-papyrus` and dialogs swap it in |
 | `--seal` | per culture | decisions, deficits, breaches, war borders |
+
+Danger is not the seal. The seal is the world asking for the player's word;
+danger is the site warning that something will be lost.
 
 The seal is set by `data-culture` on the game shell:
 
@@ -73,8 +82,9 @@ One family, loaded with `next/font/google`:
 Figures are old-style in prose (`font-variant-numeric: oldstyle-nums`) and
 tabular lining in ledgers and muster numbers.
 
-Sizes run on a 1.25 scale from 15px UI text. Chronicle body text is 19px/1.6
-at about 62 characters.
+Sizes run on a 1.25 scale from 15px UI text. The step below it stops at 13px:
+nothing a player has to read is smaller. Chronicle body text is 19px/1.6 at
+about 62 characters.
 
 ## Parts
 
@@ -96,6 +106,15 @@ Shared components live in `apps/web/app/components/ui/`, styled in
   month to spare"), from `roomStates` (shared); the seal mark when that fact
   wants the player's word. One line and one mark per object at most; a quiet
   room means nothing needs you.
+- **Plaques**: invisible until the object is pointed at or focused. The
+  painting is the thing to look at; only the seal mark and the lamp-gold
+  badge sit on an object at rest.
+- **The reckoning** under the order at the desk: what this save has spent of
+  its cap, what is in the wallet, and what the last order came to. Turns are
+  billed by tokens, so there is no price in advance; the desk says what the
+  last one cost. An empty purse, or a save at its cap, shuts the desk and the
+  map's order bar and says why before the click. The lintel's date and coins
+  are read with the record, so both move when the world does.
 - **The calendar line** after the date in the lintel: the next dated thing
   the player could know of, from `whatComesNext` (shared), never from the
   event queue. A seal dot when it wants the player's word; choosing it opens
@@ -107,6 +126,38 @@ Shared components live in `apps/web/app/components/ui/`, styled in
 - **`CloseButton`**: the one close control, labelled "Close".
 - Lamp-gold unread badges, underlined word filters instead of pill chips, and
   ledgers with the surplus or shortfall at the foot.
+- **Unread in the Chronicle**: an entry the player has not read carries a
+  lamp-gold "New" badge (ink on the lamp, since gold letters vanish on
+  papyrus). It becomes read once it has held the page for a moment and a
+  half, not when the Chronicle opens. The head of the sheet says how many are
+  unread and offers "Only what is unread" and "Mark all as read"; the
+  unread-only view keeps what was unread when it was chosen, so reading an
+  entry never makes it vanish.
+- Marks before a line, not bars beside it: a notice, an error or an empty
+  purse leads with a small dot in bronze, danger or the seal.
+
+## Outside the game
+
+The site is the same room seen before the lamp is lit.
+
+- **The threshold** (signed out): the Roman room full-bleed, dark where the
+  words stand, leading with "Play anyone." Below it, one turn as it goes: an
+  order on wax, the world moving, and a Chronicle passage on papyrus, marked
+  as an example.
+- **The shelf** (your games): the save to go back to as its own room, with
+  who the player is there, the world's date and the last thing the Chronicle
+  recorded; the others as ruled rows. No saves is an invitation, not an empty
+  table.
+- **Worlds**: a plate and its words, alternating down the page: the day it
+  opens, the premise, and who you might be, all read from the scenario's own
+  data. The plate is `public/worlds/<slug>.webp`, painted to one house style
+  (docs/scenario-key-art.md); a world without art gets a title plate.
+- **Character creation**: the question, the world's date, and under the box
+  the scenario's leading people and a few stations as starting points that
+  fill it. The price is said on the button line.
+- **The account**: the wallet first, then a ruled ledger of name, recovery
+  email and saves.
+- Deleting a save asks on papyrus, never in a browser alert.
 
 ## Motion
 
@@ -127,6 +178,24 @@ The satellite relief is drawn as an engraved plate:
 - region labels in letterspaced Alegreya SC, cached as bitmaps per zoom level
   (see `map-canvas-labels.ts`), rebuilt once the font has loaded.
 
+Sizes on the map are set in CSS pixels times a display unit: the shorter side
+of the map over 1000 px, held between 0.75 and 1.6 and rounded to tenths
+(`map-display-unit.ts`). A laptop's map is about 0.8 and a large monitor's
+about 1.3. Settlement markers, their names and gaps, the army standards and
+the label floors all scale by it, so a large screen is not dotted with a
+laptop's specks. Markers grow gently with each octave of zoom up to a
+ceiling, instead of sitting on a floor and then jumping.
+
+Zoomed all the way out, each polity is named once, on its largest piece, and
+the largest few by all the land they hold (twelve times the display unit) are
+always named. A name that will not fit along its territory's curve is set
+straight through the territory at 11 px times the unit, overhanging its
+borders if it must. When two of these collide, both shrink toward that
+floor, then the smaller slides along its line, and only then is it dropped.
+Detached pieces get their own names once the player zooms in.
+
+Capitals are named at every zoom. Other settlements are named only close in.
+
 Measure map performance with a GPU trace, not script timers.
 
 ## Words
@@ -142,4 +211,5 @@ speaks in the world's voice ("Sending for the muster roll…"), keep it.
 - Monospace for data, emoji for icons, `→` on buttons.
 - The same rounded card and shadow on everything. A border or shadow marks a
   thing as a separate object; use it only for one.
+- A coloured bar down the left of a callout or option.
 - Any colour that is not a token.

@@ -22,3 +22,6 @@ export * from "./delegation";
 export * from "./order-outcome";
 export * from "./elections";
 export * from "./plans";
+export * from "./peace";
+export * from "./polity-end";
+export { diplomaticAnswererOf } from "./letters";

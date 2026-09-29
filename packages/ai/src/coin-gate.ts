@@ -50,6 +50,9 @@ const MODEL_TOKEN_RATES: Record<string, ModelTokenRate> = {
     cacheWriteMicroUnitsPerMillionTokens: 0n,
   },
 };
+// Azure reports its deployment name as the model, so each deployment is priced
+// as the model it serves.
+MODEL_TOKEN_RATES["gpt-6-ad"] = MODEL_TOKEN_RATES["gpt-6-luna"]!;
 
 // Conservative overestimate for the hold — settled to the actual model's cost.
 const HOLD_RATE = {

@@ -18,8 +18,38 @@ import { normalizeRefs } from "./normalize-refs";
  * it, not paying it, not through anything else the order made for him -- is
  * that power's business, and is judged as the world's. A Roman who raises
  * Gauls under his own command is still in it, and still answers for it.
+ *
+ * The same for dealings between two other powers. A Roman consul's order to
+ * write to Messana and Syracuse came back with the Midland Britons' war on the
+ * Thames Basin and the Mamertines' appeal to Carthage in the order's list; the
+ * engine read them as the consul committing Britons and Mamertines, refused
+ * both, and the historian headlined "Clepsina speaks for the Midland Britons".
+ * A treaty, a letter or an answer in which the actor's own power is neither
+ * party, and he appears nowhere, is between those two powers.
  */
 const MADE_FOR_A_POWER = new Set(["force_create", "character_create"]);
+const BETWEEN_POWERS = new Set(["agreement_open", "agreement_close", "diplomatic_message_send", "diplomatic_message_answer"]);
+
+/** The powers a dealing is between, as the engine will read them; null when it cannot tell. */
+function partiesOf(delta: WorldDelta, world: WorldState): readonly string[] | null {
+  const read = normalizeRefs(delta, world);
+  switch (read.op) {
+    case "agreement_open":
+      return [read.polityId, read.otherPolityId];
+    case "diplomatic_message_send":
+      return [read.fromPolityId, read.toPolityId];
+    case "agreement_close": {
+      const agreement = world.polityAgreements.find((candidate) => candidate.id === read.agreementRef);
+      return agreement === undefined ? null : [agreement.polityId, agreement.otherPolityId];
+    }
+    case "diplomatic_message_answer": {
+      const message = world.diplomacy.find((candidate) => candidate.id === read.messageRef);
+      return message === undefined ? null : [message.fromPolityId, message.toPolityId];
+    }
+    default:
+      return null;
+  }
+}
 
 export function misfiledWorldActs(orderDeltas: readonly WorldDelta[], world: WorldState, actorRef: OrderPartyRef): Set<WorldDelta> {
   if (actorRef.kind !== "character") return new Set();
@@ -55,7 +85,16 @@ export function misfiledWorldActs(orderDeltas: readonly WorldDelta[], world: Wor
 
   const misfiled = new Set<WorldDelta>();
   for (const delta of orderDeltas) {
-    if (!MADE_FOR_A_POWER.has(delta.op) || mentions(delta, his)) continue;
+    if (mentions(delta, his)) continue;
+    if (BETWEEN_POWERS.has(delta.op)) {
+      const parties = partiesOf(delta, world);
+      if (parties !== null
+        && parties.every((id) => id !== actor.polityId && world.map.polities.some((polity) => polity.id === id))) {
+        misfiled.add(delta);
+      }
+      continue;
+    }
+    if (!MADE_FOR_A_POWER.has(delta.op)) continue;
     // The power as the engine will read it, near-misses put right.
     const polityId = (normalizeRefs(delta, world) as { polityId?: unknown }).polityId;
     if (typeof polityId !== "string" || polityId === actor.polityId) continue;

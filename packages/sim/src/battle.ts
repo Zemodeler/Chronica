@@ -1,4 +1,8 @@
 import {
+  AILMENT_DAYS,
+  aptitude,
+  practise,
+  skillShare,
   INJURIES,
   applyInjury,
   boundedId,
@@ -11,6 +15,10 @@ import {
   summarizeBattleResult,
   terrainDefenseBps,
   warfareWith,
+  isNavalForce,
+  retreatRoute,
+  applyWarDamage,
+  woundsMend,
   type BattlePosture,
   type BattleResult,
   type Character,
@@ -21,7 +29,9 @@ import {
   type TacticalPremise,
   type WorldState,
 } from "@chronica/shared";
-import { killCharacter } from "./mortality";
+import { handOverForcesOf, killCharacter } from "./mortality";
+import { divertFieldFates, openFieldPerils } from "./field-perils";
+import { summonToJudgment } from "./trials";
 
 /**
  * Battle (VISION §3, §12, §29).
@@ -73,6 +83,8 @@ export interface EngagementInput {
   readonly warfare: ScenarioWarfareRules;
   readonly battleId: string;
   readonly seed: string;
+  /** Whose death is a question rather than an answer -- see `field-perils.ts`. */
+  readonly playerCharacterId?: string | null | undefined;
 }
 
 export interface EngagementResult {
@@ -166,13 +178,54 @@ export function memberFates(world: WorldState, result: BattleResult): MemberFate
   return fates;
 }
 
+/**
+ * A category's losses, shared among the groups that make it up.
+ *
+ * The resolver counts losses per category, and an army is often several groups
+ * of one category -- Legio I was legionaries, allied infantry and recruits, all
+ * "infantry". Each group was charged the whole category's losses, so a battle
+ * that cost 811 men took 2,433 from the legion. Shared by strength, the largest
+ * group taking what does not divide evenly.
+ */
+function shareAmong(groups: readonly { readonly fit: number }[], owed: number): number[] {
+  const total = groups.reduce((sum, group) => sum + group.fit, 0);
+  if (total <= 0 || owed <= 0) return groups.map(() => 0);
+  const taking = Math.min(owed, total);
+  const shares = groups.map((group) => Math.floor((taking * group.fit) / total));
+  let left = taking - shares.reduce((sum, share) => sum + share, 0);
+  const bySize = groups.map((_, index) => index).sort((a, b) => groups[b]!.fit - groups[a]!.fit);
+  for (const index of bySize) {
+    if (left <= 0) break;
+    const room = groups[index]!.fit - shares[index]!;
+    const more = Math.min(room, left);
+    shares[index] = shares[index]! + more;
+    left -= more;
+  }
+  return shares;
+}
+
+interface CategoryLoss { dead: number; deserted: number; wounded: number }
+
+/**
+ * A wound heals: a commander hurt in the field was barred from office for the
+ * rest of his life, because nothing ever lifted "wounded". It passes as any
+ * ailment does (`ailments.ts`), the day it would have if the world had written it.
+ */
+function healsBy(character: Character, status: string, atStep: number): NonNullable<Character["ailmentsUntil"]> {
+  return [...(character.ailmentsUntil ?? []).filter((entry) => entry.status !== status), { status, untilStep: atStep + AILMENT_DAYS }];
+}
+
 function applyResult(world: WorldState, result: BattleResult, atStep: number, members: readonly MemberFate[]): { world: WorldState; spoils: SpoilsTaken[] } {
-  const lossesByForce = new Map<string, Map<string, number>>();
+  const lossesByForce = new Map<string, Map<string, CategoryLoss>>();
   for (const casualty of result.casualties) {
-    const gone = casualty.dead + casualty.deserted + casualty.wounded;
-    if (gone === 0) continue;
-    const byCategory = lossesByForce.get(casualty.forceId) ?? new Map<string, number>();
-    byCategory.set(casualty.categoryId, (byCategory.get(casualty.categoryId) ?? 0) + gone);
+    if (casualty.dead + casualty.deserted + casualty.wounded === 0) continue;
+    const byCategory = lossesByForce.get(casualty.forceId) ?? new Map<string, CategoryLoss>();
+    const was = byCategory.get(casualty.categoryId) ?? { dead: 0, deserted: 0, wounded: 0 };
+    byCategory.set(casualty.categoryId, {
+      dead: was.dead + casualty.dead,
+      deserted: was.deserted + casualty.deserted,
+      wounded: was.wounded + casualty.wounded,
+    });
     lossesByForce.set(casualty.forceId, byCategory);
   }
 
@@ -185,40 +238,69 @@ function applyResult(world: WorldState, result: BattleResult, atStep: number, me
     const retreat = retreatByForce.get(force.id);
     if (losses === undefined && state === undefined && retreat === undefined) return force;
 
-    const personnel = losses === undefined
-      ? force.personnel
-      : force.personnel.map((category) => ({ ...category, fit: Math.max(0, category.fit - (losses.get(category.categoryId) ?? 0)) }));
+    // The dead and the deserters are gone; the wounded are off the rolls of
+    // the fit until they mend (`returnTheMended`), not struck off the army --
+    // save the share who never will (`woundsMend`), who are struck off with
+    // the dead: the ranks do not see them again.
+    let personnel = force.personnel;
+    let gone = 0;
+    const maimed = new Map<string, number>();
+    for (const [categoryId, loss] of losses ?? []) {
+      const indices = personnel.map((group, index) => (group.categoryId === categoryId ? index : -1)).filter((index) => index >= 0);
+      const groups = indices.map((index) => personnel[index]!);
+      const lost = shareAmong(groups, loss.dead + loss.deserted);
+      const afterLost = groups.map((group, at) => group.fit - lost[at]!);
+      const hurt = shareAmong(afterLost.map((fit) => ({ fit })), loss.wounded);
+      gone += lost.reduce((sum, n) => sum + n, 0);
+      personnel = personnel.map((group, index) => {
+        const at = indices.indexOf(index);
+        if (at < 0) return group;
+        const wounded = hurt[at]!;
+        const mending = woundsMend(wounded, atStep);
+        gone += mending.lost;
+        if (mending.lost > 0) maimed.set(categoryId, (maimed.get(categoryId) ?? 0) + mending.lost);
+        return {
+          ...group,
+          fit: afterLost[at]! - wounded,
+          unavailable: [
+            ...group.unavailable,
+            ...mending.back.map((cohort, week) => ({
+              id: boundedId(result.battleId, force.id, categoryId, String(at), `wounded${week}`),
+              count: cohort.count,
+              causeKind: "wounds" as const,
+              causeId: result.battleId,
+              earliestRecoveryStep: cohort.atStep,
+            })),
+          ],
+        };
+      });
+    }
 
+    const event = (categoryId: string, kind: "battle_death" | "desertion" | "unavailable" | "wounds_death", count: number) => ({
+      id: boundedId(result.battleId, force.id, categoryId, kind),
+      atStep,
+      kind,
+      categoryId,
+      count,
+      causeId: result.battleId,
+    });
     const history = [
       ...force.history,
-      ...result.casualties
-        .filter((casualty) => casualty.forceId === force.id && casualty.dead > 0)
-        .map((casualty) => ({
-          id: boundedId(result.battleId, force.id, casualty.categoryId, "dead"),
-          atStep,
-          kind: "battle_death" as const,
-          categoryId: casualty.categoryId,
-          count: casualty.dead,
-          causeId: result.battleId,
-        })),
-      ...result.casualties
-        .filter((casualty) => casualty.forceId === force.id && casualty.deserted > 0)
-        .map((casualty) => ({
-          id: boundedId(result.battleId, force.id, casualty.categoryId, "deserted"),
-          atStep,
-          kind: "desertion" as const,
-          categoryId: casualty.categoryId,
-          count: casualty.deserted,
-          causeId: result.battleId,
-        })),
+      ...[...(losses ?? [])].flatMap(([categoryId, loss]) => [
+        ...(loss.dead > 0 ? [event(categoryId, "battle_death", loss.dead)] : []),
+        ...(loss.deserted > 0 ? [event(categoryId, "desertion", loss.deserted)] : []),
+        ...(loss.wounded > 0 ? [event(categoryId, "unavailable", loss.wounded)] : []),
+        ...((maimed.get(categoryId) ?? 0) > 0 ? [event(categoryId, "wounds_death", maimed.get(categoryId)!)] : []),
+      ]),
     ];
 
     return {
       ...force,
       personnel,
-      // The paper establishment follows the men actually present: a legion that
-      // lost half its strength is not still a full legion on the books.
-      authorizedStrength: Math.max(1, personnel.reduce((sum, category) => sum + category.fit, 0)),
+      // The paper establishment follows the men it has lost for good: a legion
+      // that lost half its strength is not still a full legion on the books,
+      // but one with men in the surgeons' tents still has them.
+      authorizedStrength: Math.max(1, force.authorizedStrength - gone),
       ...(state === undefined ? {} : { moraleBps: state.moraleBps, cohesionBps: state.cohesionBps, fatigueBps: state.fatigueBps }),
       // A force must stand somewhere. A retreat with nowhere to go is a force
       // that could not get away, not a force that ceased to exist.
@@ -241,6 +323,7 @@ function applyResult(world: WorldState, result: BattleResult, atStep: number, me
         disqualifyingStatuses: hurt.disqualifyingStatuses.includes("wounded")
           ? hurt.disqualifyingStatuses
           : [...hurt.disqualifyingStatuses, "wounded"].slice(0, 8),
+        ailmentsUntil: healsBy(hurt, "wounded", atStep),
       };
     }
     const change = result.commanderChanges.find((candidate) => candidate.characterId === character.id);
@@ -252,6 +335,7 @@ function applyResult(world: WorldState, result: BattleResult, atStep: number, me
       disqualifyingStatuses: character.disqualifyingStatuses.includes(status)
         ? character.disqualifyingStatuses
         : [...character.disqualifyingStatuses, status].slice(0, 8),
+      ...(status === "wounded" ? { ailmentsUntil: healsBy(character, "wounded", atStep) } : {}),
     };
   });
   const killed = [
@@ -271,7 +355,25 @@ function applyResult(world: WorldState, result: BattleResult, atStep: number, me
   // handed to somebody living, and the estate is settled. Letting it write
   // `alive: false` itself left a dead man commanding his own legion, because
   // `commanderCharacterId` is not nullable and nothing here reassigned it.
-  let next: WorldState = { ...world, characters, map: { ...world.map, provinces }, material: { ...world.material, forces } };
+  // The men who commanded come out of it better at it: two points of
+  // strategy for the fight, and a point of martial for winning one. And a
+  // devout commander's men believe the gods are with him -- up to three
+  // points of morale either way when the fighting is done.
+  const defenderForceIds = result.participantIds.filter((id) => !result.attackerForceIds.includes(id));
+  const winners = new Set(result.outcome === "attacker_victory" ? result.attackerForceIds : result.outcome === "defender_victory" ? defenderForceIds : []);
+  const commandedBy = new Map(forces.flatMap((force) => (result.participantIds.includes(force.id) ? [[force.commanderCharacterId, force.id] as const] : [])));
+  const seasoned = characters.map((character) => {
+    const forceId = commandedBy.get(character.id);
+    if (forceId === undefined || !character.alive) return character;
+    const learned = practise(character, "strategist", 2);
+    return winners.has(forceId) ? { ...learned, skills: { ...learned.skills, martial: Math.min(Math.max(learned.skills.martial, 90), learned.skills.martial + 1) } } : learned;
+  });
+  const heartened = forces.map((force) => {
+    const commander = seasoned.find((character) => character.id === force.commanderCharacterId);
+    if (commander === undefined || !commandedBy.has(commander.id)) return force;
+    return { ...force, moraleBps: Math.max(0, Math.min(10_000, force.moraleBps + Math.round(skillShare(aptitude(commander, "devotion"), 300)))) };
+  });
+  let next: WorldState = { ...world, characters: seasoned, map: { ...world.map, provinces }, material: { ...world.material, forces: heartened } };
 
   // ── The spoils ──────────────────────────────────────────────────────────
   //
@@ -337,6 +439,12 @@ function applyResult(world: WorldState, result: BattleResult, atStep: number, me
     }
   }
 
+  // A general taken prisoner commands nothing. He went on leading his army
+  // from the enemy's camp, because being captured only ever wrote a status.
+  for (const change of result.commanderChanges) {
+    if (change.outcome === "captured") next = handOverForcesOf(next, change.characterId);
+  }
+
   for (const characterId of killed) {
     // The facts are `factsFor`'s: a commander killed at Agrigentum is written
     // as that and not as "died of natural causes".
@@ -346,14 +454,14 @@ function applyResult(world: WorldState, result: BattleResult, atStep: number, me
 }
 
 /** What a battle leaves in the record. A battle is never a secret. */
-function factsFor(world: WorldState, result: BattleResult, provinceId: string, index: number, members: readonly MemberFate[]): FactProposalDraft[] {
+function factsFor(world: WorldState, result: BattleResult, provinceId: string, index: number, members: readonly MemberFate[], naval: ReadonlySet<string>): FactProposalDraft[] {
   const names = new Map(world.material.forces.map((force) => [force.id, force.name]));
   const provinceName = world.map.provinces.find((province) => province.id === provinceId)?.name ?? provinceId;
   const facts: FactProposalDraft[] = [
     {
       localId: `battle_${index}`,
       kind: "battle",
-      summary: summarizeBattleResult(result, names, provinceName).slice(0, 600),
+      summary: summarizeBattleResult(result, names, provinceName, naval).slice(0, 600),
       affectedRefs: [
         { kind: "province", id: provinceId },
         ...result.participantIds.map((forceId) => ({ kind: "force" as const, id: forceId })),
@@ -529,14 +637,14 @@ export interface BattleAccount {
   readonly factIds: readonly string[];
   readonly provinceName: string;
   /** Who attacked, who defended, and what each was worth going in. */
-  readonly sides: readonly { readonly name: string; readonly attacking: boolean; readonly strength: number; readonly commander: string }[];
+  readonly sides: readonly { readonly name: string; readonly attacking: boolean; readonly strength: number; readonly unit: "men" | "ships"; readonly commander: string }[];
   /** The fight in order, with the weight on each side as it shifted. */
   readonly phases: readonly { readonly phase: string; readonly summary: string; readonly attacker: number; readonly defender: number }[];
   /** What was tried out of the ordinary, and what the ground would not allow. */
   readonly tactics: readonly string[];
   readonly refusedTactics: readonly string[];
   /** Dead, deserted and wounded, by force. */
-  readonly losses: readonly { readonly name: string; readonly dead: number; readonly deserted: number; readonly wounded: number }[];
+  readonly losses: readonly { readonly name: string; readonly unit: "men" | "ships"; readonly dead: number; readonly deserted: number; readonly wounded: number }[];
   readonly commanders: readonly { readonly name: string; readonly outcome: string }[];
   /** Named men in the ranks, and what became of each -- including those who came through. */
   readonly members: readonly { readonly name: string; readonly force: string; readonly outcome: string }[];
@@ -544,7 +652,7 @@ export interface BattleAccount {
   readonly outcome: string;
 }
 
-function accountOf(world: WorldState, result: BattleResult, provinceId: string, factIds: readonly string[], members: readonly MemberFate[]): BattleAccount {
+function accountOf(world: WorldState, result: BattleResult, provinceId: string, factIds: readonly string[], members: readonly MemberFate[], naval: ReadonlySet<string>): BattleAccount {
   const forceName = (id: string): string => world.material.forces.find((force) => force.id === id)?.name ?? id;
   const characterName = (id: string): string => world.characters.find((character) => character.id === id)?.name ?? id;
   const provinceName = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
@@ -569,6 +677,7 @@ function accountOf(world: WorldState, result: BattleResult, provinceId: string, 
         name: forceName(forceId),
         attacking: attacking.has(forceId),
         strength: force?.personnel.reduce((sum, category) => sum + category.fit, 0) ?? 0,
+        unit: naval.has(forceId) ? "ships" as const : "men" as const,
         commander: force === undefined ? "nobody" : characterName(force.commanderCharacterId),
       };
     }),
@@ -580,7 +689,7 @@ function accountOf(world: WorldState, result: BattleResult, provinceId: string, 
     })),
     tactics: result.acceptedTactics.map((tactic) => `${characterName(tactic.actorId)} tried ${tactic.factor} (${tactic.magnitude}): ${tactic.rationale}`),
     refusedTactics: result.rejectedTactics.map((rejected) => `${characterName(rejected.actorId)} could not: ${rejected.reason}`),
-    losses: [...lossesByForce.entries()].map(([forceId, losses]) => ({ name: forceName(forceId), ...losses })),
+    losses: [...lossesByForce.entries()].map(([forceId, losses]) => ({ name: forceName(forceId), unit: naval.has(forceId) ? "ships" as const : "men" as const, ...losses })),
     commanders: result.commanderChanges
       .filter((change) => change.outcome !== "unharmed")
       .map((change) => ({ name: characterName(change.characterId), outcome: change.outcome })),
@@ -682,6 +791,40 @@ const PREMISE_IN_WORDS: Record<TacticalPremise, string> = {
   numbers: "the greater numbers",
 };
 
+/** Each side's road back, away from the other side (`retreatRoute`). */
+function retreatRoutesFor(world: WorldState, provinceId: string, attackers: readonly Force[], defenders: readonly Force[], rules: ScenarioWarfareRules): Map<string, string | null> {
+  const routes = new Map<string, string | null>();
+  for (const [side, enemies] of [[attackers, defenders], [defenders, attackers]] as const) {
+    const enemyPolities = new Set(enemies.map((force) => force.polityId));
+    for (const force of side) routes.set(force.id, retreatRoute(world, force, provinceId, enemyPolities, isNavalForce(force, rules)));
+  }
+  return routes;
+}
+
+/**
+ * A field fought over is a field trampled, whoever keeps it. Only ground that
+ * changed hands was ever damaged -- by the sack -- so a province two armies
+ * fought across three times in a summer was as fed and as orderly as one no
+ * soldier had seen. Scaled by the dead and wounded against the people who
+ * live there; a sea fight touches nobody's harvest.
+ */
+function trampled(world: WorldState, result: BattleResult, provinceId: string, naval: ReadonlySet<string>): WorldState {
+  if (result.siegeAndControlChanges.some((change) => change.provinceId === provinceId && change.newControllerPolityId !== world.map.provinces.find((province) => province.id === provinceId)?.controllerPolityId)) return world;
+  if (result.participantIds.every((id) => naval.has(id))) return world;
+  const material = world.material.provinceMaterial.find((candidate) => candidate.provinceId === provinceId);
+  if (material === undefined || material.population <= 0) return world;
+  const fallen = result.casualties.filter((casualty) => !naval.has(casualty.forceId)).reduce((sum, casualty) => sum + casualty.dead + casualty.wounded + casualty.deserted, 0);
+  if (fallen <= 0) return world;
+  const severityBps = Math.max(300, Math.min(2_500, Math.round((fallen / material.population) * 200_000)));
+  return {
+    ...world,
+    material: {
+      ...world.material,
+      provinceMaterial: world.material.provinceMaterial.map((candidate) => (candidate === material ? applyWarDamage(candidate, { severityBps }, world.elapsedStep) : candidate)),
+    },
+  };
+}
+
 export function resolveEngagement(input: EngagementInput, index: number): EngagementResult {
   const { world, attacker, defender } = input;
   const province = world.map.provinces.find((candidate) => candidate.id === attacker.locationId);
@@ -771,21 +914,86 @@ export function resolveEngagement(input: EngagementInput, index: number): Engage
       warfareRules: warfareWith(world, input.warfare),
       tacticalProposals,
       structures: world.structures.filter((structure) => structure.provinceId === province.id),
+      retreatRoutes: retreatRoutesFor(world, province.id, attackers, defenders, warfareWith(world, input.warfare)),
     },
     input.seed,
   );
-  const result: BattleResult = preRejected.length === 0
+  const rolled: BattleResult = preRejected.length === 0
     ? resolved
     : { ...resolved, rejectedTactics: [...preRejected, ...resolved.rejectedTactics] };
 
-  const members = memberFates(world, result);
+  // A death or a capture that matters is not decided here: the man is left
+  // surrounded, or cut off, and the next report says how it ended.
+  const diverted = divertFieldFates(world, rolled, memberFates(world, rolled), input.playerCharacterId ?? null);
+  const result = diverted.result;
+  const members = diverted.members;
   const applied = applyResult(world, result, world.elapsedStep, members);
-  const facts = [...factsFor(world, result, province.id, index, members), ...spoilsFacts(world, applied.spoils, index)];
+  // A power that judges its generals sends for the one who lost.
+  const judged = summonToJudgment(withStandingFromTheField(applied.world, result, attackers, defenders), result,
+    result.outcome === "attacker_victory" ? defenders : result.outcome === "defender_victory" ? attackers : [], province.name);
+  // A fleet counts hulls, not heads: "Gisco's force of 106 men" was 106 quinqueremes.
+  const rules = warfareWith(world, input.warfare);
+  const naval = new Set([...attackers, ...defenders].filter((force) => isNavalForce(force, rules)).map((force) => force.id));
+  const perils = openFieldPerils(trampled(judged.world, result, province.id, naval), diverted.plights, { battleId: result.battleId, provinceId: province.id, provinceName: province.name }, world.elapsedStep);
+  const facts = [...factsFor(world, result, province.id, index, members, naval), ...spoilsFacts(world, applied.spoils, index), ...judged.facts, ...perils.facts];
+  const account = accountOf(world, result, province.id, facts.map((fact) => fact.localId), members, naval);
+  const plights = diverted.plights.map((plight) => ({
+    name: world.characters.find((character) => character.id === plight.characterId)?.name ?? plight.characterId,
+    outcome: plight.plight === "encircled" ? "surrounded, fate undecided" : "cut off, fate undecided",
+  }));
   return {
-    world: withStandingFromTheField(applied.world, result, attackers, defenders),
+    world: perils.world,
     facts,
     // Read from the world as it stood *before* the fight, so the strengths are
     // what each side brought to it rather than what survived it.
-    account: accountOf(world, result, province.id, facts.map((fact) => fact.localId), members),
+    account: plights.length === 0 ? account : { ...account, commanders: [...account.commanders, ...plights] },
   };
+}
+
+/**
+ * The wounded back in the ranks, once their day has come.
+ *
+ * A battle's wounded were struck off the army with its dead: nothing ever put a
+ * man into `unavailable`, and nothing ever took one out. They go back to the
+ * fit on the day the battle said they could, and the army's history says so.
+ */
+export function returnTheMended(world: WorldState, toDay: number): WorldState {
+  let changed = false;
+  const forces = world.material.forces.map((force) => {
+    if (!force.personnel.some((group) => group.unavailable.some((out) => out.earliestRecoveryStep <= toDay))) return force;
+    changed = true;
+    const back = new Map<string, number>();
+    const joined = new Map<string, number>();
+    const personnel = force.personnel.map((group) => {
+      const mended = group.unavailable.filter((out) => out.earliestRecoveryStep <= toDay);
+      if (mended.length === 0) return group;
+      const count = mended.reduce((sum, out) => sum + out.count, 0);
+      // Levied men reaching the standard join it; they are not coming back to it.
+      const levied = mended.filter((out) => out.causeKind === "mustering").reduce((sum, out) => sum + out.count, 0);
+      if (levied > 0) joined.set(group.categoryId, (joined.get(group.categoryId) ?? 0) + levied);
+      if (count > levied) back.set(group.categoryId, (back.get(group.categoryId) ?? 0) + count - levied);
+      return { ...group, fit: group.fit + count, unavailable: group.unavailable.filter((out) => out.earliestRecoveryStep > toDay) };
+    });
+    const history = [
+      ...force.history,
+      ...[...back].map(([categoryId, count]) => ({
+        id: boundedId(force.id, categoryId, "recovery", toDay),
+        atStep: toDay,
+        kind: "recovery" as const,
+        categoryId,
+        count,
+        causeId: force.id,
+      })),
+      ...[...joined].map(([categoryId, count]) => ({
+        id: boundedId(force.id, categoryId, "mustered", toDay),
+        atStep: toDay,
+        kind: "reinforcement" as const,
+        categoryId,
+        count,
+        causeId: force.id,
+      })),
+    ];
+    return { ...force, personnel, history: history.slice(-64) };
+  });
+  return changed ? { ...world, material: { ...world.material, forces } } : world;
 }

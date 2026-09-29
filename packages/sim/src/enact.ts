@@ -12,6 +12,7 @@ import {
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
 import { amend } from "./constitutions";
+import { carryOutDepartment } from "./departments";
 
 /**
  * A measure carried, and what it does.
@@ -145,6 +146,13 @@ export function carryOutEnactment(
     }
   }
 
+  // A department: who is in charge of a piece of the state's work.
+  if (enactment.department != null) {
+    const carried = carryOutDepartment(next, enactment.polityId, enactment.department, atStep, ids, scenarioOffices, procedure?.sponsorCharacterId ?? null, title);
+    next = carried.world;
+    said.push(...carried.said);
+  }
+
   // A council that did not exist, with one bloc of members to begin with.
   // Who sits in it, and how they vote, is the world's to fill in.
   if (enactment.body !== null) {
@@ -191,6 +199,19 @@ export function carryOutEnactment(
           : character)),
       };
       said.push(`${excused.name} may stand for ${office.label} as the law would otherwise forbid`);
+    }
+  }
+
+  // The work it voted, begun today: every stage falls due from the day of the
+  // vote, not the day the question was put.
+  if (enactment.projectId != null) {
+    const work = next.projects.find((project) => project.id === enactment.projectId && project.status === "proposed");
+    if (work !== undefined) {
+      const span = Math.max(0, ...work.milestones.map((milestone) => milestone.requiredAtElapsedOffset));
+      next = { ...next, projects: next.projects.map((project) => (project.id === work.id
+        ? { ...project, status: "in_progress" as const, startedAtStep: atStep, targetCompletionStep: atStep + span }
+        : project)) };
+      said.push(`${work.label} is begun`);
     }
   }
 

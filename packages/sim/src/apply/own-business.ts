@@ -53,6 +53,15 @@ export function isOwnBusiness(
     case "diplomatic_message_send":
       return PERSONAL_LETTERS.has(delta.kind) && isActor(delta.fromCharacterRef)
         && id(delta.fromPolityId) === world.characters.find((character) => character.id === actorId)?.polityId;
+    // Answering a letter written to him by name: his own, when it is the kind
+    // a man writes as himself and offers nothing a power would have to keep.
+    // Written back to by a private man, a friend's letter from Syracuse was
+    // judged as his answering for the republic.
+    case "diplomatic_message_answer": {
+      const letter = world.diplomacy.find((candidate) => candidate.id === id(delta.messageRef));
+      return letter !== undefined && letter.toCharacterId === actorId && PERSONAL_LETTERS.has(letter.kind)
+        && (letter.proposes ?? []).length === 0 && (letter.clauses ?? []).length === 0 && letter.onRefusal == null;
+    }
     // A school, a shrine, a company: his, and kept out of his own purse.
     case "generic_entity_create":
       return delta.ownerRef?.kind === "character" && isActor(delta.ownerRef.id)

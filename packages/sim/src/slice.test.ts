@@ -37,6 +37,16 @@ describe("what the player's government can see of the world", () => {
     expect(carthage.forces.join(" ")).toMatch(/\[[a-z0-9-]+\]/);
   });
 
+  it("never tells the model another power's true count, only what the actor could guess", () => {
+    const state = world();
+    const carthage = slice(state).foreignPowers.find((power) => power.id === "carthage")!;
+    const exact = state.material.forces
+      .filter((force) => force.polityId === "carthage")
+      .map((force) => `${force.personnel.reduce((sum, category) => sum + category.fit, 0)} men`);
+    for (const line of carthage.forces) for (const figure of exact) expect(line).not.toContain(`— ${figure}`);
+    expect(carthage.forces.join(" ")).toMatch(/strength unknown|between|about/);
+  });
+
   it("renders every place with its id, ours and theirs alike", () => {
     const text = renderWorldSlice(slice());
     expect(text).toContain("PLACES");
@@ -99,7 +109,22 @@ describe("what the player's government can see of the world", () => {
     // is and who may change it, and what each bloc wants rather than only
     // whom it speaks for. Powers are named only where a chamber has fewer
     // than all of them.
-    expect(text.length).toBeLessThan(17_000);
+    //
+    // Moved 17k -> 17.5k for seated rulers (v34): the foreign figures a
+    // government can see are now real people with offices, not blanks.
+    //
+    // Moved 17.5k -> 17.75k for the ruler's own wars: his portrait says which
+    // war his power is in and whether any of its armies is within reach.
+    //
+    // Moved 17.75k -> 18.5k for the Senate of 270 (v34): eight consulars of
+    // our own people, each with his age, faith and standing, so a vote has men
+    // to speak for and against it.
+    //
+    // Moved 18.5k -> 18.75k for the ancient names of the far ground: the
+    // Helvetian cantons and Gaulish departments beyond the frontier are the
+    // Tigurini and the Rauraci, and a region cut into several units says which
+    // part ("Northern Corsica") -- longer than "Zug", and true in 270.
+    expect(text.length).toBeLessThan(18_750);
   });
 });
 

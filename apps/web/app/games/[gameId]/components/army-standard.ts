@@ -18,13 +18,15 @@ export const ARMY_STANDARD_CONFLICT_FRAME_INSET = .004;
 // fixed world-space width scaling unboundedly with zoom-in) it would balloon
 // into an oversized blob at high zoom. The canvas draw (map-canvas-entities.ts)
 // and the SVG hit target (geo-map.tsx) both call this so the clickable area
-// always matches what's actually painted.
+// always matches what's actually painted. Both pixel limits are multiplied by
+// the display unit (map-display-unit.ts), so a standard keeps its share of the
+// map on a large monitor.
 const MIN_ARMY_STANDARD_PIXEL_WIDTH = 16;
 const MAX_ARMY_STANDARD_PIXEL_WIDTH = 120;
 
-/** World-space army standard width for the current zoom, held to a fixed on-screen-pixel range. */
-export function armyStandardWidthForZoom(pixelsPerDegree: number): number {
-  const pixels = Math.min(Math.max(ARMY_STANDARD_WIDTH * pixelsPerDegree, MIN_ARMY_STANDARD_PIXEL_WIDTH), MAX_ARMY_STANDARD_PIXEL_WIDTH);
+/** World-space army standard width for the current zoom, held to an on-screen-pixel range scaled by the display unit. */
+export function armyStandardWidthForZoom(pixelsPerDegree: number, unit = 1): number {
+  const pixels = Math.min(Math.max(ARMY_STANDARD_WIDTH * pixelsPerDegree, MIN_ARMY_STANDARD_PIXEL_WIDTH * unit), MAX_ARMY_STANDARD_PIXEL_WIDTH * unit);
   return pixels / pixelsPerDegree;
 }
 
@@ -84,5 +86,5 @@ export function fannedStandardCentre(
 /** Below this zoom the map draws no forces, so none may be hovered or clicked. */
 export const FORCES_VISIBLE_FROM_SCALE = 2.5;
 
-/** Extra reach around a standard's painted edge, in screen pixels, so a small flag is not a fiddly target. */
+/** Extra reach around a standard's painted edge, in screen pixels (times the display unit), so a small flag is not a fiddly target. */
 export const ARMY_STANDARD_HIT_SLOP_PIXELS = 4;

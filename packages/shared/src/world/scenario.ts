@@ -104,9 +104,19 @@ export const ScenarioHistoricalPressureSchema = z
          * independently available from day one and the age has no order to it.
          */
         afterPressureIds: z.array(z.string().trim().min(1)).max(8).default([]),
+        /**
+         * One of these powers must have men standing in the province.
+         *
+         * "Whoever crosses to Messana" was reachable once Messana had asked,
+         * whether or not anybody had crossed -- and the brief asked the model
+         * to decide which power had, so a Roman landing was written up as a
+         * Carthaginian one and the wrong war was opened. The pressure now waits
+         * for the crossing, and is told who made it (`narrator.ts`).
+         */
+        forcesPresent: z.array(z.object({ polityIds: z.array(z.string().trim().min(1)).min(1).max(8), provinceId: z.string().trim().min(1) }).strict()).max(4).default([]),
       })
       .strict()
-      .default({ politiesExist: [], polityHolds: [], atWar: [], atPeace: [], notBeforeDay: 0, notAfterDay: null, afterPressureIds: [] }),
+      .default({ politiesExist: [], polityHolds: [], atWar: [], atPeace: [], notBeforeDay: 0, notAfterDay: null, afterPressureIds: [], forcesPresent: [] }),
     /** Where it lands, when the pressure names a place or a power itself. */
     target: z
       .object({

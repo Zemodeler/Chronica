@@ -1,4 +1,4 @@
-import { allOffices, buildAuthorityIndex, type Office, type WorldState } from "@chronica/shared";
+import { allOffices, buildAuthorityIndex, formatWorldDate, isDelivered, type DiplomaticMessage, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
 
 /**
  * Who answers a letter sent to a power.
@@ -51,4 +51,93 @@ export function addressWaitingLetters(world: WorldState, offices: readonly Offic
       return answerer === null ? message : { ...message, toCharacterId: answerer };
     }),
   };
+}
+
+/**
+ * Whom an unanswered letter is in front of: the person it names, or, for one
+ * still addressed to a power at large, every one of that power's people -- the
+ * same reading the cognition portrait uses to show it. Once it has reached
+ * them: a letter on the road is in front of nobody.
+ */
+function isPutTo(message: DiplomaticMessage, characterId: string, polityId: string | null, day: number): boolean {
+  if (!isDelivered(message, day)) return false;
+  return message.toCharacterId === characterId || (message.toCharacterId === null && polityId !== null && message.toPolityId === polityId);
+}
+
+/**
+ * Who owes a letter an answer and has not yet been shown it, with why.
+ *
+ * A letter is as pressing as a plan's step: an unanswered one is answered by
+ * silence, and silence is a refusal. Left to the router alone, seven of Rome's
+ * allies were crowded out of three rounds by the Romans reacting to the order
+ * that sent the letters, and then the depth cap asked only men with plans --
+ * so none of them ever read what Rome asked. Each letter wakes its reader
+ * once; after that his silence is his own.
+ */
+export function lettersOwed(world: WorldState, clock: ScenarioClock, excludeIds: readonly string[] = []): Map<string, string> {
+  const excluded = new Set(excludeIds);
+  const polityName = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
+  const owed = new Map<string, string>();
+  for (const message of world.diplomacy) {
+    if (message.status !== "awaiting_reply" || message.putToRecipientOnDay != null || message.toCharacterId === null) continue;
+    if (!isDelivered(message, world.instant.day)) continue;
+    const reader = world.characters.find((character) => character.id === message.toCharacterId);
+    if (reader === undefined || !reader.alive || excluded.has(reader.id) || owed.has(reader.id)) continue;
+    const due = message.replyDueByStep === null ? "" : `, the answer due by ${formatWorldDate({ day: message.replyDueByStep, minute: 0 }, clock)}`;
+    owed.set(reader.id, `a letter from ${polityName(message.fromPolityId)} awaits their answer ("${message.subject}"${due})`);
+  }
+  return owed;
+}
+
+/** Every unanswered letter in front of someone in this round's cast, marked as read today. */
+export function markLettersPut(world: WorldState, castIds: ReadonlySet<string>): WorldState {
+  const cast = world.characters.filter((character) => castIds.has(character.id));
+  if (cast.length === 0) return world;
+  const today = world.instant.day;
+  let changed = false;
+  const diplomacy = world.diplomacy.map((message) => {
+    if (message.status !== "awaiting_reply" || message.putToRecipientOnDay != null) return message;
+    if (!cast.some((character) => isPutTo(message, character.id, character.polityId, today))) return message;
+    changed = true;
+    return { ...message, putToRecipientOnDay: today };
+  });
+  return changed ? { ...world, diplomacy } : world;
+}
+
+/**
+ * The next letter date still to come, as a sort key: a reply date, or the day
+ * a letter reaches its reader. The burst may not jump past either. The tick
+ * decides silence on the reply date, and a war an ultimatum threatened opens
+ * on it -- not two months later, when the calendar's next project happened to
+ * fall; and a letter arriving is somebody's business the day it arrives.
+ */
+export function nextReplyDueKey(world: WorldState, afterKey: number): number | undefined {
+  return world.diplomacy
+    .filter((message) => message.status === "awaiting_reply")
+    .flatMap((message) => [
+      ...(message.replyDueByStep === null ? [] : [message.replyDueByStep * 1440]),
+      ...(message.deliveredOnDay == null ? [] : [message.deliveredOnDay * 1440]),
+    ])
+    .filter((key) => key > afterKey)
+    .sort((a, b) => a - b)[0];
+}
+
+/**
+ * A letter is still waiting on its reader: nobody has shown it to him yet, or
+ * he has read it and its term is already up. Either way the next few days
+ * settle it, and the burst should not jump a month before they do -- two
+ * allies left out of a crowded first round were otherwise first asked on the
+ * reply date itself, and their silence was then dated to whatever came next
+ * on the calendar, fifty days on.
+ */
+export function aLetterWaitsOnItsReader(world: WorldState, excludeIds: readonly string[] = []): boolean {
+  const excluded = new Set(excludeIds);
+  const today = world.instant.day;
+  return world.diplomacy.some((message) => {
+    if (message.status !== "awaiting_reply" || message.toCharacterId === null || excluded.has(message.toCharacterId)) return false;
+    // Still on the road: its arrival is on the calendar (`nextReplyDueKey`).
+    if (!isDelivered(message, today)) return false;
+    if (message.putToRecipientOnDay != null) return message.replyDueByStep !== null && message.replyDueByStep <= today;
+    return world.characters.some((character) => character.id === message.toCharacterId && character.alive);
+  });
 }

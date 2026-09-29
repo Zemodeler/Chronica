@@ -154,14 +154,40 @@ describe("knowing a person, as against being briefed on them", () => {
     // chieftain he has never heard of.
     const state = world();
     const station = buildStation({ world: state, characterId: seatedConsul(state), offices });
+    const consul = state.characters.find((c) => c.id === station.characterId)!;
     const strangers = state.characters.filter(
-      (c) => c.id !== station.characterId && !station.knownCharacterIds.has(c.id),
+      (c) => c.id !== station.characterId && !station.knownCharacterIds.has(c.id) && c.polityId === station.polityId,
     );
     expect(strangers.length).toBeGreaterThan(0);
     for (const stranger of strangers) {
-      expect(reachesPerson(station, stranger.id)).toBe(true);
+      expect(reachesPerson(station, stranger.id, state)).toBe(true);
       expect(knowsPerson(station, stranger.id)).toBe(false);
     }
+    expect(consul.polityId).toBe(station.polityId);
+  });
+
+  it("briefs a consul on his own power's figures, not on every foreigner's", () => {
+    // The hatch opened on every character alive, so a consul read what each
+    // Carthaginian privately meant to do.
+    const state = world();
+    const station = buildStation({ world: state, characterId: seatedConsul(state), offices });
+    const consul = state.characters.find((c) => c.id === station.characterId)!;
+    const foreigners = state.characters.filter((c) =>
+      c.polityId !== station.polityId && !station.knownCharacterIds.has(c.id) && c.locationProvinceId !== consul.locationProvinceId
+      && !state.diplomacy.some((m) => [m.fromCharacterId, m.toCharacterId].includes(c.id) && [m.fromCharacterId, m.toCharacterId].includes(consul.id)));
+    expect(foreigners.length).toBeGreaterThan(0);
+    for (const foreigner of foreigners) expect(reachesPerson(station, foreigner.id, state)).toBe(false);
+    // Written to, a foreigner is somebody he has dealt with.
+    const writer = foreigners[0]!;
+    const written = {
+      ...state,
+      diplomacy: [...state.diplomacy, {
+        id: "letter-from-abroad", kind: "letter" as const, fromPolityId: writer.polityId ?? "carthage", fromCharacterId: writer.id,
+        toPolityId: station.polityId!, toCharacterId: consul.id, subject: "Greetings", terms: "We write.", sentAtStep: 0, replyDueByStep: null,
+        status: "awaiting_reply" as const, answer: null, answerText: null, answeredAtStep: null, inReplyToMessageId: null, visibility: "private" as const,
+      }],
+    };
+    expect(reachesPerson(station, writer.id, written)).toBe(true);
   });
 
   it("still counts the people they have actually dealt with, and themselves", () => {

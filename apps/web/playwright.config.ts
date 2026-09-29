@@ -48,7 +48,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `npx next dev -p ${PORT}`,
+    command: `npx next dev --turbopack -p ${PORT}`,
     cwd: __dirname,
     url: `http://localhost:${PORT}`,
     reuseExistingServer: false,

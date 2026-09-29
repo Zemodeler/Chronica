@@ -1,5 +1,6 @@
 import type { ProvinceEdge, CrossingType } from "./map";
 import type { WorldState } from "./world-state";
+import { isWaterCrossing } from "../warfare/sea";
 
 /**
  * Whether an army can get there from here (VISION §3's "army continuity").
@@ -48,6 +49,27 @@ export function crossingAdmitted(world: WorldState, edge: ProvinceEdge, terrains
 
 /** How many edges away, up to a bound. Null when there is no path at all. */
 export function hopsBetween(world: WorldState, fromProvinceId: string, toProvinceId: string, limit = 12): number | null {
+  return hopsAlong(world, fromProvinceId, toProvinceId, limit, () => true);
+}
+
+/**
+ * How many edges away on foot: no strait, no sea lane. Null when the only ways
+ * there are over water.
+ *
+ * A march was allowed wherever `hopsBetween` found a path, and the path from
+ * Latium to Messana runs over the strait -- so "Transport Legio I across the
+ * strait" completed with no ship in it, Syracuse having refused to lend one.
+ */
+export function landHopsBetween(world: WorldState, fromProvinceId: string, toProvinceId: string, limit = 12): number | null {
+  return hopsAlong(world, fromProvinceId, toProvinceId, limit, (edge) => !isWaterCrossing(edge.crossing));
+}
+
+/** How many edges away using only crossings this admits. Null when there is no such way. */
+export function strictHopsBetween(world: WorldState, fromProvinceId: string, toProvinceId: string, admits: (crossing: CrossingType) => boolean, limit = 12): number | null {
+  return hopsAlong(world, fromProvinceId, toProvinceId, limit, (edge) => admits(edge.crossing));
+}
+
+function hopsAlong(world: WorldState, fromProvinceId: string, toProvinceId: string, limit: number, passable: (edge: ProvinceEdge) => boolean): number | null {
   if (fromProvinceId === toProvinceId) return 0;
   let frontier = [fromProvinceId];
   const seen = new Set(frontier);
@@ -55,6 +77,7 @@ export function hopsBetween(world: WorldState, fromProvinceId: string, toProvinc
     const next: string[] = [];
     for (const provinceId of frontier) {
       for (const edge of edgesOf(world, provinceId)) {
+        if (!passable(edge)) continue;
         const neighbour = otherEnd(edge, provinceId);
         if (seen.has(neighbour)) continue;
         if (neighbour === toProvinceId) return depth;

@@ -39,9 +39,13 @@ describe("whose hands an order passes through", () => {
   });
 
   it("asks the right skill for the kind of work", () => {
-    const soldier = withMan({ skills: { ...base().characters[0]!.skills, martial: 90, stewardship: 10 } });
+    // The skill and the work's own finer skill, half each: war and feeding an
+    // army for military work, administration and the tax roll for fiscal.
+    const soldier = withMan({ skills: { ...base().characters[0]!.skills, martial: 90, stewardship: 10, subSkills: { logistics: 90, taxation: 10 } } });
     expect(assessExecution(soldier.world, soldier.id, "military")!.competence).toBe(90);
     expect(assessExecution(soldier.world, soldier.id, "fiscal")!.competence).toBe(10);
+    const quartermaster = withMan({ skills: { ...base().characters[0]!.skills, martial: 90, subSkills: { logistics: 30 } } });
+    expect(assessExecution(quartermaster.world, quartermaster.id, "military")!.competence).toBe(60);
   });
 
   it("takes a cut only where both the appetite and the weak conscience are", () => {
@@ -115,5 +119,15 @@ describe("how a person answers somebody else's order", () => {
 
   it("has the careful man delay rather than refuse", () => {
     expect(answersAnOrder(withMind({ caution: 70 }))!).toContain("delays rather than refuses");
+  });
+});
+
+describe("what kind of work a project is", () => {
+  it("reads it off the project's kind and name, and calls anything else civil work", async () => {
+    const { domainOfWork } = await import("./delegation");
+    expect(domainOfWork("temple", "The Temple of Janus")).toBe("religious");
+    expect(domainOfWork("construction", "Walls of Messana")).toBe("military");
+    expect(domainOfWork("census", "The census of the tribes")).toBe("fiscal");
+    expect(domainOfWork("road", "The Via Appia to Capua")).toBe("civil");
   });
 });

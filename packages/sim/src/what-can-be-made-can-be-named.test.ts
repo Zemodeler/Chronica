@@ -76,6 +76,9 @@ const MINTS: Readonly<Record<string, string>> = {
   // the same breath it was laid in is a plan nobody laid, so there is no handle
   // site to prove here either.
   contingency_arm: "contingency",
+  // An audit is resolved by the engine on its day and never named again.
+  audit_open: "audit",
+  siege_lay: "siege",
   // A contract is ended again by `service_contract_close`, with an ordinary
   // ref: a man hired and let go in the same breath was never hired.
   service_contract_open: "contract",

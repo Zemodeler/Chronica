@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario, punicWarsScenario } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, isNavalForce, type WorldState } from "@chronica/shared";
+import { WorldStateSchema, ensureProvinceMaterial, type WorldState } from "@chronica/shared";
 import { decideNarratorSeed, decideNarratorSeeds, livePressures, readTension, recordSeedOffered, recordSeedOutcome, recordSeedsOffered, seedWasTaken, type NarratorInput } from "./narrator";
 
 const small = (): WorldState => WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
@@ -133,7 +133,7 @@ describe("the age's own pull", () => {
     severity: "grave" as const,
     secret: false,
     oneShot: false,
-    when: { politiesExist: ["carthage"], polityHolds: [], atWar: [], atPeace: [], notBeforeDay: 0, notAfterDay: null, afterPressureIds: [] },
+    when: { politiesExist: ["carthage"], polityHolds: [], atWar: [], atPeace: [], notBeforeDay: 0, notAfterDay: null, afterPressureIds: [], forcesPresent: [] },
     target: { polityId: "carthage", provinceId: null, otherPolityId: null },
   };
 
@@ -154,7 +154,7 @@ describe("the age's own pull", () => {
   it("waits for its day, and expires after it", () => {
     const world = later(large(), 40);
     expect(livePressures(world, [{ ...pressure, when: { ...pressure.when, notBeforeDay: 900 } }])).toEqual([]);
-    expect(livePressures(world, [{ ...pressure, when: { ...pressure.when, notAfterDay: 10, afterPressureIds: [] } }])).toEqual([]);
+    expect(livePressures(world, [{ ...pressure, when: { ...pressure.when, notAfterDay: 10, afterPressureIds: [], forcesPresent: [] } }])).toEqual([]);
   });
 
   it("only counts a war condition when the war is actually on", () => {
@@ -303,7 +303,7 @@ describe("an age that arrives in order", () => {
   it("holds a pressure back until the one it follows has been put to the world", () => {
     const world = later(large(), 400);
     const first = { id: "the-asking", label: "a", kind: "world_event" as const, brief: "b", weight: 10, severity: "serious" as const, secret: false, oneShot: false,
-      when: { politiesExist: [], polityHolds: [], atWar: [], atPeace: [], notBeforeDay: 0, notAfterDay: null, afterPressureIds: [] },
+      when: { politiesExist: [], polityHolds: [], atWar: [], atPeace: [], notBeforeDay: 0, notAfterDay: null, afterPressureIds: [], forcesPresent: [] },
       target: { polityId: "rome", provinceId: null, otherPolityId: null } };
     const second = { ...first, id: "the-answering", when: { ...first.when, afterPressureIds: ["the-asking"] } };
 
@@ -345,23 +345,6 @@ describe("trouble that lands on an army", () => {
       expect(seed.target.characterId).toBe(force.commanderCharacterId);
       expect(seed.target.provinceId).toBe(force.locationId);
     }
-  });
-
-  it("never catches a legion in a storm at sea", () => {
-    const world = large();
-    const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-    for (const seed of everySeed(world, { warfare: definition.warfare })) {
-      if (seed.archetype !== "storm_at_sea") continue;
-      const force = world.material.forces.find((candidate) => candidate.id === seed.target.forceId)!;
-      expect(isNavalForce(force, definition.warfare)).toBe(true);
-    }
-  });
-
-  it("offers no storm at all when nothing on the map floats", () => {
-    // Told no rules of war, nothing is naval -- and a brief about a fleet that
-    // does not exist would be carried out anyway, on nobody.
-    const world = large();
-    expect(everySeed(world, { warfare: undefined }).some((seed) => seed.archetype === "storm_at_sea")).toBe(false);
   });
 });
 

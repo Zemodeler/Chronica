@@ -4,8 +4,11 @@ import {
   boundedId,
   createPressure,
   labelNamesOffice,
-  resolveEligibility,
+  ELECTABLE_MIN_PRESTIGE_BPS,
+  isBeneath,
   isMagistracy,
+  isEligibleFor,
+  officeRequirements,
   seatCharacterInOffice,
   vacateMagistraciesOf,
   type Character,
@@ -55,7 +58,6 @@ export const ELECTION_POLLING_DAYS = 20;
  */
 export const ELECTED_TERM_DAYS = 365;
 /** Standing below this and a man is not somebody the voters would think of electing unprompted. */
-export const ELECTABLE_MIN_PRESTIGE_BPS = 5_000;
 /** What winning an election adds to a man's standing. */
 const ELECTION_STANDING_BPS = 500;
 /** How many of the likeliest candidates are told the seat is theirs to seek. */
@@ -137,9 +139,11 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
   const nextLocalId = (): string => `election_${(localId += 1)}`;
 
   // As they now stand: a consulship reformed by law is kept by its new term.
+  // A power that is no more elects nobody (`polity-end.ts`).
+  const ended = new Set(world.map.polities.filter((polity) => polity.endedAtStep != null).map((polity) => polity.id));
   for (const office of offices) {
     const rule = rulesById.get(office.successionRuleId);
-    if (rule?.kind !== "elective") continue;
+    if (rule?.kind !== "elective" || ended.has(office.polityId)) continue;
     const institution = rule.institutionId === null ? undefined : world.material.institutions.find((candidate) => candidate.id === rule.institutionId);
     const body = institution?.name ?? "assembly";
     const polityName = world.map.polities.find((polity) => polity.id === office.polityId)?.name ?? office.polityId;
@@ -189,43 +193,13 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
     const cycle = office.cycleDays ?? termDays ?? 0;
     const collegeDueDay = college ? (Number.isFinite(lastCalled) ? lastCalled + cycle : cycle) : null;
     const vacant = (): Place[] => (collegeDueDay !== null && input.toDay < collegeDueDay ? [] : openPlaces());
-    // Who sits in this office now. Only they are kept out: a man cannot hold
-    // two seats of one college. Anyone holding some other office used to be
-    // kept out as well, so nobody could rise -- a quaestor could never become
-    // consul, nor a tribune a praetor -- and a man whose term ran out could
-    // not stand again while he held anything else at all.
-    const sittingInIt = (): Set<string> => new Set(seats().flatMap((seat) => (seat.status === "held" && seat.holderCharacterId !== null ? [seat.holderCharacterId] : [])));
     const requirementIds = seats()[0]?.eligibilityRequirementIds ?? office.eligibilityRequirementIds;
-    // The standing the office itself asks, where it asks one: a quaestorship
-    // is within reach of a man a consulship is not.
-    const minStanding = world.material.eligibilityRequirements
-      .filter((requirement) => requirement.kind === "min_prestige" && requirementIds.includes(requirement.id))
-      .map((requirement) => (requirement.params.minPrestigeBps as number | undefined) ?? 0)[0] ?? ELECTABLE_MIN_PRESTIGE_BPS;
-    const rank = office.rank ?? 0;
-    /**
-     * Beneath him: a man who holds a magistracy as high as this one, or has
-     * held one two rungs above it. A former consul does not stand for
-     * quaestor, and the Senate does not think of him for it -- though he may
-     * put himself forward. A censor might be consul again; it happened.
-     */
-    const beneath = (character: Character): boolean =>
-      // What he sits in today as well as what is written down: a man elected
-      // consul this morning has no tenure on record until tomorrow.
-      office.rank !== undefined && [
-        ...character.officesHeld.map((tenure) => tenure.officeId),
-        ...world.material.officeSeats.filter((seat) => seat.holderCharacterId === character.id && seat.status === "held").map((seat) => seat.officeId),
-      ].some((officeId) => {
-        const held = officesById.get(officeId);
-        if (held === undefined || held.polityId !== office.polityId || !isMagistracy(held) || held.rank === undefined) return false;
-        const sitting = world.material.officeSeats.some((seat) => seat.officeId === held.id && seat.holderCharacterId === character.id && seat.status === "held");
-        return held.rank >= rank + 2 || (sitting && held.rank >= rank);
-      });
-
+    // The rules for who may stand and whom the electors think of are shared
+    // (`candidates.ts`), so an office's note says the election's own answer.
+    const minStanding = officeRequirements(world, office).minStanding;
+    const beneath = (character: Character): boolean => isBeneath(world, office, officesById, character);
     /** Who could hold it: eligible, alive, and not already sitting in it. */
-    const eligible = (character: Character): boolean =>
-      character.alive
-      && !sittingInIt().has(character.id)
-      && resolveEligibility({ ...world, elapsedStep: input.toDay }, character.id, requirementIds, office.id).eligible;
+    const eligible = (character: Character): boolean => isEligibleFor(world, office, requirementIds, character, input.toDay);
     /** Who the Senate would think of unprompted: eligible, of standing, not above it, and not the player. */
     const electable = (): Character[] =>
       world.characters
@@ -301,7 +275,7 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
           visibility: "public",
           discoveryState: "public",
           knowableInDays: 0,
-          significance: 50,
+          significance: 30,
         });
         continue;
       }
@@ -317,6 +291,7 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
           ? { ...character, prestigeBps: Math.min(10_000, character.prestigeBps + ELECTION_STANDING_BPS) }
           : character)) };
       });
+      const heldBefore = new Set(winners.filter((id) => world.characters.find((character) => character.id === id)?.officesHeld?.some((held) => held.officeId === office.id) === true));
       const names = winners.map((id) => world.characters.find((character) => character.id === id)?.name ?? id);
       const losers = [...standing.keys()].filter((id) => !winners.includes(id));
       const loserNames = losers.map((id) => world.characters.find((character) => character.id === id)?.name ?? id);
@@ -333,8 +308,10 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
         visibility: "public",
         discoveryState: "public",
         knowableInDays: 0,
-        // How a republic differs from a reign, and who holds the fasces now.
-        significance: 60,
+        // How a republic differs from a reign, and who holds the fasces now --
+        // when somebody new does. A chief returned to the chair he held is the
+        // calendar, and a year in, ninety powers returned theirs on one day.
+        significance: winners.every((id) => heldBefore.has(id)) ? 20 : 60,
       });
     }
 
@@ -395,7 +372,8 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
         visibility: "public",
         discoveryState: "public",
         knowableInDays: 0,
-        significance: 50,
+        // A date set is not news; the count, when it comes, is.
+        significance: 15,
       });
       continue;
     }
