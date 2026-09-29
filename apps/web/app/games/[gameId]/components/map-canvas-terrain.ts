@@ -1,6 +1,7 @@
 import type { DynamicMapOverlay } from "@chronica/shared";
 import { provincesInRect as provincesMeetingRect, type StaticProvince, type StaticWorldGeometry } from "./world-geometry";
-import { politicalColourWithAlpha, type PoliticalMapState } from "./political-geometry";
+import { politicalColourWithAlpha, type PoliticalBorderSegment, type PoliticalMapState } from "./political-geometry";
+import { detachedFragmentProvinces, GROUP_STRENGTH, PROVINCE_LINE_RGB, provinceLineStyle, strokeGroupOf, type ProvinceLineStyle } from "./border-strokes";
 import type { ViewportTransform } from "./map-viewport";
 import { drawPoliticalLabels } from "./map-canvas-labels";
 import { drawForces, drawSettlements } from "./map-canvas-entities";
@@ -77,6 +78,8 @@ interface FillCache {
   rectVx: number; rectVy: number; rectVw: number; rectVh: number;
   /** The screen resolution (device px per world unit) it was built for. */
   builtForPixelsPerUnit: number;
+  /** Which province-line strength it was drawn with (border-strokes.ts). */
+  lineTier: number;
 }
 
 let _fillCache: FillCache | null = null;
@@ -95,9 +98,11 @@ const MAX_CACHE_UPSCALE = 2;
 // every frame instead of using the cache — few enough to be cheap, and
 // pixel-crisp where the fixed-size cache would be stretched.
 const DIRECT_RENDER_PROVINCE_THRESHOLD = 60;
+// Province lines are stroked in a directly filled view up to this many provinces.
+const DIRECT_LINES_PROVINCE_LIMIT = 400;
 
-function fillCacheCovers(cache: FillCache | null, world: StaticWorldGeometry, political: PoliticalMapState, visibleRect: VisibleWorldRect, screenPixelsPerUnit: number): cache is FillCache {
-  if (cache === null || cache.world !== world || cache.political !== political) return false;
+function fillCacheCovers(cache: FillCache | null, world: StaticWorldGeometry, political: PoliticalMapState, visibleRect: VisibleWorldRect, screenPixelsPerUnit: number, lineTier: number): cache is FillCache {
+  if (cache === null || cache.world !== world || cache.political !== political || cache.lineTier !== lineTier) return false;
   // Zoomed all the way out the cache is exactly the viewport, and a strict
   // comparison then misses by a rounding error — which rebuilt it every frame.
   const slackX = cache.rectVw * 1e-6;
@@ -114,28 +119,71 @@ function fillCacheCovers(cache: FillCache | null, world: StaticWorldGeometry, po
 // along the province's outer edges, clipped to the province, so only its
 // inner half shows and neighbours never paint over one another.
 
-const _outerEdgeCache = new WeakMap<PoliticalMapState, Map<string, Path2D>>();
+interface BorderIndex { readonly segmentsByProvince: ReadonlyMap<string, readonly PoliticalBorderSegment[]>; readonly groups: ReadonlyMap<PoliticalBorderSegment, ReturnType<typeof strokeGroupOf>>; readonly outer: Map<string, Path2D | null>; }
+const _borderIndexCache = new WeakMap<PoliticalMapState, BorderIndex>();
+const _segmentPathCache = new WeakMap<PoliticalBorderSegment, Path2D>();
 
-/** Each owned province's edges that face another power, unclaimed land or the sea. */
-function outerEdges(political: PoliticalMapState): Map<string, Path2D> {
-  const cached = _outerEdgeCache.get(political);
+/** Every border by province, and the line each is drawn with (border-strokes.ts). Built once per political state. */
+function borderIndex(political: PoliticalMapState): BorderIndex {
+  const cached = _borderIndexCache.get(political);
   if (cached) return cached;
-  const pieces = new Map<string, string[]>();
-  const add = (provinceId: string, svgPath: string) => {
-    const list = pieces.get(provinceId);
-    if (list) list.push(svgPath); else pieces.set(provinceId, [svgPath]);
-  };
+  const fragments = detachedFragmentProvinces(political);
+  const byProvince = new Map<string, PoliticalBorderSegment[]>();
+  const groups = new Map<PoliticalBorderSegment, ReturnType<typeof strokeGroupOf>>();
+  const add = (id: string, segment: PoliticalBorderSegment) => { const list = byProvince.get(id); if (list) list.push(segment); else byProvince.set(id, [segment]); };
   for (const segment of political.borderSegments) {
-    if (segment.classification === "internal_province") continue;
-    if (political.ownerByProvince.get(segment.provinceA)) add(segment.provinceA, segment.svgPath);
-    if (segment.provinceB !== null && political.ownerByProvince.get(segment.provinceB)) add(segment.provinceB, segment.svgPath);
+    groups.set(segment, strokeGroupOf(segment, political.ownerByProvince, fragments));
+    add(segment.provinceA, segment);
+    if (segment.provinceB !== null) add(segment.provinceB, segment);
   }
-  const edges = new Map([...pieces].map(([id, paths]) => [id, new Path2D(paths.join(""))]));
-  _outerEdgeCache.set(political, edges);
-  return edges;
+  const index: BorderIndex = { segmentsByProvince: byProvince, groups, outer: new Map() };
+  _borderIndexCache.set(political, index);
+  return index;
 }
 
-function fillProvinces(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, world: StaticWorldGeometry, political: PoliticalMapState, provinces: readonly StaticProvince[], devicePixelsPerUnit: number): void {
+function segmentPath(segment: PoliticalBorderSegment): Path2D {
+  let path = _segmentPathCache.get(segment);
+  if (!path) {
+    const built = new Path2D();
+    segment.points.forEach(([x, y], index) => { if (index === 0) built.moveTo(x, -y); else built.lineTo(x, -y); });
+    _segmentPathCache.set(segment, built);
+    path = built;
+  }
+  return path;
+}
+
+/** An owned province's edges that face another power or the sea: the outline band. */
+function outerEdges(political: PoliticalMapState, provinceId: string): Path2D | undefined {
+  const index = borderIndex(political);
+  const kept = index.outer.get(provinceId);
+  if (kept !== undefined) return kept ?? undefined;
+  let edge: Path2D | undefined;
+  for (const segment of index.segmentsByProvince.get(provinceId) ?? []) {
+    if (index.groups.get(segment) !== "outline") continue;
+    edge ??= new Path2D();
+    edge.addPath(segmentPath(segment));
+  }
+  index.outer.set(provinceId, edge ?? null);
+  return edge;
+}
+
+/** The province lines for these provinces, one Path2D per style. */
+function provinceLinePaths(political: PoliticalMapState, provinces: readonly StaticProvince[]): Record<"internal" | "frontier" | "unclaimed", Path2D> {
+  const index = borderIndex(political);
+  const paths = { internal: new Path2D(), frontier: new Path2D(), unclaimed: new Path2D() };
+  const seen = new Set<PoliticalBorderSegment>();
+  for (const province of provinces) {
+    for (const segment of index.segmentsByProvince.get(province.id) ?? []) {
+      if (seen.has(segment)) continue;
+      seen.add(segment);
+      const group = index.groups.get(segment);
+      if (group === "internal" || group === "frontier" || group === "unclaimed") paths[group].addPath(segmentPath(segment));
+    }
+  }
+  return paths;
+}
+
+function fillProvinces(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, world: StaticWorldGeometry, political: PoliticalMapState, provinces: readonly StaticProvince[], devicePixelsPerUnit: number, lines: { readonly style: ProvinceLineStyle; readonly screenPixelsPerUnit: number } | null): void {
   const ownedByPolity = new Map<string, StaticProvince[]>();
   for (const province of provinces) {
     const owner = political.ownerByProvince.get(province.id);
@@ -145,7 +193,18 @@ function fillProvinces(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingC
     ctx.fillStyle = politicalColourWithAlpha(owner, ATLAS.washAlpha, political.leaderByPolity);
     ctx.fill(getProvincePath(world, province.id, province.svgPath));
   }
-  const edges = outerEdges(political);
+  // The thin province lines, under the outline bands. Widths are set against the
+  // screen's resolution, not the cache's, so they match what is drawn straight.
+  if (lines !== null) {
+    const paths = provinceLinePaths(political, provinces);
+    ctx.lineWidth = lines.style.widthCssPixels * (typeof window === "undefined" ? 1 : window.devicePixelRatio || 1) / lines.screenPixelsPerUnit;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "butt";
+    for (const group of ["unclaimed", "frontier", "internal"] as const) {
+      ctx.strokeStyle = `rgb(${PROVINCE_LINE_RGB} / ${(lines.style.alpha * GROUP_STRENGTH[group]).toFixed(3)})`;
+      ctx.stroke(paths[group]);
+    }
+  }
   const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
   const bandDevicePixels = Math.min(ATLAS.bandPixels * dpr, devicePixelsPerUnit * ATLAS.bandShareOfDegree);
   // Twice the band's width: the clip keeps only the half inside.
@@ -159,7 +218,7 @@ function fillProvinces(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingC
     const land = new Path2D();
     const band = new Path2D();
     for (const province of owned) {
-      const edge = edges.get(province.id);
+      const edge = outerEdges(political, province.id);
       if (!edge) continue;
       land.addPath(getProvincePath(world, province.id, province.svgPath));
       band.addPath(edge);
@@ -183,6 +242,7 @@ function rebuildFillCache(
   fullViewBox: string,
   world: StaticWorldGeometry,
   political: PoliticalMapState,
+  lineStyle: ProvinceLineStyle,
 ): FillCache {
   const [, , fullVw, fullVh] = fullViewBox.split(" ").map(Number) as [number, number, number, number];
   const visibleW = Math.max(visibleRect.maxX - visibleRect.minX, Number.EPSILON);
@@ -207,10 +267,10 @@ function rebuildFillCache(
   ctx.clearRect(0, 0, offw, offh);
   ctx.setTransform(pixelsPerUnit, 0, 0, pixelsPerUnit, -rectVx * pixelsPerUnit, -rectVy * pixelsPerUnit);
   const rect = { minX: rectVx, maxX: rectVx + rectVw, minY: rectVy, maxY: rectVy + rectVh };
-  fillProvinces(ctx, world, political, provincesInRect(world, rect), pixelsPerUnit);
+  fillProvinces(ctx, world, political, provincesInRect(world, rect), pixelsPerUnit, { style: lineStyle, screenPixelsPerUnit });
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-  _fillCache = { canvas, world, political, rectVx, rectVy, rectVw, rectVh, builtForPixelsPerUnit: screenPixelsPerUnit };
+  _fillCache = { canvas, world, political, rectVx, rectVy, rectVw, rectVh, builtForPixelsPerUnit: screenPixelsPerUnit, lineTier: lineStyle.tier };
   return _fillCache;
 }
 
@@ -293,13 +353,18 @@ export function drawTerrainToCanvas(
   // cache (see the fill cache comment above).
   const visibleProvinces = provincesInRect(world, visibleRect);
   const screenPixelsPerUnit = m * dpr;
+  // A change in the province lines' strength rebuilds the cache once the map has
+  // settled, not in the middle of a zoom (which would refill thousands directly).
+  const lineStyle = provinceLineStyle(transform.scale);
   let fillCache: FillCache | null = null;
   if (visibleProvinces.length > DIRECT_RENDER_PROVINCE_THRESHOLD) {
-    if (fillCacheCovers(_fillCache, world, political, visibleRect, screenPixelsPerUnit)) fillCache = _fillCache;
-    else if (!interacting) fillCache = rebuildFillCache(visibleRect, screenPixelsPerUnit, viewBox, world, political);
+    if (fillCacheCovers(_fillCache, world, political, visibleRect, screenPixelsPerUnit, interacting && _fillCache !== null ? _fillCache.lineTier : lineStyle.tier)) fillCache = _fillCache;
+    else if (!interacting) fillCache = rebuildFillCache(visibleRect, screenPixelsPerUnit, viewBox, world, political, lineStyle);
   }
   if (fillCache) ctx.drawImage(fillCache.canvas, fillCache.rectVx, fillCache.rectVy, fillCache.rectVw, fillCache.rectVh);
-  else fillProvinces(ctx, world, political, visibleProvinces, screenPixelsPerUnit);
+  // While a gesture has outrun the cache, a crowd of provinces is filled without
+  // their thin lines, which come back with the rebuilt cache; a small view has them.
+  else fillProvinces(ctx, world, political, visibleProvinces, screenPixelsPerUnit, visibleProvinces.length <= DIRECT_LINES_PROVINCE_LIMIT ? { style: lineStyle, screenPixelsPerUnit } : null);
 
   // 6 — rivers (non-scaling stroke: visual width stays constant across zoom)
   ctx.strokeStyle = RIVER_STROKE;

@@ -14,6 +14,7 @@ import { computeViewBox } from "./geo-projection";
 import { prepareStaticWorldGeometry, type StaticWorldGeometry } from "./world-geometry";
 import { derivePoliticalMapState, deriveWarBorderPaths, type PoliticalMapState, type PoliticalOverlayInput } from "./political-geometry";
 import { drawTerrainToCanvas } from "./map-canvas-terrain";
+import { seaMaskFromImage, type SeaTest } from "./sea-mask";
 import { MapTooltip, type MapTooltipHandle } from "./map-tooltip";
 import { MapControls } from "./map-controls";
 import { CharacterPanel, type CharacterPanelProps } from "./character-panel";
@@ -341,14 +342,26 @@ export function GameShell({
   // Reused across recomputes so unaffected polities skip the expensive
   // label-curve search entirely — see derivePoliticalMapState's `previous`
   // param. Only valid for the same `world`; a new map load starts fresh.
+  // Where the sea is, read from the base raster, so an edge with no neighbour is
+  // told to be a shore (outlined) or the edge of empty ground (not). Until it
+  // has been read every such edge counts as a shore.
+  const [seaMask, setSeaMask] = useState<SeaTest | null>(null);
+  useEffect(() => {
+    if (!baseImageUrl) return;
+    let cancelled = false;
+    const img = new Image();
+    img.src = baseImageUrl;
+    img.decode().then(() => seaMaskFromImage(img)).then((mask) => { if (!cancelled && mask) setSeaMask(() => mask); }).catch(() => { /* every bare edge stays a shore */ });
+    return () => { cancelled = true; };
+  }, [baseImageUrl]);
   const previousPoliticalRef = useRef<{ world: StaticWorldGeometry; political: PoliticalMapState } | null>(null);
   const political = useMemo(() => {
     if (!world) return null;
     const previous = previousPoliticalRef.current?.world === world ? previousPoliticalRef.current.political : null;
-    const next = derivePoliticalMapState(world, politicalInput, previous);
+    const next = derivePoliticalMapState(world, politicalInput, previous, undefined, seaMask ?? undefined);
     previousPoliticalRef.current = { world, political: next };
     return next;
-  }, [world, politicalInput]);
+  }, [world, politicalInput, seaMask]);
   const countryBorderPath = useMemo(
     () => (political ? deriveWarBorderPaths(political, overlay?.conflicts.wars ?? []) : ""),
     [political, overlay?.conflicts.wars],

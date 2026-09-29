@@ -2,12 +2,34 @@ import type { DynamicMapOverlay, GeoJsonPosition } from "@chronica/shared";
 import { polityColorFromId, polityColorWithAlpha } from "./geo-projection";
 import { provinceContains, type SharedBoundary, type StaticProvince, type StaticWorldGeometry, type WorldBounds } from "./world-geometry";
 import { MAJOR_POLITY_PIGMENTS } from "../../../../lib/palette";
+import type { SeaTest } from "./sea-mask";
 
-export type BorderClassification = "internal_province" | "country_border" | "coast";
+/**
+ * `coast` faces the sea, `void` faces ground the map leaves empty (told apart by
+ * the sea test, when the caller has one; without it every edge with no
+ * neighbour is a `coast`).
+ */
+export type BorderClassification = "internal_province" | "country_border" | "coast" | "void";
 export interface PoliticalBorderSegment extends SharedBoundary { readonly classification: BorderClassification; }
 /** A border with its classification; the path is read through, not copied, so it is still built only when someone draws it. */
 function classified(boundary: SharedBoundary, classification: BorderClassification): PoliticalBorderSegment {
   return { provinceA: boundary.provinceA, provinceB: boundary.provinceB, points: boundary.points, get svgPath() { return boundary.svgPath; }, classification };
+}
+/** How far either side of a shore edge the sea is looked for, in degrees. */
+const SHORE_PROBE_DEGREES = .08;
+/** An edge with no neighbouring province: shore if the sea lies on either side of it, else the edge of empty ground. */
+function edgeWithoutNeighbour(boundary: SharedBoundary, isSea: SeaTest | undefined): BorderClassification {
+  if (isSea === undefined) return "coast";
+  const middle = Math.max(1, Math.floor(boundary.points.length / 2));
+  const from = boundary.points[middle - 1]!;
+  const to = boundary.points[middle]!;
+  const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
+  if (length === 0) return "coast";
+  const nx = -(to[1] - from[1]) / length * SHORE_PROBE_DEGREES;
+  const ny = (to[0] - from[0]) / length * SHORE_PROBE_DEGREES;
+  const mx = (from[0] + to[0]) / 2;
+  const my = (from[1] + to[1]) / 2;
+  return isSea(mx + nx, my + ny) || isSea(mx - nx, my - ny) ? "coast" : "void";
 }
 export interface TerritorialComponent { readonly provinceIds: readonly string[]; readonly totalArea: number; readonly weightedCentroid: GeoJsonPosition; readonly bounds: WorldBounds; }
 export interface PoliticalLabelGeometry {
@@ -99,6 +121,7 @@ const LABEL_PATH_COVERAGE = .85;
 // stay high for label-curve quality without a speed cost.
 const MAX_BOUNDARY_SAMPLES = 14;
 const PATH_SAMPLES = 30;
+const MIN_ROUTE_SHARE_OF_EXTENT = .6;
 // A country name may extend outside its territorial component for at most 5% of
 // the sampled route, preserving a natural curve without visibly crossing borders.
 const MAX_LABEL_OUTSIDE_BORDER_RATIO = .05;
@@ -231,7 +254,12 @@ function labelGeometry(component: TerritorialComponent, world: StaticWorldGeomet
     anchor,
     [anchor[0] + axisX * availableLength / 2, anchor[1] + axisY * availableLength / 2],
   ]);
-  const route = longestUsablePath(component, world, anchor) ?? { points: fallbackPoints, length: quadraticLength(fallbackPoints) };
+  // A curve that runs through only a coherent corner of a territory the map has
+  // broken up (desert and massif cut out between its pieces) would name that
+  // corner. Unless it spans a fair share of the territory along its main axis,
+  // the name goes on the axis through the centre of the whole piece instead.
+  const found = longestUsablePath(component, world, anchor);
+  const route = found !== null && found.length >= availableLength * MIN_ROUTE_SHARE_OF_EXTENT ? found : { points: fallbackPoints, length: quadraticLength(fallbackPoints) };
   const usableLength = route.length * LABEL_PATH_COVERAGE;
   // Width is fixed by SVG textLength, so it already tracks how much of the
   // territory the curve can run through. Height doesn't: a font sized only
@@ -270,10 +298,11 @@ export function derivePoliticalMapState(
   overlay: PoliticalOverlayInput | null,
   previous?: PoliticalMapState | null,
   geometryAliases?: ReadonlyMap<string, string>,
+  isSea?: SeaTest,
 ): PoliticalMapState {
   const ownerByProvince = new Map<string, string | null>(world.provinces.map((province) => [province.id, null]));
   const leaderByPolity = leadersOf(overlay?.politicalRelations ?? []);
-  if (!overlay) return { ownerByProvince, leaderByPolity, territories: [], borderSegments: world.sharedBoundaries.map((boundary) => classified(boundary, boundary.provinceB === null ? "coast" : "internal_province")) };
+  if (!overlay) return { ownerByProvince, leaderByPolity, territories: [], borderSegments: world.sharedBoundaries.map((boundary) => classified(boundary, boundary.provinceB === null ? edgeWithoutNeighbour(boundary, isSea) : "internal_province")) };
   for (const province of overlay.provinces) if (world.provinceById.has(province.provinceId)) ownerByProvince.set(province.provinceId, province.controllerPolityId);
   // A geometry polygon with no gameplay province of its own (several tribal
   // provinces merged onto one real region -- see geometryAliases) never gets
@@ -302,6 +331,6 @@ export function derivePoliticalMapState(
     }
     const remaining = new Set(owned); const components: TerritorialComponent[] = []; while (remaining.size) components.push(componentFor(remaining.values().next().value as string, remaining, world)); components.sort((a, b) => b.totalArea - a.totalArea || a.provinceIds[0]!.localeCompare(b.provinceIds[0]!)); const primaryComponent = components[0]!; const componentLabels = components.map((component) => labelGeometry(component, world, name)); territories.push({ polityId, name, colour: politicalColourFromId(polityId), components, primaryComponent, label: componentLabels[0]!, componentLabels });
   }
-  const borderSegments = world.sharedBoundaries.map((boundary) => { if (boundary.provinceB === null) return classified(boundary, "coast"); const a = ownerByProvince.get(boundary.provinceA) ?? null; const b = ownerByProvince.get(boundary.provinceB) ?? null; return classified(boundary, a !== b ? "country_border" : "internal_province"); });
+  const borderSegments = world.sharedBoundaries.map((boundary) => { if (boundary.provinceB === null) return classified(boundary, edgeWithoutNeighbour(boundary, isSea)); const a = ownerByProvince.get(boundary.provinceA) ?? null; const b = ownerByProvince.get(boundary.provinceB) ?? null; return classified(boundary, a !== b ? "country_border" : "internal_province"); });
   return { ownerByProvince, leaderByPolity, territories: territories.sort((a, b) => b.label.priority - a.label.priority), borderSegments };
 }
