@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import type { Books } from "@chronica/shared";
 import { Sheet, type SheetSide } from "../../../components/ui/sheet";
 import { Tabs, type TabSection } from "../../../components/ui/tabs";
+import { Tip, TipCard } from "../../../components/ui/tip";
+import { spanInWords } from "@chronica/shared";
+import { Why } from "./notes";
 
 /**
  * The treasury, laid out the way VISION §7 lays it out.
@@ -17,24 +19,17 @@ import { Tabs, type TabSection } from "../../../components/ui/tabs";
  * Three ribbons, each offered only when it has something in it: the accounts
  * and the month, then what is owed, then the lands the money comes from. A
  * private purse will usually only ever have the first.
+ *
+ * One panel for two objects, reading two different sets of books: the
+ * strongbox (`which="own"`) opens what is in the player's own name, and the
+ * ledger stand (`which="kept"`) what he keeps for somebody else -- a treasury,
+ * an army's chest, a guild's fund.
  */
 
-type BooksView = Books & { readonly currencyName: string };
+export type BooksView = Books & { readonly currencyName: string };
 
-export function BooksPanel({ gameId, revision, onClose, side }: { readonly gameId: string; readonly revision: number; readonly onClose: () => void; readonly side: SheetSide }) {
-  const [books, setBooks] = useState<BooksView | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let live = true;
-    void fetch(`/api/games/${encodeURIComponent(gameId)}/books`, { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("no books"))))
-      .then((data: BooksView) => { if (live) setBooks(data); })
-      .catch(() => { if (live) setFailed(true); });
-    return () => { live = false; };
-    // Refetched when simulated time moves, which is the only thing that changes them.
-  }, [gameId, revision]);
-
+/** `books` is null until the room has been read; the stand and the strongbox are not drawn before then. */
+export function BooksPanel({ which, books, onClose, side }: { readonly which: "own" | "kept"; readonly books: BooksView | null; readonly onClose: () => void; readonly side: SheetSide }) {
   const sections: TabSection[] = books === null ? [] : [
     { id: "accounts", title: "Accounts", marked: books.surplus < 0 || books.pressure?.hard === true, content: <Accounts books={books} /> },
     ...(books.debts.length > 0 || books.behind.length > 0
@@ -47,16 +42,15 @@ export function BooksPanel({ gameId, revision, onClose, side }: { readonly gameI
 
   return (
     <Sheet
-      label="the treasury"
-      title={books?.theirGovernments === true ? "The Treasury" : "Your Means"}
+      label={which === "own" ? "your means" : "the books you keep"}
+      title={which === "own" ? "Your means" : books?.theirGovernments === true ? "The treasury" : "The books you keep"}
       width="ledger"
       side={side}
       onClose={onClose}
       className="books-panel"
     >
-      {failed && <p className="quiet">There are no books you may read.</p>}
-      {books === null && !failed && <p className="quiet">Sending for the quaestor…</p>}
-      {books !== null && <Tabs label="The treasury's books" sections={sections} />}
+      {books === null && <p className="quiet">{which === "own" ? "Opening the strongbox…" : "Sending for the quaestor…"}</p>}
+      {books !== null && <Tabs label={which === "own" ? "Your own books" : "The books you keep"} sections={sections} />}
     </Sheet>
   );
 }
@@ -81,7 +75,7 @@ function Accounts({ books }: { readonly books: BooksView }) {
             <tr className="ledger__head"><th scope="rowgroup" colSpan={2}>Coming in</th></tr>
             {books.income.map((line) => (
               <tr key={line.key} className="books__in">
-                <th scope="row" title={line.detail.map((entry) => `${entry.label}: ${entry.monthly}`).join("\n")}>{line.label}</th>
+                <th scope="row"><LineWhy line={line} /></th>
                 <td>{money(line.monthly)}</td>
               </tr>
             ))}
@@ -89,7 +83,7 @@ function Accounts({ books }: { readonly books: BooksView }) {
             <tr className="ledger__head"><th scope="rowgroup" colSpan={2}>Going out</th></tr>
             {books.expenditure.map((line) => (
               <tr key={line.key} className="books__out">
-                <th scope="row" title={line.detail.map((entry) => `${entry.label}: ${entry.monthly}`).join("\n")}>{line.label}</th>
+                <th scope="row"><LineWhy line={line} /></th>
                 <td>−{money(line.monthly)}</td>
               </tr>
             ))}
@@ -102,7 +96,12 @@ function Accounts({ books }: { readonly books: BooksView }) {
         </table>
         {books.pressure !== null && (
           <p className={books.pressure.hard ? "books__pressure is-hard" : "books__pressure"}>
-            The taxes are {books.pressure.inWords}.
+            The taxes are <Why word={books.pressure.inWords} why={books.pressure.why} kicker="Why the taxes are" />.
+          </p>
+        )}
+        {books.runsOutInDays !== null && (
+          <p className="books__projection">
+            If nothing changes, what is in hand {books.runsOutInDays <= 0 ? "is already spent" : `runs out in ${books.runsOutInDays < 14 ? "days" : `about ${spanInWords(books.runsOutInDays)}`}`}.
           </p>
         )}
         {books.arrears > 0 && <p className="books__arrears">
@@ -113,6 +112,20 @@ function Accounts({ books }: { readonly books: BooksView }) {
         )}
       </section>
     </div>
+  );
+}
+
+/** A line of the books, and what it is made of: "Pay of the legions", and which legions. */
+function LineWhy({ line }: { readonly line: { readonly label: string; readonly detail: readonly { readonly label: string; readonly monthly: number }[] } }) {
+  if (line.detail.length <= 1) return <>{line.label}</>;
+  return (
+    <Tip label={line.label} note={() => (
+      <TipCard kicker="Made up of" title={line.label}>
+        <ul className="why">
+          {line.detail.map((entry) => <li key={entry.label} className="why__sum"><span>{entry.label}</span><span>{money(entry.monthly)}</span></li>)}
+        </ul>
+      </TipCard>
+    )}>{line.label}</Tip>
   );
 }
 

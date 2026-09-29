@@ -13,8 +13,7 @@ import { requiredDatabaseUrl } from "./database-url";
  *
  * Before the first burst commits there is no snapshot, so the stored world is
  * the scenario's authored one, which has never heard of a character the
- * player declared. `getPlayerAuthoritySummary` has projected the player in
- * since it was written and explains why; nothing else did. A declared consul
+ * player declared. A declared consul
  * who opened the Treasury before giving his first order read a private
  * citizen's books -- and the muster and the standing panel would each have
  * inherited the same bug.

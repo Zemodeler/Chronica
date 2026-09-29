@@ -157,8 +157,13 @@ describe("4. the army at Agrigentum keeps fortifying both walls", () => {
     // Short of the 300 and 400 asked for, because the work goes through a
     // man's hands and this one takes his percent on the way past. That is
     // `throughHand`, and the skim lands as a private fact a rival can find.
+    // And a little shorter again: Carthage's works are costed by its Office of
+    // the Accounts (v35), old hands at it, three in a hundred below a
+    // middling man's price. A wall is a soldier's work, so it is his gifts
+    // for war and for feeding an army that price it (`domainOfWork`), not
+    // his gifts for letters and building.
     const costs = result.world.projects.at(-1)!.milestones.map((milestone) => milestone.costAmount);
-    expect(costs).toEqual([297, 396]);
+    expect(costs).toEqual([Math.round(292 * 0.97), Math.round(390 * 0.97)]);
   });
 });
 

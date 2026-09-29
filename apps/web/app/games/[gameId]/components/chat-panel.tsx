@@ -1,9 +1,11 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback, useMemo, type FormEvent } from "react";
-import type { AwaitingLetter, DirectoryEntry, DirectoryGroup } from "@chronica/shared";
+import type { AwaitingLetter, Correspondence, DirectoryEntry, DirectoryGroup } from "@chronica/shared";
 import { Sheet, type SheetSide } from "../../../components/ui/sheet";
 import { Era } from "../../../components/ui/era";
+import { Explains, Name, useGlossary } from "./notes";
+import type { EntityKey, EntityNote } from "@chronica/shared";
 
 interface ContactView {
   readonly sessionId: string;
@@ -30,8 +32,6 @@ interface ChatPanelProps {
   readonly open: boolean;
   readonly onClose: () => void;
   readonly side: SheetSide;
-  /** Letters from other powers are answered at the desk, as orders. */
-  readonly onAnswerAtDesk: () => void;
   /** Set to open this panel directly on a specific session -- e.g. a conversation a character initiated. */
   readonly openSessionId?: string | null;
   readonly onOpenSessionConsumed?: () => void;
@@ -40,7 +40,10 @@ interface ChatPanelProps {
 type Focus =
   | { readonly kind: "none" }
   | { readonly kind: "letter"; readonly id: string }
-  | { readonly kind: "person"; readonly id: string };
+  /** The name travels with the id: somebody found a moment ago, or who wrote first, may not be listed yet. */
+  | { readonly kind: "person"; readonly id: string; readonly name: string };
+
+type Reply = "accepted" | "refused" | "countered";
 
 /**
  * The letter tray: everyone the player knows of, what they have said, and
@@ -54,20 +57,36 @@ type Focus =
  * shows what is known of them, and a way to speak or write, or what it would
  * take when that cannot be done yet.
  *
+ * Somebody in the player's region is spoken with. Anybody further off is
+ * written to: the letter goes out now, and they answer it when the world next
+ * moves. A letter waiting on the player's answer is answered here too --
+ * accepted, refused, or written back to -- not at the desk as an order.
+ *
  * A conversation reads as a transcript -- who spoke, and what they said --
- * the way a history records an exchange, not as chat bubbles.
+ * the way a history records an exchange, not as chat bubbles. A
+ * correspondence reads as the letters themselves, dated.
  */
-export function ChatPanel({ gameId, open, onClose, side, onAnswerAtDesk, openSessionId, onOpenSessionConsumed }: ChatPanelProps) {
+export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSessionConsumed }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [contacts, setContacts] = useState<readonly ContactView[]>([]);
   const [groups, setGroups] = useState<readonly DirectoryGroup[]>([]);
   const [letters, setLetters] = useState<readonly AwaitingLetter[]>([]);
+  const [correspondence, setCorrespondence] = useState<readonly Correspondence[]>([]);
+  const [letterBody, setLetterBody] = useState("");
+  const [reply, setReply] = useState<Reply>("countered");
+  const [agreementKind, setAgreementKind] = useState("");
+  const [posting, setPosting] = useState(false);
+  /** Why the last letter did not go. The words stay on the page. */
+  const [letterError, setLetterError] = useState<string | null>(null);
+  const [letterSent, setLetterSent] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [focus, setFocus] = useState<Focus>({ kind: "none" });
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<readonly MessageView[]>([]);
   const [messageBody, setMessageBody] = useState("");
   const [sending, setSending] = useState(false);
+  /** Why the last thing said did not reach them. The words stay in the box. */
+  const [sayError, setSayError] = useState<string | null>(null);
   const [approaching, setApproaching] = useState(false);
   const [refusal, setRefusal] = useState<{ explanation: string; ladder: string[] } | null>(null);
   const [discoverOpen, setDiscoverOpen] = useState(false);
@@ -88,6 +107,16 @@ export function ChatPanel({ gameId, open, onClose, side, onAnswerAtDesk, openSes
   const gatherings = contacts.filter((contact) => contact.isGroup);
   const focused = focus.kind === "person" ? personById.get(focus.id) ?? null : null;
   const letter = focus.kind === "letter" ? letters.find((candidate) => candidate.id === focus.id) ?? null : null;
+  // Whom the letters on the right are with: the person chosen, or the one a
+  // conversation is open with. A conversation begun here goes on by letter
+  // once they have left the region.
+  const correspondentId = focus.kind === "person" ? focus.id : activeContact !== null && !activeContact.isGroup ? activeContact.npcCharacterId : null;
+  const correspondent = correspondentId === null ? null : personById.get(correspondentId) ?? null;
+  const correspondentName = correspondent?.name ?? (focus.kind === "person" ? focus.name : activeContact?.knownName ?? "");
+  const thread = correspondentId === null ? null : correspondence.find((entry) => entry.withCharacterId === correspondentId) ?? null;
+  // Unlisted -- found a moment ago, or known only by the letter they sent --
+  // is somebody elsewhere; the server says so if they are in fact here.
+  const byLetter = correspondentId !== null && (correspondent === null ? true : correspondent.reach === "letter");
   // In a group, each line is spoken by one of its members.
   const namesById = useMemo(() => new Map([
     ...everyone.map((person) => [person.id, person.name] as const),
@@ -116,9 +145,10 @@ export function ChatPanel({ gameId, open, onClose, side, onAnswerAtDesk, openSes
     try {
       const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/directory`, { cache: "no-store" });
       if (!res.ok) return;
-      const data = await res.json() as { groups: DirectoryGroup[]; letters: AwaitingLetter[] };
+      const data = await res.json() as { groups: DirectoryGroup[]; letters: AwaitingLetter[]; correspondence: Correspondence[] };
       setGroups(data.groups ?? []);
       setLetters(data.letters ?? []);
+      setCorrespondence(data.correspondence ?? []);
     } catch {
       // The tray still shows the conversations already open.
     }
@@ -172,12 +202,80 @@ export function ChatPanel({ gameId, open, onClose, side, onAnswerAtDesk, openSes
     await fetchMessages(sessionId);
   }
 
-  function choosePerson(person: DirectoryEntry) {
-    setFocus({ kind: "person", id: person.id });
+  function freshPage() {
+    setLetterBody("");
+    setLetterError(null);
+    setLetterSent(null);
+    setReply("countered");
+    setAgreementKind("");
+  }
+
+  function choosePerson(person: { readonly id: string; readonly name: string }) {
+    setFocus({ kind: "person", id: person.id, name: person.name });
     setRefusal(null);
+    freshPage();
     const session = sessionFor(person.id);
     if (session !== undefined) void openSession(session.sessionId);
     else { setActiveSessionId(null); setMessages([]); }
+  }
+
+  function chooseLetter(id: string) {
+    setFocus({ kind: "letter", id });
+    setActiveSessionId(null);
+    freshPage();
+    const waiting = letters.find((entry) => entry.id === id);
+    if (waiting !== undefined) setReply(waiting.asksYesOrNo ? "accepted" : "countered");
+  }
+
+  /** A letter to somebody out of the region: it goes now, and is answered when the world next moves. */
+  async function sendLetter(event: FormEvent) {
+    event.preventDefault();
+    const body = letterBody.trim();
+    if (!body || correspondentId === null || posting) return;
+    setPosting(true);
+    setLetterError(null);
+    setLetterSent(null);
+    try {
+      const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/letters`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ toCharacterId: correspondentId, body }),
+      });
+      const data = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) { setLetterError(data.error ?? "The letter did not go. Your words are still here; try again."); return; }
+      setLetterBody("");
+      setLetterSent(`Your letter is on its way to ${correspondentName}. They will answer when the world next moves.`);
+      await fetchDirectory();
+    } catch {
+      setLetterError("The letter did not go. Your words are still here; try again.");
+    } finally {
+      setPosting(false);
+    }
+  }
+
+  /** Accepting, refusing, or writing back to a letter waiting on the player. */
+  async function sendAnswer(event: FormEvent) {
+    event.preventDefault();
+    const words = letterBody.trim();
+    if (!words || letter === null || posting) return;
+    setPosting(true);
+    setLetterError(null);
+    try {
+      const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/letters/${encodeURIComponent(letter.id)}/answer`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reply, words, ...(reply === "accepted" && letter.offers.length > 1 ? { agreementKind } : {}) }),
+      });
+      const data = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) { setLetterError(data.error ?? "The answer did not go. Your words are still here; try again."); return; }
+      const sender = { id: letter.fromCharacterId, name: personById.get(letter.fromCharacterId)?.name ?? letter.fromLabel.split(",")[0]! };
+      await fetchDirectory();
+      choosePerson(sender);
+      setLetterSent(reply === "countered"
+        ? `Your answer is on its way. ${sender.name} will write back when the world next moves.`
+        : `Your answer is sent: you have ${reply === "accepted" ? "accepted" : "refused"} it.`);
+    } catch {
+      setLetterError("The answer did not go. Your words are still here; try again.");
+    } finally {
+      setPosting(false);
+    }
   }
 
   /** Open a conversation with someone chosen from the list. */
@@ -190,7 +288,12 @@ export function ChatPanel({ gameId, open, onClose, side, onAnswerAtDesk, openSes
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: person.name, characterId: person.id }),
       });
       if (!res.ok) { setRefusal({ explanation: "The message could not be sent. Try again.", ladder: [] }); return; }
-      const data = await res.json() as { status: string; sessionId?: string; explanation?: string; ladder?: { label: string }[] };
+      const data = await res.json() as { status: string; sessionId?: string; characterId?: string; knownName?: string; explanation?: string; ladder?: { label: string }[] };
+      if (data.status === "letter" && data.characterId) {
+        choosePerson({ id: data.characterId, name: data.knownName ?? person.name });
+        void fetchDirectory();
+        return;
+      }
       if (data.status === "found" && data.sessionId) {
         await fetchContacts();
         await openSession(data.sessionId);
@@ -208,6 +311,7 @@ export function ChatPanel({ gameId, open, onClose, side, onAnswerAtDesk, openSes
     const body = messageBody.trim();
     if (!body || !activeSessionId || sending) return;
     setSending(true);
+    setSayError(null);
     setMessageBody("");
     try {
       const res = await fetch(
@@ -215,7 +319,19 @@ export function ChatPanel({ gameId, open, onClose, side, onAnswerAtDesk, openSes
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body }) },
       );
       if (!res.ok) {
+        const refused = await res.json().catch(() => ({})) as { error?: string; byLetter?: boolean };
+        if (refused.byLetter === true) {
+          // They have left the region since: what was to be said goes in a letter.
+          setMessageBody("");
+          setLetterBody(body);
+          setSayError(null);
+          void fetchDirectory();
+          return;
+        }
         setMessageBody(body);
+        setSayError(res.status === 402
+          ? "Your purse is spent, so they did not hear you. Add coins on your account page, then say it again."
+          : "That did not reach them. Your words are still here; try again.");
         return;
       }
       const data = await res.json() as { playerMessage: MessageView | null; npcReply: MessageView | null; npcReplies?: MessageView[] };
@@ -228,6 +344,7 @@ export function ChatPanel({ gameId, open, onClose, side, onAnswerAtDesk, openSes
       });
     } catch {
       setMessageBody(body);
+      setSayError("That did not reach them. Your words are still here; try again.");
     } finally {
       setSending(false);
     }
@@ -268,9 +385,15 @@ export function ChatPanel({ gameId, open, onClose, side, onAnswerAtDesk, openSes
         return;
       }
       const data = await res.json() as {
-        status: "found" | "unavailable"; sessionId?: string; explanation?: string;
+        status: "found" | "unavailable" | "letter"; sessionId?: string; characterId?: string; knownName?: string; explanation?: string;
         ladder?: { rung: string; label: string }[];
       };
+      if (data.status === "letter" && data.characterId) {
+        setDiscoverOpen(false);
+        choosePerson({ id: data.characterId, name: data.knownName ?? query });
+        void fetchDirectory();
+        return;
+      }
       if (data.status === "unavailable") {
         setDiscoverError(data.explanation ?? "No one matching that description could be found nearby.");
         // Never a dead end: the last rung is always "write to him and see".
@@ -308,18 +431,41 @@ export function ChatPanel({ gameId, open, onClose, side, onAnswerAtDesk, openSes
             </div>
 
             <div className="letters__scroll">
+              {wanted.length > 0 && <AskAfter wanted={wanted} />}
               {letters.length > 0 && wanted.length === 0 && (
                 <section className="letters__group">
-                  <h3>Waiting on your answer</h3>
+                  <h3><Explains k="rule:letter">Waiting on your answer</Explains></h3>
                   <ul className="letters__list">
                     {letters.map((entry) => (
                       <li key={entry.id}>
-                        <button type="button" className="letters__person letters__person--letter" aria-current={focus.kind === "letter" && focus.id === entry.id ? "true" : undefined} onClick={() => { setFocus({ kind: "letter", id: entry.id }); setActiveSessionId(null); }}>
+                        <button type="button" className="letters__person letters__person--letter" aria-current={focus.kind === "letter" && focus.id === entry.id ? "true" : undefined} onClick={() => chooseLetter(entry.id)}>
                           <strong><span className="seal-dot" aria-hidden="true" /> {entry.kindLabel}</strong>
                           <span>From {entry.fromLabel}</span>
                         </button>
                       </li>
                     ))}
+                  </ul>
+                </section>
+              )}
+
+              {correspondence.length > 0 && wanted.length === 0 && (
+                <section className="letters__group">
+                  <h3>Letters</h3>
+                  <ul className="letters__list">
+                    {correspondence.map((entry) => {
+                      const last = entry.pages.at(-1);
+                      const state = entry.waitingOn === "you" ? "Waiting on your answer"
+                        : entry.waitingOn === "them" ? "Awaiting their answer"
+                        : last !== undefined && !last.fromYou ? `They wrote, ${last.dateLabel}` : `You wrote, ${last?.dateLabel ?? ""}`;
+                      return (
+                        <li key={entry.withCharacterId}>
+                          <button type="button" className="letters__person" aria-current={focus.kind === "person" && focus.id === entry.withCharacterId ? "true" : undefined} onClick={() => choosePerson({ id: entry.withCharacterId, name: entry.withName })}>
+                            <strong>{entry.waitingOn === "you" && <span className="seal-dot" aria-hidden="true" />} {entry.withName}</strong>
+                            <span><Era text={state} /></span>
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </section>
               )}
@@ -371,18 +517,48 @@ export function ChatPanel({ gameId, open, onClose, side, onAnswerAtDesk, openSes
                 <p className="letters__from">From {letter.fromLabel}{letter.replyByLabel !== null && <>, wanting an answer by <Era text={letter.replyByLabel} /></>}.</p>
                 <p className="letters__subject">{letter.subject}</p>
                 <blockquote className="letters__terms">{letter.terms}</blockquote>
-                <p className="mirror__note">{letter.toYou ? "It is addressed to you." : "It is addressed to your government."} Answer it at the desk, as an order.</p>
-                <div><button type="button" className="btn btn--primary" onClick={onAnswerAtDesk}>Answer at the desk</button></div>
+                <p className="mirror__note">{letter.toYou ? "It is addressed to you." : "It is addressed to your government."}</p>
+                <form className="letters-form" onSubmit={(event) => { void sendAnswer(event); }}>
+                  {letter.asksYesOrNo && (
+                    <fieldset className="letters-form__choices">
+                      <legend className="visually-hidden">Your answer</legend>
+                      <label><input type="radio" name="letter-reply" checked={reply === "accepted"} onChange={() => setReply("accepted")} disabled={posting} /> Accept{letter.offers.length === 1 ? ` the ${letter.offers[0]!.label}` : ""}</label>
+                      <label><input type="radio" name="letter-reply" checked={reply === "refused"} onChange={() => setReply("refused")} disabled={posting} /> Refuse</label>
+                      <label><input type="radio" name="letter-reply" checked={reply === "countered"} onChange={() => setReply("countered")} disabled={posting} /> Write back with terms of your own</label>
+                    </fieldset>
+                  )}
+                  {reply === "accepted" && letter.offers.length > 1 && (
+                    <label>
+                      Which of what it offers you take up
+                      <select value={agreementKind} onChange={(event) => setAgreementKind(event.target.value)} disabled={posting}>
+                        <option value="" disabled>Choose one</option>
+                        {letter.offers.map((offer) => <option key={offer.kind} value={offer.kind}>The {offer.label}</option>)}
+                      </select>
+                    </label>
+                  )}
+                  <label htmlFor="letters-answer">{reply === "countered" ? "Your letter back" : "Your answer, in your own words"}</label>
+                  <textarea id="letters-answer" rows={6} value={letterBody} onChange={(event) => setLetterBody(event.target.value)} maxLength={1200} disabled={posting}
+                    placeholder={reply === "countered" ? `What you write back to ${letter.fromLabel}…` : reply === "accepted" ? "On what understanding you accept…" : "Why you will not…"} />
+                  {letterError !== null && <p className="letters-form__error" role="alert">{letterError}</p>}
+                  <p className="mirror__note">
+                    {reply === "countered" ? "It goes out now, and they will answer it when the world next moves." : "Your answer goes out now, and holds from the day it is sent."}
+                  </p>
+                  <div className="letters-form__actions letters-form__actions--start">
+                    <button type="submit" className="btn btn--primary" disabled={posting || !letterBody.trim() || (reply === "accepted" && letter.offers.length > 1 && agreementKind === "")}>
+                      {posting ? "Sealing it…" : reply === "accepted" ? "Send your acceptance" : reply === "refused" ? "Send your refusal" : "Send your letter"}
+                    </button>
+                  </div>
+                </form>
               </article>
             )}
 
             {focused !== null && (
-              <div className={activeContact !== null ? "letters__with letters__with--dossier" : "letters__dossier"}>
+              <div className={activeContact !== null || thread !== null ? "letters__with letters__with--dossier" : "letters__dossier"}>
                 <div className="letters__who">
                   <strong>{focused.name}</strong>
                   <span>{[focused.officeLabel, focused.polityLabel].filter(Boolean).join(", ")}</span>
                 </div>
-                {activeContact === null && (
+                {activeContact === null && thread === null && (
                   <>
                     <dl className="mirror__facts">
                       {focused.whereLabel !== null && <><dt>Where</dt><dd>{focused.whereLabel}</dd></>}
@@ -392,13 +568,17 @@ export function ChatPanel({ gameId, open, onClose, side, onAnswerAtDesk, openSes
                       {focused.opinionLabel !== null && <><dt>What you think of them</dt><dd>{focused.opinionLabel}</dd></>}
                       {focused.how === "public" && <><dt>Known</dt><dd>By repute; you have never dealt with them.</dd></>}
                     </dl>
-                    <p className="letters__reach-line">{focused.reachLabel}.</p>
-                    {focused.reach === "out_of_reach" && focused.ladder.length > 0 && (
+                    <p className="letters__reach-line">{focused.reach === "letter" ? "Not here: written to, and answering when the world next moves" : focused.reachLabel}.</p>
+                    {focused.ladder.length > 0 && (
                       <div className="letters-form">
-                        <p className="mirror__note">What it would take:</p>
+                        <p className="mirror__note">They owe you no answer. To be heard in person:</p>
                         <ol className="letters-form__ladder">{focused.ladder.map((step) => <li key={step}>{step}</li>)}</ol>
                       </div>
                     )}
+                  </>
+                )}
+                {activeContact === null && focused.reach !== "letter" && (
+                  <>
                     {refusal !== null && (
                       <div className="letters-form">
                         <p className="letters-form__error" role="alert">{refusal.explanation}</p>
@@ -407,27 +587,27 @@ export function ChatPanel({ gameId, open, onClose, side, onAnswerAtDesk, openSes
                     )}
                     <div className="letters-form__actions letters-form__actions--start">
                       <button type="button" className="btn btn--primary" disabled={approaching} onClick={() => void approach(focused)}>
-                        {approaching ? "Sending for them…" : focused.reach === "here" ? `Speak with ${focused.name}` : focused.reach === "letter" ? `Write to ${focused.name}` : "Try anyway"}
+                        {approaching ? "Sending for them…" : `Speak with ${focused.name}`}
                       </button>
                     </div>
                   </>
                 )}
-                {activeContact !== null && focused.knownFor.length > 0 && <span className="letters__known">Known for {focused.knownFor.join(", ")}</span>}
+                {(activeContact !== null || thread !== null) && focused.knownFor.length > 0 && <span className="letters__known">Known for {focused.knownFor.join(", ")}</span>}
               </div>
             )}
 
-            {focused === null && letter === null && activeContact !== null && (
+            {focused === null && letter === null && (focus.kind === "person" || activeContact !== null) && (
               <div className="letters__with">
-                <strong>{activeContact.knownName}</strong>
-                <span>{activeContact.roleLabel}</span>
+                <strong>{focus.kind === "person" ? focus.name : activeContact!.knownName}</strong>
+                {activeContact !== null && <span>{activeContact.roleLabel}</span>}
               </div>
             )}
 
-            {letter === null && (activeContact !== null || focused === null) && (
+            {letter === null && (activeContact !== null || thread !== null || focus.kind === "none") && (
               <div className="letters__transcript" aria-live="polite">
                 {loadingMessages && <p className="letters__hint">Finding what was said…</p>}
-                {!loadingMessages && activeContact === null && focused === null && (
-                  <p className="letters__hint">Choose someone to speak with, or a letter to answer.</p>
+                {!loadingMessages && activeContact === null && focus.kind === "none" && (
+                  <p className="letters__hint">Choose someone to speak with or write to, or a letter to answer.</p>
                 )}
                 {messages.map((message) => (
                   <div key={message.id} className={message.isPlayerMessage ? "letters__line is-yours" : "letters__line"}>
@@ -441,11 +621,29 @@ export function ChatPanel({ gameId, open, onClose, side, onAnswerAtDesk, openSes
                     <p>considers what to say…</p>
                   </div>
                 )}
+                {thread !== null && thread.pages.map((page) => {
+                  const answerable = page.awaiting && !page.fromYou ? letters.find((entry) => entry.id === page.messageId) : undefined;
+                  return (
+                    <article key={page.id} className={page.fromYou ? "letters__page is-yours" : "letters__page"}>
+                      <header className="letters__page-head">
+                        <span className="letters__speaker">{page.fromYou ? "You" : thread.withName}</span>
+                        <span><Era text={`${page.label}, ${page.dateLabel}`} /></span>
+                      </header>
+                      {/* A subject the tray took from the letter's first words would only say them twice. */}
+                      {page.subject !== null && !page.body.startsWith(page.subject.replace(/…$/, "")) && <p className="letters__page-subject">{page.subject}</p>}
+                      <p>{page.body}</p>
+                      {page.awaiting && page.fromYou && <p className="letters__page-note">Not yet answered. The answer comes when the world next moves.</p>}
+                      {answerable !== undefined && (
+                        <button type="button" className="word-button" onClick={() => chooseLetter(answerable.id)}>Answer this letter</button>
+                      )}
+                    </article>
+                  );
+                })}
                 <div ref={messagesEndRef} />
               </div>
             )}
 
-            {activeContact && letter === null && (
+            {activeContact && letter === null && (activeContact.isGroup || !byLetter) && (
               <form className="letters__compose" onSubmit={(e) => { void handleSend(e); }}>
                 <label className="visually-hidden" htmlFor="letters-say">What you say to {activeContact.knownName}</label>
                 <input
@@ -458,6 +656,31 @@ export function ChatPanel({ gameId, open, onClose, side, onAnswerAtDesk, openSes
                   autoComplete="off"
                 />
                 <button type="submit" className="btn btn--primary" disabled={sending || !messageBody.trim()}>Say it</button>
+                {sayError !== null && (
+                  <p className="letters-form__error letters__compose-error" role="alert">
+                    {sayError}{sayError.startsWith("Your purse") && <> <a href="/account">Open your account</a>.</>}
+                  </p>
+                )}
+              </form>
+            )}
+
+            {letter === null && byLetter && (
+              <form className="letters__compose letters__compose--letter" onSubmit={(event) => { void sendLetter(event); }}>
+                <label htmlFor="letters-write">
+                  {activeContact !== null && !activeContact.isGroup ? `${correspondentName} is not here. Write to them` : `A letter to ${correspondentName}`}
+                </label>
+                <textarea
+                  id="letters-write"
+                  rows={4}
+                  value={letterBody}
+                  onChange={(event) => setLetterBody(event.target.value)}
+                  maxLength={1200}
+                  placeholder={`What you write to ${correspondentName}…`}
+                  disabled={posting}
+                />
+                <button type="submit" className="btn btn--primary" disabled={posting || !letterBody.trim()}>{posting ? "Sealing it…" : "Send the letter"}</button>
+                {letterError !== null && <p className="letters-form__error letters__compose-error" role="alert">{letterError}</p>}
+                {letterSent !== null && letterError === null && <p className="mirror__note letters__compose-error" role="status">{letterSent}</p>}
               </form>
             )}
           </div>
@@ -511,5 +734,35 @@ export function ChatPanel({ gameId, open, onClose, side, onAnswerAtDesk, openSes
         </Sheet>
       )}
     </>
+  );
+}
+
+const ASK_KIND_WORDS: Readonly<Record<EntityNote["kind"], string>> = { person: "a person", place: "a place", force: "a force", power: "a power", office: "an office" };
+
+/**
+ * Ask after anyone: every name the glossary holds that matches the search,
+ * each opening its note. The glossary is station-filtered, so this finds only
+ * what the player could know of; asking after a name nobody told him of
+ * finds nothing.
+ */
+function AskAfter({ wanted }: { readonly wanted: string }) {
+  const glossary = useGlossary();
+  const found = (Object.entries(glossary) as [EntityKey, EntityNote | undefined][])
+    .filter((entry): entry is [EntityKey, EntityNote] => entry[1] !== undefined && entry[1].name.toLowerCase().includes(wanted))
+    .sort((a, b) => a[1].name.localeCompare(b[1].name))
+    .slice(0, 12);
+  if (found.length === 0) return null;
+  return (
+    <section className="letters__group letters__ask">
+      <h3>Ask after</h3>
+      <ul className="letters__list">
+        {found.map(([key, note]) => (
+          <li key={key} className="letters__asked">
+            <Name k={key}>{note.name}</Name>
+            <span>{ASK_KIND_WORDS[note.kind]}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

@@ -60,6 +60,7 @@ export function Office({
   const [hot, setHot] = useState<OfficeObjectId | null>(null);
   const scenery = sceneryFor(style);
   const present = new Map(things.map((thing) => [thing.id, thing]));
+  const waiting = things.filter((thing) => thing.marked === true).length;
 
   // Reading order is the array's order, always, so the room reads the same
   // whether or not it is drawn.
@@ -92,7 +93,10 @@ export function Office({
         )}
         {!drawn && <div className="office__scenery office__scenery--drawn" aria-hidden="true" />}
 
-        <ul className={drawn ? "office__objects office__objects--placed" : "office__objects"}>
+        <ul
+          className={drawn ? "office__objects office__objects--placed" : "office__objects"}
+          aria-label={waiting === 0 ? "The room. Nothing here wants your word." : `The room. ${waiting === 1 ? "One thing wants" : `${waiting} things want`} your word.`}
+        >
           {shown.map((object) => {
             const thing = present.get(object.id);
             const rect = rectFor(scenery, object.id, object.rect);

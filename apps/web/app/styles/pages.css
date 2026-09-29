@@ -62,7 +62,6 @@
   .shell, .dashboard-shell { width: min(72rem, calc(100% - 3rem)); margin: 0 auto; padding: 3rem 0 4rem; }
   .shell.narrow { width: min(52rem, calc(100% - 3rem)); }
   .page-header { display: grid; gap: .6rem; max-width: 44rem; margin-bottom: 2rem; }
-  .eyebrow { color: var(--bronze); font: italic 400 var(--step-1) var(--font-serif); }
   .lede { color: var(--dust); font-size: var(--step-1); line-height: 1.55; }
   .page-header h1 { font-size: var(--step-5); }
 
@@ -91,90 +90,8 @@
   .shell dl dt { font-family: var(--font-serif); font-style: italic; }
   .shell dl dd { color: var(--vellum); }
 
-  /* Links that act as buttons. */
-  .button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 2.5rem;
-    padding: .5rem 1.15rem;
-    border: 1px solid var(--bronze-high);
-    border-radius: var(--radius);
-    background: var(--bronze);
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 22%), 0 1px 0 rgb(0 0 0 / 35%);
-    color: var(--soot);
-    font: 500 var(--step-0)/1.2 var(--font-sans);
-    text-decoration: none;
-    cursor: pointer;
-  }
-  .button:hover { background: #C99A58; }
-  .button.secondary { border-color: color-mix(in srgb, var(--bronze) 60%, transparent); background: transparent; box-shadow: none; color: var(--vellum); }
-  .button.secondary:hover { border-color: var(--bronze); background: transparent; }
-  .button.sm { min-height: 2rem; padding: .3rem .8rem; font-size: var(--step--1); }
-  .button.delete-save { border-color: color-mix(in srgb, #C0534A 60%, transparent); color: #E3A69E; }
-  .button.delete-save:hover { border-color: #C0534A; }
 
   .table-wrap { max-width: 100%; overflow-x: auto; }
-
-  /* ─── The dashboard ────────────────────────────────────────────────── */
-  .dashboard-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 2rem; }
-  .dashboard-heading h1 { font-size: var(--step-5); }
-
-  /* The save to go back to, as a plate with its title beside it. */
-  .featured-card {
-    display: grid;
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
-    margin-bottom: 3rem;
-    overflow: hidden;
-    border: 1px solid var(--rule);
-    border-radius: var(--radius);
-    background: var(--umber);
-  }
-  .featured-thumb, .slot-thumb img, .world-thumb {
-    display: block;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    filter: sepia(.6) saturate(.75) brightness(.8) contrast(1.05);
-  }
-  .featured-thumb { aspect-ratio: 16 / 9; }
-  .featured-content { display: grid; align-content: center; gap: .9rem; padding: 2rem 2.25rem; }
-  .featured-title { font-size: var(--step-4); }
-  .featured-meta { color: var(--dust); font: italic 400 var(--step-1) var(--font-serif); }
-  .featured-actions { display: flex; gap: .75rem; margin-top: .4rem; }
-
-  /* The saves, as a shelf: one ruled row each. */
-  .slot-rail { display: grid; border-top: 1px solid var(--rule); counter-reset: slot; }
-  .slot-card {
-    display: grid;
-    grid-template-columns: 3rem 10rem 1fr;
-    align-items: center;
-    gap: 1.5rem;
-    padding: 1.1rem 0;
-    border-bottom: 1px solid var(--rule);
-  }
-  .slot-thumb { position: relative; grid-column: 2; grid-row: 1; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 2px; background: var(--umber); }
-  .slot-thumb-new { background: repeating-linear-gradient(135deg, var(--umber) 0 6px, color-mix(in srgb, var(--umber) 60%, var(--soot)) 6px 12px); }
-  .slot-number { grid-column: 1; grid-row: 1; color: var(--bronze); font: 400 var(--step-2) var(--font-caps); text-align: center; }
-  .slot-thumb .slot-number { display: none; }
-  .slot-body { grid-column: 3; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: .15rem 1.5rem; }
-  .slot-title { font-size: var(--step-2); }
-  .slot-meta { grid-column: 1; color: var(--dust); font: italic 400 var(--step-0) var(--font-serif); }
-  .slot-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center; gap: .6rem; }
-  .slot-actions form { display: contents; }
-  .slot-card-new .slot-title { color: var(--dust); }
-
-  /* ─── Scenarios ────────────────────────────────────────────────────── */
-  .world-rail { display: grid; gap: .6rem; }
-  .world-rail-label { font-size: var(--step-5); }
-  .worlds-hero-meta { color: var(--dust); font-size: var(--step-1); }
-  .world-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 26rem), 1fr)); gap: 1.5rem; margin-top: 1.5rem; }
-  .world-card { overflow: hidden; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--umber); }
-  .world-thumb { aspect-ratio: 16 / 9; height: auto; }
-  .world-card-body { display: grid; gap: .4rem; padding: 1.25rem 1.4rem 1.4rem; }
-  .world-card-title { font-size: var(--step-3); }
-  .world-card-meta { color: var(--dust); font: italic 400 var(--step-0) var(--font-serif); }
-  .world-card-body .button { justify-self: start; margin-top: .6rem; }
 
   /* ─── The account ──────────────────────────────────────────────────── */
   .acct-hero { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; padding-bottom: 1.75rem; margin-bottom: 1.75rem; border-bottom: 1px solid var(--rule); }
@@ -187,29 +104,25 @@
   .acct-wallet-note { color: var(--ink-faded); }
   .acct-paused-row { display: flex; align-items: center; gap: 1rem; }
 
-  .account-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 1rem; }
-  .account-card {
+  /* The wallet, then everything else as ruled rows: a ledger, not a wall of cards. */
+  .acct-wallet { display: grid; gap: .6rem; padding-bottom: 2rem; margin-bottom: .5rem; }
+  .acct-wallet__sum { color: var(--dust); font: italic 400 var(--step-1) var(--font-serif); }
+  .acct-wallet__figure { margin-right: .35rem; color: var(--vellum); font: 500 var(--step-5)/1 var(--font-serif); font-style: normal; font-variant-numeric: lining-nums tabular-nums; }
+  .acct-wallet__note { max-width: 36rem; color: var(--dust); line-height: 1.55; }
+  .acct-wallet__actions { display: flex; align-items: center; gap: 1.25rem; margin-top: .6rem; }
+  .shell .acct-ledger { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; margin: 0; border-top: 1px solid var(--rule); }
+  .acct-ledger > div {
     display: grid;
-    align-content: start;
-    justify-items: start;
-    gap: .35rem;
-    width: 100%;
-    min-height: 8.5rem;
-    padding: 1.25rem 1.35rem;
-    border: 1px solid var(--rule);
-    border-radius: var(--radius);
-    background: var(--umber);
-    box-shadow: none;
-    color: var(--vellum);
-    text-align: left;
-    justify-content: stretch;
+    grid-template-columns: 12rem minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 1.5rem;
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--rule);
   }
-  .account-card:hover:not(:disabled) { border-color: color-mix(in srgb, var(--bronze) 70%, transparent); }
-  .account-card--dev { border-style: dashed; }
-  .account-card-title { font: 500 var(--step-2) var(--font-serif); }
-  .account-card-meta { color: var(--dust); }
-  .account-card-value { font: 500 var(--step-3) var(--font-serif); font-variant-numeric: lining-nums tabular-nums; }
-  .account-card-action { margin-top: auto; color: var(--bronze); font-size: var(--step--1); }
+  .shell .acct-ledger dt { color: var(--dust); font: italic 400 var(--step-1) var(--font-serif); }
+  .shell .acct-ledger dd { margin: 0; color: var(--vellum); font-size: var(--step-1); }
+  .acct-ledger__quiet { color: var(--dust); }
+  .acct-ledger__dev dt::after { content: " (developer)"; font-size: var(--step-0); }
 
   /* Account dialogs are documents too. */
   .account-dialog {
@@ -244,6 +157,7 @@
   .dialog-body { display: grid; gap: .9rem; max-height: min(72vh, 42rem); overflow-y: auto; padding: 1.25rem 1.6rem 1.6rem; }
   .dialog-body h3 { margin-top: .5rem; color: var(--ink-faded); font-size: var(--step-0); font-style: italic; font-weight: 400; }
   .dialog-lede, .dialog-empty { color: var(--ink-faded); }
+  .dialog-actions { display: flex; justify-content: flex-end; gap: .75rem; margin-top: .4rem; }
   .credit-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
   .credit-summary strong { display: block; font: 500 var(--step-3) var(--font-serif); font-variant-numeric: lining-nums tabular-nums; }
   .avatar-picker { display: flex; flex-wrap: wrap; gap: .75rem; }
@@ -261,8 +175,13 @@
     padding-inline: 1.5rem;
     border-bottom: 1px solid var(--rule);
   }
+  .declare__way { display: flex; align-items: baseline; gap: 1.25rem; }
+  .declare__home { color: var(--dust); font-size: var(--step--1); letter-spacing: .02em; text-decoration: none; }
+  .declare__home:hover { color: var(--vellum); }
   .declare__title { font: italic 400 var(--step-1) var(--font-serif); }
-  .declare__coins { color: var(--dust); font-variant-numeric: lining-nums tabular-nums; }
+  .declare__coins { color: var(--dust); font-variant-numeric: lining-nums tabular-nums; text-decoration: none; }
+  .declare__coins:hover { color: var(--vellum); }
+  .declare__coins[data-empty="true"] { color: var(--vellum); text-decoration: underline 1.5px var(--seal); text-underline-offset: .3em; }
   .declare__main { flex: 1; display: grid; place-items: center; padding: 3rem 1.5rem; }
   .declare__column { display: grid; gap: 1.5rem; width: min(44rem, 100%); }
   .declare__column h1 { font-size: var(--step-5); }
@@ -279,8 +198,38 @@
   }
   .declare__actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
   .declare__actions form { display: contents; }
-  .declare__wait { color: var(--dust); font-style: italic; font-family: var(--font-serif); }
-  .declare__error { padding-left: .9rem; border-left: 2px solid #C0534A; color: #E3A69E; }
+  .declare__price { max-width: 30rem; color: var(--dust); font: italic 400 var(--step-0)/1.45 var(--font-serif); text-wrap: pretty; }
+  .declare__price a, .declare__error a { color: var(--bronze-high); text-underline-offset: .2em; }
+  .declare__error { color: var(--danger-ink); text-wrap: pretty; }
+  .declare__error::before { content: ""; display: inline-block; width: .5rem; height: .5rem; margin-right: .55rem; border-radius: 50%; background: var(--danger); vertical-align: .1em; }
+
+  /* Starting points fill the editable description above. */
+  .declare__starters {
+    display: grid;
+    gap: 1.75rem;
+    margin-top: 1.25rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+  }
+  .declare__starters h2 { margin-bottom: .6rem; color: var(--dust); font: italic 400 var(--step-1) var(--font-serif); }
+  .declare__people { min-width: 0; }
+  .declare__people > p { margin-bottom: .8rem; color: var(--dust); font-size: var(--step-0); }
+  .declare__starters ul { display: grid; margin: 0; padding: 0; list-style: none; }
+  .declare__starters li { display: grid; gap: .05rem; padding: .45rem 0; border-bottom: 1px solid var(--rule); }
+  .declare__starters li:last-child { border-bottom: 0; }
+  .declare__starters .word-button { justify-self: start; color: var(--vellum); font: 400 var(--step-1)/1.3 var(--font-serif); text-align: left; }
+  .declare__starters li span { color: var(--dust); font-size: var(--step-0); }
+  .declare__starters .declare__illustrated { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .65rem; margin-bottom: 1rem; }
+  .declare__starters .declare__illustrated li { padding: 0; border: 0; }
+  .declare__illustrated-button { display: grid; gap: .55rem; width: 100%; padding: 0; border: 0; background: transparent; color: var(--vellum); cursor: pointer; text-align: left; font: 400 var(--step-0)/1.3 var(--font-serif); }
+  .declare__illustrated-button img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; object-position: center; border: 1px solid var(--rule); filter: saturate(.8); }
+  .declare__illustrated-button:hover img, .declare__illustrated-button:focus-visible img { border-color: var(--bronze); filter: saturate(1); }
+  .declare__illustrated-button:focus-visible { outline: 2px solid var(--bronze-high); outline-offset: 3px; }
+  .declare__starters .declare__illustrated-button span { color: inherit; }
+  .declare__named-people { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 1.5rem; }
+  @media (max-width: 40rem) {
+    .declare__starters .declare__illustrated, .declare__named-people { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
   .declare__origin { color: var(--bronze); font: italic 400 var(--step-1) var(--font-serif); }
   .declare__money { color: var(--dust); }
   .declare__money strong { color: var(--vellum); font-weight: 500; }
@@ -294,7 +243,7 @@
     font-variant-numeric: oldstyle-nums;
     white-space: pre-wrap;
   }
-  .declare__wallet { color: var(--dust); font-size: var(--step--1); }
+  .declare__wallet { color: var(--dust); font-size: var(--step-0); }
 
   /* ─── Waiting on the world ─────────────────────────────────────────── */
   /* One lamp, burning. Used while a world loads and while a character is
@@ -313,7 +262,7 @@
     width: 1.1rem;
     height: 1.8rem;
     border-radius: 50% 50% 45% 45% / 62% 62% 38% 38%;
-    background: radial-gradient(circle at 50% 70%, #FFF3C8 0%, var(--lamp) 45%, rgb(242 198 109 / 0%) 75%);
+    background: radial-gradient(circle at 50% 70%, var(--lamp-core) 0%, var(--lamp) 45%, rgb(242 198 109 / 0%) 75%);
     box-shadow: 0 0 2.5rem 1rem rgb(242 198 109 / 22%);
     animation: flicker 2.4s ease-in-out infinite;
   }

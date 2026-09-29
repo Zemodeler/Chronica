@@ -42,15 +42,14 @@
     width: 100%;
     min-height: 0;
     padding: .75rem 1rem;
-    border: 1px solid var(--rule);
-    border-left: 3px solid var(--seal);
+    border: 1px solid color-mix(in srgb, var(--seal) 40%, var(--rule));
     border-radius: 2px;
     background: rgb(255 255 255 / 24%);
     box-shadow: none;
     color: var(--ink);
     text-align: left;
   }
-  .decision__option:hover:not(:disabled) { border-color: var(--rule); border-left-color: var(--seal); background: rgb(255 255 255 / 42%); }
+  .decision__option:hover:not(:disabled) { border-color: var(--seal); background: rgb(255 255 255 / 42%); }
   .decision__option strong { font: 500 var(--step-1) var(--font-serif); }
   .decision__option span { color: var(--ink-faded); font-size: var(--step-0); }
 
@@ -134,7 +133,21 @@
   }
   .tablet__then select option { background: var(--umber); color: var(--vellum); }
   .tablet__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .75rem; }
-  .desk__error { color: #E3A69E; }
+  /* What turns have cost: a quiet line, figures in lining numerals so they
+     can be compared from one turn to the next. */
+  .tablet__purse {
+    justify-self: end;
+    max-width: 38rem;
+    color: var(--dust);
+    font: italic 400 var(--step-0)/1.45 var(--font-serif);
+    font-variant-numeric: lining-nums tabular-nums;
+    text-align: right;
+    text-wrap: pretty;
+  }
+  .tablet__purse.is-empty { color: var(--vellum); font-style: normal; }
+  .tablet__purse.is-empty::before { content: ""; display: inline-block; width: .5rem; height: .5rem; margin-right: .5rem; border-radius: 50%; background: var(--seal); vertical-align: .1em; }
+  .tablet__purse a { color: var(--bronze-high); text-underline-offset: .2em; }
+  .desk__error { color: var(--danger-ink); }
 
   /* ─── The Chronicle ────────────────────────────────────────────────── */
   .chronicle-filter {
@@ -149,10 +162,37 @@
     color: var(--ink-faded);
   }
   .chronicle-filter strong { color: var(--ink); font-weight: 500; }
+  /* What is unread, and the two things to do about it. Sits at the head of
+     the sheet like the filter line, and above it when both are shown. */
+  .chronicle-reading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: .35rem 1.25rem;
+    margin: -1.1rem -1.6rem 1rem;
+    padding: .65rem 1.6rem;
+    border-bottom: 1px solid var(--rule);
+    color: var(--ink-faded);
+    font: italic 400 var(--step-0) var(--font-serif);
+  }
+  .chronicle-reading > span { margin-right: auto; }
+  .chronicle-reading .word-button { font-style: normal; font-family: var(--font-sans); }
+  .chronicle-reading + .chronicle-filter { margin-top: -1rem; }
+  /* New means lamp-gold, as the Office's badges do: dark ink on the lamp,
+     because gold letters on papyrus cannot be read. */
+  .chronicle-entry__new {
+    display: inline-block;
+    margin-left: .6rem;
+    padding: .05rem .5rem;
+    border-radius: 999px;
+    background: radial-gradient(circle at 40% 35%, var(--lamp-core), var(--lamp) 55%, var(--lamp-rim));
+    color: var(--ink);
+    font: 600 var(--step--1)/1.35 var(--font-sans);
+    letter-spacing: .02em;
+    vertical-align: .08em;
+  }
   .chronicle-unfolding {
     margin-bottom: 1rem;
-    padding-left: .9rem;
-    border-left: 2px solid var(--bronze-deep);
     color: var(--ink-faded);
     font: italic 400 var(--step-0) var(--font-serif);
   }
@@ -160,6 +200,8 @@
   .chronicle-entry { display: grid; gap: .55rem; padding-block: 1.4rem; border-bottom: 1px solid var(--rule); }
   .chronicle-entry:first-of-type { padding-top: 0; }
   .chronicle-entry:last-child { border-bottom: 0; }
+  /* The entry the mirror opened the record at. */
+  .chronicle-entry.is-focused { padding-left: .8rem; border-left: 2px solid var(--bronze-deep); }
   .chronicle-entry > header { display: grid; gap: .3rem; }
   .chronicle-entry__date {
     color: var(--bronze-deep);
@@ -227,6 +269,7 @@
   .books__arrears { padding-left: .9rem; border-left: 2px solid var(--seal); font: italic 400 var(--step-0) var(--font-serif); }
   .books__pressure { color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
   .books__pressure.is-hard { padding-left: .9rem; border-left: 2px solid var(--seal); color: var(--ink); }
+  .books__projection { color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
   .books__list li { display: grid; gap: .1rem; }
   .books__list strong { font: 500 var(--step-1)/1.3 var(--font-serif); }
   .books__list s { text-decoration-color: var(--seal); text-decoration-thickness: 1.5px; }
@@ -246,6 +289,20 @@
   /* ─── The muster ───────────────────────────────────────────────────── */
   .muster__force { display: grid; gap: .25rem; }
   .muster__force h3 { font-size: var(--step-2); }
+  /* Closed, a force is its name and one line; clicked, it opens to the rest. */
+  .muster__name {
+    display: grid; justify-content: stretch; justify-items: stretch; gap: .1rem; width: 100%; min-height: 0; padding: .15rem 0; border: 0; border-radius: 0; background: none;
+    color: inherit; text-align: left; font: inherit; cursor: pointer;
+  }
+  .muster__title { display: flex; align-items: center; justify-content: flex-start; gap: .5rem; width: 100%; font: 500 var(--step-1) var(--font-serif); }
+  .muster__title .seal-dot { flex: none; margin: 0; }
+  .muster__title::after { content: "▸"; margin-left: auto; color: var(--ink-faded); font-size: .8em; transition: transform .15s ease; }
+  .muster__force.is-open .muster__title::after { transform: rotate(90deg); }
+  .muster__summary { justify-self: start; color: var(--ink-faded); font-variant-numeric: lining-nums tabular-nums; }
+  .muster__name:hover .muster__title { text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: .2em; }
+  .muster__name:focus-visible { outline: 2px solid var(--lamp); outline-offset: 2px; }
+  .muster__force.is-open .muster__summary { display: none; }
+  .muster__details { display: grid; gap: .25rem; padding-top: .25rem; }
   .muster__commander { color: var(--ink-faded); font-style: italic; font-family: var(--font-serif); }
   .muster__strength { font-size: var(--step-1); font-variant-numeric: lining-nums tabular-nums; }
   .muster__strength strong { font: 500 var(--step-2) var(--font-serif); font-variant-numeric: lining-nums tabular-nums; }
@@ -266,7 +323,7 @@
   .standing__powers b { font-weight: 500; }
   .standing__legitimacy { font: 500 var(--step-1)/1.4 var(--font-serif); }
   .standing__legitimacy.is-shaky { padding-left: .9rem; border-left: 2px solid var(--seal); }
-  .standing__business.is-yours strong::before, .standing__treaty.is-war strong::before {
+  .standing__business.is-yours strong::before {
     content: "";
     display: inline-block;
     width: .5rem;
@@ -276,12 +333,91 @@
     background: var(--seal);
     vertical-align: .12em;
   }
-  .standing__offices li { display: grid; grid-template-columns: 10rem 1fr auto; align-items: baseline; gap: 1rem; padding: .3rem 0; border-bottom: 1px solid var(--rule); }
+  .standing__offices li { display: grid; grid-template-columns: 10rem 1fr minmax(9rem, 16rem); align-items: baseline; gap: 1rem; padding: .3rem 0; border-bottom: 1px solid var(--rule); }
+  .standing__offices li.is-yours strong { color: var(--seal); }
   .standing__offices li:last-child { border-bottom: 0; }
   .standing__offices span { color: var(--ink-faded); font-family: var(--font-serif); font-style: italic; }
   .standing__offices strong { font: 500 var(--step-0) var(--font-serif); }
-  .standing__offices em { color: var(--ink-faded); font-size: var(--step--1); white-space: nowrap; }
-  .standing__treaty span { color: var(--ink); font-family: var(--font-serif); }
+  .standing__offices em { color: var(--ink-faded); font-size: var(--step--1); font-style: normal; text-align: right; }
+
+  /* ─── Treaties: the powers on the left, one power's dossier on the right ─ */
+  .treaties { display: grid; grid-template-columns: minmax(14rem, 17rem) minmax(0, 1fr); gap: 1.6rem; align-items: start; }
+  .treaties__powers { display: grid; gap: 1.1rem; }
+  .treaties__group { display: grid; gap: .35rem; }
+  .treaties__group h3 { color: var(--ink-faded); font: 400 var(--step--1) var(--font-caps); text-transform: lowercase; letter-spacing: .05em; }
+  .treaties__group--war h3 { color: var(--seal); }
+  .treaties__count { color: var(--ink-faded); }
+  .treaties__group ul { display: grid; margin: 0; padding: 0; list-style: none; }
+  details.treaties__group > summary { list-style: none; cursor: pointer; }
+  details.treaties__group > summary::-webkit-details-marker { display: none; }
+  details.treaties__group > summary h3::after { content: " ▸"; }
+  details.treaties__group[open] > summary h3::after { content: " ▾"; }
+
+  /* A power: its name, the government's word for it, the kinds between you. */
+  .treaty-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: .6rem;
+    padding: .45rem .6rem .5rem .7rem;
+    border-left: 2px solid transparent;
+    border-bottom: 1px solid var(--rule);
+  }
+  .treaty-card:last-child { border-bottom: 0; }
+  .treaty-card.is-war { border-left-color: var(--seal); }
+  .treaty-card.is-chosen { background: color-mix(in srgb, var(--papyrus-shade) 80%, transparent); border-left-color: var(--bronze-deep); }
+  .treaty-card.is-war.is-chosen { border-left-color: var(--seal); }
+  .treaty-card__name {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: .45rem;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--ink);
+    font: 500 var(--step-1)/1.25 var(--font-serif);
+    text-align: left;
+    cursor: pointer;
+  }
+  .treaty-card__name:hover { text-decoration: underline; text-decoration-color: var(--bronze-deep); text-underline-offset: .2em; }
+  .treaty-card__name:focus-visible { outline: 1px solid var(--edge); outline-offset: 2px; }
+  .treaty-card__regard { align-self: baseline; color: var(--ink-faded); font: italic 400 var(--step--1) var(--font-serif); }
+  .treaty-card__kinds { grid-column: 1 / -1; color: var(--ink-faded); font: 400 var(--step--1)/1.4 var(--font-sans); }
+  .treaty-card__soon { color: var(--seal); font-style: normal; }
+
+  .treaties__between { gap: .3rem; }
+  .treaties__between li { display: grid; gap: 0; padding: .3rem 0 .3rem .7rem; border-left: 2px solid transparent; font-size: var(--step--1); }
+  .treaties__between li.is-war { border-left-color: var(--seal); }
+  .treaties__between strong { font: 500 var(--step-0) var(--font-serif); }
+  .treaties__between span, .treaties__between em { color: var(--ink-faded); }
+
+  /* The dossier: everything that stands between you and one power. */
+  .treaties__dossier { position: sticky; top: 0; display: grid; gap: 1rem; min-width: 0; padding-left: 1.6rem; border-left: 1px solid var(--rule); }
+  .dossier__header { display: grid; gap: .15rem; }
+  .dossier__kicker { color: var(--ink-faded); font: 400 var(--step--1) var(--font-caps); text-transform: lowercase; letter-spacing: .05em; }
+  .dossier__title { font: 500 var(--step-3)/1.1 var(--font-serif); }
+  .dossier__regard { font: italic 400 var(--step-0) var(--font-serif); color: var(--ink-faded); }
+  .dossier__section { display: grid; gap: .7rem; padding-top: .9rem; border-top: 1px solid var(--rule); }
+  .dossier__section h4 { color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
+  .dossier__letters { padding: .8rem .9rem; border: 1px solid color-mix(in srgb, var(--seal) 45%, transparent); border-radius: var(--radius); }
+  .dossier__letters ul { display: grid; gap: .3rem; margin: 0; padding: 0; list-style: none; font-family: var(--font-serif); }
+  .dossier__letters em { color: var(--ink-faded); }
+  .dossier__letters .word-button { justify-self: start; }
+  .dossier__history ol { display: grid; gap: .35rem; margin: 0; padding: 0; list-style: none; font: 400 var(--step-0)/1.45 var(--font-serif); }
+  .dossier__history li { display: grid; grid-template-columns: 6.5rem 1fr; gap: .8rem; }
+  .dossier__years { color: var(--ink-faded); font-variant-numeric: lining-nums; white-space: nowrap; }
+  .dossier__actions { display: flex; gap: .6rem; padding-top: .9rem; border-top: 1px solid var(--rule); }
+
+  .treaty-line { display: grid; gap: .35rem; }
+  .treaty-line + .treaty-line { padding-top: .8rem; border-top: 1px dashed var(--rule); }
+  .treaty-line__head { color: var(--ink-faded); font: 400 var(--step--1)/1.5 var(--font-sans); }
+  .treaty-line__head > .tip-term:first-child { color: var(--ink); font: 500 var(--step-1) var(--font-serif); }
+  .treaty-line.is-war .treaty-line__head > .tip-term:first-child { color: var(--seal); }
+  .treaty-line__summary { font: 500 var(--step-0) var(--font-serif); }
+  .treaty-line__terms { margin: 0; padding-left: .9rem; border-left: 2px solid var(--papyrus-shade); font: italic 400 1.05rem/1.5 var(--font-serif); }
+  .treaty-line__sides, .treaty-line__source { color: var(--ink-faded); font: 400 var(--step-0)/1.45 var(--font-serif); }
 
   /* ─── The mirror ───────────────────────────────────────────────────── */
   .mirror__rows { display: grid; margin: 0; padding: 0; list-style: none; }
@@ -320,6 +456,8 @@
   .mirror__section { display: grid; gap: .4rem; }
   .mirror__section h4 { color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
   .mirror__section > p { font: 400 1.05rem/1.6 var(--font-serif); white-space: pre-line; }
+  .mirror__story li.is-family strong { font-style: italic; }
+  .mirror__story .word-button { justify-self: start; text-align: left; }
   .mirror__facts { display: grid; grid-template-columns: auto 1fr; gap: .35rem 1.25rem; }
   .mirror__facts dt { color: var(--ink-faded); font-style: italic; font-family: var(--font-serif); }
 
@@ -366,6 +504,9 @@
   .family-tree-node strong { overflow: hidden; font: 500 var(--step-0) var(--font-serif); text-overflow: ellipsis; white-space: nowrap; }
   .family-tree-node span { color: var(--ink-faded); font-size: var(--step--1); line-height: 1.25; }
   .family-tree-node--self { border-color: var(--bronze-deep); box-shadow: inset 0 0 0 1px var(--bronze-deep); }
+  /* The dead stay in the family, set back a little rather than struck out. */
+  .family-tree-node.is-dead { border-style: dashed; background: transparent; }
+  .family-tree-node.is-dead strong, .mirror__list li.is-dead strong { color: var(--ink-faded); font-style: italic; }
   .family-tree-relatives { margin-top: .7rem; padding-top: .75rem; border-top: 1px dashed var(--rule); }
   .family-tree-relatives > p { margin-bottom: .45rem; color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); text-align: center; }
   .family-tree-relatives > div { display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem; }
@@ -436,8 +577,23 @@
   .letters__line.is-yours { padding-left: 1rem; border-left: 2px solid var(--bronze); }
   .letters__line.is-yours .letters__speaker { color: var(--ink-faded); }
   .letters__line.is-waiting p { color: var(--ink-faded); font-style: italic; }
-  .letters__compose { display: flex; gap: .6rem; padding: .9rem 1.6rem 1.1rem; border-top: 1px solid var(--rule); }
+  .letters__compose { display: flex; flex-wrap: wrap; gap: .6rem; padding: .9rem 1.6rem 1.1rem; border-top: 1px solid var(--rule); }
   .letters__compose input { flex: 1; }
+  .letters__compose-error { flex-basis: 100%; }
+  .letters__compose--letter { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+  .letters__compose--letter .letters__compose-error { flex-basis: auto; }
+  .letters__compose--letter label { color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
+  .letters__compose--letter textarea { font: 400 1.05rem/1.5 var(--font-serif); resize: vertical; }
+  .letters__compose--letter .btn { align-self: flex-start; }
+  /* A letter reads as a page, dated, not as a line said aloud. */
+  .letters__page { display: grid; gap: .3rem; max-width: 62ch; padding: .7rem .9rem; border: 1px solid var(--rule); border-radius: var(--radius); background: rgb(255 255 255 / 18%); }
+  .letters__page.is-yours { border-left: 2px solid var(--bronze); }
+  .letters__page-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .2rem .8rem; }
+  .letters__page-head > span:last-child { color: var(--ink-faded); font: italic 400 var(--step--1) var(--font-serif); }
+  .letters__page-subject { font: 500 var(--step-0) var(--font-serif); }
+  .letters__page p { font: 400 1.075rem/1.55 var(--font-serif); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .letters__page .letters__page-note { color: var(--ink-faded); font: italic 400 var(--step--1) var(--font-serif); }
+  .letters__page .word-button { justify-self: start; }
 
   .letters-form { display: grid; gap: .9rem; }
   .letters-form__ladder { display: grid; gap: .3rem; margin: 0; padding-left: 1.2rem; color: var(--ink-faded); }
@@ -445,4 +601,13 @@
   .letters-form__choices label { display: flex; align-items: center; gap: .6rem; font-weight: 400; }
   .letters-form__actions { display: flex; justify-content: flex-end; gap: .6rem; }
   .letters-form__error { padding-left: .9rem; border-left: 2px solid var(--seal); color: var(--ink); }
+  .chronicle-entry__threads { margin: .1rem 0 0; color: var(--ink-faded); font: italic 400 var(--step--1) var(--font-serif); }
+  /* The mirror among its peers. */
+  .mirror__peers { display: grid; gap: .3rem; margin: .5rem 0 0; }
+  .mirror__peers > div { display: grid; grid-template-columns: 6rem 1fr; gap: .8rem; }
+  .mirror__peers dt { color: var(--ink-faded); }
+  .mirror__peers dd { margin: 0; }
+  /* Ask after: names with notes behind them, and what each is. */
+  .letters__asked { display: flex; justify-content: space-between; gap: .8rem; padding: .3rem .1rem; }
+  .letters__asked > span { color: var(--ink-faded); font-style: italic; font-size: var(--step--1); }
 }

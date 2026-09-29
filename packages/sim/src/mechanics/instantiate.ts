@@ -63,6 +63,15 @@ export const reasonTag = (entity: { readonly label: string }, index: number): st
 export const tagOf = (delta: WorldDelta): string | undefined =>
   delta.op === "social_events" ? delta.events[0]?.summary : "reason" in delta ? delta.reason : undefined;
 
+/** Whether the arrangement's owner commands this army: leads it, answers for it, or -- for a power -- owns it. */
+export function commands(entity: Pick<GenericEntity, "ownerRef">, world: WorldState, forceId: string): boolean {
+  const force = world.material.forces.find((candidate) => candidate.id === forceId);
+  const owner = entity.ownerRef;
+  if (force === undefined || owner === null) return false;
+  if (owner.kind === "polity") return force.polityId === owner.id;
+  return owner.kind === "character" && (force.commanderCharacterId === owner.id || force.controllerCharacterId === owner.id);
+}
+
 export function instantiate(rule: { readonly effects: readonly MechanicEffect[] }, entity: GenericEntity, world: WorldState, scale: number, ledger: DebitLedger): Instantiated[] {
   const out: Instantiated[] = [];
   for (const [index, effect] of rule.effects.entries()) {
@@ -89,6 +98,13 @@ export function instantiate(rule: { readonly effects: readonly MechanicEffect[] 
       }
       case "province_material_shift": {
         const sign = effect.direction === "raise" ? 1 : -1;
+        if (effect.quantity === "population") {
+          const population = world.material.provinceMaterial.find((row) => row.provinceId === effect.provinceId)?.population ?? 0;
+          const people = Math.round(population * mechanicWorth.populationShare[effect.band]) * sign;
+          if (people === 0) continue;
+          out.push({ effect, amount: null, delta: { op: "province_material_shift", provinceId: effect.provinceId, populationDelta: people, reason } });
+          break;
+        }
         if (effect.quantity === "available_manpower") {
           const population = world.material.provinceMaterial.find((row) => row.provinceId === effect.provinceId)?.population ?? 0;
           const men = Math.round(population * mechanicWorth.manpowerShare[effect.band]) * sign;
@@ -99,6 +115,18 @@ export function instantiate(rule: { readonly effects: readonly MechanicEffect[] 
         const bps = mechanicWorth.provinceBps[effect.band] * sign;
         const field = { stability: "stabilityBpsDelta", food_security: "foodSecurityBpsDelta", productive_capacity: "productiveCapacityBpsDelta", war_damage: "warDamageBpsDelta" } as const;
         out.push({ effect, amount: null, delta: { op: "province_material_shift", provinceId: effect.provinceId, [field[effect.quantity]]: bps, reason } });
+        break;
+      }
+      case "force_shift": {
+        // Only an army the owner commands, now: the warrant is command, and it lapses when he gives it up.
+        if (!commands(entity, world, effect.forceId)) continue;
+        if (effect.quantity === "men") {
+          if (effect.direction === "raise") continue;
+          out.push({ effect, amount: null, delta: { op: "force_attrition", forceRef: effect.forceId, cause: "exposure", lossBps: mechanicWorth.forceLossBps[effect.band], reason } });
+          break;
+        }
+        const bps = mechanicWorth.forceBps[effect.band] * (effect.direction === "raise" ? 1 : -1);
+        out.push({ effect, amount: null, delta: { op: "force_modify", forceRef: effect.forceId, ...(effect.quantity === "morale" ? { moraleBpsDelta: bps } : { cohesionBpsDelta: bps }), reason } });
         break;
       }
       case "legitimacy_shift":

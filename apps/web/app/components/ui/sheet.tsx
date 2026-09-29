@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, type MouseEvent, type ReactNode } from "react";
+import { TipRoot } from "./tip";
 
 /**
  * A document laid over the room.
@@ -103,7 +104,7 @@ export function Sheet({
         </header>
         {/* Reachable by Tab, so a document too long for the sheet can be
             scrolled from the keyboard even when it holds no controls. */}
-        <div className="sheet__body" tabIndex={0}>{children}</div>
+        <div className="sheet__body" tabIndex={0}><TipRoot>{children}</TipRoot></div>
       </div>
     </dialog>
   );

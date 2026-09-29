@@ -5,6 +5,7 @@ import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
 import { createIdFactory } from "./ports";
 import { runDeterministicTick } from "./tick";
+import { withMiddlingManagers } from "./middling-managers";
 
 /**
  * "I don't hold office. I own an estate, and I mean to improve it."
@@ -22,7 +23,8 @@ import { runDeterministicTick } from "./tick";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
+// Middling managers: these count estates, not the skill of the men running them.
+const opening = (): WorldState => withMiddlingManagers(ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0));
 const LATIUM = "punic-italy-latium";
 
 const as = (characterId: string): ApplyContext => ({

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { GameViewController } from "./use-game-view";
+import { purseIsSpent, type GameViewController } from "./use-game-view";
 
 /**
  * One line, and a door.
@@ -25,6 +25,7 @@ export function MapOrderBar({
 }) {
   const [order, setOrder] = useState("");
   const { view, busy } = controller;
+  const spentOut = purseIsSpent(view.coins);
 
   if (view.decision !== null) {
     return (
@@ -42,7 +43,7 @@ export function MapOrderBar({
       onSubmit={(event) => {
         event.preventDefault();
         const text = order.trim();
-        if (text.length === 0 || busy) return;
+        if (text.length === 0 || busy || spentOut) return;
         setOrder("");
         void controller.send(text);
       }}
@@ -53,11 +54,11 @@ export function MapOrderBar({
         type="text"
         value={order}
         maxLength={2000}
-        placeholder={busy ? "The world is moving…" : "Defend Sicily."}
-        disabled={busy}
+        placeholder={busy ? "The world is moving…" : spentOut ? "Your purse is spent. Add coins to send an order." : "Defend Sicily."}
+        disabled={busy || spentOut}
         onChange={(event) => setOrder(event.target.value)}
       />
-      <button type="submit" className="btn btn--primary" disabled={busy || order.trim().length === 0}>Send</button>
+      <button type="submit" className="btn btn--primary" disabled={busy || spentOut || order.trim().length === 0}>Send</button>
       <button type="button" className="word-button map-order-bar__desk" onClick={onGoToDesk}>At the desk…</button>
     </form>
   );

@@ -141,7 +141,23 @@ describe("orchestrator prompt", () => {
     // Raised from 63 000 on 2026-09-26 for constitutions: the "constitution"
     // amendment, "regime_change" and one sentence in principle 9. The user
     // asked for the feature whatever it cost in prompt.
-    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(65_000);
+    // Raised 65k -> 66k (2026-09-27, with the player's say-so): every part of
+    // an order answered ("intent.parts") and conquered ground governed by the
+    // man given it. A governorship order vanished for want of both.
+    // Raised 66k -> 66.5k for the treaty system: surrender as a clause, and a
+    // letter that offers peace carrying its terms.
+    // Raised 66.5k -> 67.5k (2026-09-27, the user allowing it "as needed"):
+    // departments (docs/plans/departments.md) -- the "department" a measure
+    // enacts, with the closed list of levers it may hold, and "audit_open";
+    // one sentence in principle 9, trimmed to the least that names them.
+    // Raised 67.5k -> 68.5k (2026-09-28): a hired captain's "company" and a
+    // measure's "project" -- a fleet hired or voted produced no ships -- and a
+    // troop kind for a project's force. Stage and outcome are named $defs, so
+    // the measure's project costs no second copy of them.
+    // Freed ~570 (2026-09-28), ceiling left where it is: the agreement kinds,
+    // family kinds and government forms are named $defs, written once instead
+    // of at each use (68 320 -> 67 751).
+    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(68_500);
   });
 });
 

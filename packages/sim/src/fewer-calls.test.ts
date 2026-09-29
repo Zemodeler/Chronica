@@ -46,7 +46,9 @@ describe("the reactive router", () => {
     // Hieron's act names Hieron; Hanno is woken by it as a foreign power
     // involved, never as "directly affected" by another man's deed.
     const own = fact("f3", [{ kind: "character", id: "hieron-ii" }, { kind: "polity", id: "carthage" }]);
-    const cast = routeAttention({ world: opening(), facts: [own], offices, excludeCharacterIds: [], maxFocused: 8, maxCausalDepth: 3, authorOf: new Map([["f3", "hieron-ii"]]) }).focused;
+    // Asked once word of it has had time to cross to Carthage.
+    const tenDaysOn = { ...opening(), instant: { day: 10, minute: 0 }, elapsedStep: 10 };
+    const cast = routeAttention({ world: tenDaysOn, facts: [own], offices, excludeCharacterIds: [], maxFocused: 8, maxCausalDepth: 3, authorOf: new Map([["f3", "hieron-ii"]]) }).focused;
     expect(cast.find((actor) => actor.characterId === "hanno-carthage")?.why).not.toContain("directly affected");
   });
 });
@@ -96,14 +98,14 @@ describe("the Chronicle", () => {
 
 describe("the narrator's arithmetic", () => {
   const harvest: NarratorSeed = {
-    key: "seed-harvest", kind: "world_event", archetype: "harvest", severity: "serious", secret: false, oneShot: true,
+    key: "seed-grain-fleet", kind: "world_event", archetype: "grain_fleet_lost", severity: "serious", secret: false, oneShot: true,
     target: { provinceId: "punic-italy-latium", provinceName: "Latium", polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null, otherPolityId: null, otherPolityName: null, forceId: null, forceName: null, forceIsNaval: false },
-    inPlayerRealm: true, repeated: false, pressureId: null, why: "Quiet.", brief: "The year has turned in Latium.",
+    inPlayerRealm: true, repeated: false, pressureId: null, why: "Quiet.", brief: "A storm off Latium.",
   };
 
   it("is done by the engine for a stirring that needs no decision", () => {
     const work = engineWork(harvest)!;
-    expect(work.deltas).toEqual([expect.objectContaining({ op: "province_material_shift", provinceId: "punic-italy-latium", foodSecurityBpsDelta: 1200, stabilityBpsDelta: 400 })]);
+    expect(work.deltas).toEqual([expect.objectContaining({ op: "province_material_shift", provinceId: "punic-italy-latium", foodSecurityBpsDelta: -900, stabilityBpsDelta: -300 })]);
     expect(work.fact.visibility).toBe("public");
     expect(engineWork({ ...harvest, archetype: "games" })).toBeNull();
   });
@@ -123,7 +125,7 @@ describe("the narrator's arithmetic", () => {
       orderText: null, spanDays: 7, knownFacts: [], queue: [], port, narratorSeeds: [harvest],
     });
     expect(shown[0]).not.toContain("THE WORLD STIRS");
-    expect(food(result.world)).toBeGreaterThan(food(world));
-    expect(result.newFacts.some((entry) => entry.kind === "harvest" && entry.summary.includes("Latium"))).toBe(true);
+    expect(food(result.world)).toBeLessThan(food(world));
+    expect(result.newFacts.some((entry) => entry.kind === "grain_fleet_lost" && entry.summary.includes("Latium"))).toBe(true);
   });
 });

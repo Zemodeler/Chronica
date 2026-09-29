@@ -3,6 +3,9 @@ import type { WorldState } from "../world/world-state";
 import type { CharacterKnowledgebase } from "./knowledgebase";
 import type { Office, ScenarioGovernmentRules } from "./character";
 import { deriveDefaultMind } from "./mind";
+import { mindShapedBy } from "./mind-drift";
+import { canonicalTraitIds } from "./traits";
+import { spreadSubSkills } from "./aptitude";
 import { faithNamed } from "../world/faith";
 
 // Placing a declared player character into the world.
@@ -324,6 +327,12 @@ export function materializePlayerCharacter(
   const believes = knowledgebase.faith === null ? null : faithNamed(world, knowledgebase.faith, world.elapsedStep);
   const ageYears = Math.max(14, Math.min(80, knowledgebase.ageYearsAtOpening ?? 35));
   const officeId = matched?.office.id ?? null;
+  // Who he is, from what was said of him. He was a blank: no traits, a mind
+  // derived from his skills alone, the standing of nobody in particular, and
+  // finer skills all equal to the skill they belong to.
+  const skills = { ...knowledgebase.skills, subSkills: spreadSubSkills(actorCharacterId, knowledgebase.skills, knowledgebase.skills.subSkills) };
+  const traits = canonicalTraitIds([knowledgebase.role, ...knowledgebase.notableEvents, knowledgebase.biography], DECLARED_TRAITS);
+  const mind = mindShapedBy(deriveDefaultMind({ id: actorCharacterId, officeId, skills, ageYears, cultureId }), traits);
   const playerCharacter: WorldState["characters"][number] = {
     id: actorCharacterId,
     name: knowledgebase.canonicalName,
@@ -335,11 +344,11 @@ export function materializePlayerCharacter(
     ageYearsAtStart: ageYears,
     officeId,
     personalAccountId: accountId,
-    skills: knowledgebase.skills,
-    traits: [],
-    mind: deriveDefaultMind({ officeId, skills: knowledgebase.skills, ageYears, cultureId }),
+    skills,
+    traits,
+    mind,
     healthBps: 10_000,
-    prestigeBps: 3_000,
+    prestigeBps: declaredStanding(knowledgebase, matched?.office),
     relations: [],
     ambitions: [],
     heirCharacterId: null,
@@ -455,6 +464,36 @@ export function materializePlayerCharacter(
         }],
     },
   };
+}
+
+/** The most traits a declaration gives him: what is said of a man before anybody has met him. */
+const DECLARED_TRAITS = 3;
+
+/**
+ * The standing a declared man starts with: by what he says he is -- a king,
+ * a senator, a merchant, a freedman, a slave -- and by the office he takes,
+ * higher the higher it stands on the ladder. Everybody used to start at the
+ * same three thousand, a consul and a ploughman alike.
+ */
+export function declaredStanding(
+  knowledgebase: Pick<CharacterKnowledgebase, "socioEconomicClass" | "role" | "legalStatus">,
+  office: Pick<Office, "rank"> | undefined,
+): number {
+  const said = `${knowledgebase.socioEconomicClass} ${knowledgebase.role}`.toLowerCase();
+  const byStation: readonly [RegExp, number][] = [
+    [/\b(king|queen|tyrant|dictator|prince|suffete|consul|basileus|monarch|chief(tain)?)\b/, 7_000],
+    [/\b(senator|senatorial|patrician|noble|aristocra\w*|magnate|elder|oligarch\w*|consular)\b/, 5_500],
+    [/\b(equestrian|equites|knight|merchant|trader|landowner|wealthy|priest|magistrate)\b/, 4_000],
+    [/\b(plebeian|peasant|farmer|commoner|labourer|laborer|craftsman|artisan|soldier|sailor)\b/, 2_000],
+    [/\b(freedman|freedwoman|freed)\b/, 1_500],
+    [/\b(slave|servant)\b/, 500],
+  ];
+  let standing = byStation.find(([pattern]) => pattern.test(said))?.[1] ?? 3_000;
+  if (office !== undefined) standing = Math.max(standing, 4_000 + (office.rank ?? 0) * 400);
+  const status = knowledgebase.legalStatus ?? "free";
+  if (status === "enslaved") standing = Math.min(standing, 500);
+  if (status === "freed") standing = Math.min(standing, 2_500);
+  return Math.max(500, Math.min(9_000, standing));
 }
 
 /**

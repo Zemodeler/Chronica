@@ -8,6 +8,7 @@ import "./styles/office.css";
 import "./styles/documents.css";
 import "./styles/map.css";
 import "./styles/pages.css";
+import "./styles/site.css";
 
 export const metadata: Metadata = {
   title: {

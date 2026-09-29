@@ -66,3 +66,77 @@ describe("an army already on the road", () => {
     expect(army(second.world).moraleBps).toBe(army(first.world).moraleBps + 100);
   });
 });
+
+describe("a march over the strait", () => {
+  const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
+  const withFleet = (state: WorldState, warships: number): WorldState => ({
+    ...state,
+    material: {
+      ...state.material,
+      forces: [...state.material.forces, {
+        ...state.material.forces.find((force) => force.id === "allied-greek-hulls")!,
+        id: "roman-transports",
+        name: "Roman transports",
+        locationId: "punic-italy-latium",
+        personnel: [{ categoryId: "warship", label: "Transports", fit: warships, unavailable: [] }],
+        history: [],
+      }],
+    },
+  });
+  const march = WorldDeltaSchema.parse({ op: "force_modify", forceRef: "roman-field-army", locationId: MESSANA, reason: "Cross to Messana." });
+  const tickUntil = (state: WorldState, until: number): WorldState => {
+    let now = state;
+    for (let day = 10; day <= until; day += 10) {
+      now = runDeterministicTick({ world: { ...now, elapsedStep: day }, toDay: day, ids: createIdFactory(`strait-${day}`), warfare: definition.warfare }).world;
+    }
+    return now;
+  };
+
+  it("is refused without ships to cross in", () => {
+    // Legio I in Latium with 18 Greek hulls in Bruttium, carrying 540 men, and
+    // Syracuse refusing to ferry it: "Transport Legio I across the strait"
+    // completed anyway, and the legion walked into Messana.
+    const result = applyDeltas(world(), [march], context);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.reason).toMatch(/over water/);
+    expect(result.world.projects.some((project) => project.completionOutcome?.kind === "force_move")).toBe(false);
+  });
+
+  it("refuses a project written to carry it over, too", () => {
+    const result = applyDeltas(world(), [WorldDeltaSchema.parse({
+      op: "project_create", localId: "transport", kind: "transport", label: "Transport Legio I across the strait to Messana",
+      sponsorRef: { kind: "character", id: "gaius-genucius" }, fundingAccountRef: null,
+      milestones: [{ label: "Embark and cross", dueInDays: 20, costAmount: 0 }],
+      completionOutcome: { kind: "force_move", label: "Legio I in Messana", amount: 0, provinceId: MESSANA, polityId: null, commanderCharacterRef: null, forceRef: "roman-field-army", beneficiaryAccountRef: null, cadenceDays: null, agreementKind: null, withPolityId: null },
+      reason: "Carry the legion over.",
+    })], context);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.reason).toMatch(/over water/);
+  });
+
+  it("goes over in its own ships, and the ships go with it", () => {
+    const start = withFleet(world(), 400);
+    const result = applyDeltas(start, [march], context);
+    expect(result.rejected).toEqual([]);
+    const journey = result.world.projects.find((project) => project.completionOutcome?.kind === "force_move")!;
+    const arrived = tickUntil(result.world, journey.milestones.at(-1)!.requiredAtElapsedOffset + 10);
+    expect(army(arrived).locationId).toBe(MESSANA);
+    expect(arrived.material.forces.find((force) => force.id === "roman-transports")!.locationId).toBe(MESSANA);
+  });
+
+  it("stays on the shore when its ships have gone by the day it arrives, and says why", () => {
+    const start = withFleet(world(), 400);
+    const result = applyDeltas(start, [march], context);
+    const journey = result.world.projects.find((project) => project.completionOutcome?.kind === "force_move")!;
+    const sailed: WorldState = { ...result.world, material: { ...result.world.material, forces: result.world.material.forces.filter((force) => force.id !== "roman-transports") } };
+    let state = sailed;
+    const facts: string[] = [];
+    for (let day = 10; day <= journey.milestones.at(-1)!.requiredAtElapsedOffset + 10; day += 10) {
+      const ticked = runDeterministicTick({ world: { ...state, elapsedStep: day }, toDay: day, ids: createIdFactory(`shore-${day}`), warfare: definition.warfare });
+      facts.push(...ticked.factProposals.filter((fact) => fact.kind === "project_completed").map((fact) => fact.summary));
+      state = ticked.world;
+    }
+    expect(army(state).locationId).toBe("punic-italy-latium");
+    expect(facts.join(" ")).toMatch(/produced nothing it was meant to\. .*over water/);
+  });
+});

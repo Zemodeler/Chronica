@@ -81,3 +81,31 @@ export async function waitForTheOffice(page: Page) {
   await expect(theOffice(page)).toBeVisible();
   await expect(page.locator(".office-object").first()).toBeVisible();
 }
+
+/**
+ * The tray is for a player with a confirmed character file, which the suite's
+ * seeded worlds skip (the declaration is AI-driven). The player already
+ * stands in the world as the scenario's own man, so the file only opens it.
+ */
+export async function aConfirmedCharacter(gameId: string, characterId: string, canonicalName: string, culture: string): Promise<void> {
+  const { db, close } = createDatabase(DATABASE_URL);
+  try {
+    const [player] = await db.select({ id: schema.players.id }).from(schema.players)
+      .where(and(eq(schema.players.gameId, gameId), eq(schema.players.status, "active"))).limit(1);
+    await db.insert(schema.characterKnowledgebases).values({
+      gameId,
+      playerId: player!.id,
+      characterId,
+      knowledgebase: {
+        version: 1, characterId, gameId, canonicalName, nickname: null, birthYearApprox: -310, deathYearApprox: null,
+        origin: "historical", becomesCharacterId: characterId, period: "270 BCE", locationProvinceId: null, culture, faith: null,
+        biography: `${canonicalName}, as the scenario opens: a man of standing in his own country, with his own affairs to see to.`,
+        notableEvents: [], role: "As the scenario has him", authority: [], socioEconomicClass: "Noble", startingMoney: 0,
+        skills: { martial: 50, intrigue: 50, learning: 50, piety: 50, stewardship: 50, diplomacy: 50, body: 50, subSkills: {} },
+        skillRationale: {}, relations: [], confirmedByPlayer: true, confirmationDraft: null,
+      } as never,
+    }).onConflictDoNothing();
+  } finally {
+    await close();
+  }
+}

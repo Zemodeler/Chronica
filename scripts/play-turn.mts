@@ -16,7 +16,7 @@
 //   npx tsx --env-file=.env.local scripts/play-turn.mts <gameId> "<order>"
 //   npx tsx --env-file=.env.local scripts/play-turn.mts <gameId> --wait <days>
 //   npx tsx --env-file=.env.local scripts/play-turn.mts <gameId> --chronicles
-//   npx tsx --env-file=.env.local scripts/play-turn.mts <gameId> --repin=<version>
+//   npx tsx --env-file=.env.local scripts/play-turn.mts <gameId> --repin[=<version>]
 import {
   PUNIC_WARS_SCENARIO_ID,
   claimCharacter,
@@ -25,7 +25,7 @@ import {
   ensureBuiltInScenarios,
   getWorldView,
   listChronicle,
-  persistOpeningWorld,
+  repinGame,
   schema,
 } from "@chronica/db";
 import { and, eq } from "drizzle-orm";
@@ -63,26 +63,11 @@ async function chronicles(gameId: string): Promise<void> {
   for (const row of rows) console.log(`\n## ${row.title}\n_(days ${Math.floor(Number(row.fromInstantSortKey) / 1440)}–${Math.floor(Number(row.toInstantSortKey) / 1440)})_\n\n${row.body}`);
 }
 
-/** One-off for a playtest game: move it to a newer scenario version and seat the offices that version adds. */
-async function repin(gameId: string, version: number): Promise<void> {
+/** Moves a save onto a newer scenario version (`repinGame`); with no number, onto the current one. */
+async function repin(gameId: string, version: number | undefined): Promise<void> {
   await ensureBuiltInScenarios(db);
-  const view = await getWorldView(db, gameId);
-  if (!view) throw new Error("no world");
-  const [game] = await db.select().from(schema.games).where(eq(schema.games.id, gameId)).limit(1);
-  const [scenarioVersion] = await db.select().from(schema.scenarioVersions).where(and(eq(schema.scenarioVersions.scenarioId, game!.scenarioId), eq(schema.scenarioVersions.version, version))).limit(1);
-  if (!scenarioVersion) throw new Error("no such version");
-  const fresh = scenarioVersion.initialWorld as { material: { officeSeats: typeof view.world.material.officeSeats }; characters: { id: string; officeId: string | null }[] };
-  const seats = fresh.material.officeSeats.filter((seat) => !view.world.material.officeSeats.some((existing) => existing.id === seat.id));
-  const officeOf = new Map(fresh.characters.map((c) => [c.id, c.officeId]));
-  const world = {
-    ...view.world,
-    pins: { ...view.world.pins, scenarioVersion: version },
-    material: { ...view.world.material, officeSeats: [...view.world.material.officeSeats, ...seats] },
-    characters: view.world.characters.map((c) => (c.officeId === null && officeOf.get(c.id) ? { ...c, officeId: officeOf.get(c.id)! } : c)),
-  };
-  await persistOpeningWorld(db, gameId, world);
-  await db.update(schema.games).set({ scenarioVersion: version }).where(eq(schema.games.id, gameId));
-  console.log(`repinned to v${version}; seats added: ${seats.map((seat) => seat.id).join(", ")}`);
+  const report = await repinGame(db, gameId, { toVersion: version });
+  console.log(`repinned v${report.fromVersion} -> v${report.toVersion}; seats added: ${report.seatsAdded.join(", ") || "none"}; offices given: ${report.officesGiven.join(", ") || "none"}`);
 }
 
 async function playTurn(gameId: string, orderText: string | null, spanDays: number | undefined): Promise<void> {
@@ -112,9 +97,9 @@ try {
   if (flag("--new") !== undefined) await newGame();
   else {
     const [gameId, second] = args;
-    if (!gameId || !second) throw new Error("usage: play-turn <gameId> \"<order>\" | --wait <days> | --chronicles | --repin=<n>");
+    if (!gameId || !second) throw new Error("usage: play-turn <gameId> \"<order>\" | --wait <days> | --chronicles | --repin[=<n>]");
     if (second === "--chronicles") await chronicles(gameId);
-    else if (second.startsWith("--repin=")) await repin(gameId, Number(second.slice("--repin=".length)));
+    else if (second === "--repin" || second.startsWith("--repin=")) await repin(gameId, second === "--repin" ? undefined : Number(second.slice("--repin=".length)));
     else if (second === "--wait") await playTurn(gameId, null, Number(flag("--wait")));
     else await playTurn(gameId, second, undefined);
   }

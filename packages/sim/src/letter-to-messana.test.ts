@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { punicWarsScenario } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldStateSchema, localRef, type WorldDelta, type WorldState } from "@chronica/shared";
+import { ScenarioDefinitionSchema, WorldStateSchema, advanceWorldTo, localRef, type WorldDelta, type WorldState } from "@chronica/shared";
 import { createIdFactory } from "./ports";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -55,20 +55,39 @@ describe("a letter to Messana promising autonomy under Roman rule", () => {
     expect(sent.answer).toBeNull();
   });
 
+  /** Sent from Rome, and read in Messana the day it gets there: an answer waits on the road. */
+  const delivered = (): { readonly world: WorldState; readonly letterId: string; readonly at: ApplyContext } => {
+    const sent = applyDeltas(world(), [THE_LETTER], context());
+    const letter = sent.world.diplomacy.at(-1)!;
+    const arrived = advanceWorldTo(sent.world, { day: letter.deliveredOnDay!, minute: 540 });
+    return { world: arrived, letterId: letter.id, at: { ...context(), now: arrived.instant } };
+  };
+
+  it("is not answered in the breath it is written", () => {
+    // Accepted the same hour it left Rome, it was answered from Messana
+    // before a courier could have reached the strait.
+    const result = applyDeltas(world(), [THE_LETTER, {
+      op: "diplomatic_message_answer", messageRef: localRef("protection_offer"), answer: "accepted",
+      answerText: "Messana will have Rome for its protector.", reason: "They accept.",
+    }], context());
+    expect(result.world.diplomacy.at(-1)!.deliveredOnDay).toBeGreaterThan(0);
+    expect(result.rejected.map((rejection) => rejection.reason)).toEqual([expect.stringMatching(/has not reached .* yet/)]);
+  });
+
   it("can be accepted by the people it was sent to", () => {
+    const { world: arrived, letterId, at } = delivered();
     const result = applyDeltas(
-      world(),
+      arrived,
       [
-        THE_LETTER,
         {
           op: "diplomatic_message_answer",
-          messageRef: localRef("protection_offer"),
+          messageRef: letterId,
           answer: "accepted",
           answerText: "Messana will have Rome for its protector, and keeps its own laws.",
           reason: "The Mamertines take the offer rather than face Syracuse alone.",
         },
       ],
-      context(),
+      at,
     );
 
     expect(result.rejected).toHaveLength(0);
@@ -76,12 +95,12 @@ describe("a letter to Messana promising autonomy under Roman rule", () => {
   });
 
   it("leaves behind an arrangement that says what was actually agreed", () => {
+    const { world: arrived, letterId, at } = delivered();
     const accepted = applyDeltas(
-      world(),
+      arrived,
       [
-        THE_LETTER,
         {
-          op: "diplomatic_message_answer", messageRef: localRef("protection_offer"), answer: "accepted",
+          op: "diplomatic_message_answer", messageRef: letterId, answer: "accepted",
           answerText: "Messana will have Rome for its protector.", reason: "They accept.",
         },
         {
@@ -94,12 +113,12 @@ describe("a letter to Messana promising autonomy under Roman rule", () => {
           otherPolityId: "rome",
           terms: "Messana keeps its own magistrates and laws; Rome answers for it abroad and holds the strait.",
           forDays: null,
-          sourceMessageRef: localRef("protection_offer"),
+          sourceMessageRef: letterId,
           visibility: "public",
           reason: "What the letter promised, now standing between the two powers.",
         },
       ],
-      context(),
+      at,
     );
 
     expect(accepted.rejected.map((r) => r.reason)).toEqual([]);

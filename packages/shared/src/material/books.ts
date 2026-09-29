@@ -3,6 +3,8 @@ import { taxBurdens, taxBurdenInWords } from "./taxation";
 import type { Office } from "../characters/character";
 import type { WorldState } from "../world/world-state";
 import { accountLabel } from "./account-names";
+import { obligationAmountNow } from "../world/economy";
+import { taxWhy, type WhyReading } from "../knowledge/why";
 
 /**
  * The books, as the person holding them can read them (VISION §7).
@@ -20,7 +22,17 @@ import { accountLabel } from "./account-names";
  * reads his own books, a consul reads the government's. It is the same
  * `seesAccount` the world slice uses, so what the player is shown and what
  * the model is told can never drift apart.
+ *
+ * Two sets of books, because the room has two objects for them. The strongbox
+ * is what is the reader's own: the accounts in his name. The ledger stand is
+ * what he keeps for somebody else: a treasury, an army's chest, a guild's
+ * fund, a master's purse. A consul's private fortune and the Republic's
+ * treasury were one table, added together into one surplus that belonged to
+ * nobody.
  */
+
+/** "own": accounts in the reader's name. "kept": what he can open that is somebody else's. "all": both. */
+export type BooksScope = "all" | "own" | "kept";
 
 export type LedgerSide = "income" | "expenditure";
 
@@ -42,6 +54,8 @@ export interface Books {
   readonly surplus: number;
   /** What is owed and has not been paid. A surplus on paper with arrears under it is not a surplus. */
   readonly arrears: number;
+  /** If nothing changes, days until what is in hand is spent. Null when it is not being spent down. */
+  readonly runsOutInDays: number | null;
   /** Everything they can actually open, with its balance. */
   readonly accounts: readonly { readonly id: string; readonly label: string; readonly balance: number }[];
   /** True when these are a government's books rather than one man's purse. */
@@ -51,7 +65,7 @@ export interface Books {
    * treasury (product guide: "your treasury shows how hard you are pressing").
    * `hard` once order is suffering for it.
    */
-  readonly pressure: { readonly inWords: string; readonly hard: boolean } | null;
+  readonly pressure: { readonly inWords: string; readonly hard: boolean; readonly why: WhyReading } | null;
   /** Loans owed out of accounts they can open. */
   readonly debts: readonly DebtLine[];
   /** Payments that have fallen behind, one by one rather than as one sum. */
@@ -135,6 +149,7 @@ export function readTheBooks(
   world: WorldState,
   characterId: string | null,
   offices: readonly Office[] = [],
+  scope: BooksScope = "all",
 ): Books {
   const station: Station | null = characterId === null ? null : buildStation({ world, characterId, offices });
   const reaches = (accountId: string): boolean => station === null || seesAccount(station, accountId);
@@ -143,6 +158,11 @@ export function readTheBooks(
   const open = world.material.accounts
     .filter((account) => reaches(account.id))
     .filter((account) => account.owner.kind !== "polity" || account.owner.id === polityId || polityId === null)
+    .filter((account) => {
+      if (scope === "all") return true;
+      const own = account.owner.kind === "character" && account.owner.id === characterId;
+      return scope === "own" ? own : !own;
+    })
     .sort((a, b) => b.balance - a.balance);
   const accounts = open.map((account) => ({ id: account.id, label: accountLabel(world, account), balance: account.balance }));
   const readable = new Set(accounts.map((account) => account.id));
@@ -162,7 +182,7 @@ export function readTheBooks(
 
   const owed = world.material.obligations.filter((obligation) => obligation.active && readable.has(obligation.payerAccountId));
   const expenditure = fold(
-    owed.map((obligation) => ({ kind: obligation.kind, label: obligation.label, monthly: perMonth(obligation.amount, obligation.cadenceSteps) })),
+    owed.map((obligation) => ({ kind: obligation.kind, label: obligation.label, monthly: perMonth(obligationAmountNow(world, obligation), obligation.cadenceSteps) })),
     EXPENSE_LABELS,
   );
 
@@ -178,6 +198,7 @@ export function readTheBooks(
   const pressure = burden === undefined ? null : {
     inWords: taxBurdenInWords(burden),
     hard: burden.bearable <= 0 || burden.asked / burden.bearable > 0.8,
+    why: taxWhy(burden),
   };
 
   const nameOf = (kind: "character" | "polity" | "foreign", id: string | null): string =>
@@ -226,12 +247,18 @@ export function readTheBooks(
       strained: material.stabilityBps < 5_000 || material.foodSecurityBps < 5_000 || material.warDamageBps >= 5_000,
     }));
 
+  // If nothing changes: how long what is in hand lasts at this month's rate.
+  const surplus = totalIncome - totalExpenditure;
+  const inHand = accounts.reduce((sum, account) => sum + account.balance, 0);
+  const runsOutInDays = surplus < 0 && inHand > 0 ? Math.floor((inHand / -surplus) * 30) : null;
+
   return {
     income,
     expenditure,
     totalIncome,
     totalExpenditure,
-    surplus: totalIncome - totalExpenditure,
+    surplus,
+    runsOutInDays,
     arrears: owed.reduce((sum, obligation) => sum + obligation.arrears, 0),
     accounts,
     theirGovernments: opensTreasury,

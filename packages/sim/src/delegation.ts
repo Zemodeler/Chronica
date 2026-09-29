@@ -1,5 +1,9 @@
 import {
+  aptitude,
+  readDepartments,
+  type StandardLever,
   bandWord,
+  type SubSkill,
   type AuthorityDomain,
   type Character,
   type WorldState,
@@ -44,6 +48,51 @@ const SKILL_FOR_DOMAIN: Readonly<Record<AuthorityDomain, keyof Character["skills
   social: "diplomacy",
 };
 
+/** The finer skill each kind of work turns on. */
+const SUBSKILL_FOR_DOMAIN: Readonly<Record<AuthorityDomain, SubSkill>> = {
+  fiscal: "taxation",
+  military: "logistics",
+  civil: "scholarship",
+  diplomatic: "arbitration",
+  religious: "rites",
+  judicial: "scholarship",
+  social: "rhetoric",
+};
+
+/** The lever whose head a kind of work answers to. */
+const LEVER_FOR_DOMAIN: Readonly<Record<AuthorityDomain, StandardLever>> = {
+  fiscal: "tax_roll",
+  military: "supply",
+  civil: "public_works_cost",
+  diplomatic: "peace_talks",
+  religious: "public_rites",
+  judicial: "courts",
+  social: "foreign_letters",
+};
+
+export const leverForDomain = (domain: AuthorityDomain): StandardLever => LEVER_FOR_DOMAIN[domain];
+
+/** Words that say what kind of work a project is, where its kind and name say anything at all. */
+const WORK_WORDS: readonly (readonly [AuthorityDomain, RegExp])[] = [
+  ["religious", /\b(temple|shrine|altar|sanctuar\w*|rite|rites|sacrifice|priest\w*|oracle|festival|games|cult)\b/i],
+  ["military", /\b(fort\w*|wall|walls|camp|legion\w*|fleet|ships?|warships?|quinquereme\w*|levy|siege|arsenal|garrison|muster)\b/i],
+  ["fiscal", /\b(tax\w*|census|mint|coin\w*|treasury|tribute|toll|customs|loan|debt)\b/i],
+  ["diplomatic", /\b(embass\w*|envoy|treaty|alliance|legation)\b/i],
+  ["judicial", /\b(court|courts|law|laws|trial|code|tribunal)\b/i],
+  ["social", /\b(grain dole|distribution|feast|dole|colony|colonists|settlement of veterans)\b/i],
+];
+
+/**
+ * Which kind of work a project is, so the right gifts answer for it: a temple
+ * is built as well as a priest can build it, a fort as a soldier can, a
+ * census as a tax man can. Every project used to be civil work, so a
+ * general's gifts and a pontiff's never counted for anything they built.
+ */
+export function domainOfWork(kind: string, label: string): AuthorityDomain {
+  const said = `${kind} ${label}`.replace(/_/g, " ");
+  return WORK_WORDS.find(([, words]) => words.test(said))?.[0] ?? "civil";
+}
+
 export interface ExecutionHand {
   readonly characterId: string;
   readonly name: string;
@@ -70,8 +119,14 @@ export function assessExecution(world: WorldState, characterId: string, domain: 
   const character = world.characters.find((candidate) => candidate.id === characterId);
   if (character === undefined || !character.alive) return null;
 
-  const competence = character.skills[SKILL_FOR_DOMAIN[domain]];
-  if (typeof competence !== "number") return null;
+  const skill = character.skills[SKILL_FOR_DOMAIN[domain]];
+  if (typeof skill !== "number") return null;
+  // The work's own finer skill weighs as much as the skill it belongs to: a
+  // quaestor's gift for the tax roll, a legate's for feeding an army.
+  // And a hand in his power's service works under whoever is in charge of
+  // that kind of work: a seventh better, or worse, for the head above him.
+  const lift = character.polityId === null ? 0 : readDepartments(world).headLift({ kind: "polity", id: character.polityId }, LEVER_FOR_DOMAIN[domain]);
+  const competence = Math.max(0, Math.min(100, Math.round(((skill + aptitude(character, SUBSKILL_FOR_DOMAIN[domain])) / 2) * (1 + lift))));
   const mind = character.mind;
 
   // Fidelity is honesty and duty against the pull of wanting things. A man

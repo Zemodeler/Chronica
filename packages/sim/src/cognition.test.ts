@@ -502,3 +502,17 @@ describe("how a cast is dealt onto calls", () => {
     expect(deal(ten.slice(0, 7), { maxBatches: 4, actorsPerCall: 2 }).map((batch) => batch.length)).toEqual([2, 2, 2, 1]);
   });
 });
+
+describe("how old he is and how he is in body", () => {
+  it("says his age always, and his health only when it is not sound", () => {
+    const world = baseWorld();
+    const man = world.characters.find((character) => character.alive)!;
+    const sound = renderCharacterPortrait(man.id, man.name, { ...world, characters: world.characters.map((character) => (character.id === man.id ? { ...character, healthBps: 10_000, disqualifyingStatuses: [] } : character)) }, clock);
+    expect(sound).toMatch(/\nAge \d+\.\n/);
+    const unwell = renderCharacterPortrait(man.id, man.name, {
+      ...world,
+      characters: world.characters.map((character) => (character.id === man.id ? { ...character, healthBps: 3_000, disqualifyingStatuses: ["incapacitated", "fever", "injured:blinded-one-eye"] } : character)),
+    }, clock);
+    expect(unwell).toContain("in poor health; ill, and keeping to the house; suffering from fever; blinded in one eye.");
+  });
+});

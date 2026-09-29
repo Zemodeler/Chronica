@@ -9,7 +9,7 @@ describe("deriveAuthoritySummary", () => {
   it("names the office (with polity), bloc leadership, force command, and open-procedure voting right for an office holder", () => {
     const labels = deriveAuthoritySummary(world(), "marcus-atilius", government);
     expect(labels).toContain("Roman field command of Roman Republic");
-    expect(labels).toContain("leader of Patrician bloc");
+    expect(labels).toContain("leader of The patrician houses");
     expect(labels).toContain("Command of the Legio I");
     expect(labels).toContain("Eligible voter in the Senate");
   });

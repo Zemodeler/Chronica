@@ -1,5 +1,8 @@
 import {
   DEFAULT_STRUCTURE_EFFECTS,
+  aptitude,
+  readDepartments,
+  skillShare,
   EFFECT_PERIOD_DAYS,
   adjustPolityLegitimacy,
   convertIn,
@@ -180,6 +183,18 @@ export function arrangementNetIncome(
   return Math.round(income - keep);
 }
 
+/**
+ * How well a faith is taught where a power spreads it: the theology of the
+ * men over its rites, a third better or worse. A mission led by priests who
+ * know their gods' law converts faster than one led by men who do not.
+ */
+function preachedBy(world: WorldState, polityId: string | null): number {
+  if (polityId === null) return 1;
+  const priests = readDepartments(world).holding({ kind: "polity", id: polityId }, "public_rites").people;
+  if (priests.length === 0) return 1;
+  return 1 + skillShare(priests.reduce((sum, priest) => sum + aptitude(priest, "theology"), 0) / priests.length, 1 / 3);
+}
+
 /** Half the province believing is when a Chronicle should hear of it. */
 const MAJORITY_BPS = 5_000;
 
@@ -279,7 +294,7 @@ export function settleStandingEffects(input: { readonly world: WorldState; reado
           world = founded.world;
           for (const provinceId of provincesOf(world, carrier, effect)) {
             const before = world.faithAdherence.find((row) => row.provinceId === provinceId && row.faithId === founded.faithId)?.shareBps ?? 0;
-            const converted = convertIn(world, provinceId, founded.faithId, effectWorth.conversionBps(effect));
+            const converted = convertIn(world, provinceId, founded.faithId, Math.round(effectWorth.conversionBps(effect) * preachedBy(world, carrier.ownerPolityId)));
             world = converted.world;
             if (before < MAJORITY_BPS && converted.shareBps >= MAJORITY_BPS) {
               const faith = world.faiths.find((candidate) => candidate.id === founded.faithId)!.name;

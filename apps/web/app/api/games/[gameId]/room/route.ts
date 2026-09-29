@@ -1,4 +1,5 @@
 import { getRoomContents } from "../../../../../lib/room-service";
+import { orSaveNeedsRepair } from "../../../../../lib/save-errors";
 
 /**
  * What is in the player's room.
@@ -9,7 +10,9 @@ import { getRoomContents } from "../../../../../lib/room-service";
  */
 export async function GET(_request: Request, { params }: { params: Promise<{ gameId: string }> }) {
   const { gameId } = await params;
-  const contents = await getRoomContents(gameId);
-  if (contents === null) return Response.json({ error: "There is no room you may enter." }, { status: 404 });
-  return Response.json(contents, { headers: { "Cache-Control": "private, no-store" } });
+  return orSaveNeedsRepair(gameId, async () => {
+    const contents = await getRoomContents(gameId);
+    if (contents === null) return Response.json({ error: "There is no room you may enter." }, { status: 404 });
+    return Response.json(contents, { headers: { "Cache-Control": "private, no-store" } });
+  });
 }

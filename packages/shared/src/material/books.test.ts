@@ -7,6 +7,10 @@ import type { WorldState } from "../world/world-state";
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const offices = definition.government.offices;
 const world = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
+const consul = (state: WorldState) => {
+  const seat = state.material.officeSeats.find((candidate) => candidate.status === "held" && candidate.holderCharacterId !== null)!;
+  return state.characters.find((character) => character.id === seat.holderCharacterId)!;
+};
 
 describe("the books, as the person holding them can read them", () => {
   it("adds up to the surplus the engine was already computing and never showing", () => {
@@ -127,5 +131,25 @@ describe("the books, as the person holding them can read them", () => {
     // "tribute" appeared in the panel in lowercase beside "Taxes".
     for (const line of [...books.income, ...books.expenditure]) expect(line.label[0]).toBe(line.label[0]!.toUpperCase());
     expect(books.expenditure.map((line) => line.label)).toContain("Army pay");
+  });
+
+  it("keeps a consul's own purse out of the treasury, and the treasury out of his purse", () => {
+    // The strongbox and the ledger stand opened one table that added the
+    // Republic's treasury and the consul's fortune into one surplus.
+    const state = world();
+    const holder = consul(state);
+    const own = readTheBooks(state, holder.id, offices, "own");
+    const kept = readTheBooks(state, holder.id, offices, "kept");
+    const all = readTheBooks(state, holder.id, offices, "all");
+    expect(own.accounts.length).toBeGreaterThan(0);
+    for (const account of own.accounts) {
+      expect(state.material.accounts.find((candidate) => candidate.id === account.id)!.owner).toEqual({ kind: "character", id: holder.id });
+    }
+    const ownIds = new Set(own.accounts.map((account) => account.id));
+    expect(kept.accounts.some((account) => ownIds.has(account.id))).toBe(false);
+    expect(own.accounts.length + kept.accounts.length).toBe(all.accounts.length);
+    expect(own.theirGovernments).toBe(false);
+    expect(own.lands).toBeNull();
+    expect(own.pressure).toBeNull();
   });
 });

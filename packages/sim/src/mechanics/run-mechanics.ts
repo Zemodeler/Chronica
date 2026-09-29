@@ -44,6 +44,8 @@ export interface RunMechanicsInput {
   /** Facts materialised since the rules last looked. */
   readonly recentFacts: readonly Fact[];
   readonly ledger: DebitLedger;
+  /** The calendar month at `toDay`, for a rule that keeps a season (`in_months`). Absent, no season holds. */
+  readonly month?: number | null | undefined;
   readonly apply: {
     readonly offices: readonly Office[];
     readonly warfare: ScenarioWarfareRules;
@@ -118,7 +120,7 @@ export function runMechanics(input: RunMechanicsInput): RunMechanicsResult {
     const termEnds = rule.end.kind === "term" && rule.endsAtStep !== null && input.toDay >= rule.endsAtStep;
     const lastDay = termEnds && rule.endsAtStep !== null ? rule.endsAtStep : input.toDay;
     if (rule.end.kind === "when") {
-      const reading = watchReading(rule.end.predicate, world);
+      const reading = watchReading(rule.end.predicate, world, input.month ?? null);
       const done = rule.endArmedReading !== null && firedBetween(rule.end.predicate, rule.endArmedReading, reading);
       setRule({ endArmedReading: reading });
       if (done) { end(`it ended as it was set to: ${mechanicInWords(rule, world).split("; ends when ")[1] ?? "its condition came true"}`); continue; }
@@ -140,7 +142,7 @@ export function runMechanics(input: RunMechanicsInput): RunMechanicsResult {
         fact.kind === trigger.factKind
         && (trigger.subjectRef === null || fact.affectedEntities.some((entity) => entity.kind === trigger.subjectRef!.kind && entity.id === trigger.subjectRef!.id))).length;
     } else {
-      const reading = watchReading(rule.trigger.predicate, world);
+      const reading = watchReading(rule.trigger.predicate, world, input.month ?? null);
       if (rule.armedReading !== null && firedBetween(rule.trigger.predicate, rule.armedReading, reading)) due = 1;
       setRule({ armedReading: reading });
     }
@@ -155,7 +157,7 @@ export function runMechanics(input: RunMechanicsInput): RunMechanicsResult {
     for (let round = 0; round < due; round += 1) {
       const current = world.genericEntities.find((candidate) => candidate.id === entity.id);
       if (current === undefined || !live(current)) break;
-      if (!rule.conditions.every((condition) => holdsIn(condition, world))) continue;
+      if (!rule.conditions.every((condition) => holdsIn(condition, world, input.month ?? null))) continue;
       const refs = readableRefsFor(world, owner, current);
       const warranted = new Set<string>();
       for (const warrant of rule.debitWarrants) {

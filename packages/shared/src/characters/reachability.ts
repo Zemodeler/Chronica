@@ -33,3 +33,17 @@ export function isCharacterReachable(
   }
   return { reachable: true, reason: null };
 }
+
+/**
+ * Whether two people are in the same region, and so may speak face to face.
+ *
+ * Everyone further off is written to: a letter goes out now and is answered
+ * when the world next moves. Nobody is anywhere while their location is
+ * unknown, so two people with none are not together either.
+ */
+export function inTheSameRegion(
+  a: { readonly locationProvinceId: string | null },
+  b: { readonly locationProvinceId: string | null },
+): boolean {
+  return a.locationProvinceId !== null && a.locationProvinceId === b.locationProvinceId;
+}

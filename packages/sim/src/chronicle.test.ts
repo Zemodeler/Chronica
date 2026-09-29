@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ScenarioClockSchema, emitFacts, factsKnownTo, type Fact, type FactDraft, type WorldStoryline } from "@chronica/shared";
-import { OWN_BUSINESS_FLOOR, composeChronicle } from "./chronicle";
+import { DEFAULT_ENTRY_THRESHOLD, OWN_BUSINESS_FLOOR, composeChronicle } from "./chronicle";
 import type { SimModelPort } from "./ports";
 
 const clock = ScenarioClockSchema.parse({ epoch: { year: 264, month: 3, day: 1, era: "BCE" }, minSpanDays: 7, maxSpanDays: 365 });
@@ -474,7 +474,7 @@ describe("what an entry carries beside the prose", () => {
     expect(result.entries[0]!.changes.map((change) => change.id)).toEqual(["vatluna"]);
   });
 
-  it("shows three subjects at most, the reader's own government last, under the names they are known by", async () => {
+  it("shows four subjects at most, the one who acted first and the reader's own government among them, under the names they are known by", async () => {
     const own = fact({
       summary: "Rome storms the Etruscan towns.",
       affectedEntities: [
@@ -484,9 +484,10 @@ describe("what an entry carries beside the prose", () => {
     });
     const names: Record<string, string> = { etruria: "Etruscan Confederation", vatluna: "Vatluna", rusellae: "Rusellae" };
     const result = await compose(capturingPort(), [own], { nameOf: (ref) => names[ref.id] ?? null });
-    expect(result.entries[0]!.subjects.length).toBeGreaterThan(3);
-    expect(result.entries[0]!.tags).toHaveLength(3);
-    expect(result.entries[0]!.tags.map((tag) => tag.id)).not.toContain("rome");
+    expect(result.entries[0]!.subjects.length).toBeGreaterThan(4);
+    expect(result.entries[0]!.tags).toHaveLength(4);
+    // Sorted last, the reader's own power was the first dropped.
+    expect(result.entries[0]!.tags.map((tag) => tag.id)).toEqual(["corvus", "rome", "etruria", "rusellae"]);
     // An id is the engine's handle. The reader was being offered
     // "force-e98084fc-0494-4fab-ad92-7c3473be9afe-4" as a way into the record.
     expect(result.entries[0]!.tags.map((tag) => tag.label)).toContain("Etruscan Confederation");
@@ -518,6 +519,52 @@ describe("what an entry carries beside the prose", () => {
     const quoted = result.entries.filter((entry) => entry.quote !== null);
     expect(quoted).toHaveLength(1);
     expect(quoted[0]!.quote!.speaker).toBe("Marcus Valerius Corvus");
+  });
+
+  /** A historian who gives every passage a line, said by `speaker`. */
+  const quotingPort = (speaker: string): SimModelPort & { userMessages: string[] } => {
+    const userMessages: string[] = [];
+    return {
+      userMessages,
+      complete(_operation, _system, user) {
+        userMessages.push(user);
+        return Promise.resolve(JSON.stringify({ entries: [{ thread: 1, title: "A Title", body: "A passage.", quote: { speaker, line: "\u201cThey made the ring long, so they made it thin.\u201d", occasion: "to his guard at the ford" } }] }));
+      },
+    };
+  };
+  const names: Record<string, string> = { "marcus-atilius": "Marcus Atilius", hanno: "Hanno" };
+
+  it("lets the historian quote the one whose reign it is, when the moment is his", async () => {
+    const surrounded = fact({ summary: "Marcus Atilius is surrounded at Messana.", affectedEntities: [{ kind: "character", id: "marcus-atilius" }, { kind: "polity", id: "rome" }] });
+    const port = quotingPort("Marcus Atilius");
+    const result = await compose(port, [surrounded], {
+      significanceByFactId: new Map([[surrounded.id, 94]]),
+      nameOf: (ref) => names[ref.id] ?? null,
+      describePerson: (id) => names[id] ?? null,
+    });
+    expect(result.entries[0]!.quote).toEqual({ speaker: "Marcus Atilius", line: "They made the ring long, so they made it thin.", occasion: "to his guard at the ford" });
+    expect(port.userMessages[0]).toContain("the one whose reign this history is");
+  });
+
+  it("drops a quotation put in the mouth of somebody not in the matter", async () => {
+    const surrounded = fact({ summary: "Marcus Atilius is surrounded at Messana.", affectedEntities: [{ kind: "character", id: "marcus-atilius" }, { kind: "polity", id: "rome" }] });
+    const result = await compose(quotingPort("Scipio Africanus"), [surrounded], {
+      significanceByFactId: new Map([[surrounded.id, 94]]),
+      nameOf: (ref) => names[ref.id] ?? null,
+    });
+    expect(result.entries[0]!.quote).toBeNull();
+  });
+
+  it("shows the historian the words recorded at the time", async () => {
+    const taken = fact({ summary: "Hanno yields at the ford.", affectedEntities: [{ kind: "character", id: "hanno" }, { kind: "polity", id: "rome" }] });
+    const port = quotingPort("Hanno");
+    await compose(port, [taken], {
+      significanceByFactId: new Map([[taken.id, 92]]),
+      nameOf: (ref) => names[ref.id] ?? null,
+      utterances: [{ actorRef: { kind: "character", id: "hanno" }, speaker: "Hanno", line: "I will give my sword to your commander, not to you.", occasion: "to the Roman officers", factIds: [taken.id] }],
+    });
+    expect(port.userMessages[0]).toContain("Words recorded at the time:");
+    expect(port.userMessages[0]).toContain("I will give my sword to your commander");
   });
 });
 
@@ -575,9 +622,26 @@ describe("what makes two things one matter", () => {
   it("gives the reign's own separate affairs an entry each", async () => {
     // The old rule fused everything naming the ruler's side into one passage,
     // so a reign doing four things read as one thing.
-    const result = await composeOwn(separateAffairs(), OWN_BUSINESS_FLOOR);
+    const result = await composeOwn(separateAffairs(), DEFAULT_ENTRY_THRESHOLD);
     expect(result.entries).toHaveLength(3);
     expect(result.carried).toHaveLength(0);
+  });
+
+  it("gathers the reign's small affairs into one passage rather than a headline each", async () => {
+    // "Titus Genucius Sponsors His Own Nomination" and "Rome Begins Surveying
+    // Messana's Defences" were entries of a sentence each.
+    const port = capturingPort();
+    const facts = separateAffairs();
+    const result = await composeChronicle({
+      port, clock, observer: OBSERVER, observerPolityId: "rome", facts,
+      from: { day: 0, minute: 0 }, to: { day: 30, minute: 0 }, narrative: [], frictions: [],
+      ownEntityIds: new Set(["marcus-atilius", "rome", "rhegium", "roman-senate", "falto"]),
+      significanceByFactId: new Map(facts.map((candidate) => [candidate.id, OWN_BUSINESS_FLOOR])),
+    });
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]!.factIds).toHaveLength(3);
+    expect(result.carried).toHaveLength(0);
+    expect(port.lastUserMessage).toContain("several small matters of the same days");
   });
 
   it("holds the reign's slight affairs for the matter they belong to, rather than telling each the moment it happens", async () => {
@@ -874,6 +938,34 @@ describe("a matter that is only continuing", () => {
     const told = [["polity:rome"]];
     expect((await compose(capturingPort(), [ours], { recentSubjects: told })).entries).toHaveLength(1);
   });
+
+  it("never lets the historian decline the answer to an order as said before", async () => {
+    // "Continue the siege of Messana; hire merchants; merge Legio II into
+    // Legio I." Shown the last report's titles, the historian judged the siege
+    // an old story and wrote nothing -- and the merchants he could not hire and
+    // the legion that did not exist went with it.
+    const answer = fact({
+      kind: "siege_continued",
+      summary: "Clepsina kept Legio I in its investment of Messana.",
+      affectedEntities: [{ kind: "polity", id: "rome" }],
+      visibility: "public",
+      discovery: { state: "public", knowableAtInstant: null, discoveredBy: [] },
+    });
+    const declining: SimModelPort & { userMessages: string[] } = {
+      userMessages: [],
+      complete(_operation, _system, user) {
+        declining.userMessages.push(user);
+        return Promise.resolve(JSON.stringify({ entries: [] }));
+      },
+    };
+    const result = await compose(declining, [answer], {
+      orderFactIds: new Set([answer.id]),
+      recentTitles: ["Legio I Breaks Hieron's Army Before Messana"],
+    });
+    expect(declining.userMessages[0]).not.toContain("WHAT THE LAST REPORT ALREADY SAID");
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]!.body).toContain("Clepsina kept Legio I");
+  });
 });
 
 describe("a passage that could not be written", () => {
@@ -909,5 +1001,169 @@ describe("a passage that could not be written", () => {
     expect(written.title).toBe("The legions go north");
     // The one that failed keeps its facts, under the period as a title.
     expect(unwritten.body).toContain("Carthage weighs the strait at Messana.");
+  });
+});
+
+describe("the Senate's business", () => {
+  const OBSERVER = { kind: "character" as const, id: "gaius-genucius" };
+  const vote = (procedure: string, summary: string) => fact({
+    kind: "motion_passed",
+    summary,
+    affectedEntities: [{ kind: "procedure", id: procedure }, { kind: "polity", id: "rome" }, { kind: "character", id: "manius-curius" }],
+    visibility: "public",
+    discovery: { state: "public", knowableAtInstant: null, discoveredBy: [] },
+  });
+  const compose = (port: SimModelPort, facts: Fact[], extra: Partial<Parameters<typeof composeChronicle>[0]> = {}) =>
+    composeChronicle({
+      port, clock, observer: OBSERVER, observerPolityId: "rome", facts,
+      from: { day: 0, minute: 0 }, to: { day: 2, minute: 0 }, narrative: [], frictions: [],
+      ownEntityIds: new Set(["gaius-genucius", "rome"]),
+      significanceByFactId: new Map(facts.map((candidate) => [candidate.id, 60])),
+      maxEntries: 1,
+      ...extra,
+    });
+  const three = () => [
+    vote("procedure-transports", "The Senate carried \"Prepare transports for 20,000 men\", 60 to 59."),
+    vote("procedure-taxes", "The Senate rejected \"Raise war taxes\", 19 to 40."),
+    vote("procedure-emergency", "The Senate carried \"Declare the Sicilian front a national emergency\", 60 to 59."),
+  ];
+
+  it("gives each vote its own entry, whoever sponsored them all, and cuts none of them", async () => {
+    // Three votes in a sitting, one sponsor: they were one entry.
+    const result = await compose(capturingPort(), three());
+    expect(result.entries).toHaveLength(3);
+  });
+
+  it("heads an entry the historian would not write with what happened, not the dates", async () => {
+    const declining: SimModelPort = { complete: () => Promise.resolve(JSON.stringify({ entries: [] })) };
+    const result = await compose(declining, three().slice(0, 1));
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]!.title).toBe("The Senate carried \"Prepare transports for 20,000 men\"");
+  });
+});
+
+describe("the audit of a Roman consul's spring", () => {
+  const OBSERVER = { kind: "character" as const, id: "clepsina" };
+  const SIDE = new Set(["clepsina", "rome", "latium", "legio-i", "treasury", "clepsina-purse", "senate"]);
+  const base = (facts: Fact[], weights: Record<string, number>, extra: Partial<Parameters<typeof composeChronicle>[0]> = {}) =>
+    composeChronicle({
+      port: capturingPort(), clock, observer: OBSERVER, observerPolityId: "rome", facts,
+      from: { day: 0, minute: 0 }, to: { day: 60, minute: 0 }, narrative: [], frictions: [],
+      ownEntityIds: SIDE,
+      significanceByFactId: new Map(facts.map((candidate) => [candidate.id, weights[candidate.id] ?? 50])),
+      ...extra,
+    });
+
+  /** A strip of road: Latium, then ten provinces east, two days apart, and Pannonia joined to nothing. */
+  const road = () => {
+    const chain = ["latium", ...Array.from({ length: 10 }, (_, index) => `east-${index + 1}`)];
+    return {
+      map: {
+        provinces: [...chain, "pannonia"].map((id) => ({ id, name: id, controllerPolityId: id === "latium" ? "rome" : null, settlements: [] })),
+        polities: [{ id: "rome", name: "Rome", capitalSettlementId: null }],
+        edges: chain.slice(1).map((id, index) => ({ from: chain[index]!, to: id, crossing: "land" })),
+      },
+      characters: [{ id: "clepsina", locationProvinceId: "latium" }],
+      material: { forces: [{ id: "legio-i", locationId: "latium" }] },
+      projects: [{
+        id: "crossing-1", kind: "crossing", label: "The crossing", sponsorEntityRef: { kind: "polity", id: "rome" },
+        overseerCharacterId: null, linkedEntityIds: [],
+        completionOutcome: { kind: "force_move", forceId: "legio-i", provinceId: "east-1" },
+      }],
+    } as unknown as NonNullable<Parameters<typeof composeChronicle>[0]["world"]>;
+  };
+
+  it("tells a project's arrival in the thread of the army it moved", async () => {
+    const march = fact({ summary: "Legio I embarks for Messana.", affectedEntities: [{ kind: "force", id: "legio-i" }] });
+    const done = fact({ kind: "project_completed", summary: "The crossing is complete: Legio I is ashore.", affectedEntities: [{ kind: "project", id: "crossing-1" }] });
+    const result = await base([march, done], { [march.id]: 60, [done.id]: 60 }, { world: road() });
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]!.factIds).toEqual([march.id, done.id]);
+  });
+
+  it("tells what else the order did inside its answer, not as entries of its own", async () => {
+    const answer = fact({ summary: "Clepsina orders the fleet built.", affectedEntities: [{ kind: "character", id: "clepsina" }, { kind: "province", id: "latium" }] });
+    const aside = fact({ summary: "Rome begins surveying Messana's defences.", affectedEntities: [{ kind: "province", id: "messana" }] });
+    const other = fact({ summary: "The office of admiral is created.", affectedEntities: [{ kind: "institution", id: "senate" }] });
+    const result = await base([answer, aside, other], { [answer.id]: 50, [aside.id]: 30, [other.id]: 30 }, { orderFactIds: new Set([answer.id, aside.id]) });
+    const told = result.entries.map((entry) => entry.factIds);
+    expect(told).toContainEqual([answer.id, aside.id]);
+    expect(told).toContainEqual([other.id]);
+  });
+
+  it("makes a letter and the model's word of it one matter", async () => {
+    const letter = fact({
+      kind: "letter_sent", summary: "Clepsina wrote for Rome to Hiero of Syracuse: \"The strait\".",
+      affectedEntities: [{ kind: "character", id: "clepsina" }, { kind: "character", id: "hiero" }, { kind: "polity", id: "rome" }, { kind: "polity", id: "syracuse" }],
+      time: { day: 3, minute: 0 },
+      // On the road to Syracuse for a week: its reader has it then, its writer now.
+      visibility: "polity",
+      discovery: { state: "delayed", knowableAtInstant: { day: 10, minute: 0 }, discoveredBy: [] },
+    });
+    const appeal = fact({
+      kind: "diplomatic_appeal", summary: "Clepsina appealed to Syracuse to keep the strait open.",
+      affectedEntities: [{ kind: "character", id: "clepsina" }, { kind: "polity", id: "syracuse" }],
+      time: { day: 3, minute: 0 },
+    });
+    const result = await base([letter, appeal], {}, { to: { day: 5, minute: 0 } });
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]!.factIds).toHaveLength(2);
+  });
+
+  it("does not carry a far-off local fire to the consul, but still a far-off war", async () => {
+    const fire = fact({ kind: "disaster", summary: "Fire consumes the heart of a town.", affectedEntities: [{ kind: "province", id: "east-10" }] });
+    const nearFire = fact({ kind: "disaster", summary: "Fire consumes a market nearby.", affectedEntities: [{ kind: "province", id: "east-2" }] });
+    const unjoined = fact({ kind: "disgrace", summary: "A chief's kinsman is disgraced.", affectedEntities: [{ kind: "province", id: "pannonia" }] });
+    const war = fact({ kind: "war_declared", summary: "Two kings go to war.", affectedEntities: [{ kind: "province", id: "east-9" }] });
+    const result = await base([fire, nearFire, unjoined, war], { [fire.id]: 55, [nearFire.id]: 55, [unjoined.id]: 55, [war.id]: 80 }, { world: road() });
+    const told = result.entries.flatMap((entry) => entry.factIds);
+    expect(told).toContain(nearFire.id);
+    expect(told).toContain(war.id);
+    expect(told).not.toContain(fire.id);
+    expect(told).not.toContain(unjoined.id);
+  });
+
+  it("shows a change only on the entry whose facts made it, and the world's routine on none", async () => {
+    const office = fact({ summary: "Rome creates the office of admiral.", affectedEntities: [{ kind: "polity", id: "rome" }, { kind: "institution", id: "senate" }] });
+    const fleet = fact({ summary: "The fleet is laid down.", affectedEntities: [{ kind: "polity", id: "rome" }, { kind: "project", id: "fleet-1" }] });
+    const siege = fact({ summary: "Syracuse presses the siege.", affectedEntities: [{ kind: "force", id: "syracusan-army" }, { kind: "province", id: "messana" }] });
+    const match = fact({ summary: "Clepsina seeks a match for his daughter.", affectedEntities: [{ kind: "character", id: "clepsina" }], time: { day: 5, minute: 0 } });
+    const result = await base([office, fleet, siege, match], {}, {
+      changes: [
+        { kind: "account", id: "treasury", claimedBy: ["rome"], label: "Rome's treasury", detail: "up 1,234", causes: [], routine: true },
+        { kind: "account", id: "treasury-2", claimedBy: ["rome"], label: "Rome's war chest", detail: "down 2,000", causes: [{ id: "fleet-1", day: 0 }], routine: false },
+        { kind: "force", id: "syracusan-army", label: "Syracusan army", detail: "up 361", causes: [], routine: true },
+        { kind: "account", id: "clepsina-purse", claimedBy: ["clepsina"], label: "Clepsina's purse", detail: "down 300", causes: [{ id: "obligation-x", day: 12 }], routine: false },
+      ],
+    });
+    const changesOf = (factId: string) => result.entries.find((entry) => entry.factIds.includes(factId))!.changes.map((change) => change.id);
+    expect(changesOf(office.id)).toEqual([]);
+    expect(changesOf(fleet.id)).toEqual(["treasury-2"]);
+    expect(changesOf(siege.id)).toEqual([]);
+    expect(changesOf(match.id)).toEqual([]);
+  });
+
+  it("tags a battle by the men who led it, and a name once", async () => {
+    const battle = fact({
+      kind: "battle", summary: "Off Lipara the fleets met.",
+      affectedEntities: [
+        { kind: "character", id: "decius" }, { kind: "character", id: "decius" }, { kind: "character", id: "gisco" },
+        { kind: "polity", id: "boii" }, { kind: "province", id: "boii-land" }, { kind: "polity", id: "carthage" }, { kind: "polity", id: "rome" },
+      ],
+    });
+    const second = fact({ summary: "Decius Vibellius brought news of it.", affectedEntities: [{ kind: "character", id: "decius" }] });
+    const names: Record<string, string> = { decius: "Decius Vibellius", gisco: "Hannibal Gisco", boii: "Boii", "boii-land": "Boii", carthage: "Carthage", rome: "Rome" };
+    const result = await base([battle, second], { [battle.id]: 90, [second.id]: 20 }, {
+      nameOf: (ref) => names[ref.id] ?? null,
+      battleAccounts: [{
+        factIds: [battle.id], provinceName: "Lipara",
+        sides: [{ name: "Punic fleet", attacking: true, strength: 100, unit: "ships", commander: "Hannibal Gisco" }],
+        phases: [], tactics: [], refusedTactics: [], losses: [], commanders: [], retreats: [], outcome: "attacker_victory",
+      }],
+    });
+    const labels = result.entries[0]!.tags.map((tag) => tag.label);
+    expect(labels[0]).toBe("Hannibal Gisco");
+    expect(labels).toContain("Rome");
+    expect(labels.filter((label) => label === "Boii")).toHaveLength(1);
   });
 });

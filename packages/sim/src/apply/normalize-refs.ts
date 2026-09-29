@@ -1,4 +1,4 @@
-import { chestOf, treasuryOf, type WorldDelta, type WorldState } from "@chronica/shared";
+import { chestOf, treasuryOf, whoIsNamed, type WorldDelta, type WorldState } from "@chronica/shared";
 
 /**
  * The ways a model gets a reference almost right, put right before the engine
@@ -105,6 +105,57 @@ function provinceByName(world: WorldState, value: string): string | null {
   return hits.length === 1 ? hits[0]!.id : null;
 }
 
+/**
+ * A province written by its name, or its city's: "Messana", "Panormus and the
+ * north-west". The whole name, or the one place a province is named for.
+ */
+function provinceNamed(world: WorldState, value: string): string | null {
+  const wanted = value.trim().toLowerCase().replace(/[_-]+/g, " ");
+  if (wanted.length < 4) return null;
+  const whole = world.map.provinces.filter((province) => province.name.toLowerCase() === wanted
+    || province.settlements.some((settlement) => settlement.name.toLowerCase() === wanted));
+  if (whole.length === 1) return whole[0]!.id;
+  const named = world.map.provinces.filter((province) => placeWordsOf(province).includes(wanted));
+  return named.length === 1 ? named[0]!.id : null;
+}
+
+/** The words a province goes by in prose: the place it is named for, and its cities. */
+function placeWordsOf(province: WorldState["map"]["provinces"][number]): string[] {
+  const first = province.name.toLowerCase().split(/\s+and\s+|,/)[0]!.trim();
+  return [first, ...province.settlements.map((settlement) => settlement.name.toLowerCase())]
+    .filter((word) => word.length >= 4 && !GENERIC_PLACE_WORDS.has(word));
+}
+
+/** Where an act's own words say it happens: the provinces its reason and label name. */
+function placesSaidIn(delta: WorldDelta, world: WorldState): Set<string> {
+  const record = delta as Record<string, unknown>;
+  const said = ["reason", "label", "summary", "title", "duties"]
+    .map((key) => record[key])
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+  if (said.length === 0) return new Set();
+  const found = new Set<string>();
+  for (const province of world.map.provinces) {
+    if (placeWordsOf(province).some((word) => new RegExp(`(^|[^a-z])${word.replace(/[^a-z ]/g, "")}($|[^a-z])`).test(said))) found.add(province.id);
+  }
+  return found;
+}
+
+/**
+ * Two ids of one family, differing only in their last word: the map's
+ * provinces of one island, "...-sicily-northeast" and "...-sicily-northwest".
+ * The copying error that costs most, because both ids are real.
+ */
+function siblings(a: string, b: string): boolean {
+  const left = a.split("-");
+  const right = b.split("-");
+  return a !== b && left.length >= 3 && left.length === right.length && left.slice(0, -1).join("-") === right.slice(0, -1).join("-");
+}
+
+/** Fields naming where an act goes, as against where it comes from. */
+const DESTINATION_FIELDS = new Set(["locationId", "provinceId", "toProvinceId", "targetProvinceId"]);
+
 /** The power behind something that named a province or a city where a power was wanted. */
 function polityOf(world: WorldState, id: string): string | null {
   const province = world.map.provinces.find((candidate) => candidate.id === id);
@@ -162,6 +213,23 @@ export function normalizeRefs(
       if (found !== null) return found;
     }
     return null;
+  };
+  // Read once, and only when a province is in question.
+  let said: Set<string> | null = null;
+  const saidPlaces = (): Set<string> => (said ??= placesSaidIn(delta, world));
+  // Where the act already stands or starts: the army's own ground, and any
+  // other province the act names in a field of its own.
+  let stands: Set<string> | null = null;
+  const elsewhere = (): Set<string> => {
+    if (stands !== null) return stands;
+    const record = delta as Record<string, unknown>;
+    const forceRef = typeof record.forceRef === "string" ? record.forceRef : null;
+    const force = forceRef === null ? undefined : world.material.forces.find((candidate) => candidate.id === (resolve(forceRef) ?? forceRef));
+    stands = new Set([
+      ...(force === undefined ? [] : [force.locationId]),
+      ...Object.entries(record).filter(([key, value]) => !DESTINATION_FIELDS.has(key) && typeof value === "string" && /province|location/i.test(key)).map(([, value]) => value as string),
+    ]);
+    return stands;
   };
   const fix = (key: string, value: string): string | null => {
     // "character:decius-vibellius": the kind written in front of the id, as
@@ -236,7 +304,22 @@ export function normalizeRefs(
         if (theirs !== null) return theirs;
       }
     }
+    if (wantsProvince && isProvince && DESTINATION_FIELDS.has(key)) {
+      // A real province, and not the one the act's own words name. Hieron's
+      // squadron, sent to Messana, was written "...-sicily-northwest" for
+      // "...-sicily-northeast": thirty characters alike, and it sailed round
+      // the wrong side of the island into Panormus. Where the words name
+      // exactly one place, of the same family of ids as the one written, and
+      // not the one written, the words are what was meant.
+      const said = saidPlaces();
+      if (said.size > 0 && !said.has(value)) {
+        const meant = [...said].filter((id) => siblings(id, value) && !elsewhere().has(id));
+        if (meant.length === 1) return meant[0]!;
+      }
+    }
     if (wantsProvince && !isProvince) {
+      const named = provinceNamed(world, value);
+      if (named !== null) return named;
       const province = provinceOf(world, value) ?? (known.has(value) ? null : provinceOf(world, byPrefix(value) ?? "") ?? byPrefix(value) ?? provinceByName(world, value));
       if (province !== null) return province;
     }
@@ -284,13 +367,19 @@ export function peopleNamedButNeverMade(
     const byId = world.characters.find((character) => character.id === bare || character.id.endsWith(`-${bare}`));
     if (byId !== undefined) return byId.id;
     const byName = world.characters.filter((character) => words.length > 0 && words.every((word) => character.name.toLowerCase().includes(word)));
-    return byName.length === 1 ? byName[0]!.id : null;
+    if (byName.length === 1) return byName[0]!.id;
+    // "hiero-ii" for Hieron II: the same name a letter off.
+    return byName.length === 0 ? whoIsNamed(world.characters, nameFrom(handle))?.id ?? null : null;
   };
   const fix = (value: string): string => {
     if (value.startsWith("local:")) {
       if (isAccountedFor(value.slice("local:".length))) return value;
-    } else if (world.characters.some((character) => character.id === value) || !/^[a-z][a-z0-9_-]*$/.test(value) || /^(character|office|entity)-/.test(value)) {
+    } else if (world.characters.some((character) => character.id === value) || /^(character|office|entity)-/.test(value)) {
       return value;
+    } else if (!/^[a-z][a-z0-9_-]*$/.test(value)) {
+      // Written as a name -- "Gaius Genucius Clepsina" -- where an id was
+      // wanted. The one person it means, or left as written to be refused.
+      return whoIsNamed(world.characters, value)?.id ?? value;
     }
     const found = existing(value);
     if (found !== null) return found;

@@ -1,9 +1,21 @@
 import { z } from "zod";
 import {
   CognitionOutputSchema,
+  LEVERS,
+  STANDARD_LEVERS,
+  readDepartments,
   LOOSE_COHESION_BPS,
   TRAIT_REGISTRY,
   cohesionInWords,
+  alliesLedBy,
+  DICTATE_AT,
+  warStanding,
+  enemiesOf,
+  groundToRetake,
+  hopsBetween,
+  isDelivered,
+  estimateMen,
+  warsOf,
   standingInWords,
   abortsTheTurn,
   isTimeout,
@@ -13,6 +25,9 @@ import {
   outlookFor,
   queryBeliefs,
   relationshipLabelFor,
+  currentAgeYears,
+  injuriesOf,
+  isAilment,
   type Character,
   type CognitionOutput,
   type ScenarioClock,
@@ -20,6 +35,7 @@ import {
 } from "@chronica/shared";
 import type { RoutedActor } from "./attention";
 import { answersAnOrder, assessExecution } from "./delegation";
+import { isOpenIntent, mostPressingFirst } from "./intents";
 import { dropMalformedEntries, extractJson } from "./json";
 import { kindsIn, readLeniently } from "./bare-refs";
 import type { SimModelPort } from "./ports";
@@ -180,12 +196,15 @@ That is the answer for someone reacting to news. It is rarely the answer for
 someone whose section says nobody has brought them news: they are in the batch
 because they have a war to press, a promise to keep, a city to hold or a rival to
 manage, and a month of their own is not nothing. Move their business on by a step
-they could actually take from where they stand, and record it as a fact so the
-world can see it happened. They are not waiting for the ruler; they do not know
+they could actually take from where they stand -- an act the world takes: an
+army moved or engaged, a letter sent, money spent, a man hired, a question put
+to a chamber -- with the fact that says it happened beside it. Reviewing,
+maintaining, reaffirming and waiting for reports change nothing; an answer of
+only those is "nothing", and a step is not done by it. They are not waiting for the ruler; they do not know
 what the ruler is doing. Business that will take months is a plan: give it in
-"plan" as up to four steps in order, each something they would do, with the days
+"plan" as up to four steps in order, each an act of that kind, with the days
 by which it should be done and, if it must wait for something, "when". A step
-they carry out in this answer goes in "stepsTaken" by its id; one shown as
+they carry out in this answer goes in "stepsTaken" by its id, and so does a promise they keep; one shown as
 missed means the plan has fallen behind, and they carry on late, lay it again,
 or give it up. What their government means to do is somebody's to carry out,
 and if it is theirs -- their office, their army -- it is their plan.
@@ -216,7 +235,9 @@ The same engine rules apply as elsewhere:
 - A fact is something that happened, never a condition that obtains and never
   something expected. "Holding the province rather than advancing" is a posture,
   "is expected to answer" is a diary entry: neither happened. If nothing
-  happened, write no fact.
+  happened, write no fact. Say what was done, never what was not: "without
+  conceding allegiance", "made no pledge", "ordered no attack" are not things
+  anybody did.
 - Someone who sets out to find something out, and succeeds, records it in
   "discoveries" -- the fact already existed; what changed is that they now know
   it. Someone who sets out to deceive uses "belief_set" on the person they are
@@ -227,9 +248,13 @@ The same engine rules apply as elsewhere:
   out, and arrives when the road has been walked. An engagement between two
   provinces is refused, and the attack simply does not happen.
 - Two powers at peace do not fight. Declaring the war is a decision somebody
-  takes, with "agreement_open"; an engagement without it is refused.
+  takes, with "agreement_open"; an engagement without it is refused. A war
+  ends by terms one side offers ("peace_offer", its "clauses") and the other
+  accepts; the side the war has gone for may dictate them.
 - Ground taken is said with "province_control_set", and only for a province you
-  have an army standing in or one next to ground your power already holds.
+  have an army standing in or one next to ground your power already holds. A
+  walled city is besieged with "siege_lay" by an army standing in its province;
+  the engine starves it and says when it falls.
 - Someone who raises a province against its ruler and holds it has founded a
   country: "polity_create", taking the ground from the power it breaks from.
   Riots are not a country, and neither is a claimant who wants the throne that
@@ -239,11 +264,12 @@ The same engine rules apply as elsewhere:
   battle to each other.
 - You do not decide who wins. Propose the engagement; the casualties, the rout
   and the ground are the engine's, and final.
-- Rarely -- at a death, a victory, an oath, a refusal somebody will remember --
-  a person says something worth writing down. Put it in "utterance" as their own
-  words, under twenty-five, with the occasion. Leave it null otherwise; almost
-  every answer leaves it null, and a chronicle in which everyone is quotable
-  quotes nobody.
+- At a death, a victory, an oath, a refusal somebody will remember, a speech
+  in a council, a person says something worth writing down. Put it in
+  "utterance": their own words, under twenty, laconic and concrete -- the line
+  men repeated afterwards, never a slogan -- with the occasion; a
+  speaker in a chamber puts them in the "words" of "political_support_set".
+  Routine business leaves it null.
 - Dealing with somebody changes what you think of them. Where this turn put
   two people in the same room, on the same order or on opposite sides of a
   refusal, record it as a delta in "deltas" with "op": "social_events" -- it
@@ -276,7 +302,9 @@ The same engine rules apply as elsewhere:
 - A letter put to them is theirs to answer: "diplomatic_message_answer", naming
   the letter, accepting, refusing or countering it, and saying why in their own
   words. Answer it as the person who received it, weighing what it would cost
-  them -- not as the power that sent it would like. To counter, answer
+  them -- not as the power that sent it would like. Accepting an offer makes
+  the agreement it offered; where it offered more than one, name the one taken
+  in "agreementKind". To counter, answer
   "countered" and send a letter back with "diplomatic_message_send" in the same
   breath, naming the original in "inReplyToRef". They may also write first, to
   anyone they have reason to.
@@ -335,7 +363,68 @@ const SKILL_WORDS: Readonly<Record<string, string>> = {
   body: "physical endurance",
 };
 
+const SUBSKILL_WORDS: Readonly<Record<string, string>> = {
+  strategist: "choosing the field of battle", authority: "holding men to their duty", espionage: "spies and informers", manipulation: "working on people",
+  rhetoric: "speaking in public", arbitration: "settling quarrels and refusing without offence", logistics: "feeding and moving armies", taxation: "the tax roll",
+  theology: "the gods' law", scholarship: "letters and building", devotion: "the gods' favour", rites: "the rites", endurance: "hardship and sickness", prowess: "fighting hand to hand",
+};
+
+/**
+ * What he is in charge of, and how it goes (docs/plans/departments.md): the
+ * work his power's gifts are his gifts for, whether he holds too much of it
+ * to do any of it well, and what men say of the departments he sits in.
+ * Printed only where there is something to say, since it is carried for
+ * every person in the batch.
+ */
+function describeCharge(character: Character, world: WorldState): string[] {
+  if (character.polityId === null) return [];
+  const reader = readDepartments(world);
+  const scope = { kind: "polity" as const, id: character.polityId };
+  const held = STANDARD_LEVERS.filter((lever) => reader.holding(scope, lever).people.some((person) => person.id === character.id));
+  const lines: string[] = [];
+  if (held.length > 0) {
+    const by = new Map<string, string[]>();
+    for (const lever of held) {
+      const department = reader.holding(scope, lever).department;
+      const key = department === null ? "as head of state" : `in ${department.name}`;
+      by.set(key, [...(by.get(key) ?? []), LEVERS[lever].words]);
+    }
+    lines.push(`In charge of: ${[...by.entries()].map(([where, work]) => `${work.join(", ")} (${where})`).join("; ")}.`);
+  }
+  const load = reader.workload(character.id);
+  if (load <= -9) lines.push("Holds more than one man can do well: every part of it suffers until he hands some of it to others.");
+  else if (load < 0) lines.push("Stretched: holds a little more than he can do well.");
+  const talked = world.departments.filter((department) => department.abolishedAtStep === null && department.rumouredAtStep !== null
+    && world.elapsedStep - department.rumouredAtStep <= 180 && department.scope.id === character.polityId);
+  if (talked.length > 0) lines.push(`Men say less reaches ${talked.map((department) => department.name).join(" and ")} than the rolls promise.`);
+  // A gift that has gone.
+  const faded = Object.entries(character.skillRecord?.peaks ?? {})
+    .filter((entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] >= 70 && entry[1] - ((character.skills.subSkills as Record<string, number | undefined>)[entry[0]] ?? entry[1]) >= 10)
+    .slice(0, 2)
+    .map(([skill]) => SUBSKILL_WORDS[skill] ?? skill);
+  if (faded.length > 0) lines.push(`Once had a gift for ${faded.join(" and ")}, which age or disuse has worn down.`);
+  return lines;
+}
+
 /** The way this character is spoken of, from their traits -- labels, never raw ids. */
+/**
+ * How old he is and how he is in body: what the player was never told of
+ * himself, and what an old man or a wounded one has to answer as. One line,
+ * silent on health for anybody sound.
+ */
+function describeBody(character: Character, world: WorldState): string {
+  const parts: string[] = [];
+  const health = character.healthBps >= 8_000 ? null
+    : character.healthBps >= 5_000 ? "in indifferent health"
+      : character.healthBps >= 2_500 ? "in poor health" : "gravely unwell";
+  if (health !== null) parts.push(health);
+  if (character.disqualifyingStatuses.includes("incapacitated")) parts.push("ill, and keeping to the house");
+  const ailments = character.disqualifyingStatuses.filter(isAilment);
+  if (ailments.length > 0) parts.push(`suffering from ${ailments.join(", ")}`);
+  parts.push(...injuriesOf(character).map((injury) => injury.label));
+  return `Age ${currentAgeYears(character, world.elapsedStep)}${parts.length === 0 ? "" : `; ${parts.join("; ")}`}.`;
+}
+
 function describeTraits(character: Character): string[] {
   const lines: string[] = [];
   const named = character.traits.map((id) => TRAIT_REGISTRY[id]?.label ?? id);
@@ -389,6 +478,14 @@ function describeMind(character: Character): string[] {
     .slice(0, ACTOR_CAPS.skills)
     .map(([skill]) => SKILL_WORDS[skill] ?? skill);
   if (skills.length > 0) lines.push(`Capable at: ${skills.join(", ")}.`);
+  // The finer gifts that stand out -- only where written, and only the ones
+  // the engine reads, so what the world says of a man is what his acts do.
+  const gifts = Object.entries(character.skills.subSkills ?? {})
+    .filter((entry): entry is [string, number] => typeof entry[1] === "number" && (entry[1] >= 70 || entry[1] <= 30))
+    .sort((a, b) => Math.abs(b[1] - 50) - Math.abs(a[1] - 50))
+    .slice(0, 3)
+    .map(([skill, value]) => `${value >= 70 ? "a gift for" : "no hand at"} ${SUBSKILL_WORDS[skill] ?? skill}`);
+  if (gifts.length > 0) lines.push(`In particular: ${gifts.join("; ")}.`);
 
   // What they actually reach for, which is not the same as what they are good
   // at. "Capable at: intrigue" is a fact about a man; naming the operation it
@@ -422,6 +519,114 @@ function describeMind(character: Character): string[] {
  * Every id here is printed because these are the very things they would name in
  * a delta.
  */
+const placeOf = (world: WorldState, provinceId: string): string =>
+  `${world.map.provinces.find((province) => province.id === provinceId)?.name ?? provinceId} [${provinceId}]`;
+
+/** How far an enemy may be and still be something a commander has to answer. */
+const ENEMY_NEAR_HOPS = 2;
+
+/**
+ * The wars their power is in, and the enemy close enough to matter.
+ *
+ * Nobody was ever told. Carthage had been at war with Rome for four months and
+ * its admiral kept "watch over the strait"; the Campanians of Rhegium had been
+ * at war with Rome since the first day and their leader reviewed the walls
+ * fifteen times. A portrait listed a man's own army by a location id and never
+ * mentioned that there was a war, or who was in it, or where.
+ *
+ * Armies within two provinces are the kind of thing scouts, merchants and
+ * rumour make known; further off, what they know is what they have been told.
+ */
+function describeWars(character: Character, world: WorldState): string[] {
+  if (character.polityId === null) return [];
+  const polityId = character.polityId;
+  const enemies = enemiesOf(world.polityAgreements, polityId);
+  if (enemies.length === 0) return [];
+  const polityName = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
+  const lines = warsOf(world.polityAgreements, polityId).map((enemy) => {
+    const war = world.polityAgreements.find((agreement) => agreement.kind === "war" && agreement.status === "active"
+      && [agreement.polityId, agreement.otherPolityId].includes(polityId) && [agreement.polityId, agreement.otherPolityId].includes(enemy));
+    const days = war === undefined ? null : world.elapsedStep - war.sinceStep;
+    const allies = alliesLedBy(world.polityAgreements, enemy);
+    // How it stands, which is what decides the peace: at 50 the winner dictates.
+    const standing = warStanding(world, polityId, enemy);
+    const how = standing.dictates ? "they have won it, and may dictate the peace"
+      : standing.score <= -DICTATE_AT ? "they have lost it, and must take the terms they are given"
+        : standing.score >= 15 ? "it goes well for them" : standing.score <= -15 ? "it goes badly for them" : "it is even";
+    return `Their power is at war with ${polityName(enemy)} [${enemy}]${allies.length === 0 ? "" : ", and the allies who follow it"}${days === null ? "" : `, and has been for ${days} days`}${war === undefined ? "" : `: ${war.terms}`}. It stands at ${standing.score} of 100 for them -- ${how}${standing.parts.length === 0 ? "" : ` (${standing.parts.join("; ")})`}.`;
+  });
+  const own = world.material.forces.filter((force) => force.commanderCharacterId === character.id || force.controllerCharacterId === character.id);
+  const from = [...new Set([character.locationProvinceId, ...own.map((force) => force.locationId)].filter((id): id is string => id !== null))];
+  const near = world.material.forces
+    .filter((force) => enemies.includes(force.polityId))
+    .map((force) => ({ force, hops: Math.min(...from.map((here) => hopsBetween(world, here, force.locationId, ENEMY_NEAR_HOPS) ?? Infinity)) }))
+    .filter((entry) => entry.hops <= ENEMY_NEAR_HOPS)
+    .sort((a, b) => a.hops - b.hops)
+    .slice(0, 6);
+  // A war nobody is fighting. Rome was at war with the Campanians of Rhegium
+  // for five months and no Roman army went near them: the only legions were
+  // the consul's in Sicily, and his colleague, told nothing, advocated. A man
+  // holding a magistracy of a power at war is told when none of its armies is
+  // within reach of the enemy -- raising one, or sending one, is somebody's.
+  // A magistracy, not a seat in a council or a priesthood: a senator does not raise legions.
+  const magistrate = world.material.officeSeats.some((seat) => seat.status === "held" && seat.holderCharacterId === character.id
+    && !/(senat|council|elder|priest|member|assembly)/i.test(seat.officeId));
+  if (magistrate) {
+    // Armies, not fleets: ships and armies do not give battle to each other.
+    const afloat = (force: WorldState["material"]["forces"][number]): boolean => force.personnel.length > 0 && force.personnel.every((group) => /ship|galley|fleet|naval|trireme|quinquereme/i.test(group.categoryId));
+    const ours = world.material.forces.filter((force) => force.polityId === polityId && !afloat(force));
+    for (const enemy of warsOf(world.polityAgreements, polityId)) {
+      const theirs = [
+        ...world.map.provinces.filter((province) => province.controllerPolityId === enemy).map((province) => province.id),
+        ...world.material.forces.filter((force) => force.polityId === enemy).map((force) => force.locationId),
+      ];
+      if (theirs.length === 0) continue;
+      const inReach = ours.some((force) => theirs.some((place) => (hopsBetween(world, force.locationId, place, ENEMY_NEAR_HOPS) ?? Infinity) <= ENEMY_NEAR_HOPS));
+      if (!inReach) lines.push(`No army of their power stands within reach of ${polityName(enemy)}: to raise one or send one against them is the business of whoever may.`);
+    }
+  }
+  // Ground their power lost in the war, and how far their own army is from it.
+  for (const lost of groundToRetake(world, polityId).slice(0, 4)) {
+    const reach = own.map((force) => ({ force, hops: hopsBetween(world, force.locationId, lost.provinceId, ENEMY_NEAR_HOPS) })).filter((entry) => entry.hops !== null).sort((a, b) => a.hops! - b.hops!)[0];
+    lines.push(`Their power lost ${placeOf(world, lost.provinceId)} to ${polityName(lost.holderId)} ${lost.daysAgo} days ago${reach === undefined ? "" : `; ${reach.force.name} is ${reach.hops === 0 ? "there" : reach.hops === 1 ? "one province from it" : `${reach.hops} provinces from it`}`}.`);
+  }
+  // Sieges their power lays or suffers, with the siege's id for "siege_lift".
+  const sieges = world.sieges.filter((siege) => siege.status === "active" && (siege.besiegerPolityId === polityId || siege.defenderPolityId === polityId));
+  for (const siege of sieges.slice(0, 4)) {
+    const besieger = world.material.forces.find((force) => force.id === siege.forceId)?.name ?? siege.forceId;
+    const city = world.map.provinces.flatMap((province) => province.settlements).find((settlement) => settlement.id === siege.settlementId)?.name
+      ?? world.map.provinces.find((province) => province.id === siege.provinceId)?.name ?? siege.provinceId;
+    lines.push(`Siege [${siege.id}]: ${besieger} has besieged ${city} for ${world.elapsedStep - siege.startedAtStep} days, and the city is ${Math.round(siege.pressureBps / 100)}% of the way to yielding.`);
+  }
+  if (near.length > 0) {
+    // Counted as the player's own scouts would count them (`estimateMen`): by
+    // eye where they stand in the same province, by report a province or two
+    // off -- never the true muster, which a portrait printed to the man.
+    lines.push("Enemy forces near them:", ...near.map(({ force, hops }) => {
+      const fit = force.personnel.reduce((sum, category) => sum + category.fit, 0);
+      const seenThisWeek = Math.floor(world.elapsedStep / 7);
+      const count = estimateMen(fit, hops === 0 ? "own_eyes" : "report", 0, [force.id, character.id, seenThisWeek]).label;
+      const where = hops === 0 ? "here, in the same province" : hops === 1 ? "one province off" : `${hops} provinces off`;
+      return `  - ${force.name} [${force.id}] of ${polityName(force.polityId)} — ${count} at ${placeOf(world, force.locationId)}, ${where}`;
+    }));
+  }
+  return lines;
+}
+
+/**
+ * What ground their power still holds, where it is little. The Mamertines lost
+ * Messana and their spokesman went on seeking "provisions for Messana" for a
+ * month, keeping a garrison ready that was three provinces away: nothing told
+ * him the city was Rome's.
+ */
+function describeGround(character: Character, world: WorldState): string[] {
+  if (character.polityId === null) return [];
+  const held = world.map.provinces.filter((province) => province.controllerPolityId === character.polityId);
+  if (held.length === 0) return ["Their power holds no ground at all: its cities and country are in other hands."];
+  if (held.length > 4) return [];
+  return [`Their power holds only ${held.map((province) => placeOf(world, province.id)).join(", ")}.`];
+}
+
 function describeMeans(character: Character, world: WorldState): string[] {
   const lines: string[] = [];
   const purse = world.material.accounts.find((account) => account.id === character.personalAccountId);
@@ -435,7 +640,7 @@ function describeMeans(character: Character, world: WorldState): string[] {
       "Forces answering to them:",
       ...commanded.map((force) => {
         const fit = force.personnel.reduce((sum, category) => sum + category.fit, 0);
-        return `  - ${force.name} [${force.id}] — ${fit} men at ${force.locationId}, morale ${Math.round(force.moraleBps / 100)}/100, ${force.provisionStatus}`;
+        return `  - ${force.name} [${force.id}] — ${fit} men at ${placeOf(world, force.locationId)}, morale ${Math.round(force.moraleBps / 100)}/100, ${force.provisionStatus}`;
       }),
     );
   }
@@ -523,12 +728,16 @@ export function renderCharacterPortrait(
 
   if (character !== undefined) {
     lines.push(`Office: ${character.officeId ?? "none"}. Polity: ${character.polityId ?? "none"}. Standing: ${standingInWords(character.prestigeBps)}.`);
+    lines.push(describeBody(character, world));
     lines.push(...describeTraits(character));
     lines.push(...describeMind(character));
+    lines.push(...describeCharge(character, world));
     // What they want, with the plan for it where they have one. Its own
     // block because a plan needs the calendar, and a mind does not.
     lines.push(...describePlans(character, world, clock, ACTOR_CAPS.ambitions));
     lines.push(...describeMeans(character, world));
+    lines.push(...describeWars(character, world));
+    lines.push(...describeGround(character, world));
 
     // What they can actually speak for. A chieftain of a people who never had a
     // centre does not answer for the people; he answers for his own ground and
@@ -590,16 +799,15 @@ export function renderCharacterPortrait(
     }));
   }
 
-  const intents = world.characterIntents
-    .filter((intent) => intent.actorCharacterId === characterId && (intent.status === "proposed" || intent.status === "prepared"))
-    .slice(-ACTOR_CAPS.intents);
+  const intents = mostPressingFirst(world.characterIntents.filter((intent) => intent.actorCharacterId === characterId && isOpenIntent(intent)))
+    .slice(0, ACTOR_CAPS.intents);
   if (intents.length > 0) lines.push("They mean to:", ...intents.map((intent) => `  - ${intent.actionType}: ${intent.rationale}`));
 
   const commitments = world.commitments
-    .filter((commitment) => commitment.promisorCharacterId === characterId && commitment.status === "pending")
+    .filter((commitment) => commitment.promisorCharacterId === characterId && (commitment.status === "pending" || commitment.status === "deferred"))
     .slice(0, ACTOR_CAPS.commitments);
   if (commitments.length > 0) {
-    lines.push("They have promised:", ...commitments.map((commitment) => `  - to ${name(commitment.beneficiaryCharacterId)}: ${commitment.description}`));
+    lines.push("They have promised:", ...commitments.map((commitment) => `  - [${commitment.id}] to ${name(commitment.beneficiaryCharacterId)}: ${commitment.description}${commitment.reviewAtStep <= world.elapsedStep ? " (its day has come)" : ""}`));
   }
 
   if (character !== undefined) lines.push(...describeRelations(character, world, options.others ?? [], name));
@@ -648,13 +856,16 @@ export function renderCharacterPortrait(
   const polityName = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
   const letters = world.diplomacy.filter(
     (message) =>
-      message.status === "awaiting_reply" &&
+      message.status === "awaiting_reply" && isDelivered(message, world.instant.day) &&
       (message.toCharacterId === characterId || (message.toCharacterId === null && character?.polityId != null && message.toPolityId === character.polityId)),
   );
+  const enemyPowers = new Set(character?.polityId == null ? [] : enemiesOf(world.polityAgreements, character.polityId));
   if (letters.length > 0) {
     lines.push(
       "Letters awaiting their answer:",
-      ...letters.map((message) => `  - [${message.id}] ${message.kind} from ${polityName(message.fromPolityId)}, by ${name(message.fromCharacterId)} — ${message.subject}: ${message.terms}`),
+      // A letter from the enemy says so: a power at war was answered as though
+      // the letter came from a neutral, because nothing on it said otherwise.
+      ...letters.map((message) => `  - [${message.id}] ${message.kind} from ${polityName(message.fromPolityId)}${enemyPowers.has(message.fromPolityId) ? " (the enemy: their power is at war with it)" : ""}, by ${name(message.fromCharacterId)} — ${message.subject}: ${message.terms}`),
     );
   }
 

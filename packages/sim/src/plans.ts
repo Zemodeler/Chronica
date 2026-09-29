@@ -82,6 +82,20 @@ const withAmbition = (world: WorldState, ownerId: string, ambitionId: string, ch
   })),
 });
 
+/** How many missed steps in a row a plan may carry before laying it again gives it up. */
+export const STALE_AFTER_MISSES = 3;
+
+/** Missed steps since the last one done, counting back from the latest settled step. */
+function trailingMisses(ambition: Ambition): number {
+  let misses = 0;
+  for (const step of [...ambition.steps].reverse()) {
+    if (step.status === "pending") continue;
+    if (step.status === "done") break;
+    misses += 1;
+  }
+  return misses;
+}
+
 /**
  * A plan laid, or laid again.
  *
@@ -107,6 +121,13 @@ export function layPlan(world: WorldState, ownerId: string, plan: PlanProposal, 
   }));
 
   const held = activeAmbitions(owner).find((ambition) => sameWant(ambition.label, plan.ambition));
+  // A plan whose last steps all fell behind is not laid a fourth time. Decius
+  // laid "hold Rhegium" again every few days for four months, each time with
+  // the same review and the same scouts, and nothing ever came of it; the want
+  // is given up, and what he does next has to be something else.
+  if (held !== undefined && trailingMisses(held) >= STALE_AFTER_MISSES) {
+    return { world: withAmbition(world, ownerId, held.id, (ambition) => ({ ...ambition, status: "abandoned" })), ambitionId: null };
+  }
   if (held !== undefined) {
     const kept = held.steps
       .filter((step) => step.status !== "pending")
@@ -129,9 +150,9 @@ export function layPlan(world: WorldState, ownerId: string, plan: PlanProposal, 
 /**
  * Steps a man says his answer carried out.
  *
- * Only his own, only ones not already done, and only when the answer left a
- * mark on the record: a step is something that happened, and an answer that
- * recorded nothing did not happen. A missed step done late still counts.
+ * Only his own, only ones not already done, and only when the answer changed
+ * the world: a step is something that happened, and an answer that only wrote
+ * about it did not happen. A missed step done late still counts.
  */
 export function takeSteps(world: WorldState, ownerId: string, stepIds: readonly string[], leftAMark: boolean): { readonly world: WorldState; readonly taken: number } {
   if (!leftAMark || stepIds.length === 0) return { world, taken: 0 };

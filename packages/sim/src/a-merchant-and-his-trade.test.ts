@@ -15,6 +15,7 @@ void applyDeltas;
 import type { ApplyContext } from "./apply/context";
 import { createIdFactory } from "./ports";
 import { runDeterministicTick } from "./tick";
+import { withMiddlingManagers } from "./middling-managers";
 
 /**
  * "I am a merchant of Syracuse. I fit out a ship and trade to Messana."
@@ -35,7 +36,8 @@ import { runDeterministicTick } from "./tick";
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const SYRACUSE = "ita-72843720b81376294924159-sicily-southeast";
 const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
-const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
+// Middling managers: these count trade, not the skill of the men running it.
+const opening = (): WorldState => withMiddlingManagers(ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0));
 
 const as = (characterId: string): ApplyContext => ({
   now: { day: 0, minute: 540 },

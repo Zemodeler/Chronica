@@ -3,8 +3,10 @@ import { firstPunicWarScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, type WorldState } from "@chronica/shared";
 import { createIdFactory } from "./ports";
 import { runDeterministicTick } from "./tick";
+import { withMiddlingManagers } from "./middling-managers";
 
-const base = (): WorldState => WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
+// Middling tax men: revenue here is counted, not collected well or badly.
+const base = (): WorldState => withMiddlingManagers(WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld)));
 const tick = (world: WorldState, toDay: number) => runDeterministicTick({ world, toDay, ids: createIdFactory("tick") });
 const balance = (world: WorldState, id: string) => world.material.accounts.find((account) => account.id === id)!.balance;
 

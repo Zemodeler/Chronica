@@ -1,4 +1,7 @@
 import {
+  aptitude,
+  deriveReputation,
+  skillShare,
   CONCERN_IN_WORDS,
   FOLLOWING_SHIFT,
   adjustPolityLegitimacy,
@@ -26,6 +29,7 @@ import {
 import { carryOutEnactment } from "./enact";
 import type { IdFactory } from "./ports";
 import { concernsOf } from "./questions";
+import { judgmentLean, sentenceByOutcome } from "./trials";
 import { rulerOf } from "./constitutions";
 
 /**
@@ -137,7 +141,7 @@ function powersNeeded(world: WorldState, procedure: PoliticalProcedure, concerns
   }
   const enactment = world.enactments.find((candidate) => candidate.procedureId === procedure.id);
   if (enactment !== undefined) {
-    if (enactment.effects.length > 0 || enactment.office !== null || enactment.body !== null) needed.add("laws");
+    if (enactment.effects.length > 0 || enactment.office !== null || enactment.body !== null || enactment.department != null) needed.add("laws");
     if (enactment.constitution != null) needed.add("constitution");
   }
   if (procedure.type === "removal" || procedure.type === "denunciation") needed.add("judgment");
@@ -163,10 +167,25 @@ export function isBindingChamberQuestion(world: WorldState, procedure: Political
   return isChamberQuestion(procedure) && !isAdvisoryFor(world, procedure);
 }
 
+/**
+ * A question about "a seat" that names none an election will fill: "Assign
+ * command of the Sicilian front to Clepsina". The count leaves seat questions
+ * to the elections, and no election names that command, so it sat gathering
+ * support for forty days past its vote and was never put. The house decides it.
+ */
+function isUnclaimedSeatQuestion(procedure: PoliticalProcedure, electiveOffices: readonly Office[]): boolean {
+  return procedure.subjectKind === "office_seat"
+    && procedure.subjectId === null
+    && procedure.resolutionMechanism === "vote"
+    && procedure.institutionId !== null
+    && !electiveOffices.some((office) => labelNamesOffice(procedure.label, office.label));
+}
+
 /** Open chamber questions in the world, with the body hearing each. A candidacy for an elected office waits for its election. */
 function openQuestions(world: WorldState, electiveOffices: readonly Office[] = []): { procedure: PoliticalProcedure; institution: GovernmentInstitution }[] {
   return world.material.politicalProcedures.flatMap((procedure) => {
-    if (!OPEN_STAGES.has(procedure.stage) || !isChamberQuestion(procedure) || isElectiveCandidacy(procedure, electiveOffices)) return [];
+    if (!OPEN_STAGES.has(procedure.stage)) return [];
+    if (!(isChamberQuestion(procedure) || isUnclaimedSeatQuestion(procedure, electiveOffices)) || isElectiveCandidacy(procedure, electiveOffices)) return [];
     // Counted already: advice waiting on the ruler, not a question before the house.
     if (procedure.voteRecordId !== null) return [];
     const institution = world.material.institutions.find((candidate) => candidate.id === procedure.institutionId);
@@ -216,10 +235,20 @@ export function blocLeanings(world: WorldState, procedure: PoliticalProcedure, i
     if (position.supporterKind !== "character" || signOf(position.position) === 0) return [];
     const character = world.characters.find((candidate) => candidate.id === position.supporterId);
     if (character === undefined || !character.alive || character.polityId !== institution.polityId) return [];
-    const sway = Math.max(1, Math.round(character.prestigeBps / SWAY_PER_STANDING_BPS)) + clientsOf(character.id);
+    // His standing moves the house, and so does how he speaks: a great orator
+    // half again, a poor one half as much. A priest's word carries the gods'
+    // weight too, by his rites, in any house he sits in.
+    const priest = world.material.officeSeats.some((seat) => seat.holderCharacterId === character.id && seat.status === "held" && /priest|pontif|augur/i.test(seat.officeId));
+    const voice = 1 + skillShare(aptitude(character, "rhetoric"), 0.5) + (priest ? skillShare((aptitude(character, "rites") + aptitude(character, "theology")) / 2, 0.3) : 0);
+    // And what is said of him: a man everybody speaks well of is heard, one
+    // nobody trusts is heard less, by up to a quarter either way.
+    const name = 1 + deriveReputation(world, character.id) / 400;
+    const sway = Math.max(1, Math.round((character.prestigeBps / SWAY_PER_STANDING_BPS) * voice * name)) + clientsOf(character.id);
     return [{ name: character.name, signed: signOf(position.position) * sway, position: position.position }];
   });
   const houseShift = speakers.reduce((sum, speaker) => sum + speaker.signed, 0);
+  // A trial leans as its court is run (`trials.ts`).
+  const judged = judgmentLean(world, procedure, institution.polityId);
   return institution.votingBlocs.map((bloc) => {
     const reasons: string[] = [`its own disposition (${bloc.baseSupport})`];
     let lean = bloc.baseSupport;
@@ -242,7 +271,8 @@ export function blocLeanings(world: WorldState, procedure: PoliticalProcedure, i
       lean += signOf(declared.position) * BLOC_DECLARATION_SHIFT;
       reasons.push(`its leaders declared ${declared.position === "support" ? "for" : "against"} it`);
     }
-    lean += houseShift;
+    lean += houseShift + judged.lean;
+    reasons.push(...judged.reasons);
     const forIt = speakers.filter((speaker) => speaker.position === "support").map((speaker) => speaker.name);
     const againstIt = speakers.filter((speaker) => speaker.position === "oppose").map((speaker) => speaker.name);
     if (forIt.length > 0) reasons.push(`${forIt.join(", ")} spoke for it`);
@@ -281,10 +311,10 @@ function countVote(id: string, procedure: PoliticalProcedure, institution: Gover
 
 const CHOICE_WORDS = { yes: "for", no: "against", abstain: "abstaining" } as const;
 
-/** "the Patrician bloc", and "the citizens" for a bloc already called "The citizens". */
+/** "the patrician houses", and "the citizens" for a bloc already called "The citizens". */
 const theBloc = (name: string): string => (/^the\s/iu.test(name) ? `the${name.slice(3)}` : `the ${name}`);
 
-/** "the Patrician bloc for, the Popular bloc against" */
+/** "the patrician houses for, the plebeian new men against" */
 function howTheyVoted(leanings: readonly BlocLeaning[]): string {
   return leanings.map((leaning) => `${theBloc(leaning.bloc.name)} ${CHOICE_WORDS[leaning.choice]}`).join(", ");
 }
@@ -349,7 +379,7 @@ export function holdVotes(input: HoldVotesInput): { world: WorldState; facts: Fa
         localId: `vote_${facts.length + 1}`,
         kind: "motion_vetoed",
         summary: said,
-        affectedRefs: [{ kind: "polity", id: institution.polityId }, { kind: "character", id: procedure.sponsorCharacterId }],
+        affectedRefs: [{ kind: "procedure", id: procedure.id }, { kind: "polity", id: institution.polityId }, { kind: "character", id: procedure.sponsorCharacterId }],
         visibility: "public",
         discoveryState: "public",
         knowableInDays: 0,
@@ -383,7 +413,14 @@ export function holdVotes(input: HoldVotesInput): { world: WorldState; facts: Fa
       : !record.quorumMet
         ? `The ${institution.name} could not muster a quorum on "${procedure.label}", and it fell.`
         : `The ${institution.name} rejected "${procedure.label}", ${tally}: ${howTheyVoted(leanings)}.`;
-    const said = debate.length === 0 ? verdict : `${verdict} ${debate[0]!.toUpperCase()}${debate.slice(1)}.`;
+    // A vote that carries leave and nothing else. "Authorize a fleet budget
+    // and begin building toward three hundred ships" passed 191 to 40 and no
+    // keel was laid, because the question itself began no work; the player
+    // read "carried" and waited four months for ships.
+    const beganNothing = carried && procedure.subjectKind === "polity"
+      && !world.enactments.some((enactment) => enactment.procedureId === procedure.id && enactment.enactedAtStep === null);
+    const leave = beganNothing ? `${verdict} It gives leave and begins nothing by itself: what it allows waits on somebody's order.` : verdict;
+    const said = debate.length === 0 ? leave : `${leave} ${debate[0]!.toUpperCase()}${debate.slice(1)}.`;
     const settled: PoliticalProcedure = {
       ...procedure,
       stage: "resolved",
@@ -408,6 +445,9 @@ export function holdVotes(input: HoldVotesInput): { world: WorldState; facts: Fa
       kind: carried ? "motion_passed" : "motion_failed",
       summary: said,
       affectedRefs: [
+        // The question itself, first: a vote is its own matter in the record
+        // (chronicle.ts `splitIntoThreads`), whoever else voted on others.
+        { kind: "procedure", id: procedure.id },
         { kind: "polity", id: institution.polityId },
         { kind: "character", id: procedure.sponsorCharacterId },
         ...speakers.filter((ref) => ref.id !== procedure.sponsorCharacterId).slice(0, 6),
@@ -421,7 +461,7 @@ export function holdVotes(input: HoldVotesInput): { world: WorldState; facts: Fa
     // Carried, it does what it said it would, and moves the office it names.
     if (carried) {
       const enacted = carryOutEnactment(world, procedure.id, input.toDay, input.ids, input.offices, input.successionRules ?? []);
-      world = seatByOutcome(enacted.world, settled, input.toDay, input.offices);
+      world = sentenceByOutcome(seatByOutcome(enacted.world, settled, input.toDay, input.offices), settled, input.toDay);
       facts.push(...enacted.facts);
     } else {
       const referred = referOn(world, settled, institution, input);
@@ -484,7 +524,7 @@ function giveAdvice(
       localId: `advice_${procedure.id}`.slice(0, 60),
       kind: "council_advised",
       summary: said,
-      affectedRefs: [{ kind: "polity", id: institution.polityId }, { kind: "character", id: procedure.sponsorCharacterId }, ...(ruler === null ? [] : [{ kind: "character" as const, id: ruler.id }])],
+      affectedRefs: [{ kind: "procedure", id: procedure.id }, { kind: "polity", id: institution.polityId }, { kind: "character", id: procedure.sponsorCharacterId }, ...(ruler === null ? [] : [{ kind: "character" as const, id: ruler.id }])],
       visibility: "polity",
       discoveryState: "polity",
       knowableInDays: 0,
@@ -511,14 +551,14 @@ function settleAdvice(world: WorldState, input: HoldVotesInput): { world: WorldS
     next = { ...next, material: { ...next.material, politicalProcedures: next.material.politicalProcedures.map((candidate) => (candidate.id === procedure.id ? settled : candidate)) } };
     if (carried) {
       const enacted = carryOutEnactment(next, procedure.id, input.toDay, input.ids, input.offices, input.successionRules ?? []);
-      next = seatByOutcome(enacted.world, settled, input.toDay, input.offices);
+      next = sentenceByOutcome(seatByOutcome(enacted.world, settled, input.toDay, input.offices), settled, input.toDay);
       facts.push(...enacted.facts);
     }
     facts.push({
       localId: `advice_settled_${procedure.id}`.slice(0, 60),
       kind: carried ? "motion_passed" : "motion_failed",
       summary: said,
-      affectedRefs: [{ kind: "polity", id: institution.polityId }, { kind: "character", id: procedure.sponsorCharacterId }],
+      affectedRefs: [{ kind: "procedure", id: procedure.id }, { kind: "polity", id: institution.polityId }, { kind: "character", id: procedure.sponsorCharacterId }],
       visibility: "public",
       discoveryState: "public",
       knowableInDays: 0,
@@ -559,7 +599,7 @@ function referOn(world: WorldState, settled: PoliticalProcedure, institution: Go
       localId: `referred_${settled.id}`.slice(0, 60),
       kind: "motion_referred",
       summary: `The ${institution.name} would not have "${settled.label}", and ${sponsor} has taken it to the ${target.name}, which votes in ${MOTION_VOTING_DAYS} days [${settled.id}].`,
-      affectedRefs: [{ kind: "polity", id: institution.polityId }, { kind: "character", id: settled.sponsorCharacterId }],
+      affectedRefs: [{ kind: "procedure", id: settled.id }, { kind: "polity", id: institution.polityId }, { kind: "character", id: settled.sponsorCharacterId }],
       visibility: "public",
       discoveryState: "public",
       knowableInDays: 0,
@@ -612,7 +652,7 @@ export function overruleCost(world: WorldState, procedure: PoliticalProcedure, o
       localId: `overruled_${procedure.id}`.slice(0, 60),
       kind: "council_overruled",
       summary: `${who} carried "${procedure.label}" against the advice of the ${council.name}${customary ? ", as rulers there now do" : ""}.`,
-      affectedRefs: [{ kind: "polity", id: polityId }, ...(ruler === null ? [] : [{ kind: "character" as const, id: ruler.id }])],
+      affectedRefs: [{ kind: "procedure", id: procedure.id }, { kind: "polity", id: polityId }, ...(ruler === null ? [] : [{ kind: "character" as const, id: ruler.id }])],
       visibility: "public",
       discoveryState: "public",
       knowableInDays: 0,
@@ -659,7 +699,7 @@ export function debatersOf(
     const forecast = forecastInWords(world, procedure, offices);
     for (const character of chosen) {
       if (due.has(character.id)) continue;
-      due.set(character.id, `the ${institution.name} votes on "${procedure.label}" [${procedure.id}] in ${inDays} day${inDays === 1 ? "" : "s"}; ${forecast ?? ""} Where he stands, and whether he speaks for or against it ("political_support_set" on it), is his to say`.slice(0, 600));
+      due.set(character.id, `the ${institution.name} votes on "${procedure.label}" [${procedure.id}] in ${inDays} day${inDays === 1 ? "" : "s"}; ${forecast ?? ""} Where he stands, and whether he speaks for or against it ("political_support_set" on it, with what he says in the house as its "words"), is his to say`.slice(0, 600));
     }
   }
   return due;

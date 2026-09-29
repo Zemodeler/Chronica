@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { StateReading } from "@chronica/shared";
+import type { StateOffice, StateReading } from "@chronica/shared";
 import { Sheet, type SheetSide } from "../../../components/ui/sheet";
 import { Tabs, type TabSection } from "../../../components/ui/tabs";
 import { Era } from "../../../components/ui/era";
+import { TreatiesSheet } from "./treaties-sheet";
+import { Explains, Linkify } from "./notes";
 
 /**
  * What a person holds: the offices, the powers, and the land -- and the state
@@ -46,7 +47,7 @@ interface HoldingReading {
   readonly incomeLabel: string;
 }
 
-interface Standing {
+export interface Standing {
   readonly seats: readonly SeatReading[];
   readonly powers: readonly PowerReading[];
   readonly holdings: readonly HoldingReading[];
@@ -73,43 +74,34 @@ function sentencesByHolding(powers: readonly PowerReading[]): { over: string; sa
   });
 }
 
-export function StandingPanel({ gameId, revision, onClose, side }: {
-  readonly gameId: string;
-  readonly revision: number;
+export function StandingPanel({ standing, state, onClose, side, onWriteTo, onOpenLetters }: {
+  readonly standing: Standing | null;
+  readonly state: StateReading | null;
   readonly onClose: () => void;
   readonly side: SheetSide;
+  readonly onWriteTo?: ((polityLabel: string) => void) | undefined;
+  readonly onOpenLetters?: (() => void) | undefined;
 }) {
-  const [standing, setStanding] = useState<Standing | null>(null);
-  const [state, setState] = useState<StateReading | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let live = true;
-    const read = <T,>(path: string): Promise<T | null> =>
-      fetch(`/api/games/${encodeURIComponent(gameId)}/${path}`, { cache: "no-store" })
-        .then((response) => (response.ok ? (response.json() as Promise<T>) : null))
-        .catch(() => null);
-    void read<Standing>("standing").then((data) => { if (!live) return; if (data === null) setFailed(true); else setStanding(data); });
-    void read<StateReading>("state").then((data) => { if (live) setState(data); });
-    return () => { live = false; };
-  }, [gameId, revision]);
-
-  const theState = state !== null && (state.legitimacy !== null || state.offices.length > 0 || state.business.length > 0 || state.factions.length > 0);
-  const abroad = state !== null && (state.treaties.length > 0 || state.regard.length > 0);
+  const theState = state !== null && (state.government !== null || state.legitimacy !== null || state.offices.length > 0 || state.business.length > 0 || state.factions.length > 0);
+  const abroad = state !== null && (state.abroad.powers.length > 0 || state.abroad.between.length > 0);
   const sections: TabSection[] = standing === null ? [] : [
     { id: "you", title: "You", content: <You standing={standing} /> },
     ...(theState && state !== null
       ? [{ id: "state", title: "The state", marked: state.legitimacy?.shaky === true || state.business.some((item) => item.yours), content: <TheState state={state} /> }]
       : []),
     ...(abroad && state !== null
-      ? [{ id: "treaties", title: "Treaties", marked: state.treaties.some((treaty) => treaty.atWar), content: <Treaties state={state} /> }]
+      ? [{
+        id: "treaties",
+        title: "Treaties",
+        marked: state.abroad.powers.some((power) => power.posture === "war" || power.letters.length > 0),
+        content: <TreatiesSheet abroad={state.abroad} onWriteTo={onWriteTo} onOpenLetters={onOpenLetters} />,
+      }]
       : []),
   ];
 
   return (
-    <Sheet label="your standing" title="Your Standing" width="ledger" side={side} onClose={onClose} className="standing-panel">
-      {failed && <p className="quiet">There is no standing you may read.</p>}
-      {standing === null && !failed && <p className="quiet">Sending for the record…</p>}
+    <Sheet label="your standing" title="Your standing" width="desk" side={side} onClose={onClose} className="standing-panel">
+      {standing === null && <p className="quiet">Sending for the record…</p>}
       {standing !== null && <Tabs label="Your standing" sections={sections} />}
     </Sheet>
   );
@@ -164,8 +156,20 @@ function You({ standing }: { readonly standing: Standing }) {
 }
 
 function TheState({ state }: { readonly state: StateReading }) {
+  const government = state.government;
   return (
     <div className="standing">
+      {government !== null && state.polityLabel !== null && (
+        <section className="standing__section sheet-section">
+          <h3>How {state.polityLabel} is governed</h3>
+          <p>
+            It is <Explains k={`form:${government.form}`}>{government.formLabel}</Explains>
+            {government.rulerLabel !== null ? <>, headed by its <Linkify text={government.rulerLabel} /></> : null}.
+            {government.sovereignLabel !== null && <> The <Linkify text={government.sovereignLabel} /> may change how it is governed.</>}
+          </p>
+        </section>
+      )}
+
       {state.legitimacy !== null && (
         <section className="standing__section sheet-section">
           <h3>The right to rule</h3>
@@ -178,7 +182,7 @@ function TheState({ state }: { readonly state: StateReading }) {
 
       {state.business.length > 0 && (
         <section className="standing__section sheet-section">
-          <h3>Before the councils</h3>
+          <h3><Explains k="rule:vote">Before the councils</Explains></h3>
           <ul>
             {state.business.map((item) => (
               <li key={item.key} className={item.yours ? "standing__seat standing__business is-yours" : "standing__seat standing__business"}>
@@ -193,13 +197,13 @@ function TheState({ state }: { readonly state: StateReading }) {
 
       {state.offices.length > 0 && (
         <section className="standing__section sheet-section">
-          <h3>Who holds office</h3>
+          <h3>Its offices</h3>
           <ul className="standing__offices">
             {state.offices.map((office) => (
-              <li key={office.key}>
-                <span>{office.officeLabel}</span>
-                <strong>{office.holderLabel ?? <em>vacant</em>}{office.yours ? " (you)" : ""}</strong>
-                {office.termLabel !== null && <em><Era text={office.termLabel} /></em>}
+              <li key={office.key} className={office.yours ? "is-yours" : undefined}>
+                <strong><Linkify text={office.officeLabel} /></strong>
+                <span>{howFilled(office)}</span>
+                <em><Holders office={office} /></em>
               </li>
             ))}
           </ul>
@@ -223,36 +227,33 @@ function TheState({ state }: { readonly state: StateReading }) {
   );
 }
 
-function Treaties({ state }: { readonly state: StateReading }) {
-  return (
-    <div className="standing">
-      {state.treaties.length > 0 && (
-        <section className="standing__section sheet-section">
-          <h3>Agreements and wars</h3>
-          <ul>
-            {state.treaties.map((treaty) => (
-              <li key={treaty.key} className={treaty.atWar ? "standing__seat standing__treaty is-war" : "standing__seat standing__treaty"}>
-                <strong>{capitalise(treaty.kindLabel)} with {treaty.withLabel}</strong>
-                <span>{treaty.terms}</span>
-                {treaty.untilLabel !== null && <em>Until <Era text={treaty.untilLabel} />.</em>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {state.regard.length > 0 && (
-        <section className="standing__section sheet-section">
-          <h3>How your government regards other powers</h3>
-          <ul className="standing__offices">
-            {state.regard.map((entry) => (
-              <li key={entry.key}><span>{entry.polityLabel}</span><strong>{capitalise(entry.inWords)}</strong></li>
-            ))}
-          </ul>
-        </section>
-      )}
-    </div>
-  );
-}
-
 const capitalise = (text: string): string => (text.length === 0 ? text : `${text.charAt(0).toUpperCase()}${text.slice(1)}`);
 const lowerFirst = (text: string): string => (text.length === 0 ? text : `${text.charAt(0).toLowerCase()}${text.slice(1)}`);
+
+/** "Election by the Centuriate Assembly, for a year". */
+function howFilled(office: StateOffice): string {
+  const parts = [office.filledLabel, office.termLabel === null ? null : `for ${office.termLabel}`].filter((part) => part !== null);
+  return parts.length === 0 ? "" : capitalise(parts.join(", "));
+}
+
+/**
+ * Who sits in it. Only named people have seats, so a college is its named
+ * members out of its number, and a Senate of three hundred is a count.
+ */
+function Holders({ office }: { readonly office: StateOffice }) {
+  const { holders, seats } = office;
+  if (holders.length === 0) return <>{seats > 1 ? "None of note" : "Vacant"}</>;
+  if (holders.length > 3) return <>{holders.length} of note, of {seats}{office.yours ? "; you among them" : ""}</>;
+  return (
+    <>
+      {holders.map((holder, index) => (
+        <span key={holder.key} className="standing__holder">
+          {index > 0 && ", "}
+          <Linkify text={holder.label} />{holder.yours ? " (you)" : ""}
+          {holder.untilLabel !== null && (seats === 1 || holder.yours) && <>, <Era text={holder.untilLabel} /></>}
+        </span>
+      ))}
+      {seats > holders.length && <>, of {seats}</>}
+    </>
+  );
+}

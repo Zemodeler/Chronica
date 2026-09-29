@@ -36,6 +36,15 @@ export function transportCapacityOf(force: Force, warfare: ScenarioWarfareRules 
   }, 0);
 }
 
+/** "men" for an army, "ships" for a fleet: what a force's count is a count of. */
+export function countWord(force: Force, warfare: ScenarioWarfareRules | undefined, count: number): string {
+  if (!isNavalForce(force, warfare)) return "men";
+  return count === 1 ? "ship" : "ships";
+}
+
+/** A fleet's estimate is of hulls: "about 110 men" was a count of ships. */
+export const asShips = (label: string, naval: boolean): string => (naval ? label.replace(/\bmen\b/g, "ships") : label);
+
 /** Men actually present, which is what has to be carried. */
 export function fitStrengthOf(force: Force): number {
   return force.personnel.reduce((sum, category) => sum + category.fit, 0);

@@ -110,7 +110,7 @@ export function AccountDashboard({
           </div>
         </div>
         <form action={signOut}>
-          <button type="submit" className="button secondary">Sign out</button>
+          <button type="submit" className="btn btn--quiet">Sign out</button>
         </form>
       </header>
 
@@ -134,73 +134,55 @@ export function AccountDashboard({
       {params.email === "invalid" && <p className="error acct-status">We could not send that verification email.</p>}
       {params.status === "deleted" && <p className="notice acct-status">The save and all of its game data were permanently deleted.</p>}
 
-      <div className="account-grid">
-        <button type="button" className="account-card" onClick={() => setOpenDialog("profile")}>
-          <span className="account-card-title">Profile</span>
-          <span className="account-card-meta">
-            {account.displayName}{account.username ? `, @${account.username}` : ""}
-          </span>
-          <span className="account-card-action">Edit</span>
-        </button>
+      {/* The wallet leads: it is the one thing here a player comes back for. */}
+      <section className="acct-wallet" aria-labelledby="acct-wallet-heading">
+        <h2 id="acct-wallet-heading" className="visually-hidden">Your wallet</h2>
+        <p className="acct-wallet__sum"><span className="acct-wallet__figure">{displayedCoins}</span> coins in your wallet</p>
+        <p className="acct-wallet__note">A coin is one US dollar. Orders, letters and character research are paid from here as they happen.</p>
+        <div className="acct-wallet__actions">
+          <button type="button" className="btn btn--primary" onClick={() => setOpenDialog("redeem")}>Redeem a gift code</button>
+          <button type="button" className="word-button" onClick={() => setOpenDialog("wallet")}>See what was spent</button>
+        </div>
+      </section>
 
-        <button type="button" className="account-card" onClick={() => setOpenDialog("wallet")}>
-          <span className="account-card-title">Coin wallet</span>
-          <span className="account-card-value">{displayedCoins}</span>
-          <span className="account-card-action">View</span>
-        </button>
-
-        <button type="button" className="account-card" onClick={() => setOpenDialog("redeem")}>
-          <span className="account-card-title">Redeem a gift</span>
-          <span className="account-card-meta">Enter a gift code to receive coins</span>
-          <span className="account-card-action">Redeem</span>
-        </button>
-
-        <button type="button" className="account-card" onClick={() => setOpenDialog("saves")}>
-          <span className="account-card-title">Your saves</span>
-          <span className="account-card-meta">
-            {totalSaves} save{totalSaves !== 1 ? "s" : ""}
-          </span>
-          <span className="account-card-action">Manage</span>
-        </button>
-
-        <button type="button" className="account-card" onClick={() => setOpenDialog("email")}>
-          <span className="account-card-title">Recovery email</span>
-          <span className="account-card-meta">
-            {account.emailVerified ? `Verified: ${account.email}` : "No recovery email set"}
-          </span>
-          <span className="account-card-action">{account.emailVerified ? "Info" : "Add"}</span>
-        </button>
-
+      <dl className="acct-ledger">
+        <div>
+          <dt>Name</dt>
+          <dd>{account.displayName}{account.username ? <span className="acct-ledger__quiet">, @{account.username}</span> : null}</dd>
+          <dd><button type="button" className="word-button" onClick={() => setOpenDialog("profile")}>Edit</button></dd>
+        </div>
+        <div>
+          <dt>Recovery email</dt>
+          <dd>{account.emailVerified ? account.email : <span className="acct-ledger__quiet">None yet. Without one, a forgotten password locks you out.</span>}</dd>
+          <dd><button type="button" className="word-button" onClick={() => setOpenDialog("email")}>{account.emailVerified ? "Details" : "Add one"}</button></dd>
+        </div>
+        <div>
+          <dt>Saves</dt>
+          <dd>{totalSaves === 0 ? <span className="acct-ledger__quiet">None</span> : `${totalSaves} save${totalSaves !== 1 ? "s" : ""}`}</dd>
+          <dd><button type="button" className="word-button" onClick={() => setOpenDialog("saves")}>Manage</button></dd>
+        </div>
         {canManageGifts && (
-          <button type="button" className="account-card account-card--dev" onClick={() => setOpenDialog("developer")}>
-            <span className="account-card-title">Gift codes</span>
-            <span className="account-card-meta">
-              {gifts.length} code{gifts.length !== 1 ? "s" : ""} created
-            </span>
-            <span className="account-card-action">Manage</span>
-          </button>
+          <div className="acct-ledger__dev">
+            <dt>Gift codes</dt>
+            <dd>{gifts.length} created</dd>
+            <dd><button type="button" className="word-button" onClick={() => setOpenDialog("developer")}>Manage</button></dd>
+          </div>
         )}
-
         {canManageGifts && localAiProviderConfiguration?.available && (
-          <button type="button" className="account-card account-card--dev" onClick={() => setOpenDialog("ai_provider")}>
-            <span className="account-card-title">Local AI provider</span>
-            <span className="account-card-meta">
-              {localAiProviderConfiguration.activeProvider === "openai" ? "OpenAI" : "Anthropic"}
-            </span>
-            <span className="account-card-action">Switch</span>
-          </button>
+          <div className="acct-ledger__dev">
+            <dt>Local AI provider</dt>
+            <dd>{localAiProviderConfiguration.activeProvider === "openai" ? "OpenAI" : "Anthropic"}</dd>
+            <dd><button type="button" className="word-button" onClick={() => setOpenDialog("ai_provider")}>Switch</button></dd>
+          </div>
         )}
-
         {canManageGifts && (
-          <button type="button" className="account-card account-card--dev" onClick={() => setOpenDialog("workflow_proposals")}>
-            <span className="account-card-title">Invented workflows</span>
-            <span className="account-card-meta">
-              {pendingProposalCount} saved workflow{pendingProposalCount === 1 ? "" : "s"}
-            </span>
-            <span className="account-card-action">Review</span>
-          </button>
+          <div className="acct-ledger__dev">
+            <dt>Invented workflows</dt>
+            <dd>{pendingProposalCount} saved</dd>
+            <dd><button type="button" className="word-button" onClick={() => setOpenDialog("workflow_proposals")}>Review</button></dd>
+          </div>
         )}
-      </div>
+      </dl>
 
       <dialog
         ref={dialogRef}
@@ -340,7 +322,7 @@ function WalletDialog({ account, displayedCoins, onClose }: { account: AccountDa
               <form action={resumeGame} key={game.gameId} className="acct-paused-row">
                 <input type="hidden" name="gameId" value={game.gameId} />
                 <span>{game.title}</span>
-                <button type="submit" className="button sm">Resume queued work</button>
+                <button type="submit" className="btn btn--primary btn--small">Resume queued work</button>
               </form>
             ))}
           </>
@@ -468,7 +450,7 @@ function DeveloperDialog({ gifts, onClose }: { gifts: SerializedGift[]; onClose:
                           <form action={revokeDeveloperGift}>
                             <input type="hidden" name="giftCodeId" value={gift.id} />
                             <input type="hidden" name="auditReason" value="Revoked via dashboard" />
-                            <button type="submit" className="button sm">Revoke</button>
+                            <button type="submit" className="btn btn--danger btn--small">Revoke</button>
                           </form>
                         )}
                       </td>
@@ -589,19 +571,19 @@ function WorkflowProposalsDialog({ onClose }: { onClose: () => void }) {
 
         {workflows.map((workflow) => (
           <div key={workflow.id} style={{ borderTop: "1px solid var(--rule)", paddingTop: "1rem", marginTop: "1rem" }}>
-            <p><strong>{workflow.actionId}</strong> · {workflow.status} · {workflow.successfulUseCount} successful use{workflow.successfulUseCount === 1 ? "" : "s"}</p>
+            <p><strong>{workflow.actionId}</strong> is {workflow.status}, with {workflow.successfulUseCount} successful use{workflow.successfulUseCount === 1 ? "" : "s"}.</p>
             <p><strong>Intent:</strong> {workflow.intent}</p>
-            <p style={{ color: "var(--fg-muted)", fontSize: "0.875rem" }}>
-              {workflow.description} · game: <code>{workflow.gameId.slice(0, 8)}</code> · last use: {workflow.lastUsedAt ? new Date(workflow.lastUsedAt).toLocaleString() : "never"}
+            <p style={{ color: "var(--fg-muted)", fontSize: "var(--step-0)" }}>
+              {workflow.description} In game <code>{workflow.gameId.slice(0, 8)}</code>, last used {workflow.lastUsedAt ? new Date(workflow.lastUsedAt).toLocaleString() : "never"}.
             </p>
             {useHistory[workflow.id] && (
-              <pre style={{ fontSize: "0.75rem", overflowX: "auto", background: "var(--papyrus-shade)", padding: "0.5rem", borderRadius: "4px" }}>
+              <pre style={{ fontSize: "var(--step--1)", overflowX: "auto", background: "var(--papyrus-shade)", padding: "0.5rem", borderRadius: "4px" }}>
                 {JSON.stringify({ definition: workflow.definition, recentUses: useHistory[workflow.id] }, null, 2)}
               </pre>
             )}
 
             <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
-              <button type="button" className="button sm secondary" onClick={() => void viewUseHistory(workflow.id)}>
+              <button type="button" className="btn btn--quiet btn--small" onClick={() => void viewUseHistory(workflow.id)}>
                 View definition & uses
               </button>
               <input
@@ -614,7 +596,7 @@ function WorkflowProposalsDialog({ onClose }: { onClose: () => void }) {
               />
               <button
                 type="button"
-                className="button sm"
+                className="btn btn--quiet btn--small"
                 disabled={working[workflow.id] || workflow.status === "active"}
                 onClick={() => void setStatus(workflow.id, "active")}
               >
@@ -622,7 +604,7 @@ function WorkflowProposalsDialog({ onClose }: { onClose: () => void }) {
               </button>
               <button
                 type="button"
-                className="button sm secondary"
+                className="btn btn--quiet btn--small"
                 disabled={working[workflow.id] || workflow.status === "disabled"}
                 onClick={() => void setStatus(workflow.id, "disabled")}
               >

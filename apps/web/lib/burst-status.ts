@@ -4,7 +4,8 @@
  * Pure: the rows come in, the view goes out, and the one judgment here -- is a
  * "running" row actually running -- is made against the heartbeat, not the
  * clock on the wall when it started. A burst can be silent for the length of
- * one model call; it cannot go a minute and a half without beating.
+ * one model call; it cannot go a minute and a half without beating, nor eight
+ * minutes without getting anywhere.
  */
 
 /** How long a burst may go without a heartbeat before it is treated as dead. Three missed beats, and well under one model call's cap. */
@@ -13,6 +14,32 @@ export const BURST_STALE_MS = 90_000;
 export const HEARTBEAT_MS = 20_000;
 /** A coin hold older than this was taken by a call that can no longer be running: the cap is 150 s, tried at most twice. */
 export const STALE_HOLD_MS = 6 * 60_000;
+/**
+ * How long a burst may go without getting anywhere -- no stage reported, no
+ * call answered, no passage written -- before it is treated as stuck, however
+ * steadily its process beats. Above the longest honest silence (one call at
+ * its 150 s cap, tried twice, and its repair) and below the player's patience.
+ */
+export const BURST_NO_PROGRESS_MS = 8 * 60_000;
+/**
+ * How long the simulation may run before it is told to stop and commit what
+ * it has (see `burstDeadlineMs` in burst-runner.ts). A measured turn is
+ * 80-130 s; this is the ceiling on a pathological one, not a budget.
+ */
+export const BURST_DEADLINE_MS = 12 * 60_000;
+
+/** The cutoffs a running burst is judged alive by, at `now`. */
+export function livenessAt(now: Date, noProgressMs = noProgressAllowedMs()): { readonly aliveAfter: Date; readonly progressAfter: Date } {
+  return { aliveAfter: new Date(now.getTime() - BURST_STALE_MS), progressAfter: new Date(now.getTime() - noProgressMs) };
+}
+
+/**
+ * A burst answered by hand waits on a person writing the answer, which can
+ * take far longer than eight minutes; only a stopped heartbeat reaps it.
+ */
+export function noProgressAllowedMs(env: Readonly<Record<string, string | undefined>> = process.env): number {
+  return env.CHRONICA_AI_MODE === "hand" ? Number.MAX_SAFE_INTEGER / 2 : BURST_NO_PROGRESS_MS;
+}
 
 export interface BurstRow {
   readonly id: string;
@@ -20,6 +47,8 @@ export interface BurstRow {
   readonly error: string | null;
   readonly startedAt: Date;
   readonly heartbeatAt: Date | null;
+  /** Last time the burst got somewhere; null on rows written before 0042. */
+  readonly progressAt?: Date | null | undefined;
   readonly endedAt: Date | null;
 }
 
@@ -63,14 +92,25 @@ export interface BurstStatusView {
 
 export const ABANDONED_ERROR = "The world stopped moving before the order was carried out. Your world is as it was; give the order again.";
 
-export function isStale(row: BurstRow, now: Date, staleMs = BURST_STALE_MS): boolean {
-  if (row.status !== "running") return false;
+export const STUCK_ERROR = "The world stopped getting anywhere with the order, so it was given up. Your world is as it was; give the order again.";
+
+/** Why a "running" row is not running: its process fell silent, or it stopped getting anywhere. Null while it is alive. */
+export function abandonment(row: BurstRow, now: Date, staleMs = BURST_STALE_MS, noProgressMs = BURST_NO_PROGRESS_MS): "silent" | "stuck" | null {
+  if (row.status !== "running") return null;
   const lastBeat = row.heartbeatAt ?? row.startedAt;
-  return now.getTime() - lastBeat.getTime() > staleMs;
+  if (now.getTime() - lastBeat.getTime() > staleMs) return "silent";
+  const lastProgress = row.progressAt ?? row.startedAt;
+  if (now.getTime() - lastProgress.getTime() > noProgressMs) return "stuck";
+  return null;
+}
+
+export function isStale(row: BurstRow, now: Date, staleMs = BURST_STALE_MS): boolean {
+  return abandonment(row, now, staleMs) !== null;
 }
 
 export function toBurstStatus(row: BurstRow, rows: readonly ProgressRow[], afterId: number, now: Date): BurstStatusView {
-  const stale = isStale(row, now);
+  const abandoned = abandonment(row, now);
+  const stale = abandoned !== null;
   const progress = rows
     .filter((entry) => entry.id > afterId && entry.kind === "progress")
     .map((entry) => {
@@ -92,7 +132,9 @@ export function toBurstStatus(row: BurstRow, rows: readonly ProgressRow[], after
         body: p.body,
         subjects: Array.isArray(p.subjects) ? p.subjects : [],
         tags: Array.isArray(p.tags) ? p.tags : [],
-        changes: Array.isArray(p.changes) ? p.changes : [],
+        // Money that moved waits for the published entry, which checks the
+        // reader may open the purse; a live line is not the place to leak it.
+        changes: Array.isArray(p.changes) ? p.changes.filter((change: unknown) => (change as { kind?: unknown } | null)?.kind !== "account") : [],
         quote: p.quote ?? null,
         unread: true,
         published: false,
@@ -102,7 +144,7 @@ export function toBurstStatus(row: BurstRow, rows: readonly ProgressRow[], after
   return {
     burstId: row.id,
     status: stale ? "failed" : row.status,
-    error: stale ? ABANDONED_ERROR : row.error,
+    error: abandoned === "silent" ? ABANDONED_ERROR : abandoned === "stuck" ? STUCK_ERROR : row.error,
     startedAt: row.startedAt.toISOString(),
     endedAt: row.endedAt?.toISOString() ?? null,
     progress,

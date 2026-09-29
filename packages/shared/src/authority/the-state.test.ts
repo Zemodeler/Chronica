@@ -24,13 +24,31 @@ describe("the state a person serves, as they could know it", () => {
     expect(reading.polityLabel).toBe(state.map.polities.find((polity) => polity.id === holder.polityId)!.name);
   });
 
+  it("says how his power is governed, and lists each office once, with how it is filled", () => {
+    const seeded = world();
+    const holder = holderOf(seeded);
+    // The sim grows constitutions at the first tick (`ensureConstitutions`); the seed has none.
+    const state: WorldState = {
+      ...seeded,
+      constitutions: [{ polityId: holder.polityId!, form: "oligarchic_republic", origin: "scenario", adoptedAtStep: 0, rulerOfficeId: null, sovereignInstitutionId: null, history: [] }],
+    };
+    const reading = readTheState(state, holder.id, offices, clock, definition.government.successionRules);
+    expect(reading.government?.formLabel).toMatch(/great houses|republic/i);
+    const keys = reading.offices.map((office) => office.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    const mine = reading.offices[0]!;
+    expect(mine.holders.some((seat) => seat.yours)).toBe(true);
+    expect(mine.filledLabel).not.toBeNull();
+    for (const office of reading.offices) expect(office.holders.length).toBeLessThanOrEqual(office.seats);
+  });
+
   it("does not show a foreigner another power's offices", () => {
     const state = world();
     const holder = holderOf(state);
     const foreigner = state.characters.find((character) => character.alive && character.polityId !== holder.polityId && character.polityId !== null)!;
     const theirs = readTheState(state, foreigner.id, offices, clock);
-    const romanSeats = new Set(state.material.officeSeats.filter((seat) => seat.holderCharacterId === holder.id).map((seat) => seat.id));
-    expect(theirs.offices.some((office) => romanSeats.has(office.key))).toBe(false);
+    const romanOffices = new Set(state.material.officeSeats.filter((seat) => seat.holderCharacterId === holder.id).map((seat) => seat.officeId));
+    expect(theirs.offices.some((office) => romanOffices.has(office.key))).toBe(false);
   });
 
   it("keeps a treaty made in private from those who do not govern", () => {
@@ -43,11 +61,12 @@ describe("the state a person serves, as they could know it", () => {
     };
     const withSecret = WorldStateSchema.parse({ ...state, polityAgreements: [...state.polityAgreements, secret] });
     const commoner = withSecret.characters.find((character) =>
-      character.alive && character.polityId === holder.polityId
+      character.alive && character.polityId === holder.polityId && character.officesHeld.length === 0
       && !withSecret.material.officeSeats.some((seat) => seat.status === "held" && seat.holderCharacterId === character.id));
     if (commoner === undefined) return;
-    expect(readTheState(withSecret, commoner.id, offices, clock).treaties.some((treaty) => treaty.key === "secret-pact")).toBe(false);
-    expect(readTheState(withSecret, commoner.id, offices, clock).regard).toEqual([]);
+    const powers = readTheState(withSecret, commoner.id, offices, clock).abroad.powers;
+    expect(powers.some((power) => power.lines.some((line) => line.key === "secret-pact"))).toBe(false);
+    expect(powers.every((power) => power.regard === null)).toBe(true);
   });
 
   it("says legitimacy in words, never as a number", () => {

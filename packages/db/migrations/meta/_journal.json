@@ -288,6 +288,20 @@
       "when": 1788401100000,
       "tag": "0040_one_running_burst",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1788401200000,
+      "tag": "0041_threads",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1788401300000,
+      "tag": "0042_burst_accounting",
+      "breakpoints": true
     }
   ]
 }

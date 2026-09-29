@@ -203,6 +203,26 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
       return () => observer.disconnect();
     }, [requestRedraw]);
 
+    // Moving the window to a screen of another pixel density changes
+    // devicePixelRatio without resizing anything, which left the canvas at
+    // the old backing-store resolution. A resolution query matches only the
+    // current ratio, so it is re-armed for the new one each time it fires.
+    useEffect(() => {
+      if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+      let query: MediaQueryList | null = null;
+      const arm = () => {
+        query?.removeEventListener("change", onChange);
+        query = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+        query.addEventListener("change", onChange);
+      };
+      function onChange() {
+        arm();
+        requestRedraw();
+      }
+      arm();
+      return () => query?.removeEventListener("change", onChange);
+    }, [requestRedraw]);
+
     useEffect(() => () => {
       if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
       if (settleTimerRef.current) clearTimeout(settleTimerRef.current);

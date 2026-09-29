@@ -123,7 +123,7 @@ describe("the second run", () => {
   });
 
   it("takes the id out of a { kind, id } written where only the id was wanted", () => {
-    const value = { ...JSON.parse(answer({})), deltas: [{ op: "character_intent_set", actorCharacterRef: { kind: "character", id: "leptines-syracuse" }, actionType: "prepare", targetRefs: [], rationale: "He readies a cargo.", priority: 50, visibility: "private" }] };
+    const value = { ...(JSON.parse(answer({})) as Record<string, unknown>), deltas: [{ op: "character_intent_set", actorCharacterRef: { kind: "character", id: "leptines-syracuse" }, actionType: "prepare", targetRefs: [], rationale: "He readies a cargo.", priority: 50, visibility: "private" }] };
     const read = readLeniently(OrchestratorOutputSchema, value, kindsIn(opening()));
     expect(read.parsed.success).toBe(true);
   });

@@ -10,15 +10,17 @@ import {
   listBurstProgress,
   listChronicle,
   markChronicleRead,
+  setThreadFollowed,
   reapStaleBursts,
   schema,
   type ChronicaDatabase,
 } from "@chronica/db";
-import { PlayerDecisionSchema, type OrderPartyRef, type WorldState } from "@chronica/shared";
+import { formatCoins } from "@chronica/billing";
+import { buildStation, formatWorldDate, PlayerDecisionSchema, seesAccount, type OrderPartyRef, type WorldState } from "@chronica/shared";
 import { nameOfSubject, whoSeeksThePlayer, type AnsweredDecision } from "@chronica/sim";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { dateLabel, prepareBurst, runBurstToCommit, type BurstJob } from "./burst-runner";
-import { ABANDONED_ERROR, BURST_STALE_MS, toBurstStatus, type BurstStatusView } from "./burst-status";
+import { ABANDONED_ERROR, livenessAt, toBurstStatus, type BurstStatusView } from "./burst-status";
 import { requiredDatabaseUrl } from "./database-url";
 import { openInitiatedDialogue } from "./dialogue-service";
 
@@ -71,20 +73,26 @@ export type StartOutcome =
  * Gives an order, or lets time pass, and returns as soon as the burst exists.
  *
  * The burst itself runs after the response is sent (`after`), in this same
- * process, with its own database pool. It heartbeats while it runs; a process
- * that dies mid-turn is found out by its silence within `BURST_STALE_MS`, and
- * the next order reaps the row and the coins it held.
+ * process, with its own database pool. It heartbeats while it runs and marks
+ * its progress as it makes it; a process that dies mid-turn is found out by
+ * its silence, one stuck by its lack of progress (`livenessAt`), and the next
+ * order or look at the page reaps the row and the coins it held.
+ *
+ * There is no durable queue behind this: a burst whose process dies is not
+ * resumed, it is failed and the world stays at its last commit. The order is
+ * the player's to give again, and with the same `idempotencyKey` a resend
+ * that raced the first finds its burst rather than paying twice.
  */
 export async function startDetachedBurst(
   gameId: string,
   /** Null to let time pass without giving an order. */
   orderText: string | null,
-  options: { readonly spanDays?: number | undefined } = {},
+  options: { readonly spanDays?: number | undefined; readonly idempotencyKey?: string | undefined } = {},
 ): Promise<StartOutcome> {
   const context = await resolveContext(gameId);
   if (context === null) return { status: "error", message: "You are not playing in this game." };
   try {
-    return await launch(context, { gameId, orderText, spanDays: options.spanDays });
+    return await launch(context, { gameId, orderText, spanDays: options.spanDays, idempotencyKey: options.idempotencyKey });
   } finally {
     await context.close();
   }
@@ -99,11 +107,14 @@ async function launch(
     readonly answeredDecision?: AnsweredDecision | undefined;
     readonly resolvesDecision?: { readonly id: string; readonly optionId: string } | undefined;
     readonly askedAs?: string | undefined;
+    readonly idempotencyKey?: string | undefined;
   },
 ): Promise<StartOutcome> {
   const { db, userId, playerId, characterId } = context;
   const prepared = await prepareBurst(db, { ...input, userId, playerId, characterId });
   if (prepared.status === "error") return prepared;
+  // Sent before, under the same id: follow that burst, pay for nothing new.
+  if (prepared.status === "existing") return { status: "started", burstId: prepared.burstId };
   const job = prepared.job;
 
   after(async () => {
@@ -131,7 +142,7 @@ export async function getBurstStatus(gameId: string, burstId: string, afterId: n
   const { db, close } = context;
   try {
     const now = new Date();
-    await reapStaleBursts(db, gameId, new Date(now.getTime() - BURST_STALE_MS), ABANDONED_ERROR);
+    await reapStaleBursts(db, gameId, livenessAt(now), ABANDONED_ERROR);
     const [row, rows] = await Promise.all([getBurst(db, gameId, burstId), listBurstProgress(db, burstId, afterId)]);
     if (row === undefined) return null;
     return toBurstStatus(row, rows, afterId, now);
@@ -143,18 +154,31 @@ export async function getBurstStatus(gameId: string, burstId: string, afterId: n
 export async function getGameView(gameId: string) {
   const context = await resolveContext(gameId);
   if (context === null) return null;
-  const { db, close } = context;
+  const { db, close, userId, characterId } = context;
   try {
-    const [view, chronicle, decision, running] = await Promise.all([
+    const [view, chronicle, decision, running, purse] = await Promise.all([
       getWorldView(db, gameId),
       listChronicle(db, gameId),
       getOpenDecision(db, gameId),
-      findRunningBurst(db, gameId, new Date(Date.now() - BURST_STALE_MS)),
+      findRunningBurst(db, gameId, livenessAt(new Date())),
+      readPurse(db, gameId, userId),
     ]);
     if (view === undefined) return null;
+    // A purse's movements belong to whoever may open it. The historian's
+    // entry claimed the change by its owner; this checks the reader too.
+    const station = buildStation({ world: view.world, characterId, offices: view.scenarioGovernment?.offices ?? [] });
+    const readable = (change: { readonly kind?: unknown; readonly id?: unknown }): boolean =>
+      change.kind !== "account" || (typeof change.id === "string" && seesAccount(station, change.id));
     return {
       gameTitle: view.gameTitle,
       instant: view.world.instant,
+      // The lintel's date. Read with the record, so the date moves in the same
+      // breath as the Chronicle that says why.
+      dateLabel: formatWorldDate(view.world.instant, view.scenarioClock),
+      // What the player has to spend, and what this save has spent against
+      // the cap it was given. Turns are billed by the model's tokens, so there
+      // is no price to show in advance -- only what was actually spent.
+      coins: purse,
       // The whole record, oldest first -- not the last report. A chronicle you
       // cannot turn back through is a notification.
       //
@@ -175,8 +199,9 @@ export async function getGameView(gameId: string) {
         // refs. Naming them on the way out repairs the old record rather than
         // leaving two rows of engine handles in it forever.
         tags: namedTags(view.world, entry.tags),
-        changes: entry.changes,
+        changes: (Array.isArray(entry.changes) ? entry.changes as { kind?: unknown; id?: unknown }[] : []).filter(readable),
         quote: entry.quote,
+        storylineIds: Array.isArray(entry.storylineIds) ? (entry.storylineIds as unknown[]).filter((id): id is string => typeof id === "string") : [],
         // read_at has been on the row since the table was written and nothing
         // ever set it, so the badge counted the length of the record and
         // called it unopened.
@@ -192,20 +217,50 @@ export async function getGameView(gameId: string) {
   }
 }
 
+/** The wallet and this save's spending, as coin strings. */
+async function readPurse(db: ChronicaDatabase, gameId: string, userId: string) {
+  const [[wallet], [game]] = await Promise.all([
+    db.select({ available: schema.creditWallets.availableMicrocredits }).from(schema.creditWallets).where(eq(schema.creditWallets.userId, userId)).limit(1),
+    db.select({ budget: schema.games.creditBudgetMicrocredits, spent: schema.games.creditSpentMicrocredits }).from(schema.games).where(eq(schema.games.id, gameId)).limit(1),
+  ]);
+  return {
+    available: formatCoins(wallet?.available ?? 0n),
+    spent: game === undefined ? null : formatCoins(game.spent),
+    cap: game === undefined ? null : formatCoins(game.budget),
+  };
+}
+
 /**
- * Mark the record as read, as far as it has been written.
+ * Mark entries of the record read.
  *
- * Called when the player opens the Chronicle. Deliberately marks everything
- * rather than up to a particular entry: the panel shows the whole record at
- * once, oldest first, and pretending to track a scroll position would be a
- * more precise lie than the one it replaces.
+ * With ids, the entries the player has actually had in view: the Chronicle
+ * marks an entry read once it has sat on the page long enough to be read,
+ * so the player can see what is new and what they have already turned
+ * through. Without, everything -- "Mark all as read".
  */
-export async function markTheRecordRead(gameId: string): Promise<boolean> {
+export async function markTheRecordRead(gameId: string, entryIds?: readonly string[]): Promise<boolean> {
   const context = await resolveContext(gameId);
   if (context === null) return false;
   const { db, close } = context;
   try {
-    await markChronicleRead(db, gameId);
+    await markChronicleRead(db, gameId, new Date(), entryIds);
+    return true;
+  } finally {
+    await close();
+  }
+}
+
+/**
+ * Follow a thread of history, or stop. A thread the player may not know of
+ * can be followed by id and still shows nothing (`threadsYouSee`), so this
+ * needs no check of its own.
+ */
+export async function followTheThread(gameId: string, storylineId: string, followed: boolean): Promise<boolean> {
+  const context = await resolveContext(gameId);
+  if (context === null) return false;
+  const { db, close } = context;
+  try {
+    await setThreadFollowed(db, gameId, storylineId, followed);
     return true;
   } finally {
     await close();
@@ -254,7 +309,9 @@ export async function answerDecision(gameId: string, decisionId: string, optionI
     // Hand the world the question and the answer, not a sentence about them.
     // Round-tripping through prose lost the prompt entirely, so the world
     // resumed a decision without quite knowing what had been asked.
-    const answered: AnsweredDecision = { prompt: open.prompt, label: chosen.label, summary: chosen.summary };
+    // The option id, and who was asking, go with it: a succession changes who
+    // the world follows, and a plight in the field is ended by the choice.
+    const answered: AnsweredDecision = { prompt: open.prompt, label: chosen.label, summary: chosen.summary, optionId: chosen.id, predecessorId: askedAs };
     const outcome = await launch(
       { ...context, characterId },
       { gameId, orderText: `The ruler has answered: ${answered.label}.`, answeredDecision: answered, resolvesDecision: { id: decisionId, optionId }, askedAs: characterId === askedAs ? undefined : askedAs },

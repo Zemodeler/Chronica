@@ -20,7 +20,6 @@ export default async function AdminPage({
   return (
     <main id="main-content" className="shell">
       <header className="page-header">
-        <p className="eyebrow">Protected administration</p>
         <h1>Credits and fulfillment</h1>
         <p className="lede">Sensitive mutations require a recent verified sign-in.</p>
       </header>

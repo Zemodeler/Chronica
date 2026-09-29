@@ -78,6 +78,8 @@ export interface ChronicleEntry {
   readonly tags: readonly EntryTag[];
   readonly changes: readonly MapChange[];
   readonly quote: EntryQuote | null;
+  /** The threads of history it belongs to. Absent on a passage still being written. */
+  readonly storylineIds?: readonly string[];
   /** Whether the player has yet opened the record since this was written. */
   readonly unread: boolean;
   /**
@@ -104,6 +106,18 @@ export interface GameView {
   readonly decision: OpenDecision | null;
   /** A burst still moving the world when the view was read. */
   readonly running: { readonly burstId: string } | null;
+  /** The world's date as the record stands. Absent until the first read. */
+  readonly dateLabel?: string | undefined;
+  /** The wallet and this save's spending. Absent until the first read. */
+  readonly coins?: Purse | undefined;
+}
+
+/** Coin amounts as the server formats them: "4.892". */
+export interface Purse {
+  readonly available: string;
+  /** What this save has spent so far, and the cap it was created with. */
+  readonly spent: string | null;
+  readonly cap: string | null;
 }
 
 /** One answer from `/bursts/<id>`. Mirrors the server's `BurstStatusView`. */
@@ -130,6 +144,13 @@ export interface GameViewController {
   readonly progress: readonly string[];
   readonly error: string | null;
   /**
+   * What the last order actually cost, in coins ("0.314"), read from this
+   * save's spending before and after it. Null before the first order of the
+   * visit. Turns are billed by the model's tokens, so this is the only honest
+   * price there is: what the last one came to.
+   */
+  readonly lastTurnCost: string | null;
+  /**
    * An order, or -- with `wait` and no words -- time let pass. `spanDays` is
    * how far the world is to run; omitted, the engine decides. Resolves true
    * when the burst committed, so the caller can go and read the record.
@@ -138,12 +159,12 @@ export interface GameViewController {
   readonly choose: (decisionId: string, optionId: string) => Promise<void>;
   readonly refresh: () => Promise<void>;
   /**
-   * The player has opened the record.
+   * The player has read these entries -- or, with no ids, the whole record.
    *
-   * Marks server-side and locally in the same breath, so the badge clears as
-   * the panel opens rather than after a round trip.
+   * Marks server-side and locally in the same breath, so the mark and the
+   * badge clear as the entry is read rather than after a round trip.
    */
-  readonly markRead: () => Promise<void>;
+  readonly markRead: (entryIds?: readonly string[]) => Promise<void>;
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
@@ -163,15 +184,32 @@ export function useGameView(gameId: string): GameViewController {
   const following = useRef<string | null>(null);
   /** An order on its way to the server, so a double click or Enter-and-click sends it once. */
   const sending = useRef(false);
+  // The id the last order that never reached the server went out under. The
+  // same order sent again goes under the same id, so a send whose answer was
+  // lost -- the burst opened, the reply did not arrive -- is found by the
+  // server rather than paid for twice.
+  const unsent = useRef<{ readonly sent: string; readonly requestId: string } | null>(null);
+  const [lastTurnCost, setLastTurnCost] = useState<string | null>(null);
+  /** This save's spending when the running order was sent, to price it once it is done. */
+  const spentBefore = useRef<string | null>(null);
+  const spentNow = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     const response = await fetch(`/api/games/${gameId}/simulate`, { cache: "no-store" });
     if (!response.ok) return;
     const body = (await response.json()) as GameView;
+    const spent = body.coins?.spent ?? null;
+    spentNow.current = spent;
+    if (spentBefore.current !== null && spent !== null) {
+      setLastTurnCost(coinDifference(spent, spentBefore.current));
+      spentBefore.current = null;
+    }
     setCommitted({
       chronicle: (body.chronicle ?? []).map((entry) => ({ ...entry, published: true })),
       decision: body.decision ?? null,
       running: body.running ?? null,
+      dateLabel: body.dateLabel,
+      coins: body.coins,
     });
   }, [gameId]);
   const view = useMemo<GameView>(
@@ -244,16 +282,21 @@ export function useGameView(gameId: string): GameViewController {
     // order is on its way, so it cannot be sent a second time.
     setBusy(true);
     setError(null);
+    spentBefore.current = spentNow.current;
     let burstId: string;
     try {
+      const sent = `${path} ${JSON.stringify(body)}`;
+      const requestId = unsent.current?.sent === sent ? unsent.current.requestId : crypto.randomUUID();
       let response: Response;
       try {
-        response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...(body as object), requestId }) });
       } catch {
+        unsent.current = { sent, requestId };
         setError("The order could not be sent.");
         setBusy(false);
         return false;
       }
+      unsent.current = null;
       const answer = (await response.json().catch(() => ({}))) as { burstId?: string; error?: string };
       if (!response.ok || typeof answer.burstId !== "string") {
         setError(answer.error ?? "The order could not be carried out.");
@@ -282,16 +325,45 @@ export function useGameView(gameId: string): GameViewController {
     await start(`/api/games/${gameId}/decisions/${decisionId}`, { optionId });
   }, [gameId, start]);
 
-  const markRead = useCallback(async () => {
-    setCommitted((current) => (current.chronicle.some((entry) => entry.unread)
-      ? { ...current, chronicle: current.chronicle.map((entry) => ({ ...entry, unread: false })) }
+  const markRead = useCallback(async (entryIds?: readonly string[]) => {
+    if (entryIds !== undefined && entryIds.length === 0) return;
+    const wanted = entryIds === undefined ? null : new Set(entryIds);
+    const reads = (entry: ChronicleEntry) => entry.unread && (wanted === null || wanted.has(entry.id));
+    setCommitted((current) => (current.chronicle.some(reads)
+      ? { ...current, chronicle: current.chronicle.map((entry) => (reads(entry) ? { ...entry, unread: false } : entry)) }
       : current));
     // A badge that fails to clear is a small thing; an error dialog over a
-    // panel the player has just opened is not. Swallowed on purpose.
-    await fetch(`/api/games/${gameId}/chronicle/read`, { method: "POST" }).catch(() => undefined);
+    // panel the player is reading is not. Swallowed on purpose.
+    await fetch(`/api/games/${gameId}/chronicle/read`, {
+      method: "POST",
+      ...(entryIds === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: entryIds }) }),
+    }).catch(() => undefined);
   }, [gameId]);
 
-  return { view, busy, progress, error, send, choose, refresh, markRead };
+  return { view, busy, progress, error, lastTurnCost, send, choose, refresh, markRead };
+}
+
+/** The wallet is empty, or this save has spent its cap: nothing more can be sent. */
+export function purseIsSpent(purse: Purse | undefined): boolean {
+  if (purse === undefined) return false;
+  if (purse.available === "0") return true;
+  return purse.spent !== null && purse.cap !== null && coinDifference(purse.cap, purse.spent) === "0";
+}
+
+/**
+ * `after - before` for two coin strings, to the thousandth. Coins carry up to
+ * six places; the difference is done in millionths so no float rounding
+ * turns 0.3 into 0.29999.
+ */
+export function coinDifference(after: string, before: string): string {
+  const micro = (coins: string): number => {
+    const [whole = "0", fraction = ""] = coins.split(".");
+    return Number(whole) * 1_000_000 + Number(fraction.padEnd(6, "0").slice(0, 6));
+  };
+  const thousandths = Math.max(0, Math.round((micro(after) - micro(before)) / 1000));
+  const whole = Math.floor(thousandths / 1000);
+  const fraction = String(thousandths % 1000).padStart(3, "0").replace(/0+$/, "");
+  return fraction.length === 0 ? String(whole) : `${whole}.${fraction}`;
 }
 
 /** How many entries the player has not yet turned back to. */

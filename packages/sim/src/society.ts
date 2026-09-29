@@ -1,4 +1,9 @@
 import {
+  LOOSE_COHESION_BPS,
+  readDepartments,
+  skillShare,
+  warsOf,
+  warWeariness,
   allOffices,
   boundedId,
   createPressure,
@@ -14,7 +19,11 @@ import {
   type VotingBloc,
   type WorldState,
 } from "@chronica/shared";
+import { circleName, clientsName, CLASS_NAMES } from "./group-names";
 import { chambersOf, polityPhrase, rulerOf, rulerOfficeOf, templateFor, type GovernmentRules } from "./constitutions";
+import { grumbleAtOfficers } from "./grumbling";
+import { aimsFromState } from "./outlooks";
+import { sueForPeace } from "./sue-for-peace";
 import type { IdFactory } from "./ports";
 
 /**
@@ -50,6 +59,10 @@ const VETERAN_MEMORY_DAYS = 1_095;
 const PRECEDENT_WINDOW_DAYS = 3_650;
 /** A deposed party's claim fades each month nobody restores it. */
 const DEPOSED_FADE_BPS = 250;
+/** The most a month of rites kept well, or badly, moves a government's standing. */
+const RITES_REACH_BPS = 40;
+/** What a ruler's own piety adds to it, either way, in basis points a month. */
+const RULER_PIETY_REACH_BPS = 10;
 /** Strength past which an interest group presses on its ruler. */
 const CLAMOUR_BPS = 6_500;
 
@@ -107,11 +120,23 @@ function factions(world: WorldState, toDay: number): Candidate[] {
       .map(([id]) => id);
     if (followers.length < 2) continue;
     out.push({
-      key: `faction:${leader.id}`, type: "faction", name: `The friends of ${leader.name}`, polityId: leader.polityId!, leaderId: leader.id, interest: "faction",
+      key: `faction:${leader.id}`, type: "faction", name: leader.name, polityId: leader.polityId!, leaderId: leader.id, interest: "faction",
       strengthBps: clampBps(followers.length * 2_000 + leader.prestigeBps / 4), memberIds: followers, platform: [`Whatever ${leader.name} wants`],
     });
   }
-  return out;
+  // Named once every circle is known, strongest first, so two Fabii in one
+  // Senate are told apart and the greater keeps the plain name.
+  const taken = new Map<string, Set<string>>();
+  return [...out]
+    .sort((a, b) => b.strengthBps - a.strengthBps || a.key.localeCompare(b.key))
+    .map((candidate) => {
+      const leader = world.characters.find((character) => character.id === candidate.leaderId)!;
+      const names = taken.get(candidate.polityId) ?? new Set<string>();
+      const name = circleName(leader, names);
+      names.add(name);
+      taken.set(candidate.polityId, names);
+      return { ...candidate, name };
+    });
 }
 
 /** A man others pay dues to, or who holds many estates and their tenants, has clients. */
@@ -131,7 +156,7 @@ function clienteles(world: WorldState): Candidate[] {
     const strength = clampBps(clients.size * 1_500 + estates * 800);
     if (strength < GROUP_DISSOLVES_BPS) continue;
     out.push({
-      key: `clients:${patron.id}`, type: "clientele", name: `The clients of ${patron.name}`, polityId: patron.polityId!, leaderId: patron.id, interest: "clients",
+      key: `clients:${patron.id}`, type: "clientele", name: clientsName(patron), polityId: patron.polityId!, leaderId: patron.id, interest: "clients",
       strengthBps: strength, memberIds: [...clients], platform: [`Vote as ${patron.name} votes`],
     });
   }
@@ -159,8 +184,84 @@ function debtors(world: WorldState): Candidate[] {
     if (strength < GROUP_DISSOLVES_BPS) continue;
     const leader = [...named].sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))[0];
     out.push({
-      key: `debtors:${polity.id}`, type: "debtors", name: `The debtors of ${polityPhrase(polity.name)}`, polityId: polity.id, leaderId: leader !== undefined && leader.prestigeBps >= 4_000 ? leader.id : null, interest: "debtors",
+      key: `debtors:${polity.id}`, type: "debtors", name: CLASS_NAMES.debtors, polityId: polity.id, leaderId: leader !== undefined && leader.prestigeBps >= 4_000 ? leader.id : null, interest: "debtors",
       strengthBps: strength, memberIds: [...new Set(named.map((character) => character.id))], platform: ["Relief of debts", "Land for the ruined"],
+    });
+  }
+  return out;
+}
+
+/**
+ * The pressures that make a government want a department: a ruler carrying
+ * more than one man can do well, a treasury in debt, a plot against its men
+ * found out or carried off, and hunger with unrest -- each with nobody but
+ * the ruler over it. Each becomes an ambition of the ruler's, which he plans for
+ * and carries out -- or not -- as he would anything else he wants.
+ */
+/** How long a plot against the state's men is felt as a reason for a watch. */
+const PRESSURE_MEMORY_DAYS = 90;
+/** Food this short, with stability this low, is a famine the ruler must answer. */
+const HUNGER_BPS = 5_000;
+const UNREST_BPS = 5_000;
+
+function wantDepartments(world: WorldState): WorldState {
+  const reader = readDepartments(world);
+  const wants = new Map<string, { id: string; label: string; polityId: string }[]>();
+  for (const polity of world.map.polities) {
+    // A loose people or a single town has nothing to hand to anybody.
+    if (polity.cohesionBps < LOOSE_COHESION_BPS) continue;
+    if (world.map.provinces.filter((province) => province.controllerPolityId === polity.id).length < 3) continue;
+    const ruler = reader.rulers(polity.id)[0];
+    if (ruler === undefined) continue;
+    const scope = { kind: "polity" as const, id: polity.id };
+    const list: { id: string; label: string; polityId: string }[] = [];
+    if (reader.workload(ruler.id) <= -9) {
+      list.push({ id: `hand-off-${polity.id}`, label: "Hand part of the government to others: he holds more than one man can do well", polityId: polity.id });
+    }
+    const chest = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === polity.id);
+    if (chest !== undefined && chest.balance < 0 && reader.holding(scope, "tax_roll").department === null) {
+      list.push({ id: `treasurer-${polity.id}`, label: "Put somebody in charge of the treasury, which is in debt", polityId: polity.id });
+    }
+    // A plot against one of its own found out, or one that worked, and nobody
+    // but the ruler keeping watch.
+    const struck = world.covertPlots.some((plot) => plot.resolvedAtStep !== null && world.elapsedStep - plot.resolvedAtStep <= PRESSURE_MEMORY_DAYS
+      && (plot.outcome === "discovered" || plot.outcome === "killed" || plot.outcome === "maimed")
+      && world.characters.some((character) => character.id === plot.targetCharacterId && character.polityId === polity.id));
+    if (struck && reader.holding(scope, "watch").department === null) {
+      list.push({ id: `watch-${polity.id}`, label: "Set up a watch: a plot was laid against the state's own men, and nobody keeps watch for it", polityId: polity.id });
+    }
+    // Hunger with unrest, and nobody over the grain.
+    const hungry = world.map.provinces.some((province) => province.controllerPolityId === polity.id && world.material.provinceMaterial.some((entry) => entry.provinceId === province.id
+      && entry.foodSecurityBps < HUNGER_BPS && entry.stabilityBps < UNREST_BPS));
+    if (hungry && reader.holding(scope, "grain").department === null) {
+      list.push({ id: `grain-${polity.id}`, label: "Put somebody over the grain: the people are hungry, and restless with it", polityId: polity.id });
+    }
+    if (list.length > 0) wants.set(ruler.id, list);
+  }
+  if (wants.size === 0) return world;
+  return {
+    ...world,
+    characters: world.characters.map((character) => {
+      const list = wants.get(character.id);
+      if (list === undefined) return character;
+      const fresh = list.filter((want) => !character.ambitions.some((ambition) => ambition.id === want.id));
+      if (fresh.length === 0) return character;
+      return { ...character, ambitions: [...character.ambitions, ...fresh.map((want) => ({ id: want.id, label: want.label, kind: "other" as const, targetId: want.polityId, status: "active" as const, steps: [] }))] };
+    }),
+  };
+}
+
+/** Those who want their power's war over: a war-weary city (`world/war-weariness.ts`). */
+function peaceParties(world: WorldState): Candidate[] {
+  const out: Candidate[] = [];
+  for (const polity of world.map.polities) {
+    const tired = Math.max(0, ...warsOf(world.polityAgreements, polity.id).map((enemyId) => warWeariness(world, polity.id, enemyId).score));
+    // Appears at fifty, dissolves below thirty-five.
+    const strength = clampBps((tired - 20) * 100);
+    if (strength < GROUP_DISSOLVES_BPS) continue;
+    out.push({
+      key: `peace:${polity.id}`, type: "peace_party", name: CLASS_NAMES.peace_party, polityId: polity.id, leaderId: null, interest: "war_weary",
+      strengthBps: strength, memberIds: [], platform: ["An end to the war", "The men brought home"],
     });
   }
   return out;
@@ -174,7 +275,7 @@ function veterans(world: WorldState, toDay: number): Candidate[] {
     const strength = clampBps(men * 2);
     if (strength < GROUP_DISSOLVES_BPS) continue;
     out.push({
-      key: `veterans:${polity.id}`, type: "veterans", name: `The veterans of ${polityPhrase(polity.name)}`, polityId: polity.id, leaderId: null, interest: "veterans",
+      key: `veterans:${polity.id}`, type: "veterans", name: CLASS_NAMES.veterans, polityId: polity.id, leaderId: null, interest: "veterans",
       strengthBps: strength, memberIds: [], platform: ["Land for the men who served", "Their pay in arrears"],
     });
   }
@@ -196,7 +297,7 @@ function merchants(world: WorldState): Candidate[] {
     for (const owner of owners) counts.set(owner.id, (counts.get(owner.id) ?? 0) + 1);
     const leader = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null;
     out.push({
-      key: `merchants:${polity.id}`, type: "merchant_interest", name: `The merchants of ${polityPhrase(polity.name)}`, polityId: polity.id, leaderId: leader, interest: "merchants",
+      key: `merchants:${polity.id}`, type: "merchant_interest", name: CLASS_NAMES.merchant_interest, polityId: polity.id, leaderId: leader, interest: "merchants",
       strengthBps: strength, memberIds: [...counts.keys()], platform: ["Open seas and open markets", "No war that closes a port"],
     });
   }
@@ -215,7 +316,7 @@ function landholders(world: WorldState): Candidate[] {
     if (strength < GROUP_DISSOLVES_BPS) continue;
     const leader = [...holders].sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))[0];
     out.push({
-      key: `landed:${polity.id}`, type: "landholder_interest", name: `The landholders of ${polityPhrase(polity.name)}`, polityId: polity.id, leaderId: leader?.id ?? null, interest: "landed",
+      key: `landed:${polity.id}`, type: "landholder_interest", name: CLASS_NAMES.landholder_interest, polityId: polity.id, leaderId: leader?.id ?? null, interest: "landed",
       strengthBps: strength, memberIds: [...new Set(holders.map((holder) => holder.id))], platform: ["Low taxes on land", "No land for the landless"],
     });
   }
@@ -278,7 +379,7 @@ function cults(world: WorldState): Candidate[] {
       if (strength < GROUP_DISSOLVES_BPS) continue;
       const founder = faith.founderCharacterId === null ? undefined : world.characters.find((character) => character.id === faith.founderCharacterId && character.alive && character.polityId === polity.id);
       out.push({
-        key: `cult:${polity.id}:${faith.id}`, type: "cult", name: `The followers of ${faith.name} in ${polityPhrase(polity.name)}`.slice(0, 120), polityId: polity.id, leaderId: founder?.id ?? null, interest: "priests",
+        key: `cult:${polity.id}:${faith.id}`, type: "cult", name: `The devotees of ${faith.name}`.slice(0, 120), polityId: polity.id, leaderId: founder?.id ?? null, interest: "priests",
         strengthBps: strength, memberIds: [], platform: [`Honour for ${faith.name}`],
       });
     }
@@ -314,7 +415,7 @@ function remember(world: WorldState, toDay: number): WorldState {
       const lost = world.material.forces
         .filter((force) => force.polityId === now.polityId)
         .flatMap((force) => force.history)
-        .filter((event) => event.atStep > since && (event.kind === "battle_death" || event.kind === "attrition_death" || event.kind === "desertion" || event.kind === "capture" || event.kind === "unavailable"))
+        .filter((event) => event.atStep > since && (event.kind === "battle_death" || event.kind === "wounds_death" || event.kind === "attrition_death" || event.kind === "desertion" || event.kind === "capture" || event.kind === "unavailable"))
         .reduce((sum, event) => sum + event.count, 0);
       const home = before - now.count - lost;
       if (home >= 100) discharged.push({ polityId: now.polityId, count: home, atStep: toDay });
@@ -450,6 +551,13 @@ const ADMITS: Record<Franchise, ReadonlySet<PoliticalGroup["type"]>> = {
 };
 
 const REGION_MARK = "~region~";
+/**
+ * The most of a chamber its groups may sit in, and its groups and regions
+ * together; the rest stays with its standing orders. A faction is a few
+ * senators around one man, not a third of the house.
+ */
+const GROUPS_TAKE = 0.4;
+const MOST_TAKEN = 2 / 3;
 
 /**
  * A chamber's blocs, brought in step with the world: its standing blocs as
@@ -459,8 +567,10 @@ const REGION_MARK = "~region~";
  */
 function seatGroups(world: WorldState, chamber: GovernmentInstitution): GovernmentInstitution {
   if (chamber.franchise == null) return chamber;
-  const standing = chamber.votingBlocs.filter((bloc) => bloc.groupId == null && !bloc.id.includes(REGION_MARK));
-  const standingWeight = Math.max(20, standing.reduce((sum, bloc) => sum + bloc.weight, 0));
+  const standingBase = chamber.votingBlocs
+    .filter((bloc) => bloc.groupId == null && !bloc.id.includes(REGION_MARK))
+    .map((bloc) => ({ ...bloc, baseWeight: bloc.baseWeight ?? bloc.weight }));
+  const standingWeight = Math.max(20, standingBase.reduce((sum, bloc) => sum + bloc.baseWeight, 0));
   const admits = ADMITS[chamber.franchise];
   const grouped: VotingBloc[] = world.material.politicalGroups
     .filter((group) => group.active && group.polityId === chamber.polityId && admits.has(group.type))
@@ -499,7 +609,24 @@ function seatGroups(world: WorldState, chamber: GovernmentInstitution): Governme
       });
     }
   }
-  const votingBlocs = [...standing, ...grouped, ...regional];
+  // The groups' seats come out of the house, not on top of it. Four
+  // factions formed around four senators, each was given its own seats, and
+  // the Senate went from 119 votes to 256 -- the same men counted twice,
+  // once in their order and again among their friends. The standing blocs
+  // give up seats in proportion; the groups and regions together may take at
+  // most MOST_TAKEN of the chamber.
+  const fit = (blocs: readonly VotingBloc[], room: number): VotingBloc[] => {
+    const wanted = blocs.reduce((sum, bloc) => sum + bloc.weight, 0);
+    const scale = wanted > room ? Math.max(0, room) / wanted : 1;
+    return blocs.map((bloc) => ({ ...bloc, weight: Math.max(1, Math.round(bloc.weight * scale)) }));
+  };
+  const seatedGroups = fit(grouped, standingWeight * GROUPS_TAKE);
+  const groupsTook = seatedGroups.reduce((sum, bloc) => sum + bloc.weight, 0);
+  const seatedCarved = [...seatedGroups, ...fit(regional, standingWeight * MOST_TAKEN - groupsTook)];
+  const taken = seatedCarved.reduce((sum, bloc) => sum + bloc.weight, 0);
+  const left = Math.max(standingBase.length, standingWeight - taken);
+  const standing = standingBase.map((bloc) => ({ ...bloc, weight: Math.max(1, Math.round((bloc.baseWeight * left) / standingWeight)) }));
+  const votingBlocs = [...standing, ...seatedCarved];
   return { ...chamber, votingBlocs, totalVotingWeight: votingBlocs.reduce((sum, bloc) => sum + bloc.weight, 0) };
 }
 
@@ -709,6 +836,7 @@ export function reviewSociety(input: ReviewSocietyInput): { world: WorldState; f
     ...conquered(world),
     ...ownArmies(world, input.toDay),
     ...cults(world),
+    ...peaceParties(world),
   ];
   // The first reading of a world is its opening state, not news.
   const opening = last === null;
@@ -717,6 +845,38 @@ export function reviewSociety(input: ReviewSocietyInput): { world: WorldState; f
   world = officesByNeed(world, input.government, input.warfare, input.toDay, facts);
   world = customs(world, input.toDay, input.ids, facts);
   if (!opening) world = clamour(world, input.government, input.toDay);
+  // The public rites, kept well or badly: the gods' favour is how a city
+  // regards its government, a little each month -- up to four in a thousand.
+  if (!opening) {
+    const inCharge = readDepartments(world);
+    world = {
+      ...world,
+      material: {
+        ...world.material,
+        polityLegitimacy: world.material.polityLegitimacy.map((entry) => {
+          // And a ruler the people see honouring the gods lends his government
+          // a little of the gods' favour himself, by his own piety.
+          const rulers = inCharge.rulers(entry.polityId);
+          const piety = rulers.length === 0 ? 0 : skillShare(rulers.reduce((sum, ruler) => sum + ruler.skills.piety, 0) / rulers.length, RULER_PIETY_REACH_BPS);
+          const drift = Math.round(skillShare(inCharge.skill({ kind: "polity", id: entry.polityId }, "public_rites"), RITES_REACH_BPS) + piety);
+          return drift === 0 ? entry : { ...entry, legitimacyBps: Math.max(0, Math.min(10_000, entry.legitimacyBps + drift)) };
+        }),
+      },
+    };
+  }
+  // A ruler who holds too much, or whose chest is empty with nobody over it,
+  // comes to want somebody to hand the work to (docs/plans/departments.md §4).
+  if (!opening) world = wantDepartments(world);
+  // And an officer who runs his work badly is a mark for those who dislike him.
+  if (!opening) world = grumbleAtOfficers(world, input.toDay);
+  // What each power is trying to do, read again off the state it is in.
+  if (!opening) world = { ...world, polityOutlooks: aimsFromState(world, input.toDay) };
+  // And a power tired of its war asks for an end to it.
+  if (!opening) {
+    const sued = sueForPeace(world, input.toDay, input.ids);
+    world = sued.world;
+    facts.push(...sued.facts);
+  }
   world = { ...world, society: { ...world.society, lastReviewStep: input.toDay } };
   return { world, facts: opening ? [] : facts };
 }

@@ -1,0 +1,264 @@
+/*
+ * Everything outside a game, in its own palette: terracotta on slate.
+ *
+ * The site layout wraps its pages in `.site`, and every rule here hangs off
+ * that class, so the Office and the map keep their own colours. The tokens
+ * are redefined rather than renamed, so the shared primitives (buttons,
+ * fields, dialogs) take the new palette without knowing about it.
+ *
+ * One accent (terracotta), one corner (2px), one easing curve.
+ */
+@layer tokens {
+  .site {
+    --soot: #171B1F;          /* page ground */
+    --umber: #232A30;         /* raised: bars, fields, wax */
+    --umber-high: #2E363D;
+    --wax: #232A30;
+    --vellum: #E6E8E9;        /* text on ground, 14.1:1 */
+    --vellum-high: #F4F5F5;
+    --dust: #98A1A8;          /* muted text, 6.6:1 on ground, 5.5:1 raised */
+    --papyrus: #E9E3D7;       /* the Chronicle sheet */
+    --papyrus-shade: #DAD3C4;
+    --ink: #1D2226;           /* on papyrus, 12.6:1 */
+    --ink-faded: #5A5F63;     /* on papyrus, 5.1:1 */
+    --bronze: #C9673F;        /* the accent: terracotta, 4.5:1 on ground */
+    --bronze-high: #E08A62;   /* accent text on ground, 6.6:1 */
+    --bronze-deep: #8E3F22;   /* accent on papyrus, 5.7:1 */
+    --bronze-hover: #D87A53;
+    --scrim: 23 27 31;        /* --soot as channels, for gradients */
+
+    --radius: 2px;
+    --ease-site: cubic-bezier(.16, 1, .3, 1);
+    --shadow-lift: 0 1.5rem 3.5rem -1rem rgb(8 10 12 / 70%);
+
+    /* Resolved at :root, so they have to be said again here. */
+    --fg: var(--vellum);
+    --fg-muted: var(--dust);
+    --edge: var(--bronze);
+    --rule: rgb(230 232 233 / 13%);
+    --field: var(--umber);
+
+    min-height: 100dvh;
+    background: var(--soot);
+    color: var(--fg);
+  }
+  .site .on-papyrus {
+    --fg: var(--ink);
+    --fg-muted: var(--ink-faded);
+    --edge: var(--bronze-deep);
+    --rule: rgb(29 34 38 / 16%);
+  }
+}
+
+@layer surfaces {
+  .site .top-bar { background: rgb(var(--scrim) / 90%); }
+  .site .account-dialog::backdrop { background: rgb(23 27 31 / 72%); }
+  .site .btn { border-radius: var(--radius); transition: background-color .24s var(--ease-site), border-color .24s var(--ease-site), transform .12s var(--ease-site); }
+  .site .btn:active { transform: scale(.98); }
+  .site .btn--primary { border-color: transparent; box-shadow: none; }
+  .site .btn--quiet { border-color: color-mix(in srgb, var(--bronze) 55%, transparent); }
+  .site .btn--quiet:hover { background: color-mix(in srgb, var(--bronze) 12%, transparent); }
+  .site .btn--large { min-height: 2.9rem; padding: 0 1.4rem; font-size: var(--step-1); white-space: nowrap; }
+
+  .landing-wrap, .hub, .worlds-page, .site .top-bar-inner, .site .site-footer { width: min(76rem, calc(100% - 4rem)); margin-inline: auto; }
+
+  /* ─── The landing page ─────────────────────────────────────────────── */
+  .landing { display: grid; }
+
+  /* The room, dark on the left where the words stand. It fades up as the
+     page opens, as if a lamp were lit; the words follow it in. */
+  .landing-hero {
+    position: relative;
+    display: grid;
+    align-items: center;
+    min-height: min(calc(100dvh - var(--lintel)), 56rem);
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .landing-hero__room { position: absolute; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; object-position: 70% 50%; }
+  .landing-hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background:
+      linear-gradient(90deg, rgb(var(--scrim)) 0%, rgb(var(--scrim) / 92%) 30%, rgb(var(--scrim) / 45%) 60%, rgb(var(--scrim) / 5%) 100%),
+      linear-gradient(0deg, var(--soot) 0%, transparent 25%);
+  }
+  .landing-hero__words { display: grid; gap: 1.6rem; padding-block: 3rem 5rem; }
+  .landing-hero__words > * { max-width: 30rem; }
+  .landing-hero h1 { font: 500 clamp(4.2rem, 7vw, 6.2rem)/.95 var(--font-serif); letter-spacing: -.025em; }
+  .landing-hero p { color: var(--vellum); font: 400 var(--step-2)/1.45 var(--font-serif); text-wrap: pretty; }
+  .landing-hero__actions { display: flex; gap: .75rem; }
+  @media (prefers-reduced-motion: no-preference) {
+    .landing-hero__room { animation: site-lamp 1.4s var(--ease-site) both; }
+    .landing-hero__words > * { animation: site-rise .7s var(--ease-site) both; }
+    .landing-hero__words > :nth-child(1) { animation-delay: .5s; }
+    .landing-hero__words > :nth-child(2) { animation-delay: .58s; }
+    .landing-hero__words > :nth-child(3) { animation-delay: .66s; }
+  }
+
+  .landing-block { padding-block: 7rem 0; }
+  .landing-block > h2 { margin-bottom: 2.5rem; font-size: 3rem; line-height: 1.05; }
+
+  /* Who you could be: one tall, one wide, two square. */
+  .stations { display: grid; grid-template-columns: 5fr 7fr; gap: 14px; }
+  .stations__side { display: grid; gap: 14px; }
+  .stations__pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .station { position: relative; margin: 0; overflow: hidden; border-radius: var(--radius); background: var(--umber); isolation: isolate; }
+  .station[data-shape="tall"] { aspect-ratio: 2 / 3; }
+  .station[data-shape="wide"] { aspect-ratio: 3 / 2; }
+  .station[data-shape="square"] { aspect-ratio: 1; }
+  .station img { width: 100%; height: 100%; object-fit: cover; filter: brightness(.82); transition: transform .6s var(--ease-site), filter .6s var(--ease-site); }
+  .station:hover img { transform: scale(1.03); filter: none; }
+  .station::after { content: ""; position: absolute; inset: 0; background: linear-gradient(0deg, rgb(var(--scrim) / 92%) 0%, transparent 55%); pointer-events: none; }
+  .station__words { position: absolute; inset: auto 1.4rem 1.2rem; z-index: 1; display: grid; gap: .3rem; }
+  .station h3 { font-size: var(--step-3); line-height: 1.1; }
+  .station[data-shape="tall"] h3 { font-size: 2.6rem; }
+  .station p { max-width: 26rem; color: var(--dust); line-height: 1.45; text-wrap: pretty; }
+  .stations__more { margin-top: 1.6rem; color: var(--dust); font: italic 400 var(--step-2) var(--font-serif); }
+
+  /* How a turn goes: the order stays in hand while the world answers. */
+  .turn { display: grid; grid-template-columns: 5fr 7fr; gap: 4rem; }
+  .turn__order { position: sticky; top: calc(var(--lintel) + 2.5rem); align-self: start; display: grid; gap: 1rem; }
+  .turn h3 { font-size: var(--step-3); }
+  .turn__order > p:not(.turn__wax), .turn__step > p { color: var(--dust); line-height: 1.55; text-wrap: pretty; }
+  .turn__wax { padding: 1.6rem 1.8rem; border-radius: var(--radius); background: var(--umber); color: var(--vellum); font: italic 400 var(--step-3) var(--font-serif); box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); }
+  .turn__answer { display: grid; gap: 5rem; padding-top: 1rem; }
+  .turn__step { display: grid; gap: .8rem; }
+  .turn__trail { display: grid; gap: .6rem; margin: .4rem 0 0; padding: 0; list-style: none; color: var(--dust); font: italic 400 var(--step-2) var(--font-serif); }
+  .turn__trail li:last-child { color: var(--vellum); }
+  .turn__chronicle { margin: .6rem 0 0; padding: 2.4rem 2.6rem; border-radius: var(--radius); background: var(--papyrus); color: var(--ink); box-shadow: var(--shadow-lift); }
+  .turn__chronicle-date { margin-bottom: .8rem; color: var(--ink-faded); font: italic 400 var(--step-1) var(--font-serif); }
+  .turn__chronicle blockquote { display: grid; gap: .9rem; margin: 0; font: 400 var(--reading)/1.6 var(--font-serif); font-variant-numeric: oldstyle-nums; }
+  .turn__chronicle figcaption { margin-top: 1.25rem; padding-top: .75rem; border-top: 1px solid rgb(29 34 38 / 14%); color: var(--ink-faded); font-size: var(--step-0); }
+  @supports (animation-timeline: view()) {
+    @media (prefers-reduced-motion: no-preference) {
+      .turn__trail li, .turn__chronicle { animation: site-rise linear both; animation-timeline: view(); animation-range: entry 10% cover 30%; }
+    }
+  }
+
+  /* The worlds, side by side. */
+  .landing-worlds { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 14px; margin: 0; padding: 0; list-style: none; }
+  .landing-world { display: grid; gap: .8rem; align-content: start; }
+  .landing-world img { width: 100%; height: auto; aspect-ratio: 16 / 10; object-fit: cover; border-radius: var(--radius); }
+  .landing-world h3 { font-size: var(--step-3); }
+  .landing-world p { color: var(--dust); font: italic 400 var(--step-1) var(--font-serif); font-variant-numeric: oldstyle-nums; }
+
+  .landing-close { display: flex; align-items: center; justify-content: space-between; gap: 2rem; margin-top: 6rem; padding-top: 2.5rem; border-top: 1px solid var(--rule); }
+  .landing-close p { font: 400 var(--step-4) var(--font-serif); }
+  .site:has(.landing) .site-footer { margin-top: 2rem; }
+
+  /* ─── Your games ───────────────────────────────────────────────────── */
+  .hub { padding-block: 3.5rem 4rem; }
+  .hub__head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 2rem; }
+  .hub__head h1 { font-size: 3rem; line-height: 1.05; }
+  .hub__cap { margin-top: 2rem; color: var(--dust); font: italic 400 var(--step-1) var(--font-serif); }
+
+  /* A save as its own room, dark where the words are. The empty shelf uses
+     the same shape with a room nobody has taken yet. */
+  .save-room { position: relative; display: grid; align-items: end; min-height: 29rem; overflow: hidden; border-radius: var(--radius); isolation: isolate; }
+  .save-room__art { position: absolute; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; object-position: 50% 45%; }
+  .save-room::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: linear-gradient(90deg, rgb(var(--scrim) / 96%) 0%, rgb(var(--scrim) / 75%) 40%, rgb(var(--scrim) / 10%) 82%);
+  }
+  .save-room__words { display: grid; gap: .7rem; max-width: 38rem; padding: 2.8rem; }
+  .save-room__where { color: var(--dust); font: italic 400 var(--step-1) var(--font-serif); font-variant-numeric: oldstyle-nums; }
+  .save-room__name { font-size: 3.4rem; line-height: 1.05; }
+  .save-room__last { color: var(--vellum); font: 400 var(--step-1)/1.5 var(--font-serif); text-wrap: pretty; }
+  .save-room__last q { font-style: italic; }
+  .save-room__actions { display: flex; align-items: center; gap: .75rem; margin-top: 1rem; }
+
+  /* Deleting is kept out of the way of continuing. */
+  .save-menu { position: absolute; top: 1rem; right: 1rem; z-index: 1; }
+  .save-menu > summary { list-style: none; background: rgb(var(--scrim) / 75%); cursor: pointer; }
+  .save-menu > summary::-webkit-details-marker { display: none; }
+  .save-menu__list { position: absolute; top: calc(100% + .4rem); right: 0; display: grid; padding: .4rem; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--umber); }
+  .save-menu__list .btn { border-color: transparent; color: var(--danger-ink); white-space: nowrap; }
+
+  .shelf { display: grid; gap: .5rem; margin-top: 3rem; }
+  .shelf__heading { color: var(--dust); font: italic 400 var(--step-1) var(--font-serif); }
+  .shelf__rows { display: grid; margin: 0; padding: 0; border-top: 1px solid var(--rule); list-style: none; }
+  .save-row { display: grid; grid-template-columns: 11rem minmax(0, 1fr) auto; align-items: center; gap: 1.5rem; padding: 1rem 0; border-bottom: 1px solid var(--rule); transition: transform .24s var(--ease-site); }
+  .save-row:hover { transform: translateX(2px); }
+  .save-row__thumb { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--radius); filter: brightness(.8); transition: filter .3s var(--ease-site); }
+  .save-row:hover .save-row__thumb { filter: none; }
+  .save-row[data-over="true"] .save-row__thumb { filter: grayscale(.7) brightness(.7); }
+  .save-row__body { display: grid; gap: .15rem; }
+  .save-row__title { font-size: var(--step-2); }
+  .save-row__meta { color: var(--dust); font: italic 400 var(--step-0) var(--font-serif); font-variant-numeric: oldstyle-nums; }
+  .save-row__actions { display: flex; align-items: center; gap: .6rem; }
+
+  /* Loading: the shapes of what is coming, breathing slowly. */
+  .skeleton { border-radius: var(--radius); background: var(--umber); }
+  .skeleton.save-room { min-height: 29rem; }
+  .skeleton--line { height: 1.1rem; width: 60%; }
+  .skeleton--short { width: 35%; }
+  .shelf-skeleton .shelf__rows { margin-top: 3rem; }
+  @media (prefers-reduced-motion: no-preference) {
+    .skeleton { animation: site-breathe 1.6s ease-in-out infinite alternate; }
+  }
+
+  /* ─── Beginning a world ────────────────────────────────────────────── */
+  .begin-page__band { display: block; width: 100%; height: 11rem; margin-bottom: 2.25rem; object-fit: cover; object-position: 50% 40%; border-radius: var(--radius); }
+  .begin { display: grid; gap: 1.75rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); }
+  .begin__field { display: grid; gap: .45rem; }
+  .begin__field input { max-width: 26rem; }
+  .begin .field-help { max-width: 40rem; margin-top: .15rem; font-size: var(--step-0); line-height: 1.55; }
+  .begin__more summary { width: max-content; color: var(--bronze-high); cursor: pointer; }
+  .begin__more p { max-width: 40rem; margin-top: .5rem; color: var(--dust); line-height: 1.55; text-wrap: pretty; }
+  .begin > .btn { justify-self: start; }
+
+  /* ─── Worlds ───────────────────────────────────────────────────────── */
+  .worlds-page { padding-block: 3.5rem 4rem; }
+  .worlds-page__head { display: grid; gap: .6rem; max-width: 44rem; margin-bottom: 2.5rem; }
+  .worlds-page__head h1 { font-size: 3rem; line-height: 1.05; }
+  .worlds-page__head p { color: var(--dust); font-size: var(--step-1); line-height: 1.55; }
+
+  /* The first world across the page, its words over the foot of its plate. */
+  .world-lead { position: relative; display: grid; align-items: end; min-height: 34rem; overflow: hidden; border-radius: var(--radius); isolation: isolate; }
+  .world-lead > .world__plate { position: absolute; inset: 0; z-index: -2; width: 100%; height: 100%; aspect-ratio: auto; box-shadow: none; }
+  .world-lead { align-items: center; }
+  .world-lead > .world__plate { object-position: 70% 50%; }
+  .world-lead::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background:
+      linear-gradient(90deg, rgb(var(--scrim) / 97%) 0%, rgb(var(--scrim) / 90%) 38%, rgb(var(--scrim) / 30%) 70%, transparent 100%),
+      linear-gradient(0deg, rgb(var(--scrim) / 60%) 0%, transparent 40%);
+  }
+  .world-lead .world__words { max-width: 38rem; padding: 3rem; }
+  .world-lead--skeleton { min-height: 34rem; }
+
+  .world-list { display: grid; gap: 4rem; margin: 5rem 0 0; padding: 0; list-style: none; }
+  .world { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: center; gap: 3rem; }
+  .world:nth-child(even) { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); }
+  .world:nth-child(even) > .world__plate { order: 2; }
+  .world-list--grid { grid-template-columns: 1fr 1fr; gap: 3rem 14px; }
+  .world-list--grid .world, .world-list--grid .world:nth-child(even) { grid-template-columns: 1fr; align-items: start; gap: 1.25rem; }
+  .world-list--grid .world:nth-child(even) > .world__plate { order: 0; }
+
+  .world__plate { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; object-fit: cover; border-radius: var(--radius); box-shadow: var(--shadow-lift); }
+  .world__plate--title { display: grid; place-content: center; justify-items: center; gap: .9rem; padding: 2rem; background: radial-gradient(70% 60% at 50% 45%, var(--umber-high), var(--soot)); text-align: center; }
+  .world__plate-name { color: var(--vellum); font: 400 var(--step-4)/1.1 var(--font-caps); letter-spacing: .08em; text-wrap: balance; }
+  .world__plate-date { color: var(--bronze-high); font: italic 400 var(--step-1) var(--font-serif); font-variant-numeric: oldstyle-nums; }
+  .world__words { display: grid; gap: .8rem; }
+  .world__title { font-size: var(--step-5); line-height: 1.05; }
+  .world__when { color: var(--bronze-high); font: italic 400 var(--step-1) var(--font-serif); font-variant-numeric: oldstyle-nums; }
+  .world__premise { color: var(--vellum); font: 400 var(--step-1)/1.55 var(--font-serif); text-wrap: pretty; }
+  .world__people { display: grid; gap: .35rem; color: var(--dust); }
+  .world__people ul { display: grid; gap: .2rem; margin: 0; padding: 0; list-style: none; }
+  .world__person { color: var(--vellum); font: 500 var(--step-1) var(--font-serif); }
+  .world__person-role { margin-left: .5rem; color: var(--dust); font: italic 400 var(--step-0) var(--font-serif); }
+  .world__words > .btn { justify-self: start; margin-top: .5rem; }
+
+  @keyframes site-lamp { from { opacity: 0; filter: brightness(.3); } to { opacity: 1; filter: none; } }
+  @keyframes site-rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+  @keyframes site-breathe { from { opacity: .55; } to { opacity: 1; } }
+}

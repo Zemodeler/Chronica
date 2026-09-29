@@ -1,3 +1,4 @@
+import type { WorldState } from "./world-state";
 import { z } from "zod";
 import { ElapsedStepSchema, EntityIdSchema, VisibilitySchema } from "../material-state";
 
@@ -69,7 +70,9 @@ export const PolityAgreementKindSchema = z.enum([
    * what a revolt is, and it ends the foedus in the same act.
    */
   "foedus",
-]);
+  // Named, so the orchestrator and cognition schemas write the list once and
+  // refer to it, rather than spelling it out at each of its six uses.
+]).meta({ id: "AgreementKind" });
 export type PolityAgreementKind = z.infer<typeof PolityAgreementKindSchema>;
 
 /**
@@ -87,6 +90,26 @@ export const AGREEMENT_KIND_IN_WORDS: Record<PolityAgreementKind, string> = {
   protectorate: "protectorate",
   military_access: "grant of passage for armies",
   foedus: "foedus",
+};
+
+/**
+ * What each kind actually does, for a player who asks.
+ *
+ * Said as the engine enforces it and no further (`sim/treaties.ts` keeps the
+ * payments, the breaches and the calls to arms): a player reading "an ally
+ * must come to your aid" expects exactly what the rule makes happen.
+ */
+export const AGREEMENT_KIND_EXPLAINED: Record<PolityAgreementKind, string> = {
+  war: "The two powers are at war. Their armies may fight, besiege and take each other's ground, and every ally bound to either by foedus is at war too. A war ends any peace, truce, alliance, pact, tribute or foedus between them, and whatever it paid stops. Breaking a peace, truce, pact or alliance to make it costs the breaker at home and in the trust of every power that deals with it, unless it had a grievance to make war over.",
+  truce: "The fighting stops until a set day. On that day the truce ends by itself, and the war may begin again.",
+  peace: "The war between them is over, on the terms written. An indemnity in it is paid by the period; unpaid three times, the treaty is broken and the power owed has cause for war. It lasts until one of them breaks it, and breaking it is a new war.",
+  alliance: "Equals who have promised to stand by each other. Their armies may cross each other's land without leave. When one is attacked it calls on the other, who goes to war or refuses -- and a refusal costs it the ally's trust. Neither is called to a war it began.",
+  non_aggression: "Each has promised not to attack the other. It promises nothing more.",
+  tributary: "One power pays the other a tenth of what its lands yield each month, unless the terms set another sum. It keeps its own government. Tribute unpaid three times breaks the treaty and gives the power owed cause for war.",
+  trade_pact: "Their merchants may trade with each other on the terms written.",
+  protectorate: "One power keeps its own government and laws, and another answers for it abroad. The protector's armies may stand on its ground without leave.",
+  military_access: "Leave for one power's armies to march across the other's land. Without it, an army that crosses the border is trespassing, and the host may answer for it.",
+  foedus: "An ally bound to a leading power, as Rome's Italian allies are. It keeps its own magistrates and laws and pays nothing, but fights its leader's wars and makes no war, peace or treaty of its own. When its leader goes to war it sends a contingent of its own men, under its own commander.",
 };
 
 export const PolityAgreementSchema = z
@@ -224,4 +247,77 @@ export function mayEnterWithoutLeave(
     || agreement.kind === "alliance"
     || agreement.kind === "protectorate"
     || (agreement.kind === "military_access" && agreement.polityId === moverPolityId));
+}
+
+/** What a war ends between its two powers: nobody is at peace and at war at once. */
+export const ENDED_BY_WAR: readonly PolityAgreementKind[] = ["peace", "truce", "alliance", "non_aggression", "foedus", "tributary"];
+
+/**
+ * A war opened by the engine itself, where no delta is being applied -- an
+ * ultimatum's term running out in silence. `agreement_open` is the way in for
+ * everything written; this is the same result for what the calendar does.
+ */
+export function openWar(agreements: readonly PolityAgreement[], war: {
+  readonly id: string;
+  readonly polityId: string;
+  readonly otherPolityId: string;
+  readonly terms: string;
+  readonly atStep: number;
+  readonly sourceMessageId: string | null;
+  readonly reason: string;
+}): PolityAgreement[] {
+  const between = (agreement: PolityAgreement): boolean =>
+    (agreement.polityId === war.polityId && agreement.otherPolityId === war.otherPolityId)
+    || (agreement.polityId === war.otherPolityId && agreement.otherPolityId === war.polityId);
+  return [
+    ...agreements.map((agreement) => (agreement.status === "active" && between(agreement) && ENDED_BY_WAR.includes(agreement.kind)
+      ? { ...agreement, status: "ended" as const, endedAtStep: war.atStep, endedReason: war.reason.slice(0, 240) }
+      : agreement)),
+    {
+      id: war.id,
+      kind: "war",
+      polityId: war.polityId,
+      otherPolityId: war.otherPolityId,
+      terms: war.terms,
+      sinceStep: war.atStep,
+      untilStep: null,
+      sourceMessageId: war.sourceMessageId,
+      status: "active",
+      endedAtStep: null,
+      endedReason: null,
+      visibility: "public",
+    },
+  ];
+}
+
+/**
+ * The powers a war is actually with: the other side of every war this power,
+ * or the leader it follows by foedus, is in. `enemiesOf` counts every ally that
+ * follows them too, and a Campanian at war with Rome is not at war with nine
+ * Italian peoples one by one; he is at war with Rome, and Rome's allies.
+ */
+export function warsOf(agreements: readonly PolityAgreement[], polityId: string): string[] {
+  const sides = [polityId, ...(leaderOf(agreements, polityId) === null ? [] : [leaderOf(agreements, polityId)!])];
+  return [...new Set(agreements
+    .filter((agreement) => agreement.status === "active" && agreement.kind === "war")
+    .flatMap((agreement) => sides.includes(agreement.polityId) ? [agreement.otherPolityId] : sides.includes(agreement.otherPolityId) ? [agreement.polityId] : []))]
+    .filter((enemy) => !sides.includes(enemy));
+}
+
+
+/** How long ground lost in war is still a wound to be answered, in days. */
+export const LOST_GROUND_DAYS = 180;
+
+/**
+ * Ground a power lost in war within the last half year, still held by the
+ * enemy it lost it to: what it has reason to take back.
+ */
+export function groundToRetake(world: Pick<WorldState, "elapsedStep" | "map" | "polityAgreements">, polityId: string): { readonly provinceId: string; readonly name: string; readonly holderId: string; readonly daysAgo: number }[] {
+  return world.map.provinces.flatMap((province) => {
+    const lost = province.lostBy;
+    if (lost == null || lost.polityId !== polityId || province.controllerPolityId === null || province.controllerPolityId === polityId) return [];
+    const daysAgo = world.elapsedStep - lost.atStep;
+    if (daysAgo > LOST_GROUND_DAYS || !atWar(world.polityAgreements, polityId, province.controllerPolityId)) return [];
+    return [{ provinceId: province.id, name: province.name, holderId: province.controllerPolityId, daysAgo }];
+  });
 }

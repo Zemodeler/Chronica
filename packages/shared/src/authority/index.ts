@@ -7,5 +7,8 @@ export * from "./standing";
 export * from "./calendar";
 export * from "./under-way";
 export * from "./the-state";
+export * from "./treaty-knowledge";
+export * from "./abroad";
 export * from "./letters-awaiting";
 export * from "./room-states";
+export * from "./matters";

@@ -15,9 +15,11 @@ function canvasFor(mapAssetId: string | null): GeoJsonMap | undefined {
 export function canvasRegions(mapAssetId: string | null, world: WorldState): readonly CanvasRegion[] {
   const map = canvasFor(mapAssetId);
   if (map === undefined) return world.map.provinces.map(({ id, name }) => ({ id, name }));
+  // The world's name wins: the geometry's are modern (`namedByTheWorld`).
+  const named = new Map(world.map.provinces.map((province) => [province.id, province.name]));
   return map.features
     .filter((feature) => feature.properties.kind === "province")
-    .map((feature) => ({ id: feature.id, name: feature.properties.name ?? feature.id }));
+    .map((feature) => ({ id: feature.id, name: named.get(feature.id) ?? feature.properties.name ?? feature.id }));
 }
 
 function settlementKind(type: "capital" | "city" | "town" | "village" | "fort" | "port"): Settlement["kind"] {

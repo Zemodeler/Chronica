@@ -27,6 +27,8 @@ export async function POST(
       return Response.json({ status: "unavailable", explanation: result.explanation, ladder: "ladder" in result ? result.ladder ?? [] : [] });
     }
     if (result.status === "choice") return Response.json(result);
+    // Out of the player's region: found, and written to rather than spoken with.
+    if (result.status === "letter") return Response.json({ status: "letter", characterId: result.characterId, knownName: result.knownName });
     return Response.json({ status: "found", sessionId: result.sessionId, knownName: result.knownName });
   } catch (error) {
     if (error instanceof InsufficientCoinsError) {

@@ -45,7 +45,7 @@ describe("an arrangement that pays has a price", () => {
     // More than his purse holds: he pays what he has down and owes the rest, as for a venture.
     expect(price).toBeGreaterThan(balance(world, "leptines-purse"));
     expect(balance(result.world, "leptines-purse")).toBe(0);
-    expect(result.world.material.obligations.some((obligation) => obligation.label === "Interest on credit for A cutler's stall")).toBe(true);
+    expect(result.world.material.obligations.some((obligation) => obligation.label === "Repayment of credit for A cutler's stall")).toBe(true);
     expect(result.world.genericEntities.find((entity) => entity.label === "A cutler's stall")!.upkeep).toEqual({ fromAccountId: "leptines-purse", band: "slight" });
   });
 

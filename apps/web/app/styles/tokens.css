@@ -13,6 +13,7 @@
     --umber-high: #3A2E24;
     --wax: #2B2419;
     --vellum: #E6D9BE;
+    --vellum-high: #F4ECDA;
     --dust: #A8977C;
 
     /* Documents */
@@ -25,7 +26,16 @@
     --bronze: #B98B4A;
     --bronze-high: #D2A566;
     --bronze-deep: #7A5626;
+    --bronze-hover: #C99A58;
     --lamp: #F2C66D;
+    --lamp-core: #FFF3C8;
+    --lamp-rim: #C9993F;
+
+    /* Harm that cannot be undone: deleting a save, a refused form. Not the
+       seal, which is the world asking; this is the site warning. */
+    --danger: #C0534A;
+    --danger-ink: #E3A69E;
+    --danger-deep: #8A2A22;
 
     /* The seal, by culture. The shell sets data-culture; outside a game the
        seal is the neutral earth. */
@@ -35,14 +45,17 @@
     --seal-gallic: #7A4A1E;
     --seal-neutral: #6B5A45;
     --seal: var(--seal-neutral);
+    /* What works in the player's favour, in a why note: a quiet olive, never a signal green. */
+    --in-favour: #7D9A5A;
 
     /* Faces, from next/font in layout.tsx, with real fallbacks behind them. */
     --font-serif: var(--font-alegreya), "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
     --font-sans: var(--font-alegreya-sans), "Gill Sans", "Segoe UI", system-ui, sans-serif;
     --font-caps: var(--font-alegreya-sc), var(--font-alegreya), Georgia, serif;
 
-    /* A 1.25 scale from 15px. */
-    --step--1: .75rem;
+    /* A 1.25 scale from 15px. The step below it stops at 13px: nothing a
+       player has to read is set smaller. */
+    --step--1: .8125rem;
     --step-0: .9375rem;
     --step-1: 1.172rem;
     --step-2: 1.465rem;
@@ -72,6 +85,10 @@
   [data-culture="gallic"] { --seal: var(--seal-gallic); }
   [data-culture="neutral"] { --seal: var(--seal-neutral); }
 
+  .on-papyrus, .account-dialog {
+    --danger-ink: var(--danger-deep);
+    --danger: var(--danger-deep);
+  }
   .on-papyrus {
     --fg: var(--ink);
     --fg-muted: var(--ink-faded);

@@ -7,6 +7,7 @@ import { resolveMapForcePlacements } from "./map-dynamic-geometry";
 import { deriveForceConflictStatuses } from "./map-conflict-state";
 import { ARMY_STANDARD_HIT_SLOP_PIXELS, FALLBACK_FORCE_FLAG, FORCES_VISIBLE_FROM_SCALE, armyStandardHitBounds, armyStandardWidthForZoom, fannedStandardCentre, type ForceFlagAsset } from "./army-standard";
 import type { ViewportTransform } from "./map-viewport";
+import { displayUnit } from "./map-display-unit";
 
 export type { ForceFlagAsset };
 
@@ -63,7 +64,7 @@ export function GeoMap({ world, viewBox, overlay, zoomBand, liveTransform, force
   }, [overlay, world]);
   const conflictByForceId = useMemo(() => deriveForceConflictStatuses(overlay), [overlay]);
 
-  /** The pointer in projected world units (x = longitude, y = -latitude), plus the canvas scale `m`. */
+  /** The pointer in projected world units (x = longitude, y = -latitude), plus the canvas scale `m` and the display unit the canvas drew with. */
   const worldPoint = useCallback((event: MapEvent) => {
     const rect = event.currentTarget.closest<HTMLElement>(".map-frame")?.getBoundingClientRect();
     if (!rect || rect.width === 0 || rect.height === 0) return null;
@@ -73,7 +74,7 @@ export function GeoMap({ world, viewBox, overlay, zoomBand, liveTransform, force
     const ox = (rect.width - vw * sf) / 2;
     const oy = (rect.height - vh * sf) / 2;
     const m = sf * scale;
-    return { wx: (event.clientX - rect.left - ((ox - vx * sf) * scale + tx)) / m, wy: (event.clientY - rect.top - ((oy - vy * sf) * scale + ty)) / m, m, scale };
+    return { wx: (event.clientX - rect.left - ((ox - vx * sf) * scale + tx)) / m, wy: (event.clientY - rect.top - ((oy - vy * sf) * scale + ty)) / m, m, scale, unit: displayUnit(rect.width, rect.height) };
   }, [liveTransform, viewBox]);
 
   const provinceAt = useCallback((event: MapEvent) => {
@@ -99,8 +100,8 @@ export function GeoMap({ world, viewBox, overlay, zoomBand, liveTransform, force
     const point = worldPoint(event);
     if (!point || point.scale < FORCES_VISIBLE_FROM_SCALE) return null;
     const { wx, wy } = point;
-    const armyWidth = armyStandardWidthForZoom(point.m);
-    const slop = ARMY_STANDARD_HIT_SLOP_PIXELS / point.m;
+    const armyWidth = armyStandardWidthForZoom(point.m, point.unit);
+    const slop = ARMY_STANDARD_HIT_SLOP_PIXELS * point.unit / point.m;
     for (let index = forceMarkers.length - 1; index >= 0; index--) {
       const force = forceMarkers[index]!;
       const asset = forceFlagUrls.get(force.forceId) ?? FALLBACK_FORCE_FLAG;

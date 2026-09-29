@@ -145,6 +145,24 @@ describe("a step not taken by its day", () => {
   });
 });
 
+describe("a plan that only falls behind", () => {
+  it("is given up, not laid a fourth time, after three steps missed in a row", () => {
+    const hold: PlanProposal = { ambition: "Keep Rhegium", kind: "other", steps: [{ act: "Review the legion's readiness", inDays: 3, when: null }] };
+    let world = opening();
+    let day = 0;
+    for (let round = 0; round < 3; round += 1) {
+      world = layPlan(at(world, day), HIERON, hold, createIdFactory(`hold-${round}`)).world;
+      day += 5;
+      world = settleOverdueSteps(at(world, day), clock, (prefix) => prefix).world;
+    }
+    const before = plansOf(world).find((ambition) => ambition.label === "Keep Rhegium")!;
+    expect(before.steps.filter((step) => step.status === "missed")).toHaveLength(3);
+    const again = layPlan(at(world, day), HIERON, hold, createIdFactory("hold-again"));
+    expect(again.ambitionId).toBeNull();
+    expect(plansOf(again.world).find((ambition) => ambition.id === before.id)!.status).toBe("abandoned");
+  });
+});
+
 describe("the router", () => {
   it("keeps a place for a man whose plan wants him, inside the cast it already had", () => {
     const { world } = laid();
@@ -183,6 +201,12 @@ describe("a burst", () => {
     intent: { summary: "Wait on events.", domains: ["administration"] }, narrativeSummary: "The consul waits.",
     frictions: [], deltas: [], facts: [], delegations: [], schedule: [], cognitionCandidates: [], outcome: "continue", playerDecision: null,
   });
+  // The step is an act: the envoys go, as a letter the Mamertines must answer.
+  const ENVOYS = {
+    op: "diplomatic_message_send", localId: "envoys_letter", kind: "letter", fromPolityId: "syracuse", fromCharacterRef: HIERON,
+    toPolityId: "mamertines", toCharacterRef: null, subject: "Submission to Syracuse", terms: "Submit to Syracuse and keep your lives.",
+    replyWithinDays: 20, inReplyToRef: null, visibility: "polity", reason: "Hieron sends envoys.",
+  };
   const fact = (localId: string, summary: string) => ({ localId, kind: "diplomacy", summary, affectedRefs: [{ kind: "character", id: HIERON }], visibility: "public", discoveryState: "public", significance: 30 });
 
   async function playAMonth(budget?: Partial<typeof DEFAULT_BUDGET>) {
@@ -200,7 +224,7 @@ describe("a burst", () => {
       if (!section.includes("of their plan to")) return JSON.stringify({ actors: [] });
       stepId = next;
       days.push(Number(/in (\d+) day/.exec(section)?.[1] ?? -1));
-      return JSON.stringify({ actors: [{ actorRef: { kind: "character", id: HIERON }, reasoning: "Time to send the envoys.", proposal: { narrativeSummary: "Envoys go to Messana.", deltas: [], facts: [fact("envoys", "Syracusan envoys demanded that the Mamertines submit.")] }, stepsTaken: [next] }] });
+      return JSON.stringify({ actors: [{ actorRef: { kind: "character", id: HIERON }, reasoning: "Time to send the envoys.", proposal: { narrativeSummary: "Envoys go to Messana.", deltas: [ENVOYS], facts: [fact("envoys", "Syracusan envoys demanded that the Mamertines submit.")] }, stepsTaken: [next] }] });
     });
 
     // A king with an office is in the ambient cast from the first look. The
@@ -227,6 +251,31 @@ describe("a burst", () => {
 
   it("carries a man from laying a plan to being woken for its step and taking it", async () => {
     await playAMonth();
+  });
+
+  it("does not count a step done by a sentence alone, and weighs the sentence as nothing much", async () => {
+    // "Decius reviewed the legion's readiness", fifteen times, each a step taken.
+    const port = answering(ORDER, (user) => {
+      const section = user.split(/^## /m).find((part) => part.startsWith(`Hieron II [${HIERON}]`));
+      if (section === undefined) return JSON.stringify({ actors: [] });
+      const next = /next \[(plan-step-[^\]]+)\]/.exec(section)?.[1];
+      if (next === undefined) {
+        return JSON.stringify({ actors: [{ actorRef: { kind: "character", id: HIERON }, reasoning: "Messana.", proposal: { narrativeSummary: "Hieron resolves.", deltas: [], facts: [fact("resolve", "Hieron resolved to bring Messana under Syracuse.")] }, plan: TAKE_MESSANA }] });
+      }
+      if (!section.includes("of their plan to")) return JSON.stringify({ actors: [] });
+      return JSON.stringify({ actors: [{ actorRef: { kind: "character", id: HIERON }, reasoning: "Wait for reports.", proposal: { narrativeSummary: "Hieron reviews.", deltas: [], facts: [fact("review", "Hieron renewed discreet inquiries about Messana.")] }, stepsTaken: [next] }] });
+    });
+    const result = await runSimulationBurst({
+      world: opening(), clock, offices, warfare: definition.warfare, burstId: "idle", gameId: "game-plans",
+      actorRef: { kind: "character", id: "gaius-genucius" }, actorPolityId: "rome",
+      orderText: "Let a month pass.", spanDays: 30, knownFacts: [], queue: [], port, narratorSeeds: [],
+    });
+    const plan = plansOf(result.world).find((ambition) => ambition.label === TAKE_MESSANA.ambition)!;
+    expect(plan.steps[0]!.status).not.toBe("done");
+    expect(result.plans.taken).toBe(0);
+    const review = result.newFacts.find((entry) => entry.summary.includes("renewed discreet inquiries"));
+    expect(review).toBeDefined();
+    expect(result.significanceByFactId.get(review!.id)).toBeLessThanOrEqual(10);
   });
 
   it("still asks him when the burst's reactions were spent long before his step came due", async () => {

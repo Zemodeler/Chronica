@@ -130,3 +130,31 @@ describe("healing", () => {
     expect(treated.factProposals.find((fact) => fact.kind === "treatment")).toBeDefined();
   });
 });
+
+describe("a man hired to serve an army", () => {
+  it("serves the hirer's own army instead of being read as hiring it out", () => {
+    // Clepsina hired a grain contractor to feed Legio I before Messana, and was
+    // told "Legio I is not Nicias's to hire out".
+    const army = world().material.forces.find((force) => force.id === "roman-field-army")!;
+    const hired = as(army.controllerCharacterId, [{
+      op: "service_contract_open", localId: "supply", role: "retainer", label: "Provisions and transport for the legion",
+      employerAccountRef: "rome-treasury", employeeRef: "quintus-ogulnius", advance: 20, forceRef: "roman-field-army",
+      duties: "Buy and deliver food and transport to the siege lines.", reason: "Feed the army.",
+    }]);
+    expect(hired.rejected).toEqual([]);
+    const after = hired.world.material.forces.find((force) => force.id === "roman-field-army")!;
+    expect(after.controllerCharacterId).toBe(army.controllerCharacterId);
+    expect(after.polityId).toBe(army.polityId);
+    expect(hired.world.material.contracts[0]!.forceId).toBeNull();
+    expect(hired.factProposals.find((fact) => fact.kind === "contract_opened")?.summary).toMatch(/in the service of/);
+  });
+
+  it("still will not hire out a company from a man who does not lead it", () => {
+    const refused = as("gaius-genucius", [{
+      op: "service_contract_open", localId: "band", role: "mercenary", label: "The Campanians, hired",
+      employerAccountRef: "rome-treasury", employeeRef: "quintus-ogulnius", forceRef: "campanian-legion",
+      duties: "Fight for Rome.", reason: "Buy the garrison.",
+    }]);
+    expect(refused.rejected[0]?.reason).toMatch(/not .* to hire out/);
+  });
+});

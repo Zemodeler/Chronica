@@ -32,12 +32,27 @@ const fitStrength = (force: { readonly personnel: readonly { readonly fit: numbe
   force.personnel.reduce((sum, category) => sum + category.fit, 0);
 
 /**
+ * How many letters from one power to the other have had the answer watched
+ * for. A count, not a yes: Rome has written to Syracuse before, and the
+ * answer to an old letter must not stand in for the one being waited on.
+ */
+function lettersAnswered(predicate: Extract<MechanicPredicate, { kind: "letter_answered" }>, world: WorldState): number {
+  return world.diplomacy.filter((message) => message.status === "answered"
+    && message.fromPolityId === predicate.fromPolityId && message.toPolityId === predicate.toPolityId
+    && (predicate.answer === undefined
+      || (predicate.answer === "accepted" ? message.answer === "accepted" : message.answer === "refused" || message.answer === "ignored"))).length;
+}
+
+/**
  * Whether the condition holds of one world, said without reference to any
  * other. Reads the watch's arms and the mechanic's (`world/mechanic.ts`): one
  * language, one evaluator.
  */
-export function holdsIn(predicate: MechanicPredicate, world: WorldState): boolean {
+export function holdsIn(predicate: MechanicPredicate, world: WorldState, month: number | null = null): boolean {
   switch (predicate.kind) {
+    // The season, where the caller knows the calendar; otherwise never.
+    case "in_months":
+      return month !== null && predicate.months.includes(month);
     case "force_enters_province":
       return world.material.forces.some(
         (force) =>
@@ -72,6 +87,13 @@ export function holdsIn(predicate: MechanicPredicate, world: WorldState): boolea
       const character = world.characters.find((candidate) => candidate.id === predicate.characterId);
       return character !== undefined && !character.alive;
     }
+    case "question_decided": {
+      const procedure = world.material.politicalProcedures.find((candidate) => candidate.id === predicate.procedureId);
+      return procedure !== undefined && procedure.resolvedAtStep !== null
+        && (predicate.outcome === undefined ? procedure.outcome === "passed" || procedure.outcome === "failed" : procedure.outcome === predicate.outcome);
+    }
+    case "letter_answered":
+      return lettersAnswered(predicate, world) > 0;
     case "office_vacant": {
       const seats = world.material.officeSeats.filter((seat) => seat.officeId === predicate.officeId);
       if (seats.length === 0) return false;
@@ -129,9 +151,11 @@ export function holdsIn(predicate: MechanicPredicate, world: WorldState): boolea
  * Two shapes, because the union has two shapes. Most predicates are states a
  * world either holds or does not. Two of them -- who holds a province, who
  * holds a city -- are not states anybody can hold: the event *is* the change,
- * so the reading is the holder itself and any difference is the event.
+ * so the reading is the holder itself and any difference is the event. A
+ * letter answered is a third: the reading is how many have been, and one more
+ * is the event.
  */
-export function watchReading(predicate: MechanicPredicate, world: WorldState): string {
+export function watchReading(predicate: MechanicPredicate, world: WorldState, month: number | null = null): string {
   if (predicate.kind === "province_control_changes") {
     return world.map.provinces.find((province) => province.id === predicate.provinceId)?.controllerPolityId ?? "none";
   }
@@ -140,7 +164,9 @@ export function watchReading(predicate: MechanicPredicate, world: WorldState): s
       .flatMap((province) => province.settlements)
       .find((settlement) => settlement.id === predicate.settlementId)?.controllerPolityId ?? "none";
   }
-  return holdsIn(predicate, world) ? "yes" : "no";
+  // An answer is an event too, and there may have been answers before it.
+  if (predicate.kind === "letter_answered") return String(lettersAnswered(predicate, world));
+  return holdsIn(predicate, world, month) ? "yes" : "no";
 }
 
 /**
@@ -154,6 +180,7 @@ export function firedBetween(predicate: MechanicPredicate, armedReading: string,
   if (predicate.kind === "province_control_changes" || predicate.kind === "settlement_control_changes") {
     return nowReading !== armedReading;
   }
+  if (predicate.kind === "letter_answered") return (Number(nowReading) || 0) > (Number(armedReading) || 0);
   return nowReading === "yes" && armedReading !== "yes";
 }
 

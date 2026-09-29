@@ -89,6 +89,8 @@ export const StopReasonSchema = z.enum([
   "no_due_events",
   "budget_exhausted",
   "max_span",
+  // Run too long in wall-clock time; stopped between hops, with what was done kept.
+  "deadline",
 ]);
 export type StopReason = z.infer<typeof StopReasonSchema>;
 

@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
-import Image from "next/image";
-import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { StatusMessage } from "../components/status-message";
 import { DeleteSaveForm } from "../components/delete-save-form";
-import { gameRepository } from "../../lib/game-repository";
+import { Era } from "../components/ui/era";
+import { gameRepository, type GameSummaryRow, type SaveFacts } from "../../lib/game-repository";
+import { roomStyleFor } from "../games/[gameId]/components/office-objects";
+import { Landing } from "./landing";
 
 export const metadata: Metadata = { title: "Chronica" };
 
@@ -15,17 +17,18 @@ export default async function HomePage({
   try {
     saves = await gameRepository.listGames();
   } catch (error) {
+    // Signed out: the first screen says what Chronica is, rather than
+    // sending a stranger straight to a login form.
     if (error instanceof Error && error.message === "An account is required to list saves.") {
-      redirect("/login?returnTo=%2F");
+      return <Landing worlds={await gameRepository.previewWorlds()} />;
     }
     throw error;
   }
   const { hosted, activeHostedCount } = saves;
-  const featured = hosted.find((game) => game.status === "lobby" || game.status === "active") ?? null;
   const atCap = activeHostedCount >= 3;
 
   return (
-    <main id="main-content" className="dashboard-shell">
+    <main id="main-content" className="hub">
       {params.status === "left" && (
         <StatusMessage id="status">The save is no longer open.</StatusMessage>
       )}
@@ -33,75 +36,156 @@ export default async function HomePage({
         <StatusMessage id="status">The save and all of its game data were permanently deleted.</StatusMessage>
       )}
 
-      <div className="dashboard-heading">
+      <div className="hub__head">
         <h1>Your games</h1>
-        <a className="button" href="/worlds">Find a world</a>
+        {hosted.length > 0 && !atCap && <a className="btn btn--quiet" href="/worlds">Begin another world</a>}
       </div>
 
-      {featured !== null && (
-        <section className="featured-card" aria-label="Continue playing">
-          <Image className="featured-thumb" src="/images/basic-scenario-map.png" alt="" width={1280} height={720} unoptimized />
-          <div className="featured-content">
-            <h2 className="featured-title">{featured.title}</h2>
-            <p className="featured-meta">
-              {saveStatusLabel(featured.status)}
-            </p>
-            <div className="featured-actions">
-              <a className="button" href={`/games/${featured.gameId}`}>Continue</a>
-            </div>
-          </div>
-        </section>
+      {hosted.length === 0 ? (
+        <EmptyShelf />
+      ) : (
+        <Suspense fallback={<ShelfSkeleton rows={hosted.length - 1} />}>
+          <Shelf hosted={hosted} />
+        </Suspense>
       )}
 
-      <section aria-label="Your saves">
-        <div className="slot-rail">
-          {hosted.map((game, i) => (
-            <article key={game.gameId} className="slot-card">
-              <span className="slot-number" aria-hidden="true">{SLOT_NUMERALS[i] ?? String(i + 1)}</span>
-              <div className="slot-thumb">
-                <Image src="/images/basic-scenario-map.png" alt="" width={1280} height={720} unoptimized />
-              </div>
-              <div className="slot-body">
-                <h3 className="slot-title">{game.title}</h3>
-                <p className="slot-meta">
-                  {saveStatusLabel(game.status)}
-                </p>
-                <div className="slot-actions">
-                  <a className="button sm" href={`/games/${game.gameId}`}>{game.status === "finished" || game.status === "abandoned" ? "View" : "Continue"}</a>
-                  <DeleteSaveForm gameId={game.gameId} title={game.title} />
-                </div>
-              </div>
-            </article>
-          ))}
-          {!atCap && (
-            <article className="slot-card slot-card-new">
-              <span className="slot-number" aria-hidden="true">{SLOT_NUMERALS[activeHostedCount] ?? String(activeHostedCount + 1)}</span>
-              <div className="slot-thumb slot-thumb-new" />
-              <div className="slot-body">
-                <h3 className="slot-title">New save</h3>
-                <p className="slot-meta">Start a world</p>
-                <div className="slot-actions">
-                  <a className="button sm" href="/worlds">Find a world</a>
-                </div>
-              </div>
-            </article>
-          )}
-        </div>
-      </section>
-
+      {atCap && (
+        <p className="hub__cap">You have three saves open, which is the most an account can keep. Delete one to begin another world.</p>
+      )}
     </main>
   );
 }
 
-/** A save's place on the shelf. There are at most three. */
-const SLOT_NUMERALS = ["I", "II", "III", "IV"];
+/** The saves, once their facts are read: the one to go back to, then the rest. */
+async function Shelf({ hosted }: { readonly hosted: readonly GameSummaryRow[] }) {
+  const facts = await gameRepository.describeSaves(hosted.map((game) => game.gameId));
+  const open = hosted.filter((game) => game.status === "lobby" || game.status === "active");
+  const featured = open[0] ?? null;
+  const shelf = hosted.filter((game) => game !== featured);
+  return (
+    <>
+      {featured !== null && <FeaturedSave game={featured} facts={facts.get(featured.gameId)} />}
+      {shelf.length > 0 && (
+        <section aria-labelledby="shelf-heading" className="shelf">
+          <h2 id="shelf-heading" className="shelf__heading">{featured === null ? "Your saves" : "Your other saves"}</h2>
+          <ol className="shelf__rows">
+            {shelf.map((game) => <SaveRow key={game.gameId} game={game} facts={facts.get(game.gameId)} />)}
+          </ol>
+        </section>
+      )}
+    </>
+  );
+}
 
-function saveStatusLabel(status: string): string {
-  switch (status) {
-    case "lobby": return "Preparing your character";
-    case "active": return "Paused, ready to continue";
-    case "finished": return "Finished";
-    case "abandoned": return "Abandoned";
-    default: return status;
-  }
+/** No saves: the player's room, not yet lit, and the way to a world. */
+function EmptyShelf() {
+  return (
+    <section className="save-room" aria-labelledby="shelf-empty-heading">
+      <img className="save-room__art" src="/office/neutral-room-empty.webp" alt="" width={1280} height={720} />
+      <div className="save-room__words">
+        <h2 id="shelf-empty-heading" className="save-room__name">Nobody yet.</h2>
+        <p className="save-room__last">Choose a world, then decide who you will be in it: a consul, a merchant, a soldier in the ranks, or someone of your own invention.</p>
+        <div className="save-room__actions">
+          <a className="btn btn--primary btn--large" href="/worlds">Find a world</a>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/** The save to go back to: its room, who you are there, and where the story stands. */
+function FeaturedSave({ game, facts }: { readonly game: GameSummaryRow; readonly facts: SaveFacts | undefined }) {
+  const character = facts?.character ?? null;
+  const waiting = character === null;
+  const role = character?.role ?? null;
+  return (
+    <section className="save-room" aria-labelledby="featured-save-heading">
+      <img className="save-room__art" src={roomImage(facts)} alt="" width={1280} height={720} />
+      <details className="save-menu">
+        <summary className="btn btn--quiet btn--small">Manage</summary>
+        <div className="save-menu__list">
+          <DeleteSaveForm gameId={game.gameId} title={game.title} />
+        </div>
+      </details>
+      <div className="save-room__words">
+        <p className="save-room__where">
+          {role === null ? game.title : `${role}, in ${game.title}`}
+          {facts !== undefined && <>. It is <Era text={facts.dateLabel} />.</>}
+        </p>
+        <h2 id="featured-save-heading" className="save-room__name">{waiting ? "Nobody yet" : character.name}</h2>
+        {waiting ? (
+          <p className="save-room__last">This world is waiting for you to decide who you will be in it.</p>
+        ) : facts?.lastRecorded !== null && facts?.lastRecorded !== undefined ? (
+          <p className="save-room__last">The Chronicle last recorded <q>{facts.lastRecorded}</q>.</p>
+        ) : (
+          <p className="save-room__last">Nothing has been recorded yet. The world is waiting for your first order.</p>
+        )}
+        <div className="save-room__actions">
+          <a className="btn btn--primary btn--large" href={`/games/${game.gameId}`}>
+            {waiting ? "Choose who you will be" : `Continue as ${firstName(character.name)}`}
+          </a>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/** Every other save, one ruled row each. */
+function SaveRow({ game, facts }: { readonly game: GameSummaryRow; readonly facts: SaveFacts | undefined }) {
+  const character = facts?.character ?? null;
+  const over = game.status === "finished" || game.status === "abandoned";
+  return (
+    <li className="save-row" data-over={over ? "true" : undefined}>
+      <img className="save-row__thumb" src={roomImage(facts)} alt="" width={320} height={180} loading="lazy" />
+      <div className="save-row__body">
+        <h3 className="save-row__title">{character?.name ?? game.title}</h3>
+        <p className="save-row__meta">{describeRow(game, facts)}</p>
+      </div>
+      <div className="save-row__actions">
+        <a className="btn btn--quiet btn--small" href={`/games/${game.gameId}`}>{over ? "Read it" : character === null ? "Choose who you will be" : "Continue"}</a>
+        <DeleteSaveForm gameId={game.gameId} title={game.title} />
+      </div>
+    </li>
+  );
+}
+
+/** The shelf's shape while the saves' facts are read. */
+function ShelfSkeleton({ rows }: { readonly rows: number }) {
+  return (
+    <div className="shelf-skeleton" aria-busy="true" aria-label="Loading your games">
+      <div className="skeleton save-room" />
+      {rows > 0 && (
+        <div className="shelf__rows">
+          {Array.from({ length: rows }, (_, index) => (
+            <div key={index} className="save-row">
+              <div className="skeleton save-row__thumb" />
+              <div className="save-row__body">
+                <div className="skeleton skeleton--line" />
+                <div className="skeleton skeleton--line skeleton--short" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function describeRow(game: GameSummaryRow, facts: SaveFacts | undefined): string {
+  const where = facts === undefined ? game.title : `${game.title}, ${facts.dateLabel}`;
+  if (game.status === "finished") return `${where}. The story is over.`;
+  if (game.status === "abandoned") return `${where}. Left unfinished.`;
+  const character = facts?.character ?? null;
+  if (character === null) return `${where}. Waiting for a character.`;
+  return character.role === null ? `${where}.` : `${character.role} in ${where}.`;
+}
+
+function roomImage(facts: SaveFacts | undefined): string {
+  const character = facts?.character ?? null;
+  const style = character === null ? "neutral" : roomStyleFor(character.cultureId, character.polityId);
+  return `/office/${style}-room-empty.webp`;
+}
+
+function firstName(name: string): string {
+  return name.split(" ")[0] ?? name;
 }

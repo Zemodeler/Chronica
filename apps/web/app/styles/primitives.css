@@ -27,7 +27,7 @@
     color: var(--soot);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 22%), 0 1px 0 rgb(0 0 0 / 35%);
   }
-  .btn--primary:hover { background: #C99A58; border-color: var(--bronze-high); }
+  .btn--primary:hover { background: var(--bronze-hover); border-color: var(--bronze-high); }
   .on-papyrus .btn--primary { border-color: var(--bronze-deep); }
   .btn--quiet { background: transparent; color: var(--fg); box-shadow: none; }
   .btn--seal {
@@ -37,12 +37,12 @@
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 12%);
   }
   .btn--danger {
-    border-color: color-mix(in srgb, var(--seal-roman) 70%, transparent);
+    border-color: color-mix(in srgb, var(--danger) 60%, transparent);
     background: transparent;
-    color: #E3A69E;
+    color: var(--danger-ink);
     box-shadow: none;
   }
-  .btn--danger:hover { border-color: #C0534A; }
+  .btn--danger:hover { border-color: var(--danger); }
   .btn--small { min-height: 2rem; padding: .3rem .8rem; font-size: var(--step--1); }
 
   /* A control that reads as a word: filters, "show all", headline links. */
@@ -87,10 +87,10 @@
     height: 1.3rem;
     padding: 0 .35rem;
     border-radius: 999px;
-    background: radial-gradient(circle at 40% 35%, #F7D98F, var(--lamp) 55%, #C9993F);
+    background: radial-gradient(circle at 40% 35%, var(--lamp-core), var(--lamp) 55%, var(--lamp-rim));
     box-shadow: 0 1px 2px rgb(0 0 0 / 55%);
     color: var(--soot);
-    font: 700 .72rem/1.3rem var(--font-sans);
+    font: 700 var(--step--1)/1.3rem var(--font-sans);
     font-variant-numeric: lining-nums tabular-nums;
     text-align: center;
   }
@@ -217,7 +217,7 @@
 
   .sheet--papyrus { background: var(--papyrus); }
   .sheet--umber {
-    background: linear-gradient(180deg, var(--umber) 0%, #221A14 100%);
+    background: linear-gradient(180deg, var(--umber) 0%, color-mix(in srgb, var(--umber) 60%, var(--soot)) 100%);
     box-shadow: var(--shadow-lift), inset 0 0 0 1px rgb(185 139 74 / 35%);
   }
 
@@ -261,11 +261,136 @@
   .notice, .error {
     padding: .7rem 1rem;
     border: 1px solid var(--rule);
-    border-left: 3px solid var(--bronze);
     border-radius: var(--radius);
     background: color-mix(in srgb, var(--umber) 80%, transparent);
     color: var(--fg);
     scroll-margin-top: 1rem;
   }
-  .error { border-left-color: #C0534A; }
+  /* A mark before the line says which it is: bronze for done, danger for refused. */
+  .notice::before, .error::before {
+    content: "";
+    display: inline-block;
+    width: .5rem;
+    height: .5rem;
+    margin-right: .6rem;
+    border-radius: 50%;
+    background: var(--bronze);
+    vertical-align: .1em;
+  }
+  .error { border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+  .error::before { background: var(--danger); }
+
+  /* ─── Notes: a word you can ask about ──────────────────────────────── */
+  /* The word: a dotted rule in the surface's own edge colour, no chrome. */
+  .tip-term {
+    display: inline;
+    min-height: 0;
+    padding: 0;
+    border-radius: 0;
+    border: 0;
+    border-bottom: 1px dotted color-mix(in srgb, var(--edge) 85%, transparent);
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: inherit;
+    cursor: help;
+  }
+  .tip-term:hover, .tip-term.is-open { border-bottom-style: solid; border-bottom-color: var(--edge); }
+  .tip-term:focus-visible { outline: 1px solid var(--edge); outline-offset: 2px; border-radius: 1px; }
+
+  /* The note: a wax tablet held over the page, dark on any surface, so a
+     note on papyrus and a note on a note read as the same thing. */
+  .tip {
+    --fg: var(--vellum);
+    --fg-muted: var(--dust);
+    --edge: var(--bronze-high);
+    --rule: rgb(230 217 190 / 14%);
+    position: fixed;
+    inset: auto;
+    width: max-content;
+    max-width: min(22rem, calc(100vw - 1rem));
+    margin: 0;
+    padding: .7rem .9rem .8rem;
+    overflow: hidden;
+    border: 1px solid rgb(185 139 74 / 40%);
+    border-radius: var(--radius);
+    background: linear-gradient(180deg, var(--umber-high) 0%, var(--umber) 100%);
+    box-shadow: 0 .75rem 2rem rgb(0 0 0 / 55%);
+    color: var(--fg);
+    font: 400 var(--step-0)/1.45 var(--font-serif);
+    /* Unpinned, it cannot be reached, so it must not catch the pointer that
+       is on its way to another word. */
+    pointer-events: none;
+  }
+  .tip.is-locked { pointer-events: auto; border-color: var(--bronze); }
+  .tip:focus { outline: none; }
+  .tip:focus-visible { outline: 1px solid var(--edge); outline-offset: -4px; }
+  /* Holding still pins it: a thread of lamplight runs along the foot. */
+  .tip::after {
+    content: "";
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 2px;
+    background: var(--lamp);
+    transform: scaleX(0);
+    transform-origin: left;
+    animation: tip-arming .9s linear forwards;
+  }
+  .tip.is-locked::after { display: none; }
+  @keyframes tip-arming { to { transform: scaleX(1); } }
+  @media (prefers-reduced-motion: reduce) { .tip::after { animation: none; transform: scaleX(1); opacity: .5; } }
+
+  .tip__trail { margin: 0 0 .35rem; color: var(--fg-muted); font-size: var(--step--1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tip__crumb { min-height: 0; padding: 0; border: 0; border-bottom: 1px dotted var(--edge); border-radius: 0; background: none; box-shadow: none; color: var(--fg-muted); font: inherit; }
+  .tip__crumb:hover { color: var(--fg); }
+  .tip__card { display: grid; gap: .25rem; }
+  .tip__kicker { color: var(--fg-muted); font: 400 var(--step--1) var(--font-caps); text-transform: lowercase; letter-spacing: .04em; }
+  .tip__title { font: 500 var(--step-1)/1.2 var(--font-serif); }
+  .tip__body { display: grid; gap: .45rem; margin-top: .2rem; }
+  .tip__body p { margin: 0; }
+  .tip__body ul { display: grid; gap: .2rem; margin: 0; padding: 0; list-style: none; }
+  .tip__rule { border-top: 1px solid var(--rule); padding-top: .45rem; }
+  /* How the note knows what it says. Knowledge gone stale is said so, and
+     set back further, so an old report does not read like a new one. */
+  .tip__source { margin-top: .15rem; color: var(--fg-muted); font-size: var(--step--1); font-style: italic; }
+  .tip__source[data-freshness="aging"] { color: color-mix(in srgb, var(--fg-muted) 85%, var(--seal)); }
+  .tip__source[data-freshness="stale"] { color: color-mix(in srgb, var(--fg-muted) 70%, var(--seal)); }
+
+  /* Compared with you, and a person's people: two columns, the aspect quiet. */
+  .note__compared { display: grid; gap: .1rem; margin: 0; }
+  .note__compared > div { display: grid; grid-template-columns: 5.5rem 1fr; gap: .6rem; }
+  .note__compared dt { color: var(--fg-muted); }
+  .note__compared dd { margin: 0; }
+  .note__people { display: grid; gap: .1rem; }
+  .note__people span { color: var(--fg-muted); }
+
+  /* A why note: each cause with a mark for whether it works for or against. */
+  .why { display: grid; gap: .2rem; margin: 0; padding: 0; list-style: none; }
+  .why li { position: relative; padding-left: .85rem; }
+  .why li[data-tone]::before { content: ""; position: absolute; left: 0; top: .6em; width: .38rem; height: .38rem; border-radius: 50%; background: var(--fg-muted); }
+  .why li[data-tone="bad"]::before { background: var(--seal); }
+  .why li[data-tone="good"]::before { background: var(--in-favour); }
+  .why__sum { display: flex; justify-content: space-between; gap: 1rem; padding-left: 0 !important; font-variant-numeric: oldstyle-nums tabular-nums; }
+
+  /* A thread: five steps from brewing to over, the one it is at lit. */
+  .thread__phases { display: grid; grid-template-columns: repeat(5, 1fr); gap: .2rem; margin: .1rem 0 .2rem; padding: 0; list-style: none; }
+  .thread__phases li { min-height: 1.1rem; padding: .05rem .2rem; border-top: 2px solid var(--rule); color: var(--fg-muted); font: 400 var(--step--1) var(--font-caps); text-transform: lowercase; letter-spacing: .03em; white-space: nowrap; }
+  .thread__phases li[data-on] { border-top-color: var(--seal); color: var(--fg); }
+  .thread__history li { display: block; }
+  .thread__entry, .thread__follow {
+    display: inline-flex;
+    gap: .5rem;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    color: var(--fg);
+    font: inherit;
+    text-align: left;
+  }
+  .thread__entry time { flex: none; color: var(--fg-muted); font-variant-numeric: oldstyle-nums; }
+  .thread__entry:hover span { text-decoration: underline dotted var(--edge); }
+  .thread__follow { justify-self: start; margin-top: .2rem; border-bottom: 1px solid var(--edge); font-style: italic; }
 }

@@ -1,7 +1,10 @@
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import {
   ScenarioDefinitionSchema,
+  WorldDocumentUnreadableError,
   WorldStateSchema,
+  issueLine,
+  readWorldDocument,
   type Fact,
   type ScenarioClock,
   type ScenarioDefinition,
@@ -12,6 +15,7 @@ import { games, players, scenarioVersions, scenarios } from "../schema/game";
 import {
   burstProgress,
   chronicleCheckpoints,
+  followedThreads,
   deltaAudit,
   gameWorlds,
   playerDecisions,
@@ -37,15 +41,16 @@ export interface WorldView {
   /** Optimistic-concurrency token: pass it back to `saveWorld`/`commitBurst`. */
   readonly revision: number;
   readonly mapAssetId: string | null;
-  readonly scenarioClock: ScenarioClock | undefined;
-  readonly scenarioGovernment: ScenarioDefinition["government"] | undefined;
-  readonly scenarioLife: ScenarioDefinition["life"] | undefined;
-  readonly scenarioWealth: ScenarioDefinition["wealth"] | undefined;
-  readonly scenarioWarfare: ScenarioDefinition["warfare"] | undefined;
+  /** The pinned version's rules. Always present: a definition that will not parse throws `ScenarioDefinitionUnreadableError`. */
+  readonly scenarioClock: ScenarioClock;
+  readonly scenarioGovernment: ScenarioDefinition["government"];
+  readonly scenarioLife: ScenarioDefinition["life"];
+  readonly scenarioWealth: ScenarioDefinition["wealth"];
+  readonly scenarioWarfare: ScenarioDefinition["warfare"];
   /** The scenario's map rules, so movement can be held to the crossings it admits. */
-  readonly scenarioMap: ScenarioDefinition["map"] | undefined;
+  readonly scenarioMap: ScenarioDefinition["map"];
   /** What the period tends toward -- offered to the narrator only where the world still looks like it. */
-  readonly scenarioHistoricalPressures: ScenarioDefinition["historicalPressures"] | undefined;
+  readonly scenarioHistoricalPressures: ScenarioDefinition["historicalPressures"];
   readonly scenarioPeriod: string;
 }
 
@@ -54,6 +59,14 @@ export class WorldRevisionConflictError extends Error {
   constructor(readonly gameId: string, readonly expectedRevision: number, readonly actualRevision: number) {
     super(`World ${gameId} moved from revision ${expectedRevision} to ${actualRevision} during this burst.`);
     this.name = "WorldRevisionConflictError";
+  }
+}
+
+/** A burst that was reaped, or ended some other way, while it was still working. Its commit is refused. */
+export class BurstNoLongerRunningError extends Error {
+  constructor(readonly burstId: string) {
+    super(`Burst ${burstId} is no longer running (it was given up for stuck or dead); its commit was refused and nothing was saved.`);
+    this.name = "BurstNoLongerRunningError";
   }
 }
 
@@ -72,6 +85,51 @@ export class WorldWouldNotLoadError extends Error {
     super(`This turn would have left game ${gameId} unable to load (${issue}); nothing was saved.`);
     this.name = "WorldWouldNotLoadError";
   }
+}
+
+/**
+ * A stored world that will not load, and says where.
+ *
+ * Thrown by every read of a save rather than an empty view or a bare Error:
+ * the web answers it with "this save needs repair" instead of a 500, and the
+ * repair scripts read `issues` to know which paths to mend.
+ */
+export class SaveNeedsRepairError extends Error {
+  constructor(readonly gameId: string, readonly issues: readonly string[], detail: string) {
+    super(`The stored world for game ${gameId} needs repair before it can be opened: ${detail}`);
+    this.name = "SaveNeedsRepairError";
+  }
+}
+
+/**
+ * The scenario version a game is pinned to, and its rules will not parse.
+ *
+ * Used to be read with `safeParse` and every rule quietly left undefined, so
+ * the next order was refused with "This scenario declares no clock." -- true
+ * of nothing, and no hint which field of the definition was at fault.
+ */
+export class ScenarioDefinitionUnreadableError extends Error {
+  constructor(readonly scenarioId: string, readonly version: number, readonly issues: readonly string[]) {
+    super(`Scenario ${scenarioId} version ${version} has a definition this build cannot read: ${issues.slice(0, 5).join("; ")}${issues.length > 5 ? ` (and ${issues.length - 5} more)` : ""}`);
+    this.name = "ScenarioDefinitionUnreadableError";
+  }
+}
+
+/** A stored world, upgraded and parsed, or `SaveNeedsRepairError` naming the paths. */
+export function readStoredWorld(gameId: string, raw: unknown): WorldState {
+  try {
+    return readWorldDocument(raw).world;
+  } catch (error) {
+    if (error instanceof WorldDocumentUnreadableError) throw new SaveNeedsRepairError(gameId, error.issues, error.message);
+    throw error;
+  }
+}
+
+/** A pinned scenario definition, parsed, or `ScenarioDefinitionUnreadableError` naming the paths. */
+export function readScenarioDefinition(scenarioId: string, version: number, raw: unknown): ScenarioDefinition {
+  const parsed = ScenarioDefinitionSchema.safeParse(raw);
+  if (!parsed.success) throw new ScenarioDefinitionUnreadableError(scenarioId, version, parsed.error.issues.map(issueLine));
+  return parsed.data;
 }
 
 function hashWorld(world: WorldState): string {
@@ -119,33 +177,28 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
   const [stored] = await db.select().from(gameWorlds).where(eq(gameWorlds.gameId, gameId)).limit(1);
   if (stored === undefined) return undefined;
 
-  const world = WorldStateSchema.safeParse(stored.world);
-  if (!world.success) {
-    // Not "no state yet": there is state, and it will not load. Swallowing
-    // this reported a three-year campaign as an empty world because one
-    // standing order had a payer and a recipient that were the same account,
-    // and nothing anywhere said so.
-    const [first] = world.error.issues;
-    throw new Error(
-      `The stored world for game ${gameId} no longer satisfies the world schema`
-      + `${first === undefined ? "" : `: ${first.path.join(".")}: ${first.message}`}`,
-    );
-  }
-
-  const definition = ScenarioDefinitionSchema.safeParse(context.definition);
+  // Not "no state yet": there is state, and it will not load. Swallowing
+  // this reported a three-year campaign as an empty world because one
+  // standing order had a payer and a recipient that were the same account,
+  // and nothing anywhere said so. Read through the upgrade chain first, so a
+  // save written before a breaking change is carried rather than refused.
+  const world = readStoredWorld(gameId, stored.world);
+  // And the rules it is pinned to: a definition that will not parse is an
+  // error with a path, not a scenario that "declares no clock".
+  const definition = readScenarioDefinition(context.scenarioId, context.scenarioVersion, context.definition);
   return {
     gameId,
     gameTitle: context.gameTitle,
-    world: world.data,
+    world,
     revision: stored.revision,
     mapAssetId: context.mapAssetId,
-    scenarioClock: definition.success ? definition.data.clock : undefined,
-    scenarioGovernment: definition.success ? definition.data.government : undefined,
-    scenarioLife: definition.success ? definition.data.life : undefined,
-    scenarioWealth: definition.success ? definition.data.wealth : undefined,
-    scenarioWarfare: definition.success ? definition.data.warfare : undefined,
-    scenarioMap: definition.success ? definition.data.map : undefined,
-    scenarioHistoricalPressures: definition.success ? definition.data.historicalPressures : undefined,
+    scenarioClock: definition.clock,
+    scenarioGovernment: definition.government,
+    scenarioLife: definition.life,
+    scenarioWealth: definition.wealth,
+    scenarioWarfare: definition.warfare,
+    scenarioMap: definition.map,
+    scenarioHistoricalPressures: definition.historicalPressures,
     scenarioPeriod: context.period,
   };
 }
@@ -156,7 +209,8 @@ export async function getWorldView(db: ChronicaDatabase, gameId: string): Promis
  * Kept for the character/dialogue paths that materialize a province or a newly
  * discovered NPC: those are small, additive, last-write-wins edits made outside
  * a burst. Anything the simulation loop commits goes through `commitBurst`,
- * which does check.
+ * which does check, and a repair goes through `persistRepairedWorld`, which
+ * checks too.
  */
 export async function persistOpeningWorld(db: ChronicaDatabase, gameId: string, world: WorldState): Promise<void> {
   await db
@@ -182,14 +236,64 @@ export async function persistOpeningWorld(db: ChronicaDatabase, gameId: string, 
     });
 }
 
-/** Seeds a new game's world from the scenario version it pinned. */
-export async function seedGameWorld(db: ChronicaDatabase, gameId: string): Promise<WorldState | undefined> {
-  const context = await readScenarioContext(db, gameId);
-  if (context === undefined) return undefined;
-  const parsed = WorldStateSchema.safeParse(context.initialWorld);
-  if (!parsed.success) return undefined;
-  await persistOpeningWorld(db, gameId, parsed.data);
-  return parsed.data;
+/** A repair refused because a burst is moving the world, or was when the repair read it. */
+export class WorldBusyError extends Error {
+  constructor(readonly gameId: string, readonly burstId: string) {
+    super(`Game ${gameId} has a burst running (${burstId}); nothing was written. Wait for it to settle, or reap it, and read the world again.`);
+    this.name = "WorldBusyError";
+  }
+}
+
+/**
+ * Writes a repaired world over the revision the repair was read from.
+ *
+ * The repair scripts used `persistOpeningWorld`, which is last-write-wins: a
+ * script that read the world, took a minute over its dry run, and wrote it
+ * back erased whatever a burst had committed in that minute -- and a burst
+ * still running would then commit over the repair, or fail its revision
+ * check and throw the turn away. This refuses both: it writes only if the
+ * world is still at `expectedRevision` and no burst is running, under the
+ * same advisory lock `commitBurst` takes, and it holds the world to the
+ * schema before writing, as a burst's commit does.
+ *
+ * With `scenarioVersion`, the game is repinned in the same transaction, so a
+ * world and the rules it is read against never disagree on a version.
+ */
+export async function persistRepairedWorld(
+  db: ChronicaDatabase,
+  input: { readonly gameId: string; readonly expectedRevision: number; readonly world: WorldState; readonly scenarioVersion?: number | undefined },
+): Promise<number> {
+  const { gameId, expectedRevision, world } = input;
+  const loadable = WorldStateSchema.safeParse(world);
+  if (!loadable.success) throw new WorldWouldNotLoadError(gameId, loadable.error.issues.slice(0, 5).map(issueLine).join("; "));
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${gameId}))`);
+    const [running] = await tx
+      .select({ id: simulationBursts.id })
+      .from(simulationBursts)
+      .where(and(eq(simulationBursts.gameId, gameId), eq(simulationBursts.status, "running")))
+      .limit(1);
+    if (running !== undefined) throw new WorldBusyError(gameId, running.id);
+    const [current] = await tx.select({ revision: gameWorlds.revision }).from(gameWorlds).where(eq(gameWorlds.gameId, gameId)).limit(1);
+    if (current === undefined) throw new WorldRevisionConflictError(gameId, expectedRevision, 0);
+    if (current.revision !== expectedRevision) throw new WorldRevisionConflictError(gameId, expectedRevision, current.revision);
+    const nextRevision = current.revision + 1;
+    await tx
+      .update(gameWorlds)
+      .set({
+        world: loadable.data,
+        schemaVersion: loadable.data.schemaVersion,
+        revision: nextRevision,
+        stateHash: hashWorld(loadable.data),
+        instantSortKey: instantSortKeyOf(loadable.data),
+        updatedAt: new Date(),
+      })
+      .where(eq(gameWorlds.gameId, gameId));
+    if (input.scenarioVersion !== undefined) {
+      await tx.update(games).set({ scenarioVersion: input.scenarioVersion }).where(eq(games.id, gameId));
+    }
+    return nextRevision;
+  });
 }
 
 export interface BurstFactRow {
@@ -252,6 +356,10 @@ export interface BurstCommit {
     readonly outcome: string;
     readonly stopReason: string;
     readonly accumulatedSignificance: number;
+    /** Every call not made, answer not read and field dropped, as `{ stage, reason }` (see `simulation_bursts.skipped`). */
+    readonly skipped?: readonly { readonly stage: string; readonly reason: string }[] | undefined;
+    /** Of `modelCalls`, how many were the historian's. */
+    readonly chronicleCalls?: number | undefined;
   };
   /**
    * The Chronicle this burst produced: one entry per thread of events, in the
@@ -268,6 +376,7 @@ export interface BurstCommit {
     readonly tags: readonly unknown[];
     readonly changes: readonly unknown[];
     readonly quote: unknown;
+    readonly storylineIds?: readonly string[] | undefined;
     readonly fromInstantSortKey: number;
     readonly toInstantSortKey: number;
   }[];
@@ -322,6 +431,17 @@ export async function commitBurst(db: ChronicaDatabase, commit: BurstCommit): Pr
       throw new WorldRevisionConflictError(commit.gameId, commit.expectedRevision, current.revision);
     }
 
+    // Only a burst still running may commit. One reaped while it worked --
+    // stuck past its deadline, or given up for dead -- has already told the
+    // player nothing was kept, and a commit landing after that would make a
+    // liar of the page. Thrown inside the transaction, so it writes nothing.
+    const closed = await tx
+      .update(simulationBursts)
+      .set({ ...commit.burst, skipped: commit.burst.skipped ?? [], chronicleCalls: commit.burst.chronicleCalls ?? 0, status: "committed", endedAt: new Date() })
+      .where(and(eq(simulationBursts.id, commit.burstId), eq(simulationBursts.status, "running")))
+      .returning({ id: simulationBursts.id });
+    if (closed.length === 0) throw new BurstNoLongerRunningError(commit.burstId);
+
     const nextRevision = current.revision + 1;
     await tx
       .update(gameWorlds)
@@ -357,10 +477,6 @@ export async function commitBurst(db: ChronicaDatabase, commit: BurstCommit): Pr
       await tx.update(scheduledEvents).set({ status: "fired", firedAt: new Date() }).where(eq(scheduledEvents.id, eventId));
     }
 
-    await tx
-      .update(simulationBursts)
-      .set({ ...commit.burst, status: "committed", endedAt: new Date() })
-      .where(eq(simulationBursts.id, commit.burstId));
 
     if (commit.checkpoints !== undefined && commit.checkpoints.length > 0) {
       await tx.insert(chronicleCheckpoints).values(commit.checkpoints.map((entry, ordinal) => ({
@@ -377,6 +493,7 @@ export async function commitBurst(db: ChronicaDatabase, commit: BurstCommit): Pr
         tags: entry.tags,
         changes: entry.changes,
         quote: entry.quote ?? null,
+        storylineIds: entry.storylineIds ?? [],
         stopReason: commit.burst.stopReason,
       })));
     }
@@ -414,12 +531,13 @@ export async function commitBurst(db: ChronicaDatabase, commit: BurstCommit): Pr
  */
 export async function startBurst(
   db: ChronicaDatabase,
-  input: { gameId: string; playerUserId: string | null; orderText: string | null },
+  input: { gameId: string; playerUserId: string | null; orderText: string | null; idempotencyKey?: string | null | undefined },
 ): Promise<string | null> {
   try {
+    const now = new Date();
     const [row] = await db
       .insert(simulationBursts)
-      .values({ gameId: input.gameId, playerUserId: input.playerUserId, orderText: input.orderText, heartbeatAt: new Date() })
+      .values({ gameId: input.gameId, playerUserId: input.playerUserId, orderText: input.orderText, heartbeatAt: now, progressAt: now, idempotencyKey: input.idempotencyKey ?? null })
       .returning({ id: simulationBursts.id });
     return row!.id;
   } catch (error) {
@@ -440,9 +558,52 @@ export async function failBurst(db: ChronicaDatabase, burstId: string, error: st
   await db.update(simulationBursts).set({ status: "failed", error, endedAt: new Date() }).where(eq(simulationBursts.id, burstId));
 }
 
-/** The process running a burst says it is still here. A no-op once the burst has ended. */
-export async function heartbeatBurst(db: ChronicaDatabase, burstId: string): Promise<void> {
-  await db.update(simulationBursts).set({ heartbeatAt: new Date() }).where(and(eq(simulationBursts.id, burstId), eq(simulationBursts.status, "running")));
+/**
+ * The process running a burst says it is still here. A no-op once the burst
+ * has ended; returns false then, so a runner that was reaped learns it.
+ */
+export async function heartbeatBurst(db: ChronicaDatabase, burstId: string): Promise<boolean> {
+  const rows = await db
+    .update(simulationBursts)
+    .set({ heartbeatAt: new Date() })
+    .where(and(eq(simulationBursts.id, burstId), eq(simulationBursts.status, "running")))
+    .returning({ id: simulationBursts.id });
+  return rows.length > 0;
+}
+
+/**
+ * The burst got somewhere: a stage reported, a call answered, a passage
+ * written. Beating proves only that the process is alive; this is what
+ * proves the burst is not stuck in it. Returns false once the burst has ended.
+ */
+export async function markBurstProgress(db: ChronicaDatabase, burstId: string): Promise<boolean> {
+  const now = new Date();
+  const rows = await db
+    .update(simulationBursts)
+    .set({ heartbeatAt: now, progressAt: now })
+    .where(and(eq(simulationBursts.id, burstId), eq(simulationBursts.status, "running")))
+    .returning({ id: simulationBursts.id });
+  return rows.length > 0;
+}
+
+/** The burst an order with this client id already opened, whatever became of it. */
+export async function findBurstByIdempotencyKey(db: ChronicaDatabase, gameId: string, idempotencyKey: string): Promise<{ id: string; status: string } | undefined> {
+  const [row] = await db
+    .select({ id: simulationBursts.id, status: simulationBursts.status })
+    .from(simulationBursts)
+    .where(and(eq(simulationBursts.gameId, gameId), eq(simulationBursts.idempotencyKey, idempotencyKey)))
+    .limit(1);
+  return row;
+}
+
+/**
+ * The cutoffs a running burst is judged by: alive if its process has beaten
+ * since `aliveAfter` *and* it has got somewhere since `progressAfter`. Either
+ * one missed, it is abandoned.
+ */
+export interface BurstLiveness {
+  readonly aliveAfter: Date;
+  readonly progressAfter: Date;
 }
 
 /**
@@ -461,23 +622,42 @@ export async function heartbeatBurst(db: ChronicaDatabase, burstId: string): Pro
 export async function findRunningBurst(
   db: ChronicaDatabase,
   gameId: string,
-  aliveAfter: Date,
+  liveness: BurstLiveness,
 ): Promise<{ id: string; startedAt: Date } | undefined> {
   const [row] = await db
     .select({ id: simulationBursts.id, startedAt: simulationBursts.startedAt })
     .from(simulationBursts)
-    .where(and(eq(simulationBursts.gameId, gameId), eq(simulationBursts.status, "running"), gt(simulationBursts.heartbeatAt, aliveAfter)))
+    .where(and(
+      eq(simulationBursts.gameId, gameId),
+      eq(simulationBursts.status, "running"),
+      gt(sql`coalesce(${simulationBursts.heartbeatAt}, ${simulationBursts.startedAt})`, liveness.aliveAfter.toISOString()),
+      gt(sql`coalesce(${simulationBursts.progressAt}, ${simulationBursts.startedAt})`, liveness.progressAfter.toISOString()),
+    ))
     .orderBy(desc(simulationBursts.startedAt))
     .limit(1);
   return row;
 }
 
-/** Marks every running burst of a game whose heartbeat is older than `aliveBefore` as failed, and returns how many. */
-export async function reapStaleBursts(db: ChronicaDatabase, gameId: string, aliveBefore: Date, error: string): Promise<number> {
+/**
+ * Marks every running burst that is abandoned by `liveness` as failed, and
+ * returns how many: of one game, or with `gameId` null of every game -- the
+ * sweep a server makes when it starts, since a burst whose process died with
+ * the last server is otherwise only found when somebody opens that game.
+ */
+export async function reapStaleBursts(db: ChronicaDatabase, gameId: string | null, liveness: BurstLiveness, error: string): Promise<number> {
   const reaped = await db
     .update(simulationBursts)
     .set({ status: "failed", error, endedAt: new Date() })
-    .where(and(eq(simulationBursts.gameId, gameId), eq(simulationBursts.status, "running"), lte(simulationBursts.heartbeatAt, aliveBefore)))
+    // A raw coalesce() carries no column encoder, so postgres-js is handed the
+    // bound Date as-is and refuses it: the instants go in as ISO strings.
+    .where(and(
+      ...(gameId === null ? [] : [eq(simulationBursts.gameId, gameId)]),
+      eq(simulationBursts.status, "running"),
+      or(
+        lte(sql`coalesce(${simulationBursts.heartbeatAt}, ${simulationBursts.startedAt})`, liveness.aliveAfter.toISOString()),
+        lte(sql`coalesce(${simulationBursts.progressAt}, ${simulationBursts.startedAt})`, liveness.progressAfter.toISOString()),
+      ),
+    ))
     .returning({ id: simulationBursts.id });
   return reaped.length;
 }
@@ -491,6 +671,7 @@ export async function getBurst(db: ChronicaDatabase, gameId: string, burstId: st
       orderText: simulationBursts.orderText,
       startedAt: simulationBursts.startedAt,
       heartbeatAt: simulationBursts.heartbeatAt,
+      progressAt: simulationBursts.progressAt,
       endedAt: simulationBursts.endedAt,
     })
     .from(simulationBursts)
@@ -593,6 +774,35 @@ export async function listChronicle(db: ChronicaDatabase, gameId: string, limit 
   return newestFirst.reverse();
 }
 
+/** The threads of history this save follows, by storyline id. */
+export async function listFollowedThreads(db: ChronicaDatabase, gameId: string): Promise<string[]> {
+  const rows = await db.select({ storylineId: followedThreads.storylineId }).from(followedThreads).where(eq(followedThreads.gameId, gameId));
+  return rows.map((row) => row.storylineId);
+}
+
+/** Follow a thread, or stop following it. Following twice is following once. */
+export async function setThreadFollowed(db: ChronicaDatabase, gameId: string, storylineId: string, followed: boolean): Promise<void> {
+  if (followed) {
+    await db.insert(followedThreads).values({ gameId, storylineId }).onConflictDoNothing();
+    return;
+  }
+  await db.delete(followedThreads).where(and(eq(followedThreads.gameId, gameId), eq(followedThreads.storylineId, storylineId)));
+}
+
+/**
+ * The weight each named fact's author gave it (`world_facts.significance`),
+ * by fact id: what a Chronicle entry amounts to, for ranking the events of
+ * one person's life. Facts that are missing are simply absent.
+ */
+export async function factSignificances(db: ChronicaDatabase, gameId: string, factIds: readonly string[]): Promise<ReadonlyMap<string, number>> {
+  if (factIds.length === 0) return new Map();
+  const rows = await db
+    .select({ id: worldFacts.id, significance: worldFacts.significance })
+    .from(worldFacts)
+    .where(and(eq(worldFacts.gameId, gameId), inArray(worldFacts.id, [...new Set(factIds)])));
+  return new Map(rows.map((row) => [row.id, row.significance]));
+}
+
 /**
  * Mark everything written so far as read.
  *
@@ -605,12 +815,20 @@ export async function listChronicle(db: ChronicaDatabase, gameId: string, limit 
  *
  * Only the unread rows are touched, so the timestamp keeps saying when a
  * report was first read rather than when it was last looked at.
+ *
+ * With `entryIds`, only those entries: the Chronicle marks an entry read once
+ * the player has had it in view, not the whole record the moment it opens.
  */
-export async function markChronicleRead(db: ChronicaDatabase, gameId: string, atTime = new Date()): Promise<void> {
+export async function markChronicleRead(db: ChronicaDatabase, gameId: string, atTime = new Date(), entryIds?: readonly string[]): Promise<void> {
+  if (entryIds !== undefined && entryIds.length === 0) return;
   await db
     .update(chronicleCheckpoints)
     .set({ readAt: atTime })
-    .where(and(eq(chronicleCheckpoints.gameId, gameId), isNull(chronicleCheckpoints.readAt)));
+    .where(and(
+      eq(chronicleCheckpoints.gameId, gameId),
+      isNull(chronicleCheckpoints.readAt),
+      ...(entryIds === undefined ? [] : [inArray(chronicleCheckpoints.id, [...entryIds])]),
+    ));
 }
 
 /**
@@ -731,7 +949,9 @@ export async function createGame(db: ChronicaDatabase, input: CreateGameInput): 
       .where(and(eq(scenarioVersions.scenarioId, scenario.id), eq(scenarioVersions.version, scenario.currentVersion)))
       .limit(1);
     if (version === undefined) throw new Error("That shared world has no playable version.");
-    const initialWorld = WorldStateSchema.parse(version.initialWorld);
+    // Through the upgrade chain, like any stored world: a version row
+    // written by an older build still opens a game.
+    const initialWorld = readWorldDocument(version.initialWorld).world;
 
     const [game] = await tx
       .insert(games)

@@ -49,6 +49,7 @@ export function enactedConcerns(enactment: Enactment | undefined, rulerOfficeId:
     else found.push("new_office");
   }
   if (enactment.body !== null) found.push("new_office");
+  if (enactment.department != null) found.push("new_office");
   const constitution = enactment.constitution ?? null;
   if (constitution !== null) {
     const form = constitution.form ?? null;

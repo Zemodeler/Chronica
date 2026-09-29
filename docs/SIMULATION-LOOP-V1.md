@@ -1301,6 +1301,23 @@ tells them.
 Deliberately *not* a burst: a conversation is not an order, costs no simulation model call, and does
 not advance the clock or wake the world on its own.
 
+### Speaking and writing (2026-09-28)
+
+A conversation needs both people in the same region (`inTheSameRegion`). The message route refuses
+anyone further off, and discovery finds them without opening a session. Everyone else is written
+to from the letter tray (`letter-service.ts`):
+
+- **A new letter** is one `diplomatic_message_send` of kind `letter`, with no reply date.
+- **An answer** is one `diplomatic_message_answer`. Writing back also sends a letter in the same
+  words, the way the cognition prompt tells an NPC to counter.
+
+Each is applied by `applyDeltas` and committed as a burst of its own, with no model call. The
+reader is asked in the next real burst, because `lettersOwed` wakes them, and their answer comes
+back as the letter's `answerText`. `correspondenceOf` reads the letters with each person as dated
+pages. A reply to a personal letter addressed to you by name is your own business
+(`own-business.ts`). An offer that a power would have to keep is still judged against authority,
+and the tray refuses it when answering would be a breach.
+
 ### NPCs who seek the ruler out
 
 NPC-initiated contact previously reached the player through a field on a Chronicle entry. When that
@@ -1652,5 +1669,18 @@ which returns progress lines and the passages of the record written so far from 
 abandoned, reaped by the next order's preparation together with any coin hold older than six minutes
 (`expireStaleHolds`), so a dev server killed mid-turn frees the game and the coins without waiting
 fifteen minutes. A decision is closed in the same transaction as the world that heard the answer.
+
+Since 2026-09-28 (migration 0042) liveness has two halves. The heartbeat says the process is alive;
+`progress_at` moves only when the burst gets somewhere — a stage reported, a model call answered, a
+passage written — and a row with no progress for eight minutes is reaped however steadily it beats.
+The runner tells the engine to stop between hops after twelve minutes (`shouldStop`, stop reason
+`deadline`; none in hand mode, `CHRONICA_BURST_DEADLINE_MS` overrides) and commits what it did.
+`commitBurst` commits only a row still `running`, so a reaped burst's late commit is refused. The
+server sweeps every game's orphaned bursts and stale holds at start (`apps/web/instrumentation.ts`)
+and again ninety seconds later. The order box sends a `requestId`; a resend under the same id finds
+the burst the first send opened. Everything a burst set down — calls the budget or router turned
+away, unreadable answers, salvaged fields — is kept in `simulation_bursts.skipped`, and the
+historian's calls in `chronicle_calls`. There is still no durable queue: a burst whose process dies
+is failed, not resumed.
 `scripts/play-turn.mts` runs the same two functions from a terminal, which is how turns are timed
 without a browser session (`docs/plans/simulation-speed-baseline.md`).

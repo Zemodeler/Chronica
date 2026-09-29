@@ -34,9 +34,9 @@ setup("sign up once and seed two worlds", async ({ page }) => {
     await page.goto("/worlds");
     const card = page.locator(".world-card", { hasText: "Punic Wars" });
     await expect(card).toBeVisible({ timeout: 60_000 });
-    await card.getByRole("link", { name: "Begin scenario" }).click();
+    await card.getByRole("link", { name: "Begin this world" }).click();
     await expect(page).toHaveURL(/\/games\/new/, { timeout: 60_000 });
-    await page.getByRole("button", { name: "Start and enter map" }).click();
+    await page.getByRole("button", { name: "Choose who you will be" }).click();
     await page.waitForURL(/\/games\/[0-9a-fA-F-]{36}/, { timeout: 120_000 });
     return extractGameId(page.url());
   };
@@ -56,11 +56,11 @@ setup("sign up once and seed two worlds", async ({ page }) => {
   // Warm the routes the specs open.
   //
   // `next dev` compiles a route the first time it is asked for, and the
-  // Office opens six of its own. Paid inside a spec that has 120 seconds for
+  // Office opens three of its own; the room brings every sheet with it. Paid inside a spec that has 120 seconds for
   // everything, a cold compile is the whole budget -- which is what a run
   // against a cleared .next/cache spends it on, failing tests that are not
   // wrong about anything. Paid here once, it costs the setup and nobody else.
-  for (const route of ["room", "forces", "standing", "books", "people", "simulate"]) {
+  for (const route of ["room", "people", "simulate"]) {
     await page.request.get(`/api/games/${consul}/${route}`, { timeout: 180_000 }).catch(() => undefined);
   }
   // Renaming an army is a POST; a GET is refused, but compiles the route.

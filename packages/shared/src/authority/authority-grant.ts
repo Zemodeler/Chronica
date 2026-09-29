@@ -146,7 +146,10 @@ export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = 
   // authorised breaches the moment they try.
   covert_plot_open: "punish",
   contingency_arm: "command",
+  siege_lay: "command",
+  siege_lift: "command",
   contingency_disarm: "command",
+  audit_open: "propose",
   family_tie_set: "propose",
   // A government that really does give its magistrates the power of life and
   // death says so by listing this; everybody else breaches when they use it.
@@ -171,6 +174,15 @@ function officeIdToDomainPowers(office: Office): { readonly domain: AuthorityDom
     byDomain.set(domain, powers);
   }
   return [...byDomain].map(([domain, powers]) => ({ domain, powers: [...powers] }));
+}
+
+/**
+ * Whether holding this office is governing its power: the office-seat half of
+ * `holdsPolityStanding`, asked of an office rather than of a person. A seat
+ * that can only put questions is how a private man is heard, not governing.
+ */
+export function officeGovernsItsPolity(office: Office): boolean {
+  return officeIdToDomainPowers(office).some(({ powers }) => powers.some((power) => power !== "propose"));
 }
 
 /**

@@ -74,6 +74,8 @@ function clamp(value: number): number {
 }
 
 export interface DeriveMindContext {
+  /** Who it is, where known: the seed a stable spread of honesty is drawn from. */
+  readonly id?: string;
   readonly officeId: string | null;
   readonly skills: CharacterSkills;
   readonly ageYears: number;
@@ -104,7 +106,7 @@ export function deriveDefaultMind(context: DeriveMindContext): CharacterMind {
   const temperament: CharacterTemperament = {
     boldness: clamp(50 + Math.round((skills.martial - 50) / 3) - (ageYears > 50 ? 10 : 0)),
     caution: clamp(50 + (ageYears > 45 ? 10 : 0) + (holdsOffice ? 10 : 0) - Math.round((skills.martial - 50) / 4)),
-    honesty: clamp(50 - Math.round((skills.intrigue - 50) / 4)),
+    honesty: clamp(50 - Math.round((skills.intrigue - 50) / 4) + (context.id === undefined ? 0 : honestySpread(context.id))),
     sociability: clamp(50 + Math.round((skills.diplomacy - 50) / 4)),
     discipline: clamp(50 + Math.round((skills.stewardship - 50) / 6) + (holdsOffice ? 5 : 0)),
     cruelty: 50,
@@ -113,4 +115,28 @@ export function deriveDefaultMind(context: DeriveMindContext): CharacterMind {
   const riskTolerance = clamp(50 + Math.round((skills.martial - 50) / 4) - (ageYears > 45 ? 10 : 0) - (holdsOffice ? 5 : 0));
 
   return { drives, temperament, riskTolerance, values: [], taboos: [], currentPressures: [] };
+}
+
+/**
+ * A man's own honesty, within fifteen of what his gifts suggest, the same every
+ * time. Derived minds put nearly everybody between 37 and 62, so that one
+ * treasurer was as tempted as the next.
+ */
+export function honestySpread(id: string): number {
+  let hash = 2166136261;
+  for (const char of `${id}:honesty`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0;
+  return (hash % 31) - 15;
+}
+
+const isNeutral = (mind: CharacterMind): boolean =>
+  Object.values(mind.drives).every((value) => value === 50) && Object.values(mind.temperament).every((value) => value === 50);
+
+/**
+ * How honest somebody is. A mind nobody wrote -- a snapshot's neutral default
+ * -- is read as the one his gifts and his own nature would have given him,
+ * rather than as the exact middle every such man sat at.
+ */
+export function honestyOf(character: { readonly id: string; readonly mind: CharacterMind; readonly skills: { readonly intrigue: number } }): number {
+  if (!isNeutral(character.mind)) return character.mind.temperament.honesty;
+  return clamp(50 - Math.round((character.skills.intrigue - 50) / 4) + honestySpread(character.id));
 }

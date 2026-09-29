@@ -2,6 +2,7 @@ import { z } from "zod";
 import { OrderPartyRefSchema, type OrderPartyRef } from "./party-ref";
 import { MoneyAmountSchema, EntityIdSchema, ElapsedStepSchema } from "../material-state";
 import { WorldInstantSchema, type WorldInstant } from "./instant";
+import { newsHasReached, type NewsWorld } from "./news";
 
 /**
  * The durable historical record an event's resolution produces (docs/32,
@@ -123,6 +124,14 @@ export const FactSchema = z
     sourceActionId: EntityIdSchema.nullable().default(null),
     /** Mirrors the producing event's causal depth, for the 3-layer reaction cap. */
     causalDepth: z.number().int().nonnegative().default(0),
+    /**
+     * The armies it names, as they stood when it happened: what a report of
+     * them actually said. A count of another power's men was built from the
+     * army's strength today, however old the report, so a scout's word from
+     * before a battle already knew the battle's dead. Absent on facts from
+     * before this was kept, and on facts that name no army.
+     */
+    forcesAsReported: z.array(z.object({ forceId: EntityIdSchema, men: z.number().int().nonnegative(), locationId: EntityIdSchema }).strict()).max(8).optional(),
   })
   .strict();
 export type Fact = z.infer<typeof FactSchema>;
@@ -142,8 +151,12 @@ export type FactDraft = Omit<Fact, "id">;
  * world-tool executor) is responsible for appending the result to whatever
  * batch of facts it is threading through the current turn's resolution, and
  * for persisting it to `worldFacts` once the turn commits.
+ *
+ * The id factory is required. It used to default to `crypto.randomUUID()`,
+ * which made a fact's id -- and every reference to it -- different on every
+ * replay of the same burst; ids come from the burst's own factory.
  */
-export function emitFacts(drafts: readonly FactDraft[], idFactory: () => string = () => crypto.randomUUID()): Fact[] {
+export function emitFacts(drafts: readonly FactDraft[], idFactory: () => string): Fact[] {
   return drafts.map((draft) => FactSchema.parse({ ...draft, id: idFactory() }));
 }
 
@@ -159,23 +172,27 @@ export function emitFacts(drafts: readonly FactDraft[], idFactory: () => string 
  *
  * So this is the function callers should reach for. A `polity` fact is known to
  * an observer when their own polity, or the observer themselves, is among the
- * entities it affects.
+ * entities it affects -- and, like a public one, once word of it has reached
+ * where they are (`newsArrivesAt`). Given no world there is no road, and only
+ * the fact's own `knowableAtInstant` holds it back.
  */
 export function factsKnownTo(
   facts: readonly Fact[],
   observer: OrderPartyRef,
   observerPolityId: string | null,
   atInstant: WorldInstant,
+  world?: NewsWorld,
 ): Fact[] {
-  const alreadyVisible = new Set<Fact>(factsVisibleTo(facts, observer, atInstant));
+  const alreadyVisible = new Set<Fact>(factsVisibleTo(facts, observer, atInstant, world));
   return facts.filter((fact) => {
     if (alreadyVisible.has(fact)) return true;
     if (fact.visibility !== "polity") return false;
-    return fact.affectedEntities.some(
+    const ours = fact.affectedEntities.some(
       (entity) =>
         (entity.kind === "polity" && observerPolityId !== null && entity.id === observerPolityId) ||
         (entity.kind === observer.kind && entity.id === observer.id),
     );
+    return ours && newsHasReached(world, fact, observer, atInstant);
   });
 }
 
@@ -185,28 +202,27 @@ export function factsKnownTo(
  * in `gm/read-tools.ts`'s own equivalent for the session-wide case) layered
  * with the new per-observer `discovery.discoveredBy` ledger:
  *
- * - `visibility: "public"` facts are always visible.
+ * - `visibility: "public"` facts are visible once word of them has reached
+ *   the observer (`newsArrivesAt`): the road from where it happened, and
+ *   never before the fact's own `knowableAtInstant`.
  * - `visibility: "polity"` facts are visible to an observer sharing a
  *   polity-scoped affected entity (left to the caller to pre-filter by
  *   passing only same-polity facts, since polity membership is `WorldState`
  *   knowledge this pure function does not have).
- * - `visibility: "private"` facts are visible only once `discovery.state`
- *   is no longer "private" (i.e. discovered/rumoured/intercepted and due)
- *   AND the observer appears in `discovery.discoveredBy`, at or after the
- *   instant they discovered it.
+ * - Any fact is visible to an observer in `discovery.discoveredBy`, at or
+ *   after the instant they discovered it: the people in the room, and
+ *   whoever found a secret out.
  *
  * This is the single function NPC-context and star-context builders should
  * call rather than reimplementing per-observer epistemic filtering.
  */
-export function factsVisibleTo(facts: readonly Fact[], observer: OrderPartyRef, atInstant: WorldInstant): Fact[] {
+export function factsVisibleTo(facts: readonly Fact[], observer: OrderPartyRef, atInstant: WorldInstant, world?: NewsWorld): Fact[] {
   const atSortKey = atInstant.day * 1440 + atInstant.minute;
   return facts.filter((fact) => {
-    if (fact.visibility === "public") return true;
     const discoveredEntry = fact.discovery.discoveredBy.find(
       (entry) => entry.observerRef.kind === observer.kind && entry.observerRef.id === observer.id,
     );
-    if (discoveredEntry === undefined) return false;
-    const discoveredSortKey = discoveredEntry.atInstant.day * 1440 + discoveredEntry.atInstant.minute;
-    return discoveredSortKey <= atSortKey;
+    if (discoveredEntry !== undefined && discoveredEntry.atInstant.day * 1440 + discoveredEntry.atInstant.minute <= atSortKey) return true;
+    return fact.visibility === "public" && newsHasReached(world, fact, observer, atInstant);
   });
 }

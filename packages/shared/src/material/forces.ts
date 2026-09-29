@@ -2,6 +2,7 @@ import { buildStation, seesForce, type Station } from "../authority/station";
 import type { Office } from "../characters/character";
 import { standingEffectiveStrength } from "../warfare/battle-resolver";
 import type { ScenarioWarfareRules } from "../warfare/battle";
+import { isNavalForce, transportCapacityOf } from "../warfare/sea";
 import type { Force, ForcePersonnelCategory } from "../material-state";
 import type { WorldState } from "../world/world-state";
 import { formatWorldDate, type ScenarioClock } from "../world/clock";
@@ -41,6 +42,7 @@ const RECENT_STEPS = 30;
 /** What a personnel event did, said the way a report would say it. */
 const EVENT_WORDS: Readonly<Record<string, (n: number) => string>> = {
   battle_death: (n) => `${n} killed in action`,
+  wounds_death: (n) => `${n} dead of their wounds or sent home maimed`,
   attrition_death: (n) => `${n} dead of disease and hardship`,
   desertion: (n) => `${n} deserted`,
   capture: (n) => `${n} taken prisoner`,
@@ -68,6 +70,14 @@ export interface ForceReading {
   readonly locationLabel: string;
   readonly destinationLabel: string;
   readonly arrivalLabel: string | null;
+  /**
+   * A fleet. Its `fitStrength` is hulls, not men: a naval category counts
+   * ships (`transportPerHead` is men per hull), and a squadron of fifty read
+   * on the muster as "50 men".
+   */
+  readonly naval: boolean;
+  /** How many men its ships can carry across water. Zero for an army. */
+  readonly carries: number;
 }
 
 export interface Muster {
@@ -188,6 +198,8 @@ export function musterTheForces(
         changeExplanation: explainChange(force, world.elapsedStep),
         locationLabel: provinceName(force.locationId),
         ...bound,
+        naval: isNavalForce(force, warfare),
+        carries: isNavalForce(force, warfare) ? transportCapacityOf(force, warfare) : 0,
       };
     })
     .sort((a, b) => b.fitStrength - a.fitStrength || a.name.localeCompare(b.name));

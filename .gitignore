@@ -64,3 +64,5 @@ Thumbs.db
 desktop.ini
 *.swp
 eval-out/
+.pnpm-store/
+chronica-standards.zip

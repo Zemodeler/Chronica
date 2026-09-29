@@ -1,14 +1,15 @@
-import { buildStation, holdsPolityStanding, type Station } from "./station";
-import { allOffices, type Office } from "../characters/character";
-import { AGREEMENT_KIND_IN_WORDS } from "../world/agreements";
+import { buildStation, type Station } from "./station";
+import { allOffices, allSuccessionRules, type Office, type SuccessionRule } from "../characters/character";
+import { GOVERNMENT_FORM_IN_WORDS, type GovernmentForm } from "../political-parts";
+import { EMPTY_ABROAD, readAbroad, type Abroad } from "./abroad";
 import type { WorldState } from "../world/world-state";
 import { formatWorldDate, type ScenarioClock } from "../world/clock";
 
 /**
  * The state a person serves, as they could know it.
  *
- * The engine keeps a power's legitimacy and why, who holds each office and
- * until when, the business before its councils and how the votes stand, its
+ * The engine keeps a power's legitimacy and why, how it is governed, who
+ * holds each office and until when, how each is filled and for how long, the business before its councils and how the votes stand, its
  * factions, its treaties, and how its government regards every other power.
  * The model has been told all of it every turn; the player was shown none of
  * it, and could not see that an election was open or a truce was running out.
@@ -16,21 +17,22 @@ import { formatWorldDate, type ScenarioClock } from "../world/clock";
  * Gated as the world slice gates it. What any citizen would know -- who holds
  * office, what is before the Senate, the public treaties -- is shown to anyone
  * of the power. How the votes stand goes only to those who sit in the body or
- * are party to the business; the government's regard for other powers, and
- * treaties made in private, only to those who govern.
+ * are party to the business. Treaties and the government's regard for other
+ * powers are `abroad.ts`'s, gated by `treaty-knowledge.ts`.
  */
 
 export interface StateReading {
   readonly polityLabel: string | null;
   readonly legitimacy: { readonly inWords: string; readonly causes: readonly string[]; readonly shaky: boolean } | null;
-  readonly offices: readonly {
-    readonly key: string;
-    readonly officeLabel: string;
-    /** Null when the seat is empty. */
-    readonly holderLabel: string | null;
-    readonly termLabel: string | null;
-    readonly yours: boolean;
-  }[];
+  /** How it is governed, from its constitution: its form, who heads it, who may change it. */
+  readonly government: {
+    readonly form: GovernmentForm;
+    readonly formLabel: string;
+    readonly rulerLabel: string | null;
+    readonly sovereignLabel: string | null;
+  } | null;
+  /** Each office once, with how it is filled and who holds its seats now. */
+  readonly offices: readonly StateOffice[];
   readonly business: readonly {
     readonly key: string;
     readonly label: string;
@@ -40,19 +42,31 @@ export interface StateReading {
     readonly yours: boolean;
   }[];
   readonly factions: readonly { readonly key: string; readonly name: string; readonly kindLabel: string; readonly members: number }[];
-  readonly treaties: readonly {
-    readonly key: string;
-    readonly kindLabel: string;
-    readonly withLabel: string;
-    readonly terms: string;
-    readonly untilLabel: string | null;
-    readonly atWar: boolean;
-  }[];
-  /** How the government regards other powers: only for those who govern. */
-  readonly regard: readonly { readonly key: string; readonly polityLabel: string; readonly inWords: string }[];
+  /** Every other power, and where this one stands with it (`abroad.ts`). */
+  readonly abroad: Abroad;
 }
 
-const EMPTY: StateReading = { polityLabel: null, legitimacy: null, offices: [], business: [], factions: [], treaties: [], regard: [] };
+export interface StateOffice {
+  /** The office's id, and its note's key. */
+  readonly key: string;
+  readonly officeLabel: string;
+  /** "Election by the Centuriate Assembly". */
+  readonly filledLabel: string | null;
+  /** "a year", "18 months". Null for an office held for life or at pleasure. */
+  readonly termLabel: string | null;
+  /** How many sit in it at once: an office of one has one, the Senate three hundred. */
+  readonly seats: number;
+  readonly holders: readonly {
+    readonly key: string;
+    readonly label: string;
+    /** "until 1 March 269 BC". */
+    readonly untilLabel: string | null;
+    readonly yours: boolean;
+  }[];
+  readonly yours: boolean;
+}
+
+const EMPTY: StateReading = { polityLabel: null, legitimacy: null, government: null, offices: [], business: [], factions: [], abroad: EMPTY_ABROAD };
 const OPEN_STAGES = new Set(["proposed", "gathering_support", "deliberating", "voting_or_deciding"]);
 
 function legitimacyInWords(bps: number): string {
@@ -63,25 +77,17 @@ function legitimacyInWords(bps: number): string {
   return "near to breaking";
 }
 
-function trustInWords(score: number): string {
-  if (score >= 50) return "trusted";
-  if (score >= 15) return "well regarded";
-  if (score > -15) return "watched";
-  if (score > -50) return "distrusted";
-  return "regarded as an enemy";
-}
-
 export function readTheState(
   world: WorldState,
   characterId: string | null,
   offices: readonly Office[] = [],
   clock?: ScenarioClock,
+  successionRules: readonly SuccessionRule[] = [],
 ): StateReading {
   if (characterId === null) return EMPTY;
   const station: Station = buildStation({ world, characterId, offices });
   const polityId = station.polityId;
   if (polityId === null) return EMPTY;
-  const governs = holdsPolityStanding(station);
   const polityName = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? "another power";
   const personName = (id: string | null): string | null => (id === null ? null : world.characters.find((character) => character.id === id)?.name ?? null);
   const date = (day: number | null): string | null =>
@@ -94,18 +100,46 @@ export function readTheState(
     shaky: standing.legitimacyBps < 3_500,
   };
 
-  const officeById = new Map(allOffices(world, offices).map((office) => [office.id, office]));
+  const constitution = world.constitutions.find((candidate) => candidate.polityId === polityId);
+  const ownOffices = allOffices(world, offices).filter((office) => office.polityId === polityId);
+  const ruler = constitution?.rulerOfficeId == null ? undefined : ownOffices.find((office) => office.id === constitution.rulerOfficeId);
+  const sovereign = constitution?.sovereignInstitutionId == null ? undefined : world.material.institutions.find((institution) => institution.id === constitution.sovereignInstitutionId);
+  const government = constitution === undefined ? null : {
+    form: constitution.form,
+    formLabel: GOVERNMENT_FORM_IN_WORDS[constitution.form],
+    rulerLabel: ruler?.label ?? null,
+    sovereignLabel: sovereign?.name ?? null,
+  };
+
+  const rules = new Map(allSuccessionRules(world, successionRules).map((rule) => [rule.id, rule]));
   const yourSeats = new Set(station.seats.map((seat) => seat.seatId));
-  const seats = world.material.officeSeats
-    .filter((seat) => officeById.get(seat.officeId)?.polityId === polityId && (seat.status === "held" || seat.status === "vacant"))
-    .map((seat) => ({
-      key: seat.id,
-      officeLabel: officeById.get(seat.officeId)!.label,
-      holderLabel: seat.status === "held" ? personName(seat.holderCharacterId) : null,
-      termLabel: seat.status === "held" && seat.termExpiresAtStep !== null ? `until ${date(seat.termExpiresAtStep)}` : null,
-      yours: yourSeats.has(seat.id),
-    }))
-    .sort((a, b) => Number(b.yours) - Number(a.yours) || a.officeLabel.localeCompare(b.officeLabel));
+  const officeList = ownOffices
+    .map((office): StateOffice & { rank: number } => {
+      const seats = world.material.officeSeats.filter((seat) => seat.officeId === office.id);
+      const holders = seats
+        .filter((seat) => seat.status === "held" && seat.holderCharacterId !== null)
+        .map((seat) => ({
+          key: seat.id,
+          label: personName(seat.holderCharacterId) ?? "somebody",
+          untilLabel: seat.termExpiresAtStep === null ? null : `until ${date(seat.termExpiresAtStep)}`,
+          yours: yourSeats.has(seat.id),
+        }))
+        .sort((a, b) => Number(b.yours) - Number(a.yours) || a.label.localeCompare(b.label));
+      return {
+        key: office.id,
+        officeLabel: office.label,
+        filledLabel: rules.get(office.successionRuleId)?.label ?? null,
+        termLabel: office.termDays == null ? null : termWords(office.termDays),
+        // An office the world has named no seat for, a dictatorship between
+        // dictators, is still an office of the state, and vacant.
+        seats: Math.max(office.seatCount ?? 1, seats.length),
+        holders,
+        yours: holders.some((holder) => holder.yours),
+        rank: office.rank ?? 0,
+      };
+    })
+    .sort((a, b) => Number(b.yours) - Number(a.yours) || b.rank - a.rank || a.officeLabel.localeCompare(b.officeLabel))
+    .map(({ rank: _rank, ...office }) => office);
 
   const institutionPolity = new Map(world.material.institutions.map((institution) => [institution.id, institution.polityId]));
   const business = world.material.politicalProcedures
@@ -137,23 +171,11 @@ export function readTheState(
     }))
     .sort((a, b) => b.members - a.members || a.name.localeCompare(b.name));
 
-  const treaties = world.polityAgreements
-    .filter((agreement) => agreement.status === "active" && (agreement.polityId === polityId || agreement.otherPolityId === polityId))
-    .filter((agreement) => agreement.visibility === "public" || governs)
-    .map((agreement) => ({
-      key: agreement.id,
-      kindLabel: AGREEMENT_KIND_IN_WORDS[agreement.kind],
-      withLabel: polityName(agreement.polityId === polityId ? agreement.otherPolityId : agreement.polityId),
-      terms: agreement.terms,
-      untilLabel: date(agreement.untilStep),
-      atWar: agreement.kind === "war",
-    }))
-    .sort((a, b) => Number(b.atWar) - Number(a.atWar) || a.withLabel.localeCompare(b.withLabel));
+  return { polityLabel: polityName(polityId), legitimacy, government, offices: officeList, business, factions, abroad: readAbroad(world, characterId, offices, clock) };
+}
 
-  const regard = !governs ? [] : world.polityStances
-    .filter((stance) => stance.polityId === polityId && stance.towardPolityId !== polityId)
-    .map((stance) => ({ key: stance.towardPolityId, polityLabel: polityName(stance.towardPolityId), inWords: trustInWords(stance.trustScore) }))
-    .sort((a, b) => a.polityLabel.localeCompare(b.polityLabel));
-
-  return { polityLabel: polityName(polityId), legitimacy, offices: seats, business, factions, treaties, regard };
+function termWords(days: number): string {
+  if (days % 365 === 0) return days === 365 ? "a year" : `${days / 365} years`;
+  if (days >= 330 && days <= 400) return "about a year";
+  return days > 60 ? `${Math.round(days / 30)} months` : `${days} days`;
 }

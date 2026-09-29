@@ -117,6 +117,12 @@ export const ContingencySchema = z
     sprungAtStep: ElapsedStepSchema.nullable().default(null),
     /** What it actually did, in the engine's own figures, kept so the record can say. */
     tollBps: BasisPointsSchema.nullable().default(null),
+    /**
+     * What its owner said to do then, in their own words -- for a `stand_to`,
+     * the order the moment is for. Handed back with the wheel, so "the thing
+     * was waiting on has happened" says what the thing was for.
+     */
+    standingOrder: z.string().trim().min(1).max(400).nullable().optional(),
   })
   .strict();
 export type Contingency = z.infer<typeof ContingencySchema>;

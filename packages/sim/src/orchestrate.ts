@@ -67,7 +67,8 @@ principle it falls under.
    specific one does not. An order that cannot be met in full is attempted,
    with what it cost or lacked in "frictions". An order to keep going with
    something ACTIVE PROJECTS already lists is answered around it, not by
-   starting it again.
+   starting it again. List each thing the order asked in "intent.parts", with
+   the localIds of the facts that show it done, or "whyNot".
 
 2. Every order is answered. Where an order achieves nothing -- a request
    refused, a journey that finds nobody, a bid that fails -- say so in a fact
@@ -115,7 +116,7 @@ principle it falls under.
    them there.
 
 7. Facts are what happened, not what obtains or is expected. A posture, a
-   plan or a process under way is not a fact; where nothing happened, write
+   plan, a process or a thing not done is not a fact; where nothing happened, write
    none. Set visibility honestly and keep secrets secret in every field:
    "private" facts name who knows in "knownToRefs", and "narrativeSummary",
    "frictions" and "playerDecision" reach the player whatever they say, so they
@@ -130,9 +131,7 @@ principle it falls under.
 
 8. Everything costs. POLITICAL STANDING, THE COUNCIL and THE COUNTRY are real
    numbers: a measure that angers people moves them ("legitimacy_shift",
-   "political_support_set"), a levy takes manpower -- from an ally's provinces
-   too, where a foedus owes it men -- and a march eats food
-   ("province_material_shift"), and a deed that makes or breaks a name moves
+   "political_support_set"), and a deed that makes or breaks a name moves
    "standingDeltaBps", naming its "standingCause". People change: a slave freed, sold or a captive enslaved ("legal_status_set"), a defector's new "polityId", a skill
    learned or lost, an ambition taken up or given up. What no other act fits is an arrangement; it persists under
    STANDING ARRANGEMENTS, and so does a building: say what either does in
@@ -148,15 +147,22 @@ principle it falls under.
    procedure: opened, supported by people, blocs or factions (never the room
    itself), resolved when the weight is in -- except an election, which the
    count decides on its day: a man stands by a "nomination" naming the office.
-   A measure says what it "enacts", and does it only if carried; a treaty's
+   A measure says what it "enacts" (a work it pays for is its "project"),
+   and does it only if carried; a treaty's
    "clauses" are what it makes happen. One power speaks to another by
-   letter, and the answer belongs to the power it was put to; an offer that
-   would bind the player's own power is theirs to settle, as "playerDecision".
+   letter, and the answer belongs to the power it was put to; a letter that
+   offers an agreement names it in "proposes", and accepting it makes it; a
+   war ends by terms offered ("peace_offer", "clauses") and accepted. An
+   offer that would bind the player's own power is theirs to settle, as "playerDecision".
+   Ground won is governed by the man given it: an office or a grant
+   ("authority_grant_upsert") over those provinces, asked of whoever may give it.
    A power's CONSTITUTION is its chambers -- each deciding what it lists, an
    advisory one only counselling its ruler, who pays for overruling it -- and
    how its offices are filled; it changes by a measure that "enacts" a
    "constitution" change, put to the chamber that holds it, or decreed by the
-   ruler where none does. A government taken by force or dictated is
+   ruler where none does. A power's work is done by its departments, made or
+   abolished by a measure enacting a "department"; what none holds, its ruler
+   does. "audit_open" goes through their books. A government taken by force or dictated is
    "regime_change": who, the route and the armies, never whether it works.
    What powers stand in is an agreement: war and peace close each other, armies
    at peace cannot fight until somebody declares the war, and an ordered
@@ -195,7 +201,7 @@ principle it falls under.
    "force_reinforce", keeping their own kind; "authorizedStrengthDelta" is
    paper and puts no men anywhere. A city is not its province: it can be taken
    or held under siege on its own, and is "sacked" only if stormed. A man hired
-   -- a captain and his company, a physician, an envoy, a tax farmer -- is
+   -- a captain and his "company", a physician, an envoy, a tax farmer -- is
    "service_contract_open": the engine pays him, and a man cured is treated by
    someone named in "physicianRef". Pirates and brigands answer to no power:
    "outlaw", paid from a private purse.

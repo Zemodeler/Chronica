@@ -7,8 +7,12 @@
 
   html { -webkit-text-size-adjust: 100%; }
 
+  /* A desktop game: the site holds its shape down to 1024px and scrolls
+     sideways below that, rather than rearranging itself. The game's own
+     floor is 1200px, on the shell. */
   body {
     margin: 0;
+    min-width: 1024px;
     min-height: 100dvh;
     background: var(--soot);
     color: var(--fg);
@@ -78,7 +82,7 @@
     color: var(--soot);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 22%), 0 1px 0 rgb(0 0 0 / 35%);
   }
-  button[type="submit"]:hover:not(:disabled) { background: #C99A58; border-color: var(--bronze-high); }
+  button[type="submit"]:hover:not(:disabled) { background: var(--bronze-hover); border-color: var(--bronze-high); }
   button:disabled { cursor: not-allowed; opacity: .5; }
 
   label { color: var(--fg); font-weight: 500; }

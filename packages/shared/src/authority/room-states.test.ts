@@ -25,7 +25,7 @@ describe("what each object in the room says", () => {
     }
   });
 
-  it("marks the strongbox when payments have fallen behind", () => {
+  it("marks the ledger stand when payments have fallen behind", () => {
     const state = world();
     const behind: WorldState = {
       ...state,
@@ -39,5 +39,22 @@ describe("what each object in the room says", () => {
 
   it("says nothing for someone with no character", () => {
     expect(roomStates(world(), null, offices, clock)).toEqual({});
+  });
+
+  it("gives the strongbox and the ledger stand different books to speak for", () => {
+    // They said the same sentence: one ledger, assigned to both.
+    const state = world();
+    const holder = consul(state);
+    const rich: WorldState = {
+      ...state,
+      material: {
+        ...state.material,
+        accounts: state.material.accounts.map((account) => (account.owner.kind === "character" && account.owner.id === holder.id ? { ...account, balance: 12_345 } : account)),
+      },
+    };
+    const states = roomStates(rich, holder.id, offices, clock);
+    expect(states.purse).toBeDefined();
+    expect(states.books).toBeDefined();
+    expect(states.purse!.says).not.toBe(states.books!.says);
   });
 });

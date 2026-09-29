@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef, type PointerEvent } from "react";
-import { DynamicMapOverlaySchema, GeoJsonMapSchema, type GeoJsonMap, type DynamicMapOverlay, type RoomStates } from "@chronica/shared";
+import { DynamicMapOverlaySchema, GeoJsonMapSchema, type GeoJsonMap, type DynamicMapOverlay, type MatterFocus, type RoomStates, MAP_CHANGE_KINDS } from "@chronica/shared";
+import type { RoomContents } from "../../../../lib/room-service";
 
 // Module-level cache provides geometry immediately during soft navigation; a
 // fresh request below then replaces it if the active scenario map was revised.
@@ -17,7 +18,7 @@ import { MapControls } from "./map-controls";
 import { CharacterPanel, type CharacterPanelProps } from "./character-panel";
 import { ChatPanel } from "./chat-panel";
 import { CouncilPanel } from "./council-panel";
-import { ChroniclePanel } from "./chronicle-panel";
+import { ChroniclePanel, type ChronicleFocus } from "./chronicle-panel";
 import { BooksPanel } from "./books-panel";
 import { Office, type OfficeSurface } from "./office";
 import { OFFICE_OBJECTS, ROOM_WIDTH, type RoomStyle } from "./office-objects";
@@ -28,6 +29,9 @@ import { ForcesPanel } from "./forces-panel";
 import { StandingPanel } from "./standing-panel";
 import { MapOrderBar } from "./map-order-bar";
 import { CalendarLine } from "./calendar-line";
+import { LookupBox } from "./lookup-box";
+import { GlossaryProvider, ThreadMarks, type ThreadsView } from "./notes";
+import { TipRoot } from "../../../components/ui/tip";
 import { unreadCount, useGameView } from "./use-game-view";
 import { standardFor, standardsForPolity, type ArmyStandard } from "../../../../lib/army-standards";
 
@@ -158,7 +162,6 @@ export function GameShell({
   const [selectedForce, setSelectedForce] = useState<ForceMapDetails | null>(null);
   const [forceFlagUrls, setForceFlagUrls] = useState<ReadonlyMap<string, ForceFlagAsset>>(() => new Map());
   const [flagCatalogForce, setFlagCatalogForce] = useState<ForceMapDetails | null>(null);
-  const [coins, setCoins] = useState<string | null>(null);
   const [openChatSessionId, setOpenChatSessionId] = useState<string | null>(null);
   /**
    * Which of the game's two places the player is in.
@@ -180,18 +183,23 @@ export function GameShell({
    * server can answer. Guessing it from "holds a character" put an arms rack
    * in a private citizen's room. Null until it answers, and an object is not
    * drawn on a guess.
+   *
+   * It brings every sheet's contents with it (room-service.ts), so opening
+   * the strongbox or the arms rack is a render rather than a round trip.
    */
-  const [room, setRoom] = useState<{ forces: boolean; standing: boolean; books: boolean; purse: boolean; states: RoomStates } | null>(null);
+  const [room, setRoom] = useState<RoomContents | null>(null);
   const controller = useGameView(gameId);
   const zoomBand = deriveZoomBand(viewport.scale);
 
+  /** Set only when the mirror opens the record about the player; any other way in reads it whole. */
+  const [chronicleFocus, setChronicleFocus] = useState<ChronicleFocus | null>(null);
   const openSurface = useCallback((next: OfficeSurface) => {
+    setChronicleFocus(null);
     lastPickedUp.current = next;
+    // Opening the record no longer marks it read: the Chronicle marks each
+    // entry as the player reads it, so what is new stays marked until then.
     setSurface(next);
-    // Opening the record is what marks it read; the badge clears as the shelf
-    // comes off the wall rather than after a round trip.
-    if (next === "chronicle") void controller.markRead();
-  }, [controller]);
+  }, []);
   /**
    * What was picked up last, so putting it down returns focus to it.
    *
@@ -208,7 +216,39 @@ export function GameShell({
       document.querySelector<HTMLElement>(`[data-object="${id}"]`)?.focus();
     });
   }, []);
+  // The mirror's way into the record: filtered to the player, and at the
+  // entry behind the line he chose, if he chose one.
+  const openChronicleAboutMe = useCallback((entryId: string | null) => {
+    openSurface("chronicle");
+    setChronicleFocus({
+      filter: playerCharacterId === undefined || characterPanel === undefined ? null : { kind: "character", id: playerCharacterId, label: characterPanel.characterName },
+      entryId,
+    });
+  }, [openSurface, playerCharacterId, characterPanel]);
+  // A thread's way into the record: at the entry chosen.
+  const openChronicleEntry = useCallback((entryId: string) => {
+    openSurface("chronicle");
+    setChronicleFocus({ filter: null, entryId });
+  }, [openSurface]);
+  const threadsView = useMemo<ThreadsView>(() => ({
+    threads: room?.sheets?.threads ?? {},
+    onFollow: (storylineId, followed) => {
+      void fetch(`/api/games/${encodeURIComponent(gameId)}/threads`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storylineId, followed }),
+      }).then(() => setRoomRevision((n) => n + 1)).catch(() => undefined);
+    },
+    onOpenEntry: openChronicleEntry,
+  }), [room, gameId, openChronicleEntry]);
+  // Matters in hand's way into the record: at the thread of the row chosen.
+  const openChronicleAt = useCallback((focus: MatterFocus) => {
+    openSurface("chronicle");
+    setChronicleFocus({ filter: focus, entryId: null });
+  }, [openSurface]);
 
+  /** Bumped to read the room again when the player changed something in it: a thread followed. */
+  const [roomRevision, setRoomRevision] = useState(0);
   useEffect(() => {
     let live = true;
     void fetch(`/api/games/${encodeURIComponent(gameId)}/room`, { cache: "no-store" })
@@ -218,7 +258,7 @@ export function GameShell({
     return () => { live = false; };
     // Re-read when simulated time has moved: a man given a legion should find
     // an arms rack in his room next time he walks in.
-  }, [gameId, controller.view.chronicle.length]);
+  }, [gameId, controller.view.chronicle.length, roomRevision]);
 
   // Somebody has come to find the player. The wiring for this has been
   // plumbed through the shell since the chat panel was written and nothing
@@ -230,6 +270,12 @@ export function GameShell({
     setSurface("people");
   }, [openChatSessionId]);
   const goToDesk = useCallback(() => { setPlace("office"); setSurface("council"); }, []);
+  /** An order begun somewhere else in the room: the treaties' "Write to them". */
+  const [deskDraft, setDeskDraft] = useState<string | null>(null);
+  const writeTo = useCallback((polityLabel: string) => {
+    setDeskDraft(`Write to ${polityLabel}: `);
+    openSurface("council");
+  }, [openSurface]);
 
   const { view } = controller;
   const unread = unreadCount(view.chronicle);
@@ -247,7 +293,7 @@ export function GameShell({
   const stateOf = (id: keyof RoomStates) => ({ says: room?.states[id]?.says, marked: room?.states[id]?.marked === true });
   // The window looks out on the map: what has changed there since the player
   // last read the record.
-  const mapChanges = view.chronicle.filter((entry) => entry.unread).reduce((sum, entry) => sum + entry.changes.length, 0);
+  const mapChanges = view.chronicle.filter((entry) => entry.unread).reduce((sum, entry) => sum + entry.changes.filter((change) => MAP_CHANGE_KINDS.has(change.kind as never)).length, 0);
   const things = useMemo(() => [
     ...(orderingCharacterId === undefined ? [] : [{
       // A sealed document lies on the desk when the world wants an answer.
@@ -380,15 +426,6 @@ export function GameShell({
       window.removeEventListener("focus", refreshMap);
     };
   }, [gameId, initialGeoJson]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/account/coins", { cache: "no-store" })
-      .then((response) => response.ok ? response.json() as Promise<{ coins: string | null }> : null)
-      .then((data) => { if (!cancelled && data?.coins !== null && data !== null) setCoins(data.coins); })
-      .catch(() => { /* An unauthenticated map remains usable. */ });
-    return () => { cancelled = true; };
-  }, []);
 
   // What each army carries, read from its record. A change the player makes is
   // saved to the world first and only then shown, so a reload shows the same.
@@ -542,14 +579,24 @@ export function GameShell({
     return () => clearInterval(interval);
   }, [gameId]);
 
+  // Both read from the view, which is read again whenever the world moves:
+  // a date that stays put after "Let a month pass" says the month did not.
   const dateChip = (
-    <div className="shell-date-chip" aria-label="Current date">
-      <span className="shell-date-arrow" aria-hidden="true">‹</span>
-      <span><Era text={elapsedStepLabel} /></span>
-      <span className="shell-date-arrow" aria-hidden="true">›</span>
+    <div className="shell-date-chip" aria-label="Current date" aria-live="polite">
+      <Era text={controller.view.dateLabel ?? elapsedStepLabel} />
     </div>
   );
-  const coinChip = <a className="shell-coin-chip" href="/account" aria-label="Open coin wallet">{coins ?? "—"} coins</a>;
+  const purse = controller.view.coins;
+  const coinChip = (
+    <a
+      className="shell-coin-chip"
+      href="/account"
+      data-empty={purse?.available === "0" ? "true" : undefined}
+      title={purse?.spent != null && purse.cap != null ? `This save has spent ${purse.spent} of its ${purse.cap} coins.` : undefined}
+    >
+      {purse === undefined ? "—" : purse.available} coins<span className="visually-hidden">, open the wallet</span>
+    </a>
+  );
   const leave = (
     <div className="shell-top-bar-left">
       <a className="shell-top-bar-exit" href="/">Leave</a>
@@ -575,9 +622,13 @@ export function GameShell({
   }
 
   return (
+    <GlossaryProvider glossary={room?.sheets?.glossary ?? {}} threads={threadsView}>
     <div className="game" data-culture={roomStyle}>
       <header className="shell-top-bar">
-        {leave}
+        <div className="shell-top-bar-start">
+          {leave}
+          <LookupBox />
+        </div>
         <div className="shell-place-switch" role="tablist" aria-label="Where you are">
           <button
             type="button" role="tab" id="place-map-tab" aria-controls="place-map"
@@ -601,7 +652,11 @@ export function GameShell({
         </div>
         <div className="shell-top-bar-right">
           {dateChip}
-          <CalendarLine gameId={gameId} revision={view.chronicle.length} />
+          {/* The notes here live outside any sheet, so they get a root of their own. */}
+          <TipRoot>
+            <CalendarLine items={room?.sheets?.calendar ?? []} matters={room?.sheets?.matters ?? null} onOpenChronicle={openChronicleAt} />
+            <ThreadMarks />
+          </TipRoot>
           {coinChip}
         </div>
       </header>
@@ -695,7 +750,7 @@ export function GameShell({
       </div>
 
       {characterPanel && (
-        <CharacterPanel {...characterPanel} gameId={gameId} open={surface === "self"} onClose={closeSurface} side={sheetSideFor(roomStyle, "self")} />
+        <CharacterPanel {...characterPanel} mirror={room?.sheets?.self ?? null} story={room?.sheets?.story ?? null} promises={room?.sheets?.promises ?? []} peers={room?.sheets?.peers ?? null} onOpenChronicle={openChronicleAboutMe} gameId={gameId} open={surface === "self"} onClose={closeSurface} side={sheetSideFor(roomStyle, "self")} />
       )}
       {playerCharacterId && (
         <ChatPanel
@@ -704,24 +759,36 @@ export function GameShell({
           open={surface === "people"}
           onClose={closeSurface}
           side={sheetSideFor(roomStyle, "people")}
-          onAnswerAtDesk={goToDesk}
           openSessionId={openChatSessionId}
           onOpenSessionConsumed={() => setOpenChatSessionId(null)}
         />
       )}
       {surface === "council" && orderingCharacterId && (
-        <CouncilPanel gameId={gameId} controller={controller} onClose={closeSurface} onOpenChronicle={() => openSurface("chronicle")} />
+        <CouncilPanel gameId={gameId} controller={controller} underWay={room?.sheets?.underWay ?? []} draft={deskDraft} onDraftTaken={() => setDeskDraft(null)} onClose={closeSurface} onOpenChronicle={() => openSurface("chronicle")} />
       )}
-      {surface === "chronicle" && <ChroniclePanel controller={controller} onClose={closeSurface} side={sheetSideFor(roomStyle, "chronicle")} />}
+      {surface === "chronicle" && <ChroniclePanel controller={controller} onClose={closeSurface} side={sheetSideFor(roomStyle, "chronicle")} focus={chronicleFocus} />}
       {(surface === "books" || surface === "purse") && (
-        <BooksPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} side={sheetSideFor(roomStyle, surface)} />
+        <BooksPanel
+          which={surface === "purse" ? "own" : "kept"}
+          books={room?.sheets?.[surface === "purse" ? "own" : "kept"] ?? null}
+          onClose={closeSurface}
+          side={sheetSideFor(roomStyle, surface)}
+        />
       )}
       {surface === "forces" && (
-        <ForcesPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} side={sheetSideFor(roomStyle, "forces")} />
+        <ForcesPanel muster={room?.sheets?.forces ?? null} onClose={closeSurface} side={sheetSideFor(roomStyle, "forces")} />
       )}
       {surface === "standing" && (
-        <StandingPanel gameId={gameId} revision={view.chronicle.length} onClose={closeSurface} side={sheetSideFor(roomStyle, "standing")} />
+        <StandingPanel
+          standing={room?.sheets?.standing ?? null}
+          state={room?.sheets?.state ?? null}
+          onClose={closeSurface}
+          side={sheetSideFor(roomStyle, "standing")}
+          onWriteTo={orderingCharacterId ? writeTo : undefined}
+          onOpenLetters={playerCharacterId ? () => openSurface("people") : undefined}
+        />
       )}
     </div>
+    </GlossaryProvider>
   );
 }

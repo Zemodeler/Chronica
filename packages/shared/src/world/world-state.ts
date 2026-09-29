@@ -14,6 +14,7 @@ import { PolityOutlookSchema } from "./outlook";
 import { ProvinceGraphSchema } from "./map";
 import { TroopCategoryDefinitionSchema } from "../warfare/battle";
 import { ContingencySchema } from "./contingency";
+import { SiegeSchema } from "./siege";
 import { EnactmentSchema } from "./enactment";
 import { CovertPlotSchema } from "./covert-plot";
 import { MapConflictsOverlaySchema } from "./map-presentation";
@@ -27,22 +28,29 @@ import { CommitmentSchema } from "../characters/commitments";
 import { CharacterIntentSchema } from "../characters/intents";
 import { FamilyLinkSchema, HouseholdSchema, LifeContractSchema } from "../characters/family";
 import { LegacyCauseSchema } from "../continuity/continuity";
+import { FieldPerilSchema } from "./field-peril";
 import { PolityAgreementSchema } from "./agreements";
 import { DiplomaticMessageSchema, PolityStanceSchema } from "./diplomacy";
 import { ConstitutionSchema, EMPTY_SOCIETY_MEMORY, SocietyMemorySchema } from "./constitution";
 import { SuccessionRuleSchema } from "../characters/character";
+import { AuditSchema, DepartmentSchema, DiversionSchema } from "./departments";
+import { EconomyMemorySchema } from "./economy";
 
 /**
  * Bumped when an old snapshot needs upgrading on load.
  *
- * docs/03-data-model.md: because snapshots are versioned documents, a schema
- * change does not require rewriting history -- bump this and teach the reader
- * to upgrade old documents.
+ * Because snapshots are versioned documents, a schema change does not require
+ * rewriting history -- bump this and teach the reader to upgrade old
+ * documents.
  *
  * 3: storylines lost the fields of a deleted director architecture and gained
  *    provenance; the narrator's ledger arrived; `worldDevelopments`, which
- *    nothing ever read, was dropped. No upgrader: worlds written at 2 were
- *    playtests, and are recreated rather than carried.
+ *    nothing ever read, was dropped. Worlds written at 2 were playtests, and
+ *    are recreated rather than carried.
+ *
+ * Every stored world is read through `readWorldDocument` (world-upgrade.ts),
+ * which runs the chain of upgrade steps before the strict parse. Bumping this
+ * means adding the step from the old number to the new one there.
  */
 export const WORLD_SCHEMA_VERSION = 3;
 
@@ -129,6 +137,8 @@ export const WorldStateSchema = z
      * was against is part of what it was.
      */
     nemeses: z.array(NemesisSchema).default([]),
+    /** Men cut off on a lost field, and what became of them -- see `world/field-peril.ts`. */
+    fieldPerils: z.array(FieldPerilSchema).default([]),
     /** The narrator's own bookkeeping -- see `NarratorLedgerSchema`. */
     narrator: NarratorLedgerSchema.default(EMPTY_NARRATOR_LEDGER),
     /**
@@ -160,8 +170,19 @@ export const WorldStateSchema = z
      * reviews the world.
      */
     constitutions: z.array(ConstitutionSchema).default([]),
+    /**
+     * Who is in charge of what, beneath the ruler: a power's departments and
+     * a household's stewards (`world/departments.ts`). A lever no department
+     * holds is the ruler's own, and an estate nobody stewards is its owner's.
+     */
+    departments: z.array(DepartmentSchema).default([]),
+    /** What officers and stewards have taken, and whether anybody has found it (`world/departments.ts`). */
+    diversions: z.array(DiversionSchema).max(600).default([]),
+    audits: z.array(AuditSchema).max(200).default([]),
     /** What the world remembers to see its groups coming -- see `SocietyMemorySchema`. */
     society: SocietyMemorySchema.default(EMPTY_SOCIETY_MEMORY),
+    /** What the world remembers of its seasons, bargains and troubles -- see `EconomyMemorySchema`. */
+    economy: EconomyMemorySchema.optional(),
     /**
      * Kinds of troops the world has made for itself, on the same terms as the
      * offices above -- see `warfare/troop-categories.ts`.
@@ -276,6 +297,8 @@ export const WorldStateSchema = z
      * snapshot written before it still parses.
      */
     contingencies: z.array(ContingencySchema).default([]),
+    /** Cities held under siege (`siege.ts`), kept until they fall or the siege is lifted. */
+    sieges: z.array(SiegeSchema).default([]),
     /**
      * What measures before a council will do if carried -- see
      * `world/enactment.ts`. Defaulted, so every snapshot written before a law

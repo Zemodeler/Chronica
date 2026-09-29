@@ -33,7 +33,8 @@ function world(): WorldState {
 
 describe("a man of no office", () => {
   it("is asked about his own affairs only below everybody who has business to run", () => {
-    const cast = routeAmbientActors({ world: world(), facts: [], offices, excludeCharacterIds: [], max: 40 });
+    // Every power seats its ruler since v34, so the cast is the whole world, not the first forty.
+    const cast = routeAmbientActors({ world: world(), facts: [], offices, excludeCharacterIds: [], max: 1_000 });
     const order = cast.map((actor) => actor.characterId);
     const potter = order.indexOf("lucius-potter");
     expect(potter).toBeGreaterThan(-1);

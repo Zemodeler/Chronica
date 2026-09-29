@@ -141,6 +141,8 @@ export const MoneyTransactionCauseSchema = z.object({
     "project_release",
     /** A standing rule the world wrote and the engine ran (`world/mechanic.ts`); `id` is the arrangement's. */
     "mechanic",
+    /** A department's own business -- its pay, and what went missing from it (`world/departments.ts`); `id` is the department's. */
+    "department",
   ]),
   id: EntityIdSchema,
   explanation: z.string().trim().min(1).max(240),
@@ -198,6 +200,10 @@ export const MoneyTransactionSchema = z
       "ransom",
       "confiscation",
       "inheritance",
+      /** An officer's pay, from the chest of the power or the man he serves. */
+      "salary",
+      /** Money that went where it should not have: into an officer's purse, or his patron's. */
+      "diversion",
     ]),
     amount: MoneyAmountSchema.positive(),
     sourceAccountId: EntityIdSchema.optional(),
@@ -314,7 +320,7 @@ export const EstateSchema = z
   .strict();
 export type Estate = z.infer<typeof EstateSchema>;
 
-export const InheritanceAssetKindSchema = z.enum(["account_balance", "holding", "obligation"]);
+export const InheritanceAssetKindSchema = z.enum(["account_balance", "holding", "obligation", "venture", "dependant", "income"]);
 
 /** The immutable ledger of what happened to one asset -- transferred, or denied. */
 export const InheritanceTransferSchema = z
@@ -346,6 +352,12 @@ export const VotingBlocSchema = z
     name: z.string().trim().min(1).max(100),
     representedInterest: z.string().trim().min(1).max(100),
     weight: z.number().int().positive(),
+    /**
+     * A standing bloc's weight before the chamber's groups took their seats
+     * out of it. Groups are carved from the house, never added to it, so a
+     * Senate of 100 stays 100 however many factions form (`seatGroups`).
+     */
+    baseWeight: z.number().int().positive().optional(),
     baseSupport: SignedScoreSchema,
     yesThreshold: SignedScoreSchema,
     noThreshold: SignedScoreSchema,
@@ -544,6 +556,8 @@ export const PoliticalGroupTypeSchema = z.enum([
   "veterans",
   "conquered_people",
   "cult",
+  /** Those who want the war over, whatever it costs (`world/war-weariness.ts`). */
+  "peace_party",
 ]);
 export type PoliticalGroupType = z.infer<typeof PoliticalGroupTypeSchema>;
 
@@ -750,6 +764,12 @@ export const PoliticalProcedureSchema = z
     concerns: z.array(QuestionConcernSchema).max(8).optional(),
     /** The chamber that sent it here, when a failed vote was referred on: it is not referred twice. */
     referredFromInstitutionId: EntityIdSchema.nullable().optional(),
+    /**
+     * What a conviction on it costs the man it is against (`sim/trials.ts`):
+     * a fine of a fifth of his purse, exile, or his life. Absent, a man
+     * convicted loses his offices and is fined.
+     */
+    sentence: z.enum(["fine", "exile", "death"]).optional(),
   })
   .strict()
   .superRefine((procedure, context) => {
@@ -835,7 +855,8 @@ export type InstitutionLegitimacy = z.infer<typeof InstitutionLegitimacySchema>;
 export const UnavailablePersonnelGroupSchema = z.object({
   id: EntityIdSchema,
   count: z.number().int().positive(),
-  causeKind: z.enum(["sickness", "wounds"]),
+  /** "mustering": levied men still on their way to the standard, who join on the day given. */
+  causeKind: z.enum(["sickness", "wounds", "mustering"]),
   causeId: EntityIdSchema,
   earliestRecoveryStep: ElapsedStepSchema,
 });
@@ -851,7 +872,8 @@ export type ForcePersonnelCategory = z.infer<typeof ForcePersonnelCategorySchema
 export const ForcePersonnelEventSchema = z.object({
   id: EntityIdSchema,
   atStep: ElapsedStepSchema,
-  kind: z.enum(["reinforcement", "battle_death", "attrition_death", "desertion", "capture", "unavailable", "recovery"]),
+  // "wounds_death": the wounded of a battle who never came back to the ranks.
+  kind: z.enum(["reinforcement", "battle_death", "wounds_death", "attrition_death", "desertion", "capture", "unavailable", "recovery"]),
   categoryId: EntityIdSchema,
   count: z.number().int().positive(),
   causeId: EntityIdSchema,
@@ -881,6 +903,12 @@ export const ForceSchema = z.object({
   fatigueBps: BasisPointsSchema,
   provisionStatus: z.enum(["provisioned", "shortage", "critical"]),
   provisionedThroughStep: ElapsedStepSchema,
+  /**
+   * The last day the engine reckoned this army's bread, sickness and rest
+   * (`sim/campaign.ts`), so a tick that covers ten days feeds ten. Absent on
+   * an army it has not yet looked at: the first look only sets it.
+   */
+  reckonedToStep: ElapsedStepSchema.optional(),
   payObligationId: EntityIdSchema.nullable(),
   payArrearsPeriods: z.number().int().nonnegative(),
   history: z.array(ForcePersonnelEventSchema),
@@ -1036,7 +1064,7 @@ export type TradeVenture = z.infer<typeof TradeVentureSchema>;
 export const ServiceContractSchema = z
   .object({
     id: EntityIdSchema,
-    role: z.enum(["mercenary", "assassin", "envoy", "engineer", "physician", "tax_farmer", "gladiator", "retainer"]),
+    role: z.enum(["mercenary", "assassin", "envoy", "engineer", "physician", "tax_farmer", "gladiator", "retainer", "steward", "agent"]),
     label: z.string().trim().min(1).max(160),
     employerAccountId: EntityIdSchema,
     employeeCharacterId: EntityIdSchema,

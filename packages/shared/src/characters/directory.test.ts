@@ -46,8 +46,24 @@ describe("the letter tray's people", () => {
     expect(groups[0]!.key).toBe("speaking");
     expect(groups[0]!.people.map((person) => person.id)).toContain(partner.id);
     for (const person of groups.flatMap((group) => group.people)) {
-      expect(["here", "letter", "out_of_reach"]).toContain(person.reach);
-      if (person.reach === "out_of_reach") expect(person.ladder.length).toBeGreaterThan(0);
+      expect(["here", "letter"]).toContain(person.reach);
+      if (person.reach === "here") expect(person.ladder).toEqual([]);
+      expect(person.ladder.some((step) => step.startsWith("Write to"))).toBe(false);
+    }
+  });
+
+  it("lets the player write to a foreign magistrate who has never heard of him", () => {
+    const state = world();
+    const viewer = holderOf(state);
+    const everyone = lettersDirectory({ world: state, viewerId: viewer.id, offices }).flatMap((group) => group.people);
+    const strangers = everyone.filter((person) => {
+      const character = state.characters.find((candidate) => candidate.id === person.id)!;
+      return character.polityId !== viewer.polityId && character.locationProvinceId !== viewer.locationProvinceId && person.how === "public";
+    });
+    expect(strangers.length).toBeGreaterThan(0);
+    for (const person of strangers) {
+      expect(person.reach, person.name).toBe("letter");
+      expect(person.reachLabel).toBe("By letter");
     }
   });
 
