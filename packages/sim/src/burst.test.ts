@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import { FactSchema, ScenarioDefinitionSchema, WorldStateSchema, factsKnownTo, factsVisibleTo, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
-import { DEFAULT_BUDGET, runSimulationBurst, type BurstInput } from "./burst";
+import { DEFAULT_BUDGET, runSimulationBurst, type BurstInput, type WindowSnapshot } from "./burst";
 import { composeChronicle } from "./chronicle";
 import type { SimModelPort, SimOperation } from "./ports";
 
@@ -44,7 +44,7 @@ const RAISE_TWO_LEGIONS = JSON.stringify({
       polityId: "rome",
       provinceId: null,
       age: 38,
-      officeLabel: "Military Quaestor",
+      officeLabel: "Military Quaestor", officeAuthorises: [],
       traits: ["methodical", "politically cautious"],
       generatedBecause: "Responsible for financing the current mobilization.",
     },
@@ -159,11 +159,23 @@ describe("a burst answering \"Raise two new legions\"", () => {
     expect(result.newFacts.some((fact) => fact.kind === "military_reinforcement")).toBe(true);
   });
 
-  it("stays inside the two-to-four model call budget", async () => {
+  it("stays inside the two-to-four round budget", async () => {
+    // VISION §29 asks for "approximately 2--4 major model calls, not dozens",
+    // and this counted calls until a call stopped being the unit it meant. A
+    // round's cast is now dealt onto up to three requests issued at once --
+    // the same portraits, the same answers, the same tokens, finishing in the
+    // time of the longest instead of the sum. Counting those separately would
+    // read as the budget tripling when nothing more was asked of the world.
+    //
+    // So the bound is rounds, which is what §29 was always about, and the call
+    // count is held to the guard against a loop that will not stop.
     const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [CARTHAGE_REACTS] });
     const result = await runSimulationBurst(input(port));
-    expect(result.modelCalls).toBeLessThanOrEqual(4);
-    expect(result.modelCalls).toBeGreaterThanOrEqual(2);
+    // The order's own chain. What the world does after a quiet stretch is a
+    // chain of its own, bounded by the call guard (`newChainAfterDays`).
+    expect(result.chainRounds[0]).toBeLessThanOrEqual(4);
+    expect(result.chainRounds[0]).toBeGreaterThanOrEqual(2);
+    expect(result.modelCalls).toBeLessThanOrEqual(DEFAULT_BUDGET.maxModelCalls);
   });
 });
 
@@ -262,17 +274,28 @@ describe("the future queue", () => {
 });
 
 describe("friction the player hears about", () => {
-  /** An order whose spending the treasury genuinely cannot cover. */
+  /**
+   * An order whose spending the purse genuinely cannot cover. A payment larger
+   * than the purse now pays what is in it, so it is the second, from a purse
+   * already emptied, that the world refuses.
+   */
   const UNAFFORDABLE = JSON.stringify({
     ...JSON.parse(RAISE_TWO_LEGIONS),
-    deltas: [{ op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: null, amount: 999_999, reason: "An impossible levy." }],
+    deltas: [
+      { op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: null, amount: 999_999, reason: "Everything he has." },
+      { op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: null, amount: 500, reason: "An impossible levy." },
+    ],
     facts: [],
   });
 
-  /** An order naming an official the same answer never created. */
+  /**
+   * An order naming an army nobody raised. (A person named and never made is
+   * made now -- the world's lists are open -- so the malformed reference that
+   * stands for the whole class is one the engine cannot fill in: an army.)
+   */
   const PHANTOM = JSON.stringify({
     ...JSON.parse(RAISE_TWO_LEGIONS),
-    deltas: [{ op: "character_intent_set", actorCharacterRef: "publius_scutarius", actionType: "prepare", targetRefs: [], rationale: "Preparing the levy.", priority: 50, visibility: "private" }],
+    deltas: [{ op: "force_modify", forceRef: "legio-phantasma", name: "The Phantom Legion", reason: "Renaming an army nobody raised." }],
     facts: [],
   });
 
@@ -286,8 +309,8 @@ describe("friction the player hears about", () => {
   });
 
   it("keeps a malformed proposal out of the ruler's sight", async () => {
-    // "No character publius_scutarius exists" is the engine catching a bad
-    // payload, not a thing that happened in the world.
+    // "No force legio-phantasma exists" is the engine catching a bad payload,
+    // not a thing that happened in the world.
     const port = scriptedPort({ simulate_orchestrate: [PHANTOM], simulate_cognition: [JSON.stringify({ actors: [] })] });
     const result = await runSimulationBurst(input(port));
 
@@ -327,7 +350,7 @@ describe("budget and termination", () => {
     const quiet = JSON.stringify({ actors: [] });
     const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [quiet, quiet, quiet] });
     const result = await runSimulationBurst(input(port));
-    expect(result.iterations).toBeLessThanOrEqual(DEFAULT_BUDGET.maxIterations);
+    for (const rounds of result.chainRounds) expect(rounds).toBeLessThanOrEqual(DEFAULT_BUDGET.maxIterations);
     expect(result.modelCalls).toBeLessThanOrEqual(DEFAULT_BUDGET.maxModelCalls);
   });
 
@@ -438,7 +461,11 @@ describe("budget and termination", () => {
     // that no proposal was applied, not that no money moved.
     expect(result.world.characters).toHaveLength(world().characters.length);
     expect(result.world.projects).toHaveLength(0);
-    expect(result.outcome).toBe("continue");
+    // What news there is, is the engine's own: the record that the order was
+    // given, and a stirring the engine carries out itself (`engineWork`),
+    // which happens whatever the model answers.
+    const engineStirrings = new Set(["order_given", "harvest", "grain_fleet_lost", "fire", "road_or_pass"]);
+    expect(result.newFacts.filter((fact) => (result.significanceByFactId.get(fact.id) ?? 0) > 0).every((fact) => engineStirrings.has(fact.kind))).toBe(true);
   });
 
   it("interrupts for a decision that needs the ruler's own authority", async () => {
@@ -556,8 +583,8 @@ function capturingScriptedPort(script: Partial<Record<SimOperation, string[]>>):
 }
 
 const PLOT_SEED = {
-  key: "seed-plot", kind: "person_problem" as const, archetype: "conspiracy", severity: "serious" as const, secret: true, oneShot: false, repeated: false,
-  target: { provinceId: null, provinceName: null, polityId: "rome", polityName: "Roman Republic", characterId: "quintus-fabius", characterName: "Quintus Fabius" },
+  key: "seed-plot", kind: "person_problem" as const, archetype: "conspiracy", severity: "serious" as const, secret: true, oneShot: false, repeated: false, pressureId: null,
+  target: { provinceId: null, provinceName: null, polityId: "rome", polityName: "Roman Republic", characterId: "quintus-fabius", characterName: "Quintus Fabius", otherPolityId: null, otherPolityName: null, forceId: null, forceName: null, forceIsNaval: false },
   inPlayerRealm: true, why: "The world has been quiet at home.", brief: "Quintus Fabius [quintus-fabius] has begun something against the government he serves.",
 };
 
@@ -611,11 +638,13 @@ describe("the world stirs: a secret plot", () => {
 
   it("puts the seed to the orchestrator, and records that it was taken up", async () => {
     const { port, result } = await run();
-    expect(port.shown.simulate_orchestrate![0]).toContain("THE WORLD STIRS (seed seed-plot)");
+    expect(port.shown.simulate_orchestrate![0]).toContain("(seed seed-plot)");
     const thread = result.world.storylines.find((storyline) => storyline.seedKey === "seed-plot")!;
     expect(thread.origin).toBe("world");
     expect(thread.visibility).toBe("private");
-    expect(result.world.narrator).toEqual({ lastSeedDay: 0, seedCount: 1, lastSeedKey: "seed-plot", consumed: true });
+    // `lastSeedDay` is the far end of what the batch covers, not the day it
+    // was decided: a batch sized for a season is that season's stirrings.
+    expect(result.world.narrator).toEqual({ lastSeedDay: 90, seedCount: 1, lastSeedKey: "seed-plot", consumed: true, spentPressureIds: [] });
     expect(result.world.characterPressures.some((pressure) => pressure.characterId === "quintus-fabius" && pressure.visibility === "private")).toBe(true);
   });
 
@@ -665,13 +694,15 @@ describe("the world stirs: a secret plot", () => {
     // The plotter's own account travels with his private facts and is not
     // his ruler's to read; the thread's title is known to its participants
     // alone. The orchestrator's summary is the one thing code cannot gate --
-    // it describes the visible order too -- which is what rule 20 is for.
+    // it describes the visible order too -- which is what the secrecy principle (7) is for.
     const historian = capturingScriptedPort({ compose_chronicle: [JSON.stringify({ entries: [] })] });
-    await composeChronicle({
+    const record = await composeChronicle({
       port: historian, clock, observer: player, observerPolityId: "rome", facts: result.newFacts, from: { day: 0, minute: 0 }, to: result.world.instant,
       narrative: result.narrative, frictions: result.frictions, significanceByFactId: result.significanceByFactId, storylines: result.world.storylines,
     });
-    const shown = historian.shown.compose_chronicle![0]!;
+    // Whatever reaches the record: what the historian was shown, and what the
+    // record printed.
+    const shown = [...(historian.shown.compose_chronicle ?? []), ...record.entries.map((entry) => `${entry.title}\n${entry.body}`)].join("\n");
     expect(shown).toContain("inspects the first legion");
     expect(shown).not.toContain("spreads discontent");
     expect(shown).not.toContain("whisper");
@@ -695,7 +726,7 @@ describe("the world stirs: a plague in the open", () => {
   const LATIUM = "ita-local-23120603B86473916475875";
   const SEED = {
     ...PLOT_SEED, key: "seed-plague", kind: "world_event" as const, archetype: "plague", secret: false,
-    target: { provinceId: LATIUM, provinceName: "Latium", polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null },
+    target: { provinceId: LATIUM, provinceName: "Latium", polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null, otherPolityId: null, otherPolityName: null, forceId: null, forceName: null, forceIsNaval: false },
     brief: `Sickness has come to Latium [${LATIUM}].`,
   };
   const PLAGUE = JSON.stringify({
@@ -728,5 +759,205 @@ describe("the world stirs: a plague in the open", () => {
     const known = factsKnownTo(result.newFacts, { kind: "character", id: "marcus-atilius" }, "rome", result.world.instant).map((fact) => fact.kind);
     expect(known).toContain("plague_outbreak");
     expect(known).toContain("plague_wave");
+  });
+});
+
+describe("what a person said", () => {
+  const SPEAKS = JSON.stringify({
+    actors: [
+      {
+        actorRef: { kind: "character", id: "hanno" },
+        reasoning: "Rome is arming; the west of the island must be held.",
+        proposal: {
+          narrativeSummary: "Carthage quietly reinforces its position in western Sicily.",
+          utterance: { line: "Let them count our ships when they are already in the strait.", occasion: "to the Council of Elders" },
+          frictions: [],
+          deltas: [],
+          facts: [
+            { localId: "reinforcement", kind: "military_reinforcement", summary: "Carthage reinforces western Sicily.", affectedRefs: [{ kind: "polity", id: "carthage" }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 60 },
+          ],
+          delegations: [],
+          schedule: [],
+        },
+      },
+    ],
+  });
+
+  it("carries a person's own words out of the burst, with the facts they belong to", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [SPEAKS, SPEAKS, SPEAKS, SPEAKS] });
+    const result = await runSimulationBurst(input(port));
+    const spoken = result.utterances.find((utterance) => utterance.line.includes("count our ships"));
+    expect(spoken).toBeDefined();
+    expect(spoken!.speaker).toBe("Hanno");
+    expect(spoken!.occasion).toBe("to the Council of Elders");
+    expect(spoken!.factIds.length).toBeGreaterThan(0);
+  });
+
+  it("attributes nothing to the orchestrator, which speaks for everyone and so for no one", async () => {
+    // The world's own answer covers Rome, the Boii chieftain and the weather in
+    // one breath. A quotation drawn from it would have an invented speaker.
+    const speaking = JSON.parse(RAISE_TWO_LEGIONS) as Record<string, unknown>;
+    speaking.utterance = { line: "Rome will have her legions.", occasion: "in the Senate" };
+    const port = scriptedPort({ simulate_orchestrate: [JSON.stringify(speaking)], simulate_cognition: [CARTHAGE_REACTS, CARTHAGE_REACTS, CARTHAGE_REACTS, CARTHAGE_REACTS] });
+    const result = await runSimulationBurst(input(port));
+    expect(result.utterances.map((utterance) => utterance.line)).not.toContain("Rome will have her legions.");
+  });
+});
+
+describe("an irregularity somebody comes across", () => {
+  it("writes the breach in words, and lets the right person find it out later", async () => {
+    // The breach fact used to be the audit line, private to its author,
+    // forever. A consequence nobody can ever learn of is not a consequence.
+    const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [CARTHAGE_REACTS, CARTHAGE_REACTS, CARTHAGE_REACTS, CARTHAGE_REACTS] });
+    const result = await runSimulationBurst(input(port));
+    const breach = result.newFacts.find((fact) => fact.kind === "authority_breach");
+    if (breach === undefined) return; // A burst with no overreach has nothing to test.
+
+    expect(breach.summary).not.toContain("grant");
+    expect(breach.summary).not.toContain("domain");
+    // Either nobody noticed -- which must stay possible -- or somebody did,
+    // and it takes them time.
+    const others = breach.discovery.discoveredBy.filter((entry) => entry.observerRef.id !== "marcus-atilius");
+    if (others.length > 0) {
+      expect(breach.discovery.state).toBe("delayed");
+      expect(breach.discovery.knowableAtInstant).not.toBeNull();
+      expect(others.length).toBeLessThanOrEqual(2);
+    }
+  });
+});
+
+describe("the order, and the world beside it", () => {
+  const ANSWER = (lists: { deltas?: unknown[]; worldDeltas?: unknown[] }) => JSON.stringify({
+    intent: { summary: "Nothing much.", domains: [] },
+    narrativeSummary: "The world goes on.",
+    frictions: [],
+    deltas: lists.deltas ?? [],
+    worldDeltas: lists.worldDeltas ?? [],
+    facts: [], delegations: [], schedule: [], cognitionCandidates: [], outcome: "continue", playerDecision: null,
+  });
+  const RENAME = { op: "force_modify", forceRef: "carthaginian-army", name: "The Army of Sicily", reason: "Hanno renames his army." };
+  const quiet = JSON.stringify({ actors: [] });
+  const named = (result: Awaited<ReturnType<typeof runSimulationBurst>>) =>
+    result.world.material.forces.find((force) => force.id === "carthaginian-army")!.name;
+
+  it("will not have a Roman's order rename a Carthaginian army", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [ANSWER({ deltas: [RENAME] })], simulate_cognition: [quiet, quiet, quiet, quiet] });
+    const result = await runSimulationBurst(input(port, { orderText: "Have the Carthaginians call their army the Army of Sicily." }));
+    expect(named(result)).not.toBe("The Army of Sicily");
+    expect(result.newFacts.some((fact) => fact.kind === "order_ignored")).toBe(true);
+  });
+
+  it("lets the world rename it, when it is Carthage's own business", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [ANSWER({ worldDeltas: [RENAME] })], simulate_cognition: [quiet, quiet, quiet, quiet] });
+    const result = await runSimulationBurst(input(port));
+    expect(named(result)).toBe("The Army of Sicily");
+    expect(result.breaches).toEqual([]);
+  });
+});
+
+describe("the player says how long", () => {
+  const NOTHING = JSON.stringify({
+    intent: { summary: "Wait.", domains: [] }, narrativeSummary: "Time passes.", frictions: [],
+    deltas: [], facts: [], delegations: [], schedule: [], cognitionCandidates: [], outcome: "continue", playerDecision: null,
+  });
+  const quiet = JSON.stringify({ actors: [] });
+
+  it("lets a month pass with no order, in a world with nothing on its calendar", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [NOTHING], simulate_cognition: [quiet, quiet, quiet, quiet] });
+    const before = world().instant.day;
+    const result = await runSimulationBurst(input(port, { orderText: null, spanDays: 30 }));
+    expect(result.world.instant.day - before).toBeGreaterThanOrEqual(30);
+  });
+
+  it("carries a year when asked for one, past the ordinary ceiling of a season", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [NOTHING], simulate_cognition: [quiet, quiet, quiet, quiet] });
+    const before = world().instant.day;
+    const result = await runSimulationBurst(input(port, { orderText: null, spanDays: 365 }));
+    expect(result.world.instant.day - before).toBe(Math.min(365, clock.maxSpanDays));
+  });
+});
+
+describe("the audit", () => {
+  const ORDER = JSON.stringify({
+    ...JSON.parse(QUIET),
+    narrativeSummary: "The consul pays his steward and takes on a clerk.",
+    deltas: [
+      // No such account: the consul's own purse is the obvious payer.
+      { op: "obligation_upsert", obligationRef: null, localId: "clerk", kind: "salary", label: "A clerk's wage", payerAccountRef: "marcus-strongbox", recipientAccountRef: null, amount: 2, cadenceDays: 30, priority: 500, active: true, reason: "He takes on a clerk." },
+      // No such legion, and which army he meant is not the engine's to guess.
+      { op: "force_modify", forceRef: "the-stewards-guard", authorizedStrengthDelta: 10, reason: "He adds men to his guard." },
+    ],
+  });
+  const REPAIRED = JSON.stringify({ deltas: [{ op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: null, amount: 5, reason: "He pays his steward." }] });
+
+  it("keeps what was filled in and what the repair had to put right, which the merged result forgets", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [ORDER, REPAIRED], simulate_cognition: [] });
+    const result = await runSimulationBurst(input(port, { spanDays: 7 }));
+    const ofTheOrder = result.audit.filter((entry) => entry.ofTheOrder);
+    expect(ofTheOrder.find((entry) => entry.kind === "assumed")).toMatchObject({ op: "obligation_upsert", attempt: "first" });
+    expect(ofTheOrder.find((entry) => entry.kind === "reference")).toMatchObject({ op: "force_modify", attempt: "first" });
+    // The repair carried it out, so nothing of the order's is refused the second time.
+    expect(ofTheOrder.filter((entry) => entry.attempt === "repair" && entry.kind !== "assumed")).toEqual([]);
+  });
+});
+
+describe("the burst hands out its windows as the clock leaves them", () => {
+  it("cuts one window per move of the clock, partitioning every fact it wrote, with the order's facts in the first", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [CARTHAGE_REACTS, QUIET, QUIET, QUIET] });
+    const windows: WindowSnapshot[] = [];
+    const result = await runSimulationBurst(input(port, { onWindowClosed: (window) => { windows.push(window); } }));
+
+    expect(windows.length).toBeGreaterThanOrEqual(2);
+    // Numbered from the order, and the clock never moves backwards.
+    expect(windows.map((window) => window.index)).toEqual(windows.map((_, index) => index));
+    for (let index = 1; index < windows.length; index += 1) {
+      expect(windows[index]!.from).toEqual(windows[index - 1]!.to);
+      expect(windows[index]!.from.day).toBeGreaterThanOrEqual(windows[index - 1]!.from.day);
+    }
+    // Every fact of the burst lands in exactly one window, in the order written.
+    expect(windows.flatMap((window) => window.facts.map((fact) => fact.id))).toEqual(result.newFacts.map((fact) => fact.id));
+    // And the answer to the order is the first window's to tell.
+    expect(new Set(windows[0]!.orderFactIds)).toEqual(new Set(result.orderFactIds));
+    expect(windows.slice(1).every((window) => window.orderFactIds.length === 0)).toBe(true);
+    // The last window ends where the burst ended.
+    expect(windows[windows.length - 1]!.to).toEqual(result.world.instant);
+  });
+
+  it("is not failed by a listener that throws", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [CARTHAGE_REACTS, QUIET, QUIET, QUIET] });
+    const result = await runSimulationBurst(input(port, { onWindowClosed: () => { throw new Error("the page went away"); } }));
+    expect(result.newFacts.length).toBeGreaterThan(0);
+    expect(result.stopReason).not.toBe("budget_exhausted");
+  });
+});
+
+describe("calls the burst decides not to make", () => {
+  it("does not ask a cast of nobody pressing past the rounds it pays for, and says so", async () => {
+    const port = scriptedPort({ simulate_orchestrate: [QUIET], simulate_cognition: [QUIET, QUIET, QUIET, QUIET] });
+    const result = await runSimulationBurst(input(port, { budget: { ...DEFAULT_BUDGET, maxAmbientOnlyRounds: 0 } }));
+    expect(port.calls.filter((call) => call === "simulate_cognition")).toHaveLength(0);
+    expect(result.skipped.some((skip) => skip.stage === "cognition" && skip.reason.includes("nobody pressing"))).toBe(true);
+    expect(result.stopReason).toBe("no_due_events");
+  });
+
+  it("still asks when somebody is pressing, however many quiet rounds went before", async () => {
+    // Carthage reacts to the levy: a reaction is always pressing.
+    const port = scriptedPort({ simulate_orchestrate: [RAISE_TWO_LEGIONS], simulate_cognition: [CARTHAGE_REACTS, QUIET, QUIET, QUIET] });
+    const result = await runSimulationBurst(input(port, { budget: { ...DEFAULT_BUDGET, maxAmbientOnlyRounds: 0 } }));
+    expect(port.calls.filter((call) => call === "simulate_cognition").length).toBeGreaterThan(0);
+    expect(result.newFacts.length).toBeGreaterThan(0);
+  });
+
+  it("spends no repair on a refusal no correction can cure", async () => {
+    const spendsHisPurse = JSON.stringify({
+      intent: { summary: "Games are held.", domains: [] }, narrativeSummary: "The world holds games.", frictions: [], deltas: [], facts: [], delegations: [], schedule: [],
+      worldDeltas: [{ op: "money_transfer", fromAccountRef: "marcus-purse", toAccountRef: null, amount: 100, reason: "The city holds games at the consul's expense." }],
+      cognitionCandidates: [], outcome: "continue", playerDecision: null,
+    });
+    const port = scriptedPort({ simulate_orchestrate: [spendsHisPurse], repair_deltas: [JSON.stringify({ deltas: [] })], simulate_cognition: [QUIET, QUIET, QUIET, QUIET] });
+    const result = await runSimulationBurst(input(port));
+    expect(port.calls.filter((call) => call === "repair_deltas")).toHaveLength(0);
+    expect(result.skipped.some((skip) => skip.stage === "repair" && skip.reason.includes("player's own purse"))).toBe(true);
+    expect(result.audit.some((entry) => entry.kind === "reference" && entry.reason.includes("player's own purse"))).toBe(true);
   });
 });

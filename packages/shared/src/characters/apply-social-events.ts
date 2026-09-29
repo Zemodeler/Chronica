@@ -2,10 +2,12 @@ import type { WorldState } from "../world/world-state";
 import type { Character, DirectedRelation, RelationCause } from "./character";
 import type { CharacterProfile } from "./character-profile";
 import type { CharacterSocialEvent } from "./social-events";
-import type { SocialLink } from "./relationship-dimensions";
+import { listSocialLinks, type SocialLink } from "./relationship-dimensions";
 import type { CharacterBelief } from "./beliefs";
 import { KNOWLEDGE_CHANNEL_DEFAULTS, resolveRecipients } from "./beliefs";
 import { createPressure, refreshPressure, resolvePressure } from "./pressures";
+import { boundedId, stableHash } from "../determinism";
+import { MAX_TRAITS, observeTraits, type TraitObservation } from "./traits";
 import type { Commitment } from "./commitments";
 import { createCommitment } from "./commitments";
 
@@ -22,6 +24,10 @@ export interface ApplySocialEventsOutcome {
   readonly rejectedIds: readonly { id: string; reason: string }[];
   /** Profiles paired with a newly-introduced character, for the caller to persist (DB-side, not part of `WorldState`). */
   readonly introducedProfiles: readonly CharacterProfile[];
+  /** Traits that two people have now independently seen, so they are who somebody is. */
+  readonly traitsConfirmed: readonly { readonly characterId: string; readonly traitId: string; readonly observerCharacterIds: readonly string[] }[];
+  /** Traits two people have now seen the opposite of, so they are no longer who somebody is. */
+  readonly traitsLost: readonly { readonly characterId: string; readonly traitId: string; readonly contradictedBy: string }[];
 }
 
 function findRelation(character: Character, targetCharacterId: string): DirectedRelation | undefined {
@@ -57,6 +63,24 @@ function withAppendedCause(character: Character, targetCharacterId: string, caus
  * spends it -- that only happens later, when the commitment is fulfilled
  * (`character-agency/commitments.ts`).
  */
+/**
+ * A short, stable id for something scoped to an event and two people.
+ *
+ * Built by concatenation, these ran past `EntityIdSchema`'s 120 characters
+ * the moment real ids were involved -- an event id, a `declared-<uuid>`
+ * player and a `character-<burst uuid>-<n>` NPC come to well over that -- and
+ * the whole batch was then rejected with "characters.21.relations.0.causes.0.id:
+ * Too big", which names neither the event nor the people nor the cause. It
+ * was reachable only from dialogue until the simulation started writing
+ * relation causes of its own, and then it began throwing away whole answers,
+ * battles included.
+ *
+ * Hashed rather than truncated: truncating two ids that share a prefix gives
+ * one id, and `stableHash` keeps a replay identical.
+ */
+const scopedId = (eventId: string, kind: string, ...parts: readonly string[]): string =>
+  `${eventId.slice(0, 40)}:${kind}:${stableHash([eventId, kind, ...parts]).toString(36)}`;
+
 export function applySocialEvents(
   world: WorldState,
   events: readonly CharacterSocialEvent[],
@@ -69,6 +93,9 @@ export function applySocialEvents(
   let characterPressures: readonly WorldState["characterPressures"][number][] = world.characterPressures;
   let socialLinks: readonly SocialLink[] = world.socialLinks;
   let commitments: readonly Commitment[] = world.commitments;
+  let traitObservations: readonly TraitObservation[] = world.traitObservations;
+  const traitsConfirmed: { characterId: string; traitId: string; observerCharacterIds: readonly string[] }[] = [];
+  const traitsLost: { characterId: string; traitId: string; contradictedBy: string }[] = [];
   const appliedIds: string[] = [];
   const rejectedIds: { id: string; reason: string }[] = [];
   const introducedProfiles: CharacterProfile[] = [];
@@ -137,7 +164,7 @@ export function applySocialEvents(
       const authorityCheck = createCommitment(
         { characters, commitments, material: world.material },
         {
-          id: `${event.id}:commitment`,
+          id: scopedId(event.id, "commitment"),
           promisorCharacterId: proposal.promisorCharacterId,
           beneficiaryCharacterId: proposal.beneficiaryCharacterId,
           actionKind: proposal.actionKind,
@@ -166,7 +193,7 @@ export function applySocialEvents(
     }
 
     const consequenceRefs = event.relationCauses.map((cause, index) => ({
-      id: `${event.id}:cause:${index}`,
+      id: scopedId(event.id, "cause", String(index)),
       kind: "relationship_cause" as const,
       explanation: cause.label,
     }));
@@ -175,7 +202,7 @@ export function applySocialEvents(
       const subject = characters.find((c) => c.id === cause.subjectCharacterId);
       if (subject === undefined) continue;
       const relationCause: RelationCause = {
-        id: `${event.id}:cause:${cause.subjectCharacterId}:${cause.targetCharacterId}`,
+        id: scopedId(event.id, "cause", cause.subjectCharacterId, cause.targetCharacterId),
         label: cause.label,
         score: cause.score,
         occurredAtStep: atStep,
@@ -195,7 +222,7 @@ export function applySocialEvents(
         );
         if (!alreadyLinked) {
           socialLinks = [...socialLinks, {
-            id: `${event.id}:link:${cause.subjectCharacterId}:${cause.targetCharacterId}:${cause.socialLinkKind}`,
+            id: scopedId(event.id, "link", cause.subjectCharacterId, cause.targetCharacterId, cause.socialLinkKind),
             subjectCharacterId: cause.subjectCharacterId,
             targetCharacterId: cause.targetCharacterId,
             kind: cause.socialLinkKind,
@@ -208,18 +235,32 @@ export function applySocialEvents(
     }
 
     // Beliefs: resolve recipients per channel and grant/reinforce a belief for each.
+    //
+    // A rumour travels along the source's own social links -- resolveRecipients
+    // takes at most four of them, sorted, so the spread stays bounded and
+    // deterministic. This argument was [] from the day it was written, which
+    // meant ordinary_rumour resolved to nobody and the one broad channel in
+    // the knowledge model never moved a thing. The other channels name their
+    // recipients outright and do not read it.
+    const rumourSource = event.participantCharacterIds[0] ?? null;
+    const sourceSocialLinkTargetIds = rumourSource === null
+      ? []
+      : listSocialLinks({ socialLinks }, rumourSource)
+        .map((link) => (link.subjectCharacterId === rumourSource ? link.targetCharacterId : link.subjectCharacterId))
+        .filter((id) => id !== rumourSource);
+
     for (const [beliefIndex, beliefProposal] of event.proposedBeliefs.entries()) {
       const recipients = resolveRecipients({
         channel: beliefProposal.channel,
         participantCharacterIds: event.participantCharacterIds,
         witnessCharacterIds: event.knownByCharacterIds,
-        sourceCharacterId: event.participantCharacterIds[0] ?? null,
-        sourceSocialLinkTargetIds: [],
+        sourceCharacterId: rumourSource,
+        sourceSocialLinkTargetIds,
         explicitRecipientIds: beliefProposal.explicitRecipientCharacterIds,
       });
       const defaults = KNOWLEDGE_CHANNEL_DEFAULTS[beliefProposal.channel];
       for (const holderCharacterId of recipients) {
-        const id = `${event.id}:belief:${beliefIndex}:${holderCharacterId}`;
+        const id = boundedId(event.id, "belief", beliefIndex, holderCharacterId);
         const existing = characterBeliefs.find((b) =>
           b.holderCharacterId === holderCharacterId && b.status === "active"
           && b.claim === beliefProposal.claim && b.subjectEntityId === beliefProposal.subjectEntityId,
@@ -255,7 +296,7 @@ export function applySocialEvents(
       if (change.action === "create") {
         if (change.kind === undefined || change.intensity === undefined || change.label === undefined) continue;
         const result = createPressure(worldSlice, {
-          id: `${event.id}:pressure:${changeIndex}`,
+          id: scopedId(event.id, "pressure", String(changeIndex)),
           characterId: change.characterId,
           kind: change.kind,
           intensity: change.intensity,
@@ -304,6 +345,45 @@ export function applySocialEvents(
       },
     ];
 
+    // What the people in this event now think somebody is like (slice 11).
+    //
+    // An observer has to have been there -- a trait is what somebody saw, not
+    // what they heard -- and two of them have to say it before it is who
+    // anybody is. Refused observations do not fail the event: an NPC naming a
+    // trait the registry has no word for has simply said something the engine
+    // cannot write down.
+    const witnesses = new Set(event.participantCharacterIds);
+    const proposals = event.observedTraits.filter((proposal) => witnesses.has(proposal.observerCharacterId));
+    if (proposals.length > 0) {
+      const traitsOf = (characterId: string): readonly string[] =>
+        characters.find((candidate) => candidate.id === characterId)?.traits ?? [];
+      const outcome = observeTraits(
+        traitObservations,
+        proposals.map((proposal) => ({
+          characterId: proposal.subjectCharacterId,
+          observerCharacterId: proposal.observerCharacterId,
+          traitId: proposal.traitId,
+          note: proposal.note,
+        })),
+        traitsOf,
+        atStep,
+        (prefix) => `${event.id}:${prefix}:${traitObservations.length}`,
+      );
+      traitObservations = outcome.observations;
+      for (const entry of outcome.confirmed) {
+        traitsConfirmed.push(entry);
+        characters = characters.map((candidate) => (candidate.id === entry.characterId
+          ? { ...candidate, traits: [...candidate.traits, entry.traitId].slice(0, MAX_TRAITS) }
+          : candidate));
+      }
+      for (const entry of outcome.lost) {
+        traitsLost.push({ characterId: entry.characterId, traitId: entry.traitId, contradictedBy: entry.contradictedBy });
+        characters = characters.map((candidate) => (candidate.id === entry.characterId
+          ? { ...candidate, traits: candidate.traits.filter((held) => held !== entry.traitId) }
+          : candidate));
+      }
+    }
+
     appliedIds.push(event.id);
   }
 
@@ -316,9 +396,12 @@ export function applySocialEvents(
       characterPressures: [...characterPressures],
       socialLinks: [...socialLinks],
       commitments: [...commitments],
+      traitObservations: [...traitObservations],
     },
     appliedIds,
     rejectedIds,
     introducedProfiles,
+    traitsConfirmed,
+    traitsLost,
   };
 }

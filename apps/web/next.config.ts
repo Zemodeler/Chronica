@@ -9,6 +9,8 @@ loadEnvConfig(resolve(dirname(fileURLToPath(import.meta.url)), "../.."), true, c
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // The corner badge sat over the room and the map in every screenshot.
+  devIndicators: false,
   transpilePackages: ["@chronica/billing", "@chronica/db", "@chronica/shared", "@chronica/sim"],
 };
 

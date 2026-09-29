@@ -2,11 +2,25 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema/index";
 
-// Keep each application instance well below the small connection limits used
-// by hosted Postgres plans. The idle timeout also releases pools orphaned by
-// development hot reloads instead of letting them consume slots indefinitely.
+/**
+ * Keep each application instance well below the small connection limits used
+ * by hosted Postgres plans. The idle timeout also releases pools orphaned by
+ * development hot reloads instead of letting them consume slots indefinitely.
+ *
+ * Three was too few once the burst began making model calls concurrently.
+ * Every model call takes a coin hold, which is a transaction, which is a
+ * connection for as long as the call runs -- so the pool, not the provider,
+ * was the ceiling on how many passages of a Chronicle could be written at
+ * once. Ten is still modest for any Postgres worth deploying on, and the
+ * environment can lower it where a plan is stricter than that.
+ */
+const POOL_MAX = (() => {
+  const configured = Number(process.env.CHRONICA_DB_POOL_MAX?.trim());
+  return Number.isInteger(configured) && configured > 0 ? configured : 10;
+})();
+
 const POSTGRES_OPTIONS = {
-  max: 3,
+  max: POOL_MAX,
   prepare: false,
   idle_timeout: 20,
   max_lifetime: 30 * 60,

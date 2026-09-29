@@ -80,6 +80,12 @@ export interface ForceMarkerPlacement {
   readonly travelledPath: readonly GeoJsonPosition[] | null;
   /** Present only for a deliberate group (a battle, or a joint siege) of more than one force sharing this exact placement. */
   readonly group: { readonly key: string; readonly size: number; readonly isPrimary: boolean } | null;
+  /**
+   * This force's place in a row of unrelated forces that landed on the same
+   * point, or null when it stands alone. The row is laid out by whoever knows
+   * how wide a standard is drawn at this zoom (`fannedStandardCentre`).
+   */
+  readonly fan: { readonly index: number; readonly count: number } | null;
 }
 
 /** Null when the force is not part of any deliberate, already-combined engagement. */
@@ -93,16 +99,19 @@ function deliberateGroupKey(forceId: string, overlay: DynamicMapOverlay | null):
   return null;
 }
 
-/** Small, fixed in degree-space (the same space `x`/`y` already live in) so it reads consistently at any zoom. */
-const INCIDENTAL_OVERLAP_OFFSET_DEGREES = 0.015;
-
 /**
  * Resolve every force's marker placement at once: deliberate groups (a
  * battle's two sides, a joint siege's attackers) collapse to one shared
  * placement per group; any other forces that merely happen to land on the
- * same point get a small, deterministic offset (ordered by forceId, so the
- * same set of co-located forces always fans out the same way, stable across
- * reload and replay) so their flags never overlap.
+ * same point are put in a row (ordered by forceId, so the same set of
+ * co-located forces always fans out the same way, stable across reload and
+ * replay) so their flags never overlap.
+
+ * The row used to be a circle 0.015 degrees across, in a world where a
+ * standard is drawn about 0.18 degrees wide: two armies sharing a province
+ * covered each other almost exactly, and a click on the one on top opened the
+ * one beneath. The spacing is now in standard widths, which only the drawing
+ * code knows.
  */
 export function resolveMapForcePlacements(
   forces: readonly MapForceOverlay[],
@@ -128,29 +137,21 @@ export function resolveMapForcePlacements(
     bucket.push(entry);
     incidentalBuckets.set(key, bucket);
   }
-  const offsetByForceId = new Map<string, { dx: number; dy: number }>();
+  const fanByForceId = new Map<string, { index: number; count: number }>();
   for (const bucket of incidentalBuckets.values()) {
     if (bucket.length < 2) continue;
     const ordered = [...bucket].sort((a, b) => a.force.forceId.localeCompare(b.force.forceId));
-    ordered.forEach((entry, index) => {
-      const angle = (2 * Math.PI * index) / ordered.length;
-      offsetByForceId.set(entry.force.forceId, {
-        dx: Math.cos(angle) * INCIDENTAL_OVERLAP_OFFSET_DEGREES,
-        dy: Math.sin(angle) * INCIDENTAL_OVERLAP_OFFSET_DEGREES,
-      });
-    });
+    ordered.forEach((entry, index) => fanByForceId.set(entry.force.forceId, { index, count: ordered.length }));
   }
 
   const seenGroupKey = new Set<string>();
   return resolved.map(({ force, position }) => {
     const key = deliberateGroupKey(force.forceId, overlay);
-    const offset = offsetByForceId.get(force.forceId);
-    const x = position.x + (offset?.dx ?? 0);
-    const y = position.y + (offset?.dy ?? 0);
-    if (!key) return { forceId: force.forceId, x, y, travelledPath: position.travelledPath, group: null };
+    const { x, y } = position;
+    if (!key) return { forceId: force.forceId, x, y, travelledPath: position.travelledPath, group: null, fan: fanByForceId.get(force.forceId) ?? null };
     const size = groupSizeByKey.get(key) ?? 1;
     const isPrimary = !seenGroupKey.has(key);
     seenGroupKey.add(key);
-    return { forceId: force.forceId, x, y, travelledPath: position.travelledPath, group: size > 1 ? { key, size, isPrimary } : null };
+    return { forceId: force.forceId, x, y, travelledPath: position.travelledPath, group: size > 1 ? { key, size, isPrimary } : null, fan: null };
   });
 }

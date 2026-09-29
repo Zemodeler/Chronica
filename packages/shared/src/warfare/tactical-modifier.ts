@@ -56,3 +56,31 @@ export const TacticalModifierProposalSchema = z
   })
   .strict();
 export type TacticalModifierProposal = z.infer<typeof TacticalModifierProposalSchema>;
+
+/**
+ * What a battle plan says it rests on, each of which the engine can check.
+ *
+ * A tactic used to be granted on its rationale alone, and the magnitude was
+ * whatever its author asked for: four paragraphs of maniples and hidden Gauls
+ * earned exactly what "I attack cleverly" earned, and that one word -- minor or
+ * meaningful -- moved a battle further than the commander, the ground and the
+ * odds together. Now a plan names what it depends on, the engine looks at the
+ * field, and only what is actually true there counts.
+ *
+ * - `scouted_ground`: the attackers have taken up known ground in the province.
+ * - `prepared_position`: that ground is worth something (a pass, a ford, a wall).
+ * - `rough_ground`: the province is broken country, and the attackers move
+ *   faster than the defenders -- which is what rough ground does to a phalanx.
+ * - `superior_horse`: the attackers have more fast troops than the defenders.
+ * - `second_force`: more than one army is coming in on the attacking side.
+ * - `numbers`: the attackers bring at least a quarter as many men again.
+ */
+export const TacticalPremiseSchema = z.enum([
+  "scouted_ground",
+  "prepared_position",
+  "rough_ground",
+  "superior_horse",
+  "second_force",
+  "numbers",
+]);
+export type TacticalPremise = z.infer<typeof TacticalPremiseSchema>;

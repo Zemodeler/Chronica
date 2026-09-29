@@ -1314,6 +1314,34 @@ A possible normal flow:
 > already making, so a living world is paid for in prompt tokens rather than
 > in calls. Raising the number of them costs almost nothing; raising the
 > number of rounds is what costs money.
+>
+> **Amendment (2026-09-21).** A call is no longer a good unit for any of this.
+> A round's cast is dealt onto two calls issued at once, so a round is two
+> calls and the same tokens, and the ceiling is twelve where it was six --
+> which buys nothing new and costs nothing new. The measure that was always
+> meant here is rounds, and that is still four.
+>
+> The reason for the change is that a call count says nothing about how long a
+> player waits. Measured against the record the engine already keeps, a burst
+> in September ran from seventeen seconds to eleven minutes on the same number
+> of calls. What the player waits for is one cast's answers generated end to
+> end, so the fix was to stop generating them end to end.
+
+> **Amendment (2026-09-25).** Four rounds is the bound on the order's own
+> chain of reactions, and it still holds. It was also counted for the whole
+> burst, and that made a month let pass a month of nine days: played by
+> hand, three rounds of reactions were spent by the eighth, and the world
+> then walked three weeks asking nobody. A garrison let into Messana on the
+> twentieth was answered by no one, and people's plans passed their day with
+> their owners never asked.
+>
+> Now news after ten quiet days starts a chain of its own, with its own
+> depth. A man whose plan wants him is still asked after his chain is spent,
+> once per step. Both come out of the call guard (`maxModelCalls`), and a
+> round the guard cannot pay for is skipped in a span the player asked for,
+> rather than ending it. A month let pass cost 15 calls instead of 12, played
+> by hand. An ordinary order that finishes in its first chain costs what it
+> did.
 
 Exceptionally consequential situations may justify additional calls:
 

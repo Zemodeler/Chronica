@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import type { CharacterSocialEvent } from "./social-events";
 import { applySocialEvents } from "./apply-social-events";
+import { EntityIdSchema } from "../material-state";
 
 const world = () => structuredClone(firstPunicWarScenario.initialWorld);
 
@@ -22,6 +23,7 @@ function baseEvent(overrides: Partial<CharacterSocialEvent> = {}): CharacterSoci
     knowledgeClaims: [],
     proposedBeliefs: [],
     pressureChanges: [],
+    observedTraits: [],
     commitmentProposal: null,
     introducedCharacter: null,
     introducedProfile: null,
@@ -125,6 +127,39 @@ describe("applySocialEvents — character-sim phase 2 extensions", () => {
     expect(secondPass.world.characterBeliefs).toHaveLength(outcome.world.characterBeliefs.length);
   });
 
+  it("carries a rumour along the source's social links, which it never used to", () => {
+    // resolveRecipients has always spread ordinary_rumour to up to four of the
+    // source's social links. The one callsite passed [], so the only broad
+    // channel in the knowledge model reached nobody at all.
+    const state = world();
+    const linked = {
+      ...state,
+      socialLinks: [
+        { id: "l1", subjectCharacterId: "marcus-atilius", targetCharacterId: "quintus-ogulnius", kind: "friend" as const, visibility: "public" as const, sourceEventId: null, createdAtStep: 0 },
+        { id: "l2", subjectCharacterId: "manius-curius", targetCharacterId: "marcus-atilius", kind: "client" as const, visibility: "public" as const, sourceEventId: null, createdAtStep: 0 },
+      ],
+    };
+    const event = baseEvent({
+      relationCauses: [],
+      proposedBeliefs: [{
+        subjectEntityId: "hanno",
+        claim: "Hanno is short on funds.",
+        kind: "rumour",
+        channel: "ordinary_rumour",
+        explicitRecipientCharacterIds: [],
+        expiresInSteps: null,
+      }],
+    });
+    const holders = applySocialEvents(linked, [event], 5, "turn-1").world.characterBeliefs
+      .map((b) => b.holderCharacterId).sort();
+    expect(holders.length).toBeGreaterThan(0);
+    // Both directions of a link count: the source's friend and the source's client.
+    expect(holders).toContain("quintus-ogulnius");
+    expect(holders).toContain("manius-curius");
+    // Never back to the person it came from.
+    expect(holders).not.toContain("marcus-atilius");
+  });
+
   it("rejects a belief proposal naming a recipient outside the event", () => {
     const event = baseEvent({
       relationCauses: [],
@@ -187,5 +222,86 @@ describe("applySocialEvents — character-sim phase 2 extensions", () => {
     const cause = outcome.world.characters.find((c) => c.id === "hanno")!.relations
       .find((r) => r.subjectCharacterId === "marcus-atilius")!.causes[0]!;
     expect(cause.dimensions).toEqual({ fear: 30, trust: -10 });
+  });
+});
+
+describe("the people around you deciding what you are", () => {
+  it("records one person's judgment without making it true", () => {
+    const outcome = applySocialEvents(world(), [baseEvent({
+      kind: "conversation",
+      observedTraits: [{ subjectCharacterId: "marcus-atilius", observerCharacterId: "hanno", traitId: "bold", note: "He crossed before dawn." }],
+    })], 5, "turn-1");
+    expect(outcome.appliedIds).toHaveLength(1);
+    expect(outcome.traitsConfirmed).toHaveLength(0);
+    expect(outcome.world.traitObservations).toHaveLength(1);
+    expect(outcome.world.characters.find((character) => character.id === "marcus-atilius")!.traits).not.toContain("bold");
+  });
+
+  it("makes it true, and says so, once a second person agrees", () => {
+    const first = applySocialEvents(world(), [baseEvent({
+      id: "event-a", kind: "conversation",
+      observedTraits: [{ subjectCharacterId: "marcus-atilius", observerCharacterId: "hanno", traitId: "bold", note: "He crossed before dawn." }],
+    })], 5, "turn-1");
+    const second = applySocialEvents(first.world, [baseEvent({
+      id: "event-b", kind: "conversation",
+      participantCharacterIds: ["marcus-atilius", "quintus-fabius"],
+      knownByCharacterIds: ["marcus-atilius", "quintus-fabius"],
+      relationCauses: [],
+      observedTraits: [{ subjectCharacterId: "marcus-atilius", observerCharacterId: "quintus-fabius", traitId: "bold", note: "He never waits for the Senate." }],
+    })], 9, "turn-2");
+
+    expect(second.traitsConfirmed).toHaveLength(1);
+    expect(second.world.characters.find((character) => character.id === "marcus-atilius")!.traits).toContain("bold");
+  });
+
+  it("ignores a judgment from somebody who was not there", () => {
+    // A trait is what somebody saw, not what they heard.
+    const outcome = applySocialEvents(world(), [baseEvent({
+      kind: "conversation",
+      observedTraits: [{ subjectCharacterId: "marcus-atilius", observerCharacterId: "quintus-fabius", traitId: "bold", note: "I hear he is rash." }],
+    })], 5, "turn-1");
+    expect(outcome.world.traitObservations).toHaveLength(0);
+    // And the event itself still applies: one bad observation is not a failure.
+    expect(outcome.appliedIds).toHaveLength(1);
+  });
+});
+
+describe("ids that have to fit", () => {
+  it("keeps every generated id inside the schema, with real ids in it", () => {
+    // From a live game. Built by concatenation these ran past
+    // `EntityIdSchema`'s 120 characters the moment real ids were involved, and
+    // the whole batch was rejected with "characters.21.relations.0.causes.0.id:
+    // Too big" -- which names neither the event, nor the people, nor the
+    // cause. It threw away a battle.
+    const long = "declared-e31f3101-57a1-442c-858b-4a7583bf54a9";
+    const longer = "character-3d67e6fd-4aee-43ac-b28b-18481bebd754-15";
+    const state = world();
+    const withBoth = {
+      ...state,
+      characters: state.characters.map((character, index) => (index === 0
+        ? { ...character, id: long }
+        : index === 1 ? { ...character, id: longer } : character)),
+    };
+    const outcome = applySocialEvents(withBoth, [baseEvent({
+      id: "social-3d67e6fd-4aee-43ac-b28b-18481bebd754-12",
+      participantCharacterIds: [long, longer],
+      knownByCharacterIds: [long, longer],
+      relationCauses: [{
+        subjectCharacterId: long, targetCharacterId: longer,
+        label: "He would not do as I asked.", score: -8, decayPerYearBps: 1_500,
+        socialLinkKind: "rival",
+      }],
+    })], 5, "turn-long");
+
+    expect(outcome.rejectedIds).toEqual([]);
+    expect(outcome.appliedIds).toHaveLength(1);
+    const subject = outcome.world.characters.find((character) => character.id === long)!;
+    const cause = subject.relations[0]!.causes[0]!;
+    expect(cause.id.length).toBeLessThanOrEqual(120);
+    for (const link of outcome.world.socialLinks) expect(link.id.length).toBeLessThanOrEqual(120);
+    // And the ids themselves parse, which is what the batch check was failing on.
+    for (const check of [cause.id, ...outcome.world.socialLinks.map((link) => link.id)]) {
+      expect(EntityIdSchema.safeParse(check).success).toBe(true);
+    }
   });
 });

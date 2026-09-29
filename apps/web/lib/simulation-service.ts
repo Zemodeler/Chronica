@@ -1,25 +1,26 @@
 import { headers } from "next/headers";
+import { after } from "next/server";
 import { and, eq } from "drizzle-orm";
-import { InsufficientCoinsError, callWithCoinGate, createAiAdapter } from "@chronica/ai";
 import {
-  WorldRevisionConflictError,
-  commitBurst,
   createDatabase,
-  failBurst,
+  findRunningBurst,
+  getBurst,
   getOpenDecision,
   getWorldView,
+  listBurstProgress,
   listChronicle,
-  listPendingEvents,
-  listRecentFacts,
-  resolveDecision,
+  markChronicleRead,
+  setThreadFollowed,
+  reapStaleBursts,
   schema,
-  startBurst,
-  type BurstFactRow,
   type ChronicaDatabase,
 } from "@chronica/db";
-import { FactSchema, PlayerDecisionSchema, type Fact, type OrderPartyRef } from "@chronica/shared";
-import { composeChronicle, runSimulationBurst, whoSeeksThePlayer, type AnsweredDecision, type SimModelPort } from "@chronica/sim";
+import { formatCoins } from "@chronica/billing";
+import { buildStation, formatWorldDate, PlayerDecisionSchema, seesAccount, type OrderPartyRef, type WorldState } from "@chronica/shared";
+import { nameOfSubject, whoSeeksThePlayer, type AnsweredDecision } from "@chronica/sim";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
+import { dateLabel, prepareBurst, runBurstToCommit, type BurstJob } from "./burst-runner";
+import { ABANDONED_ERROR, livenessAt, toBurstStatus, type BurstStatusView } from "./burst-status";
 import { requiredDatabaseUrl } from "./database-url";
 import { openInitiatedDialogue } from "./dialogue-service";
 
@@ -27,9 +28,10 @@ import { openInitiatedDialogue } from "./dialogue-service";
  * Where the pure simulation meets the application.
  *
  * `@chronica/sim` deliberately knows nothing about databases, sessions or
- * billing -- that is what makes it testable. This module supplies all three:
- * it loads the world, wraps the AI adapter in the coin gate to build the
- * `SimModelPort` the loop asks for, and commits the result in one transaction.
+ * billing -- that is what makes it testable. This module supplies the session:
+ * it says who is asking, prepares the burst, and hands it to `burst-runner.ts`
+ * to finish on its own. The request returns as soon as the burst has a row;
+ * the page follows it through `getBurstStatus`.
  */
 
 export interface SimulationContext {
@@ -40,7 +42,7 @@ export interface SimulationContext {
   readonly characterId: string;
 }
 
-async function resolveContext(gameId: string): Promise<SimulationContext | null> {
+export async function resolveContext(gameId: string): Promise<SimulationContext | null> {
   if (!isAuthenticationConfigured()) return null;
   const session = await getAuthentication().api.getSession({ headers: await headers() });
   const userId = session?.user.id;
@@ -60,191 +62,90 @@ async function resolveContext(gameId: string): Promise<SimulationContext | null>
   return { db, close, userId, playerId: player.id, characterId: player.characterId };
 }
 
-/** The loop's model port: every call metered and charged like any other. */
-function createModelPort(db: ChronicaDatabase, userId: string, gameId: string): SimModelPort {
-  const adapter = createAiAdapter();
-  return {
-    async complete(operation, systemPrompt, userMessage) {
-      const result = await callWithCoinGate(db, userId, gameId, operation, adapter, { system: systemPrompt, user: userMessage });
-      return result.content;
-    },
-  };
-}
+/** How far the player may ask the world to run at once, in days. */
+export const TIME_SPANS = [7, 30, 90, 180, 365] as const;
 
-function parseFacts(rows: readonly { fact: unknown }[]): Fact[] {
-  return rows.flatMap((row) => {
-    const parsed = FactSchema.safeParse(row.fact);
-    return parsed.success ? [parsed.data] : [];
-  });
-}
-
-export type SimulationOutcome =
-  | {
-    readonly status: "ok";
-    readonly outcome: "continue" | "chronicle" | "player_decision";
-    /** One per thread of events the burst recorded, in reading order. */
-    readonly entries: readonly { readonly title: string; readonly body: string }[];
-    readonly decision: { readonly prompt: string; readonly options: unknown } | null;
-  }
+export type StartOutcome =
+  | { readonly status: "started"; readonly burstId: string }
   | { readonly status: "error"; readonly message: string };
 
-/** One fact as the row shape `commitBurst` stores, with its author's significance. */
-function toFactRow(significanceByFactId: ReadonlyMap<string, number>) {
-  return (fact: Fact): BurstFactRow => ({
-    id: fact.id,
-    instantSortKey: fact.time.day * 1440 + fact.time.minute,
-    kind: fact.kind,
-    summary: fact.summary,
-    visibility: fact.visibility,
-    discoveryState: fact.discovery.state,
-    knowableAtSortKey:
-      fact.discovery.knowableAtInstant === null ? null : fact.discovery.knowableAtInstant.day * 1440 + fact.discovery.knowableAtInstant.minute,
-    significance: significanceByFactId.get(fact.id) ?? 0,
-    causalDepth: fact.causalDepth,
-    fact,
-  });
-}
-
-export async function submitOrder(
+/**
+ * Gives an order, or lets time pass, and returns as soon as the burst exists.
+ *
+ * The burst itself runs after the response is sent (`after`), in this same
+ * process, with its own database pool. It heartbeats while it runs and marks
+ * its progress as it makes it; a process that dies mid-turn is found out by
+ * its silence, one stuck by its lack of progress (`livenessAt`), and the next
+ * order or look at the page reaps the row and the coins it held.
+ *
+ * There is no durable queue behind this: a burst whose process dies is not
+ * resumed, it is failed and the world stays at its last commit. The order is
+ * the player's to give again, and with the same `idempotencyKey` a resend
+ * that raced the first finds its burst rather than paying twice.
+ */
+export async function startDetachedBurst(
   gameId: string,
-  orderText: string,
-  answeredDecision?: AnsweredDecision,
-): Promise<SimulationOutcome> {
+  /** Null to let time pass without giving an order. */
+  orderText: string | null,
+  options: { readonly spanDays?: number | undefined; readonly idempotencyKey?: string | undefined } = {},
+): Promise<StartOutcome> {
   const context = await resolveContext(gameId);
   if (context === null) return { status: "error", message: "You are not playing in this game." };
-  const { db, close, userId, playerId, characterId } = context;
-
   try {
-    const view = await getWorldView(db, gameId);
-    if (view === undefined) return { status: "error", message: "This world has no state to act on yet." };
-    if (view.scenarioClock === undefined) return { status: "error", message: "This scenario declares no clock." };
-    if (view.scenarioWarfare === undefined) return { status: "error", message: "This scenario declares no rules of war." };
+    return await launch(context, { gameId, orderText, spanDays: options.spanDays, idempotencyKey: options.idempotencyKey });
+  } finally {
+    await context.close();
+  }
+}
 
-    // An answer carries its own decision, and is the one order allowed to run
-    // while one is open -- it is what closes it.
-    if (answeredDecision === undefined) {
-      const open = await getOpenDecision(db, gameId);
-      if (open !== undefined) return { status: "error", message: "A decision is waiting on you before the world can move on." };
-    }
+async function launch(
+  context: SimulationContext,
+  input: {
+    readonly gameId: string;
+    readonly orderText: string | null;
+    readonly spanDays?: number | undefined;
+    readonly answeredDecision?: AnsweredDecision | undefined;
+    readonly resolvesDecision?: { readonly id: string; readonly optionId: string } | undefined;
+    readonly askedAs?: string | undefined;
+    readonly idempotencyKey?: string | undefined;
+  },
+): Promise<StartOutcome> {
+  const { db, userId, playerId, characterId } = context;
+  const prepared = await prepareBurst(db, { ...input, userId, playerId, characterId });
+  if (prepared.status === "error") return prepared;
+  // Sent before, under the same id: follow that burst, pay for nothing new.
+  if (prepared.status === "existing") return { status: "started", burstId: prepared.burstId };
+  const job = prepared.job;
 
-    // Offices are scenario data, not world state, and authority derivation needs them.
-    const offices = view.scenarioGovernment?.offices ?? [];
-
-    // The whole pending queue, not just what is due: the burst decides how far
-    // to carry the world, and it needs to see what is waiting ahead to do it.
-    const [factRows, queueRows] = await Promise.all([
-      listRecentFacts(db, gameId),
-      listPendingEvents(db, gameId),
-    ]);
-
-    const actorRef: OrderPartyRef = { kind: "character", id: characterId };
-    const actorPolityId = view.world.characters.find((character) => character.id === characterId)?.polityId ?? null;
-    const burstId = await startBurst(db, { gameId, playerUserId: userId, orderText });
-    const port = createModelPort(db, userId, gameId);
-    const from = view.world.instant;
-
-    let result;
+  after(async () => {
+    const detached = createDatabase(requiredDatabaseUrl());
     try {
-      result = await runSimulationBurst({
-        world: view.world,
-        clock: view.scenarioClock,
-        offices,
-        warfare: view.scenarioWarfare,
-        ...(view.scenarioMap === undefined ? {} : { terrains: view.scenarioMap.terrains }),
-        burstId,
-        gameId,
-        actorRef,
-        actorPolityId,
-        orderText,
-        ...(answeredDecision === undefined ? {} : { answeredDecision }),
-        knownFacts: parseFacts(factRows),
-        queue: queueRows.map((row) => ({ id: row.id, dueInstantSortKey: row.dueInstantSortKey, kind: row.kind, summary: row.summary, payload: row.payload })),
-        port,
-      });
-    } catch (error) {
-      await failBurst(db, burstId, error instanceof Error ? error.message : String(error));
-      if (error instanceof InsufficientCoinsError) return { status: "error", message: "You have run out of coins." };
-      throw error;
+      await runBurstToCommit(detached.db, job, { afterCommit: openConversations });
+    } finally {
+      await detached.close();
     }
+  });
+  return { status: "started", burstId: job.burstId };
+}
 
-    const chronicle =
-      result.outcome === "continue"
-        ? null
-        : await composeChronicle({
-          port,
-          clock: view.scenarioClock,
-          observer: actorRef,
-          observerPolityId: actorPolityId,
-          facts: result.newFacts,
-          from,
-          to: result.world.instant,
-          narrative: result.narrative,
-          frictions: result.frictions,
-          significanceByFactId: result.significanceByFactId,
-          storylines: result.world.storylines,
-          polityOfCharacter: (id) => result.world.characters.find((character) => character.id === id)?.polityId ?? null,
-        });
+/** Now that the world has settled, let anyone with real reason to seek the ruler out open a conversation. */
+async function openConversations(db: ChronicaDatabase, job: BurstJob, world: WorldState): Promise<void> {
+  for (const initiation of whoSeeksThePlayer({ world, playerRef: job.actorRef })) {
+    await openInitiatedDialogue(db, job.gameId, job.playerId, initiation.characterId, initiation.openingLine);
+  }
+}
 
-    try {
-      await commitBurst(db, {
-        gameId,
-        expectedRevision: view.revision,
-        world: result.world,
-        burstId,
-        facts: result.newFacts.map(toFactRow(result.significanceByFactId)),
-        // Amendments to history already written, not additions to it: a secret
-        // that somebody has now found out about.
-        rediscoveredFacts: result.rediscoveredFacts.map(toFactRow(result.significanceByFactId)),
-        scheduled: result.scheduled,
-        firedEventIds: result.firedEventIds,
-        burst: {
-          iterations: result.iterations,
-          modelCalls: result.modelCalls + (chronicle?.calls ?? 0),
-          outcome: result.outcome,
-          stopReason: result.stopReason,
-          accumulatedSignificance: result.accumulatedSignificance,
-        },
-        ...(chronicle === null || chronicle.entries.length === 0
-          ? {}
-          : {
-            checkpoints: chronicle.entries.map((entry) => ({
-              title: entry.title,
-              body: entry.body,
-              factIds: entry.factIds,
-              subjects: entry.subjects,
-              fromInstantSortKey: entry.fromInstantSortKey,
-              toInstantSortKey: entry.toInstantSortKey,
-            })),
-          }),
-        ...(result.playerDecision === null
-          ? {}
-          : { decision: { prompt: result.playerDecision.prompt, options: result.playerDecision.options } }),
-      });
-    } catch (error) {
-      if (error instanceof WorldRevisionConflictError) {
-        await failBurst(db, burstId, error.message);
-        return { status: "error", message: "The world moved while your order was being carried out. Try again." };
-      }
-      throw error;
-    }
-
-    // Now that the world has settled, let anyone with real reason to seek the
-    // ruler out open a conversation. Free, and outside the burst: this reports
-    // on what already happened rather than causing anything.
-    try {
-      for (const initiation of whoSeeksThePlayer({ world: result.world, playerRef: actorRef })) {
-        await openInitiatedDialogue(db, gameId, playerId, initiation.characterId, initiation.openingLine);
-      }
-    } catch (error) {
-      console.warn("[simulation] failed to open an initiated conversation:", error);
-    }
-
-    return {
-      status: "ok",
-      outcome: result.outcome,
-      entries: chronicle?.entries.map((entry) => ({ title: entry.title, body: entry.body })) ?? [],
-      decision: result.playerDecision === null ? null : { prompt: result.playerDecision.prompt, options: result.playerDecision.options },
-    };
+/** Where a burst has got to, for the page polling it. Null when it is not this player's game. */
+export async function getBurstStatus(gameId: string, burstId: string, afterId: number): Promise<BurstStatusView | null> {
+  const context = await resolveContext(gameId);
+  if (context === null) return null;
+  const { db, close } = context;
+  try {
+    const now = new Date();
+    await reapStaleBursts(db, gameId, livenessAt(now), ABANDONED_ERROR);
+    const [row, rows] = await Promise.all([getBurst(db, gameId, burstId), listBurstProgress(db, burstId, afterId)]);
+    if (row === undefined) return null;
+    return toBurstStatus(row, rows, afterId, now);
   } finally {
     await close();
   }
@@ -253,54 +154,186 @@ export async function submitOrder(
 export async function getGameView(gameId: string) {
   const context = await resolveContext(gameId);
   if (context === null) return null;
-  const { db, close } = context;
+  const { db, close, userId, characterId } = context;
   try {
-    const [view, chronicle, decision] = await Promise.all([
+    const [view, chronicle, decision, running, purse] = await Promise.all([
       getWorldView(db, gameId),
       listChronicle(db, gameId),
       getOpenDecision(db, gameId),
+      findRunningBurst(db, gameId, livenessAt(new Date())),
+      readPurse(db, gameId, userId),
     ]);
     if (view === undefined) return null;
+    // A purse's movements belong to whoever may open it. The historian's
+    // entry claimed the change by its owner; this checks the reader too.
+    const station = buildStation({ world: view.world, characterId, offices: view.scenarioGovernment?.offices ?? [] });
+    const readable = (change: { readonly kind?: unknown; readonly id?: unknown }): boolean =>
+      change.kind !== "account" || (typeof change.id === "string" && seesAccount(station, change.id));
     return {
       gameTitle: view.gameTitle,
       instant: view.world.instant,
-      // Entries carry the burst that wrote them: several threads of one span are
-      // one report to read together, not a queue of unrelated passages.
+      // The lintel's date. Read with the record, so the date moves in the same
+      // breath as the Chronicle that says why.
+      dateLabel: formatWorldDate(view.world.instant, view.scenarioClock),
+      // What the player has to spend, and what this save has spent against
+      // the cap it was given. Turns are billed by the model's tokens, so there
+      // is no price to show in advance -- only what was actually spent.
+      coins: purse,
+      // The whole record, oldest first -- not the last report. A chronicle you
+      // cannot turn back through is a notification.
+      //
+      // Entries still carry the burst that wrote them, because several threads
+      // of one span are one report to read together.
       chronicle: chronicle.map((entry) => ({
         id: entry.id,
         burstId: entry.burstId,
+        kind: entry.kind === "recorded" ? "recorded" : "narrated",
+        // The day the matter entered the record, which is what a chronicle is
+        // indexed by. Formatted here because the scenario's calendar lives with
+        // the world and has no business being shipped to the browser.
+        date: dateLabel(entry.toInstantSortKey, view.scenarioClock),
         title: entry.title,
         body: entry.body,
         subjects: entry.subjects,
+        // Entries written before tags carried their own label still hold bare
+        // refs. Naming them on the way out repairs the old record rather than
+        // leaving two rows of engine handles in it forever.
+        tags: namedTags(view.world, entry.tags),
+        changes: (Array.isArray(entry.changes) ? entry.changes as { kind?: unknown; id?: unknown }[] : []).filter(readable),
+        quote: entry.quote,
+        storylineIds: Array.isArray(entry.storylineIds) ? (entry.storylineIds as unknown[]).filter((id): id is string => typeof id === "string") : [],
+        // read_at has been on the row since the table was written and nothing
+        // ever set it, so the badge counted the length of the record and
+        // called it unopened.
+        unread: entry.readAt === null,
       })),
       decision: decision === undefined ? null : { id: decision.id, prompt: decision.prompt, options: decision.options },
+      // A burst still moving the world, so a page opened mid-turn can follow
+      // it rather than sit on a stale record.
+      running: running === undefined ? null : { burstId: running.id },
     };
   } finally {
     await close();
   }
 }
 
-export async function answerDecision(gameId: string, decisionId: string, optionId: string): Promise<SimulationOutcome> {
+/** The wallet and this save's spending, as coin strings. */
+async function readPurse(db: ChronicaDatabase, gameId: string, userId: string) {
+  const [[wallet], [game]] = await Promise.all([
+    db.select({ available: schema.creditWallets.availableMicrocredits }).from(schema.creditWallets).where(eq(schema.creditWallets.userId, userId)).limit(1),
+    db.select({ budget: schema.games.creditBudgetMicrocredits, spent: schema.games.creditSpentMicrocredits }).from(schema.games).where(eq(schema.games.id, gameId)).limit(1),
+  ]);
+  return {
+    available: formatCoins(wallet?.available ?? 0n),
+    spent: game === undefined ? null : formatCoins(game.spent),
+    cap: game === undefined ? null : formatCoins(game.budget),
+  };
+}
+
+/**
+ * Mark entries of the record read.
+ *
+ * With ids, the entries the player has actually had in view: the Chronicle
+ * marks an entry read once it has sat on the page long enough to be read,
+ * so the player can see what is new and what they have already turned
+ * through. Without, everything -- "Mark all as read".
+ */
+export async function markTheRecordRead(gameId: string, entryIds?: readonly string[]): Promise<boolean> {
+  const context = await resolveContext(gameId);
+  if (context === null) return false;
+  const { db, close } = context;
+  try {
+    await markChronicleRead(db, gameId, new Date(), entryIds);
+    return true;
+  } finally {
+    await close();
+  }
+}
+
+/**
+ * Follow a thread of history, or stop. A thread the player may not know of
+ * can be followed by id and still shows nothing (`threadsYouSee`), so this
+ * needs no check of its own.
+ */
+export async function followTheThread(gameId: string, storylineId: string, followed: boolean): Promise<boolean> {
+  const context = await resolveContext(gameId);
+  if (context === null) return false;
+  const { db, close } = context;
+  try {
+    await setThreadFollowed(db, gameId, storylineId, followed);
+    return true;
+  } finally {
+    await close();
+  }
+}
+
+/** How `successionDecision` marks an option that names the player's next character. */
+const SUCCESSION_OPTION_PREFIX = "succeed-";
+
+/**
+ * The ruler answers, and the world resumes (VISION §23 outcome C).
+ *
+ * The decision is closed only once the world has heard the answer -- in the
+ * commit itself. It used to be closed first, so a turn that then failed spent
+ * the answer on nothing: the question was gone, the world never learned what
+ * was chosen, and nothing could ask it again.
+ */
+export async function answerDecision(gameId: string, decisionId: string, optionId: string): Promise<StartOutcome> {
   const context = await resolveContext(gameId);
   if (context === null) return { status: "error", message: "You are not playing in this game." };
-  const { db, close } = context;
-  let answered: AnsweredDecision;
+  const { db, close, playerId, characterId: askedAs } = context;
   try {
     const open = await getOpenDecision(db, gameId);
     if (open === undefined || open.id !== decisionId) return { status: "error", message: "That decision is no longer open." };
 
-    const options = PlayerDecisionSchema.shape.options.safeParse(open.options);
-    const chosen = options.success ? options.data.find((option) => option.id === optionId) : undefined;
+    // Read one by one, not against the proposal's floor of two. A decision
+    // already standing is the one on the player's screen, and a succession
+    // with a single heir -- the house otherwise extinct -- was saved with one
+    // option and then refused on every answer as "not one of the options",
+    // which locked the game for good.
+    const options = (Array.isArray(open.options) ? open.options : []).flatMap((raw: unknown) => {
+      const option = PlayerDecisionSchema.shape.options.element.safeParse(raw);
+      return option.success ? [option.data] : [];
+    });
+    const chosen = options.find((option) => option.id === optionId);
     if (chosen === undefined) return { status: "error", message: "That is not one of the options." };
 
-    await resolveDecision(db, decisionId, optionId);
+    // The one decision that changes who is asking. `successionDecision` mints
+    // its option ids as "succeed-<characterId>" precisely so this needs no
+    // second table: the answer names the man, and the next order is his.
+    let characterId = askedAs;
+    if (optionId.startsWith(SUCCESSION_OPTION_PREFIX)) {
+      characterId = optionId.slice(SUCCESSION_OPTION_PREFIX.length);
+      await db.update(schema.players).set({ characterId }).where(eq(schema.players.id, playerId));
+    }
     // Hand the world the question and the answer, not a sentence about them.
     // Round-tripping through prose lost the prompt entirely, so the world
     // resumed a decision without quite knowing what had been asked.
-    answered = { prompt: open.prompt, label: chosen.label, summary: chosen.summary };
+    // The option id, and who was asking, go with it: a succession changes who
+    // the world follows, and a plight in the field is ended by the choice.
+    const answered: AnsweredDecision = { prompt: open.prompt, label: chosen.label, summary: chosen.summary, optionId: chosen.id, predecessorId: askedAs };
+    const outcome = await launch(
+      { ...context, characterId },
+      { gameId, orderText: `The ruler has answered: ${answered.label}.`, answeredDecision: answered, resolvesDecision: { id: decisionId, optionId }, askedAs: characterId === askedAs ? undefined : askedAs },
+    );
+    if (outcome.status === "error" && characterId !== askedAs) {
+      await db.update(schema.players).set({ characterId: askedAs }).where(eq(schema.players.id, playerId));
+    }
+    return outcome;
   } finally {
     await close();
   }
-
-  return submitOrder(gameId, `The ruler has answered: ${answered.label}.`, answered);
 }
+
+/** Stored tags, with any missing label filled in from the world. */
+function namedTags(world: WorldState, stored: unknown): { kind: string; id: string; label: string }[] {
+  if (!Array.isArray(stored)) return [];
+  return stored.flatMap((tag) => {
+    if (typeof tag !== "object" || tag === null) return [];
+    const { kind, id, label } = tag as { kind?: unknown; id?: unknown; label?: unknown };
+    if (typeof kind !== "string" || typeof id !== "string") return [];
+    if (typeof label === "string" && label.length > 0) return [{ kind, id, label }];
+    return [{ kind, id, label: nameOfSubject(world, { kind, id } as OrderPartyRef) ?? id }];
+  });
+}
+

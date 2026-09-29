@@ -15,6 +15,8 @@ function withOrderTo(world: WorldState, recipientId: string, status: "issued" | 
       issuerRef: player, recipientRef: { kind: "character", id: recipientId },
       claimedAuthorityGrantId: null,
       authorityCheck: { authorized: true, grant: null, standing: null, reason: "Find the money for two new legions" },
+    instruction: "Find the money for two new legions",
+    standing: "binding" as const,
       status, recipientDecisionReason: null, issuedAtStep: 0,
       decidedAtStep: status === "carried_out" ? 1 : null, consequenceFactRefs: [],
     }],
@@ -78,6 +80,8 @@ describe("who seeks the ruler out", () => {
         issuerRef: player, recipientRef: { kind: "character" as const, id: character.id },
         claimedAuthorityGrantId: null,
         authorityCheck: { authorized: true, grant: null, standing: null, reason: "See to it" },
+    instruction: "See to it",
+    standing: "binding" as const,
         status: "issued" as const, recipientDecisionReason: null, issuedAtStep: 0,
         decidedAtStep: null, consequenceFactRefs: [],
       })),
@@ -110,5 +114,34 @@ describe("what stays hidden", () => {
     });
     expect(seekers({ ...world, characterPressures: [pressure("private")] })).toHaveLength(0);
     expect(seekers({ ...world, characterPressures: [pressure("polity")] }).map((entry) => entry.characterId)).toContain("quintus-fabius");
+  });
+});
+
+describe("people with business of their own", () => {
+  const withQuintusFeeling = (world: WorldState, score: number, atStep: number, label: string): WorldState => ({
+    ...world,
+    characters: world.characters.map((character) => (character.id === "quintus-fabius"
+      ? { ...character, relations: [{ subjectCharacterId: "marcus-atilius", causes: [{ id: "c", label, score, occurredAtStep: atStep, decayPerYearBps: 0, encounterMemoryId: null }] }] }
+      : character)),
+  });
+
+  it("sends a man with a fresh and bitter grievance, in his own words, and not once it is old", () => {
+    const world = { ...base(), elapsedStep: 10 };
+    const bitter = seekers(withQuintusFeeling(world, -60, 5, "He had my brother condemned."));
+    expect(bitter.map((entry) => entry.characterId)).toContain("quintus-fabius");
+    expect(bitter.find((entry) => entry.characterId === "quintus-fabius")!.openingLine).toContain("He had my brother condemned.");
+    expect(seekers(withQuintusFeeling({ ...world, elapsedStep: 100 }, -60, 5, "He had my brother condemned."))).toHaveLength(0);
+  });
+
+  it("sends a friend whose plan has come to the step he needs help with", () => {
+    const world = withQuintusFeeling(base(), 50, 0, "Old friends.");
+    const today = world.instant.day;
+    const planning: WorldState = {
+      ...world,
+      characters: world.characters.map((character) => (character.id === "quintus-fabius"
+        ? { ...character, ambitions: [{ id: "a", label: "Stand for the praetorship", kind: "office", targetId: null, status: "active", steps: [{ id: "s", act: "Canvass the tribes", dueDay: today + 5, laidOnDay: today, waitsOn: null, armedReading: null, status: "pending", wokenOnDay: null, settledOnDay: null }] }] }
+        : character)),
+    };
+    expect(seekers(planning).find((entry) => entry.characterId === "quintus-fabius")?.openingLine).toContain("Stand for the praetorship");
   });
 });

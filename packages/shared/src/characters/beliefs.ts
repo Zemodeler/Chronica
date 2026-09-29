@@ -18,6 +18,17 @@ export type BeliefKind = z.infer<typeof BeliefKindSchema>;
 export const BeliefStatusSchema = z.enum(["active", "superseded", "expired"]);
 export type BeliefStatus = z.infer<typeof BeliefStatusSchema>;
 
+export const KnowledgeChannelSchema = z.enum([
+  "direct_witness",
+  "event_participant",
+  "public_announcement",
+  "trusted_report",
+  "ordinary_rumour",
+  "private_disclosure",
+  "intercepted_secret",
+]);
+export type KnowledgeChannel = z.infer<typeof KnowledgeChannelSchema>;
+
 export const CharacterBeliefSchema = z
   .object({
     id: EntityIdSchema,
@@ -33,20 +44,16 @@ export const CharacterBeliefSchema = z
     expiresAtStep: ElapsedStepSchema.nullable(),
     supersedesBeliefIds: z.array(EntityIdSchema).default([]),
     status: BeliefStatusSchema,
+    /**
+     * How it reached the holder. It only picked the defaults once, and was
+     * then thrown away, so nothing could say "you heard this in the forum".
+     * Absent on beliefs written before it was kept.
+     */
+    channel: KnowledgeChannelSchema.optional(),
   })
   .strict();
 export type CharacterBelief = z.infer<typeof CharacterBeliefSchema>;
 
-export const KnowledgeChannelSchema = z.enum([
-  "direct_witness",
-  "event_participant",
-  "public_announcement",
-  "trusted_report",
-  "ordinary_rumour",
-  "private_disclosure",
-  "intercepted_secret",
-]);
-export type KnowledgeChannel = z.infer<typeof KnowledgeChannelSchema>;
 
 export interface ChannelDefaults {
   readonly defaultConfidence: number;
@@ -164,6 +171,7 @@ export function addOrReinforceBelief(world: BeliefWorldView, input: AddBeliefInp
     sourceEventId: input.sourceEventId,
     confidence,
     visibility: defaults.defaultVisibility,
+    channel: input.channel,
     learnedAtStep: input.atStep,
     expiresAtStep: input.expiresInSteps === null ? null : input.atStep + input.expiresInSteps,
     supersedesBeliefIds: [],

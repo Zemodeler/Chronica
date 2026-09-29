@@ -52,3 +52,45 @@ export function outlookFor(outlooks: readonly PolityOutlook[], polityId: string 
   if (polityId === null) return undefined;
   return outlooks.find((outlook) => outlook.polityId === polityId);
 }
+
+const WAR_CONCERN = (enemy: string): string => `the war with ${enemy}`;
+const WAR_INTENTION = (enemy: string): string => `press the war with ${enemy} wherever their armies and ground can be reached`;
+const WAR_MARK = /^(the war with |press the war with )/;
+
+/**
+ * A government's aims, kept true to the wars it is in.
+ *
+ * Aims were written in 270 BCE and rewritten only when the player's own order
+ * happened to ask for it, so Carthage went on meaning to "keep western Sicily
+ * without a war against Rome" four months into a war with Rome, and the
+ * Campanians of Rhegium, at war from the first day, meant only to "hold the
+ * walls". Everybody reads these aims every time they are asked anything. A war
+ * is a concern and an intention for as long as it lasts, and neither once it
+ * is over; the rest of the aims are left as they were written.
+ */
+export function aimsAtWar(
+  outlooks: readonly PolityOutlook[],
+  enemiesOf: (polityId: string) => readonly string[],
+  nameOf: (polityId: string) => string,
+  atStep: number,
+): PolityOutlook[] {
+  return outlooks.map((outlook) => {
+    const enemies = enemiesOf(outlook.polityId).map(nameOf);
+    const concerns = outlook.concerns.filter((concern) => !WAR_MARK.test(concern.label));
+    const intentions = outlook.intentions.filter((intention) => !WAR_MARK.test(intention));
+    const warConcerns = enemies.map((enemy) => ({ label: WAR_CONCERN(enemy), level: "high" as const }));
+    const warIntentions = enemies.map(WAR_INTENTION);
+    const next = {
+      ...outlook,
+      concerns: [...warConcerns, ...concerns].slice(0, 6),
+      intentions: [...warIntentions, ...intentions].slice(0, 6),
+    };
+    const same = JSON.stringify(next.concerns) === JSON.stringify(outlook.concerns) && JSON.stringify(next.intentions) === JSON.stringify(outlook.intentions);
+    if (same) return outlook;
+    return {
+      ...next,
+      updatedAtStep: atStep,
+      lastChangeReason: (enemies.length === 0 ? "Its wars are over." : `At war with ${enemies.join(" and ")}.`).slice(0, 300),
+    };
+  });
+}

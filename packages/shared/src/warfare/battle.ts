@@ -164,6 +164,34 @@ export const CasualtyResultSchema = z
   .strict();
 export type CasualtyResult = z.infer<typeof CasualtyResultSchema>;
 
+/**
+ * How a battle's wounded mend.
+ *
+ * Every wounded man was back in the ranks eight days after the fight, all on
+ * the same morning: a legion that lost two thousand to wounds at Messana stood
+ * at full strength again a week later. Wounds from sword and spear took weeks,
+ * when they healed at all. A quarter never stand in the line again -- dead of
+ * their wounds in the days after, or sent home unfit -- and the rest come back
+ * over three to six weeks, a share each week.
+ */
+export const WOUNDS_NEVER_RETURN_BPS = 2_500;
+/** The days after the battle on which the mended come back, in equal shares. */
+export const WOUND_RETURN_DAYS = [21, 28, 35, 42] as const;
+
+/** The wounded of one battle split into the lost and the returning, by day. Deterministic. */
+export function woundsMend(wounded: number, woundedAtStep: number): { lost: number; back: { count: number; atStep: number }[] } {
+  if (wounded <= 0) return { lost: 0, back: [] };
+  const lost = Math.floor((wounded * WOUNDS_NEVER_RETURN_BPS) / 10_000);
+  const returning = wounded - lost;
+  const share = Math.floor(returning / WOUND_RETURN_DAYS.length);
+  const back = WOUND_RETURN_DAYS.map((days, index) => ({
+    // The remainder with the last: the slowest to heal.
+    count: index === WOUND_RETURN_DAYS.length - 1 ? returning - share * index : share,
+    atStep: woundedAtStep + days,
+  })).filter((cohort) => cohort.count > 0);
+  return { lost, back };
+}
+
 export const CaptureResultSchema = z
   .object({
     forceId: EntityIdSchema,

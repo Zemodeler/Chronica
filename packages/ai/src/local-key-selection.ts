@@ -67,6 +67,9 @@ export function selectLocalAiConfiguration(provider: LocalAiProvider, model: str
   const temporaryFile = `${settingsFile}.${process.pid}.tmp`;
   writeFileSync(temporaryFile, `${JSON.stringify({ activeProvider: provider, activeModel: model }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   renameSync(temporaryFile, settingsFile);
+  // The reader below caches; a selection the developer just made must not wait
+  // for that window to lapse.
+  cachedSelection = null;
 }
 
 export function getConfiguredApiKey(provider: LocalAiProvider): string | undefined {
@@ -98,7 +101,26 @@ function primaryKeyName(provider: LocalAiProvider): "OPENAI_API_KEY" | "ANTHROPI
   return provider === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
 }
 
+/**
+ * The selection file, read at most once a second.
+ *
+ * `resolveModel` calls this on every single model call, so a development-only
+ * preference file was being read synchronously from disk in the middle of the
+ * request path, several times a turn. The window is short enough that picking
+ * a different model on the account screen still takes effect at once.
+ */
+const SELECTION_CACHE_MS = 1_000;
+let cachedSelection: { at: number; value: { activeProvider: LocalAiProvider; activeModel?: string } | null } | null = null;
+
 function readSelectedConfiguration(): { activeProvider: LocalAiProvider; activeModel?: string } | null {
+  const now = Date.now();
+  if (cachedSelection !== null && now - cachedSelection.at < SELECTION_CACHE_MS) return cachedSelection.value;
+  const value = readSelectedConfigurationFromDisk();
+  cachedSelection = { at: now, value };
+  return value;
+}
+
+function readSelectedConfigurationFromDisk(): { activeProvider: LocalAiProvider; activeModel?: string } | null {
   try {
     const parsed: unknown = JSON.parse(readFileSync(settingsFilePath(), "utf8"));
     if (typeof parsed === "object" && parsed !== null && "activeProvider" in parsed) {
@@ -124,7 +146,7 @@ function modelsForProvider(provider: LocalAiProvider): readonly string[] {
   const models = configured?.split(",").map((model) => model.trim()).filter(Boolean);
   if (models && models.length > 0) return [...new Set(models)];
   return provider === "openai"
-    ? ["gpt-5.6-luna", "gpt-5-nano", "gpt-5.6-sol"]
+    ? ["gpt-6-luna", "gpt-5-nano", "gpt-6-sol"]
     : ["claude-haiku-4-5", "claude-sonnet-4-5", "claude-opus-4-5"];
 }
 
@@ -132,7 +154,7 @@ function unavailableConfiguration(): LocalAiProviderConfiguration {
   return {
     available: false,
     activeProvider: "openai",
-    activeModel: "gpt-5.6-luna",
+    activeModel: "gpt-6-luna",
     openAiConfigured: false,
     anthropicConfigured: false,
     openAiModels: [],

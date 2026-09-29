@@ -2,7 +2,7 @@ import "server-only";
 
 import { headers } from "next/headers";
 import { and, eq } from "drizzle-orm";
-import { GameCreationSchema, type GameCreation } from "@chronica/shared";
+import { allOffices, FactSchema, formatWorldDate, GameCreationSchema, type Fact, type GameCreation } from "@chronica/shared";
 import { MICRO_UNITS_PER_COIN } from "@chronica/billing";
 import {
   SlotCapError,
@@ -15,7 +15,9 @@ import {
   getAccountProfile,
   getActiveCharacterClaimForPlayer,
   getWorldView,
+  listChronicle,
   listHostedGames,
+  listRecentFacts,
   listJoinedGames,
   listPublicScenarios as listPublicScenariosQuery,
   requestGameEnd,
@@ -26,8 +28,10 @@ import {
 } from "@chronica/db";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { requiredDatabaseUrl } from "./database-url";
-import { builtInScenarioMap } from "./built-in-scenario-maps";
+import { builtInScenarioMap, namedByTheWorld } from "./built-in-scenario-maps";
 import { projectWorldView, type GameWorldView } from "./world-view";
+import { notablePeople, type NotablePerson } from "./notable-people";
+import { describeWorld, type WorldEntry } from "./world-catalogue";
 
 /**
  * The pages' read/write surface over persistence.
@@ -41,6 +45,14 @@ import { projectWorldView, type GameWorldView } from "./world-view";
 
 export type { GameSummaryRow, PublicScenarioSummary };
 
+/** One save on the shelf, as the player would describe it. */
+export interface SaveFacts {
+  readonly character: { readonly name: string; readonly role: string | null; readonly cultureId: string; readonly polityId: string | null } | null;
+  readonly dateLabel: string;
+  /** The title of the newest Chronicle entry, if the world has recorded anything. */
+  readonly lastRecorded: string | null;
+}
+
 export type Viewer = Readonly<{
   userId: string;
   displayName: string;
@@ -49,6 +61,7 @@ export type Viewer = Readonly<{
 }>;
 
 export interface GameWorldViewWithMap extends GameWorldView {
+  readonly scenarioId: string;
   readonly mapGeoJson?: ReturnType<typeof builtInScenarioMap>;
 }
 
@@ -122,6 +135,42 @@ export const gameRepository = {
     });
   },
 
+  /** The catalogue, each world described from its own data for the worlds page. */
+  async listWorlds(): Promise<readonly WorldEntry[]> {
+    const userId = await viewerUserId();
+    if (userId === null) return [];
+    return withDatabase(async (db) => {
+      await ensureBuiltInScenarios(db);
+      const summaries = await listPublicScenariosQuery(db, userId);
+      return Promise.all(summaries.map((summary) => describeWorld(db, summary)));
+    });
+  },
+
+  /**
+   * The public worlds that have art, for the signed-out landing page. A
+   * stranger sees only what is published to everyone; nothing here needs an
+   * account, and a database fault leaves the strip out rather than the page.
+   */
+  async previewWorlds(): Promise<readonly WorldEntry[]> {
+    try {
+      return await withDatabase(async (db) => {
+        await ensureBuiltInScenarios(db);
+        const summaries = await listPublicScenariosQuery(db, null);
+        const worlds = await Promise.all(summaries.map((summary) => describeWorld(db, summary)));
+        return worlds.filter((world) => world.plate !== null);
+      });
+    } catch {
+      return [];
+    }
+  },
+
+  /** One scenario, described as the worlds page would. */
+  async describeScenario(scenarioId: string): Promise<WorldEntry | null> {
+    const scenario = await this.getPublicScenario(scenarioId);
+    if (scenario === null) return null;
+    return withDatabase((db) => describeWorld(db, scenario));
+  },
+
   async getPublicScenario(scenarioId: string): Promise<PublicScenarioSummary | null> {
     const userId = await viewerUserId();
     if (userId === null) return null;
@@ -184,9 +233,77 @@ export const gameRepository = {
         .limit(1);
       const characterId = player?.characterId ?? view.world.characters[0]?.id ?? "";
 
-      const world = projectWorldView(view.world, { gameId: view.gameId, gameTitle: view.gameTitle, clock: view.scenarioClock }, characterId);
-      const mapGeoJson = omitGeo ? undefined : builtInScenarioMap(view.mapAssetId);
-      return mapGeoJson === undefined ? world : { ...world, mapGeoJson };
+      // What has happened lately, for the armies known only by report.
+      const facts = (await listRecentFacts(db, gameId).catch(() => []))
+        .map((row) => FactSchema.safeParse(row.fact))
+        .flatMap((parsed): Fact[] => (parsed.success ? [parsed.data] : []));
+      const world = projectWorldView(view.world, {
+        gameId: view.gameId, gameTitle: view.gameTitle, clock: view.scenarioClock, offices: view.scenarioGovernment?.offices ?? [], facts, warfare: view.scenarioWarfare,
+      }, characterId);
+      const mapGeoJson = omitGeo ? undefined : namedByTheWorld(builtInScenarioMap(view.mapAssetId), view.world);
+      return mapGeoJson === undefined
+        ? { ...world, scenarioId: view.world.pins.scenarioId }
+        : { ...world, scenarioId: view.world.pins.scenarioId, mapGeoJson };
+    });
+  },
+
+  /**
+ * What makes each save itself, for the shelf: who the player is there, the
+ * world's date, and the last thing the Chronicle recorded. A save that has
+ * no character yet says so by having none. Unreadable saves are left out and
+ * the shelf shows them plainly.
+ */
+  async describeSaves(gameIds: readonly string[]): Promise<ReadonlyMap<string, SaveFacts>> {
+    const userId = await viewerUserId();
+    if (userId === null || gameIds.length === 0) return new Map();
+    return withDatabase(async (db) => {
+      const described = await Promise.all(gameIds.map(async (gameId): Promise<[string, SaveFacts] | null> => {
+        try {
+          const [[player], view, [last]] = await Promise.all([
+            db.select({ characterId: schema.players.characterId }).from(schema.players)
+              .where(and(eq(schema.players.gameId, gameId), eq(schema.players.userId, userId), eq(schema.players.status, "active"))).limit(1),
+            getWorldView(db, gameId),
+            listChronicle(db, gameId, 1),
+          ]);
+          if (view === undefined) return null;
+          const character = player?.characterId === null || player?.characterId === undefined || player.characterId.startsWith("pending:")
+            ? undefined
+            : view.world.characters.find((candidate) => candidate.id === player.characterId);
+          const offices = allOffices(view.world, view.scenarioGovernment?.offices ?? []);
+          const seat = character === undefined ? undefined : view.world.material.officeSeats.find((candidate) => candidate.status === "held" && candidate.holderCharacterId === character.id);
+          const officeId = seat?.officeId ?? character?.officeId ?? null;
+          return [gameId, {
+            character: character === undefined ? null : {
+              name: character.name,
+              role: officeId === null ? null : offices.find((office) => office.id === officeId)?.label ?? null,
+              cultureId: character.cultureId,
+              polityId: character.polityId,
+            },
+            dateLabel: formatWorldDate(view.world.instant, view.scenarioClock),
+            lastRecorded: last?.title ?? null,
+          }];
+        } catch {
+          return null;
+        }
+      }));
+      return new Map(described.filter((entry): entry is [string, SaveFacts] => entry !== null));
+    });
+  },
+
+  /** The people of this save's world a player could choose to be, for character creation. */
+  async listNotablePeople(gameId: string): Promise<readonly NotablePerson[]> {
+    const userId = await viewerUserId();
+    if (userId === null) return [];
+    return withDatabase(async (db) => {
+      if (await resolvePlayerId(db, gameId, userId) === null) return [];
+      const [view, players] = await Promise.all([
+        getWorldView(db, gameId),
+        db.select({ characterId: schema.players.characterId }).from(schema.players)
+          .where(and(eq(schema.players.gameId, gameId), eq(schema.players.status, "active"))),
+      ]);
+      if (view === undefined) return [];
+      const taken = new Set(players.flatMap((player) => (player.characterId === null ? [] : [player.characterId])));
+      return notablePeople(view.world, view.scenarioGovernment?.offices ?? [], taken);
     });
   },
 

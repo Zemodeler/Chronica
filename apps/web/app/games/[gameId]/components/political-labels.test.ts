@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DynamicMapOverlay, GeoJsonMap } from "@chronica/shared";
 import { derivePoliticalLabels } from "./political-labels";
-import { derivePoliticalMapState, deriveWarBorderPaths, politicalColourFromId } from "./political-geometry";
+import { derivePoliticalMapState, deriveWarBorderPaths, politicalColourFromId, politicalColourWithAlpha } from "./political-geometry";
 import { prepareStaticWorldGeometry } from "./world-geometry";
 
 const map: GeoJsonMap = { type: "FeatureCollection", features: [
@@ -21,12 +21,12 @@ function expectMutedHsl(colour: string) {
 }
 
 describe("political map derivation", () => {
-  it("uses a saturated red for Roman territory", () => {
-    expect(politicalColourFromId("rome")).toBe("#b21f2d");
+  it("colours Rome in cinnabar", () => {
+    expect(politicalColourFromId("rome")).toBe("#9E2B25");
   });
-  it("uses the Carthaginian blue-grey for territory", () => {
-    expect(politicalColourFromId("carthage")).toBe("#2e245f");
-    expect(politicalColourFromId("syracuse")).toBe("#80512f");
+  it("colours Carthage in Tyrian purple and Syracuse in ochre", () => {
+    expect(politicalColourFromId("carthage")).toBe("#5B2A5E");
+    expect(politicalColourFromId("syracuse")).toBe("#9A6A2E");
   });
   it("gives minor polities distinct shades within their cultural palette", () => {
     const arverni = politicalColourFromId("gaul-arverni");
@@ -36,12 +36,12 @@ describe("political map derivation", () => {
     expect(aedui).not.toBe(arverni);
     expectMutedHsl(politicalColourFromId("boii"));
     expectMutedHsl(politicalColourFromId("iberia-celtiberians"));
-    expectMutedHsl(politicalColourFromId("germania-suebi"));
+    expectMutedHsl(politicalColourFromId("germania-chatti"));
   });
   it("assigns consolidated neighbouring realms distinct curated palette slots", () => {
     const groups = [
       ["gaul-aedui", "gaul-arverni", "gaul-sequani", "gaul-belgae"],
-      ["germania-suebi", "germania-chatti", "germania-cherusci", "germania-chauci"],
+      ["germania-ubii", "germania-chatti", "germania-cherusci", "germania-chauci"],
       ["iberia-vaccei", "iberia-vettones", "iberia-carpetani", "iberia-celtiberi"],
       ["thrace-dacian-highland-communities", "thrace-getae", "thrace-eastern-carpathian-communities"],
     ] as const;
@@ -51,6 +51,18 @@ describe("political map derivation", () => {
       for (const colour of colours) expectMutedHsl(colour);
     }
   });
+  it("paints Rome's allies as lighter shades of Rome, each its own", () => {
+    const leaders = new Map([["samnites", "rome"], ["lucanians", "rome"]]);
+    const hueOf = (colour: string) => Number(/hsl\(([\d.]+)/.exec(colour)![1]);
+    const samnites = politicalColourWithAlpha("samnites", 1, leaders);
+    const lucanians = politicalColourWithAlpha("lucanians", 1, leaders);
+    // Rome's cinnabar is hue ~3; its allies stay within a few degrees of it.
+    for (const colour of [samnites, lucanians]) expect(Math.abs(((hueOf(colour) - 3 + 540) % 360) - 180)).toBeLessThan(12);
+    expect(samnites).not.toBe(lucanians);
+    expect(samnites).not.toBe(politicalColourWithAlpha("samnites", 1));
+    // Without a leader, a people keeps its own colour.
+    expect(politicalColourWithAlpha("messapians", 1, leaders)).toBe(politicalColourWithAlpha("messapians", 1));
+  });
   it("gives Hungarian, Czech, and Polish polities distinct muted lineage shades", () => {
     const hungarian = politicalColourFromId("kingdom-of-hungary");
     const czech = politicalColourFromId("kingdom-of-bohemia");
@@ -59,7 +71,7 @@ describe("political map derivation", () => {
     for (const colour of [hungarian, czech, polish]) expectMutedHsl(colour);
   });
   it("keeps major nations visually distinct from their cultural group", () => {
-    expect(politicalColourFromId("macedon")).toBe("#355f91");
+    expect(politicalColourFromId("macedon")).toBe("#2F5A8A");
     expect(politicalColourFromId("macedon")).not.toBe(politicalColourFromId("athens"));
   });
   it("builds static adjacency and shared boundaries once", () => {

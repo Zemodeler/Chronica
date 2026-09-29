@@ -60,6 +60,36 @@ Acting beyond your authority is not blocked. It is recorded as a breach. A gener
 without orders has not done something impossible; he has committed insubordination, and the world
 will remember it. This is what makes coups, embezzlement, and unauthorised wars possible at all.
 
+What is yours is yours to use. Spending your own purse, buying land with it, or improving your own
+estate needs nobody's leave. Spending the treasury, granting public land, or developing a province
+you do not govern is the government's business.
+
+## Soldiering
+
+You can serve in the ranks. Declare yourself a legionary, a hoplite or a rower and you are enlisted
+in an army of your own country and stand where it stands; declare yourself an officer and you
+command. A man in the ranks shares his army's fortune in battle — he can come through, be wounded,
+be maimed, or die, as often as the men beside him do — and the Chronicle tells him what became of
+him. His comrades and his officer notice what happens to him, and if he deserts, his side knows it
+and his commander hears of it.
+
+## Trading
+
+A merchant puts money into trade between two places — from Syracuse to Messana, say — and the
+engine says what that costs and what it returns each month: no richer than the poorer end. A war
+with the power at the far end stops it, and so does an enemy fleet off either of its ports; he is
+told when it stops and when it starts again. He can fit out a ship of his own and command it,
+lend his own money to his government, and hear the news of the ports his trade runs through.
+
+## Offices
+
+Offices change hands on the calendar. A Roman consul serves a year; when his term ends the seat
+falls vacant, and the men who could win it are told so. One of them may call the Senate to an
+election — or you may, and stand yourself. If nobody does within a month, the election is called
+anyway. On polling day the vote is counted: a candidate's standing, plus whoever has declared for
+or against him. You can win an office by standing for it and gathering backing; you are never
+handed one you did not seek.
+
 ## What you know
 
 The world distinguishes what is true from what you know. A secret arrangement exists the moment it
@@ -84,7 +114,20 @@ is recorded as the political fact it is.
 The AI is involved when circumstances *change* the economy: a new tax, a blockade, a conquest, a
 debt crisis.
 
+A country's taxes are bounded by what its lands can bear, and that depends on how orderly they are.
+Raise the tributum a little and it pays. Raise it hard and it still pays, but the provinces grow
+sullen. Raise it past what the land can give and the collectors come back short while order breaks
+down — so a tax multiplied by five ends the year raising less than one tripled. Your treasury shows
+how hard you are pressing.
+
+Men own land. The leading figures have estates that pay them every month, and anyone can buy an
+estate with his own money or improve the one he has; the engine, not the AI, says what land costs
+and what it yields. An improvement pays for itself in about two and a half years, and no estate
+yields more than its land can give.
+
 ## Not in the game yet
 
-Combat resolution, diplomacy as a system, espionage and intrigue, and deep economic modelling.
-The engine they will plug into exists; the systems themselves do not. Multiplayer is out of scope.
+Combat, diplomacy and espionage exist now: battles are resolved phase by phase, letters and
+agreements pass between powers, and plots are laid and discovered. What is still missing is deeper
+economic modelling beyond incomes, estates, ventures and the tax ceiling, and mechanics the world
+invents for itself rather than picks from a list. Multiplayer is out of scope.

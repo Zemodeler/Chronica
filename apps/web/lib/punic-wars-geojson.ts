@@ -271,28 +271,6 @@ function provinceIds(map: GeoJsonMap, prefix: string, omit: readonly string[] = 
   return new Set(map.features.filter((feature) => feature.properties.kind === "province" && feature.id.startsWith(prefix) && !excluded.has(feature.id)).map((feature) => feature.id));
 }
 
-// These are territorial reconstructions rather than exact frontiers.  They
-// deliberately use broad Iron Age community areas, while keeping every base
-// coastline and external border intact.
-const ILLYRIAN_SITES: readonly HistoricalSite[] = [
-  { id: "punic-illyria-histri", name: "Histri", coordinate: [13.85, 45.10] },
-  { id: "punic-illyria-iapodes", name: "Iapodes", coordinate: [15.85, 44.90] },
-  { id: "punic-illyria-liburni", name: "Liburni", coordinate: [15.30, 44.10] },
-  { id: "punic-illyria-delmatae", name: "Delmatae", coordinate: [16.70, 43.60] },
-  { id: "punic-illyria-daorsi", name: "Daorsi", coordinate: [17.90, 43.35] },
-  { id: "punic-illyria-autariatae", name: "Autariatae", coordinate: [18.60, 43.55] },
-  { id: "punic-illyria-pirustae", name: "Pirustae", coordinate: [19.80, 42.00] },
-  { id: "punic-illyria-ardiaei", name: "Ardiaei", coordinate: [19.00, 42.30] },
-  { id: "punic-illyria-docleatae", name: "Docleatae", coordinate: [19.30, 42.60] },
-  { id: "punic-illyria-labeatae", name: "Labeatae", coordinate: [19.50, 42.20] },
-  { id: "punic-illyria-taulantii", name: "Taulantii", coordinate: [19.50, 41.30] },
-  { id: "punic-illyria-parthini", name: "Parthini", coordinate: [20.10, 41.30] },
-  { id: "punic-illyria-dassaretii", name: "Dassaretii", coordinate: [20.70, 40.70] },
-  { id: "punic-illyria-dardani", name: "Dardani", coordinate: [21.00, 42.70] },
-  { id: "punic-illyria-breuci", name: "Breuci", coordinate: [18.70, 45.10] },
-  { id: "punic-illyria-pannonii", name: "Pannonii", coordinate: [17.70, 45.50] },
-];
-
 const THRACIAN_SITES: readonly HistoricalSite[] = [
   { id: "punic-thrace-odrysians", name: "Odrysians", coordinate: [26.30, 42.50] },
   { id: "punic-thrace-bessi", name: "Bessi", coordinate: [24.70, 41.70] },
@@ -320,28 +298,17 @@ const BELGIC_SITES: readonly HistoricalSite[] = [
   { id: "punic-belgica-morini", name: "Morini", coordinate: [2.20, 50.80] },
   { id: "punic-belgica-menapii", name: "Menapii", coordinate: [3.20, 51.00] },
   { id: "punic-belgica-nervii", name: "Nervii", coordinate: [4.40, 50.40] },
-  { id: "punic-belgica-aduatuci", name: "Aduatuci", coordinate: [5.10, 50.90] },
+  { id: "punic-belgica-aduatuci", name: "Middle Mosa", coordinate: [5.10, 50.90] },
   { id: "punic-belgica-eburones", name: "Eburones", coordinate: [5.50, 50.70] },
 ];
 
 const LOW_COUNTRIES_SITES: readonly HistoricalSite[] = [
   { id: "punic-low-countries-frisiavones", name: "Frisiavones", coordinate: [4.40, 51.60] },
-  { id: "punic-low-countries-cananefates", name: "Cananefates", coordinate: [4.50, 52.10] },
-  { id: "punic-low-countries-batavi", name: "Batavi", coordinate: [5.80, 51.90] },
+  { id: "punic-low-countries-cananefates", name: "Rhenus Mouths", coordinate: [4.50, 52.10] },
+  { id: "punic-low-countries-batavi", name: "Rhenus–Vahalis Island", coordinate: [5.80, 51.90] },
   { id: "punic-low-countries-chamavi", name: "Chamavi", coordinate: [6.40, 52.30] },
   { id: "punic-low-countries-tubantes", name: "Tubantes", coordinate: [6.60, 52.30] },
   { id: "punic-low-countries-frisii", name: "Frisii", coordinate: [5.50, 53.20] },
-];
-
-// These labels identify Iron Age communities in the territory of today's
-// Hungary and Czechia/Slovakia; they do not project modern national identities
-// into the 270 BCE setting. Their boundaries are broad reconstructions.
-const HUNGARIAN_SITES: readonly HistoricalSite[] = [
-  { id: "punic-hungary-boii-western-pannonia", name: "Boii of western Pannonia", coordinate: [17.20, 47.65] },
-  { id: "punic-hungary-pannonii", name: "Pannonii", coordinate: [18.25, 46.55] },
-  { id: "punic-hungary-scordisci", name: "Scordisci", coordinate: [19.10, 46.15] },
-  { id: "punic-hungary-carpathian-communities", name: "Carpathian communities", coordinate: [19.65, 47.50] },
-  { id: "punic-hungary-upper-tisza-communities", name: "Upper Tisza communities", coordinate: [21.20, 47.85] },
 ];
 
 const CZECHOSLOVAK_SITES: readonly HistoricalSite[] = [
@@ -354,64 +321,6 @@ const CZECHOSLOVAK_SITES: readonly HistoricalSite[] = [
 
 const LUXEMBOURG_SITES: readonly HistoricalSite[] = [
   { id: "punic-luxembourg-treveri", name: "Treveri", coordinate: [6.10, 49.75] },
-];
-
-const IBERIAN_SITES: readonly HistoricalSite[] = [
-  { id: "punic-iberia-gallaeci", name: "Gallaeci", coordinate: [-8.41, 42.88] },
-  { id: "punic-iberia-astures", name: "Astures", coordinate: [-5.85, 43.36] },
-  { id: "punic-iberia-cantabri", name: "Cantabri", coordinate: [-4.08, 43.29] },
-  { id: "punic-iberia-varduli", name: "Varduli and Autrigones", coordinate: [-2.69, 42.85] },
-  { id: "punic-iberia-vascones", name: "Vascones", coordinate: [-1.64, 42.82] },
-  { id: "punic-iberia-vaccei", name: "Vaccei", coordinate: [-4.72, 41.65], territorialWeight: 0.07 },
-  { id: "punic-iberia-vettones", name: "Vettones", coordinate: [-5.75, 40.46], territorialWeight: 0.11 },
-  { id: "punic-iberia-lusitani", name: "Lusitani", coordinate: [-7.35, 39.82], territorialWeight: 0.15 },
-  { id: "punic-iberia-carpetani", name: "Carpetani", coordinate: [-3.70, 40.42], territorialWeight: -0.05 },
-  { id: "punic-iberia-celtiberi", name: "Celtiberi", coordinate: [-2.22, 41.21], territorialWeight: 0.16 },
-  { id: "punic-iberia-oretani", name: "Oretani", coordinate: [-3.42, 38.98], territorialWeight: 0.04 },
-  { id: "punic-iberia-turdetani", name: "Turdetani", coordinate: [-5.99, 37.39], territorialWeight: -0.08 },
-  { id: "punic-iberia-turduli", name: "Turduli", coordinate: [-6.18, 38.88], territorialWeight: 0.09 },
-  { id: "punic-iberia-celtici", name: "Celtici", coordinate: [-6.80, 37.68], territorialWeight: 0.08 },
-  { id: "punic-iberia-conii", name: "Conii", coordinate: [-7.96, 37.02] },
-  { id: "punic-iberia-bastetani", name: "Bastetani", coordinate: [-2.77, 37.39], territorialWeight: 0.06 },
-  { id: "punic-iberia-contestani", name: "Contestani", coordinate: [-0.70, 38.35], territorialWeight: 0.1 },
-  { id: "punic-iberia-edetani", name: "Edetani", coordinate: [-0.38, 39.47], territorialWeight: 0.09 },
-  { id: "punic-iberia-ilergetes", name: "Ilergetes", coordinate: [0.62, 41.62] },
-  { id: "punic-iberia-lacetani", name: "Lacetani", coordinate: [1.83, 41.58] },
-];
-
-const ENGLAND_SITES: readonly HistoricalSite[] = [
-  { id: "punic-britain-cornish", name: "South-western Britons", coordinate: [-4.53, 50.42] },
-  { id: "punic-britain-dorset", name: "Southern Chalkland Britons", coordinate: [-2.44, 50.72] },
-  { id: "punic-britain-thames", name: "Thames Basin Britons", coordinate: [-0.13, 51.51] },
-  { id: "punic-britain-kentish", name: "Channel Britons", coordinate: [0.52, 51.28] },
-  { id: "punic-britain-fenland", name: "Fenland Britons", coordinate: [0.18, 52.64] },
-  { id: "punic-britain-east-anglian", name: "East Anglian Britons", coordinate: [1.30, 52.63] },
-  { id: "punic-britain-midlands", name: "Midland Britons", coordinate: [-1.54, 52.64] },
-  { id: "punic-britain-marches", name: "Marchland Britons", coordinate: [-2.71, 52.35] },
-  { id: "punic-britain-humber", name: "Humber Britons", coordinate: [-0.54, 53.75] },
-  { id: "punic-britain-pennine", name: "Pennine Britons", coordinate: [-1.78, 54.16] },
-  { id: "punic-britain-cumbrian", name: "Cumbrian Britons", coordinate: [-3.05, 54.89] },
-  { id: "punic-britain-northumbrian", name: "Northern English Britons", coordinate: [-1.62, 55.05] },
-];
-
-const SCOTLAND_SITES: readonly HistoricalSite[] = [
-  { id: "punic-britain-southern-uplands", name: "Southern Upland Britons", coordinate: [-3.55, 55.55] },
-  { id: "punic-britain-forth-clyde", name: "Forth-Clyde Communities", coordinate: [-4.25, 55.95] },
-  { id: "punic-britain-east-lowlands", name: "Eastern Lowland Communities", coordinate: [-3.18, 56.20] },
-  { id: "punic-britain-grampian", name: "Grampian Communities", coordinate: [-4.60, 56.82] },
-  { id: "punic-britain-northeast", name: "North-eastern Communities", coordinate: [-2.10, 57.25] },
-  { id: "punic-britain-hebridean", name: "Hebridean Communities", coordinate: [-6.05, 57.50] },
-  { id: "punic-britain-highland", name: "Northern Highland Communities", coordinate: [-4.85, 58.40] },
-  { id: "punic-britain-northern-isles", name: "Northern Isles Communities", coordinate: [-3.00, 59.00] },
-];
-
-const WALES_SITES: readonly HistoricalSite[] = [
-  { id: "punic-britain-welsh-northwest", name: "North-western Britons", coordinate: [-4.15, 53.15] },
-  { id: "punic-britain-welsh-northeast", name: "North-eastern Welsh Britons", coordinate: [-3.08, 53.10] },
-  { id: "punic-britain-welsh-midlands", name: "Central Upland Britons", coordinate: [-3.70, 52.35] },
-  { id: "punic-britain-welsh-southwest", name: "South-western Welsh Britons", coordinate: [-4.25, 51.78] },
-  { id: "punic-britain-welsh-southeast", name: "South-eastern Welsh Britons", coordinate: [-3.05, 51.67] },
-  { id: "punic-britain-welsh-marches", name: "Welsh March Communities", coordinate: [-2.80, 52.05] },
 ];
 
 const base = europeNorthAfricaGeoJson;
@@ -563,7 +472,7 @@ const SETTLEMENT_PROVINCES: Readonly<Record<string, string>> = {
   "settlement-naples": "punic-italy-campanian-plain",
   "settlement-caralis": "ita-72843720b81376294924159",
   "settlement-syracuse": "ita-72843720b81376294924159-sicily-southeast",
-  "settlement-agrigentum-fort": "ita-72843720b81376294924159-sicily-central",
+  "settlement-agrigentum": "ita-72843720b81376294924159-sicily-central",
 };
 
 type HistoricalSettlement = Readonly<{
@@ -597,16 +506,31 @@ const PUNIC_WARS_SETTLEMENTS: readonly HistoricalSettlement[] = [
   { id: "settlement-mediolanum", name: "Mediolanum", provinceId: "punic-italy-insubrian-plain", type: "city", coordinate: [9.19, 45.46] },
   { id: "settlement-bononia", name: "Felsina", provinceId: "punic-italy-middle-padus", type: "town", coordinate: [11.34, 44.50] },
   { id: "settlement-patavium", name: "Patavium", provinceId: "punic-italy-venetian-lagoon", type: "city", coordinate: [11.88, 45.41] },
-  { id: "settlement-volsinii", name: "Volsinii", provinceId: "punic-italy-etrurian-uplands", type: "fort", coordinate: [11.88, 42.42] },
+  { id: "settlement-volsinii", name: "Volsinii", provinceId: "punic-italy-etrurian-uplands", type: "city", coordinate: [11.88, 42.42] },
+  { id: "settlement-arretium", name: "Arretium", provinceId: "punic-italy-etrurian-uplands", type: "city", coordinate: [11.88, 43.46] },
+  { id: "settlement-iguvium", name: "Iguvium", provinceId: "punic-italy-umbrian-valleys", type: "town", coordinate: [12.58, 43.35] },
+  { id: "settlement-asculum", name: "Asculum", provinceId: "punic-italy-picenum-coast", type: "city", coordinate: [13.57, 42.85] },
+  { id: "settlement-corfinium", name: "Corfinium", provinceId: "punic-italy-marsian-highlands", type: "town", coordinate: [13.84, 42.12] },
+  { id: "settlement-grumentum", name: "Grumentum", provinceId: "punic-italy-lucanian-uplands", type: "town", coordinate: [15.91, 40.28] },
+  { id: "settlement-consentia", name: "Consentia", provinceId: "punic-italy-bruttian-highlands", type: "town", coordinate: [16.25, 39.30] },
+  { id: "settlement-arpi", name: "Arpi", provinceId: "punic-italy-apulian-coast", type: "city", coordinate: [15.60, 41.52] },
+  { id: "settlement-brundisium", name: "Brundisium", provinceId: "punic-italy-sallentine-peninsula", type: "port", coordinate: [17.94, 40.64] },
+  // Rome's Latin colonies inside its allies' lands.
+  { id: "settlement-cosa", name: "Cosa", provinceId: "punic-italy-etrurian-uplands", type: "fort", coordinate: [11.29, 42.41] },
+  { id: "settlement-narnia", name: "Narnia", provinceId: "punic-italy-umbrian-valleys", type: "fort", coordinate: [12.52, 42.52] },
+  { id: "settlement-alba-fucens", name: "Alba Fucens", provinceId: "punic-italy-marsian-highlands", type: "fort", coordinate: [13.41, 42.08] },
+  { id: "settlement-luceria", name: "Luceria", provinceId: "punic-italy-apulian-coast", type: "fort", coordinate: [15.33, 41.51] },
+  { id: "settlement-venusia", name: "Venusia", provinceId: "punic-italy-lucanian-uplands", type: "fort", coordinate: [15.81, 40.96] },
   { id: "settlement-capua", name: "Capua", provinceId: "punic-italy-campanian-plain", type: "city", coordinate: [14.17, 41.03] },
-  { id: "settlement-bovianum", name: "Bovianum", provinceId: "punic-italy-samnium", type: "fort", coordinate: [14.48, 41.56] },
+  { id: "settlement-bovianum", name: "Bovianum", provinceId: "punic-italy-samnium", type: "town", coordinate: [14.48, 41.56] },
   { id: "settlement-tarentum", name: "Tarentum", provinceId: "punic-italy-apulian-coast", type: "port", coordinate: [17.23, 40.47] },
+  { id: "settlement-rhegium", name: "Rhegium", provinceId: "punic-italy-bruttian-highlands", type: "port", coordinate: [15.65, 38.11] },
   { id: "settlement-massalia", name: "Massalia", provinceId: "punic-gaul-bouches-du-rhone", type: "port", coordinate: [5.37, 43.30] },
-  { id: "settlement-bibracte", name: "Bibracte", provinceId: "punic-gaul-saone-et-loire", type: "fort", coordinate: [4.03, 46.92] },
-  { id: "settlement-gergovia", name: "Gergovia", provinceId: "punic-gaul-puy-de-dome", type: "fort", coordinate: [3.13, 45.72] },
   { id: "settlement-gades", name: "Gades", provinceId: "punic-iberia-andalucia", type: "port", coordinate: [-6.29, 36.53] },
   { id: "settlement-numantia", name: "Numantia", provinceId: "punic-iberia-castilla-y-leon", type: "fort", coordinate: [-2.44, 41.81] },
-  { id: "settlement-carthago-nova", name: "Carthago Nova", provinceId: "punic-iberia-region-de-murcia", type: "port", coordinate: [-0.98, 37.60] },
+  // Carthago Nova was founded on this site by Hasdrubal c. 228; in 270 it is Mastia.
+  { id: "settlement-mastia", name: "Mastia", provinceId: "punic-iberia-region-de-murcia", type: "port", coordinate: [-0.98, 37.60] },
+  { id: "settlement-ebusus", name: "Ebusus", provinceId: "punic-iberia-illes-balears", type: "port", coordinate: [1.43, 38.91] },
   { id: "settlement-maiden-castle", name: "Maiden Castle", provinceId: "punic-britain-gbr-local-9080712b78235082436645", type: "fort", coordinate: [-2.49, 50.70] },
   { id: "settlement-danebury", name: "Danebury", provinceId: "punic-britain-gbr-local-9080712b82982752923250", type: "fort", coordinate: [-1.49, 51.18] },
   { id: "settlement-traprain-law", name: "Traprain Law", provinceId: "punic-britain-gbr-local-9080712b46190908677710", type: "fort", coordinate: [-2.65, 55.93] },

@@ -1,6 +1,7 @@
 import path from "node:path";
 import os from "node:os";
 import { defineConfig, devices } from "@playwright/test";
+import { STATE_FILE } from "./e2e/paths";
 
 // Real-browser end-to-end coverage for the turn-resolution / Chronicle /
 // deterministic-military-fallback fix. The dev server this spins up always
@@ -36,10 +37,18 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    // Signing up and making a save per test cost more than the tests did --
+    // against `next dev` every route compiles on its first hit. It happens
+    // once here, and everything else starts from a world that exists.
+    { name: "setup", testMatch: /global\.setup\.ts/ },
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"], storageState: STATE_FILE },
+      dependencies: ["setup"],
+    },
   ],
   webServer: {
-    command: `npx next dev -p ${PORT}`,
+    command: `npx next dev --turbopack -p ${PORT}`,
     cwd: __dirname,
     url: `http://localhost:${PORT}`,
     reuseExistingServer: false,

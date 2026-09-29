@@ -3,7 +3,6 @@ import "server-only";
 import { createAiAdapter, callWithCoinGate, InsufficientCoinsError, AiParseError } from "@chronica/ai";
 import {
   createDatabase,
-  type ChronicaDatabase,
   getCharacterKnowledgebase,
   getOrCreateNpcKnowledgebase,
   getWorldView,
@@ -13,13 +12,16 @@ import {
 } from "@chronica/db";
 import {
   CharacterKnowledgebaseSchema,
+  ScenarioDefinitionSchema,
   WorldStateSchema,
-  deriveAuthoritySummary,
+  clampWealth,
   createCanonicalNpc,
+  describeWealthBands,
   linkCanonicalCharacters,
   materializePlayerCharacter,
   type CharacterKnowledgebase,
-  type ScenarioGovernmentRules,
+  type FamilyLinkKind,
+  type ScenarioWealthRules,
   type WorldState,
 } from "@chronica/shared";
 import { eq, and, isNull } from "drizzle-orm";
@@ -75,6 +77,10 @@ type ScenarioContext = Readonly<{
   period: string;
   timelineStartYear: number | null;
   regions: readonly { id: string; name: string }[];
+  /** What a person of a given standing is worth here (slice 11). */
+  wealth: ScenarioWealthRules | undefined;
+  /** Who is already in the world: the player may become one of them, and is never handed one by accident. */
+  people: readonly { id: string; label: string }[];
   currency: Readonly<{
     name: string;
     unitName: string;
@@ -93,9 +99,29 @@ export function ageAtScenarioStart(birthYearApprox: number | null, timelineStart
   return Math.max(0, timelineStartYear - birthYearApprox);
 }
 
+/**
+ * The people already in the world, named with their office and id.
+ *
+ * Asked for a consul by a player who called himself Andreus Maximus, the
+ * model gave him Gaius Genucius Clepsina, the consul the scenario already
+ * seats: the player became a second copy of a man the world was still
+ * running. Told who is here, the model can put a player who asked only for a
+ * station in that man's place (`becomesCharacterId`), and keeps a player who
+ * named himself from becoming anybody in it.
+ */
+function peopleInTheWorld(world: WorldState, offices: readonly { id: string; label: string }[]): { id: string; label: string }[] {
+  const labels = new Map(offices.map((office) => [office.id, office.label]));
+  return world.characters
+    .filter((character) => character.alive)
+    .map((character) => {
+      const office = character.officeId === null ? undefined : labels.get(character.officeId) ?? character.officeId;
+      return { id: character.id, label: office === undefined ? character.name : `${character.name} (${office})` };
+    });
+}
+
 async function getScenarioContext(db: ReturnType<typeof createDatabase>["db"], gameId: string): Promise<ScenarioContext> {
   const [row] = await db
-    .select({ period: schema.scenarios.period, initialWorld: schema.scenarioVersions.initialWorld, mapAssetId: schema.scenarioVersions.mapAssetId })
+    .select({ period: schema.scenarios.period, initialWorld: schema.scenarioVersions.initialWorld, mapAssetId: schema.scenarioVersions.mapAssetId, definition: schema.scenarioVersions.definition })
     .from(schema.games)
     .innerJoin(schema.scenarios, eq(schema.games.scenarioId, schema.scenarios.id))
     .innerJoin(schema.scenarioVersions, and(eq(schema.scenarioVersions.scenarioId, schema.games.scenarioId), eq(schema.scenarioVersions.version, schema.games.scenarioVersion)))
@@ -114,10 +140,13 @@ async function getScenarioContext(db: ReturnType<typeof createDatabase>["db"], g
         symbol: world.data.material.currency.symbol,
       }
     : { name: "Money", unitName: "unit", unitNamePlural: "units", symbol: undefined };
+  const definition = ScenarioDefinitionSchema.safeParse(row?.definition);
   return {
     period: row?.period ?? "an unspecified historical period",
     timelineStartYear,
     regions: world.success ? canvasRegions(row?.mapAssetId ?? null, world.data) : [],
+    wealth: definition.success ? definition.data.wealth : undefined,
+    people: world.success ? peopleInTheWorld(world.data, definition.success ? definition.data.government.offices : []) : [],
     currency,
   };
 }
@@ -142,9 +171,15 @@ function buildDeclareSystemPrompt(context: ScenarioContext): string {
 The player will describe who they want to play as. You must interpret their intent and produce a character, then ask for confirmation.
 
 Rules:
-- If the player names a real historical figure: use them ONLY if they were already born and alive at the scenario opening (${start}). Never select, mention as the player character, or extend a historical person born after that date. If the requested or suggested figure does not yet exist, create an invented period-appropriate character instead and set origin to "invented".
-- If the player gives a fictional/ambiguous name or just a role description: invent a culturally authentic character appropriate to the period. If their name is not historically accurate for the period, use it as a nickname and generate an accurate canonical name.
-- Be strict about historical authenticity (culture, faith, names, roles).
+- A station and no name — "a consul", "a Carthaginian shipowner", "a soldier on the Sicilian frontier" — is a request to be a real person: somebody who actually held that station at the opening and is attested well enough to place and date. Set origin to "historical" and say who they were in the confirmation. A real person is not automatically a famous one: a minor attested figure who fits beats a great name the player did not ask for, and an officer is not handed a consulship.
+- If the person who fits is one of the people already in the world (listed below), the player becomes that person: set becomesCharacterId to their id, and canonicalName to their name. Otherwise set becomesCharacterId to null.
+- A real historical figure named by the player is that figure, if they were already born and alive at the scenario opening (${start}), and becomesCharacterId is their id if they are listed below. Never select, mention as the player character, or extend a historical person born after that date; if the named figure does not yet exist, invent a period-appropriate character instead and set origin to "invented".
+- A name of the player's own, that is no real person's — "Andreus Maximus", "Hanno the Younger" — is somebody new: origin "invented", canonicalName exactly as the player gave it, nickname null, becomesCharacterId null. Never swap it for a better-attested name and never turn it into a real person. Give them the station they asked for, whole: a player who asked to be consul is consul, even where history knew the year's consuls and even where that puts one of the people below out of the office.
+- A player who asks to be rich — "rich", "wealthy", "a fortune" — gets startingMoney at the top of the range for their standing, not the middle. One who asks to be poor gets the bottom.
+- The people already in the world, as id: name (office):
+${context.people.length === 0 ? "  (none listed)" : context.people.map((person) => `  · ${person.id}: ${person.label}`).join("\n")}
+  Unless the player is becoming one of them, the character is somebody else, with another name. They may be among the character's relations under the same name.
+- Be strict about historical authenticity of culture, faith, family and manner of life. It never outranks the player's own name or the station they asked for.
 - For historical and hybrid characters, birthYearApprox and deathYearApprox must be known enough to prove that the person was alive at the scenario opening. Use negative years for BCE. For invented characters, make a plausible adult already alive at the opening.
 - Choose locationProvinceId from this exact opening-map list. It must be a region where the character can plausibly be present at the opening:
 ${regions}
@@ -152,19 +187,24 @@ ${regions}
 - Skills are on a 0–100 scale and represent innate talent plus experience. A 50 is average for the era's population. A 75+ is exceptional. Skills: martial, intrigue, learning, piety, stewardship, diplomacy, body.
 - Sub-skills are more granular. Only assign sub-skills the character would realistically have.
 - Decide the character's startingMoney in the scenario currency: ${currency}. It must be a non-negative whole number representing liquid personal funds at the opening, appropriate to the character's role, social class, culture, period, and circumstances. Do not include a state treasury, institutional funds, land, ships, equipment, or other non-cash assets.
+- What somebody of that standing is actually worth here, so a soldier is not handed a senator's fortune and a merchant is not left with nothing to trade on. Say the standing in socioEconomicClass in words that include one of these, and keep startingMoney inside the matching range:
+${describeWealthBands(context.wealth).map((band) => `  · ${band}`).join("\n")}
 - Create exactly 4 to 8 key relations. Every relation must be an individually named human being; never include an institution, dynasty, army, navy, office, or other collective. Include at least one family member and at least one significant non-family NPC. Family relations need a familyRole; non-family relations must use null for familyRole.
 
 Output ONLY a valid JSON object matching this schema (no markdown fences, no commentary):
 {
-  "canonicalName": "string — historically accurate name",
-  "nickname": "string | null — player's name if inaccurate, else null",
+  "canonicalName": "string — the character's name: the player's own, exactly as given, when they gave one",
+  "nickname": "string | null — a byname, if the character has one; else null",
   "birthYearApprox": "number | null — approximate birth year (negative = BC)",
   "deathYearApprox": "number | null — approximate death year or null if unknown",
   "origin": "historical | invented | hybrid",
+  "becomesCharacterId": "string | null — the id of the person already in the world whom the player becomes, else null",
   "period": "string — e.g. 'First Punic War, 264–241 BC'",
   "locationProvinceId": "string — required exact opening-map region id",
   "culture": "string — e.g. 'Roman Patrician'",
   "faith": "string | null",
+  "gender": "male | female",
+  "legalStatus": "free | freed | enslaved — what the law says they are",
   "biography": "string — 200–500 words, dense prose optimised for AI re-reads",
   "notableEvents": ["array of short strings, key life events"],
   "role": "string — current position/job, using the historically accurate title for the era (e.g. 'Consul of the Roman Republic, commanding the Roman field army' rather than 'General of the Roman Army' in the Republican era)",
@@ -313,7 +353,10 @@ function parseAiKnowledgebase(
     return null;
   }
 
-  const knowledgebase = result.data;
+  // How old they are on the opening day, worked out once here, so every later
+  // reading of the declaration puts the same man in the world.
+  const openingAge = ageAtScenarioStart(result.data.birthYearApprox, context.timelineStartYear);
+  const knowledgebase = openingAge === null ? result.data : { ...result.data, ageYearsAtOpening: Math.min(120, openingAge) };
 
   if (knowledgebase.origin !== "invented") {
     // Birth year must be known and before the scenario start.
@@ -324,7 +367,18 @@ function parseAiKnowledgebase(
   }
 
   if (knowledgebase.locationProvinceId === null || !context.regions.some((region) => region.id === knowledgebase.locationProvinceId)) return null;
-  return knowledgebase;
+  // Only somebody actually here can be become; an id the model made up means
+  // a new person, not nobody.
+  const becomesCharacterId = context.people.some((person) => person.id === knowledgebase.becomesCharacterId) ? knowledgebase.becomesCharacterId! : null;
+
+  // Clamp, never reject. The prompt names the bands and this holds them: a
+  // player who declared a common soldier does not open with a senator's
+  // fortune, and one who declared a merchant is not left with nothing to
+  // trade on. Throwing the whole declaration away over a number would cost
+  // the player their character for the engine's convenience, and the model's
+  // judgment *inside* a band is worth keeping.
+  const purse = clampWealth(knowledgebase.startingMoney, knowledgebase.socioEconomicClass, context.wealth);
+  return { ...knowledgebase, startingMoney: purse, becomesCharacterId };
 }
 
 export async function declareCharacter(gameId: string, playerInput: string): Promise<CharacterDeclarationResult> {
@@ -516,11 +570,16 @@ export async function confirmDeclaredCharacter(gameId: string): Promise<Characte
     );
     for (const relation of existing.relations) {
       if (relation.kind !== "person") continue;
-      const npcId = `declared-npc-${relation.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${playerId}`;
       const relationScore = scoreForDeclaredConnection(relation.relationship, relation.notes);
       const player = canonicalWorld.characters.find((candidate) => candidate.id === characterId);
       if (player === undefined) return { status: "error", message: "The confirmed player could not enter canonical world state." };
-      const created = createCanonicalNpc(canonicalWorld, {
+      // Somebody the world already has -- the other consul, a rival senator --
+      // is that man, not a namesake made beside him.
+      const known = canonicalWorld.characters.find((candidate) => candidate.alive && candidate.id !== characterId
+        && candidate.name.trim().toLowerCase() === relation.name.trim().toLowerCase());
+      const npcId = known?.id ?? `declared-npc-${relation.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${playerId}`;
+      const kin = known !== undefined || relation.familyRole === null ? null : FAMILY_LINK_BY_ROLE[relation.familyRole] ?? null;
+      const created = known !== undefined ? { world: canonicalWorld } : createCanonicalNpc(canonicalWorld, {
         characterId: npcId,
         name: relation.name,
         polityId: player.polityId,
@@ -528,10 +587,33 @@ export async function confirmDeclaredCharacter(gameId: string): Promise<Characte
         startingMoney: 0,
         createdAtStep: canonicalWorld.elapsedStep,
         creationReason: `Declared ${relation.relationship} of ${existing.canonicalName}.`,
+        // A father a generation older, a son a generation younger. Everybody
+        // was thirty-five, so the player's parents were his own age.
+        ageYearsAtStart: kin === null ? player.ageYearsAtStart : Math.max(1, player.ageYearsAtStart + (KIN_AGE_OFFSET[kin] ?? 0)),
+        gender: declaredGender(kin, relation.relationship, player.gender),
       });
       if (created === null) return { status: "error", message: `Could not materialise ${relation.name} in canonical world state.` };
       canonicalWorld = linkCanonicalCharacters(created.world, characterId, npcId, relation.relationship, relationScore, canonicalWorld.elapsedStep);
       canonicalWorld = linkCanonicalCharacters(canonicalWorld, npcId, characterId, relation.relationship, relationScore, canonicalWorld.elapsedStep);
+      // Kin as the family graph records it, and not only as a feeling. The
+      // declared wife and son were made, and liked him, and were nobody's
+      // wife and son: succession reads family links, found none, and offered
+      // the dead man's heirs from among strangers of standing.
+      if (kin !== null) {
+        canonicalWorld = {
+          ...canonicalWorld,
+          familyLinks: [...canonicalWorld.familyLinks, {
+            id: `family-${npcId}`,
+            characterId: npcId,
+            relatedCharacterId: characterId,
+            kind: kin,
+            startedAtStep: canonicalWorld.elapsedStep,
+            endedAtStep: null,
+            visibility: "public",
+            provenanceEventId: null,
+          }],
+        };
+      }
       const kb = await getOrCreateNpcKnowledgebase(db, gameId, playerId, npcId, {
         canonicalName: relation.name,
         personalitySummary: relation.notes ?? "",
@@ -563,6 +645,33 @@ export async function confirmDeclaredCharacter(gameId: string): Promise<Characte
   }
 }
 
+/** A declared relative's role, read from the relative's side: a declared "parent" is the player's parent. */
+const FAMILY_LINK_BY_ROLE: Readonly<Record<string, FamilyLinkKind>> = {
+  parent: "parent",
+  partner: "spouse_or_partner",
+  sibling: "sibling",
+  child: "child",
+  other_relative: "other_relative",
+};
+
+/** Roughly how much older than the player each kind of kin is. */
+/**
+ * A declared wife was made a man, like everybody, and so could never bear the
+ * player a child. A partner is taken to be of the other sex; anyone else is a
+ * woman where the relationship says so in as many words.
+ */
+function declaredGender(kin: FamilyLinkKind | null, relationship: string, playerGender: "male" | "female"): "male" | "female" {
+  if (kin === "spouse_or_partner") return playerGender === "male" ? "female" : "male";
+  return /\b(mother|sister|wife|daughter|aunt|niece|grandmother|widow|matron|mistress|concubine|consort|queen|priestess)\b/i.test(relationship) ? "female" : "male";
+}
+
+const KIN_AGE_OFFSET: Readonly<Partial<Record<FamilyLinkKind, number>>> = {
+  parent: 25,
+  child: -25,
+  sibling: -2,
+  spouse_or_partner: -5,
+};
+
 export async function getCharacterPanelData(gameId: string): Promise<CharacterKnowledgebase | null> {
   if (gameId === DEMO_GAME_ID) return null;
   const userId = await resolveUserId();
@@ -578,61 +687,3 @@ export async function getCharacterPanelData(gameId: string): Promise<CharacterKn
   }
 }
 
-/**
- * Canonical Authority projection (character-sim phase 6): concise,
- * server-derived labels for what `characterId` can presently and visibly
- * exercise, replacing the free-text AI-generated `knowledgebase.authority` as
- * the source of the personal screen's Authority field. Never reads
- * `knowledgebase.authority` -- see `deriveAuthoritySummary`.
- */
-export async function getPlayerAuthoritySummary(gameId: string, characterId: string): Promise<readonly string[]> {
-  if (gameId === DEMO_GAME_ID) return [];
-  const { db, close } = createDatabase(requiredDatabaseUrl());
-  try {
-    const view = await getWorldView(db, gameId);
-    if (view === undefined) return [];
-    // Before the first turn commits there is no snapshot, so the world here is
-    // the scenario's authored initial world -- which knows nothing about a
-    // character the player declared. Reading Authority straight off it always
-    // answered "No current public office", whatever the player had declared
-    // themselves to be. Project the player in first, exactly as resolution
-    // does, so the screen and the simulation agree from turn zero.
-    const world = await materializeDeclaredPlayer(db, gameId, view.world, characterId, view.scenarioGovernment, view.mapAssetId);
-    return deriveAuthoritySummary(world, characterId, view.scenarioGovernment);
-  } finally {
-    await close();
-  }
-}
-
-/**
- * The world with this player's declared character projected into it.
- *
- * Falls back to the world as-is whenever the projection cannot be made — an
- * unconfirmed draft, a knowledgebase for somebody else, a starting location
- * the scenario does not have. A read path must never fail because a character
- * is half-created.
- */
-async function materializeDeclaredPlayer(
-  db: ChronicaDatabase,
-  gameId: string,
-  world: WorldState,
-  characterId: string,
-  scenarioGovernment: ScenarioGovernmentRules | undefined,
-  mapAssetId: string | null,
-): Promise<WorldState> {
-  if (world.characters.some((character) => character.id === characterId)) return world;
-  const playerId = characterId.startsWith("declared-") ? characterId.slice("declared-".length) : null;
-  if (playerId === null) return world;
-  const knowledgebase = await getCharacterKnowledgebase(db, gameId, playerId).catch(() => null);
-  if (knowledgebase === null || !knowledgebase.confirmedByPlayer) return world;
-  try {
-    return materializePlayerCharacter(
-      materializeCanvasProvince(world, mapAssetId, knowledgebase.locationProvinceId),
-      characterId,
-      knowledgebase,
-      scenarioGovernment,
-    );
-  } catch {
-    return world;
-  }
-}

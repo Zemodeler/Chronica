@@ -1,6 +1,7 @@
+import { FaithAdherenceSchema, FaithSchema } from "./faith";
 import { z } from "zod";
 import { ElapsedStepSchema, MaterialWorldStateSchema } from "../material-state";
-import { CharacterSchema } from "../characters/character";
+import { CharacterSchema, OfficeSchema } from "../characters/character";
 import { CharacterContinuitySchema, EncounterMemorySchema } from "../continuity/continuity";
 import { WorldPinsSchema } from "./clock";
 import { WorldInstantSchema, type WorldInstant } from "./instant";
@@ -11,29 +12,45 @@ import { StructureSchema } from "./structure";
 import { GenericEntitySchema } from "./generic-entity";
 import { PolityOutlookSchema } from "./outlook";
 import { ProvinceGraphSchema } from "./map";
+import { TroopCategoryDefinitionSchema } from "../warfare/battle";
+import { ContingencySchema } from "./contingency";
+import { SiegeSchema } from "./siege";
+import { EnactmentSchema } from "./enactment";
+import { CovertPlotSchema } from "./covert-plot";
 import { MapConflictsOverlaySchema } from "./map-presentation";
+import { NemesisSchema } from "./nemesis";
 import { WorldStorylineSchema } from "./storylines";
 import { CharacterPressureSchema } from "../characters/pressures";
 import { CharacterBeliefSchema } from "../characters/beliefs";
 import { SocialLinkSchema } from "../characters/relationship-dimensions";
+import { TraitObservationSchema } from "../characters/traits";
 import { CommitmentSchema } from "../characters/commitments";
 import { CharacterIntentSchema } from "../characters/intents";
 import { FamilyLinkSchema, HouseholdSchema, LifeContractSchema } from "../characters/family";
 import { LegacyCauseSchema } from "../continuity/continuity";
+import { FieldPerilSchema } from "./field-peril";
 import { PolityAgreementSchema } from "./agreements";
 import { DiplomaticMessageSchema, PolityStanceSchema } from "./diplomacy";
+import { ConstitutionSchema, EMPTY_SOCIETY_MEMORY, SocietyMemorySchema } from "./constitution";
+import { SuccessionRuleSchema } from "../characters/character";
+import { AuditSchema, DepartmentSchema, DiversionSchema } from "./departments";
+import { EconomyMemorySchema } from "./economy";
 
 /**
  * Bumped when an old snapshot needs upgrading on load.
  *
- * docs/03-data-model.md: because snapshots are versioned documents, a schema
- * change does not require rewriting history -- bump this and teach the reader
- * to upgrade old documents.
+ * Because snapshots are versioned documents, a schema change does not require
+ * rewriting history -- bump this and teach the reader to upgrade old
+ * documents.
  *
  * 3: storylines lost the fields of a deleted director architecture and gained
  *    provenance; the narrator's ledger arrived; `worldDevelopments`, which
- *    nothing ever read, was dropped. No upgrader: worlds written at 2 were
- *    playtests, and are recreated rather than carried.
+ *    nothing ever read, was dropped. Worlds written at 2 were playtests, and
+ *    are recreated rather than carried.
+ *
+ * Every stored world is read through `readWorldDocument` (world-upgrade.ts),
+ * which runs the chain of upgrade steps before the strict parse. Bumping this
+ * means adding the step from the old number to the new one there.
  */
 export const WORLD_SCHEMA_VERSION = 3;
 
@@ -50,11 +67,21 @@ export const NarratorLedgerSchema = z
     lastSeedKey: z.string().trim().min(1).max(80).nullable(),
     /** Whether the orchestrator took the last seed up. An ignored seed is offered once more, then dropped. */
     consumed: z.boolean(),
+    /**
+     * Historical pressures already spent.
+     *
+     * A scenario's pressures are what the period was actually tending toward --
+     * an unpaid mercenary army, a brittle alliance system, a pass that can be
+     * crossed at a price. They are offered when their circumstances hold, and
+     * each is offered once: history is a thing this world can fall into, not a
+     * thing it is on rails toward, and a pressure that keeps firing is a rail.
+     */
+    spentPressureIds: z.array(z.string().trim().min(1).max(80)).max(200).default([]),
   })
   .strict();
 export type NarratorLedger = z.infer<typeof NarratorLedgerSchema>;
 
-export const EMPTY_NARRATOR_LEDGER: NarratorLedger = { lastSeedDay: null, seedCount: 0, lastSeedKey: null, consumed: true };
+export const EMPTY_NARRATOR_LEDGER: NarratorLedger = { lastSeedDay: null, seedCount: 0, lastSeedKey: null, consumed: true, spentPressureIds: [] };
 
 /**
  * The authoritative world: one immutable document per turn, hashed to
@@ -104,8 +131,71 @@ export const WorldStateSchema = z
     encounters: z.array(EncounterMemorySchema),
     /** Threads of history the world is following -- see `world/storylines.ts`. */
     storylines: z.array(WorldStorylineSchema).default([]),
+    /**
+     * The rulers' antagonists, live and retired (VISION §19's exception).
+     * One live entry per ruler; the retired ones are kept because who a reign
+     * was against is part of what it was.
+     */
+    nemeses: z.array(NemesisSchema).default([]),
+    /** Men cut off on a lost field, and what became of them -- see `world/field-peril.ts`. */
+    fieldPerils: z.array(FieldPerilSchema).default([]),
     /** The narrator's own bookkeeping -- see `NarratorLedgerSchema`. */
     narrator: NarratorLedgerSchema.default(EMPTY_NARRATOR_LEDGER),
+    /**
+     * Offices the world has made for itself, beside the ones the scenario opened with.
+     *
+     * A scenario's government was a fixed list, so the only offices that could
+     * ever exist were the handful somebody authored -- four, in the Punic Wars.
+     * "Name a quaestor to handle the war chest" matched nothing, and the man
+     * was created holding no office at all, because there was no quaestorship
+     * for him to hold and no way to make one.
+     *
+     * A government invents offices constantly: a commission, a prefecture, a
+     * command created for one war. The scenario's list is the opening state of
+     * a thing that grows, not the whole of what may exist (VISION §9). These
+     * are merged with it everywhere offices are read, so an office the world
+     * made confers authority exactly as an authored one does.
+     */
+    offices: z.array(OfficeSchema).default([]),
+    /**
+     * How offices are filled, where the world has changed or added to the
+     * scenario's rules: a throne made elective, a council's own elections.
+     * Merged with the scenario's exactly as `offices` is (`allSuccessionRules`).
+     */
+    successionRules: z.array(SuccessionRuleSchema).default([]),
+    /**
+     * Each power's constitution: what form its parts read as, and how they came
+     * to be (`world/constitution.ts`). A power with no entry has not yet been
+     * given one; the engine grows it from the power's form the first time it
+     * reviews the world.
+     */
+    constitutions: z.array(ConstitutionSchema).default([]),
+    /**
+     * Who is in charge of what, beneath the ruler: a power's departments and
+     * a household's stewards (`world/departments.ts`). A lever no department
+     * holds is the ruler's own, and an estate nobody stewards is its owner's.
+     */
+    departments: z.array(DepartmentSchema).default([]),
+    /** What officers and stewards have taken, and whether anybody has found it (`world/departments.ts`). */
+    diversions: z.array(DiversionSchema).max(600).default([]),
+    audits: z.array(AuditSchema).max(200).default([]),
+    /** What the world remembers to see its groups coming -- see `SocietyMemorySchema`. */
+    society: SocietyMemorySchema.default(EMPTY_SOCIETY_MEMORY),
+    /** What the world remembers of its seasons, bargains and troubles -- see `EconomyMemorySchema`. */
+    economy: EconomyMemorySchema.optional(),
+    /**
+     * Kinds of troops the world has made for itself, on the same terms as the
+     * offices above -- see `warfare/troop-categories.ts`.
+     *
+     * A scenario's list was closed, so an army could be reinforced only with a
+     * kind of soldier somebody had authored in advance, and "take the
+     * Carthaginian elephants into the legion" was answered with a refusal
+     * rather than with elephants. Merged with the scenario's wherever a
+     * category is read, so one the world minted fights exactly as an authored
+     * one does. Defaulted, so every snapshot written before this existed still
+     * parses -- and its armies stay the armies they were.
+     */
+    troopCategories: z.array(TroopCategoryDefinitionSchema).default([]),
     /** Current authoritative combat, siege, and war state for map projection. */
     conflicts: MapConflictsOverlaySchema.default({ battles: [], sieges: [], wars: [] }),
     material: MaterialWorldStateSchema,
@@ -115,6 +205,12 @@ export const WorldStateSchema = z
     characterPressures: z.array(CharacterPressureSchema).default([]),
     characterBeliefs: z.array(CharacterBeliefSchema).default([]),
     socialLinks: z.array(SocialLinkSchema).default([]),
+    /**
+     * What people have said about each other's character, before enough of
+     * them have said it (slice 11). Defaulted, so every snapshot written
+     * before traits could change still loads.
+     */
+    traitObservations: z.array(TraitObservationSchema).default([]),
     // Character-sim phase 3: canonical commitments and the concrete intents
     // characters form to fulfil/defer/break them or otherwise pursue an
     // active plot. Defaulted so archived snapshots load cleanly; see
@@ -167,6 +263,10 @@ export const WorldStateSchema = z
     structures: z.array(StructureSchema).default([]),
     /** docs/32, Part C.1: the true generic fallback for a genuinely novel composition -- see `world/generic-entity.ts`. */
     genericEntities: z.array(GenericEntitySchema).default([]),
+    /** What people believe, founded by naming (see `world/faith.ts`). */
+    faiths: z.array(FaithSchema).default([]),
+    /** Belief as it has changed, by province. A province with no row believes as it always did. */
+    faithAdherence: z.array(FaithAdherenceSchema).default([]),
     /**
      * VISION §11: what each polity is trying to do -- the state-level
      * counterpart to `Character.mind`. Ordinary world state, rewritten as
@@ -174,6 +274,37 @@ export const WorldStateSchema = z
      * written before this existed still parses.
      */
     polityOutlooks: z.array(PolityOutlookSchema).default([]),
+    /**
+     * What has been laid against somebody in secret, and how it is going --
+     * see `world/covert-plot.ts`.
+     *
+     * "Hire an assassin to kill Fabius" had no expression at all: the one door
+     * to death is `mortality.ts`, and it opened only on a roll off the age
+     * table. So the commonest order in the genre resolved as a man in poor
+     * health. A plot is the missing object -- always allowed to be laid, never
+     * certain to succeed, and open long enough that the mark may be warned and
+     * the plotter found out. Defaulted, so every snapshot written before it
+     * still parses.
+     */
+    covertPlots: z.array(CovertPlotSchema).default([]),
+    /**
+     * Plans laid against days that have not come -- see `world/contingency.ts`.
+     *
+     * "When the Carthaginians are through the first wall, fire it and bar the
+     * gates" could be written down and never read: about a fifth of the orders
+     * a real player writes hang their content on a condition, and every one of
+     * them depended on the narrator remembering the note. Defaulted, so every
+     * snapshot written before it still parses.
+     */
+    contingencies: z.array(ContingencySchema).default([]),
+    /** Cities held under siege (`siege.ts`), kept until they fall or the siege is lifted. */
+    sieges: z.array(SiegeSchema).default([]),
+    /**
+     * What measures before a council will do if carried -- see
+     * `world/enactment.ts`. Defaulted, so every snapshot written before a law
+     * could do anything still parses.
+     */
+    enactments: z.array(EnactmentSchema).default([]),
   })
   .strict()
   .superRefine((world, context) => {

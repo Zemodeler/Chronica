@@ -13,7 +13,9 @@ import type {
   TroopCategoryDefinition,
   WorldFact,
 } from "./battle";
+import { WOUND_RETURN_DAYS } from "./battle";
 import type { Character } from "../characters/character";
+import { aptitude, skillShare } from "../characters/aptitude";
 import type { Force, ProvinceMaterial } from "../material-state";
 import type { Province } from "../world/map";
 import { resolveForcePosition } from "./position";
@@ -76,11 +78,28 @@ function categoryDefinition(rules: ScenarioWarfareRules | undefined, categoryId:
 }
 
 /** Coarse, scenario-independent terrain defense bonus, pending scenario-authored terrain rules. */
+/**
+ * What the ground is worth to the side standing on it.
+ *
+ * Keyed by terrain id, and the ids are the maps': a table written against
+ * `hills` and `mountains` while the Punic Wars map drew the whole of the
+ * Balkans and Gaul as `hills-uplands` made every one of those provinces as
+ * flat as a beach -- "draw them onto the rough ground" was worth nothing in
+ * any of them. Every id a scenario in this repository uses is here; an id that
+ * is not counts as open ground, which is the safe direction.
+ */
 const TERRAIN_DEFENSE_BPS: Record<string, number> = {
   hills: 500,
+  "hills-uplands": 500,
   mountains: 1_000,
+  "mountain-pass": 1_000,
   forest: 400,
 };
+
+/** What this terrain gives a defender, in basis points. Open ground gives nothing. */
+export function terrainDefenseBps(terrainId: string): number {
+  return TERRAIN_DEFENSE_BPS[terrainId] ?? 0;
+}
 
 function clampBps(value: number, min = 0, max = 10_000): number {
   return Math.max(min, Math.min(max, Math.round(value)));
@@ -89,7 +108,10 @@ function clampBps(value: number, min = 0, max = 10_000): number {
 function commanderModifierBps(commander: Character | null): number {
   if (!commander) return -500; // a force with no living commander fights at a real disadvantage.
   const healthFactor = commander.healthBps / 10_000;
-  return Math.round((commander.skills.martial - 50) * 10 * healthFactor);
+  // Martial is the man at war, seven parts in ten; the strategist in him --
+  // how he chooses the field -- the other three. A man with no finer skill
+  // written has his martial for both, so he is exactly what he always was.
+  return Math.round(((commander.skills.martial - 50) * 7 + (aptitude(commander, "strategist") - 50) * 3) * healthFactor);
 }
 
 /**
@@ -137,6 +159,13 @@ export interface ResolveBattleParticipant {
   readonly force: Force;
   readonly commander: Character | null;
   readonly posture?: BattlePosture;
+  /**
+   * An attacker that comes down off ground it was already holding -- the
+   * ambush from the pass. Position has only ever favoured the defender, on the
+   * reasoning that an attacker is by definition on the move; the one attacker
+   * that is not is the one who waited for the enemy to walk under him.
+   */
+  readonly fightsFromPosition?: boolean;
 }
 
 export interface ResolveBattleInput {
@@ -157,6 +186,13 @@ export interface ResolveBattleInput {
    * that predates this) simply contributes nothing.
    */
   readonly structures?: readonly Structure[];
+  /**
+   * Where each force would fall back to if it gave way, chosen by the caller
+   * for that force's own side (`retreatRoute`). A force with no entry falls
+   * back to the first of `adjacentProvinceIds`; one mapped to null has
+   * nowhere to go.
+   */
+  readonly retreatRoutes?: ReadonlyMap<string, string | null>;
 }
 
 const MAGNITUDE_BPS: Record<TacticalModifierProposal["magnitude"], number> = {
@@ -223,6 +259,36 @@ function garrisonOvercrowdingBps(participant: ResolveBattleParticipant, province
   return -Math.min(2_000, Math.round(overRatio * 2_000));
 }
 
+/**
+ * What the men present are worth before anyone weighs the ground.
+ *
+ * Fit heads counted at their category's combat weight: a hundred cavalry and
+ * a hundred levies are not a hundred each.
+ */
+export function paperWeightedStrength(force: Force, rules: ScenarioWarfareRules | undefined): number {
+  return force.personnel.reduce((sum, category) => {
+    const definition = categoryDefinition(rules, category.categoryId);
+    return sum + category.fit * (definition.combatWeightBps / 10_000);
+  }, 0);
+}
+
+/**
+ * What a force is worth standing where it is, before a battle is anywhere
+ * near it -- weighted heads discounted by morale, cohesion and fatigue.
+ *
+ * Extracted so the muster a commander reads and the number a battle actually
+ * opens with are the same computation rather than two that agree today. The
+ * battle multiplies this by everything that belongs to a particular field:
+ * terrain, position, structures, supply, the commander, posture, tactics and
+ * the day's variance. None of that exists until there is a field.
+ */
+export function standingEffectiveStrength(force: Force, rules: ScenarioWarfareRules | undefined): number {
+  const moraleFactor = force.moraleBps / 10_000;
+  const cohesionFactor = force.cohesionBps / 10_000;
+  const fatiguePenalty = 1 - (force.fatigueBps / 10_000) * 0.5;
+  return Math.max(0, paperWeightedStrength(force, rules) * moraleFactor * cohesionFactor * fatiguePenalty);
+}
+
 function computeForceContribution(
   participant: ResolveBattleParticipant,
   province: Province,
@@ -234,18 +300,22 @@ function computeForceContribution(
   adjacentProvinceIds: readonly string[],
 ): ForceContribution {
   const { force } = participant;
-  const baseStrength = force.personnel.reduce((sum, category) => {
-    const definition = categoryDefinition(rules, category.categoryId);
-    return sum + category.fit * (definition.combatWeightBps / 10_000);
-  }, 0);
-  const moraleFactor = force.moraleBps / 10_000;
-  const cohesionFactor = force.cohesionBps / 10_000;
-  const fatiguePenalty = 1 - (force.fatigueBps / 10_000) * 0.5;
+  const baseStrength = paperWeightedStrength(force, rules);
   const position = resolveForcePosition(province, force.positionId);
   // Terrain and position favor the defender; an attacker is, by definition, on the move.
-  const positionBps = participant.side === "defender" ? position.combatModifierBps : 0;
-  const terrainBps = participant.side === "defender" ? (TERRAIN_DEFENSE_BPS[province.terrainId] ?? 0) : 0;
-  const postureBps = participant.posture ? POSTURE_MODIFIER_BPS[participant.posture] : 0;
+  // Not a fleet: ships at sea stand on no hill, and a province's positions are
+  // on land. A squadron defending off a mountainous coast was given the
+  // mountains.
+  const afloat = force.personnel.some((category) => category.fit > 0 && categoryDefinition(rules, category.categoryId).naval);
+  const holdsGround = !afloat && (participant.side === "defender" || participant.fightsFromPosition === true);
+  const positionBps = holdsGround ? position.combatModifierBps : 0;
+  const terrainBps = holdsGround ? terrainDefenseBps(province.terrainId) : 0;
+  // `?? 0`, because an unrecognised posture here does not fail: it makes
+  // `modifierBps` NaN, which makes the effective strength NaN, which makes
+  // every casualty NaN, which lands in the world as `fit: NaN` and comes back
+  // out of the schema as "authorizedStrength: expected number, received NaN" --
+  // a rejected battle whose stated reason names neither battles nor posture.
+  const postureBps = participant.posture ? POSTURE_MODIFIER_BPS[participant.posture] ?? 0 : 0;
   const modifierBps = positionBps + terrainBps
     + structureDefenseBps(participant, province, structures)
     + garrisonOvercrowdingBps(participant, province, structures)
@@ -255,7 +325,7 @@ function computeForceContribution(
     + varianceBps
     + tacticBps;
   const modifierFactor = Math.max(0.2, 1 + modifierBps / 10_000);
-  const effectiveStrength = Math.max(0, baseStrength * moraleFactor * cohesionFactor * fatiguePenalty * modifierFactor);
+  const effectiveStrength = Math.max(0, standingEffectiveStrength(force, rules) * modifierFactor);
   return { participant, baseStrength, modifierBps, effectiveStrength };
 }
 
@@ -269,7 +339,7 @@ function totalPersonnel(force: Force): number {
  * same turn draws the same sequence.
  */
 /** A deterministic, chronicle-ready paragraph describing a resolved battle from its own structured result. */
-export function summarizeBattleResult(result: BattleResult, forceNameById: ReadonlyMap<string, string>, provinceName: string): string {
+export function summarizeBattleResult(result: BattleResult, forceNameById: ReadonlyMap<string, string>, provinceName: string, navalForceIds: ReadonlySet<string> = new Set()): string {
   const nameFor = (forceId: string) => forceNameById.get(forceId) ?? forceId;
   const attackerIds = result.participantIds.filter((forceId) => result.attackerForceIds.includes(forceId));
   const defenderIds = result.participantIds.filter((forceId) => !result.attackerForceIds.includes(forceId));
@@ -277,7 +347,9 @@ export function summarizeBattleResult(result: BattleResult, forceNameById: Reado
   const casualtyTotal = (forceId: string) =>
     result.casualties.filter((c) => c.forceId === forceId).reduce((sum, c) => sum + c.dead + c.deserted + c.wounded, 0);
   const casualtyLine = result.participantIds
-    .map((forceId) => `${nameFor(forceId)} suffers ${casualtyTotal(forceId)} casualties`)
+    .map((forceId) => navalForceIds.has(forceId)
+      ? `${nameFor(forceId)} loses ${casualtyTotal(forceId)} ships sunk, taken or crippled`
+      : `${nameFor(forceId)} suffers ${casualtyTotal(forceId)} casualties`)
     .join("; ");
   // Named, never by role. "The defender prevails" made the reader work out who
   // that was, and a Chronicle got it exactly backwards.
@@ -328,7 +400,11 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
     }
     acceptedTactics.push(proposal);
     const bps = MAGNITUDE_BPS[proposal.magnitude];
-    tacticBpsByForceId.set(proposer.forceId, (tacticBpsByForceId.get(proposer.forceId) ?? 0) + bps);
+    // A plan is the whole side's, not one army's: the Gauls waiting in the
+    // valley are the half of "hammer and anvil" the tactic is about.
+    for (const ally of participants.filter((p) => p.side === proposer.side)) {
+      tacticBpsByForceId.set(ally.forceId, (tacticBpsByForceId.get(ally.forceId) ?? 0) + bps);
+    }
   }
 
   // ── Phase 1: contact ────────────────────────────────────────────────────
@@ -378,8 +454,11 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
   const casualtyCountByForce = new Map<string, number>();
   const applyCasualties = (contributions: readonly ForceContribution[], rate: number) => {
     for (const contribution of contributions) {
-      const { force } = contribution.participant;
-      const desertionShare = clampBps(0.10 * (10_000 - force.cohesionBps) / 10_000 * 10_000, 0, 4_000) / 10_000;
+      const { force, commander } = contribution.participant;
+      // A commander men will stand for holds them in the line: authority cuts
+      // desertion by up to half, and a man nobody fears lets up to half again go.
+      const held = commander === null ? 1 : 1 - skillShare(aptitude(commander, "authority"), 0.5);
+      const desertionShare = clampBps(0.10 * (10_000 - force.cohesionBps) / 10_000 * held * 10_000, 0, 4_000) / 10_000;
       let forceCasualtyTotal = 0;
       for (const category of force.personnel) {
         const categoryCasualties = Math.floor(category.fit * rate);
@@ -394,7 +473,8 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
           dead,
           deserted,
           wounded,
-          recoveryEligibleAtStep: battle.startedAtStep + 8,
+          // The first of them, three weeks on; the rest later, or never (`woundsMend`).
+          recoveryEligibleAtStep: battle.startedAtStep + WOUND_RETURN_DAYS[0],
         });
       }
       casualtyCountByForce.set(force.id, forceCasualtyTotal);
@@ -456,7 +536,11 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
   });
 
   // ── Phase 4: withdrawal ─────────────────────────────────────────────────
-  const retreatDestination = [...adjacentProvinceIds].sort()[0] ?? null;
+  //
+  // Each force to its own side's road, not both sides to the same one.
+  const routes = input.retreatRoutes;
+  const retreatDestination = (forceId: string): string | null =>
+    routes !== undefined && routes.has(forceId) ? routes.get(forceId) ?? null : adjacentProvinceIds[0] ?? null;
   const retreats: RetreatResult[] = [];
   // The floor scales with MAX_EXCHANGE_RATE the same way DECISIVE_CASUALTY_RATE
   // does above: 0.30 of a 0.45 ceiling is the same "took the clear majority
@@ -469,14 +553,42 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
   const defenderWithdraws = defenderBroken || (orderlyWithdrawal && defenderCasualtyRate > attackerCasualtyRate);
   if (attackerWithdraws) {
     for (const contribution of attackerContributions) {
-      retreats.push({ forceId: contribution.participant.force.id, toProvinceId: retreatDestination, orderly: !attackerBroken });
+      retreats.push({ forceId: contribution.participant.force.id, toProvinceId: retreatDestination(contribution.participant.force.id), orderly: !attackerBroken });
     }
   }
   if (defenderWithdraws) {
     for (const contribution of defenderContributions) {
-      retreats.push({ forceId: contribution.participant.force.id, toProvinceId: retreatDestination, orderly: !defenderBroken });
+      retreats.push({ forceId: contribution.participant.force.id, toProvinceId: retreatDestination(contribution.participant.force.id), orderly: !defenderBroken });
     }
   }
+
+  // A rout is pursued. Men who break are cut down running, and the more horse
+  // the victor has the more of them: a beaten side keeping its order loses
+  // nothing more, a broken one a further share of what is left -- a tenth and
+  // a half at most, against a victor all horse.
+  const pursue = (fleeing: readonly ForceContribution[], pursuers: readonly ForceContribution[]): void => {
+    const heads = pursuers.reduce((sum, c) => sum + totalPersonnel(c.participant.force), 0);
+    if (heads === 0) return;
+    const horse = pursuers.reduce((sum, c) => sum + c.participant.force.personnel
+      .filter((category) => categoryDefinition(warfareRules, category.categoryId).mobilityBps >= 8_000)
+      .reduce((men, category) => men + category.fit, 0), 0);
+    const rate = 0.03 + 0.12 * (horse / heads);
+    for (const contribution of fleeing) {
+      const { force } = contribution.participant;
+      let cut = 0;
+      for (const category of force.personnel) {
+        const already = casualties.filter((c) => c.forceId === force.id && c.categoryId === category.categoryId).reduce((sum, c) => sum + c.dead + c.deserted + c.wounded, 0);
+        const lost = Math.floor(Math.max(0, category.fit - already) * rate);
+        if (lost <= 0) continue;
+        const dead = Math.floor(lost / 2);
+        cut += lost;
+        casualties.push({ forceId: force.id, categoryId: category.categoryId, dead, deserted: lost - dead, wounded: 0, recoveryEligibleAtStep: battle.startedAtStep + WOUND_RETURN_DAYS[0] });
+      }
+      casualtyCountByForce.set(force.id, (casualtyCountByForce.get(force.id) ?? 0) + cut);
+    }
+  };
+  if (attackerBroken && !defenderBroken) pursue(attackerContributions, defenderContributions);
+  if (defenderBroken && !attackerBroken) pursue(defenderContributions, attackerContributions);
 
   phases.push({
     phase: "withdrawal",
@@ -503,7 +615,9 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
     // Cumulative bands, checked worst-first: killed, then (losing side only)
     // captured, then wounded, else unharmed. A losing commander faces a real
     // chance of capture that a winning one never does.
-    const killedBand = losingSide ? 0.02 : 0.005;
+    // A man who can fight his way out lives through what kills another: prowess
+    // halves the chance of falling at best, and doubles it at worst.
+    const killedBand = (losingSide ? 0.02 : 0.005) * (1 - skillShare(aptitude(commander, "prowess"), 0.5));
     const capturedBand = losingSide ? killedBand + 0.06 : killedBand;
     const woundedBand = capturedBand + (losingSide ? 0.10 : 0.03);
     let commanderOutcome: CommanderStateChange["outcome"];
@@ -529,7 +643,12 @@ export function resolveBattle(input: ResolveBattleInput, seed: string): BattleRe
   // of the exchange, not merely more than half.
   const DECISIVE_CASUALTY_RATE = 0.30;
   const siegeAndControlChanges: SiegeOrControlChange[] = [];
-  if (outcome === "attacker_victory" && defenderCasualtyRate > DECISIVE_CASUALTY_RATE && province.controllerPolityId) {
+  // Only the holder's own beaten men loosen the holder's grip. Carthage won
+  // at Agrigentum, on its own ground, and "Carthage's grip weakened"; the
+  // Mamertines lost hold of Messana to a fight between two other powers.
+  const holderBeaten = province.controllerPolityId !== null
+    && defenderContributions.some((contribution) => contribution.participant.force.polityId === province.controllerPolityId);
+  if (outcome === "attacker_victory" && defenderCasualtyRate > DECISIVE_CASUALTY_RATE && holderBeaten) {
     siegeAndControlChanges.push({
       provinceId: province.id,
       newControllerPolityId: province.controllerPolityId,

@@ -1,0 +1,278 @@
+/*
+ * Everything outside the game: the site bar, the dashboard, the scenarios,
+ * sign-in, the account, administration, character creation and loading.
+ */
+@layer surfaces {
+  /* ─── The site bar ─────────────────────────────────────────────────── */
+  .top-bar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    border-bottom: 1px solid var(--rule);
+    background: rgb(21 17 13 / 92%);
+    backdrop-filter: blur(6px);
+  }
+  .top-bar-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 2rem;
+    width: min(72rem, calc(100% - 3rem));
+    height: var(--lintel);
+    margin: 0 auto;
+  }
+  .top-bar-wordmark {
+    color: var(--vellum);
+    font: 500 var(--step-2) var(--font-serif);
+    letter-spacing: .01em;
+    text-decoration: none;
+  }
+  .top-bar-nav { display: flex; gap: 1.75rem; margin-right: auto; }
+  .top-bar-pill {
+    padding: .2rem 0;
+    border-bottom: 1.5px solid transparent;
+    color: var(--dust);
+    font: 400 var(--step-1) var(--font-serif);
+    text-decoration: none;
+  }
+  .top-bar-pill:hover { color: var(--vellum); }
+  .top-bar-pill[aria-current="page"] { color: var(--vellum); border-bottom-color: var(--bronze); }
+  .top-bar-right { display: flex; align-items: center; gap: .75rem; }
+  .top-bar-avatar {
+    display: inline-flex;
+    width: 2.1rem;
+    height: 2.1rem;
+    overflow: hidden;
+    border: 1px solid var(--bronze);
+    border-radius: 50%;
+    background: var(--papyrus);
+  }
+  .top-bar-avatar img { display: block; }
+
+  .site-footer {
+    width: min(72rem, calc(100% - 3rem));
+    margin: 4rem auto 0;
+    padding: 1.25rem 0 2rem;
+    border-top: 1px solid var(--rule);
+    color: var(--dust);
+    font-size: var(--step--1);
+  }
+
+  /* ─── Page shells ──────────────────────────────────────────────────── */
+  .shell, .dashboard-shell { width: min(72rem, calc(100% - 3rem)); margin: 0 auto; padding: 3rem 0 4rem; }
+  .shell.narrow { width: min(52rem, calc(100% - 3rem)); }
+  .page-header { display: grid; gap: .6rem; max-width: 44rem; margin-bottom: 2rem; }
+  .lede { color: var(--dust); font-size: var(--step-1); line-height: 1.55; }
+  .page-header h1 { font-size: var(--step-5); }
+
+  .panel {
+    display: grid;
+    gap: 1rem;
+    align-content: start;
+    padding: 1.6rem 1.75rem 1.75rem;
+    border: 1px solid var(--rule);
+    border-top: 1px solid color-mix(in srgb, var(--bronze) 55%, transparent);
+    border-radius: var(--radius);
+    background: linear-gradient(180deg, var(--umber) 0%, color-mix(in srgb, var(--umber) 55%, var(--soot)) 100%);
+  }
+  .panel + .panel { margin-top: 1.5rem; }
+  .panel h2 { font-size: var(--step-2); }
+  .panel ul { display: grid; gap: .4rem; padding-left: 1.2rem; color: var(--dust); }
+
+  form { display: grid; gap: .6rem; }
+  form > button, form > .btn { justify-self: start; margin-top: .4rem; }
+  .field-help { margin-top: -.25rem; color: var(--dust); font-size: var(--step--1); }
+  .form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+  .form-grid > div { display: grid; gap: .35rem; align-content: start; }
+  .auth-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+  .auth-grid .panel + .panel { margin-top: 0; }
+  .shell dl { display: grid; grid-template-columns: auto 1fr; gap: .25rem 1.25rem; margin: .4rem 0; color: var(--dust); }
+  .shell dl dt { font-family: var(--font-serif); font-style: italic; }
+  .shell dl dd { color: var(--vellum); }
+
+
+  .table-wrap { max-width: 100%; overflow-x: auto; }
+
+  /* ─── The account ──────────────────────────────────────────────────── */
+  .acct-hero { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; padding-bottom: 1.75rem; margin-bottom: 1.75rem; border-bottom: 1px solid var(--rule); }
+  .acct-identity { display: flex; align-items: center; gap: 1.25rem; }
+  .acct-avatar { display: block; border: 1px solid var(--bronze); border-radius: 50%; background: var(--papyrus); }
+  .acct-name { font-size: var(--step-4); }
+  .acct-username { color: var(--dust); }
+  .acct-role-badge { display: inline-block; margin-top: .3rem; color: var(--bronze); font: 400 var(--step-0) var(--font-caps); letter-spacing: .06em; text-transform: lowercase; }
+  .acct-status { margin-bottom: 1rem; }
+  .acct-wallet-note { color: var(--ink-faded); }
+  .acct-paused-row { display: flex; align-items: center; gap: 1rem; }
+
+  /* The wallet, then everything else as ruled rows: a ledger, not a wall of cards. */
+  .acct-wallet { display: grid; gap: .6rem; padding-bottom: 2rem; margin-bottom: .5rem; }
+  .acct-wallet__sum { color: var(--dust); font: italic 400 var(--step-1) var(--font-serif); }
+  .acct-wallet__figure { margin-right: .35rem; color: var(--vellum); font: 500 var(--step-5)/1 var(--font-serif); font-style: normal; font-variant-numeric: lining-nums tabular-nums; }
+  .acct-wallet__note { max-width: 36rem; color: var(--dust); line-height: 1.55; }
+  .acct-wallet__actions { display: flex; align-items: center; gap: 1.25rem; margin-top: .6rem; }
+  .shell .acct-ledger { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; margin: 0; border-top: 1px solid var(--rule); }
+  .acct-ledger > div {
+    display: grid;
+    grid-template-columns: 12rem minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 1.5rem;
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .shell .acct-ledger dt { color: var(--dust); font: italic 400 var(--step-1) var(--font-serif); }
+  .shell .acct-ledger dd { margin: 0; color: var(--vellum); font-size: var(--step-1); }
+  .acct-ledger__quiet { color: var(--dust); }
+  .acct-ledger__dev dt::after { content: " (developer)"; font-size: var(--step-0); }
+
+  /* Account dialogs are documents too. */
+  .account-dialog {
+    --fg: var(--ink);
+    --fg-muted: var(--ink-faded);
+    --edge: var(--bronze-deep);
+    --rule: rgb(35 27 20 / 16%);
+    --field: rgb(255 255 255 / 38%);
+    width: min(38rem, calc(100vw - 2rem));
+    max-width: none;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius);
+    background: var(--papyrus);
+    box-shadow: var(--shadow-lift);
+    color: var(--ink);
+  }
+  .account-dialog::backdrop { background: rgb(21 17 13 / 70%); backdrop-filter: blur(2px); }
+  .dialog-header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: 1.25rem 1.6rem .9rem; border-bottom: 1px solid var(--rule); }
+  .dialog-title { font-size: var(--step-3); }
+  .dialog-close {
+    min-height: 2rem;
+    padding: .25rem .1rem;
+    border: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--edge) 55%, transparent);
+    border-radius: 0;
+    background: none;
+    color: var(--fg-muted);
+    font-size: var(--step--1);
+  }
+  .dialog-close:hover:not(:disabled) { color: var(--fg); border-bottom-color: var(--edge); }
+  .dialog-body { display: grid; gap: .9rem; max-height: min(72vh, 42rem); overflow-y: auto; padding: 1.25rem 1.6rem 1.6rem; }
+  .dialog-body h3 { margin-top: .5rem; color: var(--ink-faded); font-size: var(--step-0); font-style: italic; font-weight: 400; }
+  .dialog-lede, .dialog-empty { color: var(--ink-faded); }
+  .dialog-actions { display: flex; justify-content: flex-end; gap: .75rem; margin-top: .4rem; }
+  .credit-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+  .credit-summary strong { display: block; font: 500 var(--step-3) var(--font-serif); font-variant-numeric: lining-nums tabular-nums; }
+  .avatar-picker { display: flex; flex-wrap: wrap; gap: .75rem; }
+  .avatar-picker label { display: grid; justify-items: center; gap: .25rem; padding: .4rem; }
+  .avatar-picker img { border: 1px solid var(--rule); border-radius: 50%; background: var(--papyrus-shade); }
+  .avatar-picker input:checked + img { outline: 2px solid var(--bronze-deep); outline-offset: 3px; }
+
+  /* ─── Character creation ───────────────────────────────────────────── */
+  .declare { min-height: 100dvh; display: flex; flex-direction: column; }
+  .declare__bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: var(--lintel);
+    padding-inline: 1.5rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  .declare__way { display: flex; align-items: baseline; gap: 1.25rem; }
+  .declare__home { color: var(--dust); font-size: var(--step--1); letter-spacing: .02em; text-decoration: none; }
+  .declare__home:hover { color: var(--vellum); }
+  .declare__title { font: italic 400 var(--step-1) var(--font-serif); }
+  .declare__coins { color: var(--dust); font-variant-numeric: lining-nums tabular-nums; text-decoration: none; }
+  .declare__coins:hover { color: var(--vellum); }
+  .declare__coins[data-empty="true"] { color: var(--vellum); text-decoration: underline 1.5px var(--seal); text-underline-offset: .3em; }
+  .declare__main { flex: 1; display: grid; place-items: center; padding: 3rem 1.5rem; }
+  .declare__column { display: grid; gap: 1.5rem; width: min(44rem, 100%); }
+  .declare__column h1 { font-size: var(--step-5); }
+  .declare__intro { color: var(--dust); font-size: var(--step-1); line-height: 1.55; }
+  .declare__column form { gap: 1rem; }
+  .declare__column textarea {
+    padding: 1.1rem 1.25rem;
+    border: 1px solid var(--bronze);
+    background: var(--wax);
+    color: var(--vellum);
+    font: 400 var(--step-2)/1.45 var(--font-serif);
+    caret-color: var(--lamp);
+    box-shadow: inset 0 .5rem 1.4rem rgb(0 0 0 / 40%);
+  }
+  .declare__actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+  .declare__actions form { display: contents; }
+  .declare__price { max-width: 30rem; color: var(--dust); font: italic 400 var(--step-0)/1.45 var(--font-serif); text-wrap: pretty; }
+  .declare__price a, .declare__error a { color: var(--bronze-high); text-underline-offset: .2em; }
+  .declare__error { color: var(--danger-ink); text-wrap: pretty; }
+  .declare__error::before { content: ""; display: inline-block; width: .5rem; height: .5rem; margin-right: .55rem; border-radius: 50%; background: var(--danger); vertical-align: .1em; }
+
+  /* Starting points fill the editable description above. */
+  .declare__starters {
+    display: grid;
+    gap: 1.75rem;
+    margin-top: 1.25rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+  }
+  .declare__starters h2 { margin-bottom: .6rem; color: var(--dust); font: italic 400 var(--step-1) var(--font-serif); }
+  .declare__people { min-width: 0; }
+  .declare__people > p { margin-bottom: .8rem; color: var(--dust); font-size: var(--step-0); }
+  .declare__starters ul { display: grid; margin: 0; padding: 0; list-style: none; }
+  .declare__starters li { display: grid; gap: .05rem; padding: .45rem 0; border-bottom: 1px solid var(--rule); }
+  .declare__starters li:last-child { border-bottom: 0; }
+  .declare__starters .word-button { justify-self: start; color: var(--vellum); font: 400 var(--step-1)/1.3 var(--font-serif); text-align: left; }
+  .declare__starters li span { color: var(--dust); font-size: var(--step-0); }
+  .declare__starters .declare__illustrated { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .65rem; margin-bottom: 1rem; }
+  .declare__starters .declare__illustrated li { padding: 0; border: 0; }
+  .declare__illustrated-button { display: grid; gap: .55rem; width: 100%; padding: 0; border: 0; background: transparent; color: var(--vellum); cursor: pointer; text-align: left; font: 400 var(--step-0)/1.3 var(--font-serif); }
+  .declare__illustrated-button img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; object-position: center; border: 1px solid var(--rule); filter: saturate(.8); }
+  .declare__illustrated-button:hover img, .declare__illustrated-button:focus-visible img { border-color: var(--bronze); filter: saturate(1); }
+  .declare__illustrated-button:focus-visible { outline: 2px solid var(--bronze-high); outline-offset: 3px; }
+  .declare__starters .declare__illustrated-button span { color: inherit; }
+  .declare__named-people { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 1.5rem; }
+  @media (max-width: 40rem) {
+    .declare__starters .declare__illustrated, .declare__named-people { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  .declare__origin { color: var(--bronze); font: italic 400 var(--step-1) var(--font-serif); }
+  .declare__money { color: var(--dust); }
+  .declare__money strong { color: var(--vellum); font-weight: 500; }
+  .declare__draft {
+    padding: 1.5rem 1.75rem;
+    border-radius: 2px;
+    background: var(--papyrus);
+    box-shadow: var(--shadow-lift);
+    color: var(--ink);
+    font: 400 var(--reading)/1.6 var(--font-serif);
+    font-variant-numeric: oldstyle-nums;
+    white-space: pre-wrap;
+  }
+  .declare__wallet { color: var(--dust); font-size: var(--step-0); }
+
+  /* ─── Waiting on the world ─────────────────────────────────────────── */
+  /* One lamp, burning. Used while a world loads and while a character is
+     being written into it. */
+  .lamp-wait {
+    min-height: 100dvh;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: 1.75rem;
+    padding: 2rem;
+    background: radial-gradient(40rem 30rem at 50% 42%, rgb(242 198 109 / 9%), transparent 70%), var(--soot);
+    text-align: center;
+  }
+  .lamp-wait__flame {
+    width: 1.1rem;
+    height: 1.8rem;
+    border-radius: 50% 50% 45% 45% / 62% 62% 38% 38%;
+    background: radial-gradient(circle at 50% 70%, var(--lamp-core) 0%, var(--lamp) 45%, rgb(242 198 109 / 0%) 75%);
+    box-shadow: 0 0 2.5rem 1rem rgb(242 198 109 / 22%);
+    animation: flicker 2.4s ease-in-out infinite;
+  }
+  @keyframes flicker {
+    0%, 100% { transform: scale(1, 1); opacity: .95; }
+    30% { transform: scale(.94, 1.06); opacity: 1; }
+    55% { transform: scale(1.04, .96); opacity: .88; }
+    75% { transform: scale(.97, 1.03); opacity: 1; }
+  }
+  .lamp-wait__kicker { color: var(--dust); font: italic 400 var(--step-1) var(--font-serif); }
+  .lamp-wait__name { font-size: var(--step-4); }
+  .lamp-wait__note { color: var(--dust); }
+}

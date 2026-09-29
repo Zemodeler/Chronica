@@ -1,6 +1,7 @@
 import type { DynamicMapOverlay, GeoJsonPosition } from "@chronica/shared";
 import { polityColorFromId, polityColorWithAlpha } from "./geo-projection";
 import { provinceContains, type SharedBoundary, type StaticProvince, type StaticWorldGeometry, type WorldBounds } from "./world-geometry";
+import { MAJOR_POLITY_PIGMENTS } from "../../../../lib/palette";
 
 export type BorderClassification = "internal_province" | "country_border" | "coast";
 export interface PoliticalBorderSegment extends SharedBoundary { readonly classification: BorderClassification; }
@@ -21,8 +22,14 @@ export interface PoliticalLabelGeometry {
   readonly maxExtent: number;
 }
 export interface PoliticalTerritory { readonly polityId: string; readonly name: string; readonly colour: string; readonly components: readonly TerritorialComponent[]; readonly primaryComponent: TerritorialComponent; readonly label: PoliticalLabelGeometry; readonly componentLabels: readonly PoliticalLabelGeometry[]; }
-export interface PoliticalMapState { readonly ownerByProvince: ReadonlyMap<string, string | null>; readonly territories: readonly PoliticalTerritory[]; readonly borderSegments: readonly PoliticalBorderSegment[]; }
-export interface PoliticalOverlayInput { readonly polities: DynamicMapOverlay["polities"]; readonly provinces: DynamicMapOverlay["provinces"]; }
+export interface PoliticalMapState {
+  readonly ownerByProvince: ReadonlyMap<string, string | null>;
+  readonly territories: readonly PoliticalTerritory[];
+  readonly borderSegments: readonly PoliticalBorderSegment[];
+  /** Each ally and the power it follows, so the map can paint a confederation as one family of colours. */
+  readonly leaderByPolity: ReadonlyMap<string, string>;
+}
+export interface PoliticalOverlayInput { readonly polities: DynamicMapOverlay["polities"]; readonly provinces: DynamicMapOverlay["provinces"]; readonly politicalRelations?: DynamicMapOverlay["politicalRelations"]; }
 
 /** Returns only shared country boundaries belonging to an active war pair. */
 export function deriveWarBorderPaths(state: PoliticalMapState, wars: DynamicMapOverlay["conflicts"]["wars"]): string {
@@ -38,20 +45,49 @@ export function deriveWarBorderPaths(state: PoliticalMapState, wars: DynamicMapO
 function boundsFor(provinces: readonly StaticProvince[]): WorldBounds { return provinces.reduce<WorldBounds>((bounds, province) => ({ minX: Math.min(bounds.minX, province.bounds.minX), minY: Math.min(bounds.minY, province.bounds.minY), maxX: Math.max(bounds.maxX, province.bounds.maxX), maxY: Math.max(bounds.maxY, province.bounds.maxY) }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }); }
 function componentFor(startId: string, available: Set<string>, world: StaticWorldGeometry): TerritorialComponent { const queue = [startId]; available.delete(startId); const provinceIds: string[] = []; while (queue.length) { const id = queue.pop()!; provinceIds.push(id); for (const neighbor of world.provinceById.get(id)?.labelNeighborIds ?? []) if (available.delete(neighbor)) queue.push(neighbor); } const provinces = provinceIds.map((id) => world.provinceById.get(id)!).filter(Boolean); const totalArea = provinces.reduce((sum, province) => sum + province.area, 0); return { provinceIds: provinceIds.sort(), totalArea, weightedCentroid: [provinces.reduce((sum, province) => sum + province.centroid[0] * province.area, 0) / totalArea, provinces.reduce((sum, province) => sum + province.centroid[1] * province.area, 0) / totalArea], bounds: boundsFor(provinces) }; }
 function weightedQuantile(samples: readonly { value: number; weight: number }[], quantile: number) { const sorted = [...samples].sort((a, b) => a.value - b.value); const threshold = sorted.reduce((sum, sample) => sum + sample.weight, 0) * quantile; let cumulative = 0; for (const sample of sorted) { cumulative += sample.weight; if (cumulative >= threshold) return sample.value; } return sorted.at(-1)?.value ?? 0; }
-const ROMAN_REPUBLIC_RED = "#b21f2d";
-const CARTHAGINIAN_PURPLE_BLUE = "#2e245f";
-const SYRACUSAN_EARTH = "#80512f";
-const MACEDONIAN_BLUE = "#355f91";
-const PTOLEMAIC_GOLD = "#bd9136";
-const MAJOR_POLITY_COLOURS: Readonly<Record<string, string>> = {
-  rome: ROMAN_REPUBLIC_RED,
-  carthage: CARTHAGINIAN_PURPLE_BLUE,
-  syracuse: SYRACUSAN_EARTH,
-  macedon: MACEDONIAN_BLUE,
-  "ptolemaic-cyrenaica": PTOLEMAIC_GOLD,
-};
+// The great powers in mineral pigments -- cinnabar, Tyrian purple, ochre,
+// azurite, orpiment -- as an atlas colourist would have had them.
+const MAJOR_POLITY_COLOURS = MAJOR_POLITY_PIGMENTS;
 export function politicalColourFromId(polityId: string) { return MAJOR_POLITY_COLOURS[polityId] ?? polityColorFromId(polityId); }
-export function politicalColourWithAlpha(polityId: string, alpha: number) { const colour = MAJOR_POLITY_COLOURS[polityId]; return colour === undefined ? polityColorWithAlpha(polityId, alpha) : `${colour}${Math.round(alpha * 255).toString(16).padStart(2, "0")}`; }
+
+/** Each member of an alliance and the power it follows. */
+export function leadersOf(relations: DynamicMapOverlay["politicalRelations"]): ReadonlyMap<string, string> {
+  return new Map(relations.map((relation) => [relation.memberPolityId, relation.leaderPolityId]));
+}
+
+/**
+ * An ally painted as a lighter, softer shade of the power it follows, so Rome's
+ * Italy reads at a glance as one confederation of many peoples. Each ally takes
+ * its own shade from its id, so neighbouring allies stay apart.
+ */
+function allyColour(leaderColour: string, allyId: string, alpha: number): string {
+  const [hue, saturation, lightness] = hexToHsl(leaderColour);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < allyId.length; index++) hash = Math.imul(hash ^ allyId.charCodeAt(index), 0x01000193);
+  hash >>>= 0;
+  const allyHue = (hue + ((hash & 0xff) / 255) * 16 - 8 + 360) % 360;
+  const allySaturation = Math.max(28, saturation * 0.62 + (((hash >>> 8) & 0xff) / 255) * 10);
+  const allyLightness = Math.min(70, lightness + 12 + (((hash >>> 16) & 0xff) / 255) * 16);
+  return `hsl(${allyHue.toFixed(1)} ${allySaturation.toFixed(1)}% ${allyLightness.toFixed(1)}% / ${alpha})`;
+}
+
+function hexToHsl(hex: string): readonly [number, number, number] {
+  const [r, g, b] = [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255) as [number, number, number];
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const lightness = (max + min) / 2;
+  if (max === min) return [0, 0, lightness * 100];
+  const delta = max - min;
+  const saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+  const hue = max === r ? ((g - b) / delta + (g < b ? 6 : 0)) * 60 : max === g ? ((b - r) / delta + 2) * 60 : ((r - g) / delta + 4) * 60;
+  return [hue, saturation * 100, lightness * 100];
+}
+
+export function politicalColourWithAlpha(polityId: string, alpha: number, leaderByPolity?: ReadonlyMap<string, string>) {
+  const leader = leaderByPolity?.get(polityId);
+  const leaderColour = leader === undefined ? undefined : MAJOR_POLITY_COLOURS[leader];
+  if (leaderColour !== undefined) return allyColour(leaderColour, polityId, alpha);
+  const colour = MAJOR_POLITY_COLOURS[polityId]; return colour === undefined ? polityColorWithAlpha(polityId, alpha) : `${colour}${Math.round(alpha * 255).toString(16).padStart(2, "0")}`; }
 const LABEL_PATH_COVERAGE = .85;
 // Pair generation/ranking below is O(samples²) but cheap (just a distance
 // compare); the expensive containment check only runs on the top few
@@ -232,7 +268,8 @@ export function derivePoliticalMapState(
   geometryAliases?: ReadonlyMap<string, string>,
 ): PoliticalMapState {
   const ownerByProvince = new Map<string, string | null>(world.provinces.map((province) => [province.id, null]));
-  if (!overlay) return { ownerByProvince, territories: [], borderSegments: world.sharedBoundaries.map((boundary) => ({ ...boundary, classification: boundary.provinceB === null ? "coast" as const : "internal_province" as const })) };
+  const leaderByPolity = leadersOf(overlay?.politicalRelations ?? []);
+  if (!overlay) return { ownerByProvince, leaderByPolity, territories: [], borderSegments: world.sharedBoundaries.map((boundary) => ({ ...boundary, classification: boundary.provinceB === null ? "coast" as const : "internal_province" as const })) };
   for (const province of overlay.provinces) if (world.provinceById.has(province.provinceId)) ownerByProvince.set(province.provinceId, province.controllerPolityId);
   // A geometry polygon with no gameplay province of its own (several tribal
   // provinces merged onto one real region -- see geometryAliases) never gets
@@ -262,5 +299,5 @@ export function derivePoliticalMapState(
     const remaining = new Set(owned); const components: TerritorialComponent[] = []; while (remaining.size) components.push(componentFor(remaining.values().next().value as string, remaining, world)); components.sort((a, b) => b.totalArea - a.totalArea || a.provinceIds[0]!.localeCompare(b.provinceIds[0]!)); const primaryComponent = components[0]!; const componentLabels = components.map((component) => labelGeometry(component, world, name)); territories.push({ polityId, name, colour: politicalColourFromId(polityId), components, primaryComponent, label: componentLabels[0]!, componentLabels });
   }
   const borderSegments = world.sharedBoundaries.map((boundary) => { if (boundary.provinceB === null) return { ...boundary, classification: "coast" as const }; const a = ownerByProvince.get(boundary.provinceA) ?? null; const b = ownerByProvince.get(boundary.provinceB) ?? null; return { ...boundary, classification: a !== b ? "country_border" as const : "internal_province" as const }; });
-  return { ownerByProvince, territories: territories.sort((a, b) => b.label.priority - a.label.priority), borderSegments };
+  return { ownerByProvince, leaderByPolity, territories: territories.sort((a, b) => b.label.priority - a.label.priority), borderSegments };
 }

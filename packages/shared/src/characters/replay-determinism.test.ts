@@ -19,6 +19,7 @@ function socialEvent(overrides: Partial<CharacterSocialEvent> = {}): CharacterSo
     knowledgeClaims: [],
     proposedBeliefs: [{ subjectEntityId: null, claim: "Marcus insulted Hanno at the border.", kind: "rumour", channel: "event_participant", explicitRecipientCharacterIds: [], expiresInSteps: null }],
     pressureChanges: [{ characterId: "hanno", action: "create", kind: "humiliation", intensity: 55, label: "Publicly insulted.", reviewInSteps: 4, expiresInSteps: 20, visibility: "public" }],
+    observedTraits: [],
     commitmentProposal: null, introducedCharacter: null, introducedProfile: null,
     createdAtStep: 3, appliedAtStep: null, appliedInTurnId: null, status: "proposed", rejectionReason: null,
     ...overrides,

@@ -37,7 +37,7 @@ export default tseslint.config(
     },
   },
   {
-    // packages/sim is pure and deterministic (AGENTS.md non-negotiable #1).
+    // packages/sim is pure and deterministic (docs/architecture.md).
     // scripts/check-sim-purity.mjs is the CI gate; this block is the same rule
     // in the editor, where it is cheap to obey and expensive to discover later.
     files: ["packages/sim/**/*.ts"],
@@ -48,15 +48,15 @@ export default tseslint.config(
         { name: "process", message: "Configuration is an argument, not an ambient read." },
         { name: "fetch", message: "packages/sim performs no I/O -- pass the data in." },
         { name: "performance", message: "A timing read is still a clock read." },
-        { name: "crypto", message: "Derive stable IDs from seeded, canonical inputs." },
+        { name: "crypto", message: "Ids come from the burst's IdFactory (packages/sim/src/ports.ts), never from entropy." },
       ],
       // Math.floor/min/max are deterministic and wanted; only the entropy is not.
       "no-restricted-properties": [
         "error",
-        { object: "Math", property: "random", message: "Use the PRNG seeded on (turnId, subsystem)." },
+        { object: "Math", property: "random", message: "Rolls are stableHash/stableChoice over canonical inputs (packages/shared/src/determinism.ts)." },
         { object: "Date", property: "now", message: "Elapsed simulation time is world state -- take the step as an argument." },
         { object: "performance", property: "now", message: "A timing read is still a clock read." },
-        { object: "crypto", property: "randomUUID", message: "Derive stable IDs from seeded, canonical inputs." },
+        { object: "crypto", property: "randomUUID", message: "Ids come from the burst's IdFactory (packages/sim/src/ports.ts), never from entropy." },
       ],
       "no-restricted-imports": [
         "error",
