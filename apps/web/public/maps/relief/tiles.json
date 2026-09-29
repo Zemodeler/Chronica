@@ -1,0 +1,66 @@
+{
+  "name": "Shaded relief of Europe, North Africa and the Near East",
+  "format": "webp",
+  "scheme": "xyz",
+  "projection": "Equirectangular (EPSG:4326), world-aligned: x = floor((lon + 180) / tileDegrees), y = floor((90 - lat) / tileDegrees)",
+  "bounds": [
+    -25,
+    14,
+    66,
+    62
+  ],
+  "minZoom": 0,
+  "maxZoom": 3,
+  "tileSize": 512,
+  "levels": [
+    {
+      "zoom": 0,
+      "tileDegrees": 45,
+      "degreesPerPixel": 0.087890625,
+      "tileBounds": [
+        3,
+        0,
+        5,
+        1
+      ],
+      "tileCount": 6
+    },
+    {
+      "zoom": 1,
+      "tileDegrees": 22.5,
+      "degreesPerPixel": 0.0439453125,
+      "tileBounds": [
+        6,
+        1,
+        10,
+        3
+      ],
+      "tileCount": 15
+    },
+    {
+      "zoom": 2,
+      "tileDegrees": 11.25,
+      "degreesPerPixel": 0.02197265625,
+      "tileBounds": [
+        13,
+        2,
+        21,
+        6
+      ],
+      "tileCount": 45
+    },
+    {
+      "zoom": 3,
+      "tileDegrees": 5.625,
+      "degreesPerPixel": 0.010986328125,
+      "tileBounds": [
+        27,
+        4,
+        43,
+        13
+      ],
+      "tileCount": 170
+    }
+  ],
+  "attribution": "Elevation: AWS Open Data Terrain Tiles (SRTM, GMTED, ETOPO1 and others). Colour: Natural Earth II. Coast: Natural Earth 50m."
+}

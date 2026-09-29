@@ -62,6 +62,7 @@ export default function SiteLayout({ children }: Readonly<{ children: ReactNode 
       {children}
       <footer className="site-footer">
         <p>Chronica is in a closed playtest.</p>
+        <p className="site-footer__credits">Map: elevation from AWS Open Data Terrain Tiles (SRTM, GMTED, ETOPO1 and others); Natural Earth; Ancient World Mapping Center; Pleiades.</p>
       </footer>
     </div>
   );

@@ -15,6 +15,8 @@ import { prepareStaticWorldGeometry, type StaticWorldGeometry } from "./world-ge
 import { derivePoliticalMapState, deriveWarBorderPaths, type PoliticalMapState, type PoliticalOverlayInput } from "./political-geometry";
 import { drawTerrainToCanvas } from "./map-canvas-terrain";
 import { seaMaskFromImage, type SeaTest } from "./sea-mask";
+import { toneBitmap } from "./tone-client";
+import { ReliefLayer } from "./relief-tiles";
 import { MapTooltip, type MapTooltipHandle } from "./map-tooltip";
 import { MapControls } from "./map-controls";
 import { CharacterPanel, type CharacterPanelProps } from "./character-panel";
@@ -74,6 +76,8 @@ interface GameShellProps {
   /** Which stored world `initialOverlay` was read from, so the poll can ask only for what changed since. */
   readonly initialOverlayStamp?: string | undefined;
   readonly baseImageUrl?: string;
+  /** A folder of relief tiles (relief-tiles.ts) drawn over the base raster where the player looks. */
+  readonly reliefUrl?: string;
   readonly detailImageUrl?: string;
   readonly characterPanel?: CharacterPanelProps | undefined;
   /** Drives the chat panel: speaking as this character needs their declared knowledgebase. */
@@ -84,31 +88,13 @@ interface GameShellProps {
   readonly roomStyle: RoomStyle;
 }
 
-let _toneWorker: Worker | null | undefined;
-let _toneRequests = 0;
-
 /**
  * The raster, toned into an engraved plate (see atlas-tone.ts), off the main
  * thread. Without a worker, or if toning fails, the raster as it is: a map in
  * the wrong colours beats no map.
  */
 async function tonedBitmap(img: HTMLImageElement): Promise<ImageBitmap> {
-  if (_toneWorker === undefined) {
-    try { _toneWorker = new Worker(new URL("./atlas-tone.worker.ts", import.meta.url)); } catch { _toneWorker = null; }
-  }
-  const worker = _toneWorker;
-  if (worker === null) return createImageBitmap(img);
-  const id = ++_toneRequests;
-  const raw = await createImageBitmap(img);
-  const toned = await new Promise<ImageBitmap | null>((resolve) => {
-    const onMessage = (event: MessageEvent<{ readonly id: number; readonly bitmap: ImageBitmap | null }>) => {
-      if (event.data.id !== id) return;
-      worker.removeEventListener("message", onMessage);
-      resolve(event.data.bitmap);
-    };
-    worker.addEventListener("message", onMessage);
-    worker.postMessage({ id, bitmap: raw }, [raw]);
-  });
+  const toned = await toneBitmap(await createImageBitmap(img));
   return toned ?? createImageBitmap(img);
 }
 
@@ -145,6 +131,7 @@ export function GameShell({
   initialOverlay,
   initialOverlayStamp,
   baseImageUrl,
+  reliefUrl,
   detailImageUrl,
   characterPanel,
   playerCharacterId,
@@ -377,6 +364,13 @@ export function GameShell({
 
   useEffect(() => loadMapBitmap(baseImageUrl, baseImageRef, requestRedraw), [baseImageUrl, requestRedraw]);
   useEffect(() => loadMapBitmap(detailImageUrl, detailImageRef, requestRedraw), [detailImageUrl, requestRedraw]);
+  const reliefRef = useRef<ReliefLayer | null>(null);
+  useEffect(() => {
+    if (!reliefUrl) return;
+    const layer = new ReliefLayer(reliefUrl, toneBitmap, requestRedraw);
+    reliefRef.current = layer;
+    return () => { layer.dispose(); reliefRef.current = null; };
+  }, [reliefUrl, requestRedraw]);
 
   // Hover lives in a ref, not state: moving the pointer across provinces
   // repaints the canvas and, for unclaimed land, the tooltip — never the
@@ -391,7 +385,7 @@ export function GameShell({
   if (world && political && viewBox) {
     const w = world; const p = political; const vb = viewBox; const cbp = countryBorderPath; const ov = overlay; const flags = forceFlagUrls;
     drawCanvasFnRef.current = (canvas, transform, containerW, containerH, interacting) => {
-      drawTerrainToCanvas(canvas, containerW, containerH, transform, vb, w, p, cbp, baseImageRef.current, detailImageRef.current, ov, flags, selectedProvinceId, hoveredProvinceRef.current, interacting, requestRedraw);
+      drawTerrainToCanvas(canvas, containerW, containerH, transform, vb, w, p, cbp, baseImageRef.current, detailImageRef.current, ov, flags, selectedProvinceId, hoveredProvinceRef.current, interacting, requestRedraw, reliefRef.current);
     };
   }
 

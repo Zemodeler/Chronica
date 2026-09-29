@@ -102,6 +102,7 @@ export default async function GamePage({
       initialOverlay={world.mapOverlay}
       initialOverlayStamp={String(world.worldRevision)}
       baseImageUrl="/maps/natural-earth-ii-blue-oceans.png"
+      reliefUrl="/maps/relief"
       characterPanel={characterPanel}
       playerCharacterId={chatCharacterId}
       orderingCharacterId={orderingCharacterId}

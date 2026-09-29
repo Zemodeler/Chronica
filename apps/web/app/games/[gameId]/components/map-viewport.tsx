@@ -8,14 +8,12 @@ import {
   useImperativeHandle,
   forwardRef,
   type ReactNode,
-  type WheelEvent,
   type MouseEvent,
   type PointerEvent,
   type KeyboardEvent,
 } from "react";
+import { clampScale, wheelZoomFactor, zoomAbout } from "./wheel-zoom";
 
-const MIN_SCALE = 1;
-const MAX_SCALE = 80;
 const ZOOM_STEP = 1.35;
 const PAN_PX = 40;
 // How far a pressed pointer travels before it is a drag rather than a click.
@@ -23,12 +21,6 @@ const PAN_PX = 40;
 const DRAG_THRESHOLD_PX = 4;
 const MEDIUM_THRESHOLD = 2.5;
 const CLOSE_THRESHOLD = 5;
-// Wheel deltas vary dramatically between a mouse wheel and a trackpad.  An
-// exponential response gives both devices continuous, predictable zoom rather
-// than applying one large fixed step for every browser event.
-const WHEEL_ZOOM_SENSITIVITY = 0.0025;
-const MIN_WHEEL_FACTOR = 0.7;
-const MAX_WHEEL_FACTOR = 1.4;
 // How long after the last pan/zoom input the map counts as settled. While it
 // is not, the terrain renderer may not start an expensive cache rebuild.
 const SETTLE_MS = 150;
@@ -170,8 +162,6 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
       }
     }, [onTransformChange]);
 
-    const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
-
     useImperativeHandle(ref, () => ({
       requestRedraw,
       liveTransform() { return liveRef.current; },
@@ -236,14 +226,7 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
         const rect = container.getBoundingClientRect();
         const cx = clientX - rect.left;
         const cy = clientY - rect.top;
-        const live = liveRef.current;
-        const newScale = clampScale(live.scale * factor);
-        const ratio = newScale / live.scale;
-        const next: ViewportTransform = {
-          scale: newScale,
-          tx: cx - ratio * (cx - live.tx),
-          ty: cy - ratio * (cy - live.ty),
-        };
+        const next = zoomAbout(liveRef.current, cx, cy, factor);
         markInteracting();
         applyTransform(next);
         commitTransform(next);
@@ -251,18 +234,21 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
       [applyTransform, commitTransform, markInteracting],
     );
 
-    const handleWheel = useCallback(
-      (e: WheelEvent) => {
+    // A wheel over the map zooms the map and does nothing else: it must not
+    // scroll the page, and with ctrl held (a pinch, or ctrl + wheel) it must not
+    // zoom the browser's page. Both need preventDefault, which React's onWheel
+    // (a passive listener on the root) is not allowed to call, so the listener
+    // is added by hand, non-passive, and taken off with the frame.
+    useEffect(() => {
+      const container = containerRef.current;
+      if (!container) return;
+      const onWheel = (e: globalThis.WheelEvent) => {
         e.preventDefault();
-        // DOM_DELTA_LINE and DOM_DELTA_PAGE are intentionally normalized to
-        // pixels. Trackpads already report pixel deltas, so their fine motion
-        // remains fine instead of becoming a sequence of 35% jumps.
-        const delta = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 320 : 1);
-        const factor = Math.min(MAX_WHEEL_FACTOR, Math.max(MIN_WHEEL_FACTOR, Math.exp(-delta * WHEEL_ZOOM_SENSITIVITY)));
-        zoomAroundPoint(e.clientX, e.clientY, factor);
-      },
-      [zoomAroundPoint],
-    );
+        zoomAroundPoint(e.clientX, e.clientY, wheelZoomFactor(e));
+      };
+      container.addEventListener("wheel", onWheel, { passive: false });
+      return () => container.removeEventListener("wheel", onWheel);
+    }, [zoomAroundPoint]);
 
     const handlePointerDown = useCallback((e: PointerEvent) => {
       const container = containerRef.current;
@@ -423,7 +409,6 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
       <figure
         ref={containerRef}
         className="map-frame map-frame-interactive"
-        onWheel={handleWheel}
         onPointerDownCapture={handlePointerDownCapture}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
