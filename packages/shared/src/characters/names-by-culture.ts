@@ -15,7 +15,7 @@ import { stableHash } from "../determinism";
  * Illyrian and Thracian names of common inscriptions, the Libyan names of the
  * Dougga dedication -- and belongs to nobody the histories remember.
  */
-export type Culture = "italic" | "etruscan" | "greek" | "celtic" | "germanic" | "iberian" | "illyrian" | "thracian" | "libyan";
+export type Culture = "italic" | "etruscan" | "greek" | "celtic" | "germanic" | "iberian" | "illyrian" | "thracian" | "libyan" | "anatolian";
 
 export const POOLS: Readonly<Record<Culture, { readonly first: readonly string[]; readonly second?: readonly string[] }>> = {
   italic: {
@@ -47,6 +47,12 @@ export const POOLS: Readonly<Record<Culture, { readonly first: readonly string[]
   libyan: {
     first: ["Zelalsan", "Aelymas", "Iarbas", "Ateban", "Iepmatath", "Palu", "Ilaten", "Zamar"],
   },
+  // Iranian and native names of the Persian satrapies of Asia Minor and Armenia, which their dynasts still bore. It stands, until each
+  // has a pool of its own, for the peoples east and south of Anatolia too -- Iranian, Caucasian, Arabian, Nubian and Judaean: the
+  // closest stock there is, and not their own.
+  anatolian: {
+    first: ["Ariarathes", "Orophernes", "Datames", "Pharnaces", "Artabazus", "Mithrobuzanes", "Ariobarzanes", "Orontes", "Zariadres", "Artavasdes", "Pylaemenes", "Corylas", "Oltaces", "Kretines", "Kendebas", "Moagetes"],
+  },
 };
 
 const ETRUSCAN = new Set(["etruscan-cities"]);
@@ -55,6 +61,13 @@ const GREEK = new Set([
   "acarnania", "achaean-league", "aeolis-communities", "aetolian-league", "arcadian-league", "argos", "athens", "boeotian-league", "cretan-cities-east",
   "cretan-cities-west", "cycladic-islanders", "cyrene", "elis", "epirus", "ionia-communities", "ionian-islands", "macedon", "massalia", "megalopolis",
   "messenia", "phocian-league", "rhodes", "sparta",
+  // Asia Minor's Greek cities and the Macedonian kingdoms that ruled the rest by Greek officials.
+  "bithynia", "euxine-greek-cities", "heraclea-pontica", "hellespont-propontic-cities", "pergamon", "ptolemaic-egypt", "seleucid-empire",
+]);
+const ANATOLIAN = new Set([
+  "armenia", "cappadocia", "colchis", "paphlagonia", "pisidia-isauria", "pontus",
+  "atropatene", "caspian-peoples", "caucasian-albania", "caucasian-iberia", "makran-tribes",
+  "gerrha", "hejaz-tribes", "ituraeans", "judea", "kush", "lihyan", "minaeans", "nabataeans", "najd-tribes", "qedar", "saba",
 ]);
 const LIBYAN = new Set(["gaetuli", "garamantes", "mauretanian-peoples", "numidian-kingdoms", "canarian-peoples"]);
 
@@ -63,6 +76,7 @@ export function cultureOf(polityId: string): Culture {
   if (ITALIC.has(polityId)) return "italic";
   if (GREEK.has(polityId)) return "greek";
   if (LIBYAN.has(polityId)) return "libyan";
+  if (ANATOLIAN.has(polityId)) return "anatolian";
   if (/^(germania-|low-countries-)/.test(polityId)) return "germanic";
   if (/^(iberia-|lusitanians|balearic)/.test(polityId)) return "iberian";
   if (/^(illyria-|pannonii)/.test(polityId)) return "illyrian";

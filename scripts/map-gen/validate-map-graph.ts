@@ -4,22 +4,21 @@
  * Usage: MAP_GEN_DATA=<dir> tsx scripts/map-gen/validate-map-graph.ts   (exit code 1 on any failure)
  */
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GeoJsonMapSchema } from '../../packages/shared/src/world/geojson';
 import { ProvinceGraphSchema } from '../../packages/shared/src/world/map';
-import {
-  PUNIC_ANCHORS_V2,
-  PUNIC_WARS_GRAPH_EDGES_V2,
-  PUNIC_WARS_GRAPH_POLITIES_V2,
-  PUNIC_WARS_GRAPH_PROVINCES_V2,
-  PUNIC_WARS_GRAPH_SETTLEMENTS_V2,
-} from '../../packages/db/src/punic-wars-map-graph-v2';
 import { polygonsOf, ringAreaKm2, signedArea } from './map-geometry';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '../..');
 const DATA = process.env.MAP_GEN_DATA ?? join(ROOT, '.map-gen-data');
+// out=<suffix> checks a suffixed build (punic-wars-map-graph-<suffix>.ts, punic-wars-provinces-<suffix>.geojson); the default is the shipped one
+const SUFFIX = process.argv.find((a) => a.startsWith('out='))?.slice(4);
+const tag = SUFFIX === undefined || SUFFIX === '' ? '' : `-${SUFFIX}`;
+const graphModule = createRequire(import.meta.url)(`../../packages/db/src/punic-wars-map-graph${tag}`);
+const { PUNIC_ANCHORS, PUNIC_WARS_GRAPH_EDGES, PUNIC_WARS_GRAPH_POLITIES, PUNIC_WARS_GRAPH_PROVINCES, PUNIC_WARS_GRAPH_SETTLEMENTS } = graphModule as typeof import('../../packages/db/src/punic-wars-map-graph');
 
 // The terrains of packages/db/src/punic-wars-scenario.ts, definition.map.terrains.
 const ALLOWED: Record<string, readonly string[]> = {
@@ -39,15 +38,15 @@ const check = (ok: boolean, message: string): void => {
 };
 const percentile = (sorted: number[], p: number): number => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))]!;
 
-const provinces = PUNIC_WARS_GRAPH_PROVINCES_V2;
-const edges = PUNIC_WARS_GRAPH_EDGES_V2;
-const polities = PUNIC_WARS_GRAPH_POLITIES_V2;
-const settlements = PUNIC_WARS_GRAPH_SETTLEMENTS_V2;
+const provinces = PUNIC_WARS_GRAPH_PROVINCES;
+const edges = PUNIC_WARS_GRAPH_EDGES;
+const polities = PUNIC_WARS_GRAPH_POLITIES;
+const settlements = PUNIC_WARS_GRAPH_SETTLEMENTS;
 
 // ---- the graph through the schema
 const graph = {
   provinces: provinces.map((p) => ({
-    id: p.id, name: p.name, formerNames: [], terrainId: p.terrainId, controllerPolityId: p.controllerPolityId, controlFirmnessBps: p.controlFirmnessBps,
+    id: p.id, name: p.name, formerNames: [...p.formerNames], terrainId: p.terrainId, controllerPolityId: p.controllerPolityId, controlFirmnessBps: p.controlFirmnessBps,
     areaKm2: p.areaKm2, geo: p.geo,
     settlements: settlements.filter((s) => s.provinceId === p.id).map((s) => ({ ...s, kind: s.kind as 'city' })),
   })),
@@ -75,7 +74,7 @@ check(edges.every((e) => Number.isInteger(e.distance) && e.distance >= 1), 'edge
 // ---- connectivity from Rome's province
 const adjacency = new Map<string, string[]>();
 for (const e of edges) { (adjacency.get(e.from) ?? adjacency.set(e.from, []).get(e.from)!).push(e.to); (adjacency.get(e.to) ?? adjacency.set(e.to, []).get(e.to)!).push(e.from); }
-const rome = PUNIC_ANCHORS_V2.rome!;
+const rome = PUNIC_ANCHORS.rome!;
 const seen = new Set([rome]);
 const queue = [rome];
 while (queue.length) for (const next of adjacency.get(queue.pop()!) ?? []) if (!seen.has(next)) { seen.add(next); queue.push(next); }
@@ -103,7 +102,7 @@ console.log(`     degree: median ${percentile(degree, 0.5)}, max ${degree.at(-1)
 console.log(`     terrain ${JSON.stringify(provinces.reduce<Record<string, number>>((m, p) => ({ ...m, [p.terrainId]: (m[p.terrainId] ?? 0) + 1 }), {}))}; settlements ${settlements.length}, provinces with one: ${new Set(settlements.map((s) => s.provinceId)).size}`);
 
 // ---- the GeoJSON
-const geojson = JSON.parse(readFileSync(join(ROOT, 'apps/web/public/maps/punic-wars-provinces.geojson'), 'utf8')) as { features: { id: string; geometry: { type: string; coordinates: unknown }; properties: { kind: string } }[] };
+const geojson = JSON.parse(readFileSync(join(ROOT, `apps/web/public/maps/punic-wars-provinces${tag}.geojson`), 'utf8')) as { features: { id: string; geometry: { type: string; coordinates: unknown }; properties: { kind: string } }[] };
 const geoParsed = GeoJsonMapSchema.safeParse(geojson);
 check(geoParsed.success, `GeoJsonMapSchema accepts ${geojson.features.length} features${geoParsed.success ? '' : `: ${JSON.stringify(geoParsed.error.issues.slice(0, 3))}`}`);
 const geoProvinces = geojson.features.filter((f) => f.properties.kind === 'province');

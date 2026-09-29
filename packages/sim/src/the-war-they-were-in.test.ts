@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, outlookFor, type WorldState } from "@chronica/shared";
 import { routeAmbientActors } from "./attention";
 import { renderCharacterPortrait } from "./cognition";
@@ -14,7 +14,7 @@ import { runDeterministicTick } from "./tick";
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const clock = definition.clock;
-const BRUTTIUM = "punic-italy-bruttian-highlands";
+const BRUTTIUM = PUNIC_IDS.rhegium;
 
 function legionAtRhegium(): WorldState {
   const opening = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import {
   ScenarioDefinitionSchema,
   WorldStateSchema,
@@ -28,7 +28,7 @@ import { runDeterministicTick } from "./tick";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
+const MESSANA = PUNIC_IDS.messana;
 const context: ApplyContext = {
   now: { day: 0, minute: 540 },
   actorRef: { kind: "character", id: "gaius-genucius" },

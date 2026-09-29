@@ -39,7 +39,7 @@ const sameWork = (a: string, b: string): boolean => {
 };
 /**
  * The hired fleet's march of day 65 on "Panormus and the north-west", written
- * for Messana one letter off (…-sicily-northwest for …-sicily-northeast): a
+ * for Messana one letter off (the north-west province for the north-east): a
  * beaten squadron sailing into Carthage's own harbour.
  */
 const MISADDRESSED_MARCHES = ["project-964ca4ef-29fc-4c65-b007-3ff91f0a82be-70"];

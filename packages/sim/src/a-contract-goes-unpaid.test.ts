@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, taxBurdens, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -103,7 +103,7 @@ describe("what the work needs", () => {
     const farmed = as("gaius-genucius", [{
       op: "service_contract_open", localId: "farm", role: "tax_farmer", label: "The tax farm of Campania", employerAccountRef: "rome-treasury",
       employeeRef: "quintus-ogulnius", advance: 100, monthlyPay: 5, termDays: 1_826, duties: "Collect the tithe of Campania.",
-      provinceId: "punic-italy-campanian-plain", reason: "The treasury would rather have the money now.",
+      provinceId: PUNIC_IDS.capua, reason: "The treasury would rather have the money now.",
     }]);
     expect(farmed.rejected).toEqual([]);
     expect(balance(farmed.world, "rome-treasury")).toBe(before + 100);

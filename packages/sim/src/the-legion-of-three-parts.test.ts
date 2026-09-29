@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WOUND_RETURN_DAYS, WorldStateSchema, diffWorlds, type Force, type WorldState } from "@chronica/shared";
 import { resolveEngagement, returnTheMended } from "./battle";
 
@@ -12,7 +12,7 @@ import { resolveEngagement, returnTheMended } from "./battle";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
+const MESSANA = PUNIC_IDS.messana;
 
 function theLegion(): WorldState {
   const opening = WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));

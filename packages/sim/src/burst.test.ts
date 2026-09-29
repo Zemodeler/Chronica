@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstPunicWarScenario } from "@chronica/db";
+import { firstPunicWarScenario, FIRST_PUNIC_IDS } from "@chronica/db";
 import { FactSchema, ScenarioDefinitionSchema, WorldStateSchema, factsKnownTo, factsVisibleTo, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
 import { DEFAULT_BUDGET, runSimulationBurst, type BurstInput, type WindowSnapshot } from "./burst";
 import { composeChronicle } from "./chronicle";
@@ -427,7 +427,7 @@ describe("budget and termination", () => {
       ...JSON.parse(RAISE_TWO_LEGIONS),
       deltas: [],
       schedule: [],
-      watch: { label: "Wake me when Carthage's army moves up the north coast.", predicate: { kind: "force_enters_province", provinceId: "ita-72843720b81376294924159-sicily-northwest", polityId: "carthage" } },
+      watch: { label: "Wake me when Carthage's army moves up the north coast.", predicate: { kind: "force_enters_province", provinceId: FIRST_PUNIC_IDS.panormus, polityId: "carthage" } },
     });
     const march = JSON.stringify({
       actors: [{
@@ -437,7 +437,7 @@ describe("budget and termination", () => {
           narrativeSummary: "The army crosses into Sicily.",
           frictions: [],
           // One province, because an army may only step to ground it borders.
-          deltas: [{ op: "force_modify", forceRef: "carthaginian-army", locationId: "ita-72843720b81376294924159-sicily-northwest", reason: "The march up the coast." }],
+          deltas: [{ op: "force_modify", forceRef: "carthaginian-army", locationId: FIRST_PUNIC_IDS.panormus, reason: "The march up the coast." }],
           facts: [],
           delegations: [],
           schedule: [],
@@ -519,7 +519,7 @@ describe("a later order carries the world to what was scheduled", () => {
         // was completed" with nothing to show is a ledger entry, not history.
         completionOutcome: {
           kind: "force", label: "Two new legions", amount: 8_000,
-          provinceId: "ita-72843720b81376294924159-sicily-northeast", polityId: "rome",
+          provinceId: FIRST_PUNIC_IDS.messana, polityId: "rome",
           commanderCharacterId: "marcus-atilius", forceId: null, beneficiaryAccountId: null,
           cadenceDays: null, agreementKind: null, withPolityId: null,
         },
@@ -723,11 +723,13 @@ describe("the world stirs: a secret plot", () => {
 });
 
 describe("the world stirs: a plague in the open", () => {
-  const LATIUM = "ita-local-23120603B86473916475875";
+  const latium = world().map.provinces.find((province) => province.settlements.some((city) => city.id === "settlement-rome"))!;
+  const LATIUM = latium.id;
+  const LATIUM_NAME = latium.name;
   const SEED = {
     ...PLOT_SEED, key: "seed-plague", kind: "world_event" as const, archetype: "plague", secret: false,
-    target: { provinceId: LATIUM, provinceName: "Latium", polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null, otherPolityId: null, otherPolityName: null, forceId: null, forceName: null, forceIsNaval: false },
-    brief: `Sickness has come to Latium [${LATIUM}].`,
+    target: { provinceId: LATIUM, provinceName: LATIUM_NAME, polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null, otherPolityId: null, otherPolityName: null, forceId: null, forceName: null, forceIsNaval: false },
+    brief: `Sickness has come to ${LATIUM_NAME} [${LATIUM}].`,
   };
   const PLAGUE = JSON.stringify({
     intent: { summary: "Wait.", domains: [] },

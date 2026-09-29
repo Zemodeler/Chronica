@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstPunicWarScenario, punicWarsScenario } from "@chronica/db";
+import { firstPunicWarScenario, FIRST_PUNIC_IDS, punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, advanceWorldTo, allOffices, buildAuthorityIndex, localRef, vacateOfficesOf, type Office, type WorldDelta, type WorldState } from "@chronica/shared";
 import { createIdFactory } from "../ports";
 import { applyDeltas } from "./apply-deltas";
@@ -225,13 +225,13 @@ describe("authority", () => {
     // general. Nobody moves, and the world has a story about why.
     const result = applyDeltas(
       world(),
-      [{ op: "force_modify", forceRef: "legio-i", locationId: "ita-72843720b81376294924159-sicily-southeast", reason: "Marching without authority." }],
+      [{ op: "force_modify", forceRef: "legio-i", locationId: FIRST_PUNIC_IDS.syracuse, reason: "Marching without authority." }],
       context({ actorRef: { kind: "character", id: "hanno" } }),
     );
 
     expect(result.rejected).toHaveLength(1);
     expect(result.rejected[0]!.kind).toBe("ignored");
-    expect(result.world.material.forces.find((f) => f.id === "legio-i")!.locationId).not.toBe("ita-72843720b81376294924159-sicily-southeast");
+    expect(result.world.material.forces.find((f) => f.id === "legio-i")!.locationId).not.toBe(FIRST_PUNIC_IDS.syracuse);
   });
 });
 
@@ -993,7 +993,7 @@ describe("threads of history", () => {
   });
 
   it("opens a thread with no people in it, on a province alone", () => {
-    const result = applyDeltas(world(), [{ ...open, participantRefs: [], provinceId: "ita-local-23120603B86473916475875" }], context({ actsForTheWorld: true }));
+    const result = applyDeltas(world(), [{ ...open, participantRefs: [], provinceId: world().map.provinces.find((province) => province.settlements.some((city) => city.id === "settlement-rome"))!.id }], context({ actsForTheWorld: true }));
     expect(result.rejected).toHaveLength(0);
     expect(result.world.storylines[0]!.participantIds).toEqual([]);
   });
@@ -1211,15 +1211,15 @@ describe("getting an army from here to there", () => {
   const terrains = definition.map.terrains;
 
   it("lets an army step to ground it borders", () => {
-    const result = applyDeltas(world(), [march("ita-72843720b81376294924159-sicily-southeast")], context({ terrains }));
+    const result = applyDeltas(world(), [march(FIRST_PUNIC_IDS.syracuse)], context({ terrains }));
     expect(result.rejected).toHaveLength(0);
-    expect(result.world.material.forces.find((force) => force.id === "legio-i")!.locationId).toBe("ita-72843720b81376294924159-sicily-southeast");
+    expect(result.world.material.forces.find((force) => force.id === "legio-i")!.locationId).toBe(FIRST_PUNIC_IDS.syracuse);
   });
 
   it("refuses a march across the map, and says how far it actually is", () => {
     // The map graph has been specified from the beginning and nothing read it,
     // so a legion could be in Sicily in one delta and Africa in the next.
-    const result = applyDeltas(world(), [march("tun-13205935b88806172084765")], context({ terrains }));
+    const result = applyDeltas(world(), [march(FIRST_PUNIC_IDS.carthage)], context({ terrains }));
 
     expect(result.rejected).toHaveLength(1);
     expect(result.rejected[0]!.kind).toBe("world");
@@ -1239,7 +1239,7 @@ describe("getting an army from here to there", () => {
     // Declaring the Roman province land-only closes the strait to it.
     const state = world();
     const landlocked = definition.map.terrains.map((terrain) => ({ ...terrain, allowedCrossings: ["pass" as const] }));
-    const result = applyDeltas(state, [march("ita-72843720b81376294924159-sicily-southeast")], context({ terrains: landlocked }));
+    const result = applyDeltas(state, [march(FIRST_PUNIC_IDS.syracuse)], context({ terrains: landlocked }));
 
     expect(result.rejected).toHaveLength(1);
     expect(result.rejected[0]!.reason).toContain("crossing");
@@ -1267,14 +1267,14 @@ describe("crossing water", () => {
     material: {
       ...state.material,
       forces: state.material.forces.map((force) =>
-        force.id === "roman-field-army" ? { ...force, locationId: "punic-italy-bruttian-highlands" } : force),
+        force.id === "roman-field-army" ? { ...force, locationId: PUNIC_IDS.rhegium } : force),
     },
   });
 
   const cross: WorldDelta = {
     op: "force_modify",
     forceRef: "roman-field-army",
-    locationId: "ita-72843720b81376294924159-sicily-northeast",
+    locationId: PUNIC_IDS.messana,
     reason: "Cross to Messana.",
   };
 
@@ -1318,15 +1318,15 @@ describe("crossing water", () => {
 
     expect(result.rejected).toHaveLength(0);
     const force = (id: string) => result.world.material.forces.find((candidate) => candidate.id === id)!;
-    expect(force("roman-field-army").locationId).toBe("ita-72843720b81376294924159-sicily-northeast");
+    expect(force("roman-field-army").locationId).toBe(PUNIC_IDS.messana);
     // A fleet that ferries an army and stays behind has not sailed anywhere.
-    expect(force("allied-greek-hulls").locationId).toBe("ita-72843720b81376294924159-sicily-northeast");
+    expect(force("allied-greek-hulls").locationId).toBe(PUNIC_IDS.messana);
   });
 
   it("lets a fleet cross on its own account", () => {
     const result = applyDeltas(
       punicWorld(),
-      [{ op: "force_modify", forceRef: "carthaginian-fleet", locationId: "tun-13205935b88806172084765", reason: "Home to Carthage." }],
+      [{ op: "force_modify", forceRef: "carthaginian-fleet", locationId: PUNIC_IDS.carthage, reason: "Home to Carthage." }],
       punicContext({ actorRef: { kind: "character", id: "hannibal-gisco" } }),
     );
     expect(result.rejected).toHaveLength(0);
@@ -1339,7 +1339,7 @@ describe("crossing water", () => {
       material: {
         ...state.material,
         forces: state.material.forces.map((force) =>
-          force.id === "carthaginian-fleet" ? { ...force, locationId: "punic-italy-latium" } : force),
+          force.id === "carthaginian-fleet" ? { ...force, locationId: PUNIC_IDS.rome } : force),
       },
       polityAgreements: [{
         id: "war-1", kind: "war", polityId: "rome", otherPolityId: "carthage", terms: "Open war.",
@@ -2019,7 +2019,7 @@ describe("who has undertaken to pay them", () => {
         {
           op: "force_create", localId: "levy", name: "The new levy", polityId: "rome",
           commanderCharacterRef: "marcus-atilius", controllerCharacterRef: "marcus-atilius",
-          locationId: "ita-72843720b81376294924159-sicily-northeast", authorizedStrength: 1_000,
+          locationId: FIRST_PUNIC_IDS.messana, authorizedStrength: 1_000,
           payObligationRef: localRef("new_pay"), reason: "Two thousand men, and somebody to pay them.",
         },
       ],
@@ -2350,7 +2350,7 @@ describe("an unexpected fault costs only the delta that carried it", () => {
  * be said as taking the whole of north-eastern Sicily.
  */
 describe("a city changes hands", () => {
-  const MESSANA_PROVINCE = "ita-72843720b81376294924159-sicily-northeast";
+  const MESSANA_PROVINCE = PUNIC_IDS.messana;
   const punicDefinition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
   const punicWorld = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
   const punicContext = (): ApplyContext => ({

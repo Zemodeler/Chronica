@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, openWar, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -15,7 +15,14 @@ import { debatersOf } from "./senate";
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const offices = definition.government.offices;
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
+const MESSANA = PUNIC_IDS.messana;
+const nameOf = (id: string): string => punicWarsScenario.initialWorld.map.provinces.find((province) => province.id === id)!.name;
+const escaped = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** Where the beaten garrison has fallen back to: the Mamertines' own ground next to the city, a day or so off. */
+const BESIDE_MESSANA = (() => {
+  const edge = punicWarsScenario.initialWorld.map.edges.find((candidate) => candidate.crossing === "land" && (candidate.from === MESSANA || candidate.to === MESSANA))!;
+  return edge.from === MESSANA ? edge.to : edge.from;
+})();
 const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
 const context = (actor: string): ApplyContext => ({
   now: { day: 0, minute: 540 }, actorRef: { kind: "character", id: actor }, offices, warfare: definition.warfare,
@@ -60,19 +67,19 @@ describe("a beaten power", () => {
       map: { ...world.map, provinces: world.map.provinces.map((province) => (province.id === MESSANA
         ? { ...province, controllerPolityId: "rome", settlements: province.settlements.map((city) => ({ ...city, controllerPolityId: "rome" })), lostBy: { polityId: "mamertines", atStep: 0 } }
         : province)) },
-      material: { ...world.material, forces: world.material.forces.map((force) => (force.id === "mamertine-garrison" ? { ...force, locationId: "ita-72843720b81376294924159-sicily-central" } : force)) },
+      material: { ...world.material, forces: world.material.forces.map((force) => (force.id === "mamertine-garrison" ? { ...force, locationId: BESIDE_MESSANA } : force)) },
     };
   }
 
   it("is told the ground it lost and how far its army is from it", () => {
     const text = renderCharacterPortrait("mamertine-spokesman", "Statius Mettius", messanaTaken(), definition.clock);
-    expect(text).toMatch(/Their power lost Messana and the strait .* to Roman Republic 0 days ago; Mamertine garrison is about \d+ km from it/);
+    expect(text).toMatch(new RegExp(`Their power lost ${escaped(nameOf(MESSANA))} .* to Roman Republic 0 days ago; Mamertine garrison is about \\d+ km from it`));
   });
 
   it("has its general pressed to take it back", () => {
     const routed = routeAmbientActors({ world: messanaTaken(), facts: [], offices, excludeCharacterIds: [], max: 1_000 });
     const general = routed.find((actor) => actor.characterId === "mamertine-spokesman")!;
     expect(general.pressing).toBe(true);
-    expect(general.why).toMatch(/lost Messana and the strait .* can reach it/);
+    expect(general.why).toMatch(new RegExp(`lost ${escaped(nameOf(MESSANA))} .* can reach it`));
   });
 });

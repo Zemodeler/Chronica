@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, localRef, type WorldState } from "@chronica/shared";
 import { createIdFactory } from "./ports";
 import { applyDeltas } from "./apply/apply-deltas";
@@ -65,13 +65,13 @@ function order(written: readonly unknown[], state: WorldState = world(), actor?:
   };
 }
 
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
+const MESSANA = PUNIC_IDS.messana;
 
 describe("orders a ruler gives about people", () => {
   it("invents an officer the world had no name for and gives him a job", () => {
     const result = order([{
       op: "character_create", localId: "quaestor", name: "Titus Sempronius", polityId: "rome",
-      provinceId: "punic-italy-latium", age: 34, officeLabel: "Quaestor of the fleet",
+      provinceId: PUNIC_IDS.rome, age: 34, officeLabel: "Quaestor of the fleet",
       officeAuthorises: ["money_transfer"], traits: ["diligent"],
       generatedBecause: "Somebody has to keep the accounts of the crossing.",
       reason: "The consul appoints a quaestor to the fleet.",
@@ -130,13 +130,13 @@ describe("orders about things that are not war", () => {
 
   it("gives a province a bad year without anybody fighting in it", () => {
     const result = order([{
-      op: "province_material_shift", provinceId: "punic-italy-latium",
+      op: "province_material_shift", provinceId: PUNIC_IDS.rome,
       populationDelta: -2_000, foodSecurityBpsDelta: -2_500, stabilityBpsDelta: -1_200,
       reason: "The harvest fails in Latium.",
     }]);
 
     expect(result.engineRefusals).toEqual([]);
-    const after = result.world.material.provinceMaterial.find((row) => row.provinceId === "punic-italy-latium")!;
+    const after = result.world.material.provinceMaterial.find((row) => row.provinceId === PUNIC_IDS.rome)!;
     expect(after.foodSecurityBps).toBeLessThan(8_000);
   });
 
@@ -169,7 +169,7 @@ describe("orders about the shape of the world itself", () => {
 
   it("refuses a province to somebody who cannot reach it, and says so to the player", () => {
     const result = order([{
-      op: "province_control_set", provinceId: "tun-13205935b88806172084765",
+      op: "province_control_set", provinceId: PUNIC_IDS.carthage,
       toPolityRef: "rome", firmnessBps: 5_000, reason: "Rome annexes Africa from Latium.",
     }]);
 
@@ -221,7 +221,7 @@ describe("the whole of an order, end to end", () => {
       {
         op: "force_create", localId: "expedition", name: "The Sicilian expedition", polityId: "rome",
         commanderCharacterRef: "manius-curius", controllerCharacterRef: "gaius-genucius",
-        locationId: "punic-italy-latium", authorizedStrength: 2_000,
+        locationId: PUNIC_IDS.rome, authorizedStrength: 2_000,
         payObligationRef: localRef("new_pay"), reason: "Two legions for the crossing.",
       },
       {

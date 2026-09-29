@@ -6,7 +6,8 @@ const dreq = require('module').createRequire(path.join(DATA, 'package.json'));
 const {parse}=dreq('csv-parse/sync');const fs=require('fs');
 const rows=parse(fs.readFileSync('data/pleiades-places-latest.csv'),{columns:true,relax_quotes:true,relax_column_count:true});
 console.log('rows',rows.length);
-const W={x0:-18,x1:46,y0:26,y1:59};
+const ARG=Object.fromEntries(process.argv.slice(2).map(a=>a.split('=')));
+const W={x0:+(ARG.x0??-18),x1:+(ARG.x1??46),y0:+(ARG.y0??26),y1:+(ARG.y1??59)};
 const inWin=r=>{const lon=+r.reprLong,lat=+r.reprLat;return r.reprLong!==''&&r.reprLat!==''&&isFinite(lon)&&isFinite(lat)&&lon>=W.x0&&lon<=W.x1&&lat>=W.y0&&lat<=W.y1};
 const win=rows.filter(inWin);console.log('in window',win.length);
 const alive=(r,y)=>{const a=r.minDate===''?null:+r.minDate,b=r.maxDate===''?null:+r.maxDate;return a!==null&&b!==null&&a<=y&&b>=y};
@@ -26,4 +27,4 @@ console.log('seeds per 4x4 degree cell (rows = lat from 59 down, cols = lon from
 for(let gy=0;gy<9;gy++){let s=String(W.y1-gy*4).padStart(3)+' ';for(let gx=0;gx<12;gx++)s+=String((rowsG[gy]&&rowsG[gy][gx])||0).padStart(5);console.log(s)}
 const box={Italy:[6,19,36.5,47],Britain:[-6,2,50,59],Iberia:[-10,4,36,44],Gaul:[-5,8,42,51],Greece:[19,27,35,42],NAfrica:[-10,20,29,37.5],Germania:[5,25,47,55]};
 for(const [n,[a,b,c,d]] of Object.entries(box))console.log(n,kept.filter(k=>k[0]>=a&&k[0]<=b&&k[1]>=c&&k[1]<=d).length);
-fs.writeFileSync('seeds270.json',JSON.stringify(kept));
+fs.writeFileSync(ARG.out||'seeds270.json',JSON.stringify(kept));

@@ -35,17 +35,23 @@ function standingIn(state: WorldState, provinceId: string): { world: WorldState;
 }
 
 describe("the road news travels", () => {
-  it("is longer to Carthage than to Messana, and nothing is further than a month", () => {
+  it("is longer the further off, and nothing is further than a month", () => {
     const state = world();
     const rome = provinceOf(state, "settlement-rome");
+    const capua = provinceOf(state, "settlement-capua");
     const messana = provinceOf(state, "settlement-messana");
+    const syracuse = provinceOf(state, "settlement-syracuse");
     const carthage = provinceOf(state, "settlement-carthage");
     const athens = provinceOf(state, "settlement-athens");
     expect(newsDaysBetween(state, rome, rome)).toBe(0);
+    const toCapua = newsDaysBetween(state, rome, capua);
     const toMessana = newsDaysBetween(state, rome, messana);
-    expect(toMessana).toBeGreaterThan(0);
-    expect(newsDaysBetween(state, rome, carthage)).toBeGreaterThan(toMessana);
+    expect(toCapua).toBeGreaterThan(0);
+    expect(toMessana).toBeGreaterThan(toCapua);
+    expect(newsDaysBetween(state, rome, syracuse)).toBeGreaterThan(toMessana);
     expect(newsDaysBetween(state, messana, rome)).toBe(toMessana);
+    // Word goes by the sea lanes to Africa about as fast as it goes down Italy to the strait.
+    expect(newsDaysBetween(state, rome, carthage)).toBeLessThanOrEqual(MAX_NEWS_DAYS);
     expect(newsDaysBetween(state, rome, athens)).toBeLessThanOrEqual(MAX_NEWS_DAYS);
   });
 

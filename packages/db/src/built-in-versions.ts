@@ -221,6 +221,9 @@ export const PUNIC_WARS_VERSIONS: readonly BuiltInScenarioVersion[] = [
   // accounts, the Hundred and Four and the priests of Baal Hammon are
   // departments, and their officers' gifts are what the work is done with.
   { version: 35, notes: "Rome and Carthage open with departments: the Treasury of Saturn, the Censorship, the Aediles, the Urban Praetor's Court and the College of Pontiffs; the Office of the Accounts (a new office), the Hundred and Four and the Priests of Baal Hammon. A lever no department holds is the ruler's, and a man holding too much does all of it worse." },
+  // Version 36 swaps the map. The 780 provinces become 6,056 organic ones grown from the
+  // settlements alive in 270 BCE, Anatolia, Egypt, Arabia, the Levant, the Caucasus and Iran added; a new map asset (...0203) carries them.
+  { version: 36, notes: "A new map of 6,056 provinces over Europe, North Africa and the Near East as far as Iran, named for the regions they lie in (the old town names are kept as aliases), with each province's area, and every border's distance in kilometres: marches, letters and voyages now take as long as the ground is long, and a province's people are counted by its area. Ownership follows the old map by overlay, and the east opens with thirty-two new powers (the Seleucid and Ptolemaic kingdoms, Pergamon, Bithynia, Pontus, Cappadocia, Armenia, the Galatian tribes, Caucasian Iberia, Judea, the Nabataeans and others). Named places keep their settlements, and Antiochus I, Ptolemy II, Philetaerus, Nicomedes I, Mithridates I and Pharnavaz I sit in their seats." },
 ];
 
 /** The version the code seeds: the last one written down. */

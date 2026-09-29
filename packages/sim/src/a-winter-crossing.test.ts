@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import {
   MechanicPredicateSchema,
   ScenarioDefinitionSchema,
@@ -30,11 +30,11 @@ import { holdsIn } from "./watch";
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const clock = definition.clock;
-const LILYBAEUM = "ita-72843720b81376294924159-sicily-west";
-const BRUTTIUM = "punic-italy-bruttian-highlands";
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
-const LATIUM = "punic-italy-latium";
-const CAMPANIA = "punic-italy-campanian-plain";
+const LILYBAEUM = PUNIC_IDS.lilybaeum;
+const BRUTTIUM = PUNIC_IDS.rhegium;
+const MESSANA = PUNIC_IDS.messana;
+const LATIUM = PUNIC_IDS.rome;
+const CAMPANIA = PUNIC_IDS.capua;
 
 /** Days from the epoch (1 March 270 BC) to the first of a month that year or the next. */
 const firstOf = (month: number): number => dayOfCalendarDate({ year: month >= 3 ? 270 : 269, era: "BCE", month, day: 1 }, clock);

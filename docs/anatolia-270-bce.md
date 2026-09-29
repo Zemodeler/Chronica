@@ -8,8 +8,8 @@ the Seleucid default is last.
 
 ## What the game already has
 
-Only `rhodes`, `aeolis-communities` and `ionia-communities` reach Anatolia (see
-`apps/web/lib/punic-wars-map-territory.ts`); they are reused. There is no Seleucid or Ptolemaic
+Only `rhodes`, `aeolis-communities` and `ionia-communities` reached Anatolia on the map before
+this one; they are reused. There is no Seleucid or Ptolemaic
 polity (the Ptolemaic world is only `cyrene`). Every other polity below is new.
 `packages/db/src/punic-wars-scenario.ts` lists cohesion for only some powers; the rest, Macedon
 included, fall to the 3000 default. The cohesion values here follow the intended scale instead.

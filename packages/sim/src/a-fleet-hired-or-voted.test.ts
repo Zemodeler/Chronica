@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, passageFor, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -32,7 +32,7 @@ const as = (actor: string, written: readonly unknown[], state: WorldState = open
 };
 const tickTo = (state: WorldState, day: number) =>
   runDeterministicTick({ world: { ...state, elapsedStep: day }, toDay: day, ids: createIdFactory(`fleet-tick-${day}`), warfare: definition.warfare });
-const SICILY = "ita-72843720b81376294924159-sicily-northeast";
+const SICILY = PUNIC_IDS.messana;
 const army = (state: WorldState) => state.material.forces.find((force) => force.id === "roman-field-army")!;
 const balance = (state: WorldState, id: string) => state.material.accounts.find((account) => account.id === id)!.balance;
 

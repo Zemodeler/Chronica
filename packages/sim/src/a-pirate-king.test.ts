@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -15,7 +15,7 @@ import { createIdFactory } from "./ports";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const LATIUM = "punic-italy-latium";
+const LATIUM = PUNIC_IDS.rome;
 
 /** Curius, with a purse committed to paying armed men of his own. */
 function world(): WorldState {

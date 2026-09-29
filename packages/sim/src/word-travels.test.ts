@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import {
   CharacterIntentSchema,
   ScenarioDefinitionSchema,
@@ -138,7 +138,7 @@ describe("a man counting the enemy", () => {
   it("counts them as scouts would, never to the man", () => {
     // Decius Vibellius at Rhegium was told the consul's army to the last soldier.
     const state = opening();
-    const bruttium = "punic-italy-bruttian-highlands";
+    const bruttium = PUNIC_IDS.rhegium;
     const atRhegium = { ...state, material: { ...state.material, forces: state.material.forces.map((force) => (force.id === "roman-field-army" ? { ...force, locationId: bruttium } : force)) } };
     const army = atRhegium.material.forces.find((force) => force.id === "roman-field-army")!;
     const exact = army.personnel.reduce((sum, group) => sum + group.fit, 0);

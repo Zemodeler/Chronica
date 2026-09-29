@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import {
   ScenarioDefinitionSchema,
   WorldStateSchema,
@@ -26,7 +26,7 @@ import { runDeterministicTick } from "./tick";
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const government = { offices: definition.government.offices, successionRules: definition.government.successionRules };
-const SYRACUSE_LAND = "ita-72843720b81376294924159-sicily-southeast";
+const SYRACUSE_LAND = PUNIC_IDS.syracuse;
 
 /**
  * Syracuse under Hieron, its government despised, and Leptines at the head of

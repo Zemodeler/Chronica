@@ -155,7 +155,7 @@ land but have no leader or no forces, ranks them by whether the player is dealin
 whether they border us, and how much they hold, and states the gap in the slice. The orchestrator
 fills it in the call it was already making — no extra model call, no new contract surface.
 
-Relevance decides *which* countries, and size only orders equals. On a map of 126 peoples a quiet
+Relevance decides *which* countries, and size only orders equals. On a map of 161 peoples a quiet
 people holding sixty-four provinces would otherwise outrank the country the player is actually
 invading. A country also has to be in contact before the world owes it anyone: reachable across a
 border, already named in the facts, or large enough that the powers of the age would reckon with it.
@@ -202,20 +202,23 @@ twenty provinces and ten polities while the map drew the western Mediterranean e
 difference was made up by a hardcoded overlay table merged in at render time. When that table stopped
 being merged, the rest of the map went blank — there had never been anything behind it.
 
-The whole drawn world is now authored state: 779 provinces, 2,227 borders and the 126 peoples who
-hold them. Province names, terrain and adjacency are derived from the rendered geometry itself by
-`scripts/map-graph/build-punic-map-graph.ts` (`npm run maps:graph`) and checked in as
-`packages/db/src/punic-wars-map-graph.ts`. It is a build step because deriving adjacency walks 110k
-polygon vertices, and because a graph this size should be reviewable as data rather than recomputed
-per process. `packages/db/src/punic-wars-scenario.ts` merges it under the hand-authored core — Italy,
-Sicily and Carthage keep their settlements, garrison positions and deliberately-set control.
+The whole drawn world is now authored state: 6,056 provinces, 14,424 borders and the 161 peoples who
+hold them, over Europe, North Africa and the Near East as far as Iran. The provinces are grown from the settlements alive in
+270 BCE and traced on shared vertices by `scripts/map-gen` (see its README and
+`docs/plans/imperator-density-map.md`); the same build step writes the province graph, checked in as
+`packages/db/src/punic-wars-map-graph.ts`, and the GeoJSON asset. It is a build step because a graph
+this size should be reviewable as data rather than recomputed per process. Every province carries its
+area and centre, every border its length in kilometres, and every drawn town is a settlement of the world.
+`packages/db/src/punic-wars-scenario.ts` takes the graph as its single source and adds only what the
+scenario alone knows: the governments, the Roman alliances, the people and the armies, and the two
+positions (Etna and the strait) in the province holding Messana. The scenario, its tests and its scripts
+spell places through `PUNIC_IDS`, which the builder's anchors keep pointing at the right province.
 
-Two things about that graph are worth knowing. Borders are matched by proximity, not by exact shared
-vertices: the map is stitched from several source datasets that trace the same real borders with
-different vertices, and exact matching found borders only within each dataset — which split the
-continent and left Sicily looking for a sea crossing to Britain. And the fifteen landmasses that
-remain are joined by a minimum spanning tree of their shortest crossings, so every crossing is real
-geography (Dover, Gibraltar, Bonifacio) rather than an artefact of iteration order.
+Two things about that graph are worth knowing. Borders are exact: neighbouring provinces share their
+vertices, so adjacency is read from the arcs and not guessed. And the landmasses are joined by a minimum
+spanning tree of their shortest crossings, with the strait and sea-lane crossings a fleet needs
+(Messana, Otranto, the Gulf of Corinth, Sicily to Africa) added by length, so every crossing is real
+geography rather than an artefact of iteration order.
 
 The invariants that make "authoritative" mean something are asserted in
 `packages/db/src/punic-wars-scenario.test.ts`, because nothing enforces them at runtime:
@@ -223,9 +226,12 @@ The invariants that make "authoritative" mean something are asserted in
 otherwise ship a border to a province that does not exist, or a sea lane out of a landlocked upland,
 and the first sign of it would be an army that cannot move.
 
-Carrying the whole map costs about **1.3 ms of CPU per burst** (`JSON.stringify` 0.27 → 1.45 ms,
-`WorldStateSchema.parse` 5.67 → 5.76 ms) on a 472 KB world — against several model calls taking
-seconds. What a map this size actually threatens is not speed but honesty: see the slice and
+Carrying the whole map costs a burst a few tens of milliseconds, against several model calls taking
+seconds (`scripts/load-check-map.mts`, on an idle laptop): the opening world is 2.8 MB of JSON
+(0.47 MB on the old map), `WorldStateSchema.parse` takes about 58 ms, `ensureProvinceMaterial` 4 ms,
+`liveProvinceIds` 5 ms, the world view the client is sent 63 ms, a 30-day tick of the clock 420 to
+480 ms, and the map document the client downloads once is 12.4 MB (built once per version in 0.5 s,
+kept after). What a map this size actually threatens is not speed but honesty: see the slice and
 population notes above, both of which had to start *choosing* once the world stopped being small
 enough to send whole.
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, type PlanProposal, type WorldState } from "@chronica/shared";
 import { routeAmbientActors } from "./attention";
 import { DEFAULT_BUDGET, runSimulationBurst } from "./burst";
@@ -22,7 +22,7 @@ const offices = definition.government.offices;
 const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
 
 const HIERON = "hieron-ii";
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
+const MESSANA = PUNIC_IDS.messana;
 
 const TAKE_MESSANA: PlanProposal = {
   ambition: "Take Messana from the Mamertines",

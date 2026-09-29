@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstPunicWarScenario } from "@chronica/db";
+import { firstPunicWarScenario, FIRST_PUNIC_IDS } from "@chronica/db";
 import {
   GenericEntitySchema,
   MECHANIC_MAX_DEBIT_PER_BURST_BPS,
@@ -25,8 +25,8 @@ const offices = definition.government.offices;
 const warfare = definition.warfare;
 const MARCUS = { kind: "character" as const, id: "marcus-atilius" };
 const HANNO = { kind: "character" as const, id: "hanno" };
-const NORTHEAST = "ita-72843720b81376294924159-sicily-northeast";
-const WEST = "ita-72843720b81376294924159-sicily-west";
+const NORTHEAST = FIRST_PUNIC_IDS.messana;
+const WEST = FIRST_PUNIC_IDS.lilybaeum;
 
 const world = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld)), 0);
 const balance = (state: WorldState, id: string): number => state.material.accounts.find((account) => account.id === id)!.balance;

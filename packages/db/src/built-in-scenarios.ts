@@ -1,11 +1,27 @@
 import { ScenarioDefinitionSchema, WorldStateSchema, type ScenarioDefinition, type WorldState } from "@chronica/shared";
 
 export { PUNIC_WARS_SCENARIO_ID, PUNIC_WARS_SLUG, punicWarsScenario, punicWarsFounding } from "./punic-wars-scenario";
+export { PUNIC_IDS, type PunicPlace } from "./punic-ids";
 export { foundingPeople, romanSenators, seatFoundingPeopleInto, withFinerSkills, type SeatingReport } from "./punic-wars-rulers";
 
 export const CHRONICA_SYSTEM_USER_ID = "00000000-0000-4000-8000-000000000001";
 export const FIRST_PUNIC_WAR_SCENARIO_ID = "00000000-0000-4000-8000-000000000101";
 export const FIRST_PUNIC_WAR_SLUG = "first-punic-war";
+
+/**
+ * The provinces of this scenario's own seven-province map (asset ...0201), by the
+ * places they hold. It keeps the ids of the map it was written on; the 270 BCE
+ * scenario's are `PUNIC_IDS`.
+ */
+export const FIRST_PUNIC_IDS = {
+  rome: "ita-local-23120603B86473916475875",
+  carthage: "tun-13205935b88806172084765",
+  lilybaeum: "ita-72843720b81376294924159-sicily-west",
+  panormus: "ita-72843720b81376294924159-sicily-northwest",
+  agrigentum: "ita-72843720b81376294924159-sicily-central",
+  syracuse: "ita-72843720b81376294924159-sicily-southeast",
+  messana: "ita-72843720b81376294924159-sicily-northeast",
+} as const;
 
 const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
   clock: { epoch: { year: 264, month: 3, day: 1, era: "BCE" }, minSpanDays: 7, maxSpanDays: 365 },

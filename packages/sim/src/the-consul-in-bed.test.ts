@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { OrchestratorOutputSchema, ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -52,7 +52,7 @@ describe("a war nobody is fighting", () => {
   it("is put to a magistrate of the power whose armies are nowhere near the enemy", () => {
     // Legio I in Sicily; the Campanians hold Rhegium; nobody Roman is near them.
     const world = opening();
-    const away: WorldState = { ...world, material: { ...world.material, forces: world.material.forces.map((force) => (force.id === "roman-field-army" ? { ...force, locationId: "ita-72843720b81376294924159-sicily-west" } : force)) } };
+    const away: WorldState = { ...world, material: { ...world.material, forces: world.material.forces.map((force) => (force.id === "roman-field-army" ? { ...force, locationId: PUNIC_IDS.lilybaeum } : force)) } };
     const text = renderCharacterPortrait("gnaeus-cornelius", "Gnaeus Cornelius Blasio", away, clock);
     expect(text).toMatch(/No army of their power stands within reach of Campanian legion of Rhegium/);
     // Not to a senator, who raises no legions.
@@ -100,7 +100,7 @@ describe("a fact that puts an army where it is not", () => {
       intent: { summary: "Nothing.", domains: [] },
       narrativeSummary: "The fleet is reviewed.",
       frictions: [], deltas: [], delegations: [], schedule: [], cognitionCandidates: [], outcome: "continue", playerDecision: null,
-      facts: [{ localId: "review", kind: "fleet_review", summary: "The Carthaginian fleet was reviewed in Latium.", affectedRefs: [{ kind: "force", id: "carthaginian-fleet" }, { kind: "province", id: "punic-italy-latium" }], visibility: "public", discoveryState: "public", significance: 30 }],
+      facts: [{ localId: "review", kind: "fleet_review", summary: "The Carthaginian fleet was reviewed in Latium.", affectedRefs: [{ kind: "force", id: "carthaginian-fleet" }, { kind: "province", id: PUNIC_IDS.rome }], visibility: "public", discoveryState: "public", significance: 30 }],
     });
     const port: SimModelPort = { complete: (operation) => Promise.resolve(operation === "simulate_orchestrate" ? JSON.stringify(answer) : JSON.stringify({ actors: [] })) };
     const result = await runSimulationBurst({

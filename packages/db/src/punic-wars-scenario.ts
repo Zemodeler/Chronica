@@ -1,7 +1,15 @@
-import { ScenarioDefinitionSchema, WorldStateSchema, type GovernmentForm, type ScenarioDefinition, type Settlement, type WorldState } from "@chronica/shared";
-import { PUNIC_WARS_GRAPH_EDGES, PUNIC_WARS_GRAPH_POLITIES, PUNIC_WARS_GRAPH_PROVINCES, PUNIC_WARS_GRAPH_SETTLEMENTS } from "./punic-wars-map-graph";
+import { GovernmentFormSchema, ScenarioDefinitionSchema, WorldStateSchema, type GovernmentForm, type ScenarioDefinition, type WorldState } from "@chronica/shared";
+import { PUNIC_IDS } from "./punic-ids";
+import { POLITY_META, PUNIC_WARS_GRAPH_EDGES, PUNIC_WARS_GRAPH_POLITIES, PUNIC_WARS_GRAPH_PROVINCES, PUNIC_WARS_GRAPH_SETTLEMENTS } from "./punic-wars-map-graph";
 import { foundingPeople, romanSenators, withFinerSkills } from "./punic-wars-rulers";
 
+/**
+ * The Mediterranean and the Near East of 270 BCE, on the generated map: 6,056 provinces, 161 powers
+ * and every drawn town come from the map's graph (`punic-wars-map-graph.ts`,
+ * built by `scripts/map-gen`), and this file adds what the graph cannot know --
+ * how each power governs, who its people are, what armies and money they hold.
+ * Places are spelt through `PUNIC_IDS`, never by an id.
+ */
 export const PUNIC_WARS_SCENARIO_ID = "00000000-0000-4000-8000-000000000102";
 export const PUNIC_WARS_SLUG = "punic-wars";
 
@@ -12,35 +20,8 @@ const italianPolities = [
   ["lucanians", "Lucanians"], ["bruttians", "Bruttians"], ["apulian-cities", "Apulian cities"], ["messapians", "Messapians"],
 ] as const;
 
-// Ids and boundaries match the rendered map's own Italy partition exactly
-// (apps/web/lib/punic-wars-geojson.ts's ITALY_GROUNDED_TERRITORIES, 15 real
-// modern-region polygons) rather than a separately authored, finer tribal
-// breakdown. A gameplay province with no matching map polygon has no
-// position to render at -- see the army-vanishing and mismatched-label bugs
-// this replaced. Where several old tribal provinces shared one real region
-// (e.g. three Liguria provinces, Bruttium and Rhegium), they're merged into
-// one gameplay province here too, keeping each region's original controller.
-const italy = [
-  ["punic-italy-ligurian-coast", "Liguria", "ligurians"],
-  ["punic-italy-insubrian-plain", "Insubria", "insubres"],
-  ["punic-italy-middle-padus", "Boii", "boii"],
-  ["punic-italy-venetian-lagoon", "Veneti", "veneti"],
-  // Rome itself governs only Latium, with the Sabine country and southern
-  // Etruria, and Campania, whose cities hold citizenship without the vote.
-  // The rest of the peninsula is allied to it by foedus, not ruled by it.
-  ["punic-italy-etrurian-uplands", "Etruria", "etruscan-cities"],
-  ["punic-italy-umbrian-valleys", "Umbria", "umbrians"],
-  ["punic-italy-picenum-coast", "Picenum", "picentes"],
-  ["punic-italy-latium", "Latium", "rome"],
-  ["punic-italy-marsian-highlands", "Marsi and Paeligni", "marsi-paeligni"],
-  ["punic-italy-samnium", "Samnium", "samnites"],
-  ["punic-italy-campanian-plain", "Campania", "rome"],
-  ["punic-italy-apulian-coast", "Apulia", "apulian-cities"],
-  ["punic-italy-lucanian-uplands", "Lucania", "lucanians"],
-  ["punic-italy-bruttian-highlands", "Bruttium", "bruttians"],
-  // Free until Rome's war of 267-266, and Tarentum's friends.
-  ["punic-italy-sallentine-peninsula", "Messapia", "messapians"],
-] as const;
+/** The powers this scenario writes out itself, apart from the map's list of who holds what. */
+const AUTHORED_POLITY_IDS: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse", "mamertines", "rhegium-campanians", ...italianPolities.map(([id]) => id)]);
 
 /**
  * Rome's allies in 270, each bound by its own foedus: who, the terms, and how
@@ -58,88 +39,6 @@ const alliedItaly: readonly (readonly [string, number, string, number, string])[
   ["bruttians", 0, "Bound to Rome after defeat in 272, when they gave up half the Sila forest.", -40, "Stripped of half their forest, and neighbours to the Campanians of Rhegium."],
   ["apulian-cities", 0, "Tarentum surrendered in 272 and keeps its own laws under a Roman garrison; Arpi and the Daunians have been allies since 326. All send men and ships to Rome's wars.", -15, "Tarentum has a Roman garrison in its citadel and remembers Pyrrhus."],
 ];
-
-// The campaign state, not the rendered GeoJSON, is authoritative for a
-// siege. Keep every settlement that appears on the delivered map *within a
-// playable province* here as well. Otherwise a place can be visible and
-// clickable to a player but impossible for start_siege to resolve.
-const visibleSettlementsByProvince: Readonly<Record<string, readonly Settlement[]>> = {
-  "punic-italy-ligurian-coast": [
-    { id: "settlement-genua", name: "Genua", kind: "port", provinceId: "punic-italy-ligurian-coast", controllerPolityId: "ligurians", size: 45, fortificationLevel: 3 },
-  ],
-  "punic-italy-insubrian-plain": [
-    { id: "settlement-mediolanum", name: "Mediolanum", kind: "city", provinceId: "punic-italy-insubrian-plain", controllerPolityId: "insubres", size: 55, fortificationLevel: 3 },
-  ],
-  "punic-italy-middle-padus": [
-    { id: "settlement-bononia", name: "Felsina", kind: "town", provinceId: "punic-italy-middle-padus", controllerPolityId: "boii", size: 35, fortificationLevel: 2 },
-  ],
-  "punic-italy-venetian-lagoon": [
-    { id: "settlement-patavium", name: "Patavium", kind: "city", provinceId: "punic-italy-venetian-lagoon", controllerPolityId: "veneti", size: 50, fortificationLevel: 2 },
-  ],
-  // Rome's Latin colonies stand inside its allies' lands as its garrisons:
-  // Cosa (273), Narnia (299), Alba Fucens (303), Luceria (314), Venusia (291).
-  "punic-italy-etrurian-uplands": [
-    { id: "settlement-volsinii", name: "Volsinii", kind: "city", provinceId: "punic-italy-etrurian-uplands", controllerPolityId: "etruscan-cities", size: 35, fortificationLevel: 4 },
-    { id: "settlement-arretium", name: "Arretium", kind: "city", provinceId: "punic-italy-etrurian-uplands", controllerPolityId: "etruscan-cities", size: 40, fortificationLevel: 3 },
-    { id: "settlement-cosa", name: "Cosa", kind: "fortress", provinceId: "punic-italy-etrurian-uplands", controllerPolityId: "rome", size: 15, fortificationLevel: 3 },
-  ],
-  "punic-italy-umbrian-valleys": [
-    { id: "settlement-iguvium", name: "Iguvium", kind: "town", provinceId: "punic-italy-umbrian-valleys", controllerPolityId: "umbrians", size: 30, fortificationLevel: 2 },
-    { id: "settlement-narnia", name: "Narnia", kind: "fortress", provinceId: "punic-italy-umbrian-valleys", controllerPolityId: "rome", size: 15, fortificationLevel: 3 },
-  ],
-  "punic-italy-picenum-coast": [
-    { id: "settlement-asculum", name: "Asculum", kind: "city", provinceId: "punic-italy-picenum-coast", controllerPolityId: "picentes", size: 40, fortificationLevel: 3 },
-  ],
-  "punic-italy-marsian-highlands": [
-    { id: "settlement-corfinium", name: "Corfinium", kind: "town", provinceId: "punic-italy-marsian-highlands", controllerPolityId: "marsi-paeligni", size: 30, fortificationLevel: 2 },
-    { id: "settlement-alba-fucens", name: "Alba Fucens", kind: "fortress", provinceId: "punic-italy-marsian-highlands", controllerPolityId: "rome", size: 15, fortificationLevel: 3 },
-  ],
-  "punic-italy-latium": [
-    { id: "settlement-rome", name: "Rome", kind: "city", provinceId: "punic-italy-latium", controllerPolityId: "rome", size: 100, fortificationLevel: 6 },
-  ],
-  "punic-italy-samnium": [
-    { id: "settlement-bovianum", name: "Bovianum", kind: "town", provinceId: "punic-italy-samnium", controllerPolityId: "samnites", size: 25, fortificationLevel: 3 },
-  ],
-  "punic-italy-campanian-plain": [
-    { id: "settlement-naples", name: "Naples", kind: "city", provinceId: "punic-italy-campanian-plain", controllerPolityId: "rome", size: 60, fortificationLevel: 3 },
-    { id: "settlement-capua", name: "Capua", kind: "city", provinceId: "punic-italy-campanian-plain", controllerPolityId: "rome", size: 65, fortificationLevel: 4 },
-  ],
-  "punic-italy-bruttian-highlands": [
-    { id: "settlement-rhegium", name: "Rhegium", kind: "port", provinceId: "punic-italy-bruttian-highlands", controllerPolityId: "rhegium-campanians", size: 40, fortificationLevel: 3 },
-    { id: "settlement-consentia", name: "Consentia", kind: "town", provinceId: "punic-italy-bruttian-highlands", controllerPolityId: "bruttians", size: 35, fortificationLevel: 2 },
-  ],
-  "punic-italy-lucanian-uplands": [
-    { id: "settlement-grumentum", name: "Grumentum", kind: "town", provinceId: "punic-italy-lucanian-uplands", controllerPolityId: "lucanians", size: 30, fortificationLevel: 2 },
-    { id: "settlement-venusia", name: "Venusia", kind: "fortress", provinceId: "punic-italy-lucanian-uplands", controllerPolityId: "rome", size: 20, fortificationLevel: 3 },
-  ],
-  "punic-italy-apulian-coast": [
-    // Surrendered to Rome in 272, and holds a Roman garrison in its citadel.
-    { id: "settlement-tarentum", name: "Tarentum", kind: "port", provinceId: "punic-italy-apulian-coast", controllerPolityId: "apulian-cities", size: 60, fortificationLevel: 4 },
-    { id: "settlement-arpi", name: "Arpi", kind: "city", provinceId: "punic-italy-apulian-coast", controllerPolityId: "apulian-cities", size: 35, fortificationLevel: 2 },
-    { id: "settlement-luceria", name: "Luceria", kind: "fortress", provinceId: "punic-italy-apulian-coast", controllerPolityId: "rome", size: 20, fortificationLevel: 3 },
-  ],
-  "punic-italy-sallentine-peninsula": [
-    { id: "settlement-brundisium", name: "Brundisium", kind: "port", provinceId: "punic-italy-sallentine-peninsula", controllerPolityId: "messapians", size: 35, fortificationLevel: 2 },
-  ],
-  "tun-13205935b88806172084765": [
-    { id: "settlement-carthage", name: "Carthage", kind: "city", provinceId: "tun-13205935b88806172084765", controllerPolityId: "carthage", size: 100, fortificationLevel: 6 },
-  ],
-  "ita-72843720b81376294924159-sicily-west": [
-    { id: "settlement-lilybaeum", name: "Lilybaeum", kind: "port", provinceId: "ita-72843720b81376294924159-sicily-west", controllerPolityId: "carthage", size: 45, fortificationLevel: 4 },
-  ],
-  "ita-72843720b81376294924159-sicily-northwest": [
-    { id: "settlement-panormus", name: "Panormus", kind: "city", provinceId: "ita-72843720b81376294924159-sicily-northwest", controllerPolityId: "carthage", size: 55, fortificationLevel: 3 },
-  ],
-  "ita-72843720b81376294924159-sicily-central": [
-    { id: "settlement-agrigentum", name: "Agrigentum", kind: "city", provinceId: "ita-72843720b81376294924159-sicily-central", controllerPolityId: "carthage", size: 30, fortificationLevel: 4 },
-  ],
-  "ita-72843720b81376294924159-sicily-southeast": [
-    { id: "settlement-syracuse", name: "Syracuse", kind: "port", provinceId: "ita-72843720b81376294924159-sicily-southeast", controllerPolityId: "syracuse", size: 90, fortificationLevel: 5 },
-  ],
-  "ita-72843720b81376294924159-sicily-northeast": [
-    { id: "settlement-messana", name: "Messana", kind: "port", provinceId: "ita-72843720b81376294924159-sicily-northeast", controllerPolityId: "mamertines", size: 50, fortificationLevel: 3 },
-  ],
-};
 
 /**
  * The offices of 270 BCE, and a ladder to climb them (scenario v28).
@@ -249,7 +148,7 @@ const otherPowersOffices = [
  */
 const templatePolities: readonly (readonly [string, string])[] = [
   ...italianPolities,
-  ...PUNIC_WARS_GRAPH_POLITIES.filter((polity) => !["rome", "carthage", "syracuse", "mamertines", "rhegium-campanians", ...italianPolities.map(([id]) => id)].includes(polity.polityId)).map((polity) => [polity.polityId, polity.name] as const),
+  ...PUNIC_WARS_GRAPH_POLITIES.filter((polity) => !AUTHORED_POLITY_IDS.has(polity.polityId)).map((polity) => [polity.polityId, polity.name] as const),
 ];
 const templateRequirements = templatePolities.map(([id, name]) => ({ id: `req-${id}-polity`, kind: "polity_membership", label: `Must belong to ${name}`.slice(0, 160), params: { polityId: id } }));
 const templateOffices = templatePolities.flatMap(([id, name]) => {
@@ -272,7 +171,7 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
       { id: "mountain-pass", label: "Mountain passes", allowedCrossings: ["pass"], water: false },
       { id: "desert-steppe", label: "Desert and steppe", allowedCrossings: ["land"], water: false },
     ],
-    provinceCount: { min: 780, max: 780 },
+    provinceCount: { min: PUNIC_WARS_GRAPH_PROVINCES.length, max: PUNIC_WARS_GRAPH_PROVINCES.length },
   },
   /**
    * What a Roman of a given standing is worth, in the units this scenario's
@@ -378,9 +277,9 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
         afterPressureIds: ["messana-invites-a-protector"],
         atPeace: [{ polityId: "rome", otherPolityId: "carthage" }],
         // Only once one of them is actually there.
-        forcesPresent: [{ polityIds: ["rome", "carthage"], provinceId: "ita-72843720b81376294924159-sicily-northeast" }],
+        forcesPresent: [{ polityIds: ["rome", "carthage"], provinceId: PUNIC_IDS.messana }],
       },
-      target: { polityId: "rome", provinceId: "ita-72843720b81376294924159-sicily-northeast", otherPolityId: "carthage" },
+      target: { polityId: "rome", provinceId: PUNIC_IDS.messana, otherPolityId: "carthage" },
       brief: "A protector has been asked for at Messana, and one of the great powers has moved -- a garrison put ashore, a fleet standing into the strait, a magistrate sent to take the city's submission. The other will not have it: the strait is three miles wide and whoever holds both sides of it holds everything that passes. The power that crossed is named below. Decide what the other did about it, and who in each government carried the argument. Open the war itself with \"agreement_open\" of kind \"war\" between rome and carthage, record the breaking as a public fact naming both powers and Messana, and give the men who pushed for it a \"character_intent_set\". Do not fight it here -- opening it is the whole of this, and the campaign belongs to the people who will have to make it.",
     },
     {
@@ -472,114 +371,10 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
   dialogue: { roleSlots: [], namePools: { roman: ["Gaius", "Lucius"], carthaginian: ["Hanno", "Hamilcar"], greek: ["Hieron", "Sosistratus"] } },
   continuity: { startingSeatCount: 1, extraPrincipalsPerPlayer: 1 },
   knowledge: [
-    { id: "mamertine-crisis", summary: "In 270 BCE Hieron II's Syracuse contests the Mamertines of Messana. Rome and Carthage remain at peace, but the strait is strategically volatile.", subjectIds: ["syracuse", "mamertines", "rome", "carthage"], provinceIds: ["ita-72843720b81376294924159-sicily-northeast", "ita-72843720b81376294924159-sicily-southeast"] },
-    { id: "roman-italian-control", summary: "Rome governs Latium and Campania. The Etruscans, Umbrians, Picentes, Marsi and Paeligni, Samnites, Lucanians, Bruttians and the Apulian cities are its allies by foedus: their own laws, no tribute, soldiers for Rome's wars, no war or peace of their own. The Samnites, Lucanians and Bruttians were beaten only in 272; the Picentes are restless; the Messapians are still free.", subjectIds: ["rome", "samnites", "picentes", "messapians"], provinceIds: ["punic-italy-latium", "punic-italy-samnium", "punic-italy-picenum-coast", "punic-italy-sallentine-peninsula"] },
+    { id: "mamertine-crisis", summary: "In 270 BCE Hieron II's Syracuse contests the Mamertines of Messana. Rome and Carthage remain at peace, but the strait is strategically volatile.", subjectIds: ["syracuse", "mamertines", "rome", "carthage"], provinceIds: [PUNIC_IDS.messana, PUNIC_IDS.syracuse] },
+    { id: "roman-italian-control", summary: "Rome governs Latium and Campania. The Etruscans, Umbrians, Picentes, Marsi and Paeligni, Samnites, Lucanians, Bruttians and the Apulian cities are its allies by foedus: their own laws, no tribute, soldiers for Rome's wars, no war or peace of their own. The Samnites, Lucanians and Bruttians were beaten only in 272; the Picentes are restless; the Messapians are still free.", subjectIds: ["rome", "samnites", "picentes", "messapians"], provinceIds: [PUNIC_IDS.rome, PUNIC_IDS.bovianum, PUNIC_IDS.asculum, PUNIC_IDS.brundisium] },
   ],
 });
-
-/**
- * The places this scenario is actually about, authored rather than derived:
- * their settlements, their operational positions, and control set deliberately.
- * The rest of the map comes from the generated graph, and these win wherever
- * the two describe the same province.
- */
-const handAuthoredProvinces = [
-  ...italy.map(([id, name, controllerPolityId]) => ({ id, name, formerNames: [], terrainId: id === "punic-italy-latium" || id === "punic-italy-campanian-plain" ? "coastal-plain" : "hills", settlements: visibleSettlementsByProvince[id] ?? [], controllerPolityId, controlFirmnessBps: controllerPolityId === "rome" ? 9_000 : 7_000 })),
-  { id: "tun-13205935b88806172084765", name: "Carthaginian heartland", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["tun-13205935b88806172084765"]!, controllerPolityId: "carthage", controlFirmnessBps: 9_000 },
-  { id: "ita-72843720b81376294924159-sicily-west", name: "Lilybaeum and western Sicily", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-west"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_500 },
-  { id: "ita-72843720b81376294924159-sicily-northwest", name: "Panormus and the north-west", formerNames: [], terrainId: "hills", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-northwest"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_000 },
-  { id: "ita-72843720b81376294924159-sicily-central", name: "Agrigentum and the south-west", formerNames: [], terrainId: "hills", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-central"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_000 },
-  { id: "ita-72843720b81376294924159-sicily-southeast", name: "Syracuse and the south-east", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-southeast"]!, controllerPolityId: "syracuse", controlFirmnessBps: 8_500 },
-  {
-    id: "ita-72843720b81376294924159-sicily-northeast",
-    name: "Messana and the strait",
-    formerNames: [],
-    terrainId: "coastal-plain",
-    settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-northeast"]!,
-    // Mount Etna is an operational destination inside this coarse province;
-    // it is not a separate province that an army can be teleported to.
-    positions: [
-      { id: "position-mount-etna", provinceId: "ita-72843720b81376294924159-sicily-northeast", label: "Mount Etna", type: "pass", combatModifierBps: 700, capacity: 3 },
-      { id: "position-messana-strait", provinceId: "ita-72843720b81376294924159-sicily-northeast", label: "Messana strait", type: "coast", combatModifierBps: 0, capacity: null },
-    ],
-    controllerPolityId: "mamertines",
-    controlFirmnessBps: 7_500,
-  },
-];
-
-/**
- * Italy north-to-south, with the Messana strait and the Carthage-Sicily
- * crossing closing the loop to Africa. These stay hand-written because they
- * are the routes the opening is fought over, and because "land" is used for
- * the two water crossings deliberately: the provinces either side are
- * authored as "hills", which admits no strait, and the campaign has always
- * treated both as ordinary marches.
- */
-const handAuthoredRoads: (readonly [from: string, to: string, kilometres: number])[] = [
-  ["punic-italy-ligurian-coast", "punic-italy-insubrian-plain", 173],
-  ["punic-italy-ligurian-coast", "punic-italy-etrurian-uplands", 214],
-  ["punic-italy-insubrian-plain", "punic-italy-middle-padus", 158],
-  ["punic-italy-insubrian-plain", "punic-italy-venetian-lagoon", 162],
-  ["punic-italy-middle-padus", "punic-italy-venetian-lagoon", 140],
-  ["punic-italy-middle-padus", "punic-italy-etrurian-uplands", 120],
-  ["punic-italy-etrurian-uplands", "punic-italy-umbrian-valleys", 123],
-  ["punic-italy-etrurian-uplands", "punic-italy-latium", 211],
-  ["punic-italy-umbrian-valleys", "punic-italy-picenum-coast", 68],
-  ["punic-italy-umbrian-valleys", "punic-italy-latium", 112],
-  ["punic-italy-umbrian-valleys", "punic-italy-marsian-highlands", 139],
-  ["punic-italy-picenum-coast", "punic-italy-marsian-highlands", 137],
-  ["punic-italy-latium", "punic-italy-marsian-highlands", 94],
-  ["punic-italy-latium", "punic-italy-campanian-plain", 213],
-  ["punic-italy-marsian-highlands", "punic-italy-samnium", 86],
-  ["punic-italy-samnium", "punic-italy-campanian-plain", 94],
-  ["punic-italy-samnium", "punic-italy-apulian-coast", 142],
-  ["punic-italy-samnium", "punic-italy-lucanian-uplands", 181],
-  ["punic-italy-campanian-plain", "punic-italy-lucanian-uplands", 112],
-  ["punic-italy-apulian-coast", "punic-italy-lucanian-uplands", 78],
-  ["punic-italy-apulian-coast", "punic-italy-sallentine-peninsula", 178],
-  ["punic-italy-lucanian-uplands", "punic-italy-bruttian-highlands", 161],
-  ["punic-italy-lucanian-uplands", "punic-italy-bruttian-highlands", 161],
-  ["ita-72843720b81376294924159-sicily-west", "ita-72843720b81376294924159-sicily-northwest", 67],
-  ["ita-72843720b81376294924159-sicily-northwest", "ita-72843720b81376294924159-sicily-central", 61],
-  ["ita-72843720b81376294924159-sicily-central", "ita-72843720b81376294924159-sicily-southeast", 80],
-  ["ita-72843720b81376294924159-sicily-southeast", "ita-72843720b81376294924159-sicily-northeast", 87],
-];
-const handAuthoredEdges = handAuthoredRoads.map(([from, to, distance]) => ({ from, to, crossing: "land" as const, distance }));
-
-/**
- * The two crossings that are water, and always were.
- *
- * The strait at Messana and the passage from Sicily to Africa were authored as
- * land edges because nothing in the engine could tell the difference, so a
- * legion walked to Sicily and the First Punic War could be fought without a
- * ship. They are what makes Sicily an island.
- */
-const handAuthoredWaterEdges = [
-  { from: "punic-italy-bruttian-highlands", to: "ita-72843720b81376294924159-sicily-northeast", crossing: "strait" as const, distance: 166 },
-  { from: "tun-13205935b88806172084765", to: "ita-72843720b81376294924159-sicily-west", crossing: "sea_lane" as const, distance: 261 },
-];
-
-const edgeKey = (from: string, to: string): string => [from, to].sort().join("|");
-
-/**
- * A crossing is legal only where the terrain on *both* sides admits it
- * (`packages/shared/src/world/map.ts`). The derived graph reaches Corsica from
- * Etruria by strait, and Etruria was authored as "hills", which admits neither
- * strait nor sea lane. Any authored province the graph gives a water crossing
- * is therefore recorded as the coastal plain it evidently is, rather than
- * dropping the crossing or maintaining the same fact in two places.
- */
-const waterCrossingProvinceIds = new Set(
-  [...PUNIC_WARS_GRAPH_EDGES, ...handAuthoredWaterEdges].filter((edge) => edge.crossing !== "land").flatMap((edge) => [edge.from, edge.to]),
-);
-const authoredProvinces = handAuthoredProvinces.map((province) =>
-  waterCrossingProvinceIds.has(province.id) && province.terrainId !== "coastal-plain"
-    ? { ...province, terrainId: "coastal-plain" }
-    : province);
-const authoredEdges = [...handAuthoredEdges, ...handAuthoredWaterEdges];
-const authoredProvinceIds = new Set(authoredProvinces.map((province) => province.id));
-const authoredEdgeKeys = new Set(authoredEdges.map((edge) => edgeKey(edge.from, edge.to)));
-const authoredPolityIds = new Set<string>(["rome", "carthage", "syracuse", "mamertines", ...italianPolities.map(([id]) => id)]);
 
 /**
  * How far each power on this map acts as one thing.
@@ -622,7 +417,8 @@ const COHESION_BY_POLITY: Readonly<Record<string, number>> = {
 
 /** Peoples the map names but nobody ever organised: loose unless said otherwise. */
 const DEFAULT_COHESION = 3_000;
-const cohesionFor = (polityId: string): number => COHESION_BY_POLITY[polityId] ?? DEFAULT_COHESION;
+/** The map builder gives the powers it adds (Anatolia's) a cohesion of their own; the ones above keep theirs. */
+const cohesionFor = (polityId: string): number => COHESION_BY_POLITY[polityId] ?? POLITY_META[polityId]?.cohesionBps ?? DEFAULT_COHESION;
 
 /**
  * What sort of government each power had in 270 (scenario v33; leaders seated from v34): the seed its
@@ -651,17 +447,28 @@ const GOVERNMENT_FORM_BY_POLITY: Readonly<Record<string, GovernmentForm>> = {
   macedon: "monarchy", epirus: "monarchy", cyrene: "monarchy", sparta: "monarchy", "numidian-kingdoms": "monarchy", "mauretanian-peoples": "monarchy",
   garamantes: "monarchy", "illyria-ardiaei": "monarchy", "illyria-dardani": "monarchy", "illyria-taulantii": "monarchy", "thrace-odrysians": "monarchy", "thrace-getae": "monarchy",
 };
-const governmentFormFor = (polityId: string): GovernmentForm | null => GOVERNMENT_FORM_BY_POLITY[polityId] ?? null;
+const governmentFormFor = (polityId: string): GovernmentForm | null => {
+  const form = GOVERNMENT_FORM_BY_POLITY[polityId] ?? POLITY_META[polityId]?.governmentForm;
+  return form === undefined ? null : GovernmentFormSchema.parse(form);
+};
 
-const graphSettlementsByProvince = new Map<string, { id: string; name: string; kind: string; provinceId: string; controllerPolityId: string; size: number; fortificationLevel: number }[]>();
+const settlementsByProvince = new Map<string, (typeof PUNIC_WARS_GRAPH_SETTLEMENTS)[number][]>();
 for (const settlement of PUNIC_WARS_GRAPH_SETTLEMENTS) {
-  // Authored provinces bring their own settlements; taking the graph's copy too
-  // would duplicate an id, which the province graph refuses outright.
-  if (authoredProvinceIds.has(settlement.provinceId)) continue;
-  const existing = graphSettlementsByProvince.get(settlement.provinceId);
-  if (existing === undefined) graphSettlementsByProvince.set(settlement.provinceId, [{ ...settlement }]);
-  else existing.push({ ...settlement });
+  const at = settlementsByProvince.get(settlement.provinceId);
+  if (at === undefined) settlementsByProvince.set(settlement.provinceId, [{ ...settlement }]);
+  else at.push({ ...settlement });
 }
+
+/**
+ * Mount Etna is an operational destination inside the province holding Messana,
+ * and so is the strait: neither is a province an army can be teleported to.
+ */
+const POSITIONS_BY_PROVINCE: Readonly<Record<string, readonly { id: string; provinceId: string; label: string; type: "pass" | "coast"; combatModifierBps: number; capacity: number | null }[]>> = {
+  [PUNIC_IDS.messana]: [
+    { id: "position-mount-etna", provinceId: PUNIC_IDS.messana, label: "Mount Etna", type: "pass", combatModifierBps: 700, capacity: 3 },
+    { id: "position-messana-strait", provinceId: PUNIC_IDS.messana, label: "Messana strait", type: "coast", combatModifierBps: 0, capacity: null },
+  ],
+};
 
 /**
  * The opening world with somebody in every chair (`punic-wars-rulers.ts`,
@@ -690,7 +497,7 @@ const WRITTEN_OUT: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse"
 
 const initialWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 35, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 36, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   map: {
@@ -718,34 +525,26 @@ const initialWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
       // map has existed; until now none of them was written down, so nothing in
       // the simulation could see, name, or answer them.
       ...PUNIC_WARS_GRAPH_POLITIES
-        .filter((polity) => !authoredPolityIds.has(polity.polityId))
+        .filter((polity) => !AUTHORED_POLITY_IDS.has(polity.polityId))
         .map((polity) => ({ id: polity.polityId, name: polity.name, capitalSettlementId: polity.capitalSettlementId, cohesionBps: cohesionFor(polity.polityId), governmentForm: governmentFormFor(polity.polityId) })),
     ],
     politicalRelations: [],
-    provinces: [
-      ...authoredProvinces,
-      // The rest of the drawn world, exactly as the map already shows it. See
-      // `authoredProvinces` above for why these two lists exist separately.
-      ...PUNIC_WARS_GRAPH_PROVINCES
-        .filter((province) => !authoredProvinceIds.has(province.id))
-        .map((province) => ({
-          id: province.id,
-          name: province.name,
-          formerNames: [],
-          terrainId: province.terrainId,
-          // Exactly the settlements the map draws here -- no more, no fewer. A
-          // drawn settlement missing from the world is visible and clickable
-          // and impossible to besiege, and an undrawn one invented here would
-          // be a city in Pannonia no polygon ever claimed.
-          settlements: graphSettlementsByProvince.get(province.id) ?? [],
-          controllerPolityId: province.controllerPolityId,
-          controlFirmnessBps: province.controlFirmnessBps,
-        })),
-    ],
-    edges: [
-      ...authoredEdges,
-      ...PUNIC_WARS_GRAPH_EDGES.filter((edge) => !authoredEdgeKeys.has(edgeKey(edge.from, edge.to))),
-    ],
+    // The whole map, exactly as the asset draws it: every drawn settlement is
+    // in the world (else it is visible and clickable and impossible to besiege)
+    // and no undrawn one is invented.
+    provinces: PUNIC_WARS_GRAPH_PROVINCES.map((province) => ({
+      id: province.id,
+      name: province.name,
+      formerNames: [...province.formerNames],
+      terrainId: province.terrainId,
+      areaKm2: province.areaKm2,
+      geo: province.geo,
+      settlements: settlementsByProvince.get(province.id) ?? [],
+      ...(POSITIONS_BY_PROVINCE[province.id] === undefined ? {} : { positions: POSITIONS_BY_PROVINCE[province.id] }),
+      controllerPolityId: province.controllerPolityId,
+      controlFirmnessBps: province.controlFirmnessBps,
+    })),
+    edges: PUNIC_WARS_GRAPH_EDGES,
   },
   // The gods of each people, so a priest has a faith to serve and a man's
   // belief is something the world knows about him.
@@ -756,26 +555,26 @@ const initialWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
     { id: "faith-italic", name: "The Italic gods", foundedAtStep: 0, founderCharacterId: null },
   ],
   characters: [
-    { id: "gaius-genucius", officesHeld: [{ officeId: "roman-quaestor", lastHeldAtStep: 0 }, { officeId: "roman-praetor", lastHeldAtStep: 0 }], name: "Gaius Genucius Clepsina", cultureId: "roman", faithId: "faith-roman", dynastyId: null, locationProvinceId: "punic-italy-latium", polityId: "rome", ageYearsAtStart: 45, officeId: "roman-consul", personalAccountId: "gaius-purse", skills: { martial: 65, intrigue: 40, learning: 50, piety: 45, stewardship: 55, diplomacy: 60, body: 65, subSkills: {} }, traits: ["dutiful", "disciplined"], healthBps: 9_000, prestigeBps: 7_000, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null },
+    { id: "gaius-genucius", officesHeld: [{ officeId: "roman-quaestor", lastHeldAtStep: 0 }, { officeId: "roman-praetor", lastHeldAtStep: 0 }], name: "Gaius Genucius Clepsina", cultureId: "roman", faithId: "faith-roman", dynastyId: null, locationProvinceId: PUNIC_IDS.rome, polityId: "rome", ageYearsAtStart: 45, officeId: "roman-consul", personalAccountId: "gaius-purse", skills: { martial: 65, intrigue: 40, learning: 50, piety: 45, stewardship: 55, diplomacy: 60, body: 65, subSkills: {} }, traits: ["dutiful", "disciplined"], healthBps: 9_000, prestigeBps: 7_000, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null },
     // Genucius's colleague for 270 (scenario v29). Rome's two consuls sat
     // alone for twenty-eight versions with the second chair empty; Blasio, a
     // patrician Cornelius, held it that year, and was consul again in 257 and
     // censor after. He keeps the city while Genucius takes the army south.
-    { id: "gnaeus-cornelius", officesHeld: [{ officeId: "roman-quaestor", lastHeldAtStep: 0 }, { officeId: "roman-praetor", lastHeldAtStep: 0 }], name: "Gnaeus Cornelius Blasio", cultureId: "roman", faithId: "faith-roman", dynastyId: null, locationProvinceId: "punic-italy-latium", polityId: "rome", ageYearsAtStart: 42, officeId: "roman-consul", personalAccountId: "blasio-purse", skills: { martial: 55, intrigue: 50, learning: 55, piety: 55, stewardship: 65, diplomacy: 60, body: 55, subSkills: {} }, traits: ["ambitious", "methodical"], healthBps: 9_000, prestigeBps: 7_000, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null },
+    { id: "gnaeus-cornelius", officesHeld: [{ officeId: "roman-quaestor", lastHeldAtStep: 0 }, { officeId: "roman-praetor", lastHeldAtStep: 0 }], name: "Gnaeus Cornelius Blasio", cultureId: "roman", faithId: "faith-roman", dynastyId: null, locationProvinceId: PUNIC_IDS.rome, polityId: "rome", ageYearsAtStart: 42, officeId: "roman-consul", personalAccountId: "blasio-purse", skills: { martial: 55, intrigue: 50, learning: 55, piety: 55, stewardship: 65, diplomacy: 60, body: 55, subSkills: {} }, traits: ["ambitious", "methodical"], healthBps: 9_000, prestigeBps: 7_000, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null },
     // Carthage is a real party watching the Messana crisis, not a passive
     // name on the map: an active goal and plot (character-sim phase 3) give
     // Hanno explicit scenario relevance from the opening turn, and the
     // pressure names why it is on his mind now rather than as flavor text.
-    { id: "hanno-carthage", name: "Hanno of Carthage", cultureId: "carthaginian", faithId: "faith-punic", dynastyId: null, locationProvinceId: "tun-13205935b88806172084765", polityId: "carthage", ageYearsAtStart: 48, officeId: "carthaginian-strategos", personalAccountId: "hanno-purse", skills: { martial: 55, intrigue: 65, learning: 50, piety: 50, stewardship: 70, diplomacy: 65, body: 55, subSkills: {} }, traits: ["ambitious", "deceitful"], mind: { drives: { security: 55, status: 65, wealth: 60, family: 40, faith: 35, duty: 45, revenge: 30 }, temperament: { boldness: 55, caution: 50, honesty: 35, sociability: 55, discipline: 45, cruelty: 40 }, riskTolerance: 55, values: [], taboos: [], currentPressures: ["hanno-pressure-messana"] }, healthBps: 8_500, prestigeBps: 7_500, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null },
+    { id: "hanno-carthage", name: "Hanno of Carthage", cultureId: "carthaginian", faithId: "faith-punic", dynastyId: null, locationProvinceId: PUNIC_IDS.carthage, polityId: "carthage", ageYearsAtStart: 48, officeId: "carthaginian-strategos", personalAccountId: "hanno-purse", skills: { martial: 55, intrigue: 65, learning: 50, piety: 50, stewardship: 70, diplomacy: 65, body: 55, subSkills: {} }, traits: ["ambitious", "deceitful"], mind: { drives: { security: 55, status: 65, wealth: 60, family: 40, faith: 35, duty: 45, revenge: 30 }, temperament: { boldness: 55, caution: 50, honesty: 35, sociability: 55, discipline: 45, cruelty: 40 }, riskTolerance: 55, values: [], taboos: [], currentPressures: ["hanno-pressure-messana"] }, healthBps: 8_500, prestigeBps: 7_500, relations: [], ambitions: [], heirCharacterId: null, alive: true, diedAtStep: null },
     // A cautious, status-conscious ruler measuring every move against the Mamertine threat -- an authored
     // mind and relationship state (character-sim phase 2), demonstrating the fields without hardcoding
     // engine behavior to them: the simulation still reads Hieron II through the same canonical schema
     // every other character uses.
-    { id: "hieron-ii", name: "Hieron II", cultureId: "greek", faithId: "faith-greek", dynastyId: null, locationProvinceId: "ita-72843720b81376294924159-sicily-southeast", polityId: "syracuse", ageYearsAtStart: 38, officeId: "syracusan-king", personalAccountId: "hieron-purse", skills: { martial: 70, intrigue: 55, learning: 60, piety: 55, stewardship: 60, diplomacy: 65, body: 65, subSkills: {} }, traits: ["cautious", "dutiful"], mind: { drives: { security: 65, status: 70, wealth: 50, family: 50, faith: 45, duty: 70, revenge: 30 }, temperament: { boldness: 35, caution: 75, honesty: 55, sociability: 55, discipline: 65, cruelty: 30 }, riskTolerance: 30, values: ["dutiful"], taboos: ["deceitful"], currentPressures: ["mamertine-pressure-hieron"] }, healthBps: 9_000, prestigeBps: 7_500, relations: [{ subjectCharacterId: "mamertine-spokesman", causes: [{ id: "hieron-mamertine-rivalry", label: "The Mamertines seized Messana from Syracuse by treachery.", score: -18, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null, dimensions: { trust: -25, fear: 10, respect: -5 } }] }], ambitions: [{ id: "secure-sicily", label: "Secure Syracuse against the Mamertines", kind: "peace", targetId: "mamertines", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
+    { id: "hieron-ii", name: "Hieron II", cultureId: "greek", faithId: "faith-greek", dynastyId: null, locationProvinceId: PUNIC_IDS.syracuse, polityId: "syracuse", ageYearsAtStart: 38, officeId: "syracusan-king", personalAccountId: "hieron-purse", skills: { martial: 70, intrigue: 55, learning: 60, piety: 55, stewardship: 60, diplomacy: 65, body: 65, subSkills: {} }, traits: ["cautious", "dutiful"], mind: { drives: { security: 65, status: 70, wealth: 50, family: 50, faith: 45, duty: 70, revenge: 30 }, temperament: { boldness: 35, caution: 75, honesty: 55, sociability: 55, discipline: 65, cruelty: 30 }, riskTolerance: 30, values: ["dutiful"], taboos: ["deceitful"], currentPressures: ["mamertine-pressure-hieron"] }, healthBps: 9_000, prestigeBps: 7_500, relations: [{ subjectCharacterId: "mamertine-spokesman", causes: [{ id: "hieron-mamertine-rivalry", label: "The Mamertines seized Messana from Syracuse by treachery.", score: -18, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null, dimensions: { trust: -25, fear: 10, respect: -5 } }] }], ambitions: [{ id: "secure-sicily", label: "Secure Syracuse against the Mamertines", kind: "peace", targetId: "mamertines", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
     // A bold, embattled spokesman under active military pressure -- distinct temperament and drives
     // from Hieron II despite a similar martial skill, so their dialogue and any future decisions read
     // as different people under different pressure, not palette-swapped stat blocks.
-    { id: "mamertine-spokesman", name: "Statius Mettius", cultureId: "italic", faithId: "faith-italic", dynastyId: null, locationProvinceId: "ita-72843720b81376294924159-sicily-northeast", polityId: "mamertines", ageYearsAtStart: 35, officeId: "mamertine-leader", personalAccountId: "mamertine-purse", skills: { martial: 60, intrigue: 45, learning: 35, piety: 45, stewardship: 45, diplomacy: 50, body: 70, subSkills: {} }, traits: ["bold", "vengeful"], mind: { drives: { security: 70, status: 45, wealth: 40, family: 55, faith: 40, duty: 55, revenge: 55 }, temperament: { boldness: 70, caution: 30, honesty: 50, sociability: 45, discipline: 40, cruelty: 45 }, riskTolerance: 70, values: [], taboos: [], currentPressures: ["mamertine-pressure-spokesman"] }, healthBps: 8_500, prestigeBps: 5_500, relations: [{ subjectCharacterId: "hieron-ii", causes: [{ id: "mamertine-hieron-fear", label: "Syracusan forces press their border at Messana.", score: -12, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null, dimensions: { fear: 30, trust: -10 } }] }], ambitions: [{ id: "hold-messana", label: "Hold Messana", kind: "restoration", targetId: "settlement-messana", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
+    { id: "mamertine-spokesman", name: "Statius Mettius", cultureId: "italic", faithId: "faith-italic", dynastyId: null, locationProvinceId: PUNIC_IDS.messana, polityId: "mamertines", ageYearsAtStart: 35, officeId: "mamertine-leader", personalAccountId: "mamertine-purse", skills: { martial: 60, intrigue: 45, learning: 35, piety: 45, stewardship: 45, diplomacy: 50, body: 70, subSkills: {} }, traits: ["bold", "vengeful"], mind: { drives: { security: 70, status: 45, wealth: 40, family: 55, faith: 40, duty: 55, revenge: 55 }, temperament: { boldness: 70, caution: 30, honesty: 50, sociability: 45, discipline: 40, cruelty: 45 }, riskTolerance: 70, values: [], taboos: [], currentPressures: ["mamertine-pressure-spokesman"] }, healthBps: 8_500, prestigeBps: 5_500, relations: [{ subjectCharacterId: "hieron-ii", causes: [{ id: "mamertine-hieron-fear", label: "Syracusan forces press their border at Messana.", score: -12, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null, dimensions: { fear: 30, trust: -10 } }] }], ambitions: [{ id: "hold-messana", label: "Hold Messana", kind: "restoration", targetId: "settlement-messana", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
     // The men who actually held Rome, Syracuse and Carthage in 270 BCE, so the
     // opening world is a political situation rather than one consul and three
     // placeholders. Each is here because the year gives them something to be
@@ -784,24 +583,24 @@ const initialWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
     // Rhegium against the Republic that means to take it back. Ages are at the
     // scenario's opening; where a man's exact role in 270 is not recorded, his
     // attested career in the decade around it is what he is given.
-    { id: "manius-curius", officesHeld: [{ officeId: "roman-quaestor", lastHeldAtStep: 0 }, { officeId: "roman-praetor", lastHeldAtStep: 0 }, { officeId: "roman-consul", lastHeldAtStep: 0 }, { officeId: "roman-censor", lastHeldAtStep: 0 }], name: "Manius Curius Dentatus", cultureId: "roman", faithId: "faith-roman", dynastyId: null, locationProvinceId: "punic-italy-latium", polityId: "rome", ageYearsAtStart: 60, officeId: null, personalAccountId: "curius-purse", skills: { martial: 80, intrigue: 35, learning: 50, piety: 65, stewardship: 70, diplomacy: 55, body: 55, subSkills: {} }, traits: ["dutiful", "disciplined"], mind: { drives: { security: 50, status: 45, wealth: 20, family: 40, faith: 60, duty: 85, revenge: 20 }, temperament: { boldness: 55, caution: 55, honesty: 80, sociability: 45, discipline: 80, cruelty: 25 }, riskTolerance: 40, values: ["dutiful"], taboos: ["deceitful"], currentPressures: [] }, healthBps: 6_500, prestigeBps: 9_500, relations: [], ambitions: [{ id: "finish-the-anio", label: "See the Anio water brought into Rome", kind: "restoration", targetId: "settlement-rome", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
-    { id: "quintus-ogulnius", officesHeld: [{ officeId: "roman-quaestor", lastHeldAtStep: 0 }, { officeId: "roman-tribune", lastHeldAtStep: 0 }, { officeId: "roman-aedile", lastHeldAtStep: 0 }, { officeId: "roman-praetor", lastHeldAtStep: 0 }], name: "Quintus Ogulnius Gallus", cultureId: "roman", faithId: "faith-roman", dynastyId: null, locationProvinceId: "punic-italy-latium", polityId: "rome", ageYearsAtStart: 47, officeId: null, personalAccountId: "ogulnius-purse", skills: { martial: 45, intrigue: 55, learning: 70, piety: 70, stewardship: 75, diplomacy: 70, body: 50, subSkills: {} }, traits: ["ambitious", "methodical"], mind: { drives: { security: 45, status: 70, wealth: 55, family: 50, faith: 60, duty: 65, revenge: 25 }, temperament: { boldness: 45, caution: 65, honesty: 60, sociability: 70, discipline: 70, cruelty: 25 }, riskTolerance: 40, values: [], taboos: [], currentPressures: ["ogulnius-pressure-coinage"] }, healthBps: 8_500, prestigeBps: 7_000, relations: [], ambitions: [{ id: "roman-silver", label: "Put Rome's own silver into the hands of its allies", kind: "wealth", targetId: "rome", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
+    { id: "manius-curius", officesHeld: [{ officeId: "roman-quaestor", lastHeldAtStep: 0 }, { officeId: "roman-praetor", lastHeldAtStep: 0 }, { officeId: "roman-consul", lastHeldAtStep: 0 }, { officeId: "roman-censor", lastHeldAtStep: 0 }], name: "Manius Curius Dentatus", cultureId: "roman", faithId: "faith-roman", dynastyId: null, locationProvinceId: PUNIC_IDS.rome, polityId: "rome", ageYearsAtStart: 60, officeId: null, personalAccountId: "curius-purse", skills: { martial: 80, intrigue: 35, learning: 50, piety: 65, stewardship: 70, diplomacy: 55, body: 55, subSkills: {} }, traits: ["dutiful", "disciplined"], mind: { drives: { security: 50, status: 45, wealth: 20, family: 40, faith: 60, duty: 85, revenge: 20 }, temperament: { boldness: 55, caution: 55, honesty: 80, sociability: 45, discipline: 80, cruelty: 25 }, riskTolerance: 40, values: ["dutiful"], taboos: ["deceitful"], currentPressures: [] }, healthBps: 6_500, prestigeBps: 9_500, relations: [], ambitions: [{ id: "finish-the-anio", label: "See the Anio water brought into Rome", kind: "restoration", targetId: "settlement-rome", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
+    { id: "quintus-ogulnius", officesHeld: [{ officeId: "roman-quaestor", lastHeldAtStep: 0 }, { officeId: "roman-tribune", lastHeldAtStep: 0 }, { officeId: "roman-aedile", lastHeldAtStep: 0 }, { officeId: "roman-praetor", lastHeldAtStep: 0 }], name: "Quintus Ogulnius Gallus", cultureId: "roman", faithId: "faith-roman", dynastyId: null, locationProvinceId: PUNIC_IDS.rome, polityId: "rome", ageYearsAtStart: 47, officeId: null, personalAccountId: "ogulnius-purse", skills: { martial: 45, intrigue: 55, learning: 70, piety: 70, stewardship: 75, diplomacy: 70, body: 50, subSkills: {} }, traits: ["ambitious", "methodical"], mind: { drives: { security: 45, status: 70, wealth: 55, family: 50, faith: 60, duty: 65, revenge: 25 }, temperament: { boldness: 45, caution: 65, honesty: 60, sociability: 70, discipline: 70, cruelty: 25 }, riskTolerance: 40, values: [], taboos: [], currentPressures: ["ogulnius-pressure-coinage"] }, healthBps: 8_500, prestigeBps: 7_000, relations: [], ambitions: [{ id: "roman-silver", label: "Put Rome's own silver into the hands of its allies", kind: "wealth", targetId: "rome", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
     // Rome's other war of 270, and the one its own historians were least proud
     // of: a Campanian legion sent to garrison Rhegium killed the citizens and
     // kept the city. Vibellius holds it still, and the Republic means to end it.
-    { id: "decius-vibellius", name: "Decius Vibellius", cultureId: "italic", faithId: "faith-italic", dynastyId: null, locationProvinceId: "punic-italy-bruttian-highlands", polityId: "rhegium-campanians", ageYearsAtStart: 41, officeId: "campanian-leader", personalAccountId: "vibellius-purse", skills: { martial: 65, intrigue: 60, learning: 30, piety: 30, stewardship: 40, diplomacy: 35, body: 65, subSkills: {} }, traits: ["bold", "vengeful"], mind: { drives: { security: 80, status: 55, wealth: 65, family: 35, faith: 25, duty: 20, revenge: 50 }, temperament: { boldness: 75, caution: 35, honesty: 25, sociability: 40, discipline: 35, cruelty: 70 }, riskTolerance: 75, values: [], taboos: [], currentPressures: ["vibellius-pressure-siege"] }, healthBps: 8_000, prestigeBps: 3_000, relations: [], ambitions: [{ id: "keep-rhegium", label: "Keep Rhegium and his men's necks", kind: "restoration", targetId: "punic-italy-bruttian-highlands", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
+    { id: "decius-vibellius", name: "Decius Vibellius", cultureId: "italic", faithId: "faith-italic", dynastyId: null, locationProvinceId: PUNIC_IDS.rhegium, polityId: "rhegium-campanians", ageYearsAtStart: 41, officeId: "campanian-leader", personalAccountId: "vibellius-purse", skills: { martial: 65, intrigue: 60, learning: 30, piety: 30, stewardship: 40, diplomacy: 35, body: 65, subSkills: {} }, traits: ["bold", "vengeful"], mind: { drives: { security: 80, status: 55, wealth: 65, family: 35, faith: 25, duty: 20, revenge: 50 }, temperament: { boldness: 75, caution: 35, honesty: 25, sociability: 40, discipline: 35, cruelty: 70 }, riskTolerance: 75, values: [], taboos: [], currentPressures: ["vibellius-pressure-siege"] }, healthBps: 8_000, prestigeBps: 3_000, relations: [], ambitions: [{ id: "keep-rhegium", label: "Keep Rhegium and his men's necks", kind: "restoration", targetId: PUNIC_IDS.rhegium, status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
     // Syracuse is a court, not one king: Leptines is the aristocrat whose
     // daughter Hieron married, and the reason the city accepted him at all.
-    { id: "leptines-syracuse", name: "Leptines of Syracuse", cultureId: "greek", faithId: "faith-greek", dynastyId: null, locationProvinceId: "ita-72843720b81376294924159-sicily-southeast", polityId: "syracuse", ageYearsAtStart: 58, officeId: null, personalAccountId: "leptines-purse", skills: { martial: 50, intrigue: 60, learning: 65, piety: 55, stewardship: 70, diplomacy: 75, body: 45, subSkills: {} }, traits: ["cautious", "methodical"], mind: { drives: { security: 70, status: 60, wealth: 55, family: 75, faith: 45, duty: 60, revenge: 20 }, temperament: { boldness: 35, caution: 75, honesty: 60, sociability: 70, discipline: 65, cruelty: 20 }, riskTolerance: 30, values: [], taboos: [], currentPressures: [] }, healthBps: 7_500, prestigeBps: 7_000, relations: [{ subjectCharacterId: "hieron-ii", causes: [{ id: "leptines-hieron-kin", label: "Hieron married his daughter, and rules with his house behind him.", score: 35, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null, dimensions: { trust: 40, affection: 30, respect: 35 } }] }], ambitions: [{ id: "keep-the-house", label: "Keep his house at the centre of Syracuse", kind: "office", targetId: "syracuse", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
+    { id: "leptines-syracuse", name: "Leptines of Syracuse", cultureId: "greek", faithId: "faith-greek", dynastyId: null, locationProvinceId: PUNIC_IDS.syracuse, polityId: "syracuse", ageYearsAtStart: 58, officeId: null, personalAccountId: "leptines-purse", skills: { martial: 50, intrigue: 60, learning: 65, piety: 55, stewardship: 70, diplomacy: 75, body: 45, subSkills: {} }, traits: ["cautious", "methodical"], mind: { drives: { security: 70, status: 60, wealth: 55, family: 75, faith: 45, duty: 60, revenge: 20 }, temperament: { boldness: 35, caution: 75, honesty: 60, sociability: 70, discipline: 65, cruelty: 20 }, riskTolerance: 30, values: [], taboos: [], currentPressures: [] }, healthBps: 7_500, prestigeBps: 7_000, relations: [{ subjectCharacterId: "hieron-ii", causes: [{ id: "leptines-hieron-kin", label: "Hieron married his daughter, and rules with his house behind him.", score: 35, occurredAtStep: 0, decayPerYearBps: 0, encounterMemoryId: null, dimensions: { trust: 40, affection: 30, respect: 35 } }] }], ambitions: [{ id: "keep-the-house", label: "Keep his house at the centre of Syracuse", kind: "office", targetId: "syracuse", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
     // Carthage fights its wars through admirals, and Hannibal Gisco commanded
     // its fleets in the war that followed. In 270 he is the officer watching
     // the strait for the men who will have to decide about it.
-    { id: "hannibal-gisco", name: "Hannibal Gisco", cultureId: "carthaginian", faithId: "faith-punic", dynastyId: null, locationProvinceId: "ita-72843720b81376294924159-sicily-west", polityId: "carthage", ageYearsAtStart: 39, officeId: null, personalAccountId: "gisco-purse", skills: { martial: 70, intrigue: 45, learning: 50, piety: 45, stewardship: 55, diplomacy: 45, body: 60, subSkills: {} }, traits: ["bold", "disciplined"], mind: { drives: { security: 60, status: 60, wealth: 45, family: 45, faith: 40, duty: 70, revenge: 30 }, temperament: { boldness: 70, caution: 45, honesty: 55, sociability: 45, discipline: 70, cruelty: 40 }, riskTolerance: 60, values: [], taboos: [], currentPressures: ["gisco-pressure-strait"] }, healthBps: 9_000, prestigeBps: 6_000, relations: [], ambitions: [{ id: "hold-the-strait", label: "Keep the strait open to Carthage and shut to anyone else", kind: "other", targetId: "ita-72843720b81376294924159-sicily-northeast", status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
+    { id: "hannibal-gisco", name: "Hannibal Gisco", cultureId: "carthaginian", faithId: "faith-punic", dynastyId: null, locationProvinceId: PUNIC_IDS.lilybaeum, polityId: "carthage", ageYearsAtStart: 39, officeId: null, personalAccountId: "gisco-purse", skills: { martial: 70, intrigue: 45, learning: 50, piety: 45, stewardship: 55, diplomacy: 45, body: 60, subSkills: {} }, traits: ["bold", "disciplined"], mind: { drives: { security: 60, status: 60, wealth: 45, family: 45, faith: 40, duty: 70, revenge: 30 }, temperament: { boldness: 70, caution: 45, honesty: 55, sociability: 45, discipline: 70, cruelty: 40 }, riskTolerance: 60, values: [], taboos: [], currentPressures: ["gisco-pressure-strait"] }, healthBps: 9_000, prestigeBps: 6_000, relations: [], ambitions: [{ id: "hold-the-strait", label: "Keep the strait open to Carthage and shut to anyone else", kind: "other", targetId: PUNIC_IDS.messana, status: "active" }], heirCharacterId: null, alive: true, diedAtStep: null },
   ],
   continuity: [], encounters: [],
   // Carthage is named as a participant, not merely adjacent to the crisis: it
   // has its own stake in whether Messana falls to Syracuse or holds.
-  storylines: [{ id: "rhegium-recovery", title: "Rhegium and the Campanian Legion", participantIds: ["gaius-genucius", "decius-vibellius", "manius-curius"], provinceId: "punic-italy-bruttian-highlands", phase: "escalating", stakes: "Rome must retake a city its own garrison murdered and kept, in front of every ally watching how the Republic treats a broken oath.", history: ["The Campanian legion sent to hold Rhegium killed its citizens and took the city for itself.", "The Senate has resolved that the matter be ended."], nextDevelopment: "The consular army turns south, or the Senate finds someone else to send.", visibility: "public", updatedAtStep: 0 }, { id: "mamertine-syracusan-crisis", title: "The Messana Crisis", participantIds: ["hieron-ii", "mamertine-spokesman", "hanno-carthage"], provinceId: "ita-72843720b81376294924159-sicily-northeast", phase: "escalating", stakes: "Syracuse seeks to contain the Mamertines without drawing Rome and Carthage into a wider war.", history: ["Hieron II's forces pressure the Mamertines around the Strait of Messana.", "Carthage watches the strait for any opening or threat to its own position in Sicily."], nextDevelopment: "Envoys may seek outside support if the local balance collapses.", visibility: "public", updatedAtStep: 0 }],
+  storylines: [{ id: "rhegium-recovery", title: "Rhegium and the Campanian Legion", participantIds: ["gaius-genucius", "decius-vibellius", "manius-curius"], provinceId: PUNIC_IDS.rhegium, phase: "escalating", stakes: "Rome must retake a city its own garrison murdered and kept, in front of every ally watching how the Republic treats a broken oath.", history: ["The Campanian legion sent to hold Rhegium killed its citizens and took the city for itself.", "The Senate has resolved that the matter be ended."], nextDevelopment: "The consular army turns south, or the Senate finds someone else to send.", visibility: "public", updatedAtStep: 0 }, { id: "mamertine-syracusan-crisis", title: "The Messana Crisis", participantIds: ["hieron-ii", "mamertine-spokesman", "hanno-carthage"], provinceId: PUNIC_IDS.messana, phase: "escalating", stakes: "Syracuse seeks to contain the Mamertines without drawing Rome and Carthage into a wider war.", history: ["Hieron II's forces pressure the Mamertines around the Strait of Messana.", "Carthage watches the strait for any opening or threat to its own position in Sicily."], nextDevelopment: "Envoys may seek outside support if the local balance collapses.", visibility: "public", updatedAtStep: 0 }],
   conflicts: { battles: [], sieges: [], wars: [] },
   // Who is in charge of what beneath the consuls and the suffetes (v35,
   // docs/plans/departments.md). Named once, as the sources have them; every
@@ -935,13 +734,13 @@ const initialWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
      * kind of thing. Curius's is famously small.
      */
     holdings: [
-      { id: "curius-sabine-farm", title: "The Sabine farm", territoryId: "punic-italy-latium", legalHolderCharacterId: "manius-curius", incomeSourceId: "curius-sabine-farm-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
-      { id: "genucian-estates", title: "The Genucian estates", territoryId: "punic-italy-latium", legalHolderCharacterId: "gaius-genucius", incomeSourceId: "genucian-estates-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
-      { id: "cornelian-estates", title: "The Cornelian estates", territoryId: "punic-italy-latium", legalHolderCharacterId: "gnaeus-cornelius", incomeSourceId: "cornelian-estates-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
-      { id: "ogulnian-estates", title: "The Ogulnian lands in Campania", territoryId: "punic-italy-campanian-plain", legalHolderCharacterId: "quintus-ogulnius", incomeSourceId: "ogulnian-estates-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
-      { id: "hanno-estates", title: "Hanno's estates in the African hinterland", territoryId: "tun-13205935b88806172084765", legalHolderCharacterId: "hanno-carthage", incomeSourceId: "hanno-estates-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
-      { id: "gisco-estates", title: "The Gisconid farms", territoryId: "tun-13205935b88806172084765", legalHolderCharacterId: "hannibal-gisco", incomeSourceId: "gisco-estates-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
-      { id: "leptines-estates", title: "The house of Leptines' estates", territoryId: "ita-72843720b81376294924159-sicily-southeast", legalHolderCharacterId: "leptines-syracuse", incomeSourceId: "leptines-estates-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
+      { id: "curius-sabine-farm", title: "The Sabine farm", territoryId: PUNIC_IDS.rome, legalHolderCharacterId: "manius-curius", incomeSourceId: "curius-sabine-farm-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
+      { id: "genucian-estates", title: "The Genucian estates", territoryId: PUNIC_IDS.rome, legalHolderCharacterId: "gaius-genucius", incomeSourceId: "genucian-estates-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
+      { id: "cornelian-estates", title: "The Cornelian estates", territoryId: PUNIC_IDS.rome, legalHolderCharacterId: "gnaeus-cornelius", incomeSourceId: "cornelian-estates-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
+      { id: "ogulnian-estates", title: "The Ogulnian lands in Campania", territoryId: PUNIC_IDS.capua, legalHolderCharacterId: "quintus-ogulnius", incomeSourceId: "ogulnian-estates-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
+      { id: "hanno-estates", title: "Hanno's estates in the African hinterland", territoryId: PUNIC_IDS.carthage, legalHolderCharacterId: "hanno-carthage", incomeSourceId: "hanno-estates-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
+      { id: "gisco-estates", title: "The Gisconid farms", territoryId: PUNIC_IDS.carthage, legalHolderCharacterId: "hannibal-gisco", incomeSourceId: "gisco-estates-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
+      { id: "leptines-estates", title: "The house of Leptines' estates", territoryId: PUNIC_IDS.syracuse, legalHolderCharacterId: "leptines-syracuse", incomeSourceId: "leptines-estates-yield", successionRuleId: "roman-household", physicalControlBps: 10_000 },
     ],
     institutions: [
       {
@@ -1227,7 +1026,7 @@ const initialWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
       // armed and paid by their own cities under the foedus and led by Roman
       // prefects. Rome owes the legionaries their pay and the allies only their
       // grain, which is why the pay below is more than 4 000 men at 35 a thousand.
-      { id: "roman-field-army", name: "Roman field army", polityId: "rome", commanderCharacterId: "gaius-genucius", controllerCharacterId: "gaius-genucius", locationId: "punic-italy-latium", authorizedStrength: 8_000, personnel: [{ categoryId: "infantry", label: "Legionaries", fit: 3_500, unavailable: [] }, { categoryId: "infantry", label: "Allied infantry", fit: 3_600, unavailable: [] }], moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "rome-legion-pay", payArrearsPeriods: 0, history: [] },
+      { id: "roman-field-army", name: "Roman field army", polityId: "rome", commanderCharacterId: "gaius-genucius", controllerCharacterId: "gaius-genucius", locationId: PUNIC_IDS.rome, authorizedStrength: 8_000, personnel: [{ categoryId: "infantry", label: "Legionaries", fit: 3_500, unavailable: [] }, { categoryId: "infantry", label: "Allied infantry", fit: 3_600, unavailable: [] }], moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "rome-legion-pay", payArrearsPeriods: 0, history: [] },
       // The one force here that nobody has undertaken to pay, and deliberately
       // so. `rhegium-campanians` keeps no treasury: these men were Rome's
       // garrison, murdered the citizens they were sent to protect, and hold
@@ -1238,13 +1037,13 @@ const initialWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
       // Carthage is a sea power and Rome in 270 BCE is not: the Republic has a
       // handful of allied hulls and no fleet of its own, which is exactly the
       // asymmetry the First Punic War was fought to overturn.
-      { id: "campanian-legion", name: "Campanian legion of Rhegium", polityId: "rhegium-campanians", commanderCharacterId: "decius-vibellius", controllerCharacterId: "decius-vibellius", locationId: "punic-italy-bruttian-highlands", authorizedStrength: 4_000, personnel: [{ categoryId: "infantry", label: "Campanian mercenaries", fit: 3_600, unavailable: [] }], moraleBps: 6_500, cohesionBps: 7_000, fatigueBps: 1_000, provisionStatus: "shortage", provisionedThroughStep: 120, payObligationId: null, payArrearsPeriods: 0, history: [] },
-      { id: "carthaginian-fleet", name: "Carthaginian fleet", polityId: "carthage", commanderCharacterId: "hannibal-gisco", controllerCharacterId: "hannibal-gisco", locationId: "ita-72843720b81376294924159-sicily-west", authorizedStrength: 120, personnel: [{ categoryId: "warship", label: "Quinqueremes", fit: 110, unavailable: [] }], moraleBps: 8_000, cohesionBps: 7_500, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "carthage-fleet-pay", payArrearsPeriods: 0, history: [] },
-      { id: "syracusan-squadron", name: "Syracusan squadron", polityId: "syracuse", commanderCharacterId: "leptines-syracuse", controllerCharacterId: "leptines-syracuse", locationId: "ita-72843720b81376294924159-sicily-southeast", authorizedStrength: 40, personnel: [{ categoryId: "warship", label: "Triremes", fit: 35, unavailable: [] }], moraleBps: 7_500, cohesionBps: 7_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "syracuse-squadron-pay", payArrearsPeriods: 0, history: [] },
-      { id: "allied-greek-hulls", name: "Allied Greek hulls", polityId: "rome", commanderCharacterId: "gaius-genucius", controllerCharacterId: "gaius-genucius", locationId: "punic-italy-bruttian-highlands", authorizedStrength: 20, personnel: [{ categoryId: "warship", label: "Allied transports", fit: 18, unavailable: [] }], moraleBps: 6_500, cohesionBps: 6_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "rome-allied-hulls", payArrearsPeriods: 0, history: [] },
-      { id: "carthaginian-garrison", name: "Carthaginian field force", polityId: "carthage", commanderCharacterId: "hanno-carthage", controllerCharacterId: "hanno-carthage", locationId: "tun-13205935b88806172084765", authorizedStrength: 3_500, personnel: [{ categoryId: "infantry", label: "Infantry", fit: 3_000, unavailable: [] }], moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "carthage-mercenaries", payArrearsPeriods: 0, history: [] },
-      { id: "syracusan-army", name: "Syracusan army", polityId: "syracuse", commanderCharacterId: "hieron-ii", controllerCharacterId: "hieron-ii", locationId: "ita-72843720b81376294924159-sicily-southeast", authorizedStrength: 3_000, personnel: [{ categoryId: "infantry", label: "Hoplites", fit: 2_600, unavailable: [] }], moraleBps: 7_500, cohesionBps: 7_500, fatigueBps: 1_000, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "syracuse-army-pay", payArrearsPeriods: 0, history: [] },
-      { id: "mamertine-garrison", name: "Mamertine garrison", polityId: "mamertines", commanderCharacterId: "mamertine-spokesman", controllerCharacterId: "mamertine-spokesman", locationId: "ita-72843720b81376294924159-sicily-northeast", authorizedStrength: 1_600, personnel: [{ categoryId: "infantry", label: "Mercenaries", fit: 1_400, unavailable: [] }], moraleBps: 7_000, cohesionBps: 7_000, fatigueBps: 1_000, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "mamertine-soldiery", payArrearsPeriods: 0, history: [] },
+      { id: "campanian-legion", name: "Campanian legion of Rhegium", polityId: "rhegium-campanians", commanderCharacterId: "decius-vibellius", controllerCharacterId: "decius-vibellius", locationId: PUNIC_IDS.rhegium, authorizedStrength: 4_000, personnel: [{ categoryId: "infantry", label: "Campanian mercenaries", fit: 3_600, unavailable: [] }], moraleBps: 6_500, cohesionBps: 7_000, fatigueBps: 1_000, provisionStatus: "shortage", provisionedThroughStep: 120, payObligationId: null, payArrearsPeriods: 0, history: [] },
+      { id: "carthaginian-fleet", name: "Carthaginian fleet", polityId: "carthage", commanderCharacterId: "hannibal-gisco", controllerCharacterId: "hannibal-gisco", locationId: PUNIC_IDS.lilybaeum, authorizedStrength: 120, personnel: [{ categoryId: "warship", label: "Quinqueremes", fit: 110, unavailable: [] }], moraleBps: 8_000, cohesionBps: 7_500, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "carthage-fleet-pay", payArrearsPeriods: 0, history: [] },
+      { id: "syracusan-squadron", name: "Syracusan squadron", polityId: "syracuse", commanderCharacterId: "leptines-syracuse", controllerCharacterId: "leptines-syracuse", locationId: PUNIC_IDS.syracuse, authorizedStrength: 40, personnel: [{ categoryId: "warship", label: "Triremes", fit: 35, unavailable: [] }], moraleBps: 7_500, cohesionBps: 7_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "syracuse-squadron-pay", payArrearsPeriods: 0, history: [] },
+      { id: "allied-greek-hulls", name: "Allied Greek hulls", polityId: "rome", commanderCharacterId: "gaius-genucius", controllerCharacterId: "gaius-genucius", locationId: PUNIC_IDS.rhegium, authorizedStrength: 20, personnel: [{ categoryId: "warship", label: "Allied transports", fit: 18, unavailable: [] }], moraleBps: 6_500, cohesionBps: 6_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "rome-allied-hulls", payArrearsPeriods: 0, history: [] },
+      { id: "carthaginian-garrison", name: "Carthaginian field force", polityId: "carthage", commanderCharacterId: "hanno-carthage", controllerCharacterId: "hanno-carthage", locationId: PUNIC_IDS.carthage, authorizedStrength: 3_500, personnel: [{ categoryId: "infantry", label: "Infantry", fit: 3_000, unavailable: [] }], moraleBps: 8_000, cohesionBps: 8_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "carthage-mercenaries", payArrearsPeriods: 0, history: [] },
+      { id: "syracusan-army", name: "Syracusan army", polityId: "syracuse", commanderCharacterId: "hieron-ii", controllerCharacterId: "hieron-ii", locationId: PUNIC_IDS.syracuse, authorizedStrength: 3_000, personnel: [{ categoryId: "infantry", label: "Hoplites", fit: 2_600, unavailable: [] }], moraleBps: 7_500, cohesionBps: 7_500, fatigueBps: 1_000, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "syracuse-army-pay", payArrearsPeriods: 0, history: [] },
+      { id: "mamertine-garrison", name: "Mamertine garrison", polityId: "mamertines", commanderCharacterId: "mamertine-spokesman", controllerCharacterId: "mamertine-spokesman", locationId: PUNIC_IDS.messana, authorizedStrength: 1_600, personnel: [{ categoryId: "infantry", label: "Mercenaries", fit: 1_400, unavailable: [] }], moraleBps: 7_000, cohesionBps: 7_000, fatigueBps: 1_000, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "mamertine-soldiery", payArrearsPeriods: 0, history: [] },
     ],
   },
 }));

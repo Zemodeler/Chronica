@@ -5,7 +5,7 @@ import type { Character } from "../characters/character";
 import { resolveBattle, summarizeBattleResult, type ResolveBattleParticipant } from "./battle-resolver";
 
 const world = () => structuredClone(firstPunicWarScenario.initialWorld);
-const province = () => world().map.provinces.find((p) => p.id === "ita-72843720b81376294924159-sicily-northeast")!;
+const province = () => world().map.provinces.find((p) => p.settlements.some((s) => s.id === "messana-city"))!;
 
 function force(overrides: Partial<Force>): Force {
   const base = world().material.forces.find((f) => f.id === "legio-i")!;
@@ -29,7 +29,7 @@ function participant(overrides: Partial<ResolveBattleParticipant> & Pick<Resolve
 
 const battle = {
   battleId: "test-battle",
-  provinceId: "ita-72843720b81376294924159-sicily-northeast",
+  provinceId: province().id,
   startedAtStep: 10,
   participants: [
     { forceId: "attacker-force", side: "attacker" as const, arrivesAtPhase: "contact" as const },

@@ -1,0 +1,6 @@
+[
+  { "key": "rhine", "oldId": "punic-gaul-bas-rhin", "lon": 7.6, "lat": 48.6, "note": "Alsace on the upper Rhine (Bas-Rhin); a Gallic province far from Rome" },
+  { "key": "berat", "oldId": "punic-illyria-alb-10019604b1094996199402", "lon": 19.95, "lat": 40.7, "note": "Berat, hill country on the Aoos (Osum/Vjose) valley; must be uplands terrain" },
+  { "key": "gjirokaster", "oldId": "punic-illyria-alb-10019604b29738820438867", "lon": 20.15, "lat": 40.08, "note": "Gjirokaster, the Aoos-side province the old map drew as coastal plain" },
+  { "key": "kragujevac", "oldId": "punic-illyria-srb-41074048b91434818545320", "lon": 21.3, "lat": 44.04, "note": "Balkan interior in central Serbia (the Morava country east of Kragujevac, which itself falls in empty ground); must be a province without sea coast" }
+]

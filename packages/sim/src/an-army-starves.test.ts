@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, openWar, type FactProposalDraft, type Force, type WorldState } from "@chronica/shared";
 import { keepTheField, provisionStatusOn } from "./campaign";
 import { createIdFactory } from "./ports";
@@ -16,10 +16,11 @@ import { runDeterministicTick } from "./tick";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const AGRIGENTUM = "ita-72843720b81376294924159-sicily-central";
-const LATIUM = "punic-italy-latium";
-/** Carthage's in the scenario, and nobody counted anybody living there. */
-const EL_TARF = "dza-43142294b15861145285183";
+const AGRIGENTUM = PUNIC_IDS.agrigentum;
+const nameOf = (id: string): string => punicWarsScenario.initialWorld.map.provinces.find((province) => province.id === id)!.name;
+const LATIUM = PUNIC_IDS.rome;
+/** Emptied of people in the test that uses it. */
+const EL_TARF = PUNIC_IDS.panormus;
 
 function world(at: string, changes: Partial<Force> = {}): WorldState {
   const opening = ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
@@ -61,7 +62,7 @@ describe("an army in enemy country", () => {
     expect(legion(after).provisionStatus).toBe("critical");
     expect(fit(legion(after))).toBeLessThan(fit(legion(before)));
     expect(legion(after).moraleBps).toBeLessThan(legion(before).moraleBps);
-    expect(facts.some((fact) => fact.kind === "force_starving" && /starving in Agrigentum/.test(fact.summary))).toBe(true);
+    expect(facts.some((fact) => fact.kind === "force_starving" && fact.summary.includes(`starving in ${nameOf(AGRIGENTUM)}`))).toBe(true);
     // Some died and some walked away, and the army's history says which.
     const hunger = legion(after).history.filter((event) => event.causeId.includes("hunger"));
     expect(hunger.some((event) => event.kind === "desertion")).toBe(true);

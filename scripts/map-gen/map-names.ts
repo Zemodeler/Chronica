@@ -53,7 +53,7 @@ export const REGIONS: readonly Region[] = [
   { key: 'anatolia', slug: 'ana', name: 'Asia Minor', shapes: [box(26, 45, 36, 42.5)] },
   { key: 'syria', slug: 'syr', name: 'Syria', shapes: [box(35, 42.5, 32.9, 37.3)] },
   { key: 'judaea', slug: 'jud', name: 'Judaea', shapes: [box(34, 36.3, 29.4, 33.0)] },
-  { key: 'egypt', slug: 'egy', name: 'Egypt', shapes: [box(24.9, 34.5, 22, 32)] },
+  { key: 'egypt', slug: 'egy', name: 'Egypt', shapes: [box(24.9, 35.0, 22, 32)] },
   { key: 'cyrenaica', slug: 'cyr', name: 'Cyrenaica', shapes: [box(19, 25, 29.5, 33.3)] },
   { key: 'mauretania', slug: 'mau', name: 'Mauretania', shapes: [box(-10, -1.5, 28, 37)] },
   { key: 'numidia', slug: 'num', name: 'Numidia', shapes: [box(-1.5, 8.3, 32.5, 37.3)] },
@@ -63,6 +63,11 @@ export const REGIONS: readonly Region[] = [
   { key: 'garamantia', slug: 'gar', name: 'Garamantia', shapes: [box(9, 20, 23, 30)] },
   { key: 'scythia', slug: 'scy', name: 'Scythia', shapes: [box(28, 40, 44, 48)] },
   { key: 'sarmatia', slug: 'sarm', name: 'Sarmatia', shapes: [box(23, 46, 48, 59)] },
+  // the eastern theatres, after every box the shipped provinces were named by, so no earlier id moves
+  { key: 'iran', slug: 'irn', name: 'Iran', shapes: [box(44, 64, 24.5, 40)] },
+  { key: 'caucasus', slug: 'cau', name: 'the Caucasus', shapes: [box(39.5, 51.5, 38.4, 44.5)] },
+  { key: 'levant', slug: 'lev', name: 'the Levant', shapes: [box(34, 43, 29, 37.8)] },
+  { key: 'arabia', slug: 'ara', name: 'Arabia', shapes: [box(33, 57, 15.5, 33)] },
 ];
 
 function shapeDistance(shape: readonly Point[], lon: number, lat: number): number {
@@ -83,8 +88,8 @@ export function regionOf(lon: number, lat: number): Region {
   return best;
 }
 
-const MODERN_WORD = /\b(tell|tel|khirbet|khirbat|ain|bir|qasr|jebel|djebel|oued|wadi|nahr|kafr|deir|beni|sidi|monte|monti|santa|santo|san|sao|castel|castello|castro|villa|cerro|pico|cueva|los|las|el|al|ben|ras|hisn|tepe|hoyuk|kale|koy|yeni|eski|buyuk|kucuk|near|place|site|unnamed|unknown|modern|hill|mount|cape|bay|lake|river|island|port|fort|castle|church|monastery|tumulus|necropolis|cemetery|sanctuary|temple|mine|quarry|farm|camp|bridge|road|aqueduct|cave|grotto|spring|well|cistern|pass|gate|wall|tower|barrow|hillfort|oppidum|settlement|city|town|village|de|del|della|di|von|van|le|la|les|du|des|da|do|dos|das|untitled)\b/i;
-const MODERN_START = /^(castel|castell|acqua|acque|monte|villa|borgo|torre|ponte|porto|campo|casal|cala|san|santa|santo|saint|st|bad|neu|alt|klein|gross|new|old|upper|lower)/i;
+const MODERN_WORD = /\b(tell|tel|khirbet|khirbat|ain|bir|qasr|jebel|djebel|oued|wadi|nahr|kafr|deir|beni|sidi|monte|monti|santa|santo|san|sao|castel|castello|castro|villa|cerro|pico|cueva|los|las|el|al|ben|ras|hisn|tepe|hoyuk|kale|koy|yeni|eski|buyuk|kucuk|near|place|site|unnamed|unknown|modern|hill|mount|cape|bay|lake|river|island|port|fort|castle|church|monastery|tumulus|necropolis|cemetery|sanctuary|temple|mine|quarry|farm|camp|bridge|road|aqueduct|cave|grotto|spring|well|cistern|pass|gate|wall|tower|barrow|hillfort|oppidum|settlement|city|town|village|de|del|della|di|von|van|le|la|les|du|des|da|do|dos|das|untitled|praefectura|regio|regionis|provincia|dioecesis|nomos|eparchy|kastron|kastro)\b/i;
+const MODERN_START = /^(valea|dealul|dealu|movila|cetatea|cetate|piatra|magura|hradiste|gradiste|castro|castel|castell|acqua|acque|monte|villa|borgo|torre|ponte|porto|campo|casal|cala|san|santa|santo|saint|st|bad|neu|alt|klein|gross|new|old|upper|lower)/i;
 const MODERN_END = /(berg|burg|stein|dorf|heim|hausen|kirchen|stadt|skaya|skiy|evo|ovo|abad|kale|koy|hisar|dag|feld|bach|tepe|ello|etta|ella|ano|ino|ini|ani|eni)$/i;
 const LATIN_GREEK_END = /(a|ae|um|us|is|on|os|ion|ium|ia|ai|es|ii|i|o|e|as|ys|ax|ex|ix|ene|ous|oi|er|ur)$/i;
 // north of the Alps only the Latin and Greek endings are trusted: -e, -er, -i and -o there are mostly Dutch, German and Czech
@@ -108,7 +113,7 @@ export function ancientNameOf(title: string | null, lat = 40): string | null {
     if (MODERN_WORD.test(name) || MODERN_START.test(name)) continue;
     if (words.length === 2 && !SECOND_WORDS.test(words[1]!) && !(LATIN_GREEK_END.test(words[0]!) && LATIN_GREEK_END.test(words[1]!))) continue;
     if (!(lat >= 47 ? NORTH_END : LATIN_GREEK_END).test(words[words.length - 1]!)) continue;
-    if (NOT_ANCIENT.test(name)) continue;
+    if (NOT_ANCIENT.test(name) || words.some((w) => MODERN_AUDIT.test(w))) continue;
     if (words.some((w) => MODERN_END.test(w) && !/(ia|ium|eia)$/i.test(w))) continue;
     return name;
   }
@@ -130,3 +135,20 @@ export const ADJECTIVE: Readonly<Record<Compass, string>> = {
   north: 'Northern', 'north-east': 'North-eastern', east: 'Eastern', 'south-east': 'South-eastern',
   south: 'Southern', 'south-west': 'South-western', west: 'Western', 'north-west': 'North-western',
 };
+
+/** What no Roman-era name contains: English, German and Slavic place-name endings and prefixes, letters Latin and Greek did not use. */
+export const MODERN_AUDIT = /villa|(ville|burg|burgh|ton|ham|ford|wick|bury|ley|by|stadt|heim|dorf|berg|stein|ovo|evo|skiy|sky|grad|gorod|dam|bach|kirchen|sz|cz|zs|ij|tj)$|^(saint|mount|monte|san|santa|st)\b|[wj]|[^a-z ]/i;
+
+/** Names of peoples, regions, rivers, mountains and capes: the ending is no test (Cherusci, Rhenus, Albis differ), only a modern look is. */
+export function featureNameOf(title: string | null): string | null {
+  if (!title) return null;
+  for (const alternative of title.split('/')) {
+    const name = alternative.replace(/\([^)]*\)/g, ' ').replace(/^\*+/, '').replace(/\?+$/, '').replace(/\s+/g, ' ').trim();
+    if (!/^[A-Za-z][A-Za-z ]*$/.test(name) || name.length < 4) continue;
+    const words = name.split(' ');
+    if (words.length > 2 || words.some((w) => !/^[A-Z]/.test(w))) continue;
+    if (MODERN_WORD.test(name) || MODERN_START.test(name) || NOT_ANCIENT.test(name) || words.some((w) => MODERN_AUDIT.test(w))) continue;
+    return name;
+  }
+  return null;
+}

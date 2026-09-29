@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PUNIC_IDS, PUNIC_WARS_MAP_ASSET_ID as PUNIC_WARS_MAP_ASSET_ID_IN_DB } from "@chronica/db";
 import { isGeoJsonMapDocument, type GeoJsonMap, type WorldState } from "@chronica/shared";
 import { NUMIDIAN_DECISION_MAP_ASSET_ID, PUNIC_WARS_MAP_ASSET_ID, builtInScenarioMap, keptMapDocument, mapVersion, mapWireDocument } from "./built-in-scenario-maps";
 
@@ -12,6 +13,10 @@ describe("built-in scenario maps", () => {
     expect(first?.features.length).toBeGreaterThan(0);
   });
 
+  it("serves the map the database row for the scenario names", () => {
+    expect(PUNIC_WARS_MAP_ASSET_ID).toBe(PUNIC_WARS_MAP_ASSET_ID_IN_DB);
+  });
+
   it("gives Punic Wars an independent historical map", () => {
     const first = builtInScenarioMap(PUNIC_WARS_MAP_ASSET_ID);
     const second = builtInScenarioMap(PUNIC_WARS_MAP_ASSET_ID);
@@ -19,7 +24,7 @@ describe("built-in scenario maps", () => {
     expect(first).toBeDefined();
     expect(first).not.toBe(second);
     expect(first?.features.length).toBeGreaterThan(0);
-    expect(first?.features.some((feature) => feature.id === "punic-italy-latium")).toBe(true);
+    expect(first?.features.some((feature) => feature.id === PUNIC_IDS.rome)).toBe(true);
   });
 });
 
@@ -38,12 +43,12 @@ describe("the map as it is downloaded", { timeout: 60_000 }, () => {
 
   it("changes its version, and only its version, when a province is renamed", () => {
     const before = mapVersion(PUNIC_WARS_MAP_ASSET_ID, names());
-    const renamed = mapVersion(PUNIC_WARS_MAP_ASSET_ID, names({ id: "punic-italy-latium", name: "Latium Vetus" }));
+    const renamed = mapVersion(PUNIC_WARS_MAP_ASSET_ID, names({ id: PUNIC_IDS.rome, name: "Latium Vetus" }));
     expect(renamed).not.toBe(before);
     expect(mapVersion(PUNIC_WARS_MAP_ASSET_ID, names())).toBe(before);
     expect(mapVersion(null, names())).toBeUndefined();
-    const doc = JSON.parse(mapWireDocument(PUNIC_WARS_MAP_ASSET_ID, names({ id: "punic-italy-latium", name: "Latium Vetus" }))!.body) as GeoJsonMap;
-    expect(doc.features.find((feature) => feature.id === "punic-italy-latium")?.properties).toMatchObject({ name: "Latium Vetus" });
+    const doc = JSON.parse(mapWireDocument(PUNIC_WARS_MAP_ASSET_ID, names({ id: PUNIC_IDS.rome, name: "Latium Vetus" }))!.body) as GeoJsonMap;
+    expect(doc.features.find((feature) => feature.id === PUNIC_IDS.rome)?.properties).toMatchObject({ name: "Latium Vetus" });
   });
 
   it("is a map the client accepts, on a 1e-4 degree grid, with borders still shared and rings closed", () => {

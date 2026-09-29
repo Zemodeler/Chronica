@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, type Force, type WorldState } from "@chronica/shared";
 import { resolveEngagement } from "./battle";
 
@@ -13,7 +13,7 @@ import { resolveEngagement } from "./battle";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
+const MESSANA = PUNIC_IDS.messana;
 
 /**
  * The Syracusan army falls on the Mamertine garrison at Messana: the fight the

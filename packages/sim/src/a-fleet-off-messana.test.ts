@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, openWar, type Force, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -20,9 +20,10 @@ import { runDeterministicTick } from "./tick";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
-const BRUTTIUM = "punic-italy-bruttian-highlands";
-const AGRIGENTUM = "ita-72843720b81376294924159-sicily-central";
+const MESSANA = PUNIC_IDS.messana;
+const nameOf = (id: string): string => punicWarsScenario.initialWorld.map.provinces.find((province) => province.id === id)!.name;
+const BRUTTIUM = PUNIC_IDS.rhegium;
+const AGRIGENTUM = PUNIC_IDS.agrigentum;
 
 const context: ApplyContext = {
   now: { day: 0, minute: 540 },
@@ -71,7 +72,7 @@ describe("a crossing past an enemy fleet", () => {
     const set = applyDeltas(world(3_000, 18), [cross], context).world;
     const landed = arrive(set);
     expect(legion(landed.world).locationId).toBe(BRUTTIUM);
-    expect(landed.factProposals.some((fact) => fact.kind === "crossing_stopped" && /Carthaginian fleet lay off Messana/.test(fact.summary))).toBe(true);
+    expect(landed.factProposals.some((fact) => fact.kind === "crossing_stopped" && fact.summary.includes(`Carthaginian fleet lay off ${nameOf(MESSANA)}`))).toBe(true);
     expect(landed.world.projects.find((project) => project.completionOutcome?.forceId === "roman-field-army")!.status).toBe("failed");
   });
 

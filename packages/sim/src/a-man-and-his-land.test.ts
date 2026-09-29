@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, estateTerms, improvementTerms, type WorldDelta, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -25,7 +25,7 @@ import { withMiddlingManagers } from "./middling-managers";
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 // Middling managers: these count estates, not the skill of the men running them.
 const opening = (): WorldState => withMiddlingManagers(ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0));
-const LATIUM = "punic-italy-latium";
+const LATIUM = PUNIC_IDS.rome;
 
 const as = (characterId: string): ApplyContext => ({
   now: { day: 0, minute: 540 },

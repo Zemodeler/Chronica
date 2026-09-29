@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, type WorldDelta, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -18,7 +18,7 @@ import { createIdFactory } from "./ports";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const SYRACUSE = "ita-72843720b81376294924159-sicily-southeast";
+const SYRACUSE = PUNIC_IDS.syracuse;
 const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
 
 const as = (characterId: string, extra: Partial<ApplyContext> = {}): ApplyContext => ({

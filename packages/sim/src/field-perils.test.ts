@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstPunicWarScenario } from "@chronica/db";
+import { firstPunicWarScenario, FIRST_PUNIC_IDS } from "@chronica/db";
 import {
   FIELD_OPTION_PREFIX,
   ScenarioDefinitionSchema,
@@ -27,7 +27,7 @@ import type { SimModelPort, SimOperation } from "./ports";
 const definition = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition);
 const world = (): WorldState => WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
 const PLAYER = "marcus-atilius";
-const PROVINCE = "ita-72843720b81376294924159-sicily-northeast";
+const PROVINCE = FIRST_PUNIC_IDS.messana;
 
 function lostBattle(battleId: string, outcome: "killed" | "captured"): BattleResult {
   return {

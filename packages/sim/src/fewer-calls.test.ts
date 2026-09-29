@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, type Fact, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import { routeAttention } from "./attention";
@@ -19,6 +19,7 @@ import { createIdFactory, type SimModelPort } from "./ports";
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const clock = definition.clock;
 const offices = definition.government.offices;
+const ROME_NAME = punicWarsScenario.initialWorld.map.provinces.find((province) => province.id === PUNIC_IDS.rome)!.name;
 const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
 
 const fact = (id: string, affected: Fact["affectedEntities"], summary = `News ${id}.`): Fact => ({
@@ -99,13 +100,13 @@ describe("the Chronicle", () => {
 describe("the narrator's arithmetic", () => {
   const harvest: NarratorSeed = {
     key: "seed-grain-fleet", kind: "world_event", archetype: "grain_fleet_lost", severity: "serious", secret: false, oneShot: true,
-    target: { provinceId: "punic-italy-latium", provinceName: "Latium", polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null, otherPolityId: null, otherPolityName: null, forceId: null, forceName: null, forceIsNaval: false },
+    target: { provinceId: PUNIC_IDS.rome, provinceName: ROME_NAME, polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null, otherPolityId: null, otherPolityName: null, forceId: null, forceName: null, forceIsNaval: false },
     inPlayerRealm: true, repeated: false, pressureId: null, why: "Quiet.", brief: "A storm off Latium.",
   };
 
   it("is done by the engine for a stirring that needs no decision", () => {
     const work = engineWork(harvest)!;
-    expect(work.deltas).toEqual([expect.objectContaining({ op: "province_material_shift", provinceId: "punic-italy-latium", foodSecurityBpsDelta: -900, stabilityBpsDelta: -300 })]);
+    expect(work.deltas).toEqual([expect.objectContaining({ op: "province_material_shift", provinceId: PUNIC_IDS.rome, foodSecurityBpsDelta: -900, stabilityBpsDelta: -300 })]);
     expect(work.fact.visibility).toBe("public");
     expect(engineWork({ ...harvest, archetype: "games" })).toBeNull();
   });
@@ -119,13 +120,13 @@ describe("the narrator's arithmetic", () => {
       },
     };
     const world = opening();
-    const food = (state: WorldState) => state.material.provinceMaterial.find((material) => material.provinceId === "punic-italy-latium")!.foodSecurityBps;
+    const food = (state: WorldState) => state.material.provinceMaterial.find((material) => material.provinceId === PUNIC_IDS.rome)!.foodSecurityBps;
     const result = await runSimulationBurst({
       world, clock, offices, warfare: definition.warfare, burstId: "harvest", gameId: "g", actorRef: { kind: "character", id: "gaius-genucius" }, actorPolityId: "rome",
       orderText: null, spanDays: 7, knownFacts: [], queue: [], port, narratorSeeds: [harvest],
     });
     expect(shown[0]).not.toContain("THE WORLD STIRS");
     expect(food(result.world)).toBeLessThan(food(world));
-    expect(result.newFacts.some((entry) => entry.kind === "grain_fleet_lost" && entry.summary.includes("Latium"))).toBe(true);
+    expect(result.newFacts.some((entry) => entry.kind === "grain_fleet_lost" && entry.summary.includes(ROME_NAME))).toBe(true);
   });
 });

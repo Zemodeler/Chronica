@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import {
   CharacterKnowledgebaseSchema,
   ScenarioDefinitionSchema,
@@ -35,8 +35,8 @@ import { materializeFacts } from "./facts";
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const government = definition.government;
 const PLAYER = "declared-legionary";
-const LATIUM = "punic-italy-latium";
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
+const LATIUM = PUNIC_IDS.rome;
+const MESSANA = PUNIC_IDS.messana;
 
 const opening = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
 

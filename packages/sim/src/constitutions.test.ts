@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, recordTenures, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import { constitutionOf, ensureConstitutions, keepThrones, readForm, recast, rulerOf, templateFor, EMPTY_THRONE_DAYS } from "./constitutions";
@@ -78,11 +78,14 @@ describe("every power's constitution", () => {
     expect(names(boii)).not.toBe(names(insubres));
   });
 
-  it("gives a gathering of chiefs a bloc for every province its people hold", () => {
+  it("gives a gathering of chiefs a bloc for the provinces its people hold, a dozen of them at most", () => {
     const reviewed = reviewSociety({ world: opening(), government, warfare: definition.warfare, toDay: 0, ids: createIdFactory("society") }).world;
     valid(reviewed);
+    const held = reviewed.map.provinces.filter((province) => province.controllerPolityId === "boii");
     const gathering = reviewed.material.institutions.find((institution) => institution.polityId === "boii" && institution.franchise === "chiefs")!;
-    expect(gathering.votingBlocs.some((bloc) => bloc.interests?.includes("regional") && bloc.name.includes("Boii"))).toBe(true);
+    const regional = gathering.votingBlocs.filter((bloc) => bloc.interests?.includes("regional"));
+    expect(regional).toHaveLength(Math.min(12, held.length));
+    expect(regional.every((bloc) => held.some((province) => bloc.name === `The chiefs of ${province.name}`))).toBe(true);
     expect(gathering.totalVotingWeight).toBe(gathering.votingBlocs.reduce((sum, bloc) => sum + bloc.weight, 0));
   });
 });
@@ -286,7 +289,7 @@ describe("a government taken by force", () => {
     const world = opening();
     const taken: WorldState = {
       ...world,
-      map: { ...world.map, provinces: world.map.provinces.map((province) => (province.id === "ita-72843720b81376294924159-sicily-northeast" ? { ...province, controllerPolityId: "rome" } : province)) },
+      map: { ...world.map, provinces: world.map.provinces.map((province) => (province.id === PUNIC_IDS.messana ? { ...province, controllerPolityId: "rome" } : province)) },
     };
     const imposed = act(taken, "gaius-genucius", { op: "regime_change", actorCharacterRef: "gaius-genucius", polityRef: "mamertines", route: "imposition", form: "oligarchic_republic", reason: "Order in Messana." });
     expect(imposed.rejected).toEqual([]);
@@ -298,7 +301,8 @@ describe("a government taken by force", () => {
 
 describe("the world's groups", () => {
   const review = (world: WorldState, toDay: number) => reviewSociety({ world, government, warfare: definition.warfare, toDay, ids: createIdFactory(`society-${toDay}`) });
-  const romanLand = ["punic-italy-latium", "punic-italy-campanian-plain"];
+  // A country is ruined when its whole ground is, not two provinces of seventy.
+  const romanLand = opening().map.provinces.filter((province) => province.controllerPolityId === "rome").map((province) => province.id);
 
   it("gathers Rome's ruined into a party of debtors with seats in its assemblies, and lets it go when they recover", () => {
     const ruined = withProvinces(opening(), romanLand, { warDamageBps: 8_000, foodSecurityBps: 2_000 });
