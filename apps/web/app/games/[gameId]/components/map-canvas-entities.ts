@@ -103,9 +103,18 @@ export function settlementLabelPixelFont(type: string, scale: number, unit: numb
   return Math.round(size / SETTLEMENT_LABEL_FONT_STEP) * SETTLEMENT_LABEL_FONT_STEP;
 }
 
-/** Whether a settlement's name is drawn at `scale`: a capital's always, any other's from close zoom. */
-export function settlementLabelShown(capital: boolean, scale: number): boolean {
-  return capital || scale >= CLOSE_ZOOM_SCALE;
+/**
+ * A capital's name is drawn at every zoom only if the place is large enough to
+ * matter on the whole map; the many small powers' capitals keep their star and
+ * are named once the player has zoomed in (from the medium band). With six
+ * thousand provinces the far view otherwise carried dozens of illegible names.
+ */
+export const FAR_CAPITAL_LABEL_MIN_IMPORTANCE = 70;
+
+/** Whether a settlement's name is drawn at `scale`: a great capital's always, any other capital's from medium zoom, any other's from close zoom. */
+export function settlementLabelShown(capital: boolean, scale: number, importance = 100): boolean {
+  if (scale >= CLOSE_ZOOM_SCALE) return true;
+  return capital && (scale >= MEDIUM_ZOOM_SCALE || importance >= FAR_CAPITAL_LABEL_MIN_IMPORTANCE);
 }
 
 function drawDiamond(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number): void {
@@ -197,7 +206,7 @@ export function drawSettlements(
 
     // Capitals are named at every zoom, the whole world included; other
     // settlements only once close.
-    if (!settlementLabelShown(capital, scale)) continue;
+    if (!settlementLabelShown(capital, scale, state?.importance)) continue;
 
     const labelSize = settlementLabelPixelFont(settlement.type, scale, unit) / pixelsPerDegree;
     // The baseline sits below the marker (a capital's star reaches 1.5 radii)
