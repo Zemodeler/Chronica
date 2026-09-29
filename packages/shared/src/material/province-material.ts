@@ -1,6 +1,7 @@
 import type { WorldState } from "../world/world-state";
 import type { Province } from "../world/map";
 import type { ProvinceLevel, ProvinceMaterial } from "../material-state";
+import { liveProvinceIds } from "./live-provinces";
 
 // Background material society (docs/14 Phase 2).
 //
@@ -63,25 +64,35 @@ function clampBps(value: number): number {
 }
 
 /**
- * The country people of a province the map drew no town in, by its ground.
+ * The country people of a province the map drew no town in, by its ground and
+ * its size.
  *
  * Population was counted from towns alone, and 738 of the world's 780
  * provinces -- every one far from the war -- were drawn without any. They
  * held nobody: no bread for an army, no man for a levy, no coin for a tax.
  * These are villages and farms, a thinner people than a town's hinterland:
- * a coastal plain about as many as a middling Italian town and its country,
- * the hills half -- a few people to the square kilometre across a region the
- * size of a modern county, as the Iron Age north carried.
+ * a few people to the square kilometre, as the Iron Age north carried.
+ *
+ * It is a density, not a head count per province: cut the map into five times
+ * as many provinces and the world holds the same people. The figures are the
+ * old per-province counts (80 000 on a coastal plain, 40 000 in the hills,
+ * 50 000 elsewhere) spread over the 7 000 km2 a province then covered, and a
+ * province drawn without an area is taken to be that size, so a map that does
+ * not state areas counts exactly as it did.
  */
-export const COUNTRYSIDE_BY_TERRAIN: Readonly<Record<string, number>> = {
-  "coastal-plain": 80_000,
-  "hills-uplands": 40_000,
+export const REFERENCE_PROVINCE_AREA_KM2 = 7_000;
+export const COUNTRYSIDE_PER_KM2: Readonly<Record<string, number>> = {
+  "coastal-plain": 80_000 / REFERENCE_PROVINCE_AREA_KM2,
+  "hills-uplands": 40_000 / REFERENCE_PROVINCE_AREA_KM2,
 };
-const COUNTRYSIDE_OTHERWISE = 50_000;
+const COUNTRYSIDE_PER_KM2_OTHERWISE = 50_000 / REFERENCE_PROVINCE_AREA_KM2;
 
 /** How many people live in a province: its towns, or its countryside where it has none. */
-export function peopleOf(province: Pick<Province, "settlements" | "terrainId">): number {
-  if (province.settlements.length === 0) return COUNTRYSIDE_BY_TERRAIN[province.terrainId] ?? COUNTRYSIDE_OTHERWISE;
+export function peopleOf(province: Pick<Province, "settlements" | "terrainId" | "areaKm2">): number {
+  if (province.settlements.length === 0) {
+    const density = COUNTRYSIDE_PER_KM2[province.terrainId] ?? COUNTRYSIDE_PER_KM2_OTHERWISE;
+    return Math.round(density * (province.areaKm2 ?? REFERENCE_PROVINCE_AREA_KM2));
+  }
   return Math.max(0, province.settlements.reduce((total, settlement) => total + settlement.size * POPULATION_PER_SETTLEMENT_SIZE, 0));
 }
 
@@ -177,16 +188,16 @@ export function ensureProvinceMaterial(world: WorldState, atStep: number): World
 }
 
 /**
- * Ground at the edge of the drawn world, whose people eat, pay and serve but
- * make no history of their own: no harvest news, no famine news, no rising, no
- * civil war. The Chronicle is Rome's and Carthage's, not the Aargau's.
+ * Ground nothing is happening in, whose people eat, pay and serve but make no
+ * history of their own: no harvest news, no famine news, no rising, no civil
+ * war. The Chronicle is Rome's and Carthage's, not the Aargau's.
  *
- * The map's own detail tier is not enough: "far" is how finely the map draws
- * a place, and Latium and Carthage are drawn "far" too. The edge is far ground
- * the map drew no town in -- countryside and nothing else.
+ * Whether a place is quiet is read from the world each time
+ * (`liveProvinceIds`): a town, an army, a siege, a person or a war in the
+ * province, or any of them within reach, makes it live.
  */
-export function isQuietGround(province: Pick<Province, "tier" | "settlements"> | undefined): boolean {
-  return province !== undefined && province.tier === "far" && province.settlements.length === 0;
+export function isQuietGround(world: WorldState, provinceId: string): boolean {
+  return !liveProvinceIds(world).has(provinceId);
 }
 
 /** Recruitment draws down available manpower and briefly dents productive capacity. */

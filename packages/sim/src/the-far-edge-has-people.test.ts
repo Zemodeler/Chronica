@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { punicWarsScenario } from "@chronica/db";
 import {
-  COUNTRYSIDE_BY_TERRAIN,
   ScenarioDefinitionSchema,
   WorldStateSchema,
   ensureProvinceMaterial,
   isQuietGround,
+  peopleOf,
   type WorldState,
 } from "@chronica/shared";
 import { createIdFactory } from "./ports";
@@ -32,7 +32,7 @@ describe("the countryside", () => {
     expect(townless.length).toBeGreaterThan(700);
     for (const province of townless) {
       const row = rowOf(world, province.id);
-      expect(row.population).toBe(COUNTRYSIDE_BY_TERRAIN[province.terrainId] ?? 50_000);
+      expect(row.population).toBe(peopleOf(province));
       expect(row.availableManpower).toBeGreaterThan(0);
       expect(row.taxCapacity).toBeGreaterThan(0);
     }
@@ -65,10 +65,11 @@ describe("the countryside", () => {
 });
 
 describe("the edge of the world", () => {
-  it("is all far ground, and neither rises nor makes harvest news", () => {
+  it("is the ground nothing happens in, and neither rises nor makes harvest news", () => {
     const world = opening();
-    const far = world.map.provinces.filter(isQuietGround);
-    expect(far.length).toBeGreaterThan(700);
+    const far = world.map.provinces.filter((province) => isQuietGround(world, province.id));
+    // Ground beside a town or an army is watched too, so not every townless province is the edge.
+    expect(far.length).toBeGreaterThan(400);
     // Italy and Africa are drawn "far" as well; they are not the edge.
     expect(far.some((province) => province.settlements.some((settlement) => settlement.id === "settlement-rome"))).toBe(false);
     expect(far.some((province) => province.settlements.some((settlement) => settlement.id === "settlement-carthage"))).toBe(false);

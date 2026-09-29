@@ -577,7 +577,6 @@ export function punicWarsOpeningOverlay(revision: number): DynamicMapOverlay {
       controllerPolityId: record.controllerPolityId,
       controlFirmnessBps: record.controllerPolityId === "carthage" || record.controllerPolityId === "rome" ? 8_500 : 7_000,
       terrainId: terrainFor(record.provinceId),
-      tier: "far",
     })),
     settlements: PUNIC_WARS_MAP_SETTLEMENTS,
     forces: [],

@@ -10,7 +10,6 @@ const graph = (settlementControllerPolityId: string | null, settlementProvinceId
     settlements: [{ id: "roma", name: "Roma", kind: "city", provinceId: settlementProvinceId, controllerPolityId: settlementControllerPolityId, size: 100, fortificationLevel: 4 }],
     controllerPolityId: "ROM",
     controlFirmnessBps: 9_000,
-    tier: "focus",
   }],
   edges: [],
   polities: [{ id: "ROM", name: "Roman Republic", capitalSettlementId: "roma" }],
@@ -44,7 +43,6 @@ describe("settlement ownership", () => {
           settlements: [{ id: "roma", name: "Roma", kind: "city", provinceId: "campania", controllerPolityId: null, size: 10, fortificationLevel: 1 }],
           controllerPolityId: "ROM",
           controlFirmnessBps: 9_000,
-          tier: "focus",
         },
       ],
     };

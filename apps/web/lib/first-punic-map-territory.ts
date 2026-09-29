@@ -28,14 +28,13 @@ export const FIRST_PUNIC_CARTHAGINIAN_OVERLAY: DynamicMapOverlay["provinces"] = 
   controllerPolityId: "carthage",
   controlFirmnessBps: 8_500,
   terrainId: "coastal-plain",
-  tier: "far",
 }));
 
 export const FIRST_PUNIC_SICILY_OVERLAY: DynamicMapOverlay["provinces"] = [
-  { provinceId: "ita-72843720b81376294924159-sicily-west", controllerPolityId: "carthage", controlFirmnessBps: 8_000, terrainId: "coastal-plain", tier: "focus" },
-  { provinceId: "ita-72843720b81376294924159-sicily-northwest", controllerPolityId: "carthage", controlFirmnessBps: 7_500, terrainId: "hills", tier: "focus" },
-  { provinceId: "ita-72843720b81376294924159-sicily-central", controllerPolityId: "carthage", controlFirmnessBps: 7_000, terrainId: "hills", tier: "focus" },
+  { provinceId: "ita-72843720b81376294924159-sicily-west", controllerPolityId: "carthage", controlFirmnessBps: 8_000, terrainId: "coastal-plain" },
+  { provinceId: "ita-72843720b81376294924159-sicily-northwest", controllerPolityId: "carthage", controlFirmnessBps: 7_500, terrainId: "hills" },
+  { provinceId: "ita-72843720b81376294924159-sicily-central", controllerPolityId: "carthage", controlFirmnessBps: 7_000, terrainId: "hills" },
   // Hieron II's kingdom at the opening: Syracuse's south-eastern hinterland.
-  { provinceId: "ita-72843720b81376294924159-sicily-southeast", controllerPolityId: "syracuse", controlFirmnessBps: 8_500, terrainId: "coastal-plain", tier: "focus" },
-  { provinceId: "ita-72843720b81376294924159-sicily-northeast", controllerPolityId: "rome", controlFirmnessBps: 7_000, terrainId: "coastal-plain", tier: "focus" },
+  { provinceId: "ita-72843720b81376294924159-sicily-southeast", controllerPolityId: "syracuse", controlFirmnessBps: 8_500, terrainId: "coastal-plain" },
+  { provinceId: "ita-72843720b81376294924159-sicily-northeast", controllerPolityId: "rome", controlFirmnessBps: 7_000, terrainId: "coastal-plain" },
 ];

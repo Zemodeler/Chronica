@@ -484,12 +484,12 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
  * the two describe the same province.
  */
 const handAuthoredProvinces = [
-  ...italy.map(([id, name, controllerPolityId]) => ({ id, name, formerNames: [], terrainId: id === "punic-italy-latium" || id === "punic-italy-campanian-plain" ? "coastal-plain" : "hills", settlements: visibleSettlementsByProvince[id] ?? [], controllerPolityId, controlFirmnessBps: controllerPolityId === "rome" ? 9_000 : 7_000, tier: "far" as const })),
-  { id: "tun-13205935b88806172084765", name: "Carthaginian heartland", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["tun-13205935b88806172084765"]!, controllerPolityId: "carthage", controlFirmnessBps: 9_000, tier: "far" },
-  { id: "ita-72843720b81376294924159-sicily-west", name: "Lilybaeum and western Sicily", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-west"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_500, tier: "focus" },
-  { id: "ita-72843720b81376294924159-sicily-northwest", name: "Panormus and the north-west", formerNames: [], terrainId: "hills", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-northwest"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_000, tier: "focus" },
-  { id: "ita-72843720b81376294924159-sicily-central", name: "Agrigentum and the south-west", formerNames: [], terrainId: "hills", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-central"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_000, tier: "focus" },
-  { id: "ita-72843720b81376294924159-sicily-southeast", name: "Syracuse and the south-east", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-southeast"]!, controllerPolityId: "syracuse", controlFirmnessBps: 8_500, tier: "focus" },
+  ...italy.map(([id, name, controllerPolityId]) => ({ id, name, formerNames: [], terrainId: id === "punic-italy-latium" || id === "punic-italy-campanian-plain" ? "coastal-plain" : "hills", settlements: visibleSettlementsByProvince[id] ?? [], controllerPolityId, controlFirmnessBps: controllerPolityId === "rome" ? 9_000 : 7_000 })),
+  { id: "tun-13205935b88806172084765", name: "Carthaginian heartland", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["tun-13205935b88806172084765"]!, controllerPolityId: "carthage", controlFirmnessBps: 9_000 },
+  { id: "ita-72843720b81376294924159-sicily-west", name: "Lilybaeum and western Sicily", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-west"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_500 },
+  { id: "ita-72843720b81376294924159-sicily-northwest", name: "Panormus and the north-west", formerNames: [], terrainId: "hills", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-northwest"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_000 },
+  { id: "ita-72843720b81376294924159-sicily-central", name: "Agrigentum and the south-west", formerNames: [], terrainId: "hills", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-central"]!, controllerPolityId: "carthage", controlFirmnessBps: 8_000 },
+  { id: "ita-72843720b81376294924159-sicily-southeast", name: "Syracuse and the south-east", formerNames: [], terrainId: "coastal-plain", settlements: visibleSettlementsByProvince["ita-72843720b81376294924159-sicily-southeast"]!, controllerPolityId: "syracuse", controlFirmnessBps: 8_500 },
   {
     id: "ita-72843720b81376294924159-sicily-northeast",
     name: "Messana and the strait",
@@ -504,7 +504,6 @@ const handAuthoredProvinces = [
     ],
     controllerPolityId: "mamertines",
     controlFirmnessBps: 7_500,
-    tier: "focus",
   },
 ];
 
@@ -516,35 +515,36 @@ const handAuthoredProvinces = [
  * authored as "hills", which admits no strait, and the campaign has always
  * treated both as ordinary marches.
  */
-const handAuthoredEdges = [
-  ["punic-italy-ligurian-coast", "punic-italy-insubrian-plain"],
-  ["punic-italy-ligurian-coast", "punic-italy-etrurian-uplands"],
-  ["punic-italy-insubrian-plain", "punic-italy-middle-padus"],
-  ["punic-italy-insubrian-plain", "punic-italy-venetian-lagoon"],
-  ["punic-italy-middle-padus", "punic-italy-venetian-lagoon"],
-  ["punic-italy-middle-padus", "punic-italy-etrurian-uplands"],
-  ["punic-italy-etrurian-uplands", "punic-italy-umbrian-valleys"],
-  ["punic-italy-etrurian-uplands", "punic-italy-latium"],
-  ["punic-italy-umbrian-valleys", "punic-italy-picenum-coast"],
-  ["punic-italy-umbrian-valleys", "punic-italy-latium"],
-  ["punic-italy-umbrian-valleys", "punic-italy-marsian-highlands"],
-  ["punic-italy-picenum-coast", "punic-italy-marsian-highlands"],
-  ["punic-italy-latium", "punic-italy-marsian-highlands"],
-  ["punic-italy-latium", "punic-italy-campanian-plain"],
-  ["punic-italy-marsian-highlands", "punic-italy-samnium"],
-  ["punic-italy-samnium", "punic-italy-campanian-plain"],
-  ["punic-italy-samnium", "punic-italy-apulian-coast"],
-  ["punic-italy-samnium", "punic-italy-lucanian-uplands"],
-  ["punic-italy-campanian-plain", "punic-italy-lucanian-uplands"],
-  ["punic-italy-apulian-coast", "punic-italy-lucanian-uplands"],
-  ["punic-italy-apulian-coast", "punic-italy-sallentine-peninsula"],
-  ["punic-italy-lucanian-uplands", "punic-italy-bruttian-highlands"],
-  ["punic-italy-lucanian-uplands", "punic-italy-bruttian-highlands"],
-  ["ita-72843720b81376294924159-sicily-west", "ita-72843720b81376294924159-sicily-northwest"],
-  ["ita-72843720b81376294924159-sicily-northwest", "ita-72843720b81376294924159-sicily-central"],
-  ["ita-72843720b81376294924159-sicily-central", "ita-72843720b81376294924159-sicily-southeast"],
-  ["ita-72843720b81376294924159-sicily-southeast", "ita-72843720b81376294924159-sicily-northeast"],
-].map(([from, to]) => ({ from: from!, to: to!, crossing: "land" as const, distance: 1 }));
+const handAuthoredRoads: (readonly [from: string, to: string, kilometres: number])[] = [
+  ["punic-italy-ligurian-coast", "punic-italy-insubrian-plain", 173],
+  ["punic-italy-ligurian-coast", "punic-italy-etrurian-uplands", 214],
+  ["punic-italy-insubrian-plain", "punic-italy-middle-padus", 158],
+  ["punic-italy-insubrian-plain", "punic-italy-venetian-lagoon", 162],
+  ["punic-italy-middle-padus", "punic-italy-venetian-lagoon", 140],
+  ["punic-italy-middle-padus", "punic-italy-etrurian-uplands", 120],
+  ["punic-italy-etrurian-uplands", "punic-italy-umbrian-valleys", 123],
+  ["punic-italy-etrurian-uplands", "punic-italy-latium", 211],
+  ["punic-italy-umbrian-valleys", "punic-italy-picenum-coast", 68],
+  ["punic-italy-umbrian-valleys", "punic-italy-latium", 112],
+  ["punic-italy-umbrian-valleys", "punic-italy-marsian-highlands", 139],
+  ["punic-italy-picenum-coast", "punic-italy-marsian-highlands", 137],
+  ["punic-italy-latium", "punic-italy-marsian-highlands", 94],
+  ["punic-italy-latium", "punic-italy-campanian-plain", 213],
+  ["punic-italy-marsian-highlands", "punic-italy-samnium", 86],
+  ["punic-italy-samnium", "punic-italy-campanian-plain", 94],
+  ["punic-italy-samnium", "punic-italy-apulian-coast", 142],
+  ["punic-italy-samnium", "punic-italy-lucanian-uplands", 181],
+  ["punic-italy-campanian-plain", "punic-italy-lucanian-uplands", 112],
+  ["punic-italy-apulian-coast", "punic-italy-lucanian-uplands", 78],
+  ["punic-italy-apulian-coast", "punic-italy-sallentine-peninsula", 178],
+  ["punic-italy-lucanian-uplands", "punic-italy-bruttian-highlands", 161],
+  ["punic-italy-lucanian-uplands", "punic-italy-bruttian-highlands", 161],
+  ["ita-72843720b81376294924159-sicily-west", "ita-72843720b81376294924159-sicily-northwest", 67],
+  ["ita-72843720b81376294924159-sicily-northwest", "ita-72843720b81376294924159-sicily-central", 61],
+  ["ita-72843720b81376294924159-sicily-central", "ita-72843720b81376294924159-sicily-southeast", 80],
+  ["ita-72843720b81376294924159-sicily-southeast", "ita-72843720b81376294924159-sicily-northeast", 87],
+];
+const handAuthoredEdges = handAuthoredRoads.map(([from, to, distance]) => ({ from, to, crossing: "land" as const, distance }));
 
 /**
  * The two crossings that are water, and always were.
@@ -555,8 +555,8 @@ const handAuthoredEdges = [
  * ship. They are what makes Sicily an island.
  */
 const handAuthoredWaterEdges = [
-  { from: "punic-italy-bruttian-highlands", to: "ita-72843720b81376294924159-sicily-northeast", crossing: "strait" as const, distance: 1 },
-  { from: "tun-13205935b88806172084765", to: "ita-72843720b81376294924159-sicily-west", crossing: "sea_lane" as const, distance: 2 },
+  { from: "punic-italy-bruttian-highlands", to: "ita-72843720b81376294924159-sicily-northeast", crossing: "strait" as const, distance: 166 },
+  { from: "tun-13205935b88806172084765", to: "ita-72843720b81376294924159-sicily-west", crossing: "sea_lane" as const, distance: 261 },
 ];
 
 const edgeKey = (from: string, to: string): string => [from, to].sort().join("|");
@@ -740,7 +740,6 @@ const initialWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
           settlements: graphSettlementsByProvince.get(province.id) ?? [],
           controllerPolityId: province.controllerPolityId,
           controlFirmnessBps: province.controlFirmnessBps,
-          tier: "far" as const,
         })),
     ],
     edges: [

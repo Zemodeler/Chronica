@@ -165,8 +165,8 @@ function clienteles(world: WorldState): Candidate[] {
 
 /** How hard a power's provinces are pressed: war damage and hunger, averaged. */
 function distressOf(world: WorldState, polityId: string): number {
-  const provinces = world.map.provinces.filter((province) => province.controllerPolityId === polityId);
-  const material = world.material.provinceMaterial.filter((entry) => provinces.some((province) => province.id === entry.provinceId));
+  const held = new Set(world.map.provinces.filter((province) => province.controllerPolityId === polityId).map((province) => province.id));
+  const material = world.material.provinceMaterial.filter((entry) => held.has(entry.provinceId));
   if (material.length === 0) return 0;
   return material.reduce((sum, entry) => sum + (entry.warDamageBps + (10_000 - entry.foodSecurityBps)) / 2, 0) / material.length;
 }
@@ -206,6 +206,7 @@ const UNREST_BPS = 5_000;
 
 function wantDepartments(world: WorldState): WorldState {
   const reader = readDepartments(world);
+  const materialById = new Map(world.material.provinceMaterial.map((entry) => [entry.provinceId, entry]));
   const wants = new Map<string, { id: string; label: string; polityId: string }[]>();
   for (const polity of world.map.polities) {
     // A loose people or a single town has nothing to hand to anybody.
@@ -231,8 +232,11 @@ function wantDepartments(world: WorldState): WorldState {
       list.push({ id: `watch-${polity.id}`, label: "Set up a watch: a plot was laid against the state's own men, and nobody keeps watch for it", polityId: polity.id });
     }
     // Hunger with unrest, and nobody over the grain.
-    const hungry = world.map.provinces.some((province) => province.controllerPolityId === polity.id && world.material.provinceMaterial.some((entry) => entry.provinceId === province.id
-      && entry.foodSecurityBps < HUNGER_BPS && entry.stabilityBps < UNREST_BPS));
+    const hungry = world.map.provinces.some((province) => {
+      if (province.controllerPolityId !== polity.id) return false;
+      const entry = materialById.get(province.id);
+      return entry !== undefined && entry.foodSecurityBps < HUNGER_BPS && entry.stabilityBps < UNREST_BPS;
+    });
     if (hungry && reader.holding(scope, "grain").department === null) {
       list.push({ id: `grain-${polity.id}`, label: "Put somebody over the grain: the people are hungry, and restless with it", polityId: polity.id });
     }
@@ -326,6 +330,7 @@ function landholders(world: WorldState): Candidate[] {
 /** A people taken by conquest, until they are reconciled to it. */
 function conquered(world: WorldState): Candidate[] {
   const native = new Map(world.society.nativeControllers.map((entry) => [entry.provinceId, entry.polityId]));
+  const materialById = new Map(world.material.provinceMaterial.map((entry) => [entry.provinceId, entry]));
   const byPair = new Map<string, { provinces: string[]; ruler: string; people: string }>();
   for (const province of world.map.provinces) {
     const ruler = province.controllerPolityId;
@@ -336,7 +341,7 @@ function conquered(world: WorldState): Candidate[] {
   }
   const out: Candidate[] = [];
   for (const { provinces, ruler, people } of byPair.values()) {
-    const stability = world.material.provinceMaterial.filter((entry) => provinces.includes(entry.provinceId)).map((entry) => entry.stabilityBps);
+    const stability = provinces.flatMap((id) => materialById.get(id)?.stabilityBps ?? []);
     const average = stability.length === 0 ? 5_000 : stability.reduce((sum, value) => sum + value, 0) / stability.length;
     const strength = clampBps(provinces.length * 2_000 + Math.max(0, 7_000 - average));
     if (strength < GROUP_DISSOLVES_BPS) continue;
@@ -592,7 +597,8 @@ function seatGroups(world: WorldState, chamber: GovernmentInstitution): Governme
   const regional: VotingBloc[] = [];
   if (chamber.franchise === "chiefs" || chamber.franchise === "cities") {
     const provinces = world.map.provinces.filter((province) => province.controllerPolityId === chamber.polityId);
-    const people = (provinceId: string): number => world.material.provinceMaterial.find((entry) => entry.provinceId === provinceId)?.population ?? 1;
+    const populations = new Map(world.material.provinceMaterial.map((entry) => [entry.provinceId, entry.population]));
+    const people = (provinceId: string): number => populations.get(provinceId) ?? 1;
     const total = provinces.reduce((sum, province) => sum + people(province.id), 0) || 1;
     for (const province of provinces.slice(0, 12)) {
       regional.push({

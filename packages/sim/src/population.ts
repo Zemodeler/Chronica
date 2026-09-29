@@ -21,14 +21,20 @@ import type { Fact, WorldState } from "@chronica/shared";
 
 /**
  * How much ground a country must hold before the world owes it a leader without
- * the player having gone anywhere near it. Set where the Punic Wars map's real
- * powers sit: seventeen countries clear it, and the sixty-odd single-province
- * peoples do not.
+ * the player having gone anywhere near it, as a share of the map. Set where the
+ * Punic Wars map's real powers sit: twelve of its 780 provinces, which seventeen
+ * countries clear and the sixty-odd single-province peoples do not. A share and
+ * not a count, so a map cut into five times as many provinces asks for five
+ * times as many; province area is near enough uniform for that to be the same
+ * ground.
  */
-const MAJOR_POWER_PROVINCES = 12;
+const MAJOR_POWER_SHARE = 12 / 780;
 
 /** Ceiling on what sheer size contributes, kept below the smallest relevance bonus. */
 const MAX_SIZE_SCORE = 100;
+
+/** The size score the old 780-province map gave a country holding `count` provinces. */
+const SIZE_SCORE_PER_SHARE = 780;
 
 export interface PolityGap {
   readonly polityId: string;
@@ -57,10 +63,19 @@ function involvedPolityIds(facts: readonly Fact[]): Set<string> {
   );
 }
 
+/** Three provinces to raise them in: the capital's first, then by name so the choice does not follow map order. */
+function landOf(world: WorldState, polity: WorldState["map"]["polities"][number]): string[] {
+  const held = world.map.provinces.filter((province) => province.controllerPolityId === polity.id);
+  const capital = held.find((province) => province.settlements.some((settlement) => settlement.id === polity.capitalSettlementId));
+  const rest = held.filter((province) => province !== capital).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  return [...(capital === undefined ? [] : [capital]), ...rest].slice(0, 3).map((province) => province.id);
+}
+
 export function findPolityGaps(input: PopulationInput): PolityGap[] {
   const { world } = input;
   const involved = involvedPolityIds(input.facts);
 
+  const majorProvinces = Math.max(2, Math.ceil(world.map.provinces.length * MAJOR_POWER_SHARE));
   const provincesBy = new Map<string, number>();
   for (const province of world.map.provinces) {
     if (province.controllerPolityId === null) continue;
@@ -94,7 +109,7 @@ export function findPolityGaps(input: PopulationInput): PolityGap[] {
     // that the powers of the age would have to reckon with it. The rest stay
     // names on the map until play arrives, which is the moment this same check
     // starts returning them.
-    const major = provinceCount >= MAJOR_POWER_PROVINCES || polity.capitalSettlementId !== null;
+    const major = provinceCount >= majorProvinces || polity.capitalSettlementId !== null;
     if (!involved.has(polity.id) && !neighbours.has(polity.id) && !major) continue;
 
     const needsLeader = !world.characters.some((character) => character.polityId === polity.id && character.alive);
@@ -108,7 +123,7 @@ export function findPolityGaps(input: PopulationInput): PolityGap[] {
     // now bounded well below the smallest relevance bonus, so it can order the
     // shortlist but never choose it.
     const reasons: string[] = [];
-    let score = Math.min(provinceCount, MAX_SIZE_SCORE);
+    let score = Math.min(Math.round((provinceCount / world.map.provinces.length) * SIZE_SCORE_PER_SHARE), MAX_SIZE_SCORE);
     if (involved.has(polity.id)) {
       score += 1_000;
       reasons.push("the player is dealing with them now");
@@ -129,7 +144,7 @@ export function findPolityGaps(input: PopulationInput): PolityGap[] {
         polityId: polity.id,
         name: polity.name,
         provinceCount,
-        provinceIds: world.map.provinces.filter((province) => province.controllerPolityId === polity.id).slice(0, 3).map((province) => province.id),
+        provinceIds: landOf(world, polity),
         needsLeader,
         needsForce,
         why: reasons.length === 0 ? "they hold territory and nobody speaks for them" : reasons.join(", "),

@@ -16,6 +16,7 @@ import {
   type WorldState,
   type WorldStoryline,
 } from "@chronica/shared";
+import { RELIEF_KM, kmFrom } from "@chronica/shared";
 import type { MemberFate } from "./battle";
 import { handOverForcesOf, killCharacter, mattersEnough } from "./mortality";
 
@@ -220,11 +221,7 @@ export function openFieldPerils(
 
 /** Somebody of his own side near enough to come for him. */
 function reliefFor(world: WorldState, peril: FieldPeril, person: Character): Force | undefined {
-  const near = new Set<string>([peril.provinceId]);
-  for (const edge of world.map.edges) {
-    if (edge.from === peril.provinceId) near.add(edge.to);
-    if (edge.to === peril.provinceId) near.add(edge.from);
-  }
+  const near = kmFrom(world, peril.provinceId, { budgetKm: RELIEF_KM });
   return world.material.forces
     .filter((force) => force.polityId === person.polityId && force.id !== peril.enemyForceId && force.outlaw !== true && near.has(force.locationId) && fitOf(force) >= 500)
     .sort((a, b) => fitOf(b) - fitOf(a) || a.id.localeCompare(b.id))[0];

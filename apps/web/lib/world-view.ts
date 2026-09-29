@@ -91,6 +91,10 @@ function projectOverlay(world: WorldState, viewerCharacterId: string | null, off
   const sighted = new Map((station === null ? [] : armiesInSight(world, station, factsKnownToStation(facts, station, world.instant, world), warfare))
     .map((army) => [army.forceId, army]));
   const characterNames = new Map(world.characters.map((character) => [character.id, character.name]));
+  // Looked up once per settlement below, so indexed here rather than searched each time.
+  const capitalOf = new Map<string, string>();
+  for (const polity of world.map.polities) if (polity.capitalSettlementId != null && !capitalOf.has(polity.capitalSettlementId)) capitalOf.set(polity.capitalSettlementId, polity.id);
+  const besieged = new Set(world.conflicts.sieges.map((siege) => siege.settlementId));
 
   return DynamicMapOverlaySchema.parse({
     // The world's own clock is the revision: the map refetches exactly when
@@ -113,7 +117,6 @@ function projectOverlay(world: WorldState, viewerCharacterId: string | null, off
       controllerPolityId: province.controllerPolityId,
       controlFirmnessBps: province.controlFirmnessBps,
       terrainId: province.terrainId,
-      tier: province.tier,
     })),
     settlements: world.map.provinces.flatMap((province) =>
       province.settlements.map((settlement) => ({
@@ -123,9 +126,9 @@ function projectOverlay(world: WorldState, viewerCharacterId: string | null, off
         name: settlement.name,
         kind: settlement.kind,
         controllerPolityId: settlement.controllerPolityId,
-        capitalPolityId: world.map.polities.find((polity) => polity.capitalSettlementId === settlement.id)?.id ?? null,
+        capitalPolityId: capitalOf.get(settlement.id) ?? null,
         importance: settlement.size,
-        underSiege: world.conflicts.sieges.some((siege) => siege.settlementId === settlement.id),
+        underSiege: besieged.has(settlement.id),
         damaged: false,
       })),
     ),
@@ -154,17 +157,22 @@ export function projectWorldView(world: WorldState, meta: WorldViewMeta, viewerC
   const viewer = world.characters.find((character) => character.id === viewerCharacterId);
   const mapOverlay = projectOverlay(world, viewer?.id ?? null, meta.offices, meta.facts, meta.warfare);
 
+  // What the map shows standing in each province, and nothing it does not.
+  const forcesByProvince = new Map<string, string[]>();
+  for (const force of mapOverlay.forces) {
+    const names = forcesByProvince.get(force.provinceId);
+    if (names) names.push(force.name); else forcesByProvince.set(force.provinceId, [force.name]);
+  }
   const provinces: ProvinceView[] = world.map.provinces.map((province) => {
     const controllerLabel = province.controllerPolityId === null
       ? "Uncontrolled"
       : polityNames.get(province.controllerPolityId) ?? province.controllerPolityId;
-    // What the map shows standing there, and nothing it does not.
-    const stationed = mapOverlay.forces.filter((force) => force.provinceId === province.id);
+    const stationed = forcesByProvince.get(province.id) ?? [];
     return {
       id: province.id,
       name: province.name,
       controllerLabel,
-      garrisonLabel: stationed.length === 0 ? "No forces present" : `${stationed.map((force) => force.name).join(", ")} present`,
+      garrisonLabel: stationed.length === 0 ? "No forces present" : `${stationed.join(", ")} present`,
     };
   });
 

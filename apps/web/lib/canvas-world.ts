@@ -4,22 +4,59 @@ import type { GeoJsonMap, Settlement, WorldState } from "@chronica/shared";
 import { builtInScenarioMap, PUNIC_WARS_MAP_ASSET_ID } from "./built-in-scenario-maps";
 import { punicWarsOpeningOverlay } from "./punic-wars-map-territory";
 
-/** A canvas province is the geographic source of truth; state only materializes it when play reaches it. */
-export type CanvasRegion = Readonly<{ id: string; name: string }>;
+/**
+ * A canvas province is the geographic source of truth; state only materializes it when play reaches it.
+ * `region` is the coarse ancient region or holding polity the province sits in, and
+ * `aliases` the other names a person might use for the same ground (former names, its towns).
+ */
+export type CanvasRegion = Readonly<{ id: string; name: string; region: string; aliases: readonly string[] }>;
 
 function canvasFor(mapAssetId: string | null): GeoJsonMap | undefined {
   return builtInScenarioMap(mapAssetId);
 }
 
+function humanise(slug: string): string {
+  return slug.replace(/[-_]+/g, " ").replace(/\b\p{L}/gu, (letter) => letter.toUpperCase());
+}
+
 /** Every selectable province comes from the scenario's delivered canvas, with state as a fallback for custom maps. */
 export function canvasRegions(mapAssetId: string | null, world: WorldState): readonly CanvasRegion[] {
+  const polities = new Map(world.map.polities.map((polity) => [polity.id, polity.name]));
+  const stateProvinces = new Map(world.map.provinces.map((province) => [province.id, province]));
   const map = canvasFor(mapAssetId);
-  if (map === undefined) return world.map.provinces.map(({ id, name }) => ({ id, name }));
-  // The world's name wins: the geometry's are modern (`namedByTheWorld`).
-  const named = new Map(world.map.provinces.map((province) => [province.id, province.name]));
+  if (map === undefined) {
+    return world.map.provinces.map((province) => ({
+      id: province.id,
+      name: province.name,
+      region: (province.controllerPolityId === null ? undefined : polities.get(province.controllerPolityId)) ?? "Unclaimed lands",
+      aliases: [...province.formerNames, ...province.settlements.map((settlement) => settlement.name)],
+    }));
+  }
+  const opening = mapAssetId === PUNIC_WARS_MAP_ASSET_ID ? punicWarsOpeningOverlay(0) : null;
+  const openingPolities = new Map(opening?.polities.map((polity) => [polity.polityId, polity.name]) ?? []);
+  const openingController = new Map(opening?.provinces.map((province) => [province.provinceId, province.controllerPolityId]) ?? []);
+  const townsByProvince = new Map<string, string[]>();
+  for (const feature of map.features) {
+    if (feature.properties.kind !== "settlement") continue;
+    const towns = townsByProvince.get(feature.properties.provinceId) ?? [];
+    towns.push(feature.properties.name);
+    townsByProvince.set(feature.properties.provinceId, towns);
+  }
   return map.features
     .filter((feature) => feature.properties.kind === "province")
-    .map((feature) => ({ id: feature.id, name: named.get(feature.id) ?? feature.properties.name ?? feature.id }));
+    .map((feature) => {
+      const state = stateProvinces.get(feature.id);
+      const controllerId = state === undefined ? openingController.get(feature.id) ?? null : state.controllerPolityId;
+      const holder = controllerId === null ? undefined : polities.get(controllerId) ?? openingPolities.get(controllerId);
+      const regionId = feature.properties.kind === "province" ? feature.properties.regionId : undefined;
+      return {
+        id: feature.id,
+        // The world's name wins: the geometry's are modern (`namedByTheWorld`).
+        name: state?.name ?? feature.properties.name ?? feature.id,
+        region: regionId === undefined ? holder ?? "Unclaimed lands" : humanise(regionId),
+        aliases: [...(state?.formerNames ?? []), ...(townsByProvince.get(feature.id) ?? [])],
+      };
+    });
 }
 
 function settlementKind(type: "capital" | "city" | "town" | "village" | "fort" | "port"): Settlement["kind"] {
@@ -91,7 +128,6 @@ export function materializeCanvasProvince(
           settlements,
           controllerPolityId: materializedControllerId,
           controlFirmnessBps: openingProvince?.controlFirmnessBps ?? 0,
-          tier: "focus",
         },
       ],
     },

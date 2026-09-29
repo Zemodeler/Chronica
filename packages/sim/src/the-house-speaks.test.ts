@@ -66,7 +66,7 @@ describe("a beaten power", () => {
 
   it("is told the ground it lost and how far its army is from it", () => {
     const text = renderCharacterPortrait("mamertine-spokesman", "Statius Mettius", messanaTaken(), definition.clock);
-    expect(text).toMatch(/Their power lost Messana and the strait .* to Roman Republic 0 days ago; Mamertine garrison is one province from it/);
+    expect(text).toMatch(/Their power lost Messana and the strait .* to Roman Republic 0 days ago; Mamertine garrison is about \d+ km from it/);
   });
 
   it("has its general pressed to take it back", () => {

@@ -2,7 +2,7 @@
 
 import { useMemo, useCallback, useRef, type PointerEvent } from "react";
 import type { DynamicMapOverlay, GeoJsonPosition } from "@chronica/shared";
-import { provinceContains, type StaticWorldGeometry } from "./world-geometry";
+import { provinceAtPoint, type StaticWorldGeometry } from "./world-geometry";
 import { resolveMapForcePlacements } from "./map-dynamic-geometry";
 import { deriveForceConflictStatuses } from "./map-conflict-state";
 import { ARMY_STANDARD_HIT_SLOP_PIXELS, FALLBACK_FORCE_FLAG, FORCES_VISIBLE_FROM_SCALE, armyStandardHitBounds, armyStandardWidthForZoom, fannedStandardCentre, type ForceFlagAsset } from "./army-standard";
@@ -82,11 +82,7 @@ export function GeoMap({ world, viewBox, overlay, zoomBand, liveTransform, force
     if (!point) return null;
     const geographic: GeoJsonPosition = [point.wx, -point.wy];
     // Last drawn is on top, as it was on the canvas.
-    for (let index = world.provinces.length - 1; index >= 0; index--) {
-      const province = world.provinces[index]!;
-      if (provinceContains(province, geographic)) return province;
-    }
-    return null;
+    return provinceAtPoint(world, geographic) ?? null;
   }, [worldPoint, world]);
 
   /**
@@ -116,7 +112,7 @@ export function GeoMap({ world, viewBox, overlay, zoomBand, liveTransform, force
   const activateForce = useCallback((force: typeof forceMarkers[number]) => {
     const locationLabel = world.provinceById.get(force.provinceId)?.name ?? force.provinceId;
     const destination = force.movement?.destination;
-    const destinationLabel = destination === undefined ? "Holding position" : world.provinces.find((province) => provinceContains(province, destination))?.name ?? coordinateLabel(destination);
+    const destinationLabel = destination === undefined ? "Holding position" : provinceAtPoint(world, destination, "first")?.name ?? coordinateLabel(destination);
     const conflict = conflictByForceId.get(force.forceId);
     const details: ForceMapDetails = { forceId: force.forceId, ownerPolityId: force.ownerPolityId, name: force.name, commanderLabel: force.commanderLabel, statusLabel: conflict?.statusLabel ?? "Not in combat", strengthLabel: force.strengthLabel, locationLabel, destinationLabel, progressBps: force.movement?.progressBps ?? null, movementState: force.movement?.state ?? null, commandable: force.commandable === true };
     onForceClick(details);

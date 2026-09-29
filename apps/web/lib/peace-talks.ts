@@ -83,15 +83,48 @@ const TreatyReadingSchema = z.object({
   terms: z.string().trim().max(600).default(""),
 }).strict();
 
+/** Few enough to print: a power may hold hundreds of small provinces, and a treaty names a handful. */
+const TREATY_PROVINCES = 60;
+
+const plainWords = (text: string): string => text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * The provinces a treaty could cede: the two sides' own, with the ones the
+ * conversation names (by province or by town) first, then the ground along
+ * their common border, then the rest by name. A cut by map order would leave
+ * out the very province being bargained for.
+ */
+function provincesForTheTreaty(world: WorldState, talks: Negotiation, conversation: string): WorldState["map"]["provinces"] {
+  const sides = new Set([talks.envoyPolityId, talks.playerPolityId]);
+  const held = world.map.provinces.filter((province) => province.controllerPolityId !== null && sides.has(province.controllerPolityId));
+  const text = ` ${plainWords(conversation)} `;
+  const mentioned = (name: string): boolean => {
+    const words = plainWords(name);
+    return words.length >= 4 && text.includes(` ${words} `);
+  };
+  const controller = new Map(held.map((province) => [province.id, province.controllerPolityId]));
+  const onTheBorder = new Set<string>();
+  for (const edge of world.map.edges) {
+    const from = controller.get(edge.from);
+    const to = controller.get(edge.to);
+    if (from !== undefined && to !== undefined && from !== to) {
+      onTheBorder.add(edge.from);
+      onTheBorder.add(edge.to);
+    }
+  }
+  const rank = (province: WorldState["map"]["provinces"][number]): number =>
+    mentioned(province.name) || province.settlements.some((settlement) => mentioned(settlement.name)) ? 0 : onTheBorder.has(province.id) ? 1 : 2;
+  return [...held].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id)).slice(0, TREATY_PROVINCES);
+}
+
 /**
  * Whether the two of them agreed exact terms in this exchange, and which.
  * Nothing is agreed on the envoy's word alone, nor on the player's: both have
  * to have said yes to the same terms.
  */
 async function readTheTreaty(db: ChronicaDatabase, userId: string, gameId: string, talks: Negotiation, world: WorldState, conversation: string): Promise<z.infer<typeof TreatyReadingSchema> | null> {
-  const provinces = world.map.provinces
-    .filter((province) => province.controllerPolityId === talks.envoyPolityId || province.controllerPolityId === talks.playerPolityId)
-    .slice(0, 80).map((province) => `${province.id} = ${province.name} (held by ${province.controllerPolityId === talks.envoyPolityId ? talks.envoyPolityName : talks.playerPolityName})`);
+  const provinces = provincesForTheTreaty(world, talks, conversation)
+    .map((province) => `${province.id} = ${province.name} (held by ${province.controllerPolityId === talks.envoyPolityId ? talks.envoyPolityName : talks.playerPolityName})`);
   const system = `You read peace talks between ${talks.playerPolityName} [${talks.playerPolityId}] and ${talks.envoyPolityName} [${talks.envoyPolityId}] in a historical strategy game, and say whether BOTH sides agreed exact terms in the last exchange.
 
 "agreed" is true only when the player proposed or accepted specific terms and the envoy explicitly accepted them (or the reverse), in so many words. A proposal, a counter-offer, a refusal, or talk of terms in general is not agreement: answer false with no clauses.

@@ -46,6 +46,17 @@ const BORDER_TOLERANCE_DEGREES = 0.02;
 /** Degrees of latitude to kilometres, near enough for classifying crossings. */
 const KM_PER_DEGREE = 111;
 
+const EARTH_RADIUS_KM = 6_371;
+
+/** Great-circle kilometres between two lon/lat points. */
+function greatCircleKm(a: { lon: number; lat: number }, b: { lon: number; lat: number }): number {
+  const rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad;
+  const dLon = (b.lon - a.lon) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
 /**
  * How a gap between two landmasses is recorded, by how wide it is.
  *
@@ -182,7 +193,19 @@ function addEdge(a: string, b: string, crossing: string, distance: number): void
   recorded.add(key);
   edges.push({ from, to, crossing, distance });
 }
-for (const [id, set] of neighbours) for (const other of set) addEdge(id, other, "land", 1);
+// An edge's distance is the kilometres between its two province centres: the sim
+// times every march, letter and sailing from it, so a finer map is not a slower one.
+const centroidCache = new Map<string, { lon: number; lat: number }>();
+function centreOf(id: string): { lon: number; lat: number } {
+  let centre = centroidCache.get(id);
+  if (centre === undefined) {
+    centre = centroidOf(id);
+    centroidCache.set(id, centre);
+  }
+  return centre;
+}
+const centreKm = (a: string, b: string): number => Math.max(1, Math.round(greatCircleKm(centreOf(a), centreOf(b))));
+for (const [id, set] of neighbours) for (const other of set) addEdge(id, other, "land", centreKm(id, other));
 
 // Landmasses: what the land borders alone connect.
 const componentOf = new Map<string, number>();
@@ -267,7 +290,8 @@ while (joined.size < components.length) {
   const crossing = km <= STRAIT_KM ? "strait" : "sea_lane";
   const from = provinceAt(best.inside, best.pair.from);
   const to = provinceAt(best.outside, best.pair.to);
-  addEdge(from, to, crossing, Math.max(1, Math.round(best.pair.distance)));
+  // A water edge carries the gap itself, not the centres: the sea is what is crossed.
+  addEdge(from, to, crossing, Math.max(1, Math.round(km)));
   crossings.push({ from, to, crossing, km: Math.round(km) });
   joined.add(best.outside);
 }

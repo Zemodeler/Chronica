@@ -3,7 +3,8 @@ import {
   applyRecruitmentToMaterial,
   boundedId,
   ensureProvinceMaterial,
-  hopsBetween,
+  LEVY_REACH_KM,
+  kmFrom,
   type ForcePersonnelCategory,
   type WorldState,
 } from "@chronica/shared";
@@ -45,8 +46,6 @@ export const MUSTER_AT_ONCE = 1_000;
 export const MEN_MUSTERED_PER_DAY = 300;
 /** Bands a muster comes in: the men of the nearer towns first. */
 const MUSTER_BANDS = 3;
-/** How far a power sends for men: past this, a levy is a province's own. */
-const LEVY_REACH_HOPS = 6;
 
 export interface LevyRequest {
   readonly polityId: string;
@@ -78,12 +77,13 @@ export function levyCost(men: number): number {
 function poolsFor(world: WorldState, polityId: string, provinceId: string): string[] {
   const allies = new Set(alliesLedBy(world.polityAgreements, polityId));
   const here = world.map.provinces.find((province) => province.id === provinceId)?.controllerPolityId ?? null;
-  const distance = (id: string): number => hopsBetween(world, provinceId, id, LEVY_REACH_HOPS) ?? Infinity;
+  // How far a power sends for men: past this, a levy is a province's own.
+  const reach = kmFrom(world, provinceId, { budgetKm: LEVY_REACH_KM });
   const own = world.map.provinces
     .filter((province) => province.id !== provinceId && province.controllerPolityId === polityId)
-    .map((province) => ({ id: province.id, hops: distance(province.id) }))
-    .filter((entry) => entry.hops <= LEVY_REACH_HOPS)
-    .sort((a, b) => a.hops - b.hops || a.id.localeCompare(b.id))
+    .map((province) => ({ id: province.id, km: reach.get(province.id) ?? Infinity }))
+    .filter((entry) => entry.km <= LEVY_REACH_KM)
+    .sort((a, b) => a.km - b.km || a.id.localeCompare(b.id))
     .map((entry) => entry.id);
   return [...(here !== null && allies.has(here) ? [] : [provinceId]), ...own];
 }

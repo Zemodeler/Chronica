@@ -44,8 +44,8 @@ describe("dynamic map geometry", () => {
       polities: [{ polityId: "rome", name: "Rome" }, { polityId: "carthage", name: "Carthage" }],
       politicalRelations: [],
       provinces: [
-        { provinceId: "rome", controllerPolityId: "rome", controlFirmnessBps: 10_000, terrainId: "plain", tier: "focus" as const },
-        { provinceId: "carthage", controllerPolityId: "carthage", controlFirmnessBps: 10_000, terrainId: "plain", tier: "focus" as const },
+        { provinceId: "rome", controllerPolityId: "rome", controlFirmnessBps: 10_000, terrainId: "plain" },
+        { provinceId: "carthage", controllerPolityId: "carthage", controlFirmnessBps: 10_000, terrainId: "plain" },
       ],
       settlements: [],
       forces: [force],
@@ -81,7 +81,7 @@ describe("resolveMapForcePlacements (docs/19 Phase 3)", () => {
   it("groups both sides of a battle at the same placement, with one primary", () => {
     const overlay = {
       revision: 1, polities: [], politicalRelations: [],
-      provinces: [{ provinceId: "sicily", controllerPolityId: "rome", controlFirmnessBps: 10_000, terrainId: "plain", tier: "focus" as const }],
+      provinces: [{ provinceId: "sicily", controllerPolityId: "rome", controlFirmnessBps: 10_000, terrainId: "plain" }],
       settlements: [], forces: [forceA, forceB],
       conflicts: { battles: [{ battleId: "b1", participantForceIds: ["force-a", "force-b"], attackerForceIds: ["force-a"] }], sieges: [], wars: [] },
     };
@@ -97,7 +97,7 @@ describe("resolveMapForcePlacements (docs/19 Phase 3)", () => {
     const forceC: MapForceOverlay = { ...forceA, forceId: "force-c" };
     const overlay = {
       revision: 1, polities: [], politicalRelations: [],
-      provinces: [{ provinceId: "sicily", controllerPolityId: "rome", controlFirmnessBps: 10_000, terrainId: "plain", tier: "focus" as const }],
+      provinces: [{ provinceId: "sicily", controllerPolityId: "rome", controlFirmnessBps: 10_000, terrainId: "plain" }],
       settlements: [], forces: [forceA, forceB, forceC],
       conflicts: { battles: [], sieges: [{ settlementId: "s1", invadingForceIds: ["force-a", "force-c"], defendingForceIds: ["force-b"] }], wars: [] },
     };

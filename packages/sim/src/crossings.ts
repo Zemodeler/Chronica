@@ -1,13 +1,14 @@
 import {
+  DETOUR_FACTOR,
   atWar,
   isNavalForce,
   isWinterMonth,
-  landHopsBetween,
+  landKmBetween,
   paperWeightedStrength,
   passageFor,
   stormFinds,
   stormLossBps,
-  strictHopsBetween,
+  strictKmBetween,
   WINTER_PASS_LOSS_BPS,
   warfareWith,
   type FactProposalDraft,
@@ -179,8 +180,9 @@ export function perilsOfTheRoad(
     };
   }
   // Snow on the only roads there.
-  if (!isWinterMonth(month) || landHopsBetween(world, army.locationId, toProvinceId) === null) return { army, fleets: [...fleets], words: "" };
-  if (strictHopsBetween(world, army.locationId, toProvinceId, (crossing) => crossing !== "pass" && crossing !== "strait" && crossing !== "sea_lane") !== null) {
+  const onFoot = isWinterMonth(month) ? landKmBetween(world, army.locationId, toProvinceId) : null;
+  if (onFoot === null) return { army, fleets: [...fleets], words: "" };
+  if (strictKmBetween(world, army.locationId, toProvinceId, (crossing) => crossing !== "pass" && crossing !== "strait" && crossing !== "sea_lane", onFoot * DETOUR_FACTOR) !== null) {
     return { army, fleets: [...fleets], words: "" };
   }
   const frozen = Math.floor((fitOf(army) * WINTER_PASS_LOSS_BPS) / 10_000);

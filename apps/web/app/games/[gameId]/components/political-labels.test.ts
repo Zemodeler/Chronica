@@ -83,9 +83,9 @@ describe("political map derivation", () => {
   });
   it("keeps disconnected holdings out of the primary label territory", () => {
     const state = derivePoliticalMapState(prepareStaticWorldGeometry(map), overlay([
-      { provinceId: "west", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain", tier: "focus" },
-      { provinceId: "east", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain", tier: "focus" },
-      { provinceId: "island", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain", tier: "far" },
+      { provinceId: "west", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain" },
+      { provinceId: "east", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain" },
+      { provinceId: "island", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain" },
     ]));
     expect(state.territories[0]?.components).toHaveLength(2);
     expect(state.territories[0]?.primaryComponent.provinceIds).toEqual(["east", "west"]);
@@ -94,16 +94,16 @@ describe("political map derivation", () => {
   });
   it("uses one label for holdings separated only by a small map gap", () => {
     const state = derivePoliticalMapState(prepareStaticWorldGeometry(map), overlay([
-      { provinceId: "east", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain", tier: "focus" },
-      { provinceId: "nearby", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain", tier: "focus" },
+      { provinceId: "east", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain" },
+      { provinceId: "nearby", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain" },
     ]));
     expect(state.territories[0]?.components).toHaveLength(1);
     expect(derivePoliticalLabels(state).filter((label) => label.polityId === "rome")).toHaveLength(1);
   });
   it("classifies owner changes as country borders", () => {
     const state = derivePoliticalMapState(prepareStaticWorldGeometry(map), overlay([
-      { provinceId: "west", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain", tier: "focus" },
-      { provinceId: "east", controllerPolityId: null, controlFirmnessBps: 0, terrainId: "plain", tier: "focus" },
+      { provinceId: "west", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain" },
+      { provinceId: "east", controllerPolityId: null, controlFirmnessBps: 0, terrainId: "plain" },
     ]));
     expect(state.borderSegments.some((border) => border.classification === "country_border")).toBe(true);
     expect(deriveWarBorderPaths(state, [])).toBe("");
@@ -112,15 +112,15 @@ describe("political map derivation", () => {
     const state = derivePoliticalMapState(prepareStaticWorldGeometry(map), {
       polities: [{ polityId: "carthage", name: "Carthage" }, { polityId: "rome", name: "Rome" }],
       provinces: [
-        { provinceId: "west", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain", tier: "focus" },
-        { provinceId: "east", controllerPolityId: "carthage", controlFirmnessBps: 8500, terrainId: "plain", tier: "focus" },
+        { provinceId: "west", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain" },
+        { provinceId: "east", controllerPolityId: "carthage", controlFirmnessBps: 8500, terrainId: "plain" },
       ],
     });
     expect(deriveWarBorderPaths(state, [])).toBe("");
     expect(deriveWarBorderPaths(state, [{ polityAId: "carthage", polityBId: "rome" }])).not.toBe("");
   });
   it("fits every component label to 85 percent of its selected path", () => {
-    const state = derivePoliticalMapState(prepareStaticWorldGeometry(map), overlay([{ provinceId: "west", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain", tier: "focus" }]));
+    const state = derivePoliticalMapState(prepareStaticWorldGeometry(map), overlay([{ provinceId: "west", controllerPolityId: "rome", controlFirmnessBps: 8500, terrainId: "plain" }]));
     const label = derivePoliticalLabels(state)[0];
     expect(label?.name).toBe("Roman Republic");
     expect(label?.usableLength).toBeCloseTo((label?.pathLength ?? 0) * .85);

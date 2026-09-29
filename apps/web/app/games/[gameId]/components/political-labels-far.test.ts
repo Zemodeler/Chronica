@@ -17,7 +17,7 @@ function scenario(squares: readonly Square[], names: Record<string, string>) {
     revision: 1,
     polities: Object.entries(names).map(([polityId, name]) => ({ polityId, name })),
     politicalRelations: [],
-    provinces: squares.map(({ id, owner }) => ({ provinceId: id, controllerPolityId: owner, controlFirmnessBps: 8500, terrainId: "plain", tier: "focus" as const })),
+    provinces: squares.map(({ id, owner }) => ({ provinceId: id, controllerPolityId: owner, controlFirmnessBps: 8500, terrainId: "plain" })),
     settlements: [], forces: [], conflicts: { battles: [], sieges: [], wars: [] },
   };
   return derivePoliticalMapState(prepareStaticWorldGeometry(map), overlay);

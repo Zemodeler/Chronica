@@ -1,8 +1,10 @@
 import { seesForce, type Station } from "../authority/station";
 import { bandStrength } from "../material/in-words";
-import { asShips, countWord, fitStrengthOf, isNavalForce } from "../warfare/sea";
+import { asShips, countWord, fitStrengthOf, isNavalForce, isWaterCrossing } from "../warfare/sea";
 import type { ScenarioWarfareRules } from "../warfare/battle";
 import type { Fact } from "../world/facts";
+import { kmFromAny } from "../world/movement";
+import { SIGHT_KM } from "../world/travel";
 import type { WorldState } from "../world/world-state";
 import { strangerStrength } from "./glossary";
 
@@ -34,12 +36,9 @@ export function armiesInSight(world: WorldState, station: Station, knownFacts: r
     ...world.map.provinces.filter((province) => station.polityId !== null && province.controllerPolityId === station.polityId).map((province) => province.id),
     ...station.provinceIds,
   ]);
-  // One border out: an army on the frontier is seen from the walls.
-  const inSight = new Set(watched);
-  for (const edge of world.map.edges) {
-    if (watched.has(edge.from)) inSight.add(edge.to);
-    if (watched.has(edge.to)) inSight.add(edge.from);
-  }
+  // A day's ride out: an army on the frontier is seen from the walls. The far
+  // shore of a water crossing counts as near, as a border did.
+  const inSight = new Set(kmFromAny(world, watched, { budgetKm: SIGHT_KM, cost: (edge) => (isWaterCrossing(edge.crossing) ? 0 : edge.distance) }).keys());
 
   return world.material.forces.flatMap((force): ArmyInSight[] => {
     if (station.polityId !== null && force.polityId === station.polityId) {

@@ -1,7 +1,8 @@
 import type { Force } from "../material-state";
 import type { ScenarioWarfareRules } from "./battle";
 import type { WorldState } from "../world/world-state";
-import { hopsBetween, landHopsBetween, strictHopsBetween } from "../world/movement";
+import { kmBetween, landKmBetween, provinceOf, strictKmBetween } from "../world/movement";
+import { DETOUR_FACTOR, FERRY_GATHER_KM, describeKm, sailDaysFor } from "../world/travel";
 import { fitStrengthOf, isNavalForce, transportCapacityOf } from "./sea";
 import { sailingSeason } from "./seasons";
 
@@ -12,7 +13,7 @@ import { sailingSeason } from "./seasons";
  * The ships need not carry it all at once: forty transports that hold 1,200
  * ferry a legion of 9,100 across a strait in eight loads, which is how every
  * army of the period crossed one. Nor need they be on the beach already: a
- * power's hulls within `FERRY_GATHER_HOPS` are sent for, and the crossing
+ * power's hulls within `FERRY_GATHER_KM` are sent for, and the crossing
  * waits for them. The fleets then sail with the army.
  *
  * A march is judged by this when it is ordered and again when it arrives, so a
@@ -20,8 +21,8 @@ import { sailingSeason } from "./seasons";
  * shore.
  */
 export type Passage =
-  | { readonly by: "land"; readonly hops: number }
-  | { readonly by: "sea"; readonly hops: number; readonly ferry: Ferry; readonly over: "strait" | "sea_lane" }
+  | { readonly by: "land"; readonly km: number }
+  | { readonly by: "sea"; readonly km: number; readonly ferry: Ferry; readonly over: "strait" | "sea_lane" }
   | { readonly by: null; readonly reason: string };
 
 export interface Ferry {
@@ -31,22 +32,18 @@ export interface Ferry {
   readonly capacity: number;
   /** Loads it takes to put the whole army across. */
   readonly trips: number;
-  /** How far the furthest fleet has to come to the army first; 0 if all stand with it. */
-  readonly gatherHops: number;
+  /** How many kilometres the furthest fleet has to come to the army first; 0 if all stand with it. */
+  readonly gatherKm: number;
 }
 
 /** A crossing that would take more loads than this is not a ferry but a season's work: build or hire more hulls. */
 export const MAX_FERRY_TRIPS = 12;
-/** Hulls further off than this are not "the ships we have" for this crossing; they are a fleet to be ordered here first. */
-export const FERRY_GATHER_HOPS = 2;
-/** Days a fleet takes to sail one province to join the army. */
-export const SAIL_DAYS_PER_PROVINCE = 3;
 /** Days one more load adds to a crossing: over, unload, back. */
 export const DAYS_PER_EXTRA_LOAD = 3;
 
 /** The days a sea passage adds to the march itself: gathering the hulls and the extra loads. */
 export function ferryDays(ferry: Ferry): number {
-  return ferry.gatherHops * SAIL_DAYS_PER_PROVINCE + (ferry.trips - 1) * DAYS_PER_EXTRA_LOAD;
+  return sailDaysFor(ferry.gatherKm) + (ferry.trips - 1) * DAYS_PER_EXTRA_LOAD;
 }
 
 /**
@@ -57,29 +54,29 @@ export function ferryFor(world: WorldState, army: Force, warfare: ScenarioWarfar
   const needed = fitStrengthOf(army);
   const near = world.material.forces
     .filter((force) => force.id !== army.id && force.polityId === army.polityId && isNavalForce(force, warfare))
-    .map((fleet) => ({ fleet, hops: fleet.locationId === army.locationId ? 0 : hopsBetween(world, fleet.locationId, army.locationId), capacity: transportCapacityOf(fleet, warfare) }))
-    .filter((entry): entry is { fleet: Force; hops: number; capacity: number } => entry.hops !== null && entry.hops <= FERRY_GATHER_HOPS && entry.capacity > 0)
+    .map((fleet) => ({ fleet, km: fleet.locationId === army.locationId ? 0 : kmBetween(world, fleet.locationId, army.locationId, FERRY_GATHER_KM), capacity: transportCapacityOf(fleet, warfare) }))
+    .filter((entry): entry is { fleet: Force; km: number; capacity: number } => entry.km !== null && entry.km <= FERRY_GATHER_KM && entry.capacity > 0)
     // The nearest first; among those, the smallest that will do, so a great
     // fleet is not tied up ferrying when a squadron would carry them.
-    .sort((a, b) => a.hops - b.hops || (a.capacity >= needed ? 0 : 1) - (b.capacity >= needed ? 0 : 1) || a.capacity - b.capacity);
+    .sort((a, b) => a.km - b.km || (a.capacity >= needed ? 0 : 1) - (b.capacity >= needed ? 0 : 1) || a.capacity - b.capacity);
   const fleets: Force[] = [];
   let capacity = 0;
-  let gatherHops = 0;
+  let gatherKm = 0;
   for (const entry of near) {
     if (capacity >= needed) break;
     fleets.push(entry.fleet);
     capacity += entry.capacity;
-    gatherHops = Math.max(gatherHops, entry.hops);
+    gatherKm = Math.max(gatherKm, entry.km);
   }
   if (capacity <= 0) return null;
   const trips = Math.max(1, Math.ceil(needed / capacity));
   if (trips > MAX_FERRY_TRIPS) return null;
-  return { fleets, capacity, trips, gatherHops };
+  return { fleets, capacity, trips, gatherKm };
 }
 
 /** "in one crossing" / "in 8 loads, once the Campanian transports have come down from Campania". */
 export function describeFerry(world: WorldState, army: Force, ferry: Ferry): string {
-  const name = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
+  const name = (id: string): string => provinceOf(world, id)?.name ?? id;
   const loads = ferry.trips === 1 ? "in one crossing" : `in ${ferry.trips} loads of about ${Math.min(ferry.capacity, fitStrengthOf(army))} men`;
   const coming = ferry.fleets.filter((fleet) => fleet.locationId !== army.locationId);
   const gather = coming.length === 0 ? "" : `, once ${coming.map((fleet) => `the ${fleet.name.replace(/^the /i, "")} from ${name(fleet.locationId)}`).join(" and ")} ${coming.length === 1 ? "has" : "have"} come to it`;
@@ -92,36 +89,36 @@ export function describeFerry(world: WorldState, army: Force, ferry: Ferry): str
  * Messana -- may still be risked. Unknown, the sea is open.
  */
 export function passageFor(world: WorldState, force: Force, toProvinceId: string, warfare: ScenarioWarfareRules | undefined, month: number | null = null): Passage {
-  const name = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
-  const onFoot = landHopsBetween(world, force.locationId, toProvinceId);
-  if (onFoot !== null) return { by: "land", hops: onFoot };
-  const anyWay = hopsBetween(world, force.locationId, toProvinceId);
+  const name = (id: string): string => provinceOf(world, id)?.name ?? id;
+  const onFoot = landKmBetween(world, force.locationId, toProvinceId);
+  if (onFoot !== null) return { by: "land", km: onFoot };
+  const anyWay = kmBetween(world, force.locationId, toProvinceId);
   if (anyWay === null) return { by: null, reason: `${force.name} stands in ${name(force.locationId)} and cannot reach ${name(toProvinceId)}: no road at all leads there.` };
   // The way over water, and whether it needs the open sea or only a strait.
-  const over = strictHopsBetween(world, force.locationId, toProvinceId, (crossing) => crossing !== "sea_lane") === null ? "sea_lane" as const : "strait" as const;
+  const over = strictKmBetween(world, force.locationId, toProvinceId, (crossing) => crossing !== "sea_lane", anyWay * DETOUR_FACTOR) === null ? "sea_lane" as const : "strait" as const;
   if (over === "sea_lane" && sailingSeason(month) === "shut") {
     return { by: null, reason: `${force.name} cannot sail from ${name(force.locationId)} to ${name(toProvinceId)} now: the sea is shut for the winter, and no captain will take ships out on it before March.` };
   }
-  if (isNavalForce(force, warfare)) return { by: "land", hops: anyWay };
+  if (isNavalForce(force, warfare)) return { by: "land", km: anyWay };
   const ferry = ferryFor(world, force, warfare);
-  if (ferry !== null) return { by: "sea", hops: anyWay, ferry, over };
+  if (ferry !== null) return { by: "sea", km: anyWay, ferry, over };
   // What the power does have, and where: eighteen hulls two provinces off
   // were never mentioned, so the player could not know to send for them or
   // how far short they fell.
   const fleets = world.material.forces
     .filter((candidate) => candidate.polityId === force.polityId && candidate.id !== force.id && isNavalForce(candidate, warfare))
-    .map((fleet) => ({ fleet, hops: fleet.locationId === force.locationId ? 0 : hopsBetween(world, force.locationId, fleet.locationId) }))
-    .filter((entry): entry is { fleet: Force; hops: number } => entry.hops !== null)
-    .sort((a, b) => a.hops - b.hops);
+    .map((fleet) => ({ fleet, km: fleet.locationId === force.locationId ? 0 : kmBetween(world, force.locationId, fleet.locationId) }))
+    .filter((entry): entry is { fleet: Force; km: number } => entry.km !== null)
+    .sort((a, b) => a.km - b.km);
   const needed = fitStrengthOf(force);
-  const within = fleets.filter((entry) => entry.hops <= FERRY_GATHER_HOPS);
+  const within = fleets.filter((entry) => entry.km <= FERRY_GATHER_KM);
   const carried = within.reduce((sum, entry) => sum + transportCapacityOf(entry.fleet, warfare), 0);
   const nearest = fleets[0];
   const have = nearest === undefined
     ? " Its power has no ships at all."
     : within.length > 0
       ? ` Its ships within reach carry ${carried} at a time: ${Math.ceil(needed / Math.max(1, carried))} loads, more than the ${MAX_FERRY_TRIPS} a crossing can take. It needs more hulls, built or hired.`
-      : ` The nearest of its power's ships, ${nearest.fleet.name}, lie in ${name(nearest.fleet.locationId)}, ${nearest.hops} provinces off, and carry ${transportCapacityOf(nearest.fleet, warfare)}. They must be ordered nearer first.`;
+      : ` The nearest of its power's ships, ${nearest.fleet.name}, lie in ${name(nearest.fleet.locationId)}, ${describeKm(nearest.km)} off, and carry ${transportCapacityOf(nearest.fleet, warfare)}. They must be ordered nearer first.`;
   return {
     by: null,
     reason: `${force.name} cannot reach ${name(toProvinceId)} from ${name(force.locationId)} on foot, nor sail there without ships enough: the way lies over water, and it has ${needed} men to carry.${have}`,

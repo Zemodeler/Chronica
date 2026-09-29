@@ -1061,7 +1061,7 @@ describe("the audit of a Roman consul's spring", () => {
       map: {
         provinces: [...chain, "pannonia"].map((id) => ({ id, name: id, controllerPolityId: id === "latium" ? "rome" : null, settlements: [] })),
         polities: [{ id: "rome", name: "Rome", capitalSettlementId: null }],
-        edges: chain.slice(1).map((id, index) => ({ from: chain[index]!, to: id, crossing: "land" })),
+        edges: chain.slice(1).map((id, index) => ({ from: chain[index]!, to: id, crossing: "land", distance: 85 })),
       },
       characters: [{ id: "clepsina", locationProvinceId: "latium" }],
       material: { forces: [{ id: "legio-i", locationId: "latium" }] },

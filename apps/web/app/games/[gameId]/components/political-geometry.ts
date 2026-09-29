@@ -5,6 +5,10 @@ import { MAJOR_POLITY_PIGMENTS } from "../../../../lib/palette";
 
 export type BorderClassification = "internal_province" | "country_border" | "coast";
 export interface PoliticalBorderSegment extends SharedBoundary { readonly classification: BorderClassification; }
+/** A border with its classification; the path is read through, not copied, so it is still built only when someone draws it. */
+function classified(boundary: SharedBoundary, classification: BorderClassification): PoliticalBorderSegment {
+  return { provinceA: boundary.provinceA, provinceB: boundary.provinceB, points: boundary.points, get svgPath() { return boundary.svgPath; }, classification };
+}
 export interface TerritorialComponent { readonly provinceIds: readonly string[]; readonly totalArea: number; readonly weightedCentroid: GeoJsonPosition; readonly bounds: WorldBounds; }
 export interface PoliticalLabelGeometry {
   readonly componentId: string;
@@ -269,7 +273,7 @@ export function derivePoliticalMapState(
 ): PoliticalMapState {
   const ownerByProvince = new Map<string, string | null>(world.provinces.map((province) => [province.id, null]));
   const leaderByPolity = leadersOf(overlay?.politicalRelations ?? []);
-  if (!overlay) return { ownerByProvince, leaderByPolity, territories: [], borderSegments: world.sharedBoundaries.map((boundary) => ({ ...boundary, classification: boundary.provinceB === null ? "coast" as const : "internal_province" as const })) };
+  if (!overlay) return { ownerByProvince, leaderByPolity, territories: [], borderSegments: world.sharedBoundaries.map((boundary) => classified(boundary, boundary.provinceB === null ? "coast" : "internal_province")) };
   for (const province of overlay.provinces) if (world.provinceById.has(province.provinceId)) ownerByProvince.set(province.provinceId, province.controllerPolityId);
   // A geometry polygon with no gameplay province of its own (several tribal
   // provinces merged onto one real region -- see geometryAliases) never gets
@@ -298,6 +302,6 @@ export function derivePoliticalMapState(
     }
     const remaining = new Set(owned); const components: TerritorialComponent[] = []; while (remaining.size) components.push(componentFor(remaining.values().next().value as string, remaining, world)); components.sort((a, b) => b.totalArea - a.totalArea || a.provinceIds[0]!.localeCompare(b.provinceIds[0]!)); const primaryComponent = components[0]!; const componentLabels = components.map((component) => labelGeometry(component, world, name)); territories.push({ polityId, name, colour: politicalColourFromId(polityId), components, primaryComponent, label: componentLabels[0]!, componentLabels });
   }
-  const borderSegments = world.sharedBoundaries.map((boundary) => { if (boundary.provinceB === null) return { ...boundary, classification: "coast" as const }; const a = ownerByProvince.get(boundary.provinceA) ?? null; const b = ownerByProvince.get(boundary.provinceB) ?? null; return { ...boundary, classification: a !== b ? "country_border" as const : "internal_province" as const }; });
+  const borderSegments = world.sharedBoundaries.map((boundary) => { if (boundary.provinceB === null) return classified(boundary, "coast"); const a = ownerByProvince.get(boundary.provinceA) ?? null; const b = ownerByProvince.get(boundary.provinceB) ?? null; return classified(boundary, a !== b ? "country_border" : "internal_province"); });
   return { ownerByProvince, leaderByPolity, territories: territories.sort((a, b) => b.label.priority - a.label.priority), borderSegments };
 }

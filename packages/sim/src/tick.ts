@@ -10,7 +10,7 @@ import {
   agreementsBetween,
   atWar,
   expireDatedAgreements,
-  hopsBetween,
+  kmBetween,
   passageFor,
   describeFerry,
   practise,
@@ -39,6 +39,8 @@ import {
   obligationAmountNow,
   provinceGrainPriceBps,
   tradePremiumBps,
+  liveProvinceIds,
+  type ProvinceMaterial,
 } from "@chronica/shared";
 import { projectConflicts } from "./conflicts";
 import { trespassOf } from "./trespass";
@@ -708,7 +710,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
       // around it. A march is allowed to cross several provinces -- that is what
       // makes it a project -- but there has to be a way across them, or a
       // scheduled march put an army anywhere on the map in one step.
-      if (hopsBetween(input.world, marching.locationId, provinceId) === null) return null;
+      if (kmBetween(input.world, marching.locationId, provinceId) === null) return null;
       // ...and over water, the ships to cross it in, still standing with it on
       // the day. The fleet sails with the army it carries.
       const passage = passageFor(input.world, marching, provinceId, input.warfare === undefined ? undefined : warfareWith(input.world, input.warfare), month);
@@ -1065,38 +1067,54 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // Recovery itself is not news. A province crossing into real hunger or real
   // disorder is: it is the kind of thing a government hears about and has to
   // answer for, and it is where VISION §6's numbers start to bite.
+  //
+  // One report a power per review, not one a province: with thousands of
+  // provinces a bad season is a country's news. Only provinces something is
+  // going on in are counted (`liveProvinceIds`); the biggest are named first
+  // and the rest counted.
   const DISTRESS_BPS = 4_000;
+  const NAMED_IN_DISTRESS = 4;
+  const live = liveProvinceIds(recovered);
+  const provinceById = new Map(recovered.map.provinces.map((province) => [province.id, province]));
+  const hungry = new Map<string, ProvinceMaterial[]>();
+  const disorderly = new Map<string, ProvinceMaterial[]>();
   for (const material of recovered.material.provinceMaterial) {
     const previous = before.get(material.provinceId);
-    if (previous === undefined) continue;
+    const province = provinceById.get(material.provinceId);
+    if (previous === undefined || province === undefined || !live.has(material.provinceId)) continue;
+    const holder = province.controllerPolityId ?? "";
     const crossed = (now: number, was: number): boolean => now < DISTRESS_BPS && was >= DISTRESS_BPS;
-    if (crossed(material.foodSecurityBps, previous.foodSecurityBps)) {
-      facts.push({
-        localId: nextLocalId("hunger"),
-        kind: "province_hunger",
-        summary: `Food is running short in ${material.provinceId}.`,
-        affectedRefs: [{ kind: "province", id: material.provinceId }],
-        visibility: "polity",
-        discoveryState: "polity",
-        knowableInDays: 0,
-        significance: 55,
-      });
-      notes.push(`Food is running short in ${material.provinceId}.`);
-    }
-    if (crossed(material.stabilityBps, previous.stabilityBps)) {
-      facts.push({
-        localId: nextLocalId("unrest"),
-        kind: "province_unrest",
-        summary: `Order is breaking down in ${material.provinceId}.`,
-        affectedRefs: [{ kind: "province", id: material.provinceId }],
-        visibility: "polity",
-        discoveryState: "polity",
-        knowableInDays: 0,
-        significance: 60,
-      });
-      notes.push(`Order is breaking down in ${material.provinceId}.`);
-    }
+    if (crossed(material.foodSecurityBps, previous.foodSecurityBps)) hungry.set(holder, [...(hungry.get(holder) ?? []), material]);
+    if (crossed(material.stabilityBps, previous.stabilityBps)) disorderly.set(holder, [...(disorderly.get(holder) ?? []), material]);
   }
+  const reportDistress = (groups: ReadonlyMap<string, readonly ProvinceMaterial[]>, kind: string, prefix: string, phrase: (where: string) => string, significance: number): void => {
+    for (const [holder, rows] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const ranked = [...rows].sort((a, b) => b.population - a.population || a.provinceId.localeCompare(b.provinceId));
+      const named = ranked.slice(0, NAMED_IN_DISTRESS).map((row) => provinceById.get(row.provinceId)!.name);
+      const polityName = recovered.map.polities.find((polity) => polity.id === holder)?.name;
+      const rest = ranked.length - named.length;
+      const where = rest > 0
+        ? `${named.join(", ")} and ${rest} more of ${polityName === undefined ? "the unclaimed" : `${polityName}'s`} provinces`
+        : named.length === 1 ? named[0]! : `${named.slice(0, -1).join(", ")} and ${named.at(-1)!}`;
+      const summary = `${phrase(where)}.`;
+      facts.push({
+        localId: nextLocalId(prefix),
+        kind,
+        summary,
+        affectedRefs: [
+          ...(polityName === undefined ? [] : [{ kind: "polity" as const, id: holder }]),
+          ...ranked.slice(0, 8).map((row) => ({ kind: "province" as const, id: row.provinceId })),
+        ],
+        visibility: "polity",
+        discoveryState: "polity",
+        knowableInDays: 0,
+        significance: Math.min(significance + 10, significance + Math.round(Math.log2(ranked.length)) * 2),
+      });
+      notes.push(summary);
+    }
+  };
+  reportDistress(hungry, "province_hunger", "hunger", (where) => `Food is running short in ${where}`, 55);
+  reportDistress(disorderly, "province_unrest", "unrest", (where) => `Order is breaking down in ${where}`, 60);
 
   // A thread nobody has touched for half a year has run its course. Closing
   // it is bookkeeping, not history: no fact, a note only.

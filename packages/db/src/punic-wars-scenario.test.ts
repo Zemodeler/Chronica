@@ -185,7 +185,6 @@ describe("the Punic Wars map as authoritative world state", () => {
     expect(byId.get("ita-72843720b81376294924159-sicily-northeast")?.positions?.map((position) => position.id))
       .toEqual(["position-mount-etna", "position-messana-strait"]);
     expect(byId.get("punic-italy-latium")?.controlFirmnessBps).toBe(9_000);
-    expect(byId.get("ita-72843720b81376294924159-sicily-northeast")?.tier).toBe("focus");
   });
 
   it("carries no province name mangled by the source map's encoding", () => {

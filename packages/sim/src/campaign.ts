@@ -1,7 +1,8 @@
 import {
   aptitude,
   boundedId,
-  hopsBetween,
+  REFERENCE_PROVINCE_KM,
+  kmBetween,
   isNavalForce,
   isSummerMonth,
   isWinterMonth,
@@ -163,7 +164,7 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
     const holder = province.controllerPolityId;
     if (friendly(force, holder) && material.foodSecurityBps >= FAMINE_BPS) return "home";
     const depot = world.structures.some((structure) => structure.ownerPolityId === force.polityId && structure.supplyRadius > 0
-      && (structure.provinceId === force.locationId || (hopsBetween(world, structure.provinceId, force.locationId, structure.supplyRadius) ?? Infinity) <= structure.supplyRadius));
+      && (structure.provinceId === force.locationId || (kmBetween(world, structure.provinceId, force.locationId, structure.supplyRadius * REFERENCE_PROVINCE_KM) ?? Infinity) <= structure.supplyRadius * REFERENCE_PROVINCE_KM));
     if (depot) return "depot";
     const ships = world.material.forces.filter((other) => other.locationId === force.locationId && other.id !== force.id && isNavalForce(other, input.warfare));
     if (ships.some((fleet) => fleet.polityId === force.polityId) && !ships.some((fleet) => hostile(force, fleet.polityId))) return "sea";

@@ -1,4 +1,5 @@
 import { findPolityGaps } from "./population";
+import { distancesFrom, placeIndex, provinceIdsIn, provincesNamedIn } from "./place-index";
 import type { NarratorSeed } from "./narrator";
 import { renderCharacterPortrait } from "./cognition";
 import { isOpenIntent, mostPressingFirst } from "./intents";
@@ -367,7 +368,7 @@ export interface WorldSlice {
    */
   readonly foreignPowers: readonly { readonly id: string; readonly name: string; readonly provinces: number; readonly cohesion: string; readonly leaders: readonly string[]; readonly forces: readonly string[] }[];
   /** Countries holding land with nobody to speak or fight for them (VISION §5). */
-  readonly populationGaps: readonly { readonly polityId: string; readonly name: string; readonly needsLeader: boolean; readonly needsForce: boolean; readonly provinceIds: readonly string[]; readonly why: string }[];
+  readonly populationGaps: readonly { readonly polityId: string; readonly name: string; readonly needsLeader: boolean; readonly needsForce: boolean; readonly land: readonly string[]; readonly why: string }[];
   readonly projects: readonly { readonly id: string; readonly label: string; readonly status: string; readonly overseer: string | null; readonly nextMilestone: { readonly id: string; readonly label: string } | null }[];
   readonly intents: readonly { readonly actor: string; readonly action: string; readonly rationale: string }[];
   /** Ids are printed: a discovery has to name the fact it uncovered, and nothing else ever showed one. */
@@ -551,11 +552,14 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   // not hold, and a model with no id for it will invent one.
   //
   // Which places those are has to be chosen, not taken off the top of the list.
-  // The world holds hundreds of provinces and the cap admits a few dozen, so an
-  // arbitrary slice would hand the model our own ground plus whatever sorted
-  // first -- and leave it inventing ids for the province it was actually asked
-  // about. Three tiers earn a place: where we are, where we could go or what
-  // the moment is about, and then the rest in a stable order.
+  // The world holds thousands of provinces and the cap admits a few dozen, and
+  // a power may hold hundreds of small ones itself, so neither "ours first" nor
+  // an alphabetical tie-break can be trusted: the province with the army, the
+  // siege, the storyline or the place the order names must never be the one cut.
+  // So: (a) what the moment is about, in order of how directly; (b) our own and
+  // our neighbours' ground, nearest to (a) first; (c) everything else, nearest
+  // first. Ties fall to the name, then the id, so the choice is deterministic.
+  const places = placeIndex(world);
   const ourProvinceIds = new Set([
     ...world.map.provinces.filter((province) => province.controllerPolityId === ownPolity).map((province) => province.id),
     ...world.material.forces.filter((force) => force.polityId === ownPolity).map((force) => force.locationId),
@@ -574,40 +578,44 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     if (inOurSphere(edge.to) && !inOurSphere(edge.from)) bordering.add(edge.from);
   }
 
-  // Anywhere the world is currently doing something, and anywhere the order
-  // names outright. The order is matched by id rather than by name because an
-  // id is what the model has to give back.
-  const inPlay = new Set<string>([
-    ...openStorylines(world.storylines).flatMap((storyline) => (storyline.provinceId === null ? [] : [storyline.provinceId])),
-    ...world.characters.filter((character) => character.alive && character.polityId === ownPolity).map((character) => character.locationProvinceId),
-  ].filter((id): id is string => typeof id === "string"));
+  // Lower is more pressing: 0 the order's own words, 1 armies, sieges, battles
+  // and where the actor stands, 2 open storylines, 3 our people's whereabouts.
+  const pressing = new Map<string, number>();
+  const matters = (id: string | null | undefined, weight: number): void => {
+    if (typeof id !== "string" || !places.byId.has(id)) return;
+    if (weight < (pressing.get(id) ?? Infinity)) pressing.set(id, weight);
+  };
+  if (input.orderText !== null) {
+    for (const id of provinceIdsIn(places, input.orderText)) matters(id, 0);
+    for (const id of provincesNamedIn(places, input.orderText)) matters(id, 0);
+  }
+  for (const force of world.material.forces) if (force.polityId === ownPolity) matters(force.locationId, 1);
   // A battle records who is fighting, not where; the ground is wherever the
   // forces in it are standing. A siege records the settlement, and the province
   // is the one holding it.
   const forceLocation = new Map(world.material.forces.map((force) => [force.id, force.locationId]));
   for (const battle of world.conflicts.battles) {
-    for (const forceId of battle.participantForceIds) {
-      const provinceId = forceLocation.get(forceId);
-      if (provinceId !== undefined) inPlay.add(provinceId);
-    }
+    for (const forceId of battle.participantForceIds) matters(forceLocation.get(forceId), 1);
   }
-  const settlementProvince = new Map(world.map.provinces.flatMap((province) => province.settlements.map((settlement) => [settlement.id, province.id] as const)));
-  for (const siege of world.conflicts.sieges) {
-    const provinceId = settlementProvince.get(siege.settlementId);
-    if (provinceId !== undefined) inPlay.add(provinceId);
-  }
-  if (input.orderText !== null) {
-    for (const province of world.map.provinces) {
-      if (input.orderText.includes(province.id)) inPlay.add(province.id);
-    }
+  for (const siege of world.conflicts.sieges) matters(places.provinceOfSettlement.get(siege.settlementId), 1);
+  for (const siege of world.sieges) if (siege.status === "active") matters(siege.provinceId, 1);
+  for (const storyline of openStorylines(world.storylines)) matters(storyline.provinceId, 2);
+  for (const character of world.characters) {
+    if (character.alive && character.polityId === ownPolity) matters(character.locationProvinceId, 3);
   }
 
-  const rank = (province: { id: string }): number => {
-    if (ourProvinceIds.has(province.id) || inPlay.has(province.id)) return 0;
-    return bordering.has(province.id) || alliedProvinceIds.has(province.id) ? 1 : 2;
+  const reach = distancesFrom(places, pressing.size > 0 ? pressing.keys() : ourProvinceIds);
+  const far = (id: string): number => reach.get(id) ?? Number.MAX_SAFE_INTEGER;
+  const tier = (id: string): number => {
+    if (pressing.has(id)) return 0;
+    if (ourProvinceIds.has(id)) return 1;
+    return bordering.has(id) || alliedProvinceIds.has(id) ? 2 : 3;
   };
   const provinces = [...world.map.provinces]
-    .sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id))
+    .sort((a, b) => tier(a.id) - tier(b.id)
+      || (pressing.get(a.id) ?? 0) - (pressing.get(b.id) ?? 0)
+      || far(a.id) - far(b.id)
+      || a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
     .slice(0, CAPS.provinces)
     .map((province) => ({
       id: province.id,
@@ -1076,7 +1084,8 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     })
     .slice(0, CAPS.foreignFigures);
 
-  const populationGaps = findPolityGaps({ world, ownPolityId: ownPolity, facts: input.facts, limit: 2 });
+  const populationGaps = findPolityGaps({ world, ownPolityId: ownPolity, facts: input.facts, limit: 2 })
+    .map(({ provinceIds, ...gap }) => ({ ...gap, land: provinceIds.map((id) => `${provinceName(id)} [${id}]`) }));
 
   const projects = world.projects
     .filter((project) => project.status !== "completed" && project.status !== "cancelled")
@@ -1419,7 +1428,7 @@ export function renderWorldSlice(slice: WorldSlice): string {
       "COUNTRIES WITH NOBODY IN THEM:",
       ...slice.populationGaps.map((gap) => {
         const missing = [gap.needsLeader ? "a leader" : null, gap.needsForce ? "forces of their own" : null].filter((part) => part !== null).join(" and ");
-        const land = gap.provinceIds.length === 0 ? "" : ` Their land: ${gap.provinceIds.map((id) => `[${id}]`).join(" ")}.`;
+        const land = gap.land.length === 0 ? "" : ` Their land: ${gap.land.join("; ")}.`;
         return `  ${gap.name} [${gap.polityId}] holds land but has ${missing === "" ? "nobody" : `no ${missing}`} — ${gap.why}.${land}`;
       }),
       "  Give each of them the people and forces they plainly ought to have, now.",

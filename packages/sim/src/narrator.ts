@@ -1,5 +1,6 @@
 import {
   LOOSE_COHESION_BPS,
+  adjacentTo,
   agreementsBetween,
   deriveRelationDimension,
   familyLinksOf,
@@ -511,9 +512,7 @@ function chooseAdversary(
   );
 
   const neighbours = new Set<string>();
-  for (const edge of world.map.edges) {
-    const side = edge.from === provinceId ? edge.to : edge.to === provinceId ? edge.from : null;
-    if (side === null) continue;
+  for (const { provinceId: side } of adjacentTo(world, provinceId)) {
     const controller = controllerOf.get(side) ?? null;
     if (controller === null || controller === polityId || alreadyFighting.has(controller)) continue;
     neighbours.add(controller);

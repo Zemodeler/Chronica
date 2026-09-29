@@ -51,12 +51,12 @@ export interface WriteMechanicResult {
 }
 
 export async function writeMechanic(input: WriteMechanicInput): Promise<WriteMechanicResult> {
-  const { entity } = input;
+  const { entity, world } = input;
   const standing = entity.effects ?? [];
   const effects = standing.length === 0 ? "none" : standing.map((effect) => `${effect.quantity} ${effect.direction} (${effect.band}, ${effect.scope})`).join(", ");
   const message = [
     "THE ACT",
-    `${entity.label} [${entity.id}], an arrangement of kind "${entity.kind}"${entity.provinceId === null || entity.provinceId === undefined ? "" : ` in ${entity.provinceId}`}, owned by ${entity.ownerRef === null ? "nobody" : entity.ownerRef.id}.`,
+    `${entity.label} [${entity.id}], an arrangement of kind "${entity.kind}"${entity.provinceId === null || entity.provinceId === undefined ? "" : ` in ${world.map.provinces.find((province) => province.id === entity.provinceId)?.name ?? entity.provinceId}`}, owned by ${entity.ownerRef === null ? "nobody" : entity.ownerRef.id}.`,
     `Standing effects already in force: ${effects}.`,
     input.act === null ? "" : `As written: ${JSON.stringify(input.act).slice(0, 800)}`,
     `What was said: ${input.actText.slice(0, 600)}`,

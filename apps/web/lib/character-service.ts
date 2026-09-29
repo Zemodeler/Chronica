@@ -29,7 +29,8 @@ import { schema } from "@chronica/db";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 import { headers } from "next/headers";
 import { relationshipLabelForScore, scoreForDeclaredConnection } from "./relationship-score";
-import { canvasRegions, materializeCanvasProvince } from "./canvas-world";
+import { canvasRegions, materializeCanvasProvince, type CanvasRegion } from "./canvas-world";
+import { regionMenu, resolvePlace, type PlaceResolution } from "./place-resolver";
 
 // The fixture demo game uses a plain string ID, not a UUID, so no DB queries
 // are valid against it. All service functions return early for this ID.
@@ -76,7 +77,9 @@ async function resolvePlayerInGame(db: ReturnType<typeof createDatabase>["db"], 
 type ScenarioContext = Readonly<{
   period: string;
   timelineStartYear: number | null;
-  regions: readonly { id: string; name: string }[];
+  regions: readonly CanvasRegion[];
+  /** Places the model named that could not be settled on, oldest first; read only to word the error. */
+  unplaced: Exclude<PlaceResolution, { status: "found" }>[];
   /** What a person of a given standing is worth here (slice 11). */
   wealth: ScenarioWealthRules | undefined;
   /** Who is already in the world: the player may become one of them, and is never handed one by accident. */
@@ -145,6 +148,7 @@ async function getScenarioContext(db: ReturnType<typeof createDatabase>["db"], g
     period: row?.period ?? "an unspecified historical period",
     timelineStartYear,
     regions: world.success ? canvasRegions(row?.mapAssetId ?? null, world.data) : [],
+    unplaced: [],
     wealth: definition.success ? definition.data.wealth : undefined,
     people: world.success ? peopleInTheWorld(world.data, definition.success ? definition.data.government.offices : []) : [],
     currency,
@@ -164,7 +168,7 @@ export async function getScenarioTimelineStartYear(gameId: string): Promise<numb
 
 function buildDeclareSystemPrompt(context: ScenarioContext): string {
   const start = context.timelineStartYear === null ? "the scenario opening" : `${context.timelineStartYear <= 0 ? `${1 - context.timelineStartYear} BCE` : context.timelineStartYear}`;
-  const regions = context.regions.length === 0 ? "No map regions are available." : context.regions.map((region) => `- ${region.id}: ${region.name}`).join("\n");
+  const regions = regionMenu(context.regions);
   const currency = `${context.currency.name} (${context.currency.unitName}/${context.currency.unitNamePlural}${context.currency.symbol === undefined ? "" : `, symbol ${context.currency.symbol}`})`;
   return `You are a historical research assistant for a strategy game set in ${context.period}. The timeline begins at ${start}. Your task is to create or research a character for the player.
 
@@ -181,9 +185,9 @@ ${context.people.length === 0 ? "  (none listed)" : context.people.map((person) 
   Unless the player is becoming one of them, the character is somebody else, with another name. They may be among the character's relations under the same name.
 - Be strict about historical authenticity of culture, faith, family and manner of life. It never outranks the player's own name or the station they asked for.
 - For historical and hybrid characters, birthYearApprox and deathYearApprox must be known enough to prove that the person was alive at the scenario opening. Use negative years for BCE. For invented characters, make a plausible adult already alive at the opening.
-- Choose locationProvinceId from this exact opening-map list. It must be a region where the character can plausibly be present at the opening:
+- Choose locationPlace: the town, city or district (by the name it bore at the opening) where the character can plausibly be present at the opening, followed by its region from this list, as "Place, Region". The map is far finer than this list; name the real place, not the region alone:
 ${regions}
-- locationProvinceId is REQUIRED at the scenario opening. Never return null or an unknown region ID.
+- locationPlace is REQUIRED at the scenario opening. Never return null or a place that did not exist then.
 - Skills are on a 0–100 scale and represent innate talent plus experience. A 50 is average for the era's population. A 75+ is exceptional. Skills: martial, intrigue, learning, piety, stewardship, diplomacy, body.
 - Sub-skills are more granular. Only assign sub-skills the character would realistically have.
 - Decide the character's startingMoney in the scenario currency: ${currency}. It must be a non-negative whole number representing liquid personal funds at the opening, appropriate to the character's role, social class, culture, period, and circumstances. Do not include a state treasury, institutional funds, land, ships, equipment, or other non-cash assets.
@@ -200,7 +204,7 @@ Output ONLY a valid JSON object matching this schema (no markdown fences, no com
   "origin": "historical | invented | hybrid",
   "becomesCharacterId": "string | null — the id of the person already in the world whom the player becomes, else null",
   "period": "string — e.g. 'First Punic War, 264–241 BC'",
-  "locationProvinceId": "string — required exact opening-map region id",
+  "locationPlace": "string — required, 'Place, Region' as above",
   "culture": "string — e.g. 'Roman Patrician'",
   "faith": "string | null",
   "gender": "male | female",
@@ -323,18 +327,43 @@ function preprocessAiSkillRationale(skillRationale: unknown): unknown {
   }));
 }
 
+/**
+ * The model names a place in words; a province id is only accepted when the
+ * model copied one back from a draft it was shown or the place matches no
+ * name at all.
+ */
+function resolveDeclaredPlace(base: Record<string, unknown>, context: ScenarioContext): PlaceResolution {
+  const place = typeof base["locationPlace"] === "string" ? base["locationPlace"] : typeof base["locationProvinceId"] === "string" ? base["locationProvinceId"] : "";
+  return place.trim() === "" ? { status: "unknown" } : resolvePlace(context.regions, place);
+}
+
+/** What to tell the player when no place could be settled on, so they can name a nearer town. */
+function unplacedMessage(context: ScenarioContext): string {
+  const last = context.unplaced[context.unplaced.length - 1];
+  if (last?.status === "ambiguous") return `Several places on the map fit that description (${last.candidates.slice(0, 4).join("; ")}). Please say which town or region you mean.`;
+  if (last?.status === "unknown") return "That place could not be found on the map. Please name a nearby town or region as it was known at the opening.";
+  return "The AI returned an unexpected response. Please try again.";
+}
+
 function parseAiKnowledgebase(
   raw: string,
   gameId: string,
   playerId: string,
   context: ScenarioContext,
 ): CharacterKnowledgebase | null {
+  context.unplaced.length = 0;
   const parsed = extractJson(raw);
   if (parsed === null) return null;
 
   const base = parsed as Record<string, unknown>;
+  const place = resolveDeclaredPlace(base, context);
+  if (place.status !== "found") {
+    context.unplaced.push(place);
+    return null;
+  }
   const preprocessed = {
     ...base,
+    locationProvinceId: place.provinceId,
     relations: preprocessAiRelations(base["relations"]),
     skillRationale: preprocessAiSkillRationale(base["skillRationale"]),
   };
@@ -366,7 +395,6 @@ function parseAiKnowledgebase(
     if (context.timelineStartYear !== null && knowledgebase.deathYearApprox !== null && knowledgebase.deathYearApprox < context.timelineStartYear) return null;
   }
 
-  if (knowledgebase.locationProvinceId === null || !context.regions.some((region) => region.id === knowledgebase.locationProvinceId)) return null;
   // Only somebody actually here can be become; an id the model made up means
   // a new person, not nobody.
   const becomesCharacterId = context.people.some((person) => person.id === knowledgebase.becomesCharacterId) ? knowledgebase.becomesCharacterId! : null;
@@ -403,13 +431,13 @@ export async function declareCharacter(gameId: string, playerInput: string): Pro
       );
     } catch (error) {
       if (error instanceof InsufficientCoinsError) return { status: "insufficient_coins" };
-      if (error instanceof AiParseError) return { status: "error", message: "The AI returned an unexpected response. Please try again." };
+      if (error instanceof AiParseError) return { status: "error", message: unplacedMessage(context) };
       throw error;
     }
 
     const knowledgebase = parseAiKnowledgebase(result.content, gameId, playerId, context);
     if (knowledgebase === null) {
-      return { status: "error", message: "The AI returned an unexpected response. Please try again." };
+      return { status: "error", message: unplacedMessage(context) };
     }
 
     await upsertCharacterKnowledgebase(db, {
@@ -448,8 +476,11 @@ export async function reviseDeclaredCharacter(gameId: string, revision: string):
     const context = await getScenarioContext(db, gameId);
     const adapter = createAiAdapter();
 
-    const revisionContext = existing
-      ? `Current character draft:\n${JSON.stringify(existing, null, 2)}\n\nPlayer revision: ${revision}`
+    // The draft is shown with its place in words: an opaque province id means nothing to the model.
+    const home = existing === null || existing === undefined ? undefined : context.regions.find((region) => region.id === existing.locationProvinceId);
+    const shown = existing && { ...existing, locationProvinceId: undefined, locationPlace: home === undefined ? null : `${home.name}, ${home.region}` };
+    const revisionContext = shown
+      ? `Current character draft:\n${JSON.stringify(shown, null, 2)}\n\nPlayer revision: ${revision}`
       : revision;
 
     let result;
@@ -461,13 +492,13 @@ export async function reviseDeclaredCharacter(gameId: string, revision: string):
       );
     } catch (error) {
       if (error instanceof InsufficientCoinsError) return { status: "insufficient_coins" };
-      if (error instanceof AiParseError) return { status: "error", message: "The AI returned an unexpected response. Please try again." };
+      if (error instanceof AiParseError) return { status: "error", message: unplacedMessage(context) };
       throw error;
     }
 
     const knowledgebase = parseAiKnowledgebase(result.content, gameId, playerId, context);
     if (knowledgebase === null) {
-      return { status: "error", message: "The AI returned an unexpected response. Please try again." };
+      return { status: "error", message: unplacedMessage(context) };
     }
 
     await upsertCharacterKnowledgebase(db, { gameId, playerId, characterId: `declared-${playerId}`, knowledgebase });

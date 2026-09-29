@@ -40,13 +40,15 @@ async function rasterSvg(inner){const svg=`<svg xmlns="http://www.w3.org/2000/sv
 (async()=>{
  const landBuf=await rasterSvg(polys.map(p=>`<path d="${p.map(ringPath).join('')}" fill="#fff" fill-rule="evenodd"/>`).join(''));
  const land=new Uint8Array(W*H);for(let i=0;i<W*H;i++)land[i]=landBuf[i]>127?1:0;
+ const land0=Uint8Array.from(land);   // the mask before lakes and gaps are cut: what is not land here is sea or off the map
+ let sandBuf,ctryBuf;
  // lakes cut from land, rivers as barrier raster
  const inBox=co=>co.some(([x,y])=>x>B.x0-.5&&x<B.x1+.5&&y>B.y0-.5&&y<B.y1+.5);
  let lakeSvg='';{const s=await shp.open('data/awmc/inland water/'+fs.readdirSync('data/awmc/inland water').find(x=>x.endsWith('.shp')));
   for(;;){const r=await s.read();if(r.done)break;const t=(r.value.properties.TYPE||'').toLowerCase();if(t!=='lake'&&t!=='swamp'&&t!=='inundation area')continue;const g=r.value.geometry;
    const list=g.type==='Polygon'?[g.coordinates]:g.type==='MultiPolygon'?g.coordinates:[];
    for(const p of list){if(!inBox(p[0]))continue;if(t==='lake')lakeSvg+=`<path d="${p.map(ringPath).join('')}" fill="#fff" fill-rule="evenodd"/>`}}}
- const lakeBuf=await rasterSvg(lakeSvg);let lakes=0;for(let i=0;i<W*H;i++)if(lakeBuf[i]>127&&land[i]){land[i]=0;lakes++}
+ const lakeBuf=await rasterSvg(lakeSvg);const lakeMask=Uint8Array.from(lakeBuf,v=>v>127?1:0);let lakes=0;for(let i=0;i<W*H;i++)if(lakeBuf[i]>127&&land[i]){land[i]=0;lakes++}
  let riverSvg='';let nr=0;{const s=await shp.open('data/awmc/rivers/'+fs.readdirSync('data/awmc/rivers').find(x=>x.endsWith('.shp')));
   for(;;){const r=await s.read();if(r.done)break;if(!(r.value.properties.rank<=RIVER_RANK))continue;const g=r.value.geometry;
    const lines=g.type==='LineString'?[g.coordinates]:g.type==='MultiLineString'?g.coordinates:[];
@@ -56,9 +58,9 @@ async function rasterSvg(inner){const svg=`<svg xmlns="http://www.w3.org/2000/sv
  // ---- seeds
  const all=JSON.parse(fs.readFileSync('seeds270.json'));const seeds=[];const grid=new Map();const GC=Math.max(DEDUPE,FILL_R);
  const near=(x,y,r)=>{const gx=Math.floor(x/GC),gy=Math.floor(y/GC);for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const g=grid.get((gx+a)+','+(gy+b));if(g)for(const i of g){if(Math.hypot(seeds[i][0]-x,seeds[i][1]-y)<r)return true}}return false};
- const add=(x,y,name,src)=>{seeds.push([x,y,name,src]);const k=Math.floor(x/GC)+','+Math.floor(y/GC);if(!grid.has(k))grid.set(k,[]);grid.get(k).push(seeds.length-1)};
+ const add=(x,y,name,src,lo,la,pid)=>{seeds.push([x,y,name,src,lo,la,pid]);const k=Math.floor(x/GC)+','+Math.floor(y/GC);if(!grid.has(k))grid.set(k,[]);grid.get(k).push(seeds.length-1)};
  const snap=(x,y)=>{x=Math.round(x);y=Math.round(y);for(let r=0;r<=5;r++)for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){const nx=x+dx,ny=y+dy;if(nx>=0&&ny>=0&&nx<W&&ny<H&&land[ny*W+nx])return[nx,ny]}return null};
- let pl=0;for(const s of all){if(s[0]<B.x0||s[0]>B.x1||s[1]<B.y0||s[1]>B.y1)continue;const [x,y]=lonlat2px(s[0],s[1]);const p=snap(x,y);if(!p)continue;if(near(p[0],p[1],DEDUPE))continue;add(p[0],p[1],s[2],'pleiades');pl++}
+ let pl=0;for(const s of all){if(s[0]<B.x0||s[0]>B.x1||s[1]<B.y0||s[1]>B.y1)continue;const [x,y]=lonlat2px(s[0],s[1]);const p=snap(x,y);if(!p)continue;if(near(p[0],p[1],DEDUPE))continue;add(p[0],p[1],s[2],'pleiades',s[0],s[1],s[3]);pl++}
  // ---- cost-distance growth (multi-source Dijkstra)
  // ruggedness from the Natural Earth II relief already in the repo (equirectangular, 4000x2000)
  const NE2=path.join(ROOT,'apps/web/public/maps/natural-earth-ii-blue-oceans.png');
@@ -97,7 +99,7 @@ async function rasterSvg(inner){const svg=`<svg xmlns="http://www.w3.org/2000/sv
   let sandSvg='';{const dir='data/awmc/inland_sand/';const s=await shp.open(dir+fs.readdirSync(dir).find(x=>x.endsWith('.shp')));
    for(;;){const r=await s.read();if(r.done)break;const g=r.value.geometry;const list=g.type==='Polygon'?[g.coordinates]:g.type==='MultiPolygon'?g.coordinates:[];
     for(const p of list){if(!inBox(p[0]))continue;sandSvg+=`<path d="${p.map(ringPath).join('')}" fill="#fff" fill-rule="evenodd"/>`}}}
-  const sandBuf=await rasterSvg(sandSvg);
+  sandBuf=await rasterSvg(sandSvg);
   // far grid over real seeds
   const FG=new Map();const FC=200;for(let i=0;i<seeds.length;i++){const k=Math.floor(seeds[i][0]/FC)+','+Math.floor(seeds[i][1]/FC);if(!FG.has(k))FG.set(k,[]);FG.get(k).push(i)}
   const farFromSeed=(x,y,FAR)=>{const gx=Math.floor(x/FC),gy=Math.floor(y/FC);for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const g=FG.get((gx+a)+','+(gy+b));if(g)for(const i of g)if(Math.hypot(seeds[i][0]-x,seeds[i][1]-y)<FAR)return false}return true};
@@ -106,7 +108,7 @@ async function rasterSvg(inner){const svg=`<svg xmlns="http://www.w3.org/2000/sv
   let ctrySvg='';{const cj=JSON.parse(fs.readFileSync(path.join(ROOT,'apps/web/public/maps/natural-earth-50m-admin0-countries.geojson')));
    for(const f of cj.features){const g=f.geometry;if(!g)continue;const list=g.type==='Polygon'?[g.coordinates]:g.type==='MultiPolygon'?g.coordinates:[];
     for(const p of list){if(!inBox(p[0]))continue;ctrySvg+=`<path d="${p.map(ringPath).join('')}" fill="#fff" fill-rule="evenodd"/>`}}}
-  const ctryBuf=await rasterSvg(ctrySvg);
+  ctryBuf=await rasterSvg(ctrySvg);
   const seaInd=new Float32Array(W*H);for(let i=0;i<W*H;i++)seaInd[i]=ctryBuf[i]>127?0:1;
   const coastNear=boxMean(seaInd,+(ARG.coast??12)),riverNear=boxMean(Float32Array.from(river),+(ARG.rivnear??8));
   const FAR0=+(ARG.far0??30),FSL=+(ARG.fslope??10),FLAT=+(ARG.flat??31);
@@ -151,11 +153,34 @@ async function rasterSvg(inner){const svg=`<svg xmlns="http://www.w3.org/2000/sv
    for(const q of [x<W-1?i+1:-1,y<H-1?i+W:-1,x>0?i-1:-1,y>0?i-W:-1]){if(q<0)continue;const m=lab[q];if(m>=0&&m!==l){const k=l+','+m;border.set(k,(border.get(k)||0)+1)}}}
   const best=new Map();for(const [k,v] of border){const [l,m]=k.split(',').map(Number);if(!best.has(l)||best.get(l)[1]<v)best.set(l,[m,v])}
   if(!best.size)break;for(let i=0;i<W*H;i++){const l=lab[i];if(l>=0&&best.has(l))lab[i]=best.get(l)[0]}}
+ // tiny cells by real area (the raster is stretched by latitude): merge into the neighbour with the longest border, or drop if it touches nobody
+ const rowLat=y=>B.y1-(y+.5)*S;
+ const rowKm2=y=>PXKM*PXKM*Math.cos(rowLat(y)*Math.PI/180)/K;
+ const rowDxKm=y=>PXKM*Math.cos(rowLat(y)*Math.PI/180)/K;
+ {const area=new Float64Array(seeds.length);for(let y=0;y<H;y++){const a=rowKm2(y);for(let x=0;x<W;x++){const l=lab[y*W+x];if(l>=0)area[l]+=a}}
+  const touch=new Map();for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x,l=lab[i];if(l<0||area[l]>=5)continue;
+   for(const q of [x<W-1?i+1:-1,y<H-1?i+W:-1,x>0?i-1:-1,y>0?i-W:-1]){if(q<0)continue;const m=lab[q];if(m>=0&&m!==l){const k=l+','+m;touch.set(k,(touch.get(k)||0)+1)}}}
+  const best=new Map();for(const [k,v] of touch){const [l,m]=k.split(',').map(Number);if(!best.has(l)||best.get(l)[1]<v)best.set(l,[m,v])}
+  let merged=0,dropped=0;for(let i=0;i<W*H;i++){const l=lab[i];if(l<0||area[l]>=5)continue;if(best.has(l)){lab[i]=best.get(l)[0];merged++}else if(area[l]<30){lab[i]=-1;dropped++}}
+  console.log('cells under 5 km2: merged px',merged,'| isolated islets under 30 km2 dropped px',dropped)}
  // compact labels
- const remap=new Map();let n=0;for(let i=0;i<W*H;i++){const l=lab[i];if(l<0)continue;if(!remap.has(l))remap.set(l,n++);lab[i]=remap.get(l)}
+ const remap=new Map();const seedOf=[];let n=0;for(let i=0;i<W*H;i++){const l=lab[i];if(l<0)continue;if(!remap.has(l)){remap.set(l,n++);seedOf.push(l)}lab[i]=remap.get(l)}
  const cnt=new Int32Array(n);for(let i=0;i<W*H;i++)if(lab[i]>=0)cnt[lab[i]]++;
  const km=[...cnt].map(c=>c*PXKM*PXKM).sort((a,b)=>a-b);const q=p=>km[Math.floor(km.length*p)];
- console.log('cells',n,'km2 min',km[0].toFixed(0),'p10',q(.1).toFixed(0),'median',q(.5).toFixed(0),'p90',q(.9).toFixed(0),'max',km.at(-1).toFixed(0));
+ console.log('cells',n,'km2 (nominal) min',km[0].toFixed(0),'p10',q(.1).toFixed(0),'median',q(.5).toFixed(0),'p90',q(.9).toFixed(0),'max',km.at(-1).toFixed(0));
+ // ---- per-cell facts: true area, centroid, elevation, slope, coast, and one sample point every 4 px for the builder
+ // "sea" is empty in the game's land mask and within 3 px of empty ground in the country outlines, so cuts made for lakes, massifs and desert, and the edge of the mask inland, do not read as coast
+ const ctryIn=new Float32Array(W*H);for(let i=0;i<W*H;i++)ctryIn[i]=ctryBuf[i]>127?1:0;
+ const seaNear=boxMean(Float32Array.from(ctryIn,v=>1-v),3);const sea=new Uint8Array(W*H);for(let i=0;i<W*H;i++)sea[i]=(!land0[i]&&!lakeMask[i]&&seaNear[i]>0.0005)?1:0;
+ const st=Array.from({length:n},()=>({px:0,area:0,lo:0,la:0,eSum:0,eMax:-1e9,sSum:0,riv:0,sand:0,coastKm:0,samples:[]}));
+ for(let y=0;y<H;y++){const a=rowKm2(y),dx=rowDxKm(y),la=rowLat(y);for(let x=0;x<W;x++){const i=y*W+x,l=lab[i];if(l<0)continue;const c=st[l];
+  c.px++;c.area+=a;const [lo]=px2lonlat(x+.5,y+.5);c.lo+=lo*a;c.la+=la*a;const e=elev[i];c.eSum+=e*a;if(e>c.eMax)c.eMax=e;
+  if(x>0&&y>0&&x<W-1&&y<H-1){c.sSum+=Math.hypot((elev[i+1]-elev[i-1])/(2*dx),(elev[i+W]-elev[i-W])/(2*PXKM))*a}
+  if(river[i])c.riv++;if(sandBuf[i]>127)c.sand++;
+  if(x%4===2&&y%4===2)c.samples.push(+lo.toFixed(4),+la.toFixed(4));
+  if(x>0&&sea[i-1])c.coastKm+=PXKM;if(x<W-1&&sea[i+1])c.coastKm+=PXKM;if(y>0&&sea[i-W])c.coastKm+=dx;if(y<H-1&&sea[i+W])c.coastKm+=dx}}
+ for(let l=0;l<n;l++){const c=st[l];if(!c.samples.length){const [lo,la]=[c.lo/c.area,c.la/c.area];c.samples.push(+lo.toFixed(4),+la.toFixed(4))}}
+ lap('cell facts')
  // ---- trace: global arc network. Every border is walked once between junctions and shared by both cells.
  const VW=W+1;
  const labAt=(x,y)=>(x<0||y<0||x>=W||y>=H)?-1:lab[y*W+x];
@@ -194,8 +219,23 @@ async function rasterSvg(inner){const svg=`<svg xmlns="http://www.w3.org/2000/sv
 
  // smooth every arc exactly once
  for(const A of arcs){const coast=A.left<0||A.right<0;const seq=A.verts.map(v=>[vx(v),vy(v)]);
-  A.pts=chaikin(dp(seq,coast?.6:+(ARG.eps??1.0)),coast?1:+(ARG.chaikin??2))}
+  const eps=coast?.6:+(ARG.eps??1.0),it=coast?1:+(ARG.chaikin??2);const smooth=q=>chaikin(dp(q,eps),it);
+  // an arc that closes on itself (an island, a hole) has no junction to anchor it: split it at its farthest vertex, or Douglas-Peucker collapses it to a point
+  if(A.verts[0]===A.verts[A.verts.length-1]&&seq.length>4){let m=1,dm=-1;for(let k=1;k<seq.length-1;k++){const d=Math.hypot(seq[k][0]-seq[0][0],seq[k][1]-seq[0][1]);if(d>dm){dm=d;m=k}}
+   A.pts=[...smooth(seq.slice(0,m+1)),...smooth(seq.slice(m)).slice(1)]}
+  else A.pts=smooth(seq)}
  {let cs=0,is=0;for(const A of arcs){const n=A.pts.length-1;if(A.left<0||A.right<0)cs+=n;else is+=n}console.log('smoothed segments: coast',cs,'| interior (each shared by two cells)',is)}
+ // adjacency: every interior arc is a border between two cells; its length is the smoothed polyline, its height the mean of the ground on both sides
+ const adjMap=new Map();
+ for(const A of arcs){if(A.left<0||A.right<0||A.left===A.right)continue;
+  let len=0;for(let k=1;k<A.pts.length;k++){const [ax,ay]=A.pts[k-1],[bx,by]=A.pts[k];len+=Math.hypot((bx-ax)*rowDxKm(Math.min(H-1,Math.max(0,Math.floor((ay+by)/2)))),(by-ay)*PXKM)}
+  let es=0,en=0;for(let k=1;k<A.verts.length;k++){const fx=vx(A.verts[k-1]),fy=vy(A.verts[k-1]),tx2=vx(A.verts[k]),ty2=vy(A.verts[k]);let p1,p2;
+   if(ty2===fy){const xx=Math.min(fx,tx2);p1=[xx,fy-1];p2=[xx,fy]}else{const yy=Math.min(fy,ty2);p1=[fx-1,yy];p2=[fx,yy]}
+   for(const [px_,py_] of [p1,p2]){if(px_>=0&&py_>=0&&px_<W&&py_<H&&lab[py_*W+px_]>=0){es+=elev[py_*W+px_];en++}}}
+  const a_=Math.min(A.left,A.right),b_=Math.max(A.left,A.right),key=a_+','+b_;const r=adjMap.get(key)||{km:0,es:0,en:0};r.km+=len;r.es+=es;r.en+=en;adjMap.set(key,r)}
+ const adjOf=Array.from({length:n},()=>[]);
+ for(const [k,r] of adjMap){const [a_,b_]=k.split(',').map(Number);const rec=(o)=>({n:o,km:+r.km.toFixed(2),elev:r.en?Math.round(r.es/r.en):0});adjOf[a_].push(rec(b_));adjOf[b_].push(rec(a_))}
+ lap(`adjacency pairs ${adjMap.size}`);
  // assemble every cell's rings from its arcs (interior on the right)
  const byStart=Array.from({length:n},()=>new Map());
  const put=(c,oa)=>{const m=byStart[c];const k=oa.verts[0];if(!m.has(k))m.set(k,[]);m.get(k).push(oa)};
@@ -210,10 +250,27 @@ async function rasterSvg(inner){const svg=`<svg xmlns="http://www.w3.org/2000/sv
     nx.used=true;ring.push(...nx.pts.slice(1));cur=nx;if(++guard>100000)break}
    cellRings[c].push(ring)}}}
  console.log('open rings (should be 0):',openRings);
+ {const seg=new Map();const kk=p=>p[0].toFixed(3)+','+p[1].toFixed(3);let total=0;
+  for(const rs of cellRings)for(const r of rs)for(let k=1;k<r.length;k++){const a_=kk(r[k-1]),b_=kk(r[k]);const key=a_<b_?a_+'|'+b_:b_+'|'+a_;seg.set(key,(seg.get(key)||0)+1);total++}
+  let matched=0,single=0,over=0;for(const v of seg.values()){if(v===2)matched++;else if(v===1)single++;else over++}
+  let coastSeg=0;for(const A of arcs)if(A.left<0||A.right<0)coastSeg+=A.pts.length-1;
+  console.log('topology: matched segments',matched,'| single (coast expected',coastSeg+')',single,'| over-used',over,'| ring segments',total)}
+
  // ---- output geojson + preview
- const feats=[];for(let l=0;l<n;l++){const rs=cellRings[l].map(r=>{const c=r.map(([x,y])=>px2lonlat(x,y));return c}).filter(r=>r.length>3);if(rs.length)feats.push({l,rs})}
+ const feats=[];const idxOf0=l=>cellRings[l].some(r=>r.length>3);for(let l=0;l<n;l++){const rs=cellRings[l].map(r=>{const c=r.map(([x,y])=>px2lonlat(x,y));return c}).filter(r=>r.length>3);if(rs.length)feats.push({l,rs})}
  // outer rings = larger area; holes ambiguous -> draw evenodd
- fs.writeFileSync(OUT+'.json',JSON.stringify({bbox:B,cells:n,px:[W,H],rings:feats.map(f=>f.rs)}));
+ {const lost=[];for(let l=0;l<n;l++)if(!idxOf0(l))lost.push(l);console.log('cells without a ring:',lost.length,lost.slice(0,8).map(l=>l+':'+st[l].px+'px/'+cellRings[l].length+'r/'+cellRings[l].map(r=>r.length)))}
+ const idxOf=new Map(feats.map((f,i)=>[f.l,i]));
+ const provinces=feats.map(f=>{const c=st[f.l],sd=seeds[seedOf[f.l]];const [slo,sla]=sd[4]!==undefined?[sd[4],sd[5]]:px2lonlat(sd[0],sd[1]);
+  const pop=v=>+v.toFixed(2);
+  return{seed:{lon:+slo.toFixed(5),lat:+sla.toFixed(5),name:sd[2]||null,pleiades:sd[6]||null,src:sd[3]},areaKm2:Math.round(c.area),centroid:[+(c.lo/c.area).toFixed(5),+(c.la/c.area).toFixed(5)],
+   elevMean:Math.round(c.eSum/c.area),elevMax:Math.round(c.eMax),slopeMKm:pop(c.sSum/c.area),coast:c.coastKm>=2,coastKm:Math.round(c.coastKm/1.2),riverFrac:pop(c.riv/c.px),sandFrac:pop(c.sand/c.px),
+   adj:adjOf[f.l].filter(o=>idxOf.has(o.n)).map(o=>({n:idxOf.get(o.n),km:o.km,elev:o.elev})).sort((a_,b_)=>a_.n-b_.n)}});
+ // a 4 px sea bitmap so the builder can tell water gaps from desert gaps
+ const W4=Math.ceil(W/4),H4=Math.ceil(H/4);const seaBits=Buffer.alloc(Math.ceil(W4*H4/8));
+ for(let y=0;y<H4;y++)for(let x=0;x<W4;x++){const i=Math.min(H-1,y*4+2)*W+Math.min(W-1,x*4+2);if(sea[i]){const b=y*W4+x;seaBits[b>>3]|=1<<(b&7)}}
+ fs.writeFileSync(OUT+'.json',JSON.stringify({bbox:B,cells:n,px:[W,H],rings:feats.map(f=>f.rs),provinces,sea4:{w:W4,h:H4,step:4,bits:seaBits.toString('base64')}}));
+ fs.writeFileSync(OUT+'.samples.json',JSON.stringify(feats.map(f=>st[f.l].samples)));
  const SC=1.0;let svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect width="100%" height="100%" fill="#1a75a8"/>`;
  for(const f of feats){const h=(f.l*2654435761>>>0);const col=`hsl(${h%360},${35+(h>>9)%25}%,${58+(h>>17)%18}%)`;
   svg+=`<path d="${f.rs.map(r=>'M'+r.map(([lo,la])=>{const [x,y]=lonlat2px(lo,la);return x.toFixed(1)+','+y.toFixed(1)}).join('L')+'Z').join('')}" fill="${col}" stroke="#222" stroke-width="0.7" fill-rule="evenodd" stroke-linejoin="round"/>`}

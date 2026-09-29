@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef, type PointerEvent } from "react";
-import { DynamicMapOverlaySchema, GeoJsonMapSchema, type GeoJsonMap, type DynamicMapOverlay, type MatterFocus, type RoomStates, MAP_CHANGE_KINDS } from "@chronica/shared";
+import { applyMapOverlayDelta, DynamicMapOverlaySchema, isGeoJsonMapDocument, MapOverlayDeltaSchema, type GeoJsonMap, type DynamicMapOverlay, type MatterFocus, type RoomStates, MAP_CHANGE_KINDS } from "@chronica/shared";
 import type { RoomContents } from "../../../../lib/room-service";
 
-// Module-level cache provides geometry immediately during soft navigation; a
-// fresh request below then replaces it if the active scenario map was revised.
+// A map document never changes at its version, so each version is downloaded
+// once and kept for soft navigation back into the game.
 const _geoJsonCache = new Map<string, GeoJsonMap>();
+const mapCacheKey = (gameId: string, version: string) => `${gameId}@${version}`;
 import { GeoMap, type ForceFlagAsset, type ForceMapDetails } from "./geo-map";
 import { MapViewport, type ViewportTransform, type MapViewportHandle, type DrawCanvasFn } from "./map-viewport";
 import { computeViewBox } from "./geo-projection";
@@ -66,8 +67,11 @@ interface GameShellProps {
   readonly gameId: string;
   readonly gameTitle: string;
   readonly elapsedStepLabel: string;
-  readonly initialGeoJson: GeoJsonMap | undefined;
+  /** Names the map document to download (`/api/games/:id/map?v=`); absent when the scenario has none. */
+  readonly mapVersion: string | undefined;
   readonly initialOverlay: DynamicMapOverlay | undefined;
+  /** Which stored world `initialOverlay` was read from, so the poll can ask only for what changed since. */
+  readonly initialOverlayStamp?: string | undefined;
   readonly baseImageUrl?: string;
   readonly detailImageUrl?: string;
   readonly characterPanel?: CharacterPanelProps | undefined;
@@ -136,8 +140,9 @@ export function GameShell({
   gameId,
   gameTitle,
   elapsedStepLabel,
-  initialGeoJson,
+  mapVersion: initialMapVersion,
   initialOverlay,
+  initialOverlayStamp,
   baseImageUrl,
   detailImageUrl,
   characterPanel,
@@ -145,12 +150,17 @@ export function GameShell({
   orderingCharacterId,
   roomStyle,
 }: GameShellProps) {
+  const [mapVersion, setMapVersion] = useState(initialMapVersion);
   const [geoJson, setGeoJson] = useState<GeoJsonMap | undefined>(
-    () => initialGeoJson ?? _geoJsonCache.get(gameId),
+    () => initialMapVersion === undefined ? undefined : _geoJsonCache.get(mapCacheKey(gameId, initialMapVersion)),
   );
   const [overlay, setOverlay] = useState<DynamicMapOverlay | null>(
     initialOverlay ?? null,
   );
+  const overlayRef = useRef(overlay);
+  overlayRef.current = overlay;
+  /** The stored-world revision the overlay in state was read at; sent with each poll. */
+  const overlayStampRef = useRef<string | null>(initialOverlayStamp ?? null);
   const [selectedProvinceId, setSelectedProvinceId] = useState<string | null>(
     null,
   );
@@ -400,32 +410,37 @@ export function GameShell({
     return () => clearInterval(interval);
   }, [hasActiveConflict, place, requestRedraw]);
 
+  // The map is fetched once per version, from a URL the browser may keep for
+  // good. Refocusing the window asks again only if that fetch has not
+  // succeeded yet; a loaded map is never replaced by an equal one.
   useEffect(() => {
+    if (mapVersion === undefined) return;
+    const key = mapCacheKey(gameId, mapVersion);
+    const kept = _geoJsonCache.get(key);
+    if (kept !== undefined) { setGeoJson(kept); return; }
     let cancelled = false;
-    // Respects the map route's Cache-Control (a few minutes), so refocusing
-    // the tab doesn't force the server to refetch and re-copy this
-    // multi-megabyte document when nothing has changed.
-    const refreshMap = () => void fetch(`/api/games/${encodeURIComponent(gameId)}/map`)
-      .then((response) => response.ok ? response.json() : null)
-      .then((data: unknown) => {
-        const parsed = GeoJsonMapSchema.safeParse(data);
-        if (!cancelled && parsed.success) {
-          _geoJsonCache.set(gameId, parsed.data);
-          setGeoJson(parsed.data);
-        }
-      })
-      .catch(() => { /* The compact loading state remains available for a retry. */ });
-    if (initialGeoJson !== undefined) {
-      _geoJsonCache.set(gameId, initialGeoJson);
-      setGeoJson(initialGeoJson);
-    }
-    refreshMap();
-    window.addEventListener("focus", refreshMap);
+    let loading = false;
+    const load = () => {
+      if (loading) return;
+      loading = true;
+      void fetch(`/api/games/${encodeURIComponent(gameId)}/map?v=${encodeURIComponent(mapVersion)}`)
+        .then((response) => response.ok ? response.json() : null)
+        .then((data: unknown) => {
+          if (cancelled || !isGeoJsonMapDocument(data)) return;
+          _geoJsonCache.set(key, data);
+          setGeoJson(data);
+          window.removeEventListener("focus", load);
+        })
+        .catch(() => { /* The compact loading state remains available for a retry. */ })
+        .finally(() => { loading = false; });
+    };
+    load();
+    window.addEventListener("focus", load);
     return () => {
       cancelled = true;
-      window.removeEventListener("focus", refreshMap);
+      window.removeEventListener("focus", load);
     };
-  }, [gameId, initialGeoJson]);
+  }, [gameId, mapVersion]);
 
   // What each army carries, read from its record. A change the player makes is
   // saved to the world first and only then shown, so a reload shows the same.
@@ -560,19 +575,37 @@ export function GameShell({
   }, []);
 
   useEffect(() => {
+    let polling = false;
+    // Asks for what changed since the stored world the overlay in state was
+    // read from: usually "nothing", else the rows that differ. A full overlay
+    // comes back only when the server no longer remembers that world.
     const refreshOverlay = async () => {
+      if (polling) return;
+      polling = true;
       try {
-        const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/overlay`);
+        const since = overlayStampRef.current;
+        const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/overlay${since === null ? "" : `?since=${encodeURIComponent(since)}`}`);
         if (!res.ok) return;
-        const data: unknown = await res.json();
-        const candidate = typeof data === "object" && data !== null && "mapOverlay" in data ? data.mapOverlay : null;
-        const parsed = DynamicMapOverlaySchema.safeParse(candidate);
-        if (parsed.success) {
-          const next = parsed.data;
-          setOverlay((current) => current?.revision === next.revision ? current : next);
+        const data = await res.json() as { stamp?: unknown; mapVersion?: unknown; unchanged?: unknown; mapOverlay?: unknown; delta?: unknown } | null;
+        if (data === null || typeof data.stamp !== "string" || data.unchanged === true) return;
+        let next: DynamicMapOverlay | null = null;
+        if (data.delta !== undefined) {
+          const delta = MapOverlayDeltaSchema.safeParse(data.delta);
+          const current = overlayRef.current;
+          if (delta.success && current !== null) next = applyMapOverlayDelta(current, delta.data);
+        } else {
+          const full = DynamicMapOverlaySchema.safeParse(data.mapOverlay);
+          if (full.success) next = full.data;
         }
+        // A delta that cannot be applied leaves the stamp alone, so the next poll asks again from the same base.
+        if (next === null) return;
+        overlayStampRef.current = data.stamp;
+        setOverlay(next);
+        if (typeof data.mapVersion === "string") setMapVersion(data.mapVersion);
       } catch {
         // Silently retry on next interval
+      } finally {
+        polling = false;
       }
     };
     const interval = setInterval(() => { void refreshOverlay(); }, 15_000);

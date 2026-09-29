@@ -124,7 +124,12 @@ describe("what the player's government can see of the world", () => {
     // Helvetian cantons and Gaulish departments beyond the frontier are the
     // Tigurini and the Rauraci, and a region cut into several units says which
     // part ("Northern Corsica") -- longer than "Zug", and true in 270.
-    expect(text.length).toBeLessThan(18_750);
+    //
+    // Moved 18.75k -> 19.25k for the choice of places by relevance: the forty
+    // are now the ground the order and the armies are about, then the nearest,
+    // instead of whatever sorted first, and the nearer ground has more towns.
+    // The section is still forty lines.
+    expect(text.length).toBeLessThan(19_250);
   });
 });
 
