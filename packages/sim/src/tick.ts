@@ -1080,8 +1080,9 @@ export function runDeterministicTick(given: TickInput): TickResult {
   for (const material of recovered.material.provinceMaterial) {
     const previous = before.get(material.provinceId);
     const province = provinceById.get(material.provinceId);
-    if (previous === undefined || province === undefined || !live.has(material.provinceId)) continue;
-    const holder = province.controllerPolityId ?? "";
+    // Ground nobody holds has no government to hear of its hunger or its disorder.
+    if (previous === undefined || province === undefined || province.controllerPolityId === null || !live.has(material.provinceId)) continue;
+    const holder = province.controllerPolityId;
     const crossed = (now: number, was: number): boolean => now < DISTRESS_BPS && was >= DISTRESS_BPS;
     if (crossed(material.foodSecurityBps, previous.foodSecurityBps)) hungry.set(holder, [...(hungry.get(holder) ?? []), material]);
     if (crossed(material.stabilityBps, previous.stabilityBps)) disorderly.set(holder, [...(disorderly.get(holder) ?? []), material]);

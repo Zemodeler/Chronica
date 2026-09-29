@@ -1284,7 +1284,7 @@ export function renderWorldSlice(slice: WorldSlice): string {
       : `. Ground: ${province.ground.map((spot) => `${spot.label} [${spot.id}], ${spot.type}`).join("; ")}`;
     const buildings = province.buildings.length === 0 ? "" : `. Standing there: ${province.buildings.join("; ")}`;
     const belief = province.belief.length === 0 ? "" : `. Believe: ${province.belief.join(", ")}, the rest as of old`;
-    return `${province.name} [${province.id}] — held by ${province.controller}${cities}${ground}${buildings}${belief}`;
+    return `${province.name} [${province.id}] — ${province.controller === "uncontrolled" ? "held by no one" : `held by ${province.controller}`}${cities}${ground}${buildings}${belief}`;
   }));
   section("FAITHS", slice.faiths.length === 0 ? [] : [`${slice.faiths.join("; ")}. A faith not listed is founded by naming it.`]);
   section("OTHER POWERS", slice.foreignPowers.map((power) => {

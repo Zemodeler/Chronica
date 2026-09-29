@@ -172,7 +172,7 @@ const CONSOLIDATED_POLITY_PALETTE_SLOTS: Readonly<Record<string, number>> = {
   armenia: 1, paphlagonia: 4, colchis: 6, "pisidia-isauria": 10,
   // Iran, the Caucasus, Judea and Arabia.
   atropatene: 8, "caucasian-albania": 11, "caucasian-iberia": 12, "caspian-peoples": 13, "makran-tribes": 14, judea: 15,
-  gerrha: 0, "hejaz-tribes": 1, ituraeans: 2, kush: 3, lihyan: 4, minaeans: 5, nabataeans: 6, "najd-tribes": 7, qedar: 8, saba: 9,
+  gerrha: 0, "hejaz-tribes": 1, ituraeans: 2, kush: 3, lihyan: 4, minaeans: 5, nabataeans: 6, "najd-tribes": 7, qedar: 8, saba: 9, "scenitae-arabs": 10, "marsh-peoples": 11,
 };
 
 function historicalFamilyForPolity(polityId: string): HistoricalPolityFamily {
@@ -200,7 +200,7 @@ function historicalFamilyForPolity(polityId: string): HistoricalPolityFamily {
     "hellespont-propontic-cities", "heraclea-pontica", "euxine-greek-cities",
   ].includes(polityId)) return "hellenic";
   if (["seleucid-empire", "ptolemaic-egypt", "pergamon", "bithynia", "pontus", "cappadocia", "armenia", "paphlagonia", "colchis", "pisidia-isauria", "atropatene", "caucasian-albania", "caucasian-iberia", "caspian-peoples", "makran-tribes", "judea"].includes(polityId)) return "anatolian";
-  if (["mauretanian-peoples", "numidian-kingdoms", "gaetuli", "garamantes", "kush", "gerrha", "hejaz-tribes", "ituraeans", "lihyan", "minaeans", "nabataeans", "najd-tribes", "qedar", "saba"].includes(polityId)) return "northAfrican";
+  if (["mauretanian-peoples", "numidian-kingdoms", "gaetuli", "garamantes", "kush", "gerrha", "hejaz-tribes", "ituraeans", "lihyan", "minaeans", "nabataeans", "najd-tribes", "qedar", "saba", "scenitae-arabs", "marsh-peoples"].includes(polityId)) return "northAfrican";
   return "neutral";
 }
 

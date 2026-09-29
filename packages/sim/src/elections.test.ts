@@ -85,7 +85,7 @@ function yearEnded(): WorldState {
   return tick(started, 365).world;
 }
 
-describe("elections to an elective office", { timeout: 30_000 }, () => {
+describe("elections to an elective office", () => {
   it("fills the consulship nobody held at the opening, from the men of most standing, never the player", () => {
     const world = tick(opening(), 0).world;
     // Manius Curius has the most standing in Rome; the player (Gaius) already sits.

@@ -53,7 +53,7 @@ const withTributum = (world: WorldState, amount: number): WorldState => ({
   },
 });
 
-describe("taxes the land can bear", { timeout: 30_000 }, () => {
+describe("taxes the land can bear", () => {
   it("leaves the opening's taxes alone: every power asks less than its lands can bear", () => {
     const burdens = taxBurdens(opening());
     for (const polityId of ["rome", "carthage", "syracuse"]) {

@@ -145,6 +145,8 @@ export function reviewTheLand(input: LandInput): LandResult {
     const starvedIn = new Map<string, number>();
     const settledIn = new Map<string, { count: number; from: Set<string> }>();
     const ids = [...rows.keys()].sort();
+    // Open ground has nobody's name on it: its few people live and die unremarked, and nobody flees to it.
+    const owned = new Set(world.map.provinces.filter((province) => province.controllerPolityId !== null).map((province) => province.id));
     for (let month = 0; month < months; month += 1) {
       for (const id of ids) {
         const lived = monthOfPeople(rows.get(id)!);
@@ -159,7 +161,7 @@ export function reviewTheLand(input: LandInput): LandResult {
         if (leaving <= 0) continue;
         const refuge = adjacentTo(world, id)
           .map((other) => rows.get(other.provinceId))
-          .filter((other): other is ProvinceMaterial => other !== undefined && other.stabilityBps >= REFUGE_BPS && other.foodSecurityBps >= REFUGE_BPS)
+          .filter((other): other is ProvinceMaterial => other !== undefined && owned.has(other.provinceId) && other.stabilityBps >= REFUGE_BPS && other.foodSecurityBps >= REFUGE_BPS)
           .sort((a, b) => (b.stabilityBps + b.foodSecurityBps) - (a.stabilityBps + a.foodSecurityBps) || a.provinceId.localeCompare(b.provinceId))[0];
         if (refuge === undefined) continue;
         rows.set(id, { ...row, population: row.population - leaving, displacedPopulation: row.displacedPopulation - leaving });
@@ -184,7 +186,7 @@ export function reviewTheLand(input: LandInput): LandResult {
 
     // A famine is history; a steady trickle of deaths in a lean month is not.
     const live = liveProvinceIds(world);
-    const famines = [...starvedIn.entries()].filter(([provinceId, dead]) => dead >= 200 && live.has(provinceId)).sort((a, b) => b[1] - a[1]).slice(0, 6);
+    const famines = [...starvedIn.entries()].filter(([provinceId, dead]) => dead >= 200 && live.has(provinceId) && owned.has(provinceId)).sort((a, b) => b[1] - a[1]).slice(0, 6);
     for (const [provinceId, dead] of famines) {
       const holder = world.map.provinces.find((province) => province.id === provinceId)?.controllerPolityId ?? null;
       facts.push({

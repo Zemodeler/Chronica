@@ -52,7 +52,7 @@ function months(world: WorldState, count: number) {
   return { world: current, kinds };
 }
 
-describe("the collateral is seized", { timeout: 30_000 }, () => {
+describe("the collateral is seized", () => {
   it("is paid back in instalments: the interest on what is owed, and a share of it", () => {
     const world = borrowed();
     const loan = world.material.loans[0]!;

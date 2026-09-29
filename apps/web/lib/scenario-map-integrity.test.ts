@@ -77,8 +77,8 @@ describe("scenario map integrity", () => {
       const [x, y] = feature.geometry.coordinates;
       const parts = polygons.get(feature.properties.provinceId) ?? [];
       const inProvince = parts.some((polygon) => polygon.reduce((inside, ring) => (ringHolds(ring, x, y) ? !inside : inside), false));
-      // A port's pin can sit a little off the smoothed coast of its province; a town is never a province away.
-      const onItsShore = inProvince || kmToRings(parts.flat(), x, y) <= 12;
+      // A port's pin can sit off the smoothed coast of its province, and an island town (Ikaros on Failaka) is snapped to the nearest shore the builder finds within 25 km; a town is never a province away.
+      const onItsShore = inProvince || kmToRings(parts.flat(), x, y) <= 25;
       return !onItsShore || worldProvinceOf.get(feature.id) !== feature.properties.provinceId;
     });
     expect(misplaced.map((feature) => feature.id)).toEqual([]);

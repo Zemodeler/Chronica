@@ -9,10 +9,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GeoJsonMapSchema } from '../../packages/shared/src/world/geojson';
 import { ProvinceGraphSchema } from '../../packages/shared/src/world/map';
-import { polygonsOf, ringAreaKm2, signedArea } from './map-geometry';
+import { haversineKm, polygonsOf, ringAreaKm2, signedArea, type Point } from './map-geometry';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '../..');
+const STRAIGHT_KM = +(process.env.STRAIGHT_KM ?? 60);
 const DATA = process.env.MAP_GEN_DATA ?? join(ROOT, '.map-gen-data');
 // out=<suffix> checks a suffixed build (punic-wars-map-graph-<suffix>.ts, punic-wars-provinces-<suffix>.geojson); the default is the shipped one
 const SUFFIX = process.argv.find((a) => a.startsWith('out='))?.slice(4);
@@ -88,8 +89,11 @@ const held = new Map<string, number>();
 for (const p of provinces) if (p.controllerPolityId) held.set(p.controllerPolityId, (held.get(p.controllerPolityId) ?? 0) + 1);
 check(polities.every((p) => (held.get(p.polityId) ?? 0) > 0), 'no polity holds zero provinces');
 check(polities.every((p) => p.capitalSettlementId === null || settlements.some((s) => s.id === p.capitalSettlementId)), 'every capital exists as a settlement');
+// only open desert is left to no one: desert-steppe with no settlement
 const unowned = provinces.filter((p) => p.controllerPolityId === null);
-console.log(`     unowned provinces: ${unowned.length}`);
+const townProvinces = new Set(settlements.map((s) => s.provinceId));
+const badlyUnowned = unowned.filter((p) => p.terrainId !== 'desert-steppe' || townProvinces.has(p.id));
+check(badlyUnowned.length === 0, `unowned provinces are all desert-steppe without a settlement (${unowned.length} unowned, ${badlyUnowned.length} not open desert${badlyUnowned.length ? `: ${badlyUnowned.slice(0, 5).map((p) => p.name).join(', ')}` : ''})`);
 
 // ---- stats
 const km = edges.map((e) => e.distance).sort((a, b) => a - b);
@@ -119,6 +123,28 @@ check(geojson.features.filter((f) => f.properties.kind === 'settlement').length 
   const counts = [0, 0, 0, 0];
   for (const n of segments.values()) counts[Math.min(3, n)]!++;
   check(counts[3] < 100, `border topology: ${counts[2]} segments shared by two provinces, ${counts[1]} coast, ${counts[3]} over-used (pinch points)`);
+  // ruler-straight outer edges: runs of single-use segments that keep one heading for more than 60 km
+  const runs: { km: number; from: Point; to: Point }[] = [];
+  const km = (a: Point, b: Point): number => haversineKm(a, b);
+  for (const f of geoProvinces) for (const polygon of polygonsOf(f.geometry)) for (const ring of polygon) {
+    const single = (i: number): boolean => { const a = `${ring[i - 1]![0]},${ring[i - 1]![1]}`; const b = `${ring[i]![0]},${ring[i]![1]}`; return segments.get(a < b ? `${a}|${b}` : `${b}|${a}`) === 1; };
+    const heading = (i: number): number => Math.atan2(ring[i]![1] - ring[i - 1]![1], (ring[i]![0] - ring[i - 1]![0]) * Math.cos((ring[i]![1] * Math.PI) / 180));
+    let start = -1;
+    let base = 0;
+    let length = 0;
+    const flush = (end: number): void => { if (start >= 0 && length > STRAIGHT_KM) runs.push({ km: Math.round(length), from: ring[start - 1] as Point, to: ring[end] as Point }); start = -1; length = 0; };
+    for (let i = 1; i < ring.length; i++) {
+      if (!single(i)) { flush(i - 1); continue; }
+      const h = heading(i);
+      const drift = start < 0 ? 0 : Math.abs(Math.atan2(Math.sin(h - base), Math.cos(h - base)));
+      if (start >= 0 && drift > (4 * Math.PI) / 180) flush(i - 1);
+      if (start < 0) { start = i; base = h; }
+      length += km(ring[i - 1] as Point, ring[i] as Point);
+    }
+    flush(ring.length - 1);
+  }
+  runs.sort((a, b) => b.km - a.km);
+  console.log(`     straight outer edges over ${STRAIGHT_KM} km: ${runs.length}${runs.length ? `; longest ${runs.slice(0, 8).map((r) => `${r.km} km from ${r.from.map((v) => v.toFixed(2))} to ${r.to.map((v) => v.toFixed(2))}`).join(' | ')}` : ''}`);
 }
 
 // ---- old map versus new, by polity

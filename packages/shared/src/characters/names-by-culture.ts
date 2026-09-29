@@ -67,7 +67,7 @@ const GREEK = new Set([
 const ANATOLIAN = new Set([
   "armenia", "cappadocia", "colchis", "paphlagonia", "pisidia-isauria", "pontus",
   "atropatene", "caspian-peoples", "caucasian-albania", "caucasian-iberia", "makran-tribes",
-  "gerrha", "hejaz-tribes", "ituraeans", "judea", "kush", "lihyan", "minaeans", "nabataeans", "najd-tribes", "qedar", "saba",
+  "gerrha", "hejaz-tribes", "ituraeans", "judea", "kush", "lihyan", "marsh-peoples", "minaeans", "nabataeans", "najd-tribes", "qedar", "saba", "scenitae-arabs",
 ]);
 const LIBYAN = new Set(["gaetuli", "garamantes", "mauretanian-peoples", "numidian-kingdoms", "canarian-peoples"]);
 
