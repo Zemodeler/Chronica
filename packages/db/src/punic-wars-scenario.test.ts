@@ -113,6 +113,13 @@ describe("the Punic Wars map as authoritative world state", () => {
     expect(world.map.polities.length).toBeGreaterThanOrEqual(120);
   });
 
+  it("declares the province count the map really has", () => {
+    // Nothing in the engine enforced this before, and it had drifted by one.
+    const { min, max } = punicWarsScenario.definition.map.provinceCount;
+    expect(provinces.length).toBeGreaterThanOrEqual(min);
+    expect(provinces.length).toBeLessThanOrEqual(max);
+  });
+
   it("gives every polity that holds ground somewhere to hold", () => {
     const held = new Set(provinces.map((province) => province.controllerPolityId));
     // A city counts. The Campanian legion holds Rhegium inside a province Rome

@@ -361,8 +361,8 @@ export const ScenarioMapRulesSchema = z
      */
     provinceCount: z
       .object({
-        min: z.number().int().positive().max(2_000),
-        max: z.number().int().positive().max(2_000),
+        min: z.number().int().positive().max(6_000),
+        max: z.number().int().positive().max(6_000),
       })
       .strict()
       .refine((bounds) => bounds.max >= bounds.min, {
