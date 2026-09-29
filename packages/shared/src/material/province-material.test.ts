@@ -14,12 +14,12 @@ import {
 } from "./province-material";
 
 const province: Province = {
-  id: "sicily-west",
+  id: "test-province",
   name: "Western Sicily",
   formerNames: [],
   terrainId: "coastal-plain",
   settlements: [
-    { id: "drepanum-city", name: "Drepanum", kind: "port", provinceId: "sicily-west", controllerPolityId: "carthage", size: 55, fortificationLevel: 3 },
+    { id: "drepanum-city", name: "Drepanum", kind: "port", provinceId: "test-province", controllerPolityId: "carthage", size: 55, fortificationLevel: 3 },
   ],
   controllerPolityId: "carthage",
   controlFirmnessBps: 8_000,
@@ -57,7 +57,7 @@ describe("deriveDefaultProvinceMaterial", () => {
 
 describe("ensureProvinceMaterial", () => {
   it("backfills a missing province and leaves an existing one untouched", () => {
-    const otherProvince: Province = { ...province, id: "sicily-east", settlements: [] };
+    const otherProvince: Province = { ...province, id: "test-province-other", settlements: [] };
     const existing = material({ population: 999 });
     const world = {
       map: { provinces: [province, otherProvince], edges: [], polities: [], politicalRelations: [] },

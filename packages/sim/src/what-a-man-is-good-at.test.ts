@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, aptitude, applyDiplomaticAnswerToStance, ensureProvinceMaterial, practise, spreadSubSkills, type Character, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -43,7 +43,7 @@ describe("what a man is good at", () => {
   it("marches an army faster for a commander who can feed it", () => {
     const march = (logistics: number) => {
       const world = withSkill(opening(), "gaius-genucius", (character) => sub(character, "logistics", logistics));
-      const result = applyDeltas(world, [WorldDeltaSchema.parse({ op: "force_modify", forceRef: "roman-field-army", locationId: "punic-italy-bruttian-highlands", reason: "South." })], {
+      const result = applyDeltas(world, [WorldDeltaSchema.parse({ op: "force_modify", forceRef: "roman-field-army", locationId: PUNIC_IDS.rhegium, reason: "South." })], {
         now: { day: 0, minute: 540 }, actorRef: { kind: "character", id: "gaius-genucius" }, offices: definition.government.offices, warfare: definition.warfare,
         terrains: definition.map.terrains, ids: createIdFactory(`march-${logistics}`), gameId: "game-skill",
       } satisfies ApplyContext);

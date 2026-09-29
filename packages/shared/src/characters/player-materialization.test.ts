@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { PUNIC_IDS, punicWarsScenario } from "@chronica/db";
 import { WorldStateSchema, type WorldState } from "../world/world-state";
 import { CharacterKnowledgebaseSchema, type CharacterKnowledgebase } from "./knowledgebase";
 import { deriveAuthoritySummary } from "./authority-projection";
@@ -10,7 +10,7 @@ import { findCommandForRole, findOfficeSeatForRole, findPolityForRole, materiali
 // text the character-declaration model actually produces.
 
 const PLAYER = "declared-4cee71cf";
-const LATIUM = "punic-italy-latium";
+const LATIUM = PUNIC_IDS.rome;
 const government = punicWarsScenario.definition.government;
 
 const world = (): WorldState => structuredClone(punicWarsScenario.initialWorld);

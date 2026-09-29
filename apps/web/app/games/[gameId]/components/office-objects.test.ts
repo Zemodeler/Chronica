@@ -64,6 +64,10 @@ describe("which room a culture gets", () => {
     expect(roomStyleFor("culture-carthaginian-merchant", null)).toBe("carthaginian");
     expect(roomStyleFor("culture-local", "syracuse")).toBe("greek");
     expect(roomStyleFor("culture-gallic-chieftain", null)).toBe("gallic");
+    // Asia Minor's kingdoms sit in Hellenistic rooms; the Galatians are Celts.
+    expect(roomStyleFor("", "seleucid-empire")).toBe("greek");
+    expect(roomStyleFor("anatolian", "pontus")).toBe("greek");
+    expect(roomStyleFor("celtic", "galatians-trocmi")).toBe("gallic");
   });
 
   it("falls back rather than guessing", () => {

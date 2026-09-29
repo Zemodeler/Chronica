@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, type Fact, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import { composeChronicle, whoIsWho } from "./chronicle";
@@ -79,9 +79,9 @@ describe("who is who", () => {
 describe("storms at sea", () => {
   it("can only happen where there is sea", () => {
     const coastal = coastalProvinceIds(world());
-    expect(coastal.has("ita-72843720b81376294924159-sicily-west")).toBe(true);
+    expect(coastal.has(PUNIC_IDS.lilybaeum)).toBe(true);
     // A province of the Balkan interior, which the map calls a coastal plain.
-    expect(coastal.has("punic-illyria-srb-41074048b91434818545320")).toBe(false);
+    expect(coastal.has(PUNIC_IDS.kragujevac)).toBe(false);
   });
 });
 
@@ -89,7 +89,7 @@ describe("a journey off the map", () => {
   it("is the world answering, not a malformed order", () => {
     const state = world();
     const result = applyDeltas(state, [WorldDeltaSchema.parse({
-      op: "character_state_set", characterRef: "gaius-genucius", moveToProvinceId: "punic-egypt-nile-delta", reason: "To Egypt, for a wife.",
+      op: "character_state_set", characterRef: "gaius-genucius", moveToProvinceId: "beyond-the-edge-of-the-map", reason: "To Egypt, for a wife.",
     })], {
       now: { day: 0, minute: 540 }, actorRef: { kind: "character", id: "gaius-genucius" }, offices: definition.government.offices,
       warfare: definition.warfare, terrains: definition.map.terrains, ids: createIdFactory("far"), gameId: "game-far",

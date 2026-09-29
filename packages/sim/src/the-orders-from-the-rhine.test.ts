@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import {
   ScenarioDefinitionSchema,
   WorldDeltaSchema,
@@ -41,11 +41,12 @@ import type { ApplyContext } from "./apply/context";
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 
-const RHINE = "punic-gaul-bas-rhin";
-const SAMNIUM = "punic-italy-samnium";
-const LATIUM = "punic-italy-latium";
-const BERAT = "punic-illyria-alb-10019604b1094996199402"; // hills-uplands, on the Aoos
-const GJIROKASTER = "punic-illyria-alb-10019604b29738820438867"; // drawn as coastal plain
+const RHINE = PUNIC_IDS.rhine;
+const SAMNIUM = PUNIC_IDS.bovianum;
+const LATIUM = PUNIC_IDS.rome;
+const BERAT = PUNIC_IDS.berat; // hills-uplands, on the Aoos
+const GJIROKASTER = PUNIC_IDS.gjirokaster; // hills-uplands, the Aoos-side ground beside Berat
+const COAST = PUNIC_IDS.carthage; // coastal-plain
 
 /** The opening world, with the three of them in it and Quintus's horse. */
 function world(): WorldState {
@@ -203,7 +204,7 @@ describe("Gaius asks the Illyrians for passage", () => {
 describe("Marcus goes to Egypt for a wife", () => {
   it("travels, and the bride he finds is his wife in the record the succession reads", () => {
     const result = order("marcus-metellus", [
-      { op: "character_state_set", characterRef: "marcus-metellus", moveToProvinceId: "tun-13205935b88806172084765", reason: "He sails south." },
+      { op: "character_state_set", characterRef: "marcus-metellus", moveToProvinceId: PUNIC_IDS.carthage, reason: "He sails south." },
       {
         op: "character_create", localId: "bride", name: "Berenike", polityId: "ptolemaic-cyrenaica", provinceId: null, age: 20,
         officeLabel: null, traits: [], kin: { ofCharacterRef: "marcus-metellus", relation: "spouse_or_partner" },
@@ -212,7 +213,7 @@ describe("Marcus goes to Egypt for a wife", () => {
     ]);
 
     expect(result.rejected).toEqual([]);
-    expect(result.world.characters.find((character) => character.id === "marcus-metellus")!.locationProvinceId).toBe("tun-13205935b88806172084765");
+    expect(result.world.characters.find((character) => character.id === "marcus-metellus")!.locationProvinceId).toBe(PUNIC_IDS.carthage);
     const bride = result.world.characters.find((character) => character.name === "Berenike")!;
     expect(result.world.familyLinks).toContainEqual(expect.objectContaining({ characterId: bride.id, relatedCharacterId: "marcus-metellus", kind: "spouse_or_partner" }));
   });
@@ -335,9 +336,11 @@ describe("the battle at the Aoos", () => {
     expect(two.battleAccounts[0]!.tactics[0]).toContain("(meaningful)");
   });
 
-  it("finds no rough ground on a coast, where the map draws the Aoos as a plain", () => {
-    const result = engage(theAoos(GJIROKASTER), { factor: "deployment", magnitude: "meaningful", rationale: "Onto the rough ground.", restsOn: ["rough_ground"] });
-    expect(result.battleAccounts[0]!.tactics).toEqual([]);
+  it("finds rough ground in the uplands beside the Aoos, and none on a coast", () => {
+    const tactic = { factor: "deployment", magnitude: "meaningful", rationale: "Onto the rough ground.", restsOn: ["rough_ground"] };
+    // Gjirokaster is hills-uplands, like Berat: the ground bears the plan out, but one thing alone is not enough.
+    expect(engage(theAoos(GJIROKASTER), { ...tactic, restsOn: ["second_force", "rough_ground"] }).battleAccounts[0]!.tactics[0]).toContain("(meaningful)");
+    expect(engage(theAoos(COAST), tactic).battleAccounts[0]!.tactics).toEqual([]);
   });
 });
 
@@ -386,9 +389,11 @@ describe("Gaius rallies the Gauls at the Rhine", () => {
 
 describe("a reference that is almost right", () => {
   // Every case here was a refusal in a live run of these orders.
-  it("finds a province from the first half of its id", () => {
+  it("finds a province from its name where its id was meant", () => {
+    // Ids are nine opaque characters now, too short to be a truncation of anything.
+    const name = world().map.provinces.find((province) => province.id === BERAT)!.name;
     const result = order("quintus-agrippinus", [{
-      op: "province_material_shift", provinceId: "punic-illyria-alb-10019604b1094", stabilityBpsDelta: -100, reason: "Unrest on the Aoos.",
+      op: "province_material_shift", provinceId: name, stabilityBpsDelta: -100, reason: "Unrest on the Aoos.",
     }]);
     expect(result.rejected).toEqual([]);
   });
@@ -431,7 +436,7 @@ describe("a reference that is almost right", () => {
     const result = applyDeltas(world(), [WorldDeltaSchema.parse({
       op: "force_create", localId: "numidians", name: "The Numidian horse", polityId: "carthage",
       commanderCharacterRef: "local:numidian-king", controllerCharacterRef: "local:numidian-king",
-      locationId: "tun-13205935b88806172084765", authorizedStrength: 2_000, reason: "Numidia sends horse.",
+      locationId: PUNIC_IDS.carthage, authorizedStrength: 2_000, reason: "Numidia sends horse.",
     })], { ...context("gaius-genucius"), actsForTheWorld: true });
     expect(result.rejected).toEqual([]);
     const king = result.world.characters.find((character) => character.name === "Numidian King")!;
@@ -450,9 +455,10 @@ describe("a reference that is almost right", () => {
     expect(result.rejected).toHaveLength(2);
   });
 
-  it("finds a province whose id kept its end and lost its start", () => {
+  it("finds a province an invented id names in words", () => {
+    const syracuse = punicWarsScenario.initialWorld.map.provinces.find((province) => province.id === PUNIC_IDS.syracuse)!;
     const result = order("gaius-genucius", [{
-      op: "province_material_shift", provinceId: "punic-italy-sicily-southeast", stabilityBpsDelta: -100, reason: "Unrest at Syracuse.",
+      op: "province_material_shift", provinceId: syracuse.name.toLowerCase().replace(/\s+/g, "-"), stabilityBpsDelta: -100, reason: "Unrest at Syracuse.",
     }]);
     expect(result.rejected).toEqual([]);
   });
@@ -550,7 +556,7 @@ describe("a reference that is almost right", () => {
   it("opens a thread without the participant nobody made", () => {
     const result = order("gaius-genucius", [{
       op: "storyline_open", localId: "pirates", title: "Pirates off Lucania", participantRefs: ["gaius-genucius", "local:lucanian-pirate-squadron"],
-      provinceId: "punic-italy-lucanian-uplands", stakes: "The coast.", nextDevelopment: "They strike again.", reason: "Pirates.",
+      provinceId: PUNIC_IDS.grumentum, stakes: "The coast.", nextDevelopment: "They strike again.", reason: "Pirates.",
     }]);
     expect(result.rejected).toEqual([]);
   });

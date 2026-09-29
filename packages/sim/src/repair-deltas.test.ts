@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstPunicWarScenario } from "@chronica/db";
+import { firstPunicWarScenario, FIRST_PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
 import { runSimulationBurst, type BurstInput } from "./burst";
 import { repairDeltas } from "./repair-deltas";
@@ -164,25 +164,29 @@ describe("what is worth a second attempt", () => {
 
 describe("a refused id that was cut short", () => {
   it("is shown what it could have meant, so the correction can choose", async () => {
-    // From a live run: the model copied the first half of a Slovenian
-    // province's id, and the start it copied fits both Slovenian provinces --
-    // so the engine rightly would not guess, and the same half-id came back in
-    // the correction because nothing said what else to write.
+    // From a live run: the model copied the first half of a province's id, and
+    // the start it copied fits two provinces -- so the engine rightly would not
+    // guess, and the same half-id came back in the correction because nothing
+    // said what else to write.
     const { punicWarsScenario } = await import("@chronica/db");
-    const punic = WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
+    const stem = "cut-short-province";
+    const cloned = WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
+    const [carni, taurisci] = [cloned.map.provinces[0]!, cloned.map.provinces[1]!];
+    const punic = { ...cloned, map: { ...cloned.map, provinces: cloned.map.provinces.map((province) => (
+      province === carni ? { ...province, id: `${stem}b1` } : province === taurisci ? { ...province, id: `${stem}b2` } : province)) } };
     const { port, seen } = recordingPort({ repair_deltas: [JSON.stringify({ deltas: [] })] });
     await repairDeltas({
       port,
       worldText: "",
       world: punic,
       rejected: [{
-        delta: { op: "province_material_shift", provinceId: "punic-illyria-svn-3739544", stabilityBpsDelta: -100, reason: "Unrest." },
-        reason: 'No province "punic-illyria-svn-3739544" exists to be changed.',
+        delta: { op: "province_material_shift", provinceId: stem, stabilityBpsDelta: -100, reason: "Unrest." },
+        reason: `No province "${stem}" exists to be changed.`,
         kind: "reference",
       }],
     });
-    expect(seen[0]!.message).toContain("punic-illyria-svn-3739544b2739881953900 (Carni)");
-    expect(seen[0]!.message).toContain("punic-illyria-svn-3739544b32704473481330 (South-eastern Taurisci)");
+    expect(seen[0]!.message).toContain(`${stem}b1 (${carni.name})`);
+    expect(seen[0]!.message).toContain(`${stem}b2 (${taurisci.name})`);
   });
 });
 
@@ -191,14 +195,14 @@ describe("a correction written as a patch", () => {
     // From a live run: asked to write a refused creation again, the model wrote
     // only the field it fixed, and the repair was refused for every field it
     // had never meant to change.
-    const { port } = recordingPort({ repair_deltas: [JSON.stringify({ deltas: [{ op: "character_create", localId: "herald", provinceId: "punic-italy-latium" }] })] });
+    const { port } = recordingPort({ repair_deltas: [JSON.stringify({ deltas: [{ op: "character_create", localId: "herald", provinceId: FIRST_PUNIC_IDS.rome }] })] });
     const original = {
       op: "character_create" as const, localId: "herald", name: "Cingetorix", polityId: "rome", provinceId: "nowhere-at-all", age: 40,
       officeLabel: null, officeAuthorises: [], traits: [], standing: null, wealth: 0, generatedBecause: "A herald.",
     };
     const repaired = await repairDeltas({ port, worldText: "", rejected: [{ delta: original, reason: 'No province "nowhere-at-all".', kind: "reference" }] });
     expect(repaired.failure).toBeNull();
-    expect(repaired.deltas).toEqual([expect.objectContaining({ name: "Cingetorix", provinceId: "punic-italy-latium", age: 40 })]);
+    expect(repaired.deltas).toEqual([expect.objectContaining({ name: "Cingetorix", provinceId: FIRST_PUNIC_IDS.rome, age: 40 })]);
   });
 
   it("keeps the good corrections when one of them is bad", async () => {

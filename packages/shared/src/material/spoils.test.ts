@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { PUNIC_IDS, punicWarsScenario } from "@chronica/db";
 import { WorldStateSchema, type WorldState } from "../index";
 import { chestOf, sackTheProvince, takeTheChest, untouchedWorthOf, worthOf } from "./spoils";
 
@@ -7,7 +7,7 @@ const world = (): WorldState => WorldStateSchema.parse(structuredClone(punicWars
 const balance = (state: WorldState, id: string) => state.material.accounts.find((account) => account.id === id)!.balance;
 
 /** Messana: where the Mamertine garrison stands, and what the scenario is about. */
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
+const MESSANA = PUNIC_IDS.messana;
 
 const sack = (state: WorldState, over: Partial<Parameters<typeof sackTheProvince>[1]> = {}) =>
   sackTheProvince(state, {

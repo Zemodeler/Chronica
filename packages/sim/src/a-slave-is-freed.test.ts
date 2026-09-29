@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, resolveEligibility, type Character, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -66,7 +66,7 @@ describe("a slave's purse is his master's", () => {
   });
 
   it("is hunted when he runs", () => {
-    const fled = as(SYRUS, [{ op: "character_state_set", characterRef: SYRUS, moveToProvinceId: "punic-italy-campanian-plain", reason: "He runs for Capua." }]);
+    const fled = as(SYRUS, [{ op: "character_state_set", characterRef: SYRUS, moveToProvinceId: PUNIC_IDS.capua, reason: "He runs for Capua." }]);
     expect(fled.factProposals.find((fact) => fact.kind === "runaway")?.summary).toMatch(/run away from Manius Curius Dentatus/);
   });
 });
@@ -114,8 +114,8 @@ describe("who may hold what", () => {
 
   it("lets the world make a Vestal, and a slave belonging to whoever made him", () => {
     const made = as(CURIUS, [
-      { op: "character_create", localId: "vestal", name: "Tuccia", polityId: "rome", provinceId: "punic-italy-latium", age: 12, officeLabel: null, traits: [], gender: "female", generatedBecause: "A girl taken for Vesta." },
-      { op: "character_create", localId: "steward", name: "Eros", polityId: "rome", provinceId: "punic-italy-latium", age: 40, officeLabel: null, traits: [], legalStatus: "enslaved", generatedBecause: "The steward of the Sabine farm." },
+      { op: "character_create", localId: "vestal", name: "Tuccia", polityId: "rome", provinceId: PUNIC_IDS.rome, age: 12, officeLabel: null, traits: [], gender: "female", generatedBecause: "A girl taken for Vesta." },
+      { op: "character_create", localId: "steward", name: "Eros", polityId: "rome", provinceId: PUNIC_IDS.rome, age: 40, officeLabel: null, traits: [], legalStatus: "enslaved", generatedBecause: "The steward of the Sabine farm." },
     ]);
     expect(made.rejected).toEqual([]);
     const tuccia = made.world.characters.find((character) => character.name === "Tuccia")!;

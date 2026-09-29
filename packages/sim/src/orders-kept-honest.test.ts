@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { FactProposalSchema, ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, type FactProposal, type WorldState } from "@chronica/shared";
 import { applyDeltas, sameWork } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -28,9 +28,10 @@ const as = (actor: string, written: readonly unknown[], state: WorldState = open
   };
   return applyDeltas(state, deltas, context);
 };
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
-const PANORMUS = "ita-72843720b81376294924159-sicily-northwest";
-const BRUTTIUM = "punic-italy-bruttian-highlands";
+const MESSANA = PUNIC_IDS.messana;
+const PANORMUS = PUNIC_IDS.panormus;
+const nameOf = (id: string): string => punicWarsScenario.initialWorld.map.provinces.find((province) => province.id === id)!.name;
+const BRUTTIUM = PUNIC_IDS.rhegium;
 const force = (state: WorldState, id: string) => state.material.forces.find((candidate) => candidate.id === id)!;
 const balance = (state: WorldState, id: string) => state.material.accounts.find((account) => account.id === id)!.balance;
 
@@ -39,14 +40,14 @@ describe("an army goes where it was last sent", () => {
     const first = as("gaius-genucius", [{ op: "force_modify", forceRef: "roman-field-army", locationId: BRUTTIUM, reason: "March on Rhegium." }]);
     expect(first.rejected).toEqual([]);
     const road = first.world.projects.find((project) => project.completionOutcome?.kind === "force_move")!;
-    const second = as("gaius-genucius", [{ op: "force_modify", forceRef: "roman-field-army", locationId: "punic-italy-picenum-coast", reason: "March on Picenum instead." }], first.world, "second");
+    const second = as("gaius-genucius", [{ op: "force_modify", forceRef: "roman-field-army", locationId: PUNIC_IDS.asculum, reason: "March on Picenum instead." }], first.world, "second");
     expect(second.rejected).toEqual([]);
     expect(second.world.projects.find((project) => project.id === road.id)?.status).toBe("cancelled");
     expect(second.factProposals.map((fact) => fact.kind)).toContain("march_called_off");
     const marches = second.world.projects.filter((project) => project.status === "in_progress" && project.completionOutcome?.kind === "force_move");
     // Picenum is a road away: it is either reached today or marched on, and nowhere else is.
     expect(marches.map((project) => project.completionOutcome?.provinceId).concat(marches.length === 0 ? [force(second.world, "roman-field-army").locationId] : []))
-      .toEqual(["punic-italy-picenum-coast"]);
+      .toEqual([PUNIC_IDS.asculum]);
     // And the road it left is never walked.
     const due = Math.max(...road.milestones.map((milestone) => road.startedAtStep + milestone.requiredAtElapsedOffset));
     const ticked = runDeterministicTick({ world: { ...second.world, elapsedStep: due }, toDay: due, ids: createIdFactory("honest-tick"), warfare: definition.warfare });
@@ -57,7 +58,7 @@ describe("an army goes where it was last sent", () => {
     const first = as("gaius-genucius", [{ op: "force_modify", forceRef: "roman-field-army", locationId: BRUTTIUM, reason: "March on Rhegium." }]);
     const again = as("gaius-genucius", [
       { op: "force_modify", forceRef: "roman-field-army", locationId: BRUTTIUM, reason: "March on Rhegium." },
-      { op: "force_modify", forceRef: "roman-field-army", locationId: "punic-italy-latium", name: "Legio I", reason: "Rename the army." },
+      { op: "force_modify", forceRef: "roman-field-army", locationId: PUNIC_IDS.rome, name: "Legio I", reason: "Rename the army." },
     ], first.world, "again");
     expect(again.world.projects.filter((project) => project.status === "in_progress" && project.completionOutcome?.kind === "force_move")).toHaveLength(1);
   });
@@ -79,7 +80,7 @@ describe("a province named nearly right", () => {
   it("reads a province written by its name or its city's", () => {
     const byCity = WorldDeltaSchema.parse({ op: "force_modify", forceRef: "syracusan-army", locationId: "Messana", reason: "Relieve the city." });
     expect(normalizeRefs(byCity, opening())).toMatchObject({ locationId: MESSANA });
-    const byName = WorldDeltaSchema.parse({ op: "force_modify", forceRef: "syracusan-army", locationId: "Panormus and the north-west", reason: "Go." });
+    const byName = WorldDeltaSchema.parse({ op: "force_modify", forceRef: "syracusan-army", locationId: nameOf(PANORMUS), reason: "Go." });
     expect(normalizeRefs(byName, opening())).toMatchObject({ locationId: PANORMUS });
   });
 });
@@ -91,7 +92,7 @@ describe("every sum is in the books", () => {
       {
         op: "service_contract_open", localId: "ships", role: "mercenary", label: "Fifty ships for Rome", employerAccountRef: "gaius-purse",
         employeeRef: "quintus-ogulnius", advance: 90, monthlyPay: 0, termDays: 180, duties: "Hire and assemble fifty ships.",
-        company: { categoryId: "warship", strength: 50 }, provinceId: "punic-italy-latium", reason: "Rome needs hulls.",
+        company: { categoryId: "warship", strength: 50 }, provinceId: PUNIC_IDS.rome, reason: "Rome needs hulls.",
       },
     ]);
     expect(paid.rejected).toEqual([]);
@@ -125,7 +126,7 @@ describe("a clause that hangs on the vote", () => {
     const held = as("gaius-genucius", [{
       op: "service_contract_open", localId: "ships", role: "mercenary", label: "Fifty ships for Rome", employerAccountRef: "gaius-purse",
       employeeRef: "quintus-ogulnius", advance: 90, monthlyPay: 0, termDays: 180, duties: "Hire fifty ships; proceed only if the Senate does not vote the fleet.",
-      company: { categoryId: "warship", strength: 50 }, provinceId: "punic-italy-latium", reason: "Using the consul's own money if Rome does not support it.",
+      company: { categoryId: "warship", strength: 50 }, provinceId: PUNIC_IDS.rome, reason: "Using the consul's own money if Rome does not support it.",
     }], before, "held");
     expect(held.rejected).toEqual([]);
     expect(held.world.material.contracts).toHaveLength(before.material.contracts.length);

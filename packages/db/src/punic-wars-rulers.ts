@@ -1,3 +1,4 @@
+import { PUNIC_IDS } from "./punic-ids";
 import { aNameFor, cultureOf, inferredGovernmentForm, spreadSubSkills, stableHash, type Culture, type GovernmentForm } from "@chronica/shared";
 
 /**
@@ -27,6 +28,7 @@ interface ProvinceInput {
   readonly id: string;
   readonly controllerPolityId: string | null;
   readonly settlements: readonly { readonly id: string }[];
+  readonly areaKm2?: number;
 }
 
 /** The man history says ruled there in 270 BCE, with his age that year. */
@@ -39,6 +41,14 @@ const KNOWN: Readonly<Record<string, { readonly name: string; readonly age: numb
   athens: { name: "Chremonides", age: 40 },
   "illyria-ardiaei": { name: "Pleuratus", age: 45 },
   "numidian-kingdoms": { name: "Zelalsan", age: 50 },
+  // Anatolia (docs/anatolia-270-bce.md): the rulers the sources give with confidence.
+  "seleucid-empire": { name: "Antiochus I Soter", age: 52, martial: 65, diplomacy: 60 },
+  "ptolemaic-egypt": { name: "Ptolemy II Philadelphus", age: 39, diplomacy: 70 },
+  pergamon: { name: "Philetaerus", age: 73, diplomacy: 65 },
+  bithynia: { name: "Nicomedes I", age: 45, martial: 60 },
+  // First king of Kartli (Iberia of the Caucasus), c. 302-237 by the Georgian Chronicles: medium confidence, and a late source.
+  "caucasian-iberia": { name: "Pharnavaz I", age: 55, martial: 62 },
+  pontus: { name: "Mithridates I Ktistes", age: 55, martial: 60 },
 };
 
 /** The faith each culture's people keep, where the scenario has one for them. */
@@ -79,7 +89,9 @@ export function foundingPeople(
     if (writtenOut.has(polity.id)) continue;
     const held = provinces.filter((province) => province.controllerPolityId === polity.id);
     if (held.length === 0) continue;
-    const home = held.find((province) => province.settlements.some((settlement) => settlement.id === polity.capitalSettlementId)) ?? held[0]!;
+    // At the capital's province, else on the largest ground it holds.
+    const home = held.find((province) => province.settlements.some((settlement) => settlement.id === polity.capitalSettlementId))
+      ?? held.reduce((largest, province) => ((province.areaKm2 ?? 0) > (largest.areaKm2 ?? 0) ? province : largest));
     const form = formOf(polity.id) ?? inferredGovernmentForm(polity);
     const culture = cultureOf(polity.id);
     const posts: { key: string; role: string }[] = [{ key: headOffice(form), role: "ruler" }];
@@ -259,7 +271,7 @@ export function romanSenators(firstSeatIndex: number): FoundingPeople {
   return {
     characters: SENATORS.map((senator) => ({
       id: senator.id, name: senator.name, cultureId: "roman", faithId: "faith-roman", dynastyId: null,
-      locationProvinceId: "punic-italy-latium", polityId: "rome", ageYearsAtStart: senator.age, officeId: null, personalAccountId: `${senator.id}-purse`,
+      locationProvinceId: PUNIC_IDS.rome, polityId: "rome", ageYearsAtStart: senator.age, officeId: null, personalAccountId: `${senator.id}-purse`,
       officesHeld: senator.offices.map((officeId) => ({ officeId, lastHeldAtStep: 0 })),
       skills: { ...senator.skills, subSkills: {} }, traits: [...senator.traits],
       mind: { drives: senator.drives, temperament: senator.temperament, riskTolerance: senator.temperament.boldness ?? 50, values: [...senator.values], taboos: [], currentPressures: [] },

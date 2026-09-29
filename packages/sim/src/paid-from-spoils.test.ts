@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import {
   advanceWorldTo, localRef, ScenarioDefinitionSchema, untouchedWorthOf, WorldStateSchema,
   type WorldDelta, type WorldState,
@@ -21,7 +21,7 @@ import { runDeterministicTick } from "./tick";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const RHEGIUM = "punic-italy-bruttian-highlands";
+const RHEGIUM = PUNIC_IDS.rhegium;
 const CHEST = "roman-field-army-chest";
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, type FactProposalDraft, type WorldDelta, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -14,7 +14,7 @@ import { runDeterministicTick } from "./tick";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
+const MESSANA = PUNIC_IDS.messana;
 const context: ApplyContext = {
   now: { day: 0, minute: 540 },
   actorRef: { kind: "character", id: "gaius-genucius" },
@@ -54,7 +54,7 @@ function run(state: WorldState, days: number): { world: WorldState; facts: FactP
   return { world, facts };
 }
 
-describe("the siege of Messana", () => {
+describe("the siege of Messana", { timeout: 30_000 }, () => {
   it("is refused to a power not at war with the city", () => {
     const refused = applyDeltas(before(), [LAY], context);
     expect(refused.rejected[0]?.reason).toMatch(/not at war/);
@@ -94,7 +94,7 @@ describe("the siege of Messana", () => {
 
   it("is raised when the army marches away", () => {
     const laid = applyDeltas(before(), [WAR, LAY], context).world;
-    const gone: WorldState = { ...laid, material: { ...laid.material, forces: laid.material.forces.map((force) => (force.id === "roman-field-army" ? { ...force, locationId: "punic-italy-bruttian-highlands" } : force)) } };
+    const gone: WorldState = { ...laid, material: { ...laid.material, forces: laid.material.forces.map((force) => (force.id === "roman-field-army" ? { ...force, locationId: PUNIC_IDS.rhegium } : force)) } };
     const { world, facts } = run(gone, 10);
     expect(world.sieges[0]!.status).toBe("lifted");
     expect(facts.some((fact) => fact.kind === "siege_lifted")).toBe(true);

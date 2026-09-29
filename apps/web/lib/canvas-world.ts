@@ -1,8 +1,7 @@
 import "server-only";
 
 import type { GeoJsonMap, Settlement, WorldState } from "@chronica/shared";
-import { builtInScenarioMap, PUNIC_WARS_MAP_ASSET_ID } from "./built-in-scenario-maps";
-import { punicWarsOpeningOverlay } from "./punic-wars-map-territory";
+import { builtInScenarioMap } from "./built-in-scenario-maps";
 
 /**
  * A canvas province is the geographic source of truth; state only materializes it when play reaches it.
@@ -32,9 +31,6 @@ export function canvasRegions(mapAssetId: string | null, world: WorldState): rea
       aliases: [...province.formerNames, ...province.settlements.map((settlement) => settlement.name)],
     }));
   }
-  const opening = mapAssetId === PUNIC_WARS_MAP_ASSET_ID ? punicWarsOpeningOverlay(0) : null;
-  const openingPolities = new Map(opening?.polities.map((polity) => [polity.polityId, polity.name]) ?? []);
-  const openingController = new Map(opening?.provinces.map((province) => [province.provinceId, province.controllerPolityId]) ?? []);
   const townsByProvince = new Map<string, string[]>();
   for (const feature of map.features) {
     if (feature.properties.kind !== "settlement") continue;
@@ -46,8 +42,7 @@ export function canvasRegions(mapAssetId: string | null, world: WorldState): rea
     .filter((feature) => feature.properties.kind === "province")
     .map((feature) => {
       const state = stateProvinces.get(feature.id);
-      const controllerId = state === undefined ? openingController.get(feature.id) ?? null : state.controllerPolityId;
-      const holder = controllerId === null ? undefined : polities.get(controllerId) ?? openingPolities.get(controllerId);
+      const holder = state?.controllerPolityId == null ? undefined : polities.get(state.controllerPolityId);
       const regionId = feature.properties.kind === "province" ? feature.properties.regionId : undefined;
       return {
         id: feature.id,
@@ -83,51 +78,34 @@ export function materializeCanvasProvince(
   const feature = map?.features.find((candidate) => candidate.id === provinceId && candidate.properties.kind === "province");
   if (feature === undefined || feature.properties.kind !== "province") return world;
 
-  const opening = mapAssetId === PUNIC_WARS_MAP_ASSET_ID ? punicWarsOpeningOverlay(0) : null;
-  const openingProvince = opening?.provinces.find((province) => province.provinceId === provinceId);
-  const controllerPolityId = openingProvince?.controllerPolityId ?? null;
-  const controller = controllerPolityId === null
-    ? undefined
-    : opening?.polities.find((polity) => polity.polityId === controllerPolityId);
-  const materializedControllerId = controller === undefined ? null : controllerPolityId;
-
+  // Ground nobody holds yet: a canvas province carries geometry, not politics.
   const settlements = map?.features.flatMap((candidate) => {
     if (candidate.properties.kind !== "settlement" || candidate.properties.provinceId !== provinceId) return [];
-    const openingSettlement = opening?.settlements.find((settlement) => settlement.settlementId === candidate.id);
-    const settlementControllerId = openingSettlement?.controllerPolityId ?? materializedControllerId;
     return [{
       id: candidate.id,
       name: candidate.properties.name ?? candidate.id,
       kind: settlementKind(candidate.properties.type),
       provinceId,
-      // A settlement cannot name a polity that was not materialized with the province.
-      controllerPolityId: settlementControllerId === materializedControllerId ? materializedControllerId : null,
-      size: openingSettlement?.importance ?? 40,
+      controllerPolityId: null,
+      size: 40,
       fortificationLevel: candidate.properties.type === "fort" ? 3 : candidate.properties.type === "capital" ? 5 : 1,
     } satisfies Settlement];
   }) ?? [];
-
-  const polities = materializedControllerId !== null && controller !== undefined && !world.map.polities.some((polity) => polity.id === materializedControllerId)
-    // A region materialised from the canvas is somebody's ground, and the
-    // peoples this reaches for are the ones the map names and nobody organised.
-    ? [...world.map.polities, { id: materializedControllerId, name: controller.name, capitalSettlementId: null, cohesionBps: 3_000, soldierPayPerThousand: null }]
-    : world.map.polities;
 
   return {
     ...world,
     map: {
       ...world.map,
-      polities,
       provinces: [
         ...world.map.provinces,
         {
           id: provinceId,
           name: feature.properties.name ?? feature.id,
           formerNames: [],
-          terrainId: openingProvince?.terrainId ?? feature.properties.terrain ?? "hills",
+          terrainId: feature.properties.terrain ?? "hills",
           settlements,
-          controllerPolityId: materializedControllerId,
-          controlFirmnessBps: openingProvince?.controlFirmnessBps ?? 0,
+          controllerPolityId: null,
+          controlFirmnessBps: 0,
         },
       ],
     },

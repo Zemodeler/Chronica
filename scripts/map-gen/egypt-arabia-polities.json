@@ -1,0 +1,1609 @@
+{
+ "polities": [
+  {
+   "id": "minaeans",
+   "name": "Kingdom of Ma'in (Minaeans)",
+   "reuseExisting": false,
+   "governmentForm": "oligarchic_republic",
+   "cohesionBps": 4500,
+   "cohesionNote": "Just above etruscan-cities (4000): the Minaean state is described as a merchant republic sprung from an alliance of towns, rich but with no army to match Saba'.",
+   "capital": {
+    "settlementId": "settlement-qarnawu",
+    "name": "Qarnawu (Ma'in)",
+    "lon": 45.3,
+    "lat": 16.05,
+    "kind": "city",
+    "size": 40,
+    "fortificationLevel": 4
+   },
+   "otherSettlements": [
+    {
+     "settlementId": "settlement-yathill",
+     "name": "Yathill (Baraqish)",
+     "lon": 44.85,
+     "lat": 16.1,
+     "kind": "fortress",
+     "size": 30,
+     "fortificationLevel": 5
+    },
+    {
+     "settlementId": "settlement-kaminahu",
+     "name": "Kaminahu",
+     "lon": 45.55,
+     "lat": 16,
+     "kind": "town",
+     "size": 15,
+     "fortificationLevel": 3
+    },
+    {
+     "settlementId": "settlement-nashshan",
+     "name": "Nashshan (As-Sawda)",
+     "lon": 45,
+     "lat": 16.25,
+     "kind": "town",
+     "size": 15,
+     "fortificationLevel": 3
+    },
+    {
+     "settlementId": "settlement-najran",
+     "name": "Najran (Nashaq)",
+     "lon": 44.13,
+     "lat": 17.58,
+     "kind": "town",
+     "size": 25,
+     "fortificationLevel": 3
+    }
+   ],
+   "ruler": null,
+   "notes": "Minaean kingdom dated variously from the 5th to the 1st century BCE; 270 is inside every reading. Coordinates of Qarnawu, Yathill, Kaminahu and Nashshan are good to 0.1-0.2 deg. Najran under Minaean control is attested by Minaean inscriptions but who ruled it in 270 is not settled (Saba' is the alternative). The Minaean trading colony at Dedan sits inside Lihyan and is a note on Dedan, not territory.",
+   "territory": [
+    [
+     [
+      44.4,
+      15.8
+     ],
+     [
+      44.8,
+      15.8
+     ],
+     [
+      45.2,
+      15.8
+     ],
+     [
+      45.6,
+      15.8
+     ],
+     [
+      46,
+      15.8
+     ],
+     [
+      46.1,
+      16.1
+     ],
+     [
+      46.2,
+      16.4
+     ],
+     [
+      45.9,
+      16.6
+     ],
+     [
+      45.6,
+      16.8
+     ],
+     [
+      45.35,
+      16.79
+     ],
+     [
+      45.1,
+      16.77
+     ],
+     [
+      44.85,
+      16.76
+     ],
+     [
+      44.6,
+      16.75
+     ],
+     [
+      44.55,
+      16.51
+     ],
+     [
+      44.5,
+      16.27
+     ],
+     [
+      44.45,
+      16.04
+     ],
+     [
+      44.4,
+      15.8
+     ]
+    ],
+    [
+     [
+      43.4,
+      17.1
+     ],
+     [
+      43.72,
+      17.08
+     ],
+     [
+      44.05,
+      17.05
+     ],
+     [
+      44.38,
+      17.02
+     ],
+     [
+      44.7,
+      17
+     ],
+     [
+      44.85,
+      17.45
+     ],
+     [
+      45,
+      17.9
+     ],
+     [
+      44.8,
+      18.05
+     ],
+     [
+      44.6,
+      18.2
+     ],
+     [
+      44.4,
+      18.35
+     ],
+     [
+      44.2,
+      18.5
+     ],
+     [
+      43.85,
+      18.35
+     ],
+     [
+      43.5,
+      18.2
+     ],
+     [
+      43.48,
+      17.92
+     ],
+     [
+      43.45,
+      17.65
+     ],
+     [
+      43.43,
+      17.38
+     ],
+     [
+      43.4,
+      17.1
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "saba",
+   "name": "Saba' (Sabaeans)",
+   "reuseExisting": false,
+   "governmentForm": "monarchy",
+   "cohesionBps": 5500,
+   "cohesionNote": "Between etruscan-cities (4000) and syracuse (7500): a real kingdom with a capital and irrigation state at Marib, but the highland tribes and the Minaean, Qatabanian and Hadramite neighbours pull at it.",
+   "capital": {
+    "settlementId": "settlement-marib",
+    "name": "Marib (Mariaba)",
+    "lon": 45.33,
+    "lat": 15.43,
+    "kind": "city",
+    "size": 70,
+    "fortificationLevel": 4
+   },
+   "otherSettlements": [
+    {
+     "settlementId": "settlement-sirwah",
+     "name": "Sirwah",
+     "lon": 44.98,
+     "lat": 15.5,
+     "kind": "town",
+     "size": 25,
+     "fortificationLevel": 3
+    },
+    {
+     "settlementId": "settlement-sanaa",
+     "name": "Sana'a (Sab'a Sanaw)",
+     "lon": 44.21,
+     "lat": 15.35,
+     "kind": "town",
+     "size": 30,
+     "fortificationLevel": 3
+    },
+    {
+     "settlementId": "settlement-saada",
+     "name": "Sa'dah (Sa'dat)",
+     "lon": 43.76,
+     "lat": 16.94,
+     "kind": "town",
+     "size": 20,
+     "fortificationLevel": 2
+    },
+    {
+     "settlementId": "settlement-jizan-tihama",
+     "name": "Jizan (Tihamah coast)",
+     "lon": 42.55,
+     "lat": 16.89,
+     "kind": "port",
+     "size": 15,
+     "fortificationLevel": 1
+    }
+   ],
+   "ruler": null,
+   "notes": "Sabaean chronology in the 3rd century BCE is disputed (two schools, about 200 years apart). Royal names of the period are not reliably datable, so no ruler is given. The Ma'rib dam was in use. Tihamah coast held loosely. Only the northern strip of the Sabaean land (lat 15 and north) is inside the map.",
+   "territory": [
+    [
+     [
+      42.4,
+      15
+     ],
+     [
+      42.93,
+      15
+     ],
+     [
+      43.45,
+      15
+     ],
+     [
+      43.98,
+      15
+     ],
+     [
+      44.5,
+      15
+     ],
+     [
+      45.55,
+      15
+     ],
+     [
+      46.08,
+      15
+     ],
+     [
+      46.6,
+      15
+     ],
+     [
+      46.6,
+      15.9
+     ],
+     [
+      45.7,
+      16.3
+     ],
+     [
+      45.2,
+      16.6
+     ],
+     [
+      44.7,
+      16.9
+     ],
+     [
+      43.8,
+      17.35
+     ],
+     [
+      42.95,
+      17.35
+     ],
+     [
+      42.55,
+      16.9
+     ],
+     [
+      42.35,
+      16
+     ],
+     [
+      42.4,
+      15
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "hadramawt",
+   "name": "Hadramawt",
+   "reuseExisting": false,
+   "governmentForm": "monarchy",
+   "cohesionBps": 5500,
+   "cohesionNote": "Same as saba (5500): a single incense kingdom centred on Shabwa, but a long wadi of small towns.",
+   "capital": {
+    "settlementId": "settlement-shabwa",
+    "name": "Shabwa (Sabota)",
+    "lon": 47.02,
+    "lat": 15.37,
+    "kind": "city",
+    "size": 50,
+    "fortificationLevel": 4
+   },
+   "otherSettlements": [
+    {
+     "settlementId": "settlement-shibam-hadramawt",
+     "name": "Shibam (Wadi Hadramawt)",
+     "lon": 48.63,
+     "lat": 15.93,
+     "kind": "town",
+     "size": 25,
+     "fortificationLevel": 3
+    },
+    {
+     "settlementId": "settlement-tarim",
+     "name": "Tarim",
+     "lon": 49,
+     "lat": 16.05,
+     "kind": "town",
+     "size": 15,
+     "fortificationLevel": 2
+    },
+    {
+     "settlementId": "settlement-raybun",
+     "name": "Raybun",
+     "lon": 48.8,
+     "lat": 16,
+     "kind": "fortress",
+     "size": 12,
+     "fortificationLevel": 3
+    }
+   ],
+   "ruler": null,
+   "notes": "Only the northern edge of Hadramawt lies inside the map (lat 15 and north); the coast, Qana' and Sumhuram are south of it. It does not reach Saudi Arabia in any attested way; the polygon stops at the Ramlat as-Sab'atayn and does not enter the Empty Quarter. Drop the polity if the map is cut at lat 16.",
+   "territory": [
+    [
+     [
+      46.6,
+      15
+     ],
+     [
+      47.58,
+      15
+     ],
+     [
+      48.55,
+      15
+     ],
+     [
+      49.53,
+      15
+     ],
+     [
+      50.5,
+      15
+     ],
+     [
+      50.55,
+      15.6
+     ],
+     [
+      50.6,
+      16.2
+     ],
+     [
+      50.3,
+      16.7
+     ],
+     [
+      50,
+      17.2
+     ],
+     [
+      49.4,
+      17.35
+     ],
+     [
+      48.8,
+      17.5
+     ],
+     [
+      48.2,
+      17.35
+     ],
+     [
+      47.6,
+      17.2
+     ],
+     [
+      47.25,
+      16.85
+     ],
+     [
+      46.9,
+      16.5
+     ],
+     [
+      46.75,
+      15.75
+     ],
+     [
+      46.6,
+      15
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "gerrha",
+   "name": "Gerrha (the Gerrhaeans)",
+   "reuseExisting": false,
+   "governmentForm": "oligarchic_republic",
+   "cohesionBps": 5000,
+   "cohesionNote": "Below syracuse (7500), above the leagues of Italy (4000): a wealthy merchant city with its own laws, but a harbour and an oasis, not a state with an army.",
+   "capital": {
+    "settlementId": "settlement-gerrha",
+    "name": "Gerrha (Thaj)",
+    "lon": 48.72,
+    "lat": 26.87,
+    "kind": "city",
+    "size": 70,
+    "fortificationLevel": 3
+   },
+   "otherSettlements": [
+    {
+     "settlementId": "settlement-hagar",
+     "name": "Hagar (Hofuf oasis)",
+     "lon": 49.6,
+     "lat": 25.38,
+     "kind": "town",
+     "size": 25,
+     "fortificationLevel": 2
+    },
+    {
+     "settlementId": "settlement-uqair",
+     "name": "Uqair (Gerrhaean port)",
+     "lon": 50.22,
+     "lat": 25.65,
+     "kind": "port",
+     "size": 30,
+     "fortificationLevel": 2
+    },
+    {
+     "settlementId": "settlement-tarut",
+     "name": "Tarut (Dilmun)",
+     "lon": 50.05,
+     "lat": 26.58,
+     "kind": "port",
+     "size": 20,
+     "fortificationLevel": 1
+    },
+    {
+     "settlementId": "settlement-tylos",
+     "name": "Tylos (Bahrain)",
+     "lon": 50.52,
+     "lat": 26.23,
+     "kind": "port",
+     "size": 25,
+     "fortificationLevel": 2
+    },
+    {
+     "settlementId": "settlement-salwa",
+     "name": "Salwa (Qatar coast)",
+     "lon": 50.8,
+     "lat": 24.72,
+     "kind": "fortress",
+     "size": 8,
+     "fortificationLevel": 1
+    }
+   ],
+   "ruler": null,
+   "notes": "Gerrha is a lost city: Thaj (48.72, 26.87) is the leading identification, Uqair/Jubail the alternatives. Strabo (16.3.3) calls its people Chaldean exiles; Diodorus (3.42-43) names Gerrhaeans and Sabaeans the richest peoples. Independent in 270 on the evidence available: Antiochus III in 205 BCE granted them freedom and took a ransom, which implies no earlier Seleucid rule. Seleucid Ikaros on Failaka (Kuwait) lies north of the polygon and belongs to the Seleucid default.",
+   "territory": [
+    [
+     [
+      48.4,
+      24.3
+     ],
+     [
+      49.55,
+      24.3
+     ],
+     [
+      50.7,
+      24.3
+     ],
+     [
+      51.25,
+      24.55
+     ],
+     [
+      51.8,
+      24.8
+     ],
+     [
+      51.8,
+      25.5
+     ],
+     [
+      51.8,
+      26.2
+     ],
+     [
+      51.2,
+      26.55
+     ],
+     [
+      50.6,
+      26.9
+     ],
+     [
+      50,
+      27.6
+     ],
+     [
+      49,
+      28
+     ],
+     [
+      48.2,
+      28
+     ],
+     [
+      47.6,
+      27.4
+     ],
+     [
+      47.6,
+      26.7
+     ],
+     [
+      47.6,
+      26
+     ],
+     [
+      47.9,
+      25
+     ],
+     [
+      48.4,
+      24.3
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "lihyan",
+   "name": "Kingdom of Lihyan (Dedan)",
+   "reuseExisting": false,
+   "governmentForm": "monarchy",
+   "cohesionBps": 4500,
+   "cohesionNote": "Same as minaeans (4500): a dynasty of oasis cities on the incense road; each oasis keeps its own elders.",
+   "capital": {
+    "settlementId": "settlement-dedan",
+    "name": "Dedan (Al-Ula)",
+    "lon": 37.92,
+    "lat": 26.61,
+    "kind": "city",
+    "size": 35,
+    "fortificationLevel": 3
+   },
+   "otherSettlements": [
+    {
+     "settlementId": "settlement-hegra",
+     "name": "Hegra (Hijr)",
+     "lon": 37.95,
+     "lat": 26.79,
+     "kind": "town",
+     "size": 20,
+     "fortificationLevel": 2
+    },
+    {
+     "settlementId": "settlement-tayma",
+     "name": "Tayma",
+     "lon": 38.55,
+     "lat": 27.63,
+     "kind": "town",
+     "size": 30,
+     "fortificationLevel": 3
+    },
+    {
+     "settlementId": "settlement-khaybar",
+     "name": "Khaybar",
+     "lon": 39.29,
+     "lat": 25.7,
+     "kind": "fortress",
+     "size": 20,
+     "fortificationLevel": 3
+    },
+    {
+     "settlementId": "settlement-yathrib",
+     "name": "Yathrib (Medina oasis)",
+     "lon": 39.6,
+     "lat": 24.47,
+     "kind": "town",
+     "size": 15,
+     "fortificationLevel": 2
+    },
+    {
+     "settlementId": "settlement-tabuk",
+     "name": "Tabuk",
+     "lon": 36.57,
+     "lat": 28.38,
+     "kind": "town",
+     "size": 10,
+     "fortificationLevel": 2
+    }
+   ],
+   "ruler": null,
+   "notes": "Dates uncertain (5th-1st c. BCE; Dedanite-then-Lihyanite kings, no reliable regnal dates); 270 is inside the range and a Minaean community lived at Dedan. Yathrib is drawn Lihyanite on the maximal reading of the kingdom's extent. Nabataeans reached Hegra only later (its tombs are 1st c. CE). The Midian coast is included on the same maximal reading; Ptolemy II sent explorers along this coast (Diodorus 3.42) but held nothing there.",
+   "territory": [
+    [
+     [
+      37.7,
+      23.9
+     ],
+     [
+      39.15,
+      23.9
+     ],
+     [
+      40.6,
+      23.9
+     ],
+     [
+      40.9,
+      25.4
+     ],
+     [
+      40.7,
+      26.7
+     ],
+     [
+      40.5,
+      28
+     ],
+     [
+      39.6,
+      28.9
+     ],
+     [
+      38.4,
+      29
+     ],
+     [
+      37.4,
+      29.05
+     ],
+     [
+      36.5,
+      29
+     ],
+     [
+      35.6,
+      28.85
+     ],
+     [
+      34.95,
+      28.75
+     ],
+     [
+      34.9,
+      27.5
+     ],
+     [
+      35.5,
+      26.5
+     ],
+     [
+      36.4,
+      25.5
+     ],
+     [
+      37,
+      24.5
+     ],
+     [
+      37.7,
+      23.9
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "qedar",
+   "name": "Qedar and the tribes of the Jawf",
+   "reuseExisting": false,
+   "governmentForm": "tribal_confederation",
+   "cohesionBps": 2800,
+   "cohesionNote": "Between ligurians (2200) and umbrians (3000): camel-herding tribes with sheikhs of Dumat, no common assembly.",
+   "capital": {
+    "settlementId": "settlement-dumat",
+    "name": "Dumat (Dumat al-Jandal)",
+    "lon": 39.87,
+    "lat": 29.81,
+    "kind": "town",
+    "size": 25,
+    "fortificationLevel": 3
+   },
+   "otherSettlements": [
+    {
+     "settlementId": "settlement-sakaka",
+     "name": "Sakaka (Jawf oasis)",
+     "lon": 40.2,
+     "lat": 29.97,
+     "kind": "village",
+     "size": 10,
+     "fortificationLevel": 1
+    },
+    {
+     "settlementId": "settlement-qurayyat",
+     "name": "Qurayyat",
+     "lon": 37.38,
+     "lat": 31.33,
+     "kind": "village",
+     "size": 8,
+     "fortificationLevel": 1
+    },
+    {
+     "settlementId": "settlement-tabarjal",
+     "name": "Tabarjal",
+     "lon": 38.2,
+     "lat": 30.5,
+     "kind": "village",
+     "size": 6,
+     "fortificationLevel": 1
+    }
+   ],
+   "ruler": null,
+   "notes": "The Qedarite kings of Dumah are attested to the 5th century BCE (Geshem/Gashmu). In 270 the Qedarites survive as a people; a Dumat ruler is not attested. Settlements other than Dumat are placeholders for oases, not attested towns (Tabarjal and Qurayyat especially).",
+   "territory": [
+    [
+     [
+      37.7,
+      29.05
+     ],
+     [
+      38.65,
+      29
+     ],
+     [
+      39.6,
+      28.95
+     ],
+     [
+      40.7,
+      28.98
+     ],
+     [
+      41.8,
+      29
+     ],
+     [
+      42.6,
+      29.25
+     ],
+     [
+      43.4,
+      29.5
+     ],
+     [
+      43.9,
+      30.8
+     ],
+     [
+      43.25,
+      31.33
+     ],
+     [
+      42.6,
+      31.85
+     ],
+     [
+      41.6,
+      31.93
+     ],
+     [
+      40.6,
+      32
+     ],
+     [
+      39.6,
+      32
+     ],
+     [
+      38.6,
+      32
+     ],
+     [
+      37.3,
+      31.9
+     ],
+     [
+      37.2,
+      30.5
+     ],
+     [
+      37.7,
+      29.05
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "nabataeans",
+   "name": "Nabataeans",
+   "reuseExisting": false,
+   "governmentForm": "tribal_confederation",
+   "cohesionBps": 3500,
+   "cohesionNote": "Same as messapians (3500): a tribal people with one rock-fortress capital and caravan wealth, still without the kings of the 2nd century.",
+   "capital": {
+    "settlementId": "settlement-petra",
+    "name": "Petra (Raqmu)",
+    "lon": 35.44,
+    "lat": 30.33,
+    "kind": "fortress",
+    "size": 25,
+    "fortificationLevel": 5
+   },
+   "otherSettlements": [
+    {
+     "settlementId": "settlement-buseirah",
+     "name": "Bozrah (Buseirah)",
+     "lon": 35.6,
+     "lat": 30.72,
+     "kind": "town",
+     "size": 12,
+     "fortificationLevel": 2
+    },
+    {
+     "settlementId": "settlement-aila",
+     "name": "Aila (Elath)",
+     "lon": 34.95,
+     "lat": 29.55,
+     "kind": "port",
+     "size": 12,
+     "fortificationLevel": 2
+    },
+    {
+     "settlementId": "settlement-oboda",
+     "name": "Oboda (Avdat)",
+     "lon": 34.77,
+     "lat": 30.79,
+     "kind": "village",
+     "size": 6,
+     "fortificationLevel": 1
+    },
+    {
+     "settlementId": "settlement-elusa",
+     "name": "Elusa (Haluza)",
+     "lon": 34.65,
+     "lat": 31,
+     "kind": "village",
+     "size": 6,
+     "fortificationLevel": 1
+    }
+   ],
+   "ruler": null,
+   "notes": "First attested 312/311 BCE at Petra (Diodorus 19.94-100, from Hieronymus of Cardia). No kings until Aretas I, about 169 BCE. Hegra came under them only in the 1st century BCE-CE. Negev caravan stations are drawn for a road already used; the towns there are later. Aila is Nabataean only on the maximal reading. Territory overlaps ground a Levant polygon may draw for Edom/Idumaea; first match wins by list order.",
+   "territory": [
+    [
+     [
+      34.9,
+      29.35
+     ],
+     [
+      35.6,
+      28.9
+     ],
+     [
+      36.1,
+      28.9
+     ],
+     [
+      36.6,
+      28.9
+     ],
+     [
+      37,
+      29.1
+     ],
+     [
+      37.4,
+      29.3
+     ],
+     [
+      37.6,
+      30
+     ],
+     [
+      37.3,
+      30.8
+     ],
+     [
+      36.5,
+      31.2
+     ],
+     [
+      35.85,
+      31.35
+     ],
+     [
+      35.5,
+      31.2
+     ],
+     [
+      35.2,
+      31.05
+     ],
+     [
+      34.9,
+      31.1
+     ],
+     [
+      34.55,
+      31.1
+     ],
+     [
+      34.42,
+      30.6
+     ],
+     [
+      34.5,
+      29.95
+     ],
+     [
+      34.9,
+      29.35
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "kush",
+   "name": "Kingdom of Kush (Meroe)",
+   "reuseExisting": false,
+   "governmentForm": "monarchy",
+   "cohesionBps": 6000,
+   "cohesionNote": "Equal to mamertines (6000), below syracuse (7500): a real monarchy with a royal cemetery and a temple state at Napata, but a long thin river country with a nomad periphery.",
+   "capital": {
+    "settlementId": "settlement-meroe",
+    "name": "Meroe",
+    "lon": 33.75,
+    "lat": 16.94,
+    "kind": "city",
+    "size": 50,
+    "fortificationLevel": 3
+   },
+   "otherSettlements": [
+    {
+     "settlementId": "settlement-napata",
+     "name": "Napata (Jebel Barkal)",
+     "lon": 31.05,
+     "lat": 18.54,
+     "kind": "city",
+     "size": 40,
+     "fortificationLevel": 3
+    },
+    {
+     "settlementId": "settlement-naqa",
+     "name": "Naqa",
+     "lon": 33.28,
+     "lat": 16.27,
+     "kind": "town",
+     "size": 15,
+     "fortificationLevel": 2
+    },
+    {
+     "settlementId": "settlement-kawa",
+     "name": "Kawa",
+     "lon": 30.5,
+     "lat": 19.1,
+     "kind": "town",
+     "size": 15,
+     "fortificationLevel": 2
+    },
+    {
+     "settlementId": "settlement-musawwarat",
+     "name": "Musawwarat es-Sufra",
+     "lon": 33.3,
+     "lat": 16.4,
+     "kind": "town",
+     "size": 12,
+     "fortificationLevel": 2
+    }
+   ],
+   "ruler": null,
+   "notes": "Kings of the period cannot be dated: Arqamani (Ergamenes) is now placed about 215-205 BCE, so Diodorus 3.6 (Ergamenes under Ptolemy II) cannot be taken at face value. Ptolemy II defeated Kush in Lower Nubia in 275/274 BCE, so the northern border is drawn at Maharraqa (Hierasykaminos, about 23.0N). The Red Sea coast and hills east of the Nile (Blemmyes, Beja) are only loosely held; the polygon stops at lon 36.5.",
+   "territory": [
+    [
+     [
+      30.3,
+      15
+     ],
+     [
+      31.85,
+      15
+     ],
+     [
+      33.4,
+      15
+     ],
+     [
+      34.95,
+      15
+     ],
+     [
+      36.5,
+      15
+     ],
+     [
+      36.5,
+      17.2
+     ],
+     [
+      35.8,
+      18.5
+     ],
+     [
+      35,
+      20
+     ],
+     [
+      34.4,
+      21.5
+     ],
+     [
+      34,
+      22.9
+     ],
+     [
+      32.2,
+      22.9
+     ],
+     [
+      31.2,
+      22.9
+     ],
+     [
+      30.5,
+      22.9
+     ],
+     [
+      30,
+      21
+     ],
+     [
+      29.8,
+      19
+     ],
+     [
+      30,
+      17
+     ],
+     [
+      30.3,
+      15
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "ptolemaic-egypt",
+   "name": "Ptolemaic Kingdom",
+   "reuseExisting": true,
+   "governmentForm": "monarchy",
+   "cohesionBps": 8000,
+   "cohesionNote": "Core raised from the Anatolian entry's 7500 to 8000, equal to carthage: the Nile valley was the most centralized bureaucracy of the age, with Alexandria plainly speaking for the whole. Only the Anatolian exclaves (and Cyrene, which is separate) are looser.",
+   "capital": {
+    "settlementId": "settlement-alexandria",
+    "name": "Alexandria",
+    "lon": 29.92,
+    "lat": 31.2,
+    "kind": "port",
+    "size": 100,
+    "fortificationLevel": 4
+   },
+   "otherSettlements": [
+    {
+     "settlementId": "settlement-memphis",
+     "name": "Memphis",
+     "lon": 31.25,
+     "lat": 29.85,
+     "kind": "city",
+     "size": 80,
+     "fortificationLevel": 3
+    },
+    {
+     "settlementId": "settlement-thebes",
+     "name": "Thebes (Diospolis Megale)",
+     "lon": 32.64,
+     "lat": 25.72,
+     "kind": "city",
+     "size": 50,
+     "fortificationLevel": 3
+    },
+    {
+     "settlementId": "settlement-pelusium",
+     "name": "Pelusium",
+     "lon": 32.55,
+     "lat": 31.04,
+     "kind": "fortress",
+     "size": 30,
+     "fortificationLevel": 5
+    },
+    {
+     "settlementId": "settlement-krokodilopolis",
+     "name": "Arsinoe (Crocodilopolis, Fayum)",
+     "lon": 30.85,
+     "lat": 29.31,
+     "kind": "town",
+     "size": 30,
+     "fortificationLevel": 2
+    },
+    {
+     "settlementId": "settlement-syene",
+     "name": "Syene",
+     "lon": 32.9,
+     "lat": 24.09,
+     "kind": "fortress",
+     "size": 20,
+     "fortificationLevel": 4
+    },
+    {
+     "settlementId": "settlement-berenice",
+     "name": "Berenice Troglodytica",
+     "lon": 35.47,
+     "lat": 23.91,
+     "kind": "port",
+     "size": 15,
+     "fortificationLevel": 2
+    },
+    {
+     "settlementId": "settlement-myos-hormos",
+     "name": "Myos Hormos",
+     "lon": 34.28,
+     "lat": 26.14,
+     "kind": "port",
+     "size": 20,
+     "fortificationLevel": 2
+    },
+    {
+     "settlementId": "settlement-clysma",
+     "name": "Arsinoe (Clysma, Suez)",
+     "lon": 32.55,
+     "lat": 29.97,
+     "kind": "port",
+     "size": 20,
+     "fortificationLevel": 3
+    }
+   ],
+   "ruler": {
+    "name": "Ptolemy II Philadelphus",
+    "title": "King of Egypt",
+    "note": "Sole ruler 283/2-246 BCE; conquered Lower Nubia to Maharraqa in 275/274; founded Berenice and Myos Hormos.",
+    "confidence": "high"
+   },
+   "mergeInstructions": {
+    "replacesInAnatolianEntry": [
+     "name (to 'Ptolemaic Kingdom')",
+     "cohesionBps 7500 -> 8000",
+     "cohesionNote",
+     "capital (offMap must become false; coordinates unchanged 29.92, 31.2)"
+    ],
+    "appendedToAnatolianEntry": [
+     "otherSettlements: keep the 8 Anatolian ones and add these 8",
+     "territory: keep the 3 Anatolian rings and add these 2"
+    ],
+    "unchanged": [
+     "governmentForm monarchy",
+     "ruler"
+    ]
+   },
+   "notes": "Siwa (25.52, 29.2) and the oases of Bahariya, Farafra, Dakhla and Kharga are inside the ring: Egyptian since Alexander and the Ptolemies (Siwa's oracle was independent-minded, so low confidence). West edge at lon 25.0 meets the Cyrene polity at the Catabathmus; Gaza and Coele-Syria are Ptolemaic too but belong to the Levant file. South edge at lat 24 (Aswan) with a Lower Nubia ring down to lat 22.95 (Dodekaschoinos to Maharraqa). Deep Western Desert south of 24 and the Sinai interior are for the builder to drop. Ptolemais Theron (18.3N) is out of scope.",
+   "territory": [
+    [
+     [
+      25,
+      24
+     ],
+     [
+      31.4,
+      24
+     ],
+     [
+      35.8,
+      23.4
+     ],
+     [
+      36.3,
+      24.6
+     ],
+     [
+      35.7,
+      26
+     ],
+     [
+      35,
+      27.3
+     ],
+     [
+      34.6,
+      28.3
+     ],
+     [
+      34.9,
+      29.3
+     ],
+     [
+      34.55,
+      29.95
+     ],
+     [
+      34.45,
+      30.6
+     ],
+     [
+      34.4,
+      31.25
+     ],
+     [
+      34.3,
+      31.7
+     ],
+     [
+      32.5,
+      31.9
+     ],
+     [
+      30,
+      31.95
+     ],
+     [
+      27.5,
+      31.95
+     ],
+     [
+      25,
+      31.9
+     ],
+     [
+      25,
+      24
+     ]
+    ],
+    [
+     [
+      32.2,
+      22.95
+     ],
+     [
+      32.55,
+      22.92
+     ],
+     [
+      32.9,
+      22.9
+     ],
+     [
+      33.08,
+      22.98
+     ],
+     [
+      33.25,
+      23.05
+     ],
+     [
+      33.6,
+      23.2
+     ],
+     [
+      33.63,
+      23.39
+     ],
+     [
+      33.65,
+      23.58
+     ],
+     [
+      33.7,
+      23.95
+     ],
+     [
+      33.35,
+      24.05
+     ],
+     [
+      33,
+      24.15
+     ],
+     [
+      32.65,
+      24.03
+     ],
+     [
+      32.3,
+      23.9
+     ],
+     [
+      32.2,
+      23.65
+     ],
+     [
+      32.1,
+      23.4
+     ],
+     [
+      32.15,
+      23.17
+     ],
+     [
+      32.2,
+      22.95
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "hejaz-tribes",
+   "name": "Tribes of the Hejaz and Asir",
+   "reuseExisting": false,
+   "governmentForm": "tribal_confederation",
+   "cohesionBps": 2200,
+   "cohesionNote": "Same as ligurians (2200): mountain and coast tribes, each settlement answering for itself.",
+   "capital": {
+    "settlementId": "settlement-macoraba",
+    "name": "Macoraba (Mecca)",
+    "lon": 39.83,
+    "lat": 21.42,
+    "kind": "village",
+    "size": 8,
+    "fortificationLevel": 1
+   },
+   "otherSettlements": [
+    {
+     "settlementId": "settlement-taif",
+     "name": "Ta'if",
+     "lon": 40.4,
+     "lat": 21.27,
+     "kind": "village",
+     "size": 6,
+     "fortificationLevel": 1
+    },
+    {
+     "settlementId": "settlement-jurash",
+     "name": "Jurash (Asir)",
+     "lon": 42.25,
+     "lat": 18.2,
+     "kind": "village",
+     "size": 8,
+     "fortificationLevel": 1
+    },
+    {
+     "settlementId": "settlement-jeddah",
+     "name": "Jeddah",
+     "lon": 39.17,
+     "lat": 21.5,
+     "kind": "village",
+     "size": 5,
+     "fortificationLevel": 1
+    }
+   ],
+   "ruler": null,
+   "notes": "Nothing here is attested in 270 BCE; the towns are placeholders for tribal seats (Mecca first appears as Macoraba in Ptolemy, about 150 CE; Jurash has Iron Age and later remains). Southern Asir toward Najran may have been under Sabaean or Minaean influence.",
+   "territory": [
+    [
+     [
+      37.8,
+      23.9
+     ],
+     [
+      38.6,
+      22.4
+     ],
+     [
+      39.3,
+      20.9
+     ],
+     [
+      39.9,
+      20.25
+     ],
+     [
+      40.5,
+      19.6
+     ],
+     [
+      41.05,
+      18.95
+     ],
+     [
+      41.6,
+      18.3
+     ],
+     [
+      42.3,
+      17.4
+     ],
+     [
+      43.4,
+      17.45
+     ],
+     [
+      44,
+      18.5
+     ],
+     [
+      43.3,
+      19.8
+     ],
+     [
+      42.5,
+      21.2
+     ],
+     [
+      41.7,
+      22.6
+     ],
+     [
+      41.15,
+      23.25
+     ],
+     [
+      40.6,
+      23.9
+     ],
+     [
+      39.2,
+      23.9
+     ],
+     [
+      37.8,
+      23.9
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "najd-tribes",
+   "name": "Tribes of the Najd",
+   "reuseExisting": false,
+   "governmentForm": "tribal_confederation",
+   "cohesionBps": 2200,
+   "cohesionNote": "Same as ligurians (2200): camel-herding and oasis tribes with no common authority.",
+   "capital": {
+    "settlementId": "settlement-faw",
+    "name": "Qaryat al-Faw (Dhat Kahl)",
+    "lon": 45.16,
+    "lat": 19.76,
+    "kind": "town",
+    "size": 15,
+    "fortificationLevel": 2
+   },
+   "otherSettlements": [
+    {
+     "settlementId": "settlement-hail",
+     "name": "Hail (Jubbah oasis)",
+     "lon": 41.7,
+     "lat": 27.52,
+     "kind": "village",
+     "size": 8,
+     "fortificationLevel": 1
+    },
+    {
+     "settlementId": "settlement-qasim",
+     "name": "Qasim oases (Buraydah)",
+     "lon": 43.97,
+     "lat": 26.33,
+     "kind": "village",
+     "size": 8,
+     "fortificationLevel": 1
+    },
+    {
+     "settlementId": "settlement-hajr",
+     "name": "Hajr (Riyadh oasis)",
+     "lon": 46.7,
+     "lat": 24.65,
+     "kind": "village",
+     "size": 8,
+     "fortificationLevel": 1
+    }
+   ],
+   "ruler": null,
+   "notes": "Qaryat al-Faw (settled from the 4th century BCE) is the only attested Najd town and fits the incense road from Najran to Gerrha; Kinda, which later held it, is not yet a power. Other towns are placeholders. The polygon covers the plateau and oasis belts; the builder should drop the Nafud and Rub al-Khali interiors.",
+   "territory": [
+    [
+     [
+      43.4,
+      19.3
+     ],
+     [
+      46.3,
+      19.3
+     ],
+     [
+      47.7,
+      20.2
+     ],
+     [
+      48.1,
+      22
+     ],
+     [
+      48.1,
+      24
+     ],
+     [
+      47.6,
+      24.6
+     ],
+     [
+      47.3,
+      26
+     ],
+     [
+      47.5,
+      27.4
+     ],
+     [
+      47.8,
+      28.5
+     ],
+     [
+      44.5,
+      28.7
+     ],
+     [
+      41.5,
+      28.8
+     ],
+     [
+      40.3,
+      28.4
+     ],
+     [
+      40.3,
+      25.5
+     ],
+     [
+      40.6,
+      23.9
+     ],
+     [
+      41.7,
+      22.6
+     ],
+     [
+      42.6,
+      21.2
+     ],
+     [
+      43.4,
+      19.3
+     ]
+    ]
+   ]
+  }
+ ],
+ "notes": [
+  "ORDER MATTERS: first match wins. The list runs from the Yemeni and Gulf peoples to the northern ones; hejaz-tribes and najd-tribes are the defaults, last. nabataeans comes before ptolemaic-egypt so Sinai's eastern edge and Aila go to it.",
+  "ptolemaic-egypt reuses the id already in anatolia-polities.json; see its mergeInstructions. Its capital.offMap must become false.",
+  "Deep desert (Western Desert south of lat 24, Sinai interior, Nafud, Rub al-Khali) is not deliberately claimed; the polygons cover oases, wadis, coast strips and caravan routes generously and stop short of the emptiest sand.",
+  "Not defined: Qataban (its land lies south of lat 15), Awsan, Himyar (later), Kinda (later), Blemmyes and Beja (unattested as a state in 270), Seleucid Ikaros on Failaka (Seleucid default).",
+  "Northern edge: Nabataeans, Qedar and Ptolemaic Sinai meet whatever polity holds the Levant; the lead must decide whose polygon wins Edom, the Negev and Wadi Sirhan."
+ ]
+}

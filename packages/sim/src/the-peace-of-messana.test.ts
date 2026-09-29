@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, atWar, ensureProvinceMaterial, openWar, warStanding, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -14,18 +14,18 @@ import { createIdFactory } from "./ports";
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const offices = definition.government.offices;
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
-const SYRACUSE_HOME = "ita-72843720b81376294924159-sicily-southeast";
+const MESSANA = PUNIC_IDS.messana;
+const SYRACUSE_HOME = PUNIC_IDS.syracuse;
 const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
 const context = { now: { day: 0, minute: 540 }, offices, warfare: definition.warfare, terrains: definition.map.terrains, ids: createIdFactory("peace"), gameId: "game-peace" };
 const war = (world: WorldState, a: string, b: string): WorldState => ({ ...world, polityAgreements: openWar(world.polityAgreements, { id: `war-${a}-${b}`, polityId: a, otherPolityId: b, terms: "War.", atStep: 0, sourceMessageId: null, reason: "War." }) });
 
-/** Rome has taken Messana, and the Mamertines have nothing left but their garrison, then nothing at all. */
+/** Rome has taken Messana and every acre the Mamertines held round it, and they have nothing left but their garrison, then nothing at all. */
 function messanaFallen(): WorldState {
   const world = war(opening(), "rome", "mamertines");
   return {
     ...world,
-    map: { ...world.map, provinces: world.map.provinces.map((province) => (province.id === MESSANA
+    map: { ...world.map, provinces: world.map.provinces.map((province) => (province.id === MESSANA || province.controllerPolityId === "mamertines"
       ? { ...province, controllerPolityId: "rome", settlements: province.settlements.map((city) => ({ ...city, controllerPolityId: "rome" })), lostBy: { polityId: "mamertines", atStep: 0 } }
       : province)) },
   };

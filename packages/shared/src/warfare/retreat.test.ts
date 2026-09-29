@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { PUNIC_IDS, punicWarsScenario } from "@chronica/db";
 import type { Force } from "../material-state";
 import { WorldStateSchema, type WorldState } from "../world/world-state";
 import { openWar } from "../world/agreements";
@@ -16,10 +16,10 @@ import { retreatRoute } from "./retreat";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
-const AGRIGENTUM = "ita-72843720b81376294924159-sicily-central";
-const SYRACUSE = "ita-72843720b81376294924159-sicily-southeast";
-const PANORMUS = "ita-72843720b81376294924159-sicily-northwest";
+const MESSANA = PUNIC_IDS.messana;
+const AGRIGENTUM = PUNIC_IDS.agrigentum;
+const SYRACUSE = PUNIC_IDS.syracuse;
+const PANORMUS = PUNIC_IDS.panormus;
 
 function atWar(): WorldState {
   const world = WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
@@ -32,16 +32,21 @@ describe("a beaten army", () => {
     const world = atWar();
     const romans = { ...forceOf(world, "roman-field-army"), locationId: MESSANA };
     const carthaginians = { ...forceOf(world, "carthaginian-garrison"), locationId: MESSANA };
-    // Agrigentum sorts first among Messana's neighbours, and is Carthage's.
-    expect(retreatRoute(world, romans, MESSANA, new Set(["carthage"]))).toBe(SYRACUSE);
-    expect([AGRIGENTUM, PANORMUS]).toContain(retreatRoute(world, carthaginians, MESSANA, new Set(["rome"])));
+    const heldBy = (provinceId: string | null) => world.map.provinces.find((province) => province.id === provinceId)?.controllerPolityId;
+    // Messana's neighbours are all the Mamertines': ground that is nobody's enemy, which neither side is driven off.
+    const romanRetreat = retreatRoute(world, romans, MESSANA, new Set(["carthage"]));
+    const punicRetreat = retreatRoute(world, carthaginians, MESSANA, new Set(["rome"]));
+    expect(romanRetreat).not.toBeNull();
+    expect(punicRetreat).not.toBeNull();
+    expect(heldBy(romanRetreat)).not.toBe("carthage");
+    expect(heldBy(punicRetreat)).not.toBe("rome");
   });
 
   it("does not take ship under the enemy's eyes", () => {
     const world = atWar();
     const romans = { ...forceOf(world, "roman-field-army"), locationId: MESSANA };
     // Bruttium is Rome's ally's, but over the strait.
-    expect(retreatRoute(world, romans, MESSANA, new Set(["carthage"]))).not.toBe("punic-italy-bruttian-highlands");
+    expect(retreatRoute(world, romans, MESSANA, new Set(["carthage"]))).not.toBe(PUNIC_IDS.rhegium);
   });
 
   it("each side of one field goes its own way", () => {
@@ -92,8 +97,9 @@ describe("a rout", () => {
 describe("a fleet", () => {
   it("stands on no hill", () => {
     const world = atWar();
-    const hills = world.map.provinces.find((candidate) => candidate.id === AGRIGENTUM)!;
-    const plain = { ...hills, terrainId: "coastal-plain" };
+    const ground = world.map.provinces.find((candidate) => candidate.id === AGRIGENTUM)!;
+    const hills = { ...ground, terrainId: "hills" };
+    const plain = { ...ground, terrainId: "coastal-plain" };
     const fleet = forceOf(world, "carthaginian-fleet");
     const other = { ...forceOf(world, "syracusan-squadron"), personnel: [{ categoryId: "warship", label: "Triremes", fit: 110, unavailable: [] }] };
     const opening = (province: typeof hills, defender: Force, attacker: Force) => resolveBattle({

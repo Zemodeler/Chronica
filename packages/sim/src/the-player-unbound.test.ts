@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import {
   ScenarioDefinitionSchema,
   WorldDeltaSchema,
@@ -39,8 +39,8 @@ import { holdVotes, voteDayOf } from "./senate";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const LATIUM = "punic-italy-latium";
-const SICILY_NE = "ita-72843720b81376294924159-sicily-northeast";
+const LATIUM = PUNIC_IDS.rome;
+const SICILY_NE = PUNIC_IDS.messana;
 
 const world = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
 
@@ -396,7 +396,7 @@ describe("a man grows", () => {
 });
 
 describe("the order cannot move another power's men", () => {
-  const TURN_BACK = { op: "force_modify", forceRef: "carthaginian-fleet", locationId: "tun-13205935b88806172084765", reason: "The Carthaginians turn back." };
+  const TURN_BACK = { op: "force_modify", forceRef: "carthaginian-fleet", locationId: PUNIC_IDS.carthage, reason: "The Carthaginians turn back." };
 
   it("is not obeyed when it is the ruler's order", () => {
     const delta = WorldDeltaSchema.parse(TURN_BACK);

@@ -149,22 +149,24 @@ export function provinceNamedByWords(index: PlaceIndex, value: string): string |
   return hits.size === 1 ? [...hits][0]! : null;
 }
 
-/** Whether two provinces are the same or lie within `hops` crossings of each other. */
-export function withinHops(index: PlaceIndex, from: string, to: string, hops: number): boolean {
-  let frontier = [from];
-  const seen = new Set(frontier);
-  for (let step = 0; step < hops; step += 1) {
-    const next: string[] = [];
-    for (const id of frontier) {
-      for (const { to: neighbour } of index.links.get(id) ?? []) {
-        if (neighbour === to) return true;
-        if (!seen.has(neighbour)) {
-          seen.add(neighbour);
-          next.push(neighbour);
-        }
-      }
+/** Whether two provinces are the same or lie within `km` kilometres of each other by the crossings between them. */
+export function withinKm(index: PlaceIndex, from: string, to: string, km: number): boolean {
+  if (from === to) return true;
+  const best = new Map<string, number>([[from, 0]]);
+  const queue: [number, string][] = [[0, from]];
+  while (queue.length > 0) {
+    // Small searches: a scan for the nearest beats a heap.
+    let nearest = 0;
+    for (let at = 1; at < queue.length; at += 1) if (queue[at]![0] < queue[nearest]![0]) nearest = at;
+    const [distance, id] = queue.splice(nearest, 1)[0]!;
+    if (id === to) return true;
+    if (distance > (best.get(id) ?? Infinity)) continue;
+    for (const link of index.links.get(id) ?? []) {
+      const total = distance + link.distance;
+      if (total > km || total >= (best.get(link.to) ?? Infinity)) continue;
+      best.set(link.to, total);
+      queue.push([total, link.to]);
     }
-    frontier = next;
   }
   return false;
 }

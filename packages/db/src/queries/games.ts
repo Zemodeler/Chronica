@@ -7,11 +7,13 @@ import { characterClaims, gameInvites, games, players, scenarioMapAssets, scenar
 import { creditHolds, creditLedgerEntries, creditLots, creditWallets } from "../schema/billing";
 import { CHRONICA_SYSTEM_USER_ID, FIRST_PUNIC_WAR_SCENARIO_ID, FIRST_PUNIC_WAR_SLUG, firstPunicWarScenario } from "../built-in-scenarios";
 import { PUNIC_WARS_SCENARIO_ID, PUNIC_WARS_SLUG, punicWarsScenario } from "../punic-wars-scenario";
+import { PUNIC_WARS_MAP_ASSET } from "../punic-map-asset";
 import { FIRST_PUNIC_WAR_VERSIONS, PUNIC_WARS_VERSIONS, currentBuiltInVersion } from "../built-in-versions";
 
 /** The built-in Numidian map is a scenario-owned copy of the DEMO geography. */
 export const FIRST_PUNIC_WAR_MAP_ASSET_ID = "00000000-0000-4000-8000-000000000201";
-export const PUNIC_WARS_MAP_ASSET_ID = "00000000-0000-4000-8000-000000000202";
+/** The 270 BCE map of 6,056 provinces (the 780-province map it replaced was ...0202). */
+export const PUNIC_WARS_MAP_ASSET_ID = "00000000-0000-4000-8000-000000000203";
 
 export type PublicScenarioSummary = Readonly<{
   scenarioId: string;
@@ -60,12 +62,12 @@ export async function ensureBuiltInScenarios(db: ChronicaDatabase): Promise<void
     await tx.insert(scenarioMapAssets).values({
       id: PUNIC_WARS_MAP_ASSET_ID,
       ownerId: CHRONICA_SYSTEM_USER_ID,
-      objectKey: "built-in/punic-wars-270-bce-map-v1.geojson",
+      objectKey: "built-in/punic-wars-270-bce-map-v2.geojson",
       mimeType: "application/geo+json",
-      byteSize: BigInt(1),
-      checksum: "built-in-punic-wars-270-bce-map-v1",
-      featureCount: 990,
-      boundingBox: [-25, 20, 45, 72],
+      byteSize: BigInt(PUNIC_WARS_MAP_ASSET.byteSize),
+      checksum: PUNIC_WARS_MAP_ASSET.checksum,
+      featureCount: PUNIC_WARS_MAP_ASSET.featureCount,
+      boundingBox: PUNIC_WARS_MAP_ASSET.boundingBox,
       rightsConfirmedAt: new Date(),
     }).onConflictDoNothing();
     await tx.insert(scenarios).values({ id: PUNIC_WARS_SCENARIO_ID, slug: PUNIC_WARS_SLUG, title: "Punic Wars", period: "270 BCE · Before the Punic Wars", authorId: CHRONICA_SYSTEM_USER_ID, visibility: "public", currentVersion: punic.version }).onConflictDoNothing();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import {
   ScenarioDefinitionSchema,
   WorldStateSchema,
@@ -30,8 +30,8 @@ import { HARVEST_MONTH, harvestIn } from "./economy";
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const clock = definition.clock;
-const LATIUM = "punic-italy-latium";
-const CAMPANIA = "punic-italy-campanian-plain";
+const LATIUM = PUNIC_IDS.rome;
+const CAMPANIA = PUNIC_IDS.capua;
 const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
 const row = (world: WorldState, id: string): ProvinceMaterial => world.material.provinceMaterial.find((material) => material.provinceId === id)!;
 const setRow = (world: WorldState, id: string, change: Partial<ProvinceMaterial>): WorldState => ({
@@ -92,7 +92,9 @@ describe("a bad harvest", () => {
     const ticked = runDeterministicTick({ world: waiting, toDay: day, ids: createIdFactory("drought"), warfare: definition.warfare, clock });
     expect(row(ticked.world, LATIUM).foodSecurityBps).toBeLessThan(4_000);
     const failed = ticked.factProposals.find((fact) => fact.kind === "harvest_failed" && (fact.affectedRefs ?? []).some((ref) => ref.id === "rome"));
-    expect(failed?.summary).toContain("Latium");
+    // One line for the power, naming a few of its provinces: a drought over seventy is news in a country.
+    expect(failed?.summary).toMatch(/^The harvest failed in .+ more of Roman Republic's provinces: drought/);
+    expect(failed?.affectedRefs).toContainEqual({ kind: "polity", id: "rome" });
     // Droughts and gluts are both there, over the years: the harvest is not always fair.
     const kinds = new Set(Array.from({ length: 40 }, (_, index) => harvestIn(LATIUM, first + index)));
     expect(kinds.has("drought") || kinds.has("poor")).toBe(true);

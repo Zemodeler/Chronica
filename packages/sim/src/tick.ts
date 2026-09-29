@@ -726,8 +726,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
       if (road.words !== "") for (const tolled of [road.army, ...road.fleets]) tolledOnTheRoad.set(tolled.id, tolled);
       // Named, not identified. This summary is copied verbatim into the
       // Chronicle by whoever writes the project up, and a chronicler
-      // reporting that an army "arrived in
-      // ita-72843720b81376294924159-sicily-northeast" is the engine's
+      // reporting that an army "arrived in <province id>" is the engine's
       // bookkeeping arriving in the historian's hands.
       const arrivedAt = input.world.map.provinces.find((province) => province.id === provinceId)?.name ?? provinceId;
       // Arriving on somebody else's ground unasked is part of what arriving

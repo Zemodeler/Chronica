@@ -79,3 +79,28 @@ export function polygonsOf(geometry: { type: string; coordinates: unknown }): Ri
   if (geometry.type === 'MultiPolygon') return geometry.coordinates as Ring[][];
   return [];
 }
+
+/** The lines of an ESRI polyline shapefile (type 3), read synchronously: each part of each record as a list of [lon, lat]. */
+export function readPolylines(shp: Buffer): Point[][] {
+  const lines: Point[][] = [];
+  let at = 100;
+  while (at + 8 <= shp.length) {
+    const words = shp.readInt32BE(at + 4);
+    const body = at + 8;
+    if (shp.readInt32LE(body) === 3) {
+      const parts = shp.readInt32LE(body + 36);
+      const points = shp.readInt32LE(body + 40);
+      const partStart = body + 44;
+      const pointStart = partStart + 4 * parts;
+      for (let p = 0; p < parts; p++) {
+        const from = shp.readInt32LE(partStart + 4 * p);
+        const to = p + 1 < parts ? shp.readInt32LE(partStart + 4 * (p + 1)) : points;
+        const line: Point[] = [];
+        for (let k = from; k < to; k++) line.push([shp.readDoubleLE(pointStart + 16 * k), shp.readDoubleLE(pointStart + 16 * k + 8)]);
+        lines.push(line);
+      }
+    }
+    at = body + words * 2;
+  }
+  return lines;
+}

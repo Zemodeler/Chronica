@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstPunicWarScenario } from "@chronica/db";
+import { firstPunicWarScenario, FIRST_PUNIC_IDS } from "@chronica/db";
 import {
   GenericEntitySchema,
   MechanicEffectSchema,
@@ -32,7 +32,7 @@ const definition = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definiti
 const offices = definition.government.offices;
 const warfare = definition.warfare;
 const MARCUS = { kind: "character" as const, id: "marcus-atilius" };
-const NORTHEAST = "ita-72843720b81376294924159-sicily-northeast";
+const NORTHEAST = FIRST_PUNIC_IDS.messana;
 
 /** Marcus's arrangement in north-eastern Sicily, and an army there he commands. */
 function camp(commander = MARCUS.id): WorldState {

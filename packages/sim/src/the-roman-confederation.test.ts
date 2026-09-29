@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import {
   ScenarioDefinitionSchema,
   WorldDeltaSchema,
@@ -25,7 +25,7 @@ import type { ApplyContext } from "./apply/context";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const BRUTTIUM = "punic-italy-bruttian-highlands";
+const BRUTTIUM = PUNIC_IDS.rhegium;
 const world = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
 
 const context = (actor: string, actsForTheWorld = false): ApplyContext => ({

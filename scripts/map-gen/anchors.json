@@ -1,7 +1,7 @@
 {
   "punic-italy-latium": {
     "newId": "it-l865w",
-    "name": "Rome",
+    "name": "Latium on the Almo",
     "settlement": "settlement-rome",
     "point": [
       12.4964,
@@ -11,30 +11,30 @@
     "regionProvinces": 42
   },
   "punic-italy-campanian-plain": {
-    "newId": "it-0m16s",
-    "name": "Capua",
+    "newId": "it-0typf",
+    "name": "Campania on the Savo",
     "settlement": "settlement-capua",
     "point": [
-      14.17,
-      41.03
+      14.2502,
+      41.0861
     ],
     "why": "Capua, the heart of Campania (Naples is the neighbouring port)",
     "regionProvinces": 35
   },
   "punic-italy-ligurian-coast": {
     "newId": "cis-zdtxw",
-    "name": "Genua",
+    "name": "Liguria on the Porcibera",
     "settlement": "settlement-genua",
     "point": [
       8.95,
       44.41
     ],
     "why": "Genua, the Ligurian port",
-    "regionProvinces": 7
+    "regionProvinces": 6
   },
   "punic-italy-insubrian-plain": {
     "newId": "cis-ski54",
-    "name": "Mediolanum",
+    "name": "Insubria on the Lambrus",
     "settlement": "settlement-mediolanum",
     "point": [
       9.19,
@@ -45,40 +45,40 @@
   },
   "punic-italy-middle-padus": {
     "newId": "cis-7yz9i",
-    "name": "Felsina",
+    "name": "Aemilia on the Rhenus",
     "settlement": "settlement-bononia",
     "point": [
       11.34,
       44.5
     ],
     "why": "Felsina (Bononia), the Boii town",
-    "regionProvinces": 20
+    "regionProvinces": 21
   },
   "punic-italy-venetian-lagoon": {
     "newId": "cis-cwmqa",
-    "name": "Patavium",
+    "name": "Vale of the Dripsinates",
     "settlement": "settlement-patavium",
     "point": [
       11.88,
       45.41
     ],
     "why": "Patavium, the Veneti city",
-    "regionProvinces": 16
+    "regionProvinces": 15
   },
   "punic-italy-etrurian-uplands": {
-    "newId": "it-q8nfs",
-    "name": "Volsinii",
+    "newId": "it-5143n",
+    "name": "Further northern hills of the Falisci",
     "settlement": "settlement-volsinii",
     "point": [
-      11.88,
-      42.42
+      11.9851,
+      42.648
     ],
     "why": "Volsinii, the Etruscan league centre nearest Rome",
-    "regionProvinces": 35
+    "regionProvinces": 36
   },
   "punic-italy-umbrian-valleys": {
     "newId": "it-bz4up",
-    "name": "Iguvium",
+    "name": "Hills of the Iabuscer",
     "settlement": "settlement-iguvium",
     "point": [
       12.58,
@@ -89,7 +89,7 @@
   },
   "punic-italy-picenum-coast": {
     "newId": "it-p4o64",
-    "name": "Asculum",
+    "name": "Picenum beneath Mons Severus",
     "settlement": "settlement-asculum",
     "point": [
       13.57,
@@ -100,7 +100,7 @@
   },
   "punic-italy-marsian-highlands": {
     "newId": "it-s70j7",
-    "name": "Corfinium",
+    "name": "Uplands of the Paeligni",
     "settlement": "settlement-corfinium",
     "point": [
       13.84,
@@ -111,18 +111,18 @@
   },
   "punic-italy-samnium": {
     "newId": "it-0988l",
-    "name": "Bovianum",
+    "name": "Samnium beneath Mons Tifernus",
     "settlement": "settlement-bovianum",
     "point": [
-      14.48,
-      41.56
+      14.4739,
+      41.4867
     ],
     "why": "Bovianum, the Samnite town",
     "regionProvinces": 9
   },
   "punic-italy-apulian-coast": {
     "newId": "it-t8ojd",
-    "name": "Tarentum",
+    "name": "Coast of the Iapyges",
     "settlement": "settlement-tarentum",
     "point": [
       17.23,
@@ -133,7 +133,7 @@
   },
   "punic-italy-lucanian-uplands": {
     "newId": "it-joh51",
-    "name": "Grumentum",
+    "name": "Southern uplands of the Chones",
     "settlement": "settlement-grumentum",
     "point": [
       15.91,
@@ -143,8 +143,8 @@
     "regionProvinces": 24
   },
   "punic-italy-bruttian-highlands": {
-    "newId": "sic-5sjyb",
-    "name": "Rhegium",
+    "newId": "it-5sjyb",
+    "name": "South-western coast of the Sikeloi",
     "settlement": "settlement-rhegium",
     "point": [
       15.65,
@@ -155,7 +155,7 @@
   },
   "punic-italy-sallentine-peninsula": {
     "newId": "it-jfiwo",
-    "name": "Brundisium",
+    "name": "Northern coast of the Messapii",
     "settlement": "settlement-brundisium",
     "point": [
       17.94,
@@ -166,7 +166,7 @@
   },
   "tun-13205935b88806172084765": {
     "newId": "afr-9sdex",
-    "name": "Carthage",
+    "name": "Coast of the Muxitani",
     "settlement": "settlement-carthage",
     "point": [
       10.33,
@@ -176,19 +176,19 @@
     "regionProvinces": 1
   },
   "ita-72843720b81376294924159-sicily-west": {
-    "newId": "sic-sq2mh",
-    "name": "Lilybaeum",
+    "newId": "sic-4z01i",
+    "name": "Coast of the Elymi",
     "settlement": "settlement-lilybaeum",
     "point": [
-      12.95,
-      37.8
+      12.4297,
+      37.8027
     ],
     "why": "Lilybaeum",
     "regionProvinces": 10
   },
   "ita-72843720b81376294924159-sicily-northwest": {
     "newId": "sic-77fvs",
-    "name": "Panormus",
+    "name": "North-eastern coast of the Elymi",
     "settlement": "settlement-panormus",
     "point": [
       13.36,
@@ -199,7 +199,7 @@
   },
   "ita-72843720b81376294924159-sicily-central": {
     "newId": "sic-doquc",
-    "name": "Agrigentum",
+    "name": "Southern coast of the Sicani",
     "settlement": "settlement-agrigentum",
     "point": [
       13.5765,
@@ -210,7 +210,7 @@
   },
   "ita-72843720b81376294924159-sicily-southeast": {
     "newId": "sic-ecyan",
-    "name": "Syracuse",
+    "name": "Eastern Syracusia",
     "settlement": "settlement-syracuse",
     "point": [
       15.287,
@@ -221,7 +221,7 @@
   },
   "ita-72843720b81376294924159-sicily-northeast": {
     "newId": "sic-q659z",
-    "name": "Messana",
+    "name": "North-eastern coast of the Sikeloi",
     "settlement": "settlement-messana",
     "point": [
       15.55,

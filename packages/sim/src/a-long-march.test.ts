@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -27,7 +27,7 @@ const context: ApplyContext = {
   ids: createIdFactory("march"),
   gameId: "game-march",
 };
-const BRUTTIUM = "punic-italy-bruttian-highlands";
+const BRUTTIUM = PUNIC_IDS.rhegium;
 const army = (state: WorldState) => state.material.forces.find((force) => force.id === "roman-field-army")!;
 
 describe("a long march", () => {
@@ -37,7 +37,7 @@ describe("a long march", () => {
     })], context);
     expect(result.rejected).toEqual([]);
     // Still at home today, with the rest of the order carried out.
-    expect(army(result.world).locationId).toBe("punic-italy-latium");
+    expect(army(result.world).locationId).toBe(PUNIC_IDS.rome);
     expect(army(result.world).moraleBps).toBe(army(world()).moraleBps + 200);
     const journey = result.world.projects.find((project) => project.completionOutcome?.kind === "force_move");
     expect(journey?.completionOutcome?.provinceId).toBe(BRUTTIUM);
@@ -68,7 +68,7 @@ describe("an army already on the road", () => {
 });
 
 describe("a march over the strait", () => {
-  const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
+  const MESSANA = PUNIC_IDS.messana;
   const withFleet = (state: WorldState, warships: number): WorldState => ({
     ...state,
     material: {
@@ -77,7 +77,7 @@ describe("a march over the strait", () => {
         ...state.material.forces.find((force) => force.id === "allied-greek-hulls")!,
         id: "roman-transports",
         name: "Roman transports",
-        locationId: "punic-italy-latium",
+        locationId: PUNIC_IDS.rome,
         personnel: [{ categoryId: "warship", label: "Transports", fit: warships, unavailable: [] }],
         history: [],
       }],
@@ -136,7 +136,7 @@ describe("a march over the strait", () => {
       facts.push(...ticked.factProposals.filter((fact) => fact.kind === "project_completed").map((fact) => fact.summary));
       state = ticked.world;
     }
-    expect(army(state).locationId).toBe("punic-italy-latium");
+    expect(army(state).locationId).toBe(PUNIC_IDS.rome);
     expect(facts.join(" ")).toMatch(/produced nothing it was meant to\. .*over water/);
   });
 });

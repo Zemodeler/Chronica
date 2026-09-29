@@ -3,23 +3,28 @@
  * scenario be rewired mechanically.
  *
  * Inputs (all in $MAP_GEN_DATA): `<in>.json` and `<in>.samples.json` from generate-provinces.cjs, `old-map.json`
- * from dump-old-map.ts, and optionally scripts/map-gen/anatolia-polities.json.
- * Usage (cwd anywhere): MAP_GEN_DATA=<dir> tsx scripts/map-gen/build-map-graph.ts [in=v2]
+ * (the 780-province map, frozen before the swap), and optionally scripts/map-gen/anatolia-polities.json.
+ * Usage (cwd anywhere): MAP_GEN_DATA=<dir> tsx scripts/map-gen/build-map-graph.ts [in=v4] [out=<suffix>]
+ * Writes packages/db/src/punic-wars-map-graph.ts, apps/web/public/maps/punic-wars-provinces.geojson and
+ * scripts/map-gen/anchors.json; with out=<suffix> the same three files with `-<suffix>` before the extension.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { haversineKm, polygonsOf, PolygonIndex, ringAreaKm2, ringContains, signedArea, type Point, type Ring } from './map-geometry';
-import { ADJECTIVE, ancientNameOf, compassOf, regionOf, type Compass, type Region } from './map-names';
+import { haversineKm, polygonsOf, PolygonIndex, readPolylines, ringContains, signedArea, type Point, type Ring } from './map-geometry';
+import { ancientNameOf, featureNameOf, regionOf, type Region } from './map-names';
+import { nameProvinces } from './map-region-names';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '../..');
 const DATA = process.env.MAP_GEN_DATA ?? join(ROOT, '.map-gen-data');
-const IN = process.argv.find((a) => a.startsWith('in='))?.slice(3) ?? 'v2';
-const OUT_GRAPH = join(ROOT, 'packages/db/src/punic-wars-map-graph-v2.ts');
-const OUT_GEOJSON = join(ROOT, 'apps/web/public/maps/punic-wars-provinces.geojson');
-const OUT_ANCHORS = join(HERE, 'anchors.json');
+const IN = process.argv.find((a) => a.startsWith('in='))?.slice(3) ?? 'v4';
+const SUFFIX = process.argv.find((a) => a.startsWith('out='))?.slice(4);
+const tag = SUFFIX === undefined || SUFFIX === '' ? '' : `-${SUFFIX}`;
+const OUT_GRAPH = join(ROOT, `packages/db/src/punic-wars-map-graph${tag}.ts`);
+const OUT_GEOJSON = join(ROOT, `apps/web/public/maps/punic-wars-provinces${tag}.geojson`);
+const OUT_ANCHORS = join(HERE, `anchors${tag}.json`);
 const STRAIT_KM = 80;
 
 interface Meta {
@@ -56,12 +61,36 @@ interface AnatoliaPolity {
 const gen = JSON.parse(readFileSync(join(DATA, `${IN}.json`), 'utf8')) as Generated;
 const samples = JSON.parse(readFileSync(join(DATA, `${IN}.samples.json`), 'utf8')) as number[][];
 const old = JSON.parse(readFileSync(join(DATA, 'old-map.json'), 'utf8')) as OldMap;
-let anatolia: AnatoliaPolity[] = [];
-try {
-  anatolia = (JSON.parse(readFileSync(join(HERE, 'anatolia-polities.json'), 'utf8')) as { polities: AnatoliaPolity[] }).polities;
-} catch {
-  console.log('anatolia-polities.json is absent: Anatolian provinces stay unowned');
+// The polity files, one per theatre. Each lists its polities most-specific first; a province is tested against the list of its own theatre.
+// A polity named in two files (ptolemaic-egypt) is one polity: the later file's core replaces the earlier one's, and settlements and territory add up.
+const THEATRES = ['anatolia', 'egypt-arabia', 'levant-caucasus-iran'] as const;
+type Theatre = (typeof THEATRES)[number];
+const territoryLists = new Map<Theatre, { id: string; rings: [number, number][][] }[]>();
+const definitions = new Map<string, AnatoliaPolity>();
+const absentFiles: string[] = [];
+for (const theatre of THEATRES) {
+  let file: AnatoliaPolity[];
+  try {
+    file = (JSON.parse(readFileSync(join(HERE, `${theatre}-polities.json`), 'utf8')) as { polities: AnatoliaPolity[] }).polities;
+  } catch {
+    absentFiles.push(`${theatre}-polities.json`);
+    continue;
+  }
+  territoryLists.set(theatre, file.map((p) => ({ id: p.id, rings: p.territory })));
+  for (const p of file) {
+    const before = definitions.get(p.id);
+    // a later file may restate a polity it shares: what it says replaces, what it leaves null stands, settlements and territory add
+    const said = <T,>(earlier: T, later: T | null | undefined): T => (later === null || later === undefined ? earlier : later);
+    definitions.set(p.id, before === undefined ? { ...p } : {
+      ...before, ...p, name: said(before.name, p.name), governmentForm: said(before.governmentForm, p.governmentForm), cohesionBps: said(before.cohesionBps, p.cohesionBps),
+      capital: said(before.capital, p.capital), reuseExisting: before.reuseExisting,
+      otherSettlements: [...before.otherSettlements, ...p.otherSettlements.filter((s) => !before.otherSettlements.some((b) => b.settlementId === s.settlementId) && s.settlementId !== before.capital?.settlementId)],
+      territory: [...before.territory, ...p.territory],
+    });
+  }
 }
+const anatolia: AnatoliaPolity[] = [...definitions.values()];
+if (absentFiles.length > 0) console.log(`absent, so their provinces stay unowned: ${absentFiles.join(', ')}`);
 
 const N = gen.provinces.length;
 const P = gen.provinces;
@@ -145,13 +174,26 @@ for (let i = 0; i < N; i++) {
 const majorityOldProvince = (i: number): string | null => [...oldProvinceVotes[i]!.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null;
 
 // Turkey's Asian mainland decides which unowned provinces the Anatolian file may claim.
-const turkey = (JSON.parse(readFileSync(join(ROOT, 'apps/web/public/maps/natural-earth-50m-admin0-countries.geojson'), 'utf8')) as { features: { properties: { ADMIN: string }; geometry: { type: string; coordinates: unknown } }[] })
-  .features.find((f) => f.properties.ADMIN === 'Turkey')!;
-const asiaMinor = polygonsOf(turkey.geometry).reduce((a, b) => (ringAreaKm2(a[0]!) >= ringAreaKm2(b[0]!) ? a : b))[0]!;
+const world = JSON.parse(readFileSync(join(ROOT, 'apps/web/public/maps/natural-earth-50m-admin0-countries.geojson'), 'utf8')) as { features: { properties: { ADMIN: string }; geometry: { type: string; coordinates: unknown } }[] };
+const turkey = world.features.find((f) => f.properties.ADMIN === 'Turkey')!;
+// everything Turkish except the sliver of Thrace: the mainland and its islands
+const turkishThrace = (ring: Ring): boolean => Math.max(...ring.map((c) => c[1])) > 41.8 && Math.max(...ring.map((c) => c[0])) < 29.3;
+const asiaMinors = polygonsOf(turkey.geometry).map((polygon) => polygon[0]!).filter((ring) => !turkishThrace(ring));
+// the settled countries of the eastern theatres, by their Natural Earth outlines
+const countryRings = (names: string[]): Ring[] => world.features.filter((f) => names.includes(f.properties.ADMIN)).flatMap((f) => polygonsOf(f.geometry).map((polygon) => polygon[0]!));
+const egyptArabiaRings = countryRings(['Egypt', 'Saudi Arabia']);
+const levantRings = countryRings(['Syria', 'Lebanon', 'Israel', 'Palestine', 'Jordan', 'Georgia', 'Armenia', 'Azerbaijan', 'Iran']);
+const shareIn = (rings: Ring[], i: number): number => {
+  const pts = samples[i]!;
+  let inside = 0;
+  for (let k = 0; k < pts.length; k += 2) if (rings.some((ring) => ringContains(ring, pts[k]!, pts[k + 1]!))) inside++;
+  return inside / (pts.length / 2);
+};
+const theatreOf = (i: number): Theatre | null => (anatolianShare(i) >= 0.5 ? 'anatolia' : shareIn(egyptArabiaRings, i) >= 0.5 ? 'egypt-arabia' : shareIn(levantRings, i) >= 0.5 ? 'levant-caucasus-iran' : null);
 const anatolianShare = (i: number): number => {
   const pts = samples[i]!;
   let inside = 0;
-  for (let k = 0; k < pts.length; k += 2) if (ringContains(asiaMinor, pts[k]!, pts[k + 1]!)) inside++;
+  for (let k = 0; k < pts.length; k += 2) if (asiaMinors.some((ring) => ringContains(ring, pts[k]!, pts[k + 1]!))) inside++;
   return inside / (pts.length / 2);
 };
 const centreSample = (i: number): Point => {
@@ -202,12 +244,15 @@ let rebalanced = 0;
 }
 const fromAnatoliaFile = new Set<number>();
 for (let i = 0; i < N; i++) {
-  if (controller[i] !== null || anatolia.length === 0 || anatolianShare(i) < 0.5) continue;
+  if (controller[i] !== null) continue;
+  const theatre = theatreOf(i);
+  const list = theatre === null ? undefined : territoryLists.get(theatre);
+  if (list === undefined) continue;
   const [x, y] = centreSample(i);
-  claim: for (const polity of anatolia) for (const territory of polity.territory) if (ringContains(territory, x, y)) { controller[i] = polity.id; fromAnatoliaFile.add(i); break claim; }
+  claim: for (const polity of list) for (const territory of polity.rings) if (ringContains(territory, x, y)) { controller[i] = polity.id; fromAnatoliaFile.add(i); break claim; }
 }
 // Ground the old map did not cover and no polity claims (coastal slivers, the map's own fringe) goes to its land neighbours' commonest owner.
-const unowned = (): number[] => controller.flatMap((c, i) => (c === null && !(anatolianShare(i) >= 0.5 && anatolia.length === 0) ? [i] : []));
+const unowned = (): number[] => controller.flatMap((c, i) => (c === null ? [i] : []));
 let fringe = 0;
 for (let pass = 0; pass < 4; pass++) {
   const next = new Map<number, string>();
@@ -219,6 +264,20 @@ for (let pass = 0; pass < 4; pass++) {
   }
   for (const [i, c] of next) { controller[i] = c; fringe++; }
   if (next.size === 0) break;
+}
+
+// An island or islet no land border reaches takes the polity of the nearest held province.
+let islandsAdopted = 0;
+for (let i = 0; i < N; i++) {
+  if (controller[i] !== null) continue;
+  let best = -1;
+  let bestKm = 200;
+  for (let j = 0; j < N; j++) {
+    if (controller[j] === null) continue;
+    const d = haversineKm(centreOf(i), centreOf(j));
+    if (d < bestKm) { bestKm = d; best = j; }
+  }
+  if (best >= 0) { controller[i] = controller[best]!; islandsAdopted++; }
 }
 
 // ---- settlements
@@ -241,10 +300,55 @@ function homeOf(lon: number, lat: number): { index: number; snapKm: number } {
   return { index: best, snapKm: bestKm };
 }
 const capitalOfPolity = new Map(old.polities.filter((p) => p.capitalSettlementId).map((p) => [p.capitalSettlementId!, p.polityId]));
-// The old map put Utica half a degree east of the site, in the Gulf of Tunis.
-const CORRECTED: Record<string, [number, number]> = { 'settlement-utica': [10.06, 37.06] };
+// Where a pin was wrong: the coordinate of the same place in Pleiades (scripts/map-gen/audit-settlements.cjs lists every pin
+// further than 5 km from it). The old map put Utica half a degree east of the site, in the Gulf of Tunis, and Lilybaeum fifty
+// kilometres inland, in the hills above Alcamo; the polity files' Isaura, Aspendos, Melitene and others were off by a few miles.
+const CORRECTED: Record<string, [number, number]> = {
+  'settlement-utica': [10.06, 37.06], 'settlement-lilybaeum': [12.4297, 37.8027], 'settlement-volsinii': [11.9851, 42.648],
+  'settlement-capua': [14.2502, 41.0861], 'settlement-bovianum': [14.4739, 41.4867], 'settlement-arpi': [15.5554, 41.4757],
+  'settlement-thapsus': [11.0427, 35.6214], 'settlement-iol': [2.192, 36.607], 'settlement-leptis-minor': [10.87, 35.667],
+  'settlement-garama': [13.063, 26.545], 'settlement-apollonia-cyrene': [21.971, 32.902], 'settlement-isaura': [32.3535, 37.1904],
+  'settlement-aspendos': [31.1697, 36.9404], 'settlement-urbnisi': [43.9808, 42.0125], 'settlement-vani': [42.5015, 42.0838],
+  'settlement-melitene': [38.3612, 38.3822], 'settlement-aila': [35.0, 29.5306], 'settlement-uplistsikhe': [44.1493, 41.9679],
+  'settlement-hecatompylos': [54.0383, 35.9611],
+};
+// The towns the story is about, at the size and with the walls it needs: a siege of Volsinii or a venture out of Syracuse turns on
+// what these towns really were, where the map would draw every city alike.
+const AUTHORED_TOWNS: Record<string, { kind: string; size: number; fortificationLevel: number }> = {
+  'settlement-genua': { kind: 'port', size: 45, fortificationLevel: 3 },
+  'settlement-mediolanum': { kind: 'city', size: 55, fortificationLevel: 3 },
+  'settlement-bononia': { kind: 'town', size: 35, fortificationLevel: 2 },
+  'settlement-patavium': { kind: 'city', size: 50, fortificationLevel: 2 },
+  'settlement-volsinii': { kind: 'city', size: 35, fortificationLevel: 4 },
+  'settlement-arretium': { kind: 'city', size: 40, fortificationLevel: 3 },
+  'settlement-cosa': { kind: 'fortress', size: 15, fortificationLevel: 3 },
+  'settlement-iguvium': { kind: 'town', size: 30, fortificationLevel: 2 },
+  'settlement-narnia': { kind: 'fortress', size: 15, fortificationLevel: 3 },
+  'settlement-asculum': { kind: 'city', size: 40, fortificationLevel: 3 },
+  'settlement-corfinium': { kind: 'town', size: 30, fortificationLevel: 2 },
+  'settlement-alba-fucens': { kind: 'fortress', size: 15, fortificationLevel: 3 },
+  'settlement-rome': { kind: 'city', size: 100, fortificationLevel: 6 },
+  'settlement-bovianum': { kind: 'town', size: 25, fortificationLevel: 3 },
+  'settlement-naples': { kind: 'city', size: 60, fortificationLevel: 3 },
+  'settlement-capua': { kind: 'city', size: 65, fortificationLevel: 4 },
+  'settlement-rhegium': { kind: 'port', size: 40, fortificationLevel: 3 },
+  'settlement-consentia': { kind: 'town', size: 35, fortificationLevel: 2 },
+  'settlement-grumentum': { kind: 'town', size: 30, fortificationLevel: 2 },
+  'settlement-venusia': { kind: 'fortress', size: 20, fortificationLevel: 3 },
+  'settlement-tarentum': { kind: 'port', size: 60, fortificationLevel: 4 },
+  'settlement-arpi': { kind: 'city', size: 35, fortificationLevel: 2 },
+  'settlement-luceria': { kind: 'fortress', size: 20, fortificationLevel: 3 },
+  'settlement-brundisium': { kind: 'port', size: 35, fortificationLevel: 2 },
+  'settlement-carthage': { kind: 'city', size: 100, fortificationLevel: 6 },
+  'settlement-lilybaeum': { kind: 'port', size: 45, fortificationLevel: 4 },
+  'settlement-panormus': { kind: 'city', size: 55, fortificationLevel: 3 },
+  'settlement-agrigentum': { kind: 'city', size: 30, fortificationLevel: 4 },
+  'settlement-syracuse': { kind: 'port', size: 90, fortificationLevel: 5 },
+  'settlement-messana': { kind: 'port', size: 50, fortificationLevel: 3 },
+};
 for (const s of old.settlements) {
   if (CORRECTED[s.id]) s.coordinate = CORRECTED[s.id]!;
+  if (AUTHORED_TOWNS[s.id]) Object.assign(s, AUTHORED_TOWNS[s.id]);
   const home = homeOf(s.coordinate[0], s.coordinate[1]);
   if (home.snapKm > 0) snapped.push(`${s.id} ${home.snapKm.toFixed(1)} km`);
   if (home.snapKm > 25) { offMap.push(s.id); continue; }
@@ -258,6 +362,7 @@ for (const polity of anatolia) {
   if (polity.capital?.offMap) offMapPolities.push(polity.id);
   for (const s of all) {
     if (s.offMap) continue;
+    if (CORRECTED[s.settlementId]) [s.lon, s.lat] = CORRECTED[s.settlementId]!;
     const home = homeOf(s.lon, s.lat);
     if (home.snapKm > 0) snapped.push(`${s.settlementId} ${home.snapKm.toFixed(1)} km`);
     if (home.snapKm > 25) { offMap.push(s.settlementId); continue; }
@@ -265,16 +370,47 @@ for (const polity of anatolia) {
     if (s === polity.capital) anatoliaCapital.set(polity.id, s.settlementId);
   }
 }
-// A capital stands in its own polity's ground; an Anatolian town does too unless an old owner already holds the province.
+// A capital stands in its own polity's ground, and the Anatolian file is the authority for the towns it names.
 const adopted: string[] = [];
 for (const s of settlements) {
   const isOldCapital = capitalOfPolity.get(s.id);
   const isNewCapital = anatoliaCapital.get(s.controllerPolityId) === s.id;
-  const fileTown = fromAnatoliaFile.has(s.provinceIndex) || controller[s.provinceIndex] === null;
-  if ((isOldCapital || isNewCapital || (fileTown && anatolia.some((p) => p.id === s.controllerPolityId))) && controller[s.provinceIndex] !== s.controllerPolityId) {
+  const fromFile = anatolia.some((p) => p.id === s.controllerPolityId);
+  if ((isOldCapital || isNewCapital || fromFile) && controller[s.provinceIndex] !== s.controllerPolityId) {
     adopted.push(`${idOf[s.provinceIndex]} ${controller[s.provinceIndex] ?? 'none'} -> ${s.controllerPolityId} (${s.id})`);
     controller[s.provinceIndex] = s.controllerPolityId;
   }
+}
+// ---- anchors: every old id the scenario hard-codes, by the historically right point
+const bySettlement = (id: string): [number, number] => { const s = settlements.find((x) => x.id === id); if (!s) throw new Error(`no settlement ${id}`); return [s.lon, s.lat]; };
+const ANCHORS: [string, string, string][] = [
+  ['punic-italy-latium', 'settlement-rome', 'the province holding Rome'],
+  ['punic-italy-campanian-plain', 'settlement-capua', 'Capua, the heart of Campania (Naples is the neighbouring port)'],
+  ['punic-italy-ligurian-coast', 'settlement-genua', 'Genua, the Ligurian port'],
+  ['punic-italy-insubrian-plain', 'settlement-mediolanum', 'Mediolanum, the Insubres capital'],
+  ['punic-italy-middle-padus', 'settlement-bononia', 'Felsina (Bononia), the Boii town'],
+  ['punic-italy-venetian-lagoon', 'settlement-patavium', 'Patavium, the Veneti city'],
+  ['punic-italy-etrurian-uplands', 'settlement-volsinii', 'Volsinii, the Etruscan league centre nearest Rome'],
+  ['punic-italy-umbrian-valleys', 'settlement-iguvium', 'Iguvium, the Umbrian town'],
+  ['punic-italy-picenum-coast', 'settlement-asculum', 'Asculum, the Picene city'],
+  ['punic-italy-marsian-highlands', 'settlement-corfinium', 'Corfinium, the Paelignian town'],
+  ['punic-italy-samnium', 'settlement-bovianum', 'Bovianum, the Samnite town'],
+  ['punic-italy-apulian-coast', 'settlement-tarentum', 'Tarentum, the great city of the Apulian coast (Arpi and Luceria lie inland)'],
+  ['punic-italy-lucanian-uplands', 'settlement-grumentum', 'Grumentum, the Lucanian town'],
+  ['punic-italy-bruttian-highlands', 'settlement-rhegium', 'Rhegium, the toe of Italy the Rhegium storyline is about (Consentia lies inland)'],
+  ['punic-italy-sallentine-peninsula', 'settlement-brundisium', 'Brundisium, the Messapian port'],
+  ['tun-13205935b88806172084765', 'settlement-carthage', 'Carthage'],
+  ['ita-72843720b81376294924159-sicily-west', 'settlement-lilybaeum', 'Lilybaeum'],
+  ['ita-72843720b81376294924159-sicily-northwest', 'settlement-panormus', 'Panormus'],
+  ['ita-72843720b81376294924159-sicily-central', 'settlement-agrigentum', 'Agrigentum'],
+  ['ita-72843720b81376294924159-sicily-southeast', 'settlement-syracuse', 'Syracuse'],
+  ['ita-72843720b81376294924159-sicily-northeast', 'settlement-messana', 'Messana, on the strait'],
+];
+const anchorOwners: string[] = [];
+for (const [oldId, settlementId] of ANCHORS) {
+  const home = settlements.find((x) => x.id === settlementId)!.provinceIndex;
+  const owner = old.provinces.find((p) => p.id === oldId)!.controller;
+  if (controller[home] !== owner) { anchorOwners.push(`${idOf[home]} ${controller[home]} -> ${owner} (${oldId})`); controller[home] = owner; }
 }
 // One settlement per province unless two must share: report the sharing.
 const sharing = new Map<number, string[]>();
@@ -324,6 +460,47 @@ const isSea = (lon: number, lat: number): boolean => {
   const b = y * gen.sea4.w + x;
   return ((sea4Bits[b >> 3]! >> (b & 7)) & 1) === 1;
 };
+
+// A city or town on the shore is a port: ships can lie there, and ventures and blockades need one. The shore is the AWMC coastline
+// (the sea's edge in antiquity), not the raster's empty ground, which also borders deserts and high massifs.
+const COAST_CELL = 0.1;
+const coastCells = new Map<string, [Point, Point][]>();
+for (const line of readPolylines(readFileSync(join(DATA, 'data/awmc/coastline/coastline.shp')))) {
+  for (let k = 1; k < line.length; k++) {
+    const a = line[k - 1]!;
+    const b = line[k]!;
+    for (let gx = Math.floor(Math.min(a[0], b[0]) / COAST_CELL); gx <= Math.floor(Math.max(a[0], b[0]) / COAST_CELL); gx++) {
+      for (let gy = Math.floor(Math.min(a[1], b[1]) / COAST_CELL); gy <= Math.floor(Math.max(a[1], b[1]) / COAST_CELL); gy++) {
+        const key = `${gx},${gy}`;
+        const cell = coastCells.get(key);
+        if (cell) cell.push([a, b]); else coastCells.set(key, [[a, b]]);
+      }
+    }
+  }
+}
+const PORT_KM = 4;
+const kmToCoast = (lon: number, lat: number): number => {
+  const kx = Math.cos((lat * Math.PI) / 180) * 111.2;
+  let best = Infinity;
+  for (let gx = Math.floor(lon / COAST_CELL) - 1; gx <= Math.floor(lon / COAST_CELL) + 1; gx++) {
+    for (let gy = Math.floor(lat / COAST_CELL) - 1; gy <= Math.floor(lat / COAST_CELL) + 1; gy++) {
+      for (const [a, b] of coastCells.get(`${gx},${gy}`) ?? []) {
+        const ax = a[0] * kx, ay = a[1] * 111.2, dx = b[0] * kx - ax, dy = b[1] * 111.2 - ay;
+        const t = Math.max(0, Math.min(1, ((lon * kx - ax) * dx + (lat * 111.2 - ay) * dy) / (dx * dx + dy * dy || 1)));
+        best = Math.min(best, Math.hypot(lon * kx - (ax + t * dx), lat * 111.2 - (ay + t * dy)));
+      }
+    }
+  }
+  return best;
+};
+const madePorts: string[] = [];
+for (const s of settlements) {
+  if ((s.kind === 'city' || s.kind === 'town') && kmToCoast(s.lon, s.lat) <= PORT_KM) {
+    s.kind = 'port';
+    if (s.type !== 'capital') s.type = 'port';
+    madePorts.push(s.id);
+  }
+}
 
 // outline vertices in local kilometres, thinned, for gap measurement
 const KMLON = Math.cos((40 * Math.PI) / 180) * 111.2;
@@ -463,18 +640,126 @@ for (const [key, e] of edges) if (e.crossing === 'pass') {
   if (!(land(terrain[a]!) && land(terrain[b]!))) edges.set(key, { ...e, crossing: 'land' });
 }
 
-// ---- names
-const settlementName = new Map<number, Settlement>();
+// ---- smoothing: polities as one flowing region each
+// A labelling problem on the province graph: minimise the border length between different polities plus a pull back toward
+// the old map's owner (iterated conditional modes), then fold every exclave on a landmass into the polity around it.
+const smoothing = { edgesBefore: 0, edgesAfter: 0, componentsBefore: 0, componentsAfter: 0, flipped: 0, folded: 0, foldedSettlements: [] as string[], remainingSplits: [] as string[] };
 {
-  const rank: Record<string, number> = { capital: 5, city: 4, port: 3, town: 2, fort: 1, village: 0 };
-  for (const s of settlements) {
-    const held = settlementName.get(s.provinceIndex);
-    if (!held || (rank[s.type] ?? 0) > (rank[held.type] ?? 0)) settlementName.set(s.provinceIndex, s);
+  const LAMBDA = 0.25;
+  const SEA_POWERS = new Set(['ptolemaic-egypt']);
+  const fixed = new Set<number>(settlements.filter((s) => s.provinceIndex >= 0).map((s) => s.provinceIndex));
+  const protectedProvince = new Set<number>();
+  for (const s of settlements) if (capitalOfPolity.has(s.id) || [...anatoliaCapital.values()].includes(s.id)) protectedProvince.add(s.provinceIndex);
+  for (const [, settlementId] of ANCHORS) protectedProvince.add(settlements.find((x) => x.id === settlementId)!.provinceIndex);
+  const origin = [...controller];
+  const perimeter = P.map((p) => p.adj.reduce((sum, a) => sum + a.km, 0));
+  const shareOf = (i: number, id: string): number => {
+    if (coverage[i]! >= 0.35) { const covered = [...ownerVotes[i]!.values()].reduce((a, b) => a + b, 0); return (ownerVotes[i]!.get(id) ?? 0) / covered; }
+    return origin[i] === id ? 1 : 0;
+  };
+  const held = new Map<string, number>();
+  for (const c of controller) if (c) held.set(c, (held.get(c) ?? 0) + 1);
+  // a polity may not drift more than 8% from the land its old ground now amounts to
+  const areaHeld = new Map<string, number>();
+  for (let i = 0; i < N; i++) if (controller[i]) areaHeld.set(controller[i]!, (areaHeld.get(controller[i]!) ?? 0) + P[i]!.areaKm2);
+  const target = new Map<string, number>();
+  for (const id of areaHeld.keys()) target.set(id, P.reduce((sum, p, i) => sum + p.areaKm2 * shareOf(i, id), 0));
+  const allowed = (from: string, to: string, area: number): boolean =>
+    ((target.get(from) ?? 0) < 3000 || areaHeld.get(from)! - area >= 0.92 * target.get(from)!) && ((target.get(to) ?? 0) < 3000 || (areaHeld.get(to) ?? 0) + area <= 1.08 * target.get(to)!);
+  const borderEdges = (): number => { let n = 0; for (let i = 0; i < N; i++) for (const a of P[i]!.adj) if (a.n > i && controller[i] !== controller[a.n]) n++; return n; };
+  const componentsOf = (): Map<string, number[][]> => {
+    const seen = new Set<number>();
+    const out = new Map<string, number[][]>();
+    for (let i = 0; i < N; i++) {
+      if (seen.has(i) || controller[i] === null) continue;
+      const comp = [i];
+      seen.add(i);
+      for (let k = 0; k < comp.length; k++) for (const a of P[comp[k]!]!.adj) if (!seen.has(a.n) && controller[a.n] === controller[i]) { seen.add(a.n); comp.push(a.n); }
+      (out.get(controller[i]!) ?? out.set(controller[i]!, []).get(controller[i]!)!).push(comp);
+    }
+    return out;
+  };
+  const areaBefore = new Map<string, number>();
+  for (let i = 0; i < N; i++) if (controller[i]) areaBefore.set(controller[i]!, (areaBefore.get(controller[i]!) ?? 0) + P[i]!.areaKm2);
+  smoothing.edgesBefore = borderEdges();
+  smoothing.componentsBefore = [...componentsOf().values()].reduce((s, c) => s + c.length, 0);
+  const order = P.map((_, i) => i).sort((a, b) => idOf[a]!.localeCompare(idOf[b]!));
+  const settle = (i: number, to: string): void => {
+    const from = controller[i]!;
+    for (const s of settlements) if (s.provinceIndex === i && s.controllerPolityId === from) { s.controllerPolityId = to; smoothing.foldedSettlements.push(`${s.id} ${from} -> ${to}`); }
+    held.set(from, held.get(from)! - 1);
+    held.set(to, (held.get(to) ?? 0) + 1);
+    areaHeld.set(from, areaHeld.get(from)! - P[i]!.areaKm2);
+    areaHeld.set(to, (areaHeld.get(to) ?? 0) + P[i]!.areaKm2);
+    controller[i] = to;
+  };
+  for (let round = 0; round < 8; round++) {
+    let changed = 0;
+    for (let pass = 0; pass < 80; pass++) {
+      let moved = 0;
+      for (const i of order) {
+        if (fixed.has(i) || controller[i] === null || held.get(controller[i]!)! <= 1) continue;
+        const candidates = new Set<string>([controller[i]!]);
+        for (const a of P[i]!.adj) if (controller[a.n]) candidates.add(controller[a.n]!);
+        if (candidates.size === 1) continue;
+        const energy = (label: string): number => P[i]!.adj.reduce((sum, a) => sum + (controller[a.n] !== label ? a.km : 0), 0) + LAMBDA * perimeter[i]! * (1 - shareOf(i, label));
+        let best = controller[i]!;
+        let bestEnergy = energy(best) - 1e-6;
+        for (const label of [...candidates].sort()) { if (label !== controller[i] && !allowed(controller[i]!, label, P[i]!.areaKm2)) continue; const e = energy(label); if (e < bestEnergy) { bestEnergy = e; best = label; } }
+        if (best !== controller[i]) { const from = controller[i]!; held.set(from, held.get(from)! - 1); held.set(best, (held.get(best) ?? 0) + 1); areaHeld.set(from, areaHeld.get(from)! - P[i]!.areaKm2); areaHeld.set(best, (areaHeld.get(best) ?? 0) + P[i]!.areaKm2); controller[i] = best; moved++; smoothing.flipped++; }
+      }
+      changed += moved;
+      if (moved === 0) break;
+    }
+    // exclaves: on one landmass a polity is one piece; a small piece with no capital or anchor joins the polity around it (the piece keeps the neighbour that can best take the land; a capital or anchor keeps its piece, and is reported)
+    for (const [polity, comps] of componentsOf()) {
+      const byLandmass = new Map<number, number[][]>();
+      for (const comp of comps) (byLandmass.get(find(comp[0]!)) ?? byLandmass.set(find(comp[0]!), []).get(find(comp[0]!))!).push(comp);
+      const total = comps.flat().reduce((s, i) => s + P[i]!.areaKm2, 0);
+      for (const group of byLandmass.values()) {
+        if (group.length < 2) continue;
+        const areaOf = (c: number[]): number => c.reduce((s, i) => s + P[i]!.areaKm2, 0);
+        group.sort((a, b) => areaOf(b) - areaOf(a));
+        for (const comp of group.slice(1)) {
+          if (comp.some((i) => protectedProvince.has(i))) continue;
+          // the Ptolemies held Asia Minor's coast by sea: a piece with a town of theirs is a garrison, not an exclave to fold
+          if (SEA_POWERS.has(polity) && comp.some((i) => settlements.some((s) => s.provinceIndex === i && s.controllerPolityId === polity))) continue;
+          const border = new Map<string, number>();
+          for (const i of comp) for (const a of P[i]!.adj) { const c = controller[a.n]; if (c && c !== polity) border.set(c, (border.get(c) ?? 0) + a.km); }
+          const ranked = [...border.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([id]) => id);
+          const over = (id: string): number => ((areaHeld.get(id) ?? 0) + areaOf(comp)) / Math.max(1, target.get(id) ?? 1);
+          const to = ranked.find((id) => over(id) <= 1.15) ?? [...ranked].sort((a, b) => over(a) - over(b))[0];
+          if (!to) continue;
+          for (const i of comp) settle(i, to);
+          changed += comp.length;
+          smoothing.folded += comp.length;
+        }
+      }
+    }
+    if (changed === 0) break;
   }
+  smoothing.edgesAfter = borderEdges();
+  const after = componentsOf();
+  smoothing.componentsAfter = [...after.values()].reduce((s, c) => s + c.length, 0);
+  for (const [polity, comps] of after) {
+    const groups = new Map<number, number>();
+    for (const comp of comps) groups.set(find(comp[0]!), (groups.get(find(comp[0]!)) ?? 0) + 1);
+    for (const [landmass, n] of groups) if (n > 1) smoothing.remainingSplits.push(`${polity}: ${n} pieces on landmass ${landmass} (${comps.filter((c) => find(c[0]!) === landmass).map((c) => c.length).join('+')} provinces)`);
+  }
+  const shifted: string[] = [];
+  const areaAfter = new Map<string, number>();
+  for (let i = 0; i < N; i++) if (controller[i]) areaAfter.set(controller[i]!, (areaAfter.get(controller[i]!) ?? 0) + P[i]!.areaKm2);
+  for (const [id, a] of areaBefore) { const b = areaAfter.get(id) ?? 0; if (Math.abs(b - a) > 0.05 * a && a > 3000) shifted.push(`${id} ${Math.round(a)} -> ${Math.round(b)}`); }
+  (smoothing as Record<string, unknown>).shifted = shifted;
 }
-// A province takes the name of the most notable ancient place inside it: a settlement, then an island, a people, a fort, a harbour.
+
+// ---- names
+// The most notable ancient place inside a province survives as an alias of it (formerNames); peoples, rivers, mountains, capes and lakes tell provinces of one region apart.
 const TYPE_WEIGHT: Record<string, number> = { urban: 7, settlement: 6, island: 5, people: 4, fort: 3, port: 3, mountain: 2, sanctuary: 2, villa: 1, river: 1, region: 1 };
 const placeName: (string | null)[] = P.map(() => null);
+const placeKind: string[] = P.map(() => '');
+interface Feature { kind: string; name: string; lon: number; lat: number }
+const namedFeatures: Feature[] = [];
 {
   const require = createRequire(join(DATA, 'package.json'));
   const { parse } = require('csv-parse/sync') as { parse: (input: Buffer, options: object) => Record<string, string>[] };
@@ -489,7 +774,13 @@ const placeName: (string | null)[] = P.map(() => null);
     const maxDate = r.maxDate === '' ? null : +r.maxDate;
     if (minDate !== null && minDate > 0) continue;
     if (maxDate !== null && maxDate < -400) continue;
-    const weight = Math.max(0, ...r.featureTypes.split(',').map((t) => TYPE_WEIGHT[t.trim()] ?? 0));
+    const types = r.featureTypes.split(',').map((t) => t.trim());
+    const featureKind = ['people', 'region', 'river', 'mountain', 'cape', 'lake'].find((k) => types.includes(k));
+    if (featureKind) {
+      const fname = featureNameOf(r.title ?? null);
+      if (fname && !(featureKind === 'region' && maxDate !== null && maxDate < -270)) namedFeatures.push({ kind: featureKind, name: fname, lon, lat });
+    }
+    const weight = Math.max(0, ...types.map((t) => TYPE_WEIGHT[t] ?? 0));
     if (weight === 0) continue;
     const name = ancientNameOf(r.title ?? null, lat);
     if (!name) continue;
@@ -497,70 +788,17 @@ const placeName: (string | null)[] = P.map(() => null);
     if (i < 0) continue;
     const alive = minDate !== null && maxDate !== null && minDate <= -270 && maxDate >= -270;
     const score = weight * 10 + (alive ? 5 : 0) + (minDate !== null && minDate <= -270 ? 2 : 0) + (r.id === P[i]!.seed.pleiades ? 1 : 0);
-    if (score > best[i]! || (score === best[i]! && name.localeCompare(placeName[i]!) < 0)) { best[i] = score; placeName[i] = name; }
+    if (score > best[i]! || (score === best[i]! && name.localeCompare(placeName[i]!) < 0)) { best[i] = score; placeName[i] = name; placeKind[i] = types.reduce((a, t) => ((TYPE_WEIGHT[t] ?? 0) > (TYPE_WEIGHT[a] ?? 0) ? t : a), ''); }
   }
 }
-const base: (string | null)[] = P.map((_, i) => settlementName.get(i)?.name ?? placeName[i]);
-const finalName: (string | null)[] = [...base];
-{
-  const groups = new Map<string, number[]>();
-  base.forEach((n, i) => { if (n) (groups.get(n.toLowerCase()) ?? groups.set(n.toLowerCase(), []).get(n.toLowerCase())!).push(i); });
-  const taken = new Set<string>();
-  for (const members of groups.values()) {
-    members.sort((a, b) => (settlementName.has(b) ? 1 : 0) - (settlementName.has(a) ? 1 : 0) || idOf[a]!.localeCompare(idOf[b]!));
-    taken.add(base[members[0]!]!.toLowerCase());
-  }
-  for (const members of groups.values()) {
-    for (const i of members.slice(1)) {
-      const name = base[i]!;
-      let candidate = `${name} in ${regionAt[i]!.name}`;
-      if (taken.has(candidate.toLowerCase())) {
-        const mean: Point = [members.reduce((s, m) => s + centreOf(m)[0], 0) / members.length, members.reduce((s, m) => s + centreOf(m)[1], 0) / members.length];
-        candidate = `${ADJECTIVE[compassOf(mean, centreOf(i))]} ${name} in ${regionAt[i]!.name}`;
-      }
-      for (let n = 2; taken.has(candidate.toLowerCase()); n++) candidate = `${name} ${'I'.repeat(Math.min(n, 3))}${n > 3 ? n : ''} in ${regionAt[i]!.name}`;
-      finalName[i] = candidate;
-      taken.add(candidate.toLowerCase());
-    }
-  }
-  // provinces with no ancient name of their own: what they are, and where they lie from the nearest place that has one
-  const named = finalName.flatMap((n, i) => (n ? [i] : []));
-  const word = (i: number): string => {
-    const p = P[i]!;
-    const t = terrain[i]!;
-    if (t === 'coastal-plain') return p.coastKm > 45 || p.areaKm2 < 500 ? 'Shore' : 'Coast';
-    if (t === 'desert-steppe') return 'Steppe';
-    if (t === 'hills-uplands') return p.elevMean > 1100 ? 'Highlands' : 'Uplands';
-    return p.riverFrac > 0.09 ? 'Vale' : p.slopeMKm < 25 ? 'Plain' : 'Hills';
-  };
-  const spare = ['Upper', 'Lower', 'Outer', 'Inner', 'Broad', 'Far'];
-  const order = P.map((_, i) => i).filter((i) => !finalName[i]).sort((a, b) => idOf[a]!.localeCompare(idOf[b]!));
-  for (const i of order) {
-    const ranked = named.map((j) => ({ j, d: haversineKm(centreOf(i), centreOf(j)) })).sort((a, b) => a.d - b.d).slice(0, 8);
-    let chosen: string | null = null;
-    for (const { j } of ranked) {
-      const dir = compassOf(centreOf(j), centreOf(i));
-      const c = `${word(i)} ${dir} of ${finalName[j]}`;
-      if (!taken.has(c.toLowerCase())) { chosen = c; break; }
-    }
-    // a crowded neighbourhood: say how far, in Roman miles, then to the mile
-    for (const step of [5, 1]) {
-      for (const { j, d } of ranked) {
-        if (chosen !== null) break;
-        const miles = Math.max(step, Math.round(d / 1.48 / step) * step);
-        const c = `${word(i)} ${miles} miles ${compassOf(centreOf(j), centreOf(i))} of ${finalName[j]}`;
-        if (!taken.has(c.toLowerCase())) chosen = c;
-      }
-    }
-    for (let k = 0; chosen === null; k++) {
-      const { j } = ranked[k % ranked.length]!;
-      const c = `${spare[Math.floor(k / ranked.length) % spare.length]} ${word(i)} ${compassOf(centreOf(j), centreOf(i))} of ${finalName[j]} ${k}`;
-      if (!taken.has(c.toLowerCase())) chosen = c;
-    }
-    finalName[i] = chosen;
-    taken.add(chosen.toLowerCase());
-  }
-}
+// The province is named for the region it lies in; the towns stay settlements, and the old place name survives as an alias.
+const named = nameProvinces({
+  ids: idOf, centre: P.map((p) => p.centroid as Point), landmass: P.map((_, i) => find(i)), terrain,
+  coast: P.map((p) => p.coast), coastKm: P.map((p) => p.coastKm), elevMean: P.map((p) => p.elevMean), riverFrac: P.map((p) => p.riverFrac), features: namedFeatures,
+});
+const finalName = named.names;
+const nameKind = named.kinds;
+const formerNames = P.map((_, i) => (placeName[i] && placeName[i] !== finalName[i] ? [placeName[i]!] : []));
 
 // ---- polities that hold ground
 const holders = new Set(controller.filter((c): c is string => c !== null));
@@ -576,31 +814,6 @@ const settlementRows = settlements
   .map((s) => ({ id: s.id, name: s.name, kind: s.kind, provinceId: idOf[s.provinceIndex]!, controllerPolityId: s.controllerPolityId, size: s.size, fortificationLevel: s.fortificationLevel }))
   .sort((a, b) => a.id.localeCompare(b.id));
 
-// ---- anchors: every old id the scenario hard-codes, by the historically right point
-const bySettlement = (id: string): [number, number] => { const s = settlements.find((x) => x.id === id); if (!s) throw new Error(`no settlement ${id}`); return [s.lon, s.lat]; };
-const ANCHORS: [string, string, string][] = [
-  ['punic-italy-latium', 'settlement-rome', 'the province holding Rome'],
-  ['punic-italy-campanian-plain', 'settlement-capua', 'Capua, the heart of Campania (Naples is the neighbouring port)'],
-  ['punic-italy-ligurian-coast', 'settlement-genua', 'Genua, the Ligurian port'],
-  ['punic-italy-insubrian-plain', 'settlement-mediolanum', 'Mediolanum, the Insubres capital'],
-  ['punic-italy-middle-padus', 'settlement-bononia', 'Felsina (Bononia), the Boii town'],
-  ['punic-italy-venetian-lagoon', 'settlement-patavium', 'Patavium, the Veneti city'],
-  ['punic-italy-etrurian-uplands', 'settlement-volsinii', 'Volsinii, the Etruscan league centre nearest Rome'],
-  ['punic-italy-umbrian-valleys', 'settlement-iguvium', 'Iguvium, the Umbrian town'],
-  ['punic-italy-picenum-coast', 'settlement-asculum', 'Asculum, the Picene city'],
-  ['punic-italy-marsian-highlands', 'settlement-corfinium', 'Corfinium, the Paelignian town'],
-  ['punic-italy-samnium', 'settlement-bovianum', 'Bovianum, the Samnite town'],
-  ['punic-italy-apulian-coast', 'settlement-tarentum', 'Tarentum, the great city of the Apulian coast (Arpi and Luceria lie inland)'],
-  ['punic-italy-lucanian-uplands', 'settlement-grumentum', 'Grumentum, the Lucanian town'],
-  ['punic-italy-bruttian-highlands', 'settlement-rhegium', 'Rhegium, the toe of Italy the Rhegium storyline is about (Consentia lies inland)'],
-  ['punic-italy-sallentine-peninsula', 'settlement-brundisium', 'Brundisium, the Messapian port'],
-  ['tun-13205935b88806172084765', 'settlement-carthage', 'Carthage'],
-  ['ita-72843720b81376294924159-sicily-west', 'settlement-lilybaeum', 'Lilybaeum'],
-  ['ita-72843720b81376294924159-sicily-northwest', 'settlement-panormus', 'Panormus'],
-  ['ita-72843720b81376294924159-sicily-central', 'settlement-agrigentum', 'Agrigentum'],
-  ['ita-72843720b81376294924159-sicily-southeast', 'settlement-syracuse', 'Syracuse'],
-  ['ita-72843720b81376294924159-sicily-northeast', 'settlement-messana', 'Messana, on the strait'],
-];
 const anchorRows = ANCHORS.map(([oldId, settlementId, why]) => {
   const [lon, lat] = bySettlement(settlementId);
   const home = settlements.find((s) => s.id === settlementId)!.provinceIndex;
@@ -618,6 +831,7 @@ const provinceRows = P.map((p, i) => ({
   controlFirmnessBps: controller[i] === 'rome' || controller[i] === 'carthage' ? 8_500 : 7_000,
   areaKm2: p.areaKm2,
   geo: { latitude: round(p.centroid[1], 4), longitude: round(p.centroid[0], 4) },
+  formerNames: formerNames[i]!,
 })).sort((a, b) => a.id.localeCompare(b.id));
 const edgeRows = [...edges.values()].sort((a, b) => (a.from === b.from ? a.to.localeCompare(b.to) : a.from.localeCompare(b.from)));
 const lines = (rows: readonly unknown[]): string => `[\n${rows.map((r) => `  ${JSON.stringify(r)},`).join('\n')}\n]`;
@@ -644,7 +858,7 @@ const header = `// GENERATED FILE -- do not edit by hand.
 // Landmasses found: ${new Set(parent.map((_, i) => find(i))).size}, joined by ${crossings.length} water or gap crossings:
 ${crossings.map((c) => `//   ${c.crossing.padEnd(9)} ~${String(c.gapKm).padStart(4)} km  ${c.from} <-> ${c.to}`).join('\n')}
 
-export interface MapGraphProvinceV2 {
+export interface MapGraphProvince {
   readonly id: string;
   readonly name: string;
   readonly terrainId: string;
@@ -653,9 +867,11 @@ export interface MapGraphProvinceV2 {
   readonly controlFirmnessBps: number;
   readonly areaKm2: number;
   readonly geo: { readonly latitude: number; readonly longitude: number };
+  /** The most notable ancient place inside it, kept so a player who names the town finds the province. */
+  readonly formerNames: readonly string[];
 }
 
-export interface MapGraphEdgeV2 {
+export interface MapGraphEdge {
   readonly from: string;
   readonly to: string;
   readonly crossing: "land" | "pass" | "strait" | "sea_lane";
@@ -663,13 +879,13 @@ export interface MapGraphEdgeV2 {
   readonly distance: number;
 }
 
-export interface MapGraphPolityV2 {
+export interface MapGraphPolity {
   readonly polityId: string;
   readonly name: string;
   readonly capitalSettlementId: string | null;
 }
 
-export interface MapGraphSettlementV2 {
+export interface MapGraphSettlement {
   readonly id: string;
   readonly name: string;
   readonly kind: string;
@@ -681,22 +897,22 @@ export interface MapGraphSettlementV2 {
 `;
 writeFileSync(OUT_GRAPH, [
   header,
-  `export const PUNIC_WARS_GRAPH_PROVINCES_V2: readonly MapGraphProvinceV2[] = ${lines(provinceRows)};`,
+  `export const PUNIC_WARS_GRAPH_PROVINCES: readonly MapGraphProvince[] = ${lines(provinceRows)};`,
   '',
-  `export const PUNIC_WARS_GRAPH_EDGES_V2: readonly MapGraphEdgeV2[] = ${lines(edgeRows)};`,
+  `export const PUNIC_WARS_GRAPH_EDGES: readonly MapGraphEdge[] = ${lines(edgeRows)};`,
   '',
-  `export const PUNIC_WARS_GRAPH_POLITIES_V2: readonly MapGraphPolityV2[] = ${lines(polityRows)};`,
+  `export const PUNIC_WARS_GRAPH_POLITIES: readonly MapGraphPolity[] = ${lines(polityRows)};`,
   '',
-  `export const PUNIC_WARS_GRAPH_SETTLEMENTS_V2: readonly MapGraphSettlementV2[] = ${lines(settlementRows)};`,
+  `export const PUNIC_WARS_GRAPH_SETTLEMENTS: readonly MapGraphSettlement[] = ${lines(settlementRows)};`,
   '',
   '/** Cohesion and government form of the polities this map adds beyond the ones the scenario already writes. */',
-  `export const POLITY_META_V2: Readonly<Record<string, { readonly cohesionBps: number | null; readonly governmentForm: string }>> = ${JSON.stringify(polityMeta, null, 2)};`,
+  `export const POLITY_META: Readonly<Record<string, { readonly cohesionBps: number | null; readonly governmentForm: string }>> = ${JSON.stringify(polityMeta, null, 2)};`,
   '',
   '/** The new province that holds each place the scenario names, and each old province id it hard-codes. */',
-  `export const PUNIC_ANCHORS_V2: Readonly<Record<string, string>> = ${JSON.stringify({ ...namedAnchors, ...anchorMap }, null, 2)};`,
+  `export const PUNIC_ANCHORS: Readonly<Record<string, string>> = ${JSON.stringify({ ...namedAnchors, ...anchorMap }, null, 2)};`,
   '',
   '/** Every new province whose ground lay mostly in the old province, for the ids the scenario hard-codes. */',
-  `export const PUNIC_OLD_REGION_PROVINCES_V2: Readonly<Record<string, readonly string[]>> = ${JSON.stringify(Object.fromEntries(anchorRows.map((a) => [a.oldId, a.regionProvinces])), null, 2)};`,
+  `export const PUNIC_OLD_REGION_PROVINCES: Readonly<Record<string, readonly string[]>> = ${JSON.stringify(Object.fromEntries(anchorRows.map((a) => [a.oldId, a.regionProvinces])), null, 2)};`,
   '',
 ].join('\n'));
 
@@ -707,7 +923,7 @@ for (let i = 0; i < N; i++) {
   const polygons = polygonsOfProvince[i]!;
   if (polygons.length === 0) continue;
   const geometry = polygons.length === 1 ? { type: 'Polygon', coordinates: polygons[0] } : { type: 'MultiPolygon', coordinates: polygons };
-  features.push(JSON.stringify({ type: 'Feature', id: idOf[i], geometry, properties: { kind: 'province', name: finalName[i], terrain: terrain[i], regionId: regionAt[i]!.key } }));
+  features.push(JSON.stringify({ type: 'Feature', id: idOf[i], geometry, properties: { kind: 'province', name: finalName[i], terrain: terrain[i], regionId: named.regionIds[i] } }));
 }
 for (const s of settlements) {
   if (s.provinceIndex < 0) continue;
@@ -723,11 +939,37 @@ console.log('terrain', JSON.stringify(count(terrain)));
 console.log(`old-polity polities lost: ${lostPolities.join(', ') || 'none'}`);
 console.log(`provinces flipped to balance polity land: ${rebalanced}`);
 if (process.env.DEBUG_POLITY) for (let i = 0; i < N; i++) if (controller[i] === process.env.DEBUG_POLITY) console.log(`  ${idOf[i]} ${P[i]!.areaKm2} km2 cov ${coverage[i]!.toFixed(2)} old=${oldOfProvince[i]} votes=${JSON.stringify([...ownerVotes[i]!])} at ${P[i]!.centroid}`);
+console.log(`islands adopted by the nearest polity: ${islandsAdopted}`);
 console.log(`unowned after overlay: ${controller.filter((c) => c === null).length} (fringe adopted ${fringe}, from the Anatolian file ${fromAnatoliaFile.size})`);
+console.log(`cities and towns on the shore made ports: ${madePorts.join(', ') || 'none'}`);
 console.log(`settlements snapped to the nearest shore: ${snapped.join('; ') || 'none'}`);
 console.log(`provinces adopted by a settlement's polity: ${adopted.length}\n  ${adopted.join('\n  ')}`);
+console.log(`anchor provinces given their old province's owner: ${anchorOwners.join('; ') || 'none'}`);
 console.log(`provinces sharing settlements: ${shared.map(([i, ids]) => `${idOf[i]!}: ${ids.join('+')}`).join('; ') || 'none'}`);
 console.log(`settlements beyond the map, dropped: ${offMap.join(', ') || 'none'}`);
 console.log(`off-map capitals: ${offMapPolities.join(', ') || 'none'}`);
 console.log(`crossings ${crossings.length}`);
+console.log(`smoothing: border edges between polities ${smoothing.edgesBefore} -> ${smoothing.edgesAfter}; land components ${smoothing.componentsBefore} -> ${smoothing.componentsAfter}; provinces flipped ${smoothing.flipped}, folded as exclaves ${smoothing.folded}`);
+console.log(`  settlements whose controller followed a folded province: ${smoothing.foldedSettlements.join('; ') || 'none'}`);
+console.log(`  polities still in several pieces on one landmass: ${smoothing.remainingSplits.join('; ') || 'none'}`);
+console.log(`  polities whose land moved over 5%: ${((smoothing as unknown as { shifted: string[] }).shifted).join('; ') || 'none'}`);
+{
+  const kinds = count(nameKind);
+  let seed = 20260929;
+  const rand = (): number => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+  const pool = P.map((_, i) => i);
+  const sample: number[] = [];
+  while (sample.length < 100) sample.push(pool.splice(Math.floor(rand() * pool.length), 1)[0]!);
+  const regions = [...named.regionCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const report = [
+    `Province names by kind: ${JSON.stringify(kinds)}`,
+    `${regions.length} regions over ${N} provinces; ${named.splits.length} split into districts; names unique: ${new Set(finalName).size === N}`,
+    '', 'Regions and their provinces:', ...regions.map(([r, n]) => `${String(n).padStart(4)}  ${r}`),
+    '', 'Regions that needed splitting:', ...named.splits.map((sp) => `${sp.region} (${sp.provinces}): ${sp.districts.join('; ')}`),
+    '', '100 provinces chosen at random (id, region, kind, name):',
+    ...sample.map((i) => `${idOf[i]}\t${named.regionNames[i]}\t${nameKind[i]}\t${finalName[i]}`),
+  ].join('\n');
+  writeFileSync(join(HERE, `names-report${tag}.txt`), `${report}\n`);
+  console.log(report.split('\n').slice(0, 2).join('\n'));
+}
 console.log(`wrote ${OUT_GRAPH}\nwrote ${OUT_GEOJSON}\nwrote ${OUT_ANCHORS}`);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, type WorldDelta, type WorldState } from "@chronica/shared";
 import { createIdFactory } from "./ports";
 import { applyDeltas } from "./apply/apply-deltas";
@@ -19,7 +19,7 @@ import type { ApplyContext } from "./apply/context";
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const world = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
-const AGRIGENTUM = "ita-72843720b81376294924159-sicily-central";
+const AGRIGENTUM = PUNIC_IDS.agrigentum;
 
 const context = (): ApplyContext => ({
   now: { day: 0, minute: 540 },

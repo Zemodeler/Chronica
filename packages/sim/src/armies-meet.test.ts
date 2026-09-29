@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, openWar, type Force, type WorldState } from "@chronica/shared";
 import { armiesMeet } from "./contact";
 import { createIdFactory } from "./ports";
@@ -15,7 +15,7 @@ import { runDeterministicTick } from "./tick";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
+const MESSANA = PUNIC_IDS.messana;
 const DAY = 63;
 
 function atMessana(legionMen: number, options: { war?: boolean; fleet?: boolean } = {}): WorldState {

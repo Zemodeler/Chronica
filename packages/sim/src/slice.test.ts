@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, type ScenarioClock, type WorldState } from "@chronica/shared";
 import { buildWorldSlice, renderWorldSlice } from "./slice";
 
@@ -7,15 +7,16 @@ const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const clock: ScenarioClock = definition.clock;
 const offices = definition.government.offices;
 const world = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
+const romeName = punicWarsScenario.initialWorld.map.provinces.find((province) => province.id === PUNIC_IDS.rome)!.name;
 
-const slice = (state: WorldState = world()) =>
+const slice = (state: WorldState = world(), orderText = "Invade the Boii lands") =>
   buildWorldSlice({
     world: state,
     clock,
     offices,
     actorRef: { kind: "character", id: state.characters[0]!.id },
     actorPolityId: "rome",
-    orderText: "Invade the Boii lands",
+    orderText,
     facts: [],
     dueEvents: [],
     pendingEvents: [],
@@ -47,12 +48,15 @@ describe("what the player's government can see of the world", () => {
     expect(carthage.forces.join(" ")).toMatch(/strength unknown|between|about/);
   });
 
-  it("renders every place with its id, ours and theirs alike", () => {
-    const text = renderWorldSlice(slice());
+  it("renders the places that matter with their ids, ours and theirs alike", () => {
+    const boiiTown = punicWarsScenario.initialWorld.map.provinces.find((province) => province.id === PUNIC_IDS.felsina)!.name;
+    const text = renderWorldSlice(slice(world(), `Invade ${boiiTown}`));
     expect(text).toContain("PLACES");
     expect(text).toContain("OTHER POWERS");
-    // The Boii province is somewhere an invasion must be able to name.
-    expect(text).toContain("punic-italy-middle-padus");
+    // The Boii province the order names is somewhere an invasion must be able to name.
+    expect(text).toContain(PUNIC_IDS.felsina);
+    // The map has four thousand places; the slice names some forty of them.
+    expect(text.match(/\[[a-z]+-[a-z0-9]{5}\]/g)!.length).toBeLessThan(400);
   });
 
   it("tells the world plainly which countries have nobody in them", () => {
@@ -378,13 +382,13 @@ describe("what the world is following, and what stirs", () => {
         orderText: "Invade the Boii lands", facts: [], dueEvents: [], pendingEvents: [],
         narratorSeed: {
           key: "seed-abc", kind: "world_event", archetype: "plague", severity: "serious", secret: false, oneShot: false, repeated: false, pressureId: null,
-          target: { provinceId: "punic-italy-latium", provinceName: "Latium", polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null, otherPolityId: null, otherPolityName: null, forceId: null, forceName: null, forceIsNaval: false },
-          inPlayerRealm: true, why: "The world has been quiet at home for a while.", brief: "Sickness has come to Latium [punic-italy-latium].",
+          target: { provinceId: PUNIC_IDS.rome, provinceName: romeName, polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null, otherPolityId: null, otherPolityName: null, forceId: null, forceName: null, forceIsNaval: false },
+          inPlayerRealm: true, why: "The world has been quiet at home for a while.", brief: `Sickness has come to ${romeName} [${PUNIC_IDS.rome}].`,
         },
       }),
     );
     expect(stirred).toContain("(seed seed-abc)");
-    expect(stirred).toContain("Latium [punic-italy-latium]");
+    expect(stirred).toContain(`${romeName} [${PUNIC_IDS.rome}]`);
     expect(stirred).toContain('carrying seedKey "seed-abc"');
     expect(stirred).toContain("It is news");
   });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { DiplomaticMessageSchema, ScenarioDefinitionSchema, WatchPredicateSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, type DiplomaticMessage, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -58,7 +58,7 @@ describe("a letter's answer, waited on", () => {
       WorldDeltaSchema.parse({
         op: "contingency_arm", localId: "attack", label: "Attack, if Hieron refuses", ownerCharacterRef: "gaius-genucius",
         trigger: { kind: "letter_answered", fromPolityId: "rome", toPolityId: "syracuse", answer: "refused" }, effect: "stand_to",
-        provinceId: "punic-italy-latium", standingOrder: "Attack the Syracusan army.",
+        provinceId: PUNIC_IDS.rome, standingOrder: "Attack the Syracusan army.",
         reason: "The consul's order for when Hieron refuses.",
       }),
     ], context);

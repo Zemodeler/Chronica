@@ -1,5 +1,5 @@
-import { chestOf, treasuryOf, whoIsNamed, type WorldDelta, type WorldState } from "@chronica/shared";
-import { placeIndex, provinceNamedByWords, provinceNamedExactly, provincesNamedIn, withinHops, type PlaceIndex } from "../place-index";
+import { REFERENCE_PROVINCE_KM, chestOf, treasuryOf, whoIsNamed, type WorldDelta, type WorldState } from "@chronica/shared";
+import { placeIndex, provinceNamedByWords, provinceNamedExactly, provincesNamedIn, withinKm, type PlaceIndex } from "../place-index";
 
 /**
  * The ways a model gets a reference almost right, put right before the engine
@@ -19,6 +19,9 @@ import { placeIndex, provinceNamedByWords, provinceNamedExactly, provincesNamedI
  * holder that has exactly one account, a power that holds ground. Anything
  * that could mean two things is left to be refused and repaired.
  */
+
+/** How near a place the act's words name must lie to the one written for the words to be what was meant: three reference provinces. */
+const CLOSE_PLACE_KM = 3 * REFERENCE_PROVINCE_KM;
 
 /** Shorter than this, a prefix is a guess rather than a truncation. */
 const MIN_PREFIX = 12;
@@ -242,7 +245,7 @@ export function normalizeRefs(
       // one written, the words are what was meant.
       const said = saidPlaces();
       if (said.size > 0 && !said.has(value)) {
-        const meant = [...said].filter((id) => withinHops(places, value, id, 2) && !elsewhere().has(id));
+        const meant = [...said].filter((id) => withinKm(places, value, id, CLOSE_PLACE_KM) && !elsewhere().has(id));
         if (meant.length === 1) return meant[0]!;
       }
     }

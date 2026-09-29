@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, type WorldDelta, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -35,10 +35,14 @@ const context = (overrides: Partial<ApplyContext> = {}): ApplyContext => ({
   gameId: "game-december",
   ...overrides,
 });
-const BRUTTIUM = "punic-italy-bruttian-highlands";
-const CAMPANIA = "punic-italy-campanian-plain";
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
-const AGRIGENTUM = "ita-72843720b81376294924159-sicily-central";
+const BRUTTIUM = PUNIC_IDS.rhegium;
+const MESSANA = PUNIC_IDS.messana;
+/** A province up the coast from Rhegium, a day's sail from it: near enough for hulls to be sent for. */
+const UP_THE_COAST = (() => {
+  const edge = punicWarsScenario.initialWorld.map.edges.find((candidate) => candidate.crossing === "land" && (candidate.from === BRUTTIUM || candidate.to === BRUTTIUM))!;
+  return edge.from === BRUTTIUM ? edge.to : edge.from;
+})();
+const AGRIGENTUM = PUNIC_IDS.agrigentum;
 const forceOf = (state: WorldState, id: string) => state.material.forces.find((force) => force.id === id)!;
 
 /** Legio I on the Italian shore, the Greek hulls with it, and forty hired transports a province or two up the coast. */
@@ -49,7 +53,7 @@ function beforeTheCrossing(): WorldState {
     ...hulls,
     id: "campanian-transports",
     name: "Campanian transports",
-    locationId: CAMPANIA,
+    locationId: UP_THE_COAST,
     positionId: null,
     personnel: [{ categoryId: "warship", label: "Transports", fit: 40, unavailable: [] }],
     memberCharacterIds: [],

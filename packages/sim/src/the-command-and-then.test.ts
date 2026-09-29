@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -39,7 +39,7 @@ describe("an order that waits on the Senate", () => {
     WorldDeltaSchema.parse({
       op: "contingency_arm", localId: "legio_ii", label: "Legio II, once the command is given", ownerCharacterRef: "gaius-genucius",
       trigger: { kind: "question_decided", procedureId: "local:command", outcome: "passed" }, effect: "stand_to",
-      provinceId: "punic-italy-latium", standingOrder: "Raise an additional 5000 men known as Legio II.",
+      provinceId: PUNIC_IDS.rome, standingOrder: "Raise an additional 5000 men known as Legio II.",
       reason: "The consul's order for when the command is his.",
     }),
   ], context);

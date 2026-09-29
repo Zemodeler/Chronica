@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import {
   ScenarioDefinitionSchema, WORLD_DELTA_OPS, WorldDeltaSchema, WorldStateSchema, localRef,
   type WorldDelta, type WorldState,
@@ -83,7 +83,7 @@ describe("a payload that names things which do not exist", () => {
     const result = survives([{
       op: "force_create", localId: "ouroboros", name: "The Legion That Pays Itself", polityId: "rome",
       commanderCharacterRef: "gaius-genucius", controllerCharacterRef: "gaius-genucius",
-      locationId: "punic-italy-latium", authorizedStrength: 100,
+      locationId: PUNIC_IDS.rome, authorizedStrength: 100,
       payObligationRef: localRef("ouroboros"), reason: "It pays itself.",
     }]);
     // The handle resolves to a force, which is not an obligation, so the
@@ -98,7 +98,7 @@ describe("numbers at the end of their range", () => {
     const result = survives([{
       op: "force_create", localId: "the_host", name: "Every man in Italy", polityId: "rome",
       commanderCharacterRef: "gaius-genucius", controllerCharacterRef: "gaius-genucius",
-      locationId: "punic-italy-latium", authorizedStrength: 1_000_000,
+      locationId: PUNIC_IDS.rome, authorizedStrength: 1_000_000,
       reason: "The consul levies everybody.",
     }]);
 
@@ -162,7 +162,7 @@ describe("a batch that argues with itself", () => {
     const before = world();
     // A city taken, and then the same order again: the second is refused
     // because the city is already held, and must leave nothing behind.
-    const city = before.map.provinces.find((province) => province.id === "ita-72843720b81376294924159-sicily-northeast")!.settlements[0]!;
+    const city = before.map.provinces.find((province) => province.id === PUNIC_IDS.messana)!.settlements[0]!;
     const take = {
       op: "settlement_control_set", settlementId: city.id, toPolityRef: "mamertines",
       sacked: true, reason: "Storming a city they already hold.",

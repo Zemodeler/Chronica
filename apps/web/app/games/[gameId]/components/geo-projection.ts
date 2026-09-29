@@ -128,6 +128,8 @@ const HISTORICAL_POLITY_PALETTES = {
   czech: ["#a84f48", "#b65b51", "#95554e", "#657c91", "#527089", "#687f6a", "#78845d", "#a18d6d", "#897557", "#735e55", "#7b6374", "#8e5d58", "#668490", "#9b765b", "#667266", "#a46a55"],
   // Polish red, parchment, Baltic blue, pine, and muted gold.
   polish: ["#ad4d48", "#bb5a52", "#9c544f", "#a96a59", "#718696", "#5f7d8d", "#698160", "#778856", "#a18c62", "#8a7659", "#75645a", "#8a6376", "#8f5f54", "#718070", "#a57a5b", "#66736d"],
+  // Lapis and Tyrian purple, saffron, cedar, terracotta and Cappadocian earth: the kingdoms of Asia Minor.
+  anatolian: ["#3f6f8f", "#7d4b7a", "#b0863f", "#a55a3c", "#5c7f57", "#8c6a45", "#4b7c78", "#9a4f5a", "#6f6a8f", "#a8814b", "#57706a", "#8f5b3f", "#3f5f86", "#a06f4a", "#6b7f4a", "#845a6b"],
   // Used only when no cultural lineage is known; still deliberately subdued.
   neutral: ["#6c7470", "#727b76", "#687a78", "#7b786b", "#82745f", "#796758", "#81626a", "#6a7182", "#68766a", "#8a7f67", "#756d78", "#7c6d60", "#6e8181", "#85745f", "#737b65", "#766d64"],
 } as const;
@@ -162,6 +164,15 @@ const CONSOLIDATED_POLITY_PALETTE_SLOTS: Readonly<Record<string, number>> = {
   "ionian-islands": 6, "cycladic-islanders": 13,
   rhodes: 8, "aeolis-communities": 4, "ionia-communities": 1,
   "cretan-cities-west": 12, "cretan-cities-east": 11,
+  // Asia Minor: the Greek cities of its coasts, the Galatian tribes among the
+  // Celts, and the kingdoms, spread so that neighbours never share a swatch.
+  "hellespont-propontic-cities": 10, "heraclea-pontica": 14, "euxine-greek-cities": 7,
+  "galatians-tolistobogii": 7, "galatians-tectosages": 12, "galatians-trocmi": 13,
+  "seleucid-empire": 0, "ptolemaic-egypt": 2, pergamon: 7, bithynia: 5, pontus: 3, cappadocia: 9,
+  armenia: 1, paphlagonia: 4, colchis: 6, "pisidia-isauria": 10,
+  // Iran, the Caucasus, Judea and Arabia.
+  atropatene: 8, "caucasian-albania": 11, "caucasian-iberia": 12, "caspian-peoples": 13, "makran-tribes": 14, judea: 15,
+  gerrha: 0, "hejaz-tribes": 1, ituraeans: 2, kush: 3, lihyan: 4, minaeans: 5, nabataeans: 6, "najd-tribes": 7, qedar: 8, saba: 9,
 };
 
 function historicalFamilyForPolity(polityId: string): HistoricalPolityFamily {
@@ -170,6 +181,7 @@ function historicalFamilyForPolity(polityId: string): HistoricalPolityFamily {
     || polityId.startsWith("britain-")
     || polityId.startsWith("belgica-")
     || polityId.startsWith("ireland-")
+    || polityId.startsWith("galatians-")
     || ["insubres", "boii", "cenomani", "helvetian-peoples", "transalpine-celts"].includes(polityId)
   ) return "celtic";
   if (polityId.startsWith("germania-") || polityId.startsWith("low-countries-")) return "germanic";
@@ -185,8 +197,10 @@ function historicalFamilyForPolity(polityId: string): HistoricalPolityFamily {
     "acarnania", "boeotian-league", "phocian-league", "arcadian-league", "argos",
     "elis", "messenia", "sparta", "megalopolis", "ionian-islands", "cycladic-islanders",
     "rhodes", "aeolis-communities", "ionia-communities", "cretan-cities-west", "cretan-cities-east",
+    "hellespont-propontic-cities", "heraclea-pontica", "euxine-greek-cities",
   ].includes(polityId)) return "hellenic";
-  if (["mauretanian-peoples", "numidian-kingdoms", "gaetuli", "garamantes"].includes(polityId)) return "northAfrican";
+  if (["seleucid-empire", "ptolemaic-egypt", "pergamon", "bithynia", "pontus", "cappadocia", "armenia", "paphlagonia", "colchis", "pisidia-isauria", "atropatene", "caucasian-albania", "caucasian-iberia", "caspian-peoples", "makran-tribes", "judea"].includes(polityId)) return "anatolian";
+  if (["mauretanian-peoples", "numidian-kingdoms", "gaetuli", "garamantes", "kush", "gerrha", "hejaz-tribes", "ituraeans", "lihyan", "minaeans", "nabataeans", "najd-tribes", "qedar", "saba"].includes(polityId)) return "northAfrican";
   return "neutral";
 }
 

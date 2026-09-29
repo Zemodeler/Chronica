@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstPunicWarScenario } from "@chronica/db";
+import { firstPunicWarScenario, FIRST_PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, type WorldState } from "@chronica/shared";
 import { createIdFactory } from "./ports";
 import { runDeterministicTick } from "./tick";
@@ -118,7 +118,7 @@ describe("projects", () => {
         // Two legions are what this project is for, and an effort that declares
         // no product no longer announces its own completion.
         completionOutcome: {
-          kind: "force" as const, label: "Two new legions", amount: 8_000, provinceId: "ita-72843720b81376294924159-sicily-northeast",
+          kind: "force" as const, label: "Two new legions", amount: 8_000, provinceId: FIRST_PUNIC_IDS.messana,
           polityId: "rome", commanderCharacterId: "marcus-atilius", forceId: null, beneficiaryAccountId: null, cadenceDays: null,
           agreementKind: null, withPolityId: null,
         },

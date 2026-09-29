@@ -1,0 +1,544 @@
+Province names by kind: {"coast":96,"people":2269,"compass":1153,"compound":1461,"river":455,"mountain":237,"upland":163,"central":124,"ground":38,"lake":53,"region":7}
+393 regions over 6056 provinces; 43 split into districts; names unique: true
+
+Regions and their provinces:
+  80  Persis
+  57  Parikania
+  53  Sus
+  52  Carmania Deserta
+  45  Syrian Mesopotamia
+  43  Aria
+  40  Vaspurakan
+  39  Ichthyophagia
+  38  Noricum
+  36  Quadia
+  35  Najd
+  34  Semnonia
+  33  Celtiberia
+  33  Choarene
+  33  Marcomannia
+  33  Scythia Minor
+  33  Tihama
+  32  Cadusia
+  32  Oretania
+  32  Qasim
+  31  Atropatene
+  31  Berenice Troglodytica
+  31  Lusitania
+  31  Rhagiana
+  31  Upper Tisia
+  31  Vettonia
+  30  Armenia
+  30  Caria
+  30  Media
+  30  Pannonia Superior
+  29  Uxia
+  28  Hyrcania
+  28  Langobardia
+  28  Leptitana
+  28  Pannonia Inferior
+  28  Sardinia
+  28  Thessaly
+  27  Dalmatia
+  27  Delmatae
+  27  Epirus
+  27  Lihyan
+  27  Lycia
+  27  Turdetania
+  26  Edom
+  26  Thynia
+  25  Bastulia
+  25  Getia
+  25  Palmyrene
+  25  Sagartia
+  25  Savia
+  25  Susiana
+  24  Bastetania
+  24  Bessica
+  24  Boihaemum
+  24  Carduchia
+  24  Cossaea
+  24  Odrysia
+  23  Bithynia
+  23  Carpetania
+  23  Hercynia
+  23  Hermundurica
+  23  Illyria
+  23  Marmarica
+  23  Raetia
+  23  Sophene
+  23  Tapuria
+  23  Vasconia
+  23  Volcae
+  23  Zeugitana
+  22  Armenia Minor
+  22  Bruttium
+  22  Cyrenaica
+  22  Drangiana
+  22  Mil Steppe
+  22  Parthia
+  22  Sicca
+  22  Triballia
+  22  Vaccaea
+  22  Vocontia
+  21  Atlas
+  21  Autrigonia
+  21  Chaldia
+  21  Cotinia
+  21  Gedrosia
+  21  Lydia
+  21  Macedonia
+  21  Massaesyli
+  21  Moesia Inferior
+  21  Napoca
+  21  Pontus
+  21  Sinai
+  21  Vindelicia
+  20  Apamene
+  20  Baeturia
+  20  Cilicia Tracheia
+  20  Helvetia
+  20  Lycaonia
+  20  Mysia
+  20  Nisaea
+  20  Salluvia
+  20  Syunik
+  20  Venetia
+  19  Aquitania
+  19  Brigantia
+  19  Chattia
+  19  Cyclades
+  19  Draa
+  19  Etruria
+  19  Gerrha
+  19  Hejaz
+  19  Moesia Superior
+  19  Phrygia
+  19  Pisidia
+  19  Samnium
+  19  Senonia
+  19  Suebia
+  19  Taulantia
+  18  Ager Gallicus
+  18  Asturia
+  18  Ayrarat
+  18  Banat
+  18  Biturigia
+  18  Byzacena
+  18  Crete
+  18  Daunia
+  18  Domanitis
+  18  Edetania
+  18  Latium
+  18  Lucania
+  18  Margiana
+  18  Osrhoene
+  18  Pictonia
+  18  Syrtica
+  18  Tectosagia
+  18  Teutonia
+  18  Ulster
+  18  Yathrib
+  17  Arvernia
+  17  Baquatia
+  17  Batavia
+  17  Caucasian Iberia
+  17  Chalybonitis
+  17  Elymais
+  17  Histria
+  17  Iazygia
+  17  Ionia
+  17  Marsia
+  17  Matiane
+  17  Midian
+  17  Pamphylia
+  17  Sala
+  17  Saoura
+  17  Segusiavia
+  16  Bracara
+  16  Carpathian Arc
+  16  Chalcidice
+  16  Cynesia
+  16  Dardania
+  16  Ebudae
+  16  Kambadene
+  16  Moab
+  16  Muntenia
+  16  Trocmia
+  16  Votadinia
+  15  Bructeria
+  15  Caledonia
+  15  Carnutia
+  15  Caspiane
+  15  Cataonia
+  15  Elephantine
+  15  Frisia
+  15  Hodna
+  15  Ilercavonia
+  15  Ilergetia
+  15  Insubria
+  15  Kharj
+  15  Messapia
+  15  Oltenia
+  15  Rugia
+  14  Aemilia
+  14  Aeolis
+  14  Belgica
+  14  Campania
+  14  Cenomania
+  14  Crisia
+  14  Dacia
+  14  Galatia
+  14  Hauran
+  14  Paeonia
+  14  Paphlagonia
+  14  Picenum
+  14  Sequania
+  14  Sicelia
+  14  Syracusia
+  14  Tolistobogia
+  14  Treveria
+  14  Tribocia
+  14  Troad
+  14  Ubia
+  13  Ambiania
+  13  Caerenia
+  13  Cheruscia
+  13  Cilicia Pedias
+  13  Contestania
+  13  Corsica
+  13  Cyrrhestice
+  13  Dumnonia
+  13  Eburonia
+  13  Limicia
+  13  Malva
+  13  Massaesylia
+  13  Petrocoria
+  13  Peucetia
+  13  Sicania
+  13  Thracian Chersonese
+  13  Tyanitis
+  13  Zarangia
+  12  Aeduia
+  12  Allobrogia
+  12  Atrebatia
+  12  Attica
+  12  Byzacium
+  12  Caletia
+  12  Cantabria
+  12  Cappadocia
+  12  Caucasian Armenia
+  12  Chaucia
+  12  Damascene
+  12  Galilee
+  12  Garsauritis
+  12  Iol
+  12  Laconia
+  12  Lazica
+  12  Lemovicia
+  12  Mauretania
+  12  Paraetacene
+  12  Poseidonia
+  12  Salassia
+  12  Seleucis
+  12  Siluria
+  12  Taurinia
+  12  Timonitis
+  12  Zab
+  11  Albania
+  11  Argolis
+  11  Asir
+  11  Aulercia
+  11  Colchis
+  11  Indiketia
+  11  Kambysene
+  11  Leucia
+  11  Liguria
+  11  Lingonia
+  11  Melitene
+  11  Moschice
+  11  Namnetia
+  11  Parisia
+  11  Phocis
+  11  Sarmizegetusa
+  11  Siritis
+  11  Suania
+  11  Tingitana
+  11  Tripolitania
+  11  Trogodytice
+  10  Acarnania
+  10  Agri Decumates
+  10  Astauene
+  10  Boeotia
+  10  Corieltavia
+  10  Cornovia
+  10  Damnonia
+  10  Epidia
+  10  Fortunate Isles
+  10  Gaetulia
+  10  Heracleopolite Nome
+  10  Idumea
+  10  Lucensis
+  10  Mastiene
+  10  Najran
+  10  Nasamonia
+  10  Nervia
+  10  Novantia
+  10  Numidia
+  10  Ordovicia
+  10  Saite Delta
+  10  Tisia
+  10  Titteri
+  10  Turonia
+  10  Utik
+  10  Volaterrae
+   9  Aetolia
+   9  Ammonitis
+   9  Arcadia
+   9  Arsinoite Nome
+   9  Cadurcia
+   9  Commagene
+   9  Dobunnia
+   9  Elis
+   9  Elymia
+   9  Falerii
+   9  Gugark
+   9  Hermaea
+   9  Icenia
+   9  Lacetania
+   9  Mareotis
+   9  Menapia
+   9  Oreitia
+   9  Osismia
+   9  Phoenicia
+   9  Rhodes
+   9  Ruthenia
+   9  Taexalia
+   9  Tafilalt
+   9  Themiscyra
+   8  Achaea
+   8  Angrivaria
+   8  Arabian Nome
+   8  Armorica
+   8  Baliares
+   8  Coriosolitia
+   8  Dodecanese
+   8  Mardia
+   8  Mediomatricia
+   8  Mendesian Delta
+   8  Messenia
+   8  Philistia
+   8  Sabinum
+   8  Samaria
+   8  Sugambria
+   8  Umbria
+   7  Artabria
+   7  Atlas Maior
+   7  Aures
+   7  Cantium
+   7  Catuvellaunia
+   7  Cirtensis
+   7  Clusina
+   7  Durotrigia
+   7  Gallaecia
+   7  Gilead
+   7  Judea
+   7  Liburnia
+   7  Redonia
+   7  Sebennyte Delta
+   7  Trinovantia
+   7  Vacomagia
+   6  Andecavia
+   6  Macae
+   6  Massyli
+   6  Memphite Nome
+   6  Morinia
+   6  Peloris
+   6  Samos
+   6  Venetia Armoricana
+   5  Euboea
+   5  Laietania
+   5  Lesbos
+   5  Mzab
+   5  Nementcha
+   5  Sinopis
+   5  Sporades
+   5  Tarquinia
+   5  Tema
+   5  Thusca
+   4  Abydene Nome
+   4  Emporia
+   4  Gargarea
+   4  Heliopolite Nome
+   4  Hermopolite Nome
+   4  Lemnos and Imbros
+   4  Lycopolite Nome
+   4  Oxyrhynchite Nome
+   3  Ammonium
+   3  Cessetania
+   3  Chios
+   3  Coptite Nome
+   3  Garamantia
+   3  Theban Nome
+   2  Apollonopolite Nome
+   2  Augilae
+   2  Dumat
+   2  Ionian Isles
+   2  Orcades
+   2  Pityusae
+   2  Thasos and Samothrace
+   2  Tuwayq
+   2  Yamama
+   1  Aeolian Isles
+   1  Bastarnia
+   1  Dilmun
+   1  Hail
+   1  Melita
+   1  Ombite Nome
+
+Regions that needed splitting:
+Aria (43): North-eastern Aria; South-western Aria; North-western Aria; South-eastern Aria
+Armenia (30): North-eastern Armenia; Armenia on the Arsanias; Armenia of the Phasioi
+Atropatene (31): North-eastern Atropatene; South-eastern Atropatene; Western Atropatene
+Berenice Troglodytica (31): Northern Berenice Troglodytica; South-eastern Berenice Troglodytica; South-western Berenice Troglodytica
+Cadusia (32): Cadusia of the Gelai; South-western Cadusia; Cadusia of the Anariakai
+Caria (30): Caria on the Timeles; Caria on the Kenios; Caria on the Kalbis
+Carmania Deserta (52): Northern Carmania Deserta; Southern Carmania Deserta; Eastern Carmania Deserta; Western Carmania Deserta
+Celtiberia (33): Celtiberia of the Arevaci; Celtiberia of the Tittoi; Celtiberia of the Belloi
+Choarene (33): Northern Choarene; South-eastern Choarene; Western Choarene
+Dalmatia (27): Dalmatia of the Ditiones; Dalmatia of the Manioi; Dalmatia of the Nestoi
+Delmatae (27): Delmatae of the Sapuates; Delmatae of the Glinditiones; Delmatae of the Daesitiates
+Epirus (27): Epirus of the Onopernoi; Epirus of the Talares; Epirus of the Chaunoi
+Hyrcania (28): Northern Hyrcania; South-western Hyrcania; Eastern Hyrcania
+Ichthyophagia (39): North-western Ichthyophagia; Southern Ichthyophagia; South-eastern Ichthyophagia
+Langobardia (28): Langobardia of the Farodini; Southern Langobardia; Langobardia of the Langobardi
+Leptitana (28): Leptitana of the Cinyphii; Southern Leptitana; Leptitana of the Elaiones
+Lihyan (27): Lihyan of the Arreni; Lihyan beneath Mons Chersonnesos Akra; Lihyan of the Maisaimaneis
+Lusitania (31): Northern Lusitania; Lusitania of the Bardili Turduli; Lusitania of the Celtici
+Lycia (27): Lycia of the Ormeleis; Lycia on the Arycandus; Lycia on the Glaucus
+Marcomannia (33): Marcomannia of the Korkontoi; South-western Marcomannia; South-eastern Marcomannia
+Media (30): North-western Media; South-eastern Media; South-western Media
+Najd (35): Northern Najd; Southern Najd; Central Najd
+Noricum (38): Northern Noricum; Noricum of the Ambidrauoi; Noricum on the Anisus
+Oretania (32): North-eastern Oretania; Oretania of the Olcades; Oretania of the Oretania
+Pannonia Inferior (28): Pannonia Inferior of the Hercuniates; Pannonia Inferior of the Cornacates; South-western Pannonia Inferior
+Pannonia Superior (30): North-western Pannonia Superior; Southern Pannonia Superior; Pannonia Superior of the Arabiates
+Parikania (57): North-eastern Parikania; Southern Parikania; Western Parikania; North-western Parikania; South-eastern Parikania
+Persis (80): Northern Persis; Southern Persis; Western Persis; Eastern Persis; Central Persis; North-western Persis; Further eastern Persis
+Qasim (32): North-western Qasim; Southern Qasim; Eastern Qasim
+Quadia (36): Quadia on the Marus; Quadia of the Baimoi; Quadia of the Rakatai
+Rhagiana (31): Northern Rhagiana; South-eastern Rhagiana; North-western Rhagiana
+Sardinia (28): Sardinia of the Balari; Sardinia of the Beronicenses; Sardinia of the Celesitani
+Scythia Minor (33): Scythia Minor on the Psilon Stoma; Scythia Minor of the Krobyzoi; Scythia Minor of the Harpioi
+Semnonia (34): Semnonia of the Lemovii; South-eastern Semnonia; Semnonia of the Kaloukones
+Sus (53): Sus on the Quosenum; South-western Sus; Central Sus; Sus on the Masath; Further south-western Sus
+Syrian Mesopotamia (45): Syrian Mesopotamia beneath Mons Izala; Southern Syrian Mesopotamia; Syrian Mesopotamia on the Aborras; Syrian Mesopotamia on the Hirmas
+Thessaly (28): Thessaly of the Perraibia; Thessaly of the Ipnoi; Thessaly of the Athamania
+Tihama (33): North-western Tihama; Tihama of the Debai; North-eastern Tihama
+Turdetania (27): Northern Turdetania; Turdetania on the Maenuba; Turdetania on the Salsum
+Upper Tisia (31): Northern Upper Tisia; South-eastern Upper Tisia; Western Upper Tisia
+Uxia (29): North-eastern Uxia; South-eastern Uxia; Western Uxia
+Vaspurakan (40): Northern Vaspurakan; Vaspurakan of the Kardouchoi; Eastern Vaspurakan; Vaspurakan on the Nicephorion
+Vettonia (31): Vettonia of the Lancienses Transcudani; Vettonia of the Lancienses Oppidani; Eastern Vettonia
+
+100 provinces chosen at random (id, region, kind, name):
+it-c20bo	Campania	river	Campania on the Volturnus
+irn-5rys9	Sagartia	compound	Further north-eastern Sagartia
+ibe-uxjaw	Vettonia	people	South-eastern hills of the Vettones
+cil-oi69k	Lycaonia	people	South-eastern highlands of the Gorgoromeis
+irn-fx4l5	Persis	compound	Further upland Western Persis
+arm-yvq52	Utik	compass	Northern Utik
+bri-weft2	Corieltavia	people	Southern hills of the Catuvellauni
+mau-28ddl	Mauretania	compass	Western Mauretania
+irn-uitmx	Tapuria	mountain	Tapuria beneath Mons Iasonius
+bit-i4tnh	Domanitis	people	Western uplands of the Mariandynoi
+mau-6idnm	Sus	compound	Upper coastal Central Sus
+pon-foktc	Armenia Minor	mountain	Armenia Minor beneath Mons Dastracus
+irn-d4x2k	Carmania Deserta	compound	Farther upland Northern Carmania Deserta
+dac-4lc6a	Bastarnia	region	Bastarnia
+sic-2ykwh	Syracusia	mountain	Syracusia beneath Mons Hyblaei Colles
+irn-4q0nf	Media	compound	Inner upland South-eastern Media
+moe-6w43z	Dardania	compass	Northern Dardania
+num-b1pj1	Zab	compass	North-eastern Zab
+irn-dc91i	Parikania	compound	Remote upland North-western Parikania
+bri-zn9gw	Damnonia	compass	North-eastern Damnonia
+cyr-jwnrj	Marmarica	people	Hills of the Marmaridai
+gre-9ddq1	Laconia	compound	Central coastal Laconia
+thr-9mu6m	Bessica	river	Bessica on the Nestos
+ion-h2h7w	Caria	compass	South-western Caria on the Kenios
+egy-pjhr3	Sinai	compound	Western coastal Sinai
+ibe-bvkj8	Asturia	people	South-eastern uplands of the Bedunienses
+num-itbby	Numidia	people	North-western coast of the Gebalusii
+ibe-05cgt	Lucensis	people	Uplands of the Lougei
+pan-ckv1r	Banat	compass	North-western Banat
+syr-h5bp1	Palmyrene	compound	Further western Palmyrene
+arm-rvb43	Armenia	people	Highlands of the Phasioi
+pan-1pysn	Quadia	people	Hills of the Rakatai
+irn-7u83p	Persis	ground	Lowland Western Persis
+irn-f7j09	Carmania Deserta	compound	Middle upland Northern Carmania Deserta
+ara-lpv1w	Yathrib	compound	Eastern upland Yathrib
+gre-4n9fh	Boeotia	river	Boeotia on the Kallas
+lus-y9yy1	Bracara	people	Southern coast of the Turduli Veteres
+ibe-9owfm	Vettonia	people	North-eastern uplands of the Zoelae
+gre-n5vau	Laconia	compass	Northern Laconia
+it-7d440	Messapia	people	Eastern coast of the Sallentini
+gal-z9rex	Frisia	people	Southern hills of the Frisii
+ger-khllq	Chattia	compass	North-eastern Chattia
+thr-578s3	Chalcidice	coast	Coastal Chalcidice
+mau-xjc8x	Atlas	compound	Further north-eastern Atlas
+gre-msqec	Epirus	people	Highlands of the Athamania
+thr-gxx49	Bithynia	compass	Western Bithynia
+gre-zskz7	Messenia	people	Further southern coast of the Kaukones
+gala-lnrr4	Galatia	compass	South-western Galatia
+syr-w1gvb	Chalybonitis	compound	Southern lowland Chalybonitis
+gre-cf7ai	Thessaly	people	Western highlands of the Athamania
+bri-8qtc4	Novantia	people	Eastern coast of the Carvetii
+egy-mlled	Saite Delta	compass	Eastern Saite Delta
+irn-cn069	Matiane	compound	North-eastern upland Matiane
+lev-32n7q	Moab	compass	Eastern Moab
+egy-gtue4	Sinai	people	Coast of the Maranites
+ibe-uke4b	Vaccaea	compass	South-western Vaccaea
+ill-t2fw7	Savia	mountain	Savia beneath Mons Alpes Delmaticae
+ibe-bsyac	Vaccaea	people	North-eastern uplands of the Vaccaei
+mau-hwoia	Draa	compound	North-eastern upland Draa
+gal-2yns9	Biturigia	compass	Eastern Biturigia
+gal-3q9le	Osismia	people	Coast of the Coriosolites
+num-bjxif	Massaesyli	people	Coast of the Massaesylii
+irn-he9oj	Mil Steppe	compound	Central lowland Mil Steppe
+irn-u25ks	Nisaea	compound	South-eastern upland Nisaea
+mau-utoyz	Atlas	compound	Eastern upland Atlas
+bri-rup6k	Corieltavia	people	South-eastern hills of the Corieltauvi
+sard-ed9xh	Sardinia	people	Vale of the Sardi Pelliti
+irn-zduvk	Margiana	compound	North-eastern upland Margiana
+gal-ji4f1	Sequania	people	Further south-western hills of the Sequani
+it-rin2q	Marsia	mountain	Marsia beneath Mons Pallanum
+arm-msi18	Caucasian Armenia	compound	North-eastern upland Caucasian Armenia
+irn-ffwxy	Sagartia	compound	Central upland Sagartia
+gal-dlxlp	Vocontia	people	Hills of the Segovellauni
+gre-an5tr	Elis	river	Elis on the Acheron
+gal-k40dc	Morinia	people	North-eastern coast of the Morini
+bri-lxcvo	Brigantia	people	Eastern hills of the Brigantes
+irn-md6ju	Rhagiana	compound	Remote upland North-western Rhagiana
+tur-ra641	Turdetania	compound	Further eastern Turdetania on the Maenuba
+ibe-ycd5i	Limicia	people	Uplands of the Teibouroi
+gal-bujnp	Menapia	coast	Coastal Menapia
+irn-3nlxz	Parikania	compound	Outer upland Western Parikania
+ill-dvkbv	Liburnia	coast	Coastal Liburnia
+arm-je1kk	Vaspurakan	people	Northern highlands of the Mardoi
+pap-q5cwm	Sinopis	people	Coast of the Potamoi
+gal-ow4pa	Senonia	people	Eastern hills of the Tricasses
+gal-7mdlo	Segusiavia	people	Southern uplands of the Vellavi
+ill-ebxfz	Illyria	people	Coast of the Enchelei
+tur-7y2cw	Bastulia	people	Coast of the Bastouloi
+mau-1ex9l	Sala	people	Coast of the Salenses
+irn-dogsb	Parikania	ground	Lowland Western Parikania
+thr-btqxo	Paeonia	people	South-eastern hills of the Kissynioi
+mau-j4ihn	Sus	coast	Coastal Sus on the Quosenum
+dac-xqe2t	Scythia Minor	people	Vale of the Bastarnae
+irn-3x4x5	Persis	compound	Outer upland Further eastern Persis
+ibe-vhw81	Indiketia	river	Indiketia on the Tech
+afr-pjfcl	Byzacena	people	Coast of the Cinithi
+bri-3d33r	Caerenia	people	Coast of the Mertai
+jud-adf5q	Judea	upland	Upland Judea
+gal-kuqi2	Turonia	people	Vale of the Turoni
+cau-dgt65	Caspiane	compass	Eastern Caspiane

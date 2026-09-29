@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, type Force, type WorldDelta, type WorldState } from "@chronica/shared";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
+import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, kmFrom, type Force, type WorldDelta, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
 import { levyCost, MEN_MUSTERED_PER_DAY, MUSTER_AT_ONCE } from "./levies";
@@ -17,9 +17,9 @@ import { runDeterministicTick } from "./tick";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const LATIUM = "punic-italy-latium";
-const CAMPANIA = "punic-italy-campanian-plain";
-const ETRURIA = "punic-italy-etrurian-uplands";
+const LATIUM = PUNIC_IDS.rome;
+const CAMPANIA = PUNIC_IDS.capua;
+const ETRURIA = PUNIC_IDS.volsinii;
 
 const context: ApplyContext = {
   now: { day: 0, minute: 540 },
@@ -45,6 +45,9 @@ const raise = (men: number): WorldDelta => ({
 });
 
 const manpower = (world: WorldState, provinceId: string): number => world.material.provinceMaterial.find((row) => row.provinceId === provinceId)!.availableManpower;
+/** Every province of Rome's own, and the men of age they hold between them. */
+const romanGround = (world: WorldState): string[] => world.map.provinces.filter((province) => province.controllerPolityId === "rome").map((province) => province.id);
+const romanManpower = (world: WorldState): number => romanGround(world).reduce((sum, id) => sum + manpower(world, id), 0);
 const treasury = (world: WorldState): number => world.material.accounts.find((account) => account.id === "rome-treasury")!.balance;
 const raised = (world: WorldState): Force => world.material.forces.find((force) => force.name === "Two new legions")!;
 const fit = (force: Force): number => force.personnel.reduce((sum, group) => sum + group.fit, 0);
@@ -53,12 +56,15 @@ const coming = (force: Force): number => force.personnel.reduce((sum, group) => 
 describe("a levy", () => {
   it("draws the men out of the province, then the rest of Rome's ground", () => {
     const before = opening();
-    // More than Latium's 32 000: the rest comes from Campania.
+    // More than Latium holds: the rest comes from Rome's ground round about it, and from nowhere that is not Rome's.
     const asked = manpower(before, LATIUM) + 5_000;
     const result = applyDeltas(before, [raise(asked)], context);
     expect(result.rejected.map((rejection) => rejection.reason)).toEqual([]);
     expect(manpower(result.world, LATIUM)).toBe(0);
-    expect(manpower(result.world, CAMPANIA)).toBe(manpower(before, CAMPANIA) - 5_000);
+    expect(romanManpower(result.world)).toBe(romanManpower(before) - asked);
+    const taken = before.map.provinces.filter((province) => manpower(result.world, province.id) < manpower(before, province.id)).map((province) => province.id);
+    expect(taken.length).toBeGreaterThan(1);
+    expect(taken.every((id) => romanGround(before).includes(id))).toBe(true);
   });
 
   it("is paid for out of the treasury", () => {
@@ -91,7 +97,7 @@ describe("a levy", () => {
     const result = applyDeltas(before, [raise(200_000)], context);
     expect(result.rejected).toEqual([]);
     expect(manpower(result.world, ETRURIA)).toBe(manpower(before, ETRURIA));
-    expect(raised(result.world).authorizedStrength).toBe(manpower(before, LATIUM) + manpower(before, CAMPANIA));
+    expect(raised(result.world).authorizedStrength).toBe(romanManpower(before));
     expect(result.factProposals.some((fact) => fact.kind === "levy_short" && /no more men of age/.test(fact.summary))).toBe(true);
   });
 
@@ -100,7 +106,11 @@ describe("a levy", () => {
     const result = applyDeltas(before, [{ ...raise(1_000), locationId: ETRURIA } as WorldDelta], context);
     expect(result.rejected).toEqual([]);
     expect(manpower(result.world, ETRURIA)).toBe(manpower(before, ETRURIA));
-    expect(manpower(result.world, LATIUM)).toBe(manpower(before, LATIUM) - 1_000);
+    // From the Roman ground nearest the allies' country, not from a Rome that lies a province further.
+    const reach = kmFrom(before, ETRURIA);
+    const nearest = romanGround(before).filter((id) => manpower(before, id) > 0).sort((a, b) => (reach.get(a) ?? Infinity) - (reach.get(b) ?? Infinity) || a.localeCompare(b))[0]!;
+    expect(manpower(result.world, nearest)).toBe(Math.max(0, manpower(before, nearest) - 1_000));
+    expect(romanManpower(result.world)).toBe(romanManpower(before) - 1_000);
   });
 
   it("raises only the men there is money to arm", () => {

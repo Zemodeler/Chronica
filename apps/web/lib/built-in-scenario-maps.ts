@@ -1,10 +1,10 @@
 import type { GeoJsonMap, WorldState } from "@chronica/shared";
 import { europeNorthAfricaGeoJson } from "./europe-north-africa-geojson";
-import { punicWarsGeoJson } from "./punic-wars-geojson";
+import { punicWarsGeoJson } from "./punic-wars-map";
 
 /** Immutable identity for the Numidian Decision's copied opening map asset. */
 export const NUMIDIAN_DECISION_MAP_ASSET_ID = "00000000-0000-4000-8000-000000000201";
-export const PUNIC_WARS_MAP_ASSET_ID = "00000000-0000-4000-8000-000000000202";
+export const PUNIC_WARS_MAP_ASSET_ID = "00000000-0000-4000-8000-000000000203";
 
 /**
  * Return a fresh top-level map document so callers can't accidentally share
@@ -16,7 +16,7 @@ export const PUNIC_WARS_MAP_ASSET_ID = "00000000-0000-4000-8000-000000000202";
  */
 export function builtInScenarioMap(mapAssetId: string | null): GeoJsonMap | undefined {
   if (mapAssetId === NUMIDIAN_DECISION_MAP_ASSET_ID) return { ...europeNorthAfricaGeoJson };
-  if (mapAssetId === PUNIC_WARS_MAP_ASSET_ID) return { ...punicWarsGeoJson };
+  if (mapAssetId === PUNIC_WARS_MAP_ASSET_ID) return { ...punicWarsGeoJson() };
   return undefined;
 }
 

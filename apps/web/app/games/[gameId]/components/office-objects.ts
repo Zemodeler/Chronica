@@ -88,7 +88,7 @@ const STYLE_WORDS: readonly (readonly [RoomStyle, readonly string[]])[] = [
   // an id, and the id is the bare place name.
   ["roman", ["roman", "rome", "latin", "italic", "sabine", "etruscan"]],
   ["carthaginian", ["carthag", "punic", "phoenic", "numid", "libyan"]],
-  ["greek", ["greek", "hellen", "syracus", "achaean", "macedon", "spartan", "athen"]],
+  ["greek", ["greek", "hellen", "syracus", "achaean", "macedon", "spartan", "athen", "anatol", "seleuc", "ptolem", "pergam"]],
   ["gallic", ["gaul", "gallic", "celt", "boii", "insubr", "briton"]],
 ];
 

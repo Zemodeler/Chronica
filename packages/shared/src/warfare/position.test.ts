@@ -3,12 +3,12 @@ import type { Province } from "../world/map";
 import { fallbackPositionsFor, positionsForProvince, findPosition, defaultPositionFor, resolveForcePosition } from "./position";
 
 const province: Province = {
-  id: "sicily-northeast",
+  id: "test-province",
   name: "North-eastern Sicily",
   formerNames: [],
   terrainId: "coastal-plain",
   settlements: [
-    { id: "messana-city", name: "Messana", kind: "port", provinceId: "sicily-northeast", controllerPolityId: "rome", size: 55, fortificationLevel: 3 },
+    { id: "messana-city", name: "Messana", kind: "port", provinceId: "test-province", controllerPolityId: "rome", size: 55, fortificationLevel: 3 },
   ],
   controllerPolityId: "rome",
   controlFirmnessBps: 7_000,

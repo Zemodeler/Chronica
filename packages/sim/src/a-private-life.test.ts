@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, type WorldDelta, type WorldState } from "@chronica/shared";
 import { createIdFactory } from "./ports";
 import { applyDeltas } from "./apply/apply-deltas";
@@ -16,7 +16,7 @@ import type { ApplyContext } from "./apply/context";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const LATIUM = "punic-italy-latium";
+const LATIUM = PUNIC_IDS.rome;
 const CURIUS = "manius-curius";
 
 const world = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);

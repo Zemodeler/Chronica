@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, VENTURE_PRICE_MONTHS, WorldDeltaSchema, WorldStateSchema, ensureProvinceMaterial, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -20,7 +20,7 @@ import { arrangementNetIncome } from "./standing-effects";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const SYRACUSE = "ita-72843720b81376294924159-sicily-southeast";
+const SYRACUSE = PUNIC_IDS.syracuse;
 const LEPTINES = { kind: "character" as const, id: "leptines-syracuse" };
 const opening = (): WorldState => ensureProvinceMaterial(WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld)), 0);
 const as = (): ApplyContext => ({

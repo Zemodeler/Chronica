@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import {
   ScenarioDefinitionSchema,
   WorldDeltaSchema,
@@ -43,12 +43,17 @@ import type { ApplyContext } from "./apply/context";
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
 const world = (): WorldState => WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
 
-const AGRIGENTUM = "ita-72843720b81376294924159-sicily-central";
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
-const LILYBAEUM = "ita-72843720b81376294924159-sicily-west";
-const SYRACUSE = "ita-72843720b81376294924159-sicily-southeast";
-const AFRICA = "tun-13205935b88806172084765";
-const LATIUM = "punic-italy-latium";
+const AGRIGENTUM = PUNIC_IDS.agrigentum;
+const MESSANA = PUNIC_IDS.messana;
+const LILYBAEUM = PUNIC_IDS.lilybaeum;
+const SYRACUSE = PUNIC_IDS.syracuse;
+const AFRICA = PUNIC_IDS.carthage;
+const LATIUM = PUNIC_IDS.rome;
+/** A province next to Rome by land: one step on, so a march to it is made at once rather than set going as a journey. */
+const NEXT_DOOR = (() => {
+  const edge = punicWarsScenario.initialWorld.map.edges.find((candidate) => candidate.crossing === "land" && (candidate.from === LATIUM || candidate.to === LATIUM))!;
+  return edge.from === LATIUM ? edge.to : edge.from;
+})();
 
 const context = (): ApplyContext => ({
   now: { day: 0, minute: 540 },
@@ -323,7 +328,7 @@ describe("ground inside a province (orders 7, 17, 19, 20, 21, 23, 25, 28, 52)", 
       reason: "The crossing is held.",
     }]);
     const marched = order([{
-      op: "force_modify", forceRef: "roman-field-army", locationId: "punic-italy-samnium",
+      op: "force_modify", forceRef: "roman-field-army", locationId: NEXT_DOOR,
       reason: "The legion moves on.",
     }], held.world);
 
@@ -340,7 +345,7 @@ describe("cities, taken and founded (orders 3, 9, 16, 19, 31, 43, 47, 49)", () =
       material: {
         ...state.material,
         forces: state.material.forces.map((force) => (force.id === "roman-field-army"
-          ? { ...force, locationId: "ita-72843720b81376294924159-sicily-northwest" }
+          ? { ...force, locationId: PUNIC_IDS.panormus }
           : force)),
       },
     });
@@ -351,7 +356,7 @@ describe("cities, taken and founded (orders 3, 9, 16, 19, 31, 43, 47, 49)", () =
     }], beforePanormus);
 
     carriedOut(result);
-    const province = result.world.map.provinces.find((candidate) => candidate.id === "ita-72843720b81376294924159-sicily-northwest")!;
+    const province = result.world.map.provinces.find((candidate) => candidate.id === PUNIC_IDS.panormus)!;
     expect(province.settlements.find((settlement) => settlement.id === "settlement-panormus")!.controllerPolityId).toBe("rome");
   });
 
@@ -531,7 +536,7 @@ describe("what a governor does with a province at peace (orders 71, 72, 74, 75, 
 describe("conquest, and what the world still refuses (orders 49, 56, 73)", () => {
   it("refuses a province nothing can reach, which is the world answering and not the engine", () => {
     const result = order([{
-      op: "province_control_set", provinceId: "dza-43142294b13998567259459", toPolityRef: "rome",
+      op: "province_control_set", provinceId: PUNIC_IDS.carthage, toPolityRef: "rome",
       firmnessBps: 2_000,
       reason: "The Numidian villages submit.",
     }]);

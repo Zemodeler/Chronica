@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { punicWarsScenario } from "@chronica/db";
+import { punicWarsScenario, PUNIC_IDS } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, atWar, ensureProvinceMaterial, type WorldState } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { ApplyContext } from "./apply/context";
@@ -15,7 +15,7 @@ import { createIdFactory } from "./ports";
  */
 
 const definition = ScenarioDefinitionSchema.parse(punicWarsScenario.definition);
-const MESSANA = "ita-72843720b81376294924159-sicily-northeast";
+const MESSANA = PUNIC_IDS.messana;
 const context: ApplyContext = {
   now: { day: 0, minute: 540 },
   actorRef: { kind: "character", id: "gaius-genucius" },
@@ -54,7 +54,7 @@ describe("Messana changing hands", () => {
   it("closes a road for the season only in winter", () => {
     const seed: NarratorSeed = {
       key: "seed-road", kind: "world_event", archetype: "road_or_pass", severity: "grave", secret: false, oneShot: true,
-      target: { provinceId: "punic-italy-campania", provinceName: "Campania", polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null, otherPolityId: null, otherPolityName: null, forceId: null, forceName: null, forceIsNaval: false },
+      target: { provinceId: PUNIC_IDS.capua, provinceName: before().map.provinces.find((province) => province.id === PUNIC_IDS.capua)!.name, polityId: "rome", polityName: "Roman Republic", characterId: null, characterName: null, otherPolityId: null, otherPolityName: null, forceId: null, forceName: null, forceIsNaval: false },
       inPlayerRealm: true, repeated: false, pressureId: null, why: "Weather.", brief: "The road.",
     };
     expect(engineWork(seed, true)!.fact.summary).toMatch(/closed for the season/);
