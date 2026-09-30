@@ -68,6 +68,8 @@ const EATEN_FORAGING_BPS = 4_000;
 const FAMINE_BPS = 1_500;
 /** An army smaller than this is a garrison, and does not sicken as a camp does. */
 const CAMP_SIZE = 5_000;
+/** A fleet at sea in winter: its chance of being caught by a storm on a given day, in basis points. */
+const WINTER_STORM_BPS = 200;
 /** What rest brings morale and order back to, and no further. */
 const RESTED_BPS = 7_000;
 
@@ -125,6 +127,10 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
       ? [project.completionOutcome.forceId]
       : []));
   const besieging = new Set(world.sieges.filter((siege) => siege.status === "active").map((siege) => siege.forceId));
+  // Kept to its camp by an enemy on the same ground: whoever is attacked in a
+  // fight not yet decided (`engagements.ts`). His foragers are cut up, so the
+  // country does not feed him; the enemy, who holds it, forages as he likes.
+  const penned = new Set(world.engagements.filter((engagement) => engagement.status === "open").flatMap((engagement) => engagement.defenderForceIds));
   const provinceName = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
   let provinceMaterial = world.material.provinceMaterial;
   const materialOf = (id: string): ProvinceMaterial | undefined => provinceMaterial.find((row) => row.provinceId === id);
@@ -162,12 +168,17 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
     const material = materialOf(force.locationId);
     if (province === undefined || material === undefined) return undefined;
     const holder = province.controllerPolityId;
-    if (friendly(force, holder) && material.foodSecurityBps >= FAMINE_BPS) return "home";
+    const keptIn = penned.has(force.id);
+    // Penned, only what is inside his lines feeds him: a walled town of his
+    // own side here, whose granaries he can reach, or a depot on the spot.
+    const granary = province.settlements.some((settlement) => settlement.fortificationLevel >= 2 && friendly(force, settlement.controllerPolityId));
+    if (friendly(force, holder) && material.foodSecurityBps >= FAMINE_BPS && (!keptIn || granary)) return "home";
     const depot = world.structures.some((structure) => structure.ownerPolityId === force.polityId && structure.supplyRadius > 0
-      && (structure.provinceId === force.locationId || (kmBetween(world, structure.provinceId, force.locationId, structure.supplyRadius * REFERENCE_PROVINCE_KM) ?? Infinity) <= structure.supplyRadius * REFERENCE_PROVINCE_KM));
+      && (structure.provinceId === force.locationId || (!keptIn && (kmBetween(world, structure.provinceId, force.locationId, structure.supplyRadius * REFERENCE_PROVINCE_KM) ?? Infinity) <= structure.supplyRadius * REFERENCE_PROVINCE_KM)));
     if (depot) return "depot";
     const ships = world.material.forces.filter((other) => other.locationId === force.locationId && other.id !== force.id && isNavalForce(other, input.warfare));
     if (ships.some((fleet) => fleet.polityId === force.polityId) && !ships.some((fleet) => hostile(force, fleet.polityId))) return "sea";
+    if (keptIn) return null;
     if (material.population <= 0) return undefined;
     const feeds = material.population * FORAGE_MEN_PER_HEAD * (material.foodSecurityBps / 10_000) * (winter ? 0.5 : 1);
     return men <= feeds ? "forage" : null;
@@ -223,10 +234,34 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
         force = takeMen(takeMen(force, lost - walked, "attrition_death", toDay, "hunger"), walked, "desertion", toDay, "hunger");
         if (lost > 0) say("force_starving", force, `${force.name} is starving in ${place}: ${lost - walked} men have died of hunger and ${walked} have slipped away to find food.`, 65);
       } else if (status !== before && status === "shortage") {
-        say("force_short", force, `${force.name} has eaten the bread it carried and is on short rations in ${place}${winter ? ", in the depth of winter" : ""}: nothing feeds it there.`, 45);
+        say("force_short", force, penned.has(force.id)
+          ? `${force.name} has eaten the bread it carried and is on short rations in its camp at ${place}: penned there by the enemy, its foragers cannot go out.`
+          : `${force.name} has eaten the bread it carried and is on short rations in ${place}${winter ? ", in the depth of winter" : ""}: nothing feeds it there.`, 45);
       }
       if (status === "provisioned" && before !== "provisioned") {
         say("force_resupplied", force, `${force.name} is fed again in ${place}.`, 30);
+      }
+    }
+
+    // ── The sea out of season ──────────────────────────────────────────
+    //
+    // Galleys kept a season, spring to autumn, and were beached for the
+    // winter. A fleet kept at sea through it -- off an enemy coast, blockading,
+    // or simply not brought home -- is at the mercy of the weather, and the
+    // storms of 255 and 249 sank more Roman ships than Carthage ever did.
+    // Brought into a friendly harbour, it is laid up and safe: that is what an
+    // order to overwinter is.
+    if (naval && winter) {
+      const holder = world.map.provinces.find((candidate) => candidate.id === force.locationId)?.controllerPolityId ?? null;
+      if (!friendly(force, holder)) {
+        for (let day = since + 1; day <= toDay; day += 1) {
+          if (stableHash([force.id, "winter-storm", day]) % 10_000 >= WINTER_STORM_BPS) continue;
+          const hulls = fitOf(force);
+          const sunk = Math.max(1, Math.floor(hulls * (0.1 + (stableHash([force.id, "storm-size", day]) % 1_500) / 10_000)));
+          force = { ...takeMen(force, sunk, "attrition_death", day, "winter-storm"), moraleBps: clampBps(force.moraleBps - 800) };
+          say("fleet_storm", force, `A winter storm caught ${force.name} at sea off ${place}: ${sunk} of its ships were lost.`, 65);
+          break;
+        }
       }
     }
 

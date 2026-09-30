@@ -783,6 +783,12 @@ function projectRelations(world: ChronicleInput["world"], observerPolityId: stri
   });
 }
 
+/** What a fight day produces (`engagements.ts`, `battle.ts`): told per day, not folded into one entry. */
+const FIGHT_DAY_KINDS: ReadonlySet<string> = new Set([
+  "battle", "skirmish", "force_withdrew", "camp_taken", "engagement_broken_off", "engagement_turning_point",
+  "commander_captured", "commander_wounded", "night_attack", "camp_stormed", "siege_event", "sea_battle",
+]);
+
 function splitIntoThreads(
   facts: readonly Fact[],
   observerPolityId: string | null,
@@ -822,8 +828,13 @@ function splitIntoThreads(
     // named their sponsor and were written up as one entry; each is its own
     // decision, and its own entry.
     const question = fact.affectedEntities.find((entity) => entity.kind === "procedure");
+    // A fight that lasts is told day by day: the first clash, the day the left
+    // gave way, the night they slipped out of the camp. Its facts join only
+    // the same day's, so a week at Messana is a week of entries, and the quiet
+    // days go to the gathered passage like any other light news.
+    const dayBound = FIGHT_DAY_KINDS.has(fact.kind);
     for (const entity of question === undefined ? fact.affectedEntities : [question]) {
-      const subject = keyOf(entity);
+      const subject = dayBound ? `${keyOf(entity)}@${fact.time.day}` : keyOf(entity);
       if (subject === hubKey) continue;
       const seen = firstSeenBySubject.get(subject);
       if (seen === undefined) firstSeenBySubject.set(subject, index);

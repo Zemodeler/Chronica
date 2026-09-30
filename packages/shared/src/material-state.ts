@@ -933,6 +933,12 @@ export const ForceSchema = z.object({
    * shape as `force_engage.tactic` (`sim/deltas.ts`), repeated here because
    * the warfare module imports this one.
    */
+  /**
+   * A standing order to hold: it will not start a battle, even when ordered to
+   * attack, and in a fight already begun it stops attacking and defends
+   * (docs/plans/battles-that-last.md, decision 5). Lifted only by an order.
+   */
+  hold: z.boolean().optional(),
   battlePlan: z
     .object({
       factor: z.enum(["deployment", "surprise", "effective_strength", "cohesion", "morale", "withdrawal"]),

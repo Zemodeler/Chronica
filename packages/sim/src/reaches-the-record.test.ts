@@ -59,16 +59,29 @@ const NOBODY = JSON.stringify({ actors: [] });
 // ── Slice 8: a battle, and what the record says about it ────────────────────
 
 /** Both armies in one province, which is the whole precondition for a fight. */
+/**
+ * Every commander on the field willing to fight the day battle is offered. An
+ * order to attack now opens an engagement that a cautious defender may meet
+ * by keeping to his camp (`engagements.ts`); what is tested here is the
+ * battle itself.
+ */
+const readyToFight = (state: WorldState): WorldState => ({
+  ...state,
+  characters: state.characters.map((character) => (state.material.forces.some((force) => force.commanderCharacterId === character.id)
+    ? { ...character, mind: { ...character.mind, temperament: { ...character.mind.temperament, caution: 20 } } }
+    : character)),
+});
+
 function armiesFacing(): WorldState {
   const base = world();
   const where = base.material.forces.find((force) => force.id === "legio-i")!.locationId;
-  return {
+  return readyToFight({
     ...base,
     material: {
       ...base.material,
       forces: base.material.forces.map((force) => (force.id === "carthaginian-army" ? { ...force, locationId: where } : force)),
     },
-  };
+  });
 }
 
 const GIVE_BATTLE = JSON.stringify({

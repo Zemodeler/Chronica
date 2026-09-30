@@ -2,6 +2,7 @@ import type { Force } from "../material-state";
 import type { WorldState } from "../world/world-state";
 import { atWar, mayEnterWithoutLeave, sameConfederation } from "../world/agreements";
 import { adjacentTo, provinceOf } from "../world/movement";
+import { REFERENCE_PROVINCE_KM } from "../world/travel";
 import { isWaterCrossing } from "./sea";
 
 /**
@@ -15,16 +16,36 @@ import { isWaterCrossing } from "./sea";
  * nobody is fighting over; toward its depots and its walls; away from where
  * the enemy stands. Into the enemy's hands only when every road leads there.
  *
+ * A retreat is a march, not a step: it goes on province after province until
+ * it has put a reference province's distance between the army and the field,
+ * or the next step would be into the enemy's ground. On a map of small
+ * provinces a fall back of one is a fall back of a few miles.
+ *
  * Over land only: a beaten army does not embark under the enemy's eyes, so a
  * field with no road off it but the sea has no retreat (`null`), and the
  * army stands where it was beaten.
  */
 export function retreatRoute(world: WorldState, force: Force, fromProvinceId: string, enemyPolityIds: ReadonlySet<string>, naval = false): string | null {
+  const visited = new Set([fromProvinceId]);
+  let at = fromProvinceId;
+  let walked = 0;
+  while (walked < REFERENCE_PROVINCE_KM) {
+    const step = nextRetreatStep(world, force, at, visited, enemyPolityIds, naval, at !== fromProvinceId);
+    if (step === null) break;
+    walked += adjacentTo(world, at).find((next) => next.provinceId === step)?.edge.distance ?? REFERENCE_PROVINCE_KM;
+    visited.add(step);
+    at = step;
+  }
+  return at === fromProvinceId ? null : at;
+}
+
+/** The best single step from here; on a march already under way, never into the enemy's ground or upon his men. */
+function nextRetreatStep(world: WorldState, force: Force, fromProvinceId: string, visited: ReadonlySet<string>, enemyPolityIds: ReadonlySet<string>, naval: boolean, marching: boolean): string | null {
   const agreements = world.polityAgreements;
   const neighbours = new Set<string>();
   for (const next of adjacentTo(world, fromProvinceId)) {
     if (!naval && isWaterCrossing(next.edge.crossing)) continue;
-    neighbours.add(next.provinceId);
+    if (!visited.has(next.provinceId)) neighbours.add(next.provinceId);
   }
   const hostile = (polityId: string | null): boolean =>
     polityId !== null && polityId !== force.polityId && (enemyPolityIds.has(polityId) || atWar(agreements, force.polityId, polityId));
@@ -50,8 +71,9 @@ export function retreatRoute(world: WorldState, force: Force, fromProvinceId: st
     // Away from the enemy: his armies standing there, and his ground beyond it.
     if (world.material.forces.some((other) => other.locationId === provinceId && hostile(other.polityId))) score -= 80;
     for (const { provinceId: beyond } of adjacentTo(world, provinceId)) {
-      if (beyond !== fromProvinceId && enemyHeld(beyond)) score -= 10;
+      if (!visited.has(beyond) && enemyHeld(beyond)) score -= 10;
     }
+    if (marching && score < 0) return [];
     return [{ provinceId, score }];
   });
   scored.sort((a, b) => b.score - a.score || a.provinceId.localeCompare(b.provinceId));

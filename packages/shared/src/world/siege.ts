@@ -13,6 +13,17 @@ import type { WorldState } from "./world-state";
  * hungrier and thinner; every fortnight the besieger hears how it goes; and
  * when the city can hold no longer it opens its gates.
  */
+export const SiegeWorkKindSchema = z.enum(["rams", "towers", "mine", "lines"]);
+export type SiegeWorkKind = z.infer<typeof SiegeWorkKindSchema>;
+
+/** How long each work takes to raise, in days, and what it costs for every thousand besiegers. */
+export const SIEGE_WORKS: Readonly<Record<SiegeWorkKind, { readonly days: number; readonly costPerThousand: number; readonly label: string }>> = {
+  rams: { days: 8, costPerThousand: 8, label: "rams and sheds" },
+  towers: { days: 20, costPerThousand: 20, label: "siege towers" },
+  mine: { days: 30, costPerThousand: 14, label: "a mine under the walls" },
+  lines: { days: 15, costPerThousand: 16, label: "lines of circumvallation" },
+};
+
 export const SiegeSchema = z
   .object({
     id: EntityIdSchema,
@@ -36,6 +47,25 @@ export const SiegeSchema = z
      * Absent until the first day it is pressed.
      */
     garrisonForceIds: z.array(EntityIdSchema).max(40).optional(),
+    /**
+     * A moment of the siege put to the player besieging it, waiting on his
+     * answer: a breach to storm, or terms offered (docs/plans/battles-that-last.md,
+     * phase 5). The siege stands still until he gives it.
+     */
+    awaiting: z.object({ kind: z.enum(["breach", "terms"]), askedAtStep: ElapsedStepSchema }).strict().nullable().default(null),
+    /**
+     * The works raised against the city (docs/plans/battles-that-last.md):
+     * rams and towers press it harder once built, a mine brings a stretch of
+     * wall down when it is finished, and lines of circumvallation shut it in.
+     * A sortie may burn what is not yet finished, and rams and towers after.
+     */
+    works: z.array(z.object({
+      kind: SiegeWorkKindSchema,
+      readyAtStep: ElapsedStepSchema,
+      status: z.enum(["building", "ready", "burned", "sprung"]),
+    }).strict()).max(8).default([]),
+    /** The siege's events already told, so each is told once ("breach", "runners"). */
+    told: z.array(z.string().max(60)).max(20).default([]),
     status: z.enum(["active", "lifted", "taken"]).default("active"),
     endedAtStep: ElapsedStepSchema.nullable().default(null),
     endedReason: z.string().trim().min(1).max(300).nullable().default(null),

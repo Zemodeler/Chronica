@@ -118,6 +118,8 @@ export const PlanStepSchema = z
     /** The day its owner was last woken for it; a step wakes him once for being due and once for being missed. */
     wokenOnDay: z.number().int().nonnegative().nullable().default(null),
     settledOnDay: z.number().int().nonnegative().nullable().default(null),
+    /** Times the engine has moved its day on for its owner, unasked: once, and then he is asked (`settleOverdueSteps`). */
+    slips: z.number().int().min(0).max(3).optional(),
   })
   .strict();
 export type PlanStep = z.infer<typeof PlanStepSchema>;

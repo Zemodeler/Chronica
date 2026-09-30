@@ -61,7 +61,24 @@ import { describePlans } from "./plans";
  * an NPC and the player act through one action language (VISION §10).
  */
 
-const OUTPUT_JSON_SCHEMA = JSON.stringify(z.toJSONSchema(CognitionOutputSchema, { io: "input" }));
+/**
+ * The schema the model is shown, without the prose nothing needs. `reasoning`
+ * and the proposal's `narrativeSummary` stay in the schema that parses (an
+ * answer that has them is still good) but are not asked for: the facts already
+ * say what happened, and each is worth a sentence or two per person, per call.
+ */
+function shownSchema(): string {
+  const schema = z.toJSONSchema(CognitionOutputSchema, { io: "input" }) as Record<string, unknown>;
+  const actor = (schema.properties as { actors?: { items?: { properties?: Record<string, unknown>; required?: string[] } } } | undefined)?.actors?.items;
+  if (actor?.properties !== undefined) delete actor.properties.reasoning;
+  const proposal = actor?.properties?.proposal as { properties?: Record<string, unknown>; required?: string[] } | undefined;
+  if (proposal?.properties !== undefined) delete proposal.properties.narrativeSummary;
+  if (proposal?.required !== undefined) proposal.required = proposal.required.filter((key) => key !== "narrativeSummary");
+  if (actor?.required !== undefined) actor.required = actor.required.filter((key) => key !== "reasoning");
+  return JSON.stringify(schema);
+}
+
+const OUTPUT_JSON_SCHEMA = shownSchema();
 
 /** The lists that belong inside a proposal, and that a model keeps putting beside one. */
 const PROPOSAL_LISTS = ["deltas", "facts", "delegations", "schedule", "discoveries", "socialEvents"] as const;
