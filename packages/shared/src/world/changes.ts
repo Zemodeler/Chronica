@@ -1,4 +1,6 @@
 import type { WorldState } from "./world-state";
+import type { Office } from "../characters/character";
+import { labelFromCategoryId } from "../warfare/troop-categories";
 
 /**
  * What actually changed on the map, by comparing two worlds.
@@ -89,8 +91,12 @@ const lowerFirst = (text: string): string => (text.length === 0 ? text : `${text
 
 const round = (men: number): string => (men >= 1_000 ? `${Math.round(men / 100) / 10}k` : String(men));
 
-export function diffWorlds(before: WorldState, after: WorldState): WorldChange[] {
+export function diffWorlds(before: WorldState, after: WorldState, offices: readonly Office[] = []): WorldChange[] {
   const changes: WorldChange[] = [];
+  // An office by what it is called, never by its key: "takes up rome:admiral"
+  // was the engine's bookkeeping printed under a Roman appointment (R63).
+  const officeLabel = (id: string): string =>
+    [...after.offices, ...offices].find((office) => office.id === id)?.label ?? labelFromCategoryId(id.slice(id.indexOf(":") + 1));
 
   const polityName = (id: string | null): string => {
     if (id === null) return "no one";
@@ -108,7 +114,11 @@ export function diffWorlds(before: WorldState, after: WorldState): WorldChange[]
   for (const province of after.map.provinces) {
     const was = provincesBefore.get(province.id);
     if (was === undefined) {
-      changes.push({ kind: "province", id: province.id, label: province.name, detail: `enters the record under ${polityName(province.controllerPolityId)}` });
+      // A place or a person the record had not held before is bookkeeping, not
+      // news: "Aristodemus enters the record" stood as the one change under a
+      // ceasefire offer (C08). What they do is told; that they were written
+      // down is not.
+      changes.push({ kind: "province", id: province.id, label: province.name, detail: `enters the record under ${polityName(province.controllerPolityId)}`, routine: true });
       continue;
     }
     if (was.controllerPolityId === province.controllerPolityId) continue;
@@ -198,12 +208,12 @@ export function diffWorlds(before: WorldState, after: WorldState): WorldChange[]
   for (const character of after.characters) {
     const was = charactersBefore.get(character.id);
     if (was === undefined) {
-      changes.push({ kind: "character", id: character.id, label: character.name, detail: `enters the record under ${polityName(character.polityId)}` });
+      changes.push({ kind: "character", id: character.id, label: character.name, detail: `enters the record under ${polityName(character.polityId)}`, routine: true });
       continue;
     }
     if (was.alive && !character.alive) changes.push({ kind: "character", id: character.id, label: character.name, detail: "dies" });
     if (was.officeId !== character.officeId && character.officeId !== null) {
-      changes.push({ kind: "character", id: character.id, label: character.name, detail: `takes up ${character.officeId}` });
+      changes.push({ kind: "character", id: character.id, label: character.name, detail: `takes up the office of ${officeLabel(character.officeId)}` });
     }
   }
 

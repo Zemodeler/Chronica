@@ -3,6 +3,7 @@ import type { Office } from "../characters/character";
 import type { WorldState } from "../world/world-state";
 import type { Project } from "../world/project";
 import { formatWorldDate, type ScenarioClock } from "../world/clock";
+import { ORDER_PART_STATUS_LABEL, orderPartStatus } from "../world/orders";
 
 /**
  * What the player's orders are doing, as they could know it.
@@ -22,7 +23,9 @@ import { formatWorldDate, type ScenarioClock } from "../world/clock";
 
 export interface UnderWayItem {
   readonly key: string;
-  readonly kind: "project" | "march" | "pursuit";
+  readonly kind: "order" | "project" | "march" | "delegated" | "audit" | "plot" | "pursuit";
+  /** Only its sponsor may know of it: a spy sent, an audit opened quietly. */
+  readonly secret?: boolean;
   /** What is being done: "Raising the First New Legion". */
   readonly label: string;
   /** Where it has got to: "Next: enrolment in Latium, in 18 days. 1,200 of 3,000 spent." */
@@ -73,7 +76,9 @@ export function ordersUnderWay(
       items.push({
         key: `march:${project.id}`,
         kind: "march",
-        label: to === null ? `The ${bare(force)} on the march` : `The ${bare(force)} marching on ${to}`,
+        label: project.kind === "sailing"
+          ? (to === null ? `The ${bare(force)} at sea` : `The ${bare(force)} sailing for ${to}`)
+          : to === null ? `The ${bare(force)} on the march` : `The ${bare(force)} marching on ${to}`,
         detail: project.targetCompletionStep === null ? "No one can say when it arrives." : `Expected ${when(project.targetCompletionStep)}.`,
         stalled: project.targetCompletionStep !== null && project.targetCompletionStep < today,
       });
@@ -109,6 +114,105 @@ export function ordersUnderWay(
     });
   }
 
+  // Each part of the player's orders that no project above already shows:
+  // waiting on a vote, on a letter, on a man to take it up -- or stopped,
+  // with the reason. The latest order's parts that came to nothing are here
+  // too, so an order is never answered only in prose.
+  const shown = new Set(items.map((item) => item.key.replace(/^(project|march):/, "")));
+  const latest = [...world.orders].reverse().find((order) => order.actorCharacterId === characterId);
+  for (const order of world.orders) {
+    if (order.actorCharacterId !== characterId) continue;
+    for (const [index, part] of order.parts.entries()) {
+      if (part.closedAtStep !== null) continue;
+      const status = orderPartStatus(world, part);
+      const finished = status === "done" || status === "refused" || status === "unanswered";
+      if (finished && order !== latest) continue;
+      if (status === "done" && part.note === null) continue;
+      // Shown already, as its own work: a project above, or an audit, a plot or
+      // a delegated order below.
+      const listedBelow = (ref: { readonly kind: string; readonly id: string }): boolean =>
+        (ref.kind === "audit" && world.audits.some((audit) => audit.id === ref.id && audit.status === "under_way"))
+        || (ref.kind === "plot" && world.covertPlots.some((plot) => plot.id === ref.id && plot.outcome === null))
+        || ref.kind === "order_attempt";
+      if (status !== "blocked" && part.note === null && part.workRefs.length > 0
+        && part.workRefs.every((ref) => (ref.kind === "project" && shown.has(ref.id)) || listedBelow(ref) || ref.kind === "force" || ref.kind === "entity")) continue;
+      const why = part.refusal ?? part.whyNot;
+      items.push({
+        key: `order:${order.id}:${index}`,
+        kind: "order",
+        label: part.said,
+        detail: `${upperFirst(ORDER_PART_STATUS_LABEL[status])}.${why === null || status === "done" ? "" : ` ${lastSentenceWithin(why, 320)}`}${part.note === null ? "" : ` ${upperFirst(part.note)}.`}`,
+        stalled: status === "blocked" || status === "refused" || status === "unanswered",
+      });
+    }
+  }
+
+  // Orders handed to others, and whether they have been taken up.
+  for (const attempt of world.orderAttempts) {
+    if (attempt.issuerRef.id !== characterId) continue;
+    if (attempt.status !== "issued" && attempt.status !== "received" && attempt.status !== "delayed" && attempt.status !== "accepted") continue;
+    const who = world.characters.find((character) => character.id === attempt.recipientRef.id)?.name ?? "Somebody";
+    const work = world.orders.flatMap((order) => order.parts)
+      .find((part) => part.workRefs.some((ref) => ref.kind === "order_attempt" && ref.id === attempt.id))
+      ?.workRefs.filter((ref) => ref.kind !== "order_attempt").length ?? 0;
+    const idleDays = attempt.decidedAtStep === null ? 0 : today - attempt.decidedAtStep;
+    items.push({
+      key: `delegated:${attempt.id}`,
+      kind: "delegated",
+      label: attempt.instruction || "An order",
+      detail: attempt.status === "accepted"
+        ? (work === 0 ? `${who} took it on${idleDays > 0 ? ` ${idleDays} days ago` : ""}, and nothing has been done about it yet.` : `${who} has it in hand: ${work} piece${work === 1 ? "" : "s"} of work set going.`)
+        : attempt.status === "delayed" ? `${who} has put it off.` : `${who} has not yet answered.`,
+      stalled: attempt.status === "accepted" && work === 0 && idleDays >= 20,
+    });
+  }
+
+  // Books being gone through: those the player ordered, and his own.
+  for (const audit of world.audits) {
+    if (audit.status !== "under_way") continue;
+    const ownBooks = audit.scope.kind === "household" && audit.scope.id === characterId;
+    if (audit.orderedByCharacterId !== characterId && !ownBooks) continue;
+    const auditor = world.characters.find((character) => character.id === audit.auditorCharacterId)?.name ?? "An auditor";
+    const whose = audit.scope.kind === "household"
+      ? (audit.scope.id === characterId ? "your own books" : `${world.characters.find((character) => character.id === audit.scope.id)?.name ?? "a household"}'s books`)
+      : "the department's books";
+    items.push({
+      key: `audit:${audit.id}`,
+      kind: "audit",
+      label: `${auditor} going through ${whose}`,
+      detail: `A finding is due ${when(audit.dueAtStep)}.`,
+      stalled: audit.dueAtStep < today,
+    });
+  }
+
+  /** Whose money it was, as he would say it. */
+  const payerOf = (accountId: string | null): string => {
+    if (accountId === null) return "";
+    const account = world.material.accounts.find((candidate) => candidate.id === accountId);
+    if (account === undefined) return "";
+    if (account.owner.kind === "character" && account.owner.id === characterId) return " from your own purse";
+    if (account.owner.kind === "polity") return ` from the ${world.map.polities.find((polity) => polity.id === account.owner.id)?.name ?? "state"}'s treasury`;
+    return "";
+  };
+  // What the player has set going in secret. His to know, and nobody else's.
+  for (const plot of world.covertPlots) {
+    if (plot.sponsorCharacterId !== characterId || plot.outcome !== null) continue;
+    const target = world.characters.find((character) => character.id === plot.targetCharacterId)?.name ?? "somebody";
+    const agent = plot.agentCharacterId === null ? null : world.characters.find((character) => character.id === plot.agentCharacterId)?.name ?? null;
+    items.push({
+      key: `plot:${plot.id}`,
+      kind: "plot",
+      label: plot.kind === "espionage" ? `A spy set on ${target}` : `Something laid against ${target}`,
+      detail: [
+        agent === null ? null : `${agent} has it in hand.`,
+        plot.spend > 0 ? `${money(plot.spend)} paid${payerOf(plot.fundingAccountId ?? null)}.` : null,
+        `It comes to a head ${when(plot.resolvesAtStep)}.`,
+      ].filter((part) => part !== null).join(" "),
+      stalled: false,
+      secret: true,
+    });
+  }
+
   // What an order set the player (or the power they speak for) to doing.
   for (const entity of world.genericEntities) {
     if (entity.kind !== "pursuit" || "retiredAtStep" in entity.attributes) continue;
@@ -121,14 +225,24 @@ export function ordersUnderWay(
       key: `pursuit:${entity.id}`,
       kind: "pursuit",
       label: entity.label,
-      detail: typeof since === "number" && clock !== undefined ? `Since ${formatWorldDate({ day: since, minute: 0 }, clock)}.` : "Under way.",
-      stalled: false,
+      // Somebody's word for what he is doing is not work being done, unless
+      // the world wrote it a rule that does something with it.
+      detail: `${typeof since === "number" && clock !== undefined ? `Since ${formatWorldDate({ day: since, minute: 0 }, clock)}. ` : ""}${entity.mechanic === undefined ? "An intention only: nothing is being done about it." : "Going on by its own rule."}`,
+      stalled: entity.mechanic === undefined,
     });
   }
 
   return items.sort((a, b) => Number(b.stalled) - Number(a.stalled) || KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.label.localeCompare(b.label));
 }
 
-const KIND_ORDER: Readonly<Record<UnderWayItem["kind"], number>> = { project: 0, march: 1, pursuit: 2 };
+const KIND_ORDER: Readonly<Record<UnderWayItem["kind"], number>> = { order: 0, project: 1, march: 2, delegated: 3, audit: 4, plot: 5, pursuit: 6 };
 const bare = (name: string): string => name.replace(/^the\s+/i, "");
+/** The reason in whole sentences, as much of it as fits. */
+const lastSentenceWithin = (text: string, max: number): string => {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  const end = cut.lastIndexOf(". ");
+  return end > 0 ? cut.slice(0, end + 1) : `${cut.replace(/\s+\S*$/, "")}…`;
+};
+const upperFirst = (text: string): string => (text.length === 0 ? text : `${text.charAt(0).toUpperCase()}${text.slice(1)}`);
 const lowerFirst = (text: string): string => (text.length === 0 ? text : `${text.charAt(0).toLowerCase()}${text.slice(1)}`);

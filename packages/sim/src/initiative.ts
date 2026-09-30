@@ -130,7 +130,12 @@ function ownReasons(world: WorldState, playerId: string): ContactInitiation[] {
     if (!character.alive || character.id === playerId) continue;
     // A grievance, fresh and bitter: what he did, in the man's own words.
     const relation = character.relations.find((candidate) => candidate.subjectCharacterId === playerId);
-    const latest = relation === undefined ? undefined : [...relation.causes].sort((a, b) => b.occurredAtStep - a.occurredAtStep)[0];
+    // Something that happened between them, never the note the game was set up
+    // with: "Fictional senatorial associate" was said to the ruler's face as
+    // a grievance (R27). The seeds a new game plants are `relation-…`.
+    const latest = relation === undefined ? undefined : [...relation.causes]
+      .filter((cause) => !cause.id.startsWith("relation-"))
+      .sort((a, b) => b.occurredAtStep - a.occurredAtStep)[0];
     const opinion = computeOpinion(character, playerId);
     if (latest !== undefined && latest.score < 0 && world.elapsedStep - latest.occurredAtStep <= GRIEVANCE_DAYS && opinion <= GRIEVANCE_OPINION) {
       out.push({ characterId: character.id, reason: "has a grievance against the ruler", openingLine: `I will say it to your face, since you will hear it anyway: ${latest.label}` });
@@ -138,7 +143,15 @@ function ownReasons(world: WorldState, playerId: string): ContactInitiation[] {
     }
     // A friend of his own power, at the step of his plan he cannot take alone.
     if (opinion >= FRIENDLY_OPINION && character.polityId === player.polityId) {
+      // Never an aim against the man he would be asking: "find material that
+      // could weaken Clepsina" was put to Clepsina as a friend's favour (R28).
+      // An aim at anybody -- revenge, a rival brought down -- is not asked
+      // aloud of anyone either.
+      const surname = player.name.split(/\s+/).at(-1)?.toLowerCase() ?? "";
       const wanting = character.ambitions.find((ambition) => ambition.status === "active"
+        && ambition.targetId !== playerId && ambition.kind !== "revenge"
+        && (surname.length < 3 || !ambition.label.toLowerCase().includes(surname))
+        && !/\b(weaken|undermine|ruin|discredit|expose|bring down|destroy|kill|remove)\b/i.test(ambition.label)
         && ambition.steps.some((step) => step.status === "pending" && step.dueDay >= today && step.dueDay - today <= STEP_DUE_WITHIN_DAYS));
       if (wanting !== undefined) {
         out.push({ characterId: character.id, reason: "wants the ruler's help with his own aims", openingLine: `I have a favour to ask of you, as a friend: ${wanting.label}.` });

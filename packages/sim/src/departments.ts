@@ -487,18 +487,23 @@ export function resolveAudits(world: WorldState, toDay: number): { world: WorldS
   const reader = readDepartments(world);
   const facts: FactProposalDraft[] = [];
   let diversions = world.diversions;
+  const settled = new Map<string, "found" | "cleared">();
   const audits = world.audits.map((audit) => {
     if (!due.includes(audit)) return audit;
     const auditor = world.characters.find((character) => character.id === audit.auditorCharacterId);
     const department = audit.departmentId === null ? undefined : world.departments.find((candidate) => candidate.id === audit.departmentId);
-    const books = department?.name ?? `${world.characters.find((character) => character.id === audit.scope.id)?.name ?? "a man"}'s estates`;
+    const householdOf = (id: string): string => `${world.characters.find((character) => character.id === id)?.name ?? "a man"}'s estates`;
+    const books = department === undefined ? householdOf(audit.scope.id)
+      : audit.alsoHouseholdId == null ? department.name : `${department.name} and ${householdOf(audit.alsoHouseholdId)}`;
     const told = [...new Set([audit.orderedByCharacterId, audit.auditorCharacterId])].map((id) => ({ kind: "character" as const, id }));
     if (auditor === undefined || !auditor.alive) return { ...audit, status: "cleared" as const };
     const eye = (aptitude(auditor, "taxation") + aptitude(auditor, "espionage")) / 2;
     const lift = audit.scope.kind === "polity" ? reader.headLift(audit.scope, "audit") : 0;
     const found: string[] = [];
     diversions = diversions.map((row) => {
-      if (row.foundAtStep !== null || row.scope.id !== audit.scope.id || row.departmentId !== audit.departmentId) return row;
+      const inTheseBooks = (row.scope.id === audit.scope.id && row.departmentId === audit.departmentId)
+        || (audit.alsoHouseholdId != null && (row.byCharacterId === audit.alsoHouseholdId || row.scope.id === audit.alsoHouseholdId));
+      if (row.foundAtStep !== null || !inTheseBooks) return row;
       const thief = world.characters.find((character) => character.id === row.byCharacterId);
       if (thief === undefined) return row;
       const care = (thief.skills.intrigue + aptitude(thief, "manipulation")) / 2;
@@ -522,7 +527,22 @@ export function resolveAudits(world: WorldState, toDay: number): { world: WorldS
       knownToRefs: told,
       significance: found.length > 0 ? 60 : 25,
     });
+    // The charge it answers is settled by what it found: cleared books end the
+    // accusation, and the man it named no longer lives under it. What was
+    // found makes it heavier. Without this a cleared audit left the charge
+    // standing at full weight for ever (R30, R33).
+    // A man who went through his own books has reassured himself, not cleared
+    // his name (R32): only an audit by somebody else settles the charge.
+    const ownBooks = audit.auditorCharacterId === audit.scope.id || audit.auditorCharacterId === audit.alsoHouseholdId;
+    if (audit.allegationPressureId != null && (!ownBooks || found.length > 0)) settled.set(audit.allegationPressureId, found.length > 0 ? "found" : "cleared");
     return { ...audit, status: found.length > 0 ? "found" as const : "cleared" as const };
   });
-  return { world: { ...world, audits, diversions }, facts };
+  const characterPressures = settled.size === 0 ? world.characterPressures : world.characterPressures.map((pressure) => {
+    const verdict = settled.get(pressure.id);
+    if (verdict === undefined || pressure.status !== "active") return pressure;
+    return verdict === "cleared"
+      ? { ...pressure, status: "resolved" as const }
+      : { ...pressure, intensity: Math.min(100, pressure.intensity + 20) };
+  });
+  return { world: { ...world, audits, diversions, characterPressures }, facts };
 }

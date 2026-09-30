@@ -17,6 +17,7 @@ import { ContingencySchema } from "./contingency";
 import { SiegeSchema } from "./siege";
 import { EnactmentSchema } from "./enactment";
 import { CovertPlotSchema } from "./covert-plot";
+import { OrderRecordSchema } from "./orders";
 import { MapConflictsOverlaySchema } from "./map-presentation";
 import { NemesisSchema } from "./nemesis";
 import { WorldStorylineSchema } from "./storylines";
@@ -288,6 +289,12 @@ export const WorldStateSchema = z
      * still parses.
      */
     covertPlots: z.array(CovertPlotSchema).default([]),
+    /**
+     * The player's orders, part by part, with the work each part set going --
+     * see `world/orders.ts`. Defaulted, so every snapshot written before orders
+     * were remembered still parses.
+     */
+    orders: z.array(OrderRecordSchema).default([]),
     /**
      * Plans laid against days that have not come -- see `world/contingency.ts`.
      *

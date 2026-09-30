@@ -769,7 +769,10 @@ export async function listChronicle(db: ChronicaDatabase, gameId: string, limit 
     .select()
     .from(chronicleCheckpoints)
     .where(eq(chronicleCheckpoints.gameId, gameId))
-    .orderBy(desc(chronicleCheckpoints.toInstantSortKey), desc(chronicleCheckpoints.ordinal))
+    // Two entries of one day by when they were written, then by their place in
+    // their report: a letter written today no longer sorts before the passage
+    // of yesterday's order that happened to be dated later in the day.
+    .orderBy(desc(chronicleCheckpoints.toInstantSortKey), desc(chronicleCheckpoints.createdAt), desc(chronicleCheckpoints.ordinal))
     .limit(limit);
   return newestFirst.reverse();
 }

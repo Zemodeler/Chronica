@@ -51,6 +51,9 @@ export const ProjectCompletionOutcomeSchema = z
     commanderCharacterId: EntityIdSchema.nullable().default(null),
     /** For "force_move": the army that arrives somewhere when the journey ends. */
     forceId: EntityIdSchema.nullable().default(null),
+    /** For "force_move" over water: the fleets that carry it, and the shore it takes ship from when it has to walk there first (`passagePlanFor`). */
+    fleetIds: z.array(EntityIdSchema).max(6).optional(),
+    embarkProvinceId: EntityIdSchema.optional(),
     /** For "force": the kind of troops raised -- "warship" for a fleet. Absent is infantry. */
     categoryId: EntityIdSchema.optional(),
     beneficiaryAccountId: EntityIdSchema.nullable().default(null),

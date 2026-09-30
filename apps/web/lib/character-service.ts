@@ -361,8 +361,10 @@ function parseAiKnowledgebase(
     context.unplaced.push(place);
     return null;
   }
+  // locationPlace is the model's wording; the schema only knows the province it resolved to.
+  const { locationPlace: _placeInWords, ...declared } = base;
   const preprocessed = {
-    ...base,
+    ...declared,
     locationProvinceId: place.provinceId,
     relations: preprocessAiRelations(base["relations"]),
     skillRationale: preprocessAiSkillRationale(base["skillRationale"]),

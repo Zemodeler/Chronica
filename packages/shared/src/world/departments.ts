@@ -536,6 +536,14 @@ export const AuditSchema = z
     startedAtStep: ElapsedStepSchema,
     dueAtStep: ElapsedStepSchema,
     status: z.enum(["under_way", "found", "cleared"]),
+    /**
+     * A household gone through beside the department: "examine the public and
+     * household accounts" is one inquiry of two sets of books, and the public
+     * side was dropped whenever both were named (R71).
+     */
+    alsoHouseholdId: EntityIdSchema.nullable().optional(),
+    /** The accusation it answers, so its finding settles it (R30, R33). */
+    allegationPressureId: EntityIdSchema.nullable().optional(),
   })
   .strict();
 export type Audit = z.infer<typeof AuditSchema>;

@@ -52,7 +52,8 @@ describe("decideOrderAttempt: the garrison-gate case (docs/32 test plan)", () =>
     const received = receiveOrderAttempt(baseAttempt(authorized));
     const decided = decideOrderAttempt(received, "accept", "The commander recognizes the consul's authority.", 2);
     expect(decided.status).toBe("accepted");
-    expect(decided.decidedAtStep).toBeNull(); // accepted is not yet terminal -- carried_out/abandoned follows
+    // Accepted is decided, though not finished: carried_out/abandoned follows.
+    expect(decided.decidedAtStep).toBe(2);
   });
 
   it("an unauthorized order the recipient refuses is recorded as refused, not silently applied", () => {

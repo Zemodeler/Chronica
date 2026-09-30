@@ -268,11 +268,11 @@ export function GameShell({
     setSurface("people");
   }, [openChatSessionId]);
   const goToDesk = useCallback(() => { setPlace("office"); setSurface("council"); }, []);
-  /** An order begun somewhere else in the room: the treaties' "Write to them". */
-  const [deskDraft, setDeskDraft] = useState<string | null>(null);
+  /** The treaties' "Write to them": open the letter tray on that power. */
+  const [lettersSeed, setLettersSeed] = useState<string | null>(null);
   const writeTo = useCallback((polityLabel: string) => {
-    setDeskDraft(`Write to ${polityLabel}: `);
-    openSurface("council");
+    setLettersSeed(polityLabel);
+    openSurface("people");
   }, [openSurface]);
 
   const { view } = controller;
@@ -454,7 +454,7 @@ export function GameShell({
   useEffect(() => {
     const flags = new Map<string, ForceFlagAsset>();
     for (const force of overlay?.forces ?? []) {
-      const standard = standardFor(force.ownerPolityId, force.flagAssetId);
+      const standard = standardFor(force.ownerPolityId, force.naval ? "navy" : "army", force.flagAssetId);
       flags.set(force.forceId, { url: standard.url, aspectRatio: standard.aspectRatio });
     }
     setForceFlagUrls(flags);
@@ -757,7 +757,7 @@ export function GameShell({
           )}
           {flagCatalogForce && (
             <Sheet
-              label="the army standards"
+              label={flagCatalogForce.naval ? "the navy standards" : "the army standards"}
               title={`A standard for ${flagCatalogForce.name}`}
               width="reading"
               side="center"
@@ -765,7 +765,7 @@ export function GameShell({
             >
               {forceEdit.error !== null && <p className="map-force-error" role="alert">{forceEdit.error}</p>}
               <div className="map-flag-options">
-                {standardsForPolity(flagCatalogForce.ownerPolityId).map((flag) => (
+                {standardsForPolity(flagCatalogForce.ownerPolityId, flagCatalogForce.naval ? "navy" : "army").map((flag) => (
                   <button key={flag.id} type="button" className="map-flag-option" disabled={forceEdit.saving} onClick={() => void selectForceFlag(flag)}>
                     <img src={flag.url} alt="" decoding="sync" />
                     <span><strong>{flag.name}</strong><small>{flag.description}</small></span>
@@ -800,11 +800,13 @@ export function GameShell({
           onClose={closeSurface}
           side={sheetSideFor(roomStyle, "people")}
           openSessionId={openChatSessionId}
+          searchSeed={lettersSeed}
+          onWorldChanged={controller.refresh}
           onOpenSessionConsumed={() => setOpenChatSessionId(null)}
         />
       )}
       {surface === "council" && orderingCharacterId && (
-        <CouncilPanel gameId={gameId} controller={controller} underWay={room?.sheets?.underWay ?? []} draft={deskDraft} onDraftTaken={() => setDeskDraft(null)} onClose={closeSurface} onOpenChronicle={() => openSurface("chronicle")} />
+        <CouncilPanel gameId={gameId} controller={controller} underWay={room?.sheets?.underWay ?? []} onClose={closeSurface} onOpenChronicle={() => openSurface("chronicle")} />
       )}
       {surface === "chronicle" && <ChroniclePanel controller={controller} onClose={closeSurface} side={sheetSideFor(roomStyle, "chronicle")} focus={chronicleFocus} />}
       {(surface === "books" || surface === "purse") && (

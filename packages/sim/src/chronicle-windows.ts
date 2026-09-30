@@ -2,6 +2,7 @@ import { diffWorlds, type Fact, type Office, type OrderPartyRef, type ScenarioCl
 import type { BattleAccount } from "./battle";
 import type { WindowSnapshot } from "./burst";
 import {
+  MUST_TELL,
   WINDOW_MAX_ENTRIES,
   composeChronicle,
   nameOfSubject,
@@ -104,7 +105,21 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
   /** Everything composed so far, whether published yet or not, so the next window knows what has been said. */
   const said: ChronicleEntry[] = [];
 
-  const compose = async (window: WindowSnapshot, gate: Promise<void>): Promise<readonly ChronicleEntry[]> => {
+  /** What each window chose to tell, as it chose it: the next window's "already said" before any prose exists. */
+  const chosenSubjects: (readonly string[])[] = [];
+  /** Whether any window has chosen anything at all to tell. */
+  let anythingChosen = false;
+  /** Settled when the window before has chosen what to tell and what to carry. */
+  let selecting: Promise<void> = Promise.resolve();
+
+  const compose = async (window: WindowSnapshot, gate: Promise<void>, chosenBefore: Promise<void>, chosen: () => void): Promise<readonly ChronicleEntry[]> => {
+    // What the window before carries is this one's to tell, and what it chose
+    // is already said: both are known once it has chosen, long before its
+    // passages are written. Waiting for that -- and only that -- keeps the
+    // carry and the repeats right while the writing still runs side by side
+    // (C07). A window that started choosing before the last had carried used
+    // to miss what it carried, and the burst's last matters went untold.
+    await chosenBefore;
     narrative.push(...window.narrative);
     frictions.push(...window.frictions);
     utterances.push(...window.utterances);
@@ -130,11 +145,17 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
         significanceByFactId: window.significanceByFactId,
         ...viewsOf(window.worldAfter),
         orderFactIds,
-        changes: diffWorlds(window.worldBefore, window.worldAfter),
+        changes: diffWorlds(window.worldBefore, window.worldAfter, offices),
         // What this burst has already said counts as said: a thread told in an
         // earlier window is continued at the later date, never rewritten.
-        recentSubjects: [...said.map((entry) => entry.subjects.map(keyOf)), ...input.recentSubjects],
+        recentSubjects: [...chosenSubjects, ...said.map((entry) => entry.subjects.map(keyOf)), ...input.recentSubjects],
         recentTitles: [...[...said].reverse().map((entry) => entry.title), ...input.recentTitles],
+        onSelected: (selection) => {
+          pool = [...pool, ...selection.carried];
+          chosenSubjects.push(...selection.subjects);
+          if (selection.subjects.length > 0) anythingChosen = true;
+          chosen();
+        },
         // The last window has the room a window and the old closing pass had
         // between them, since it also tells what the pool carried this far;
         // its passages are written side by side, so the room costs no time.
@@ -142,7 +163,7 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
         // A quiet span is not a blank one: the last window tells the
         // weightiest of what nothing cleared, as a report written in one
         // piece would.
-        fallback: window.final && said.length === 0,
+        fallback: window.final && !anythingChosen,
         // Each passage goes out the moment it is written, once every passage
         // of the window before it has gone out: the reader gets the order's
         // answer while the world's other matters are still being composed.
@@ -152,15 +173,16 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
           await publish([entry], window.index);
         },
       });
-      pool = [...pool, ...out.carried];
       calls += out.calls;
       return out.entries;
     } catch (error) {
       // The record is not the world. A window that could not be written is
       // its facts carried into the next; the burst goes on regardless.
       console.error(`[chronicle] window ${window.index} could not be written:`, error);
-      pool = [...pool, ...facts];
+      if (!pool.some((fact) => facts.includes(fact))) pool = [...pool, ...facts];
       return [];
+    } finally {
+      chosen();
     }
   };
 
@@ -169,7 +191,10 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
       // This window's passages wait for the previous window's; its composing
       // does not.
       const gate = publishing;
-      const entries = compose(window, gate);
+      const chosenBefore = selecting;
+      let chosen: () => void = () => undefined;
+      selecting = new Promise<void>((resolve) => { chosen = resolve; });
+      const entries = compose(window, gate, chosenBefore, () => chosen());
       composing.push(entries);
       publishing = entries.then(() => undefined).catch(() => undefined);
     },
@@ -185,7 +210,13 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
       // burst ended -- stays untold, as any window's leftovers do: another
       // compose after the last window ran in series with it and was the
       // longest part of the turn's tail.
-      if (published.length === 0 && pool.length > 0 && lastWorld !== null && span !== null) {
+      // And what must never go untold -- a part of the order, a vote of one's
+      // own, a turn of a siege -- is told in a closing passage even when
+      // something else was published: it was left only because it came too
+      // late for the window that would have told it.
+      const owed = pool.filter((fact) => MUST_TELL.has(fact.kind) || orderFactIds.has(fact.id) || (fact.sourceActionId ?? null) !== null);
+      if (published.length > 0 && owed.length > 0) pool = owed;
+      if ((published.length === 0 || owed.length > 0) && pool.length > 0 && lastWorld !== null && span !== null) {
         const out = await composeChronicle({
           port,
           clock,

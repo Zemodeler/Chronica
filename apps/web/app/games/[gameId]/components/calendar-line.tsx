@@ -44,7 +44,8 @@ export function CalendarLine({ items, matters, onOpenChronicle }: {
               <span className="calendar-line__when"><Era text={first.whenLabel} /></span>
             </>
           )}
-        {wanting > 0 && <span className="calendar-line__wanting"> · {wanting === 1 ? "one wants your word" : `${wanting} want your word`}</span>}
+        {/* Matters, counted across the whole government: the room marks only the ones kept in it, so the two numbers differ (R59). */}
+        {wanting > 0 && <span className="calendar-line__wanting"> · {wanting === 1 ? "one matter wants your word" : `${wanting} matters want your word`}</span>}
       </Tip>
     </div>
   );

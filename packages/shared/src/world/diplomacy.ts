@@ -83,7 +83,14 @@ export const DiplomaticMessageSchema = z
      * and declared the war in the same breath, before Hieron could answer; the
      * refusal that came afterwards arrived ten days after the battle.
      */
-    onRefusal: z.enum(["war"]).nullable().optional(),
+    onRefusal: z.enum(["war", "war_if_attacked"]).nullable().optional(),
+    /**
+     * The day a conditional threat was refused or went unanswered, so it now
+     * stands: "cease hostilities or face war" answered with a refusal of the
+     * wording, while the pause held. The war opens on the next hostile act,
+     * not on the refusal (`threatWaitsOnAttack`). Null once it is carried out.
+     */
+    threatStandsSince: ElapsedStepSchema.nullable().optional(),
     /**
      * The day the letter was first put in front of the person who has to
      * answer it. Silence is a refusal only once somebody has read it: seven
@@ -319,4 +326,29 @@ export function applyDiplomaticAnswerToStance(
     }];
   }
   return next;
+}
+
+/**
+ * Whether an ultimatum's threat waits on the other side's doing something --
+ * attacking, going on attacking -- rather than on its answer. Hieron kept the
+ * pause and refused to renounce his claim, and war opened because the letter
+ * was refused, when what it threatened war for was continued attack (R15).
+ * Read from its words where the sender did not say.
+ */
+export function threatWaitsOnAttack(message: Pick<DiplomaticMessage, "onRefusal" | "terms" | "subject">): boolean {
+  if (message.onRefusal === "war_if_attacked") return true;
+  if (message.onRefusal !== "war") return false;
+  return /\b(cease|stop|halt|end)\b[^.]{0,40}\b(hostilit|attack|fighting|raids?|war)|\bif (you|they|he|syracuse|carthage|[a-z]+) (continue|keep|attack|march|move|strike|resume)|\b(continue|continued|renewed|further) (hostilit|attacks?|aggression)/i.test(`${message.subject} ${message.terms}`);
+}
+
+/**
+ * What an acceptance asks for that the letter it accepts did not offer, in the
+ * acceptor's own words, or null. "We accept Messana's protectorate ... in
+ * exchange we shall receive money and manpower as well as your participation
+ * in any war Rome is in" was bound as the Mamertines' bare request for
+ * protection, and the money, the men and the war service were lost (R13).
+ */
+export function termsAddedIn(answerText: string): string | null {
+  const match = /\b(in exchange|in return|provided that|on condition that|so long as|as long as|we shall receive|you shall (?:pay|send|give|provide|join)|you will (?:pay|send|give|provide|join)|and in addition|but (?:you|we) (?:shall|will|must))\b[\s\S]*/i.exec(answerText);
+  return match === null ? null : match[0].trim().slice(0, 600);
 }

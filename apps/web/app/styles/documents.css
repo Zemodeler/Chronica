@@ -227,6 +227,11 @@
   }
   .chronicle-entry__body p + p { text-indent: 1.4em; }
 
+  .chronicle-entry__outcomes { max-width: 62ch; margin-top: .5rem; padding-top: .4rem; border-top: 1px solid var(--rule, currentColor); }
+  .chronicle-entry__outcomes h4 { color: var(--ink-faded); font: italic 400 var(--step-0) var(--font-serif); }
+  .chronicle-entry__outcomes ul { margin: .25rem 0 0; padding-left: 1.1rem; }
+  .chronicle-entry__outcomes li { font: 400 var(--step-0)/1.5 var(--font-sans); }
+
   .chronicle-entry__quote { margin: .4rem 0 0 1.4em; padding-left: 1rem; border-left: 2px solid var(--seal); }
   .chronicle-entry__quote blockquote { font: italic 400 var(--step-1)/1.5 var(--font-serif); }
   .chronicle-entry__quote figcaption { margin-top: .25rem; color: var(--bronze-deep); font: 400 var(--step-0) var(--font-caps); }

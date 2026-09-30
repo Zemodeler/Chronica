@@ -4,6 +4,8 @@ import {
   checkCommitmentAuthority,
   deferCommitment,
   fulfillCommitment,
+  isConditionalPromise,
+  promiseFormOf,
   type Commitment,
   type CommitmentResolutionResult,
   type FactProposalDraft,
@@ -92,6 +94,31 @@ export function keptOnTheRecord(world: WorldState, commitment: Commitment): stri
 }
 
 /**
+ * Whether what a conditional promise waited on has happened since it was made:
+ * for support in a house, a question the beneficiary put there; for men or
+ * protection, a war of the beneficiary's power; for anything else, a letter
+ * from the beneficiary asking for it. What cannot be told is taken as come,
+ * so a promise is never excused by the engine's not knowing.
+ */
+function occasionCame(world: WorldState, commitment: Commitment): boolean {
+  const since = commitment.createdAtStep;
+  const beneficiary = world.characters.find((character) => character.id === commitment.beneficiaryCharacterId);
+  switch (commitment.actionKind) {
+    case "political_support":
+      return world.material.politicalProcedures.some((procedure) => procedure.sponsorCharacterId === commitment.beneficiaryCharacterId && procedure.openedAtStep >= since);
+    case "military_support":
+    case "protection":
+      return beneficiary?.polityId != null && world.polityAgreements.some((agreement) => agreement.kind === "war" && agreement.status === "active"
+        && (agreement.polityId === beneficiary.polityId || agreement.otherPolityId === beneficiary.polityId) && agreement.sinceStep >= since);
+    case "information_sharing":
+    case "other":
+      return world.diplomacy.some((message) => message.fromCharacterId === commitment.beneficiaryCharacterId && message.toCharacterId === commitment.promisorCharacterId && message.sentAtStep >= since);
+    default:
+      return true;
+  }
+}
+
+/**
  * A man asked in the burst said he kept these (their ids, in "stepsTaken"):
  * held as done, to be settled as kept on the next tick. Only his own, and only
  * when his answer changed the world -- a sentence is not a deed.
@@ -166,6 +193,30 @@ export function keepPromises(input: PromiseInput): { world: WorldState; facts: F
       continue;
     }
     if (!due) continue;
+
+    // A promise to hold back is kept by holding back. Its day passing is the
+    // proof of it, not a breach: Fabricius was marked a traitor to his word
+    // for not having written a letter he had never promised (R23).
+    if (promiseFormOf(commitment) === "refrain") {
+      world = {
+        ...world,
+        commitments: world.commitments.map((candidate) => candidate.id === commitment.id
+          ? { ...candidate, status: "fulfilled" as const, resolvedAtStep: input.toDay, resolutionReason: "He held to it." }
+          : candidate),
+      };
+      world = remember(world, [{
+        subjectCharacterId: beneficiary, targetCharacterId: promisor,
+        label: `Held to his word: ${commitment.description}`, score: 4, dimensions: { trust: 6 },
+      }], input.toDay, `promise-held-${commitment.id}`);
+      continue;
+    }
+    // A promise that waits on an occasion is judged on the occasion. If it
+    // never came, nobody broke anything: it lapses, and nobody is wronged.
+    // Support in a house is support for a question, and waits on one being put.
+    if ((isConditionalPromise(commitment) || commitment.actionKind === "political_support") && !occasionCame(world, commitment)) {
+      world = settled(world, cancelCommitment(world, commitment.id, input.toDay, "The occasion it waited on never came."));
+      continue;
+    }
 
     // One grace, while he still can keep it; none for a man who no longer holds what he promised.
     const able = checkCommitmentAuthority(world, promisor, commitment.requiredOfficeId, commitment.requiredResource).ok;

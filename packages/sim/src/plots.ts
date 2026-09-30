@@ -345,7 +345,7 @@ function stirPlot(
     facts: [{
       localId: nextLocalId("plot_warned"),
       kind: "covert_warning",
-      summary: `${target.name} has been warned that somebody means him harm, though not by whom.`,
+      summary: PLOT_WORDS[plot.kind].warned(target.name),
       affectedRefs: [{ kind: "character", id: target.id }],
       visibility: "polity",
       discoveryState: "polity",
@@ -397,6 +397,74 @@ export function ladderOutcome(input: LadderInput): CovertPlotOutcome {
   return outcome;
 }
 
+/**
+ * How each kind of secret work is spoken of. A spy set on Hieron to learn his
+ * strength opened a thread asking "whether Hieron II lives out the year", and
+ * a mark who found a spy on him believed he had been paid to be killed (R42).
+ * Only the plots that are for a life speak of one.
+ */
+export const PLOT_WORDS: Record<CovertPlot["kind"], {
+  readonly title: (target: string) => string;
+  readonly stakes: (target: string) => string;
+  readonly next: string;
+  readonly warned: (target: string) => string;
+  readonly failed: (target: string, sponsor: string) => string;
+  readonly believed: (sponsor: string) => string;
+  readonly grievance: string;
+  readonly grievanceOfKin: (target: string) => string;
+}> = {
+  assassination: {
+    title: (target) => `Something laid against ${target}`,
+    stakes: (target) => `Whether ${target} lives out the year, and who is found to have wanted otherwise.`,
+    next: "Whether the hand gets near enough, and whether anybody talks first.",
+    warned: (target) => `${target} has been warned that somebody means him harm, though not by whom.`,
+    failed: (target, sponsor) => `An attempt on ${target} came to nothing and was traced to ${sponsor}.`,
+    believed: (sponsor) => `${sponsor} paid to have me killed.`,
+    grievance: "He paid to have me killed.",
+    grievanceOfKin: (target) => `He paid to have ${target} killed.`,
+  },
+  poison: {
+    title: (target) => `Something laid against ${target}`,
+    stakes: (target) => `Whether ${target} lives out the year, and who is found to have wanted otherwise.`,
+    next: "Whether it reaches his cup, and whether anybody talks first.",
+    warned: (target) => `${target} has been warned that somebody means him harm, though not by whom.`,
+    failed: (target, sponsor) => `An attempt to poison ${target} came to nothing and was traced to ${sponsor}.`,
+    believed: (sponsor) => `${sponsor} paid to have me poisoned.`,
+    grievance: "He paid to have me poisoned.",
+    grievanceOfKin: (target) => `He paid to have ${target} poisoned.`,
+  },
+  abduction: {
+    title: (target) => `A plan to seize ${target}`,
+    stakes: (target) => `Whether ${target} is taken, and who is found to have wanted him taken.`,
+    next: "Whether they can get him alone, and whether anybody talks first.",
+    warned: (target) => `${target} has been warned that somebody means to lay hands on him.`,
+    failed: (target, sponsor) => `An attempt to seize ${target} came to nothing and was traced to ${sponsor}.`,
+    believed: (sponsor) => `${sponsor} paid to have me seized.`,
+    grievance: "He paid to have me seized.",
+    grievanceOfKin: (target) => `He paid to have ${target} seized.`,
+  },
+  sabotage: {
+    title: (target) => `Work laid in secret against ${target}`,
+    stakes: (target) => `Whether ${target}'s works are spoiled, and who is found to have paid for it.`,
+    next: "Whether the saboteurs get in and out unseen.",
+    warned: (target) => `${target} has been warned that somebody means to spoil what is his.`,
+    failed: (target, sponsor) => `A plot against ${target}'s works came to nothing and was traced to ${sponsor}.`,
+    believed: (sponsor) => `${sponsor} paid to have my works spoiled.`,
+    grievance: "He paid to have my works spoiled.",
+    grievanceOfKin: (target) => `He paid to have ${target}'s works spoiled.`,
+  },
+  espionage: {
+    title: (target) => `A watch kept on ${target}`,
+    stakes: (target) => `What is learned of ${target}, and whether the watcher is found out.`,
+    next: "Whether the agent learns anything worth sending home, and stays unseen.",
+    warned: (target) => `${target} has been warned that somebody is watching him, though not who.`,
+    failed: (target, sponsor) => `A spy set on ${target} was caught, and traced to ${sponsor}.`,
+    believed: (sponsor) => `${sponsor} set a spy on me.`,
+    grievance: "He set a spy on me.",
+    grievanceOfKin: (target) => `He set a spy on ${target}.`,
+  },
+};
+
 /** The day it comes to a head. */
 function springPlot(
   world: WorldState,
@@ -424,6 +492,28 @@ function springPlot(
   if (plot.kind === "espionage") {
     const spied = spyOn(next, plot, target, outcome, input, nextLocalId);
     return { world: closePlot(spied.world, plot.id, spied.outcome, input.toDay), facts: spied.facts, died: null };
+  }
+
+  // Seized is not slain: an abduction that comes off has a captive, not a body.
+  if (plot.kind === "abduction" && (outcome === "killed" || outcome === "maimed")) {
+    next = {
+      ...next,
+      characters: next.characters.map((character) => character.id !== target.id ? character : {
+        ...character,
+        disqualifyingStatuses: character.disqualifyingStatuses.includes("captured") ? character.disqualifyingStatuses : [...character.disqualifyingStatuses, "captured"].slice(0, 8),
+      }),
+    };
+    facts.push({
+      localId: nextLocalId("plot_seized"),
+      kind: "abduction",
+      summary: `${target.name} was seized and carried off. ${plot.cover}`.slice(0, 600),
+      affectedRefs: [{ kind: "character", id: target.id }],
+      visibility: "public",
+      discoveryState: "public",
+      knowableInDays: 0,
+      significance: 90,
+    });
+    return { world: closePlot(next, plot.id, outcome, input.toDay), facts, died: null };
   }
 
   if (outcome === "killed") {
@@ -469,7 +559,7 @@ function springPlot(
         id: input.ids.next("belief"),
         holderCharacterId: target.id,
         subjectEntityId: plot.sponsorCharacterId,
-        claim: `${nameOf(next, plot.sponsorCharacterId)} paid to have me killed.`,
+        claim: PLOT_WORDS[plot.kind].believed(nameOf(next, plot.sponsorCharacterId)),
         kind: "fact" as const,
         sourceCharacterId: null,
         sourceEventId: null,
@@ -484,7 +574,7 @@ function springPlot(
     facts.push({
       localId: nextLocalId("plot_found"),
       kind: "plot_uncovered",
-      summary: `An attempt on ${target.name} came to nothing and was traced to ${nameOf(next, plot.sponsorCharacterId)}.`,
+      summary: PLOT_WORDS[plot.kind].failed(target.name, nameOf(next, plot.sponsorCharacterId)),
       affectedRefs: [
         { kind: "character", id: target.id },
         { kind: "character", id: plot.sponsorCharacterId },
@@ -522,8 +612,8 @@ function tracedTo(world: WorldState, plot: CovertPlot, target: Character, atDay:
   const sponsor = plot.sponsorCharacterId;
   const friend = computeOpinion(target, sponsor) >= 20;
   const grievances: Grievance[] = [
-    { subjectCharacterId: target.id, targetCharacterId: sponsor, label: "He paid to have me killed.", score: -20, dimensions: { trust: -60, affection: -40, fear: 15 }, decayPerYearBps: 0 },
-    ...kinOf(world, target.id).map((kin) => ({ subjectCharacterId: kin, targetCharacterId: sponsor, label: `He paid to have ${target.name} killed.`, score: -15, dimensions: { trust: -40, affection: -30 }, decayPerYearBps: 200 })),
+    { subjectCharacterId: target.id, targetCharacterId: sponsor, label: PLOT_WORDS[plot.kind].grievance, score: -20, dimensions: { trust: -60, affection: -40, fear: 15 }, decayPerYearBps: 0 },
+    ...kinOf(world, target.id).map((kin) => ({ subjectCharacterId: kin, targetCharacterId: sponsor, label: PLOT_WORDS[plot.kind].grievanceOfKin(target.name), score: -15, dimensions: { trust: -40, affection: -30 }, decayPerYearBps: 200 })),
     ...hisMasters(world, target.polityId).filter((id) => id !== sponsor).map((id) => ({ subjectCharacterId: id, targetCharacterId: sponsor, label: `The attempt on ${target.name} was traced to him.`, score: -8, dimensions: { trust: -15, reputation: -10 } })),
   ];
   return teach(remember(world, grievances, atDay, `${plot.id}:traced`), target.id, friend ? "betrayed" : "plotted_against", atDay);

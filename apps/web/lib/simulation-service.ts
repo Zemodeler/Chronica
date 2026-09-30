@@ -34,6 +34,10 @@ import { openInitiatedDialogue } from "./dialogue-service";
  * the page follows it through `getBurstStatus`.
  */
 
+
+/** How long before its telling a matter must have happened to be dated twice: two days. */
+const LATE_NEWS_MINUTES = 2 * 1440;
+
 export interface SimulationContext {
   readonly db: ChronicaDatabase;
   readonly close: () => Promise<void>;
@@ -184,6 +188,9 @@ export async function getGameView(gameId: string) {
       //
       // Entries still carry the burst that wrote them, because several threads
       // of one span are one report to read together.
+      // The report the last committed order wrote: by when it was written, not
+      // by where its passages sort in the calendar (R79).
+      latestBurstId: [...chronicle].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0]?.burstId ?? null,
       chronicle: chronicle.map((entry) => ({
         id: entry.id,
         burstId: entry.burstId,
@@ -192,6 +199,10 @@ export async function getGameView(gameId: string) {
         // indexed by. Formatted here because the scenario's calendar lives with
         // the world and has no business being shipped to the browser.
         date: dateLabel(entry.toInstantSortKey, view.scenarioClock),
+        // When what it tells happened, where that was days before the court
+        // learned of it: a letter's arrival and the battle it reports are two
+        // dates, and a late report read as the day of the event (C08).
+        happened: entry.toInstantSortKey - entry.fromInstantSortKey > LATE_NEWS_MINUTES ? dateLabel(entry.fromInstantSortKey, view.scenarioClock) : null,
         title: entry.title,
         body: entry.body,
         subjects: entry.subjects,

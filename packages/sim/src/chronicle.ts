@@ -118,6 +118,9 @@ export const WINDOW_MAX_ENTRIES = 3;
  */
 export const OWN_BUSINESS_FLOOR = 25;
 
+/** Things that happen to a place or a house whoever gave an order (see `isAmbientElsewhere`). */
+const AMBIENT_KINDS: ReadonlySet<string> = new Set(["price_shock", "illness", "family_death"]);
+
 /**
  * What is always told when it is the reader's own: a vote of his own chamber,
  * a turn in a siege his side lays or suffers, a war begun. Each was cut by the
@@ -249,7 +252,9 @@ guard themselves -- "without conceding allegiance", "made no pledge", "no
 engagement was ordered", "the order alone did not ensure the walls would fall".
 Leave all of that out. A refusal is an event, and so is a decision to wait;
 the absence of something is not, and neither is anything a clerk says to
-cover himself.
+cover himself. Except the ruler's own order: what he ordered that did not come
+about is part of what happened to it, and is said plainly, never covered by
+what was ordered.
 
 Numbers are for the reader, not the ledger. Round the large ones as a
 historian would -- "some seven and a half thousand men", "about six hundred
@@ -378,7 +383,7 @@ export interface ChronicleInput {
    * (`newsArrivesAt`). Left out, a fact is known when it happened, or when its
    * own `knowableAtInstant` says.
    */
-  readonly world?: (NewsWorld & { readonly projects?: WorldState["projects"] }) | undefined;
+  readonly world?: (NewsWorld & { readonly projects?: WorldState["projects"]; readonly orders?: WorldState["orders"] }) | undefined;
   /** What the actors said they were doing, for colour the bare facts lack. */
   readonly narrative: readonly NarrativeLine[];
   readonly frictions: readonly NarrativeLine[];
@@ -482,6 +487,14 @@ export interface ChronicleInput {
    * entries are the same ones, complete.
    */
   readonly onEntry?: ((entry: ChronicleEntry) => Promise<void>) | undefined;
+  /**
+   * Told what this call will write about and what it leaves, the moment that
+   * is decided and before any passage is written: the choosing is arithmetic,
+   * so the next window can choose knowing it, while the writing still runs
+   * side by side (C07). Called once, whatever is chosen, and before the
+   * historian is asked anything.
+   */
+  readonly onSelected?: ((selection: { readonly carried: readonly Fact[]; readonly subjects: readonly (readonly string[])[] }) => void) | undefined;
 }
 
 export interface ChronicleEntry {
@@ -542,6 +555,10 @@ interface Thread {
   readonly people: readonly string[];
   /** Several small matters of the reader's own, gathered into one passage (`OWN_HEADLINE_FLOOR`). */
   readonly digest: boolean;
+  /** The part of an order it tells, when it tells one (`matterKeys`). Two parts are two passages. */
+  readonly partKey: string | null;
+  /** Which of its facts came only as word of mouth, in a thread that also holds what was seen (C05). */
+  readonly hearsayIds: ReadonlySet<string>;
 }
 
 /**
@@ -789,13 +806,45 @@ const FIGHT_DAY_KINDS: ReadonlySet<string> = new Set([
   "commander_captured", "commander_wounded", "night_attack", "camp_stormed", "siege_event", "sea_battle",
 ]);
 
+/**
+ * The matter a fact belongs to, where the world knows it: the part of an order
+ * it answers (`world.orders`), stamped on it when it was written or reached
+ * through the work that part set going. Two facts of one matter are one thread
+ * whatever they name; two of different matters are never one, however many
+ * people they share. The transport, the accounts inquiry and the ceasefire of
+ * a single order all named Clepsina, and were written up as one entry (C01).
+ */
+export function matterKeys(world: ChronicleInput["world"]): (fact: Fact) => string | null {
+  const byWork = new Map<string, string>();
+  for (const order of world?.orders ?? []) {
+    order.parts.forEach((part, index) => {
+      for (const ref of part.workRefs) if (!byWork.has(ref.id)) byWork.set(ref.id, `${order.id}-p${index}`);
+    });
+  }
+  return (fact) => {
+    if (fact.sourceActionId !== null && fact.sourceActionId !== undefined) return fact.sourceActionId;
+    for (const entity of fact.affectedEntities) {
+      const key = byWork.get(entity.id);
+      if (key !== undefined && entity.kind !== "character" && entity.kind !== "polity") return key;
+    }
+    return null;
+  };
+}
+
 function splitIntoThreads(
   facts: readonly Fact[],
   observerPolityId: string | null,
   orderFactIds: ReadonlySet<string> = new Set(),
   relatedOf: (fact: Fact) => readonly string[] = () => [],
+  matterOfFact: (fact: Fact) => string | null = () => null,
+  observerCharacterId: string | null = null,
 ): Fact[][] {
-  const hubKey = observerPolityId === null ? null : `polity:${observerPolityId}`;
+  // The reader's own power and the reader himself: everything of his names
+  // one or the other, and joining by them joined all his business into one.
+  const hubKeys = new Set([
+    ...(observerPolityId === null ? [] : [`polity:${observerPolityId}`]),
+    ...(observerCharacterId === null ? [] : [`character:${observerCharacterId}`]),
+  ]);
 
   const parent = new Map<number, number>();
   const find = (index: number): number => {
@@ -803,12 +852,29 @@ function splitIntoThreads(
     while ((parent.get(root) ?? root) !== root) root = parent.get(root)!;
     return root;
   };
+  // The matter each group holds, once it holds one. Two groups of different
+  // matters are not joined by anything they share.
+  const matterOfRoot = new Map<number, string>();
   const union = (a: number, b: number): void => {
     const [rootA, rootB] = [find(a), find(b)];
-    if (rootA !== rootB) parent.set(rootB, rootA);
+    if (rootA === rootB) return;
+    const [matterA, matterB] = [matterOfRoot.get(rootA), matterOfRoot.get(rootB)];
+    if (matterA !== undefined && matterB !== undefined && matterA !== matterB) return;
+    parent.set(rootB, rootA);
+    if (matterA === undefined && matterB !== undefined) matterOfRoot.set(rootA, matterB);
   };
 
   facts.forEach((_, index) => parent.set(index, index));
+  // A matter's facts first: they are one thread before anything else is asked.
+  const firstOfMatter = new Map<string, number>();
+  facts.forEach((fact, index) => {
+    const matter = matterOfFact(fact);
+    if (matter === null) return;
+    matterOfRoot.set(index, matter);
+    const seen = firstOfMatter.get(matter);
+    if (seen === undefined) firstOfMatter.set(matter, index);
+    else union(seen, index);
+  });
   const firstSeenBySubject = new Map<string, number>();
   const nameless: number[] = [];
   facts.forEach((fact, index) => {
@@ -835,7 +901,7 @@ function splitIntoThreads(
     const dayBound = FIGHT_DAY_KINDS.has(fact.kind);
     for (const entity of question === undefined ? fact.affectedEntities : [question]) {
       const subject = dayBound ? `${keyOf(entity)}@${fact.time.day}` : keyOf(entity);
-      if (subject === hubKey) continue;
+      if (hubKeys.has(subject)) continue;
       const seen = firstSeenBySubject.get(subject);
       if (seen === undefined) firstSeenBySubject.set(subject, index);
       else union(seen, index);
@@ -1018,7 +1084,10 @@ function renderThread(thread: Thread, index: number, said: readonly UtteranceLin
   if (thread.people.length > 0) lines.push("The people in it -- each a different person:", ...thread.people.map((person) => `  - ${person}`));
   lines.push(
     thread.reported ? "Reported to have happened:" : "Known to have happened:",
-    ...thread.facts.map((fact) => `- ${readable(fact.summary)}`),
+    // Where it is known from, fact by fact: one witnessed fact used to make a
+    // whole thread firsthand, and a spy's report read as the court's own
+    // knowledge (C05, R43).
+    ...thread.facts.map((fact) => `- ${fact.kind === "spy_report" ? "(an agent's report: say so, and that it may be wrong) " : !thread.reported && thread.hearsayIds.has(fact.id) ? "(word only, not witnessed) " : ""}${readable(fact.summary)}`),
   );
   if (thread.narrative.length > 0) lines.push("Accounts given at the time:", ...thread.narrative.map((line) => `- ${readable(line)}`));
   if (thread.frictions.length > 0) lines.push("Difficulties reported:", ...thread.frictions.map((line) => `- ${readable(line)}`));
@@ -1042,7 +1111,10 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   // bar is treated as met rather than as failed.
   const weightOf = (fact: Fact): number => input.significanceByFactId?.get(fact.id) ?? threshold;
   const selected = selectFacts(input.facts, input.observer, input.observerPolityId, input.ownEntityIds ?? null, input.to, weightOf, input.world, input.orderFactIds ?? new Set());
-  if (selected.length === 0) return { entries: [], calls: 0, carried: [...input.facts] };
+  if (selected.length === 0) {
+    input.onSelected?.({ carried: [...input.facts], subjects: [] });
+    return { entries: [], calls: 0, carried: [...input.facts] };
+  }
 
   const visible = selected.map((entry) => entry.fact);
   const reportedIds = new Set(selected.filter((entry) => entry.reported).map((entry) => entry.fact.id));
@@ -1058,15 +1130,24 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
    * a reported difficulty and a quotation all need a *witnessed* fact to hang
    * on, where the bare summary only needs a published one.
    */
+  // Every fact it is an account of must be one the reader may know, and one of
+  // them seen: a line bound to a visible fact and a hidden one carries the
+  // hidden one with it (C04).
   const witnessed = (line: { readonly factIds: readonly string[] }): boolean =>
-    line.factIds.some((factId) => visibleFactIds.has(factId) && !reportedIds.has(factId));
+    line.factIds.length > 0
+    && line.factIds.every((factId) => visibleFactIds.has(factId))
+    && line.factIds.some((factId) => !reportedIds.has(factId));
   const firsthand = (line: { readonly actorRef: OrderPartyRef | null; readonly factIds: readonly string[] }): boolean =>
     witnessed(line) || (line.actorRef !== null && keyOf(line.actorRef) === observerKey);
   const narrative = input.narrative.filter(firsthand);
   const frictions = input.frictions.filter(firsthand);
   const utterances = (input.utterances ?? []).filter((line) => publishable(line) && witnessed(line));
 
-  const grouped = splitIntoThreads(withoutEchoes(visible), input.observerPolityId, input.orderFactIds, projectRelations(input.world, input.observerPolityId));
+  const matterOfFact = matterKeys(input.world);
+  const grouped = splitIntoThreads(
+    withoutEchoes(visible), input.observerPolityId, input.orderFactIds, projectRelations(input.world, input.observerPolityId),
+    matterOfFact, input.observer.kind === "character" ? input.observer.id : null,
+  );
   const polityOf = (characterId: string): string | null => input.polityOfCharacter?.(characterId) ?? null;
 
   /**
@@ -1090,10 +1171,21 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
    */
   const ownKeys = new Set([keyOf(input.observer), ...(input.observerPolityId === null ? [] : [`polity:${input.observerPolityId}`])]);
   const personal = input.personalEntityIds ?? input.ownEntityIds;
+  /**
+   * The orchestrator's facts include the world's own weather beside the
+   * order's answer. A grain shortage in a far province, counted as the
+   * reader's own for riding in the order's burst, was gathered with a friction
+   * line into a passage that told the Senate had voted before it had. Ambient
+   * news that names none of the reader's side is news, not the order's answer.
+   */
+  const isAmbientElsewhere = (fact: Fact): boolean =>
+    AMBIENT_KINDS.has(fact.kind)
+    && fact.affectedEntities.length > 0
+    && !fact.affectedEntities.some((entity) => ownKeys.has(keyOf(entity)) || (personal?.has(entity.id) ?? false));
   const isOurs = (facts: readonly Fact[]): boolean =>
     personal === undefined
     || facts.some((fact) =>
-      (input.orderFactIds?.has(fact.id) ?? false)
+      ((input.orderFactIds?.has(fact.id) ?? false) && !isAmbientElsewhere(fact))
       || fact.affectedEntities.length === 0
       || fact.affectedEntities.some((entity) => ownKeys.has(keyOf(entity)) || personal.has(entity.id)));
   /**
@@ -1148,6 +1240,8 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
         })
         .slice(0, 8),
       digest,
+      partKey: facts.map(matterOfFact).find((key): key is string => key !== null) ?? null,
+      hearsayIds: new Set(facts.filter((fact) => reportedIds.has(fact.id)).map((fact) => fact.id)),
     };
   };
   const unfolded = grouped.map((facts) => threadOf(facts));
@@ -1175,10 +1269,13 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   const answerAmong = (threads: readonly Thread[]): Thread | null =>
     threads.filter((thread) => thread.answersTheOrder).reduce<Thread | null>((best, thread) => (best === null || thread.orderFacts > best.orderFacts ? thread : best), null);
   const lead = answerAmong(unfolded);
-  const toOrder = lead === null ? [] : unfolded.filter((thread) => thread !== lead && thread.ours && thread.orderFacts > 0 && slight(thread));
+  // Stages of one part of the order join its answer; another part of the same
+  // order is its own passage, however slight (C02).
+  const samePart = (thread: Thread): boolean => thread.partKey === null || thread.partKey === lead?.partKey;
+  const toOrder = lead === null ? [] : unfolded.filter((thread) => thread !== lead && thread.ours && thread.orderFacts > 0 && slight(thread) && samePart(thread));
   const answered = lead === null || toOrder.length === 0 ? lead : threadOf([...lead.facts, ...toOrder.flatMap((thread) => thread.facts)].sort(byTime));
   const afterOrder = [...(answered === null ? [] : [answered]), ...unfolded.filter((thread) => thread !== lead && !toOrder.includes(thread))];
-  const small = afterOrder.filter((thread) => thread !== answered && thread.ours && slight(thread) && thread.peak >= OWN_BUSINESS_FLOOR);
+  const small = afterOrder.filter((thread) => thread !== answered && thread.ours && slight(thread) && thread.peak >= OWN_BUSINESS_FLOOR && thread.partKey === null);
   const built: Thread[] = small.length < 2
     ? afterOrder
     : [...afterOrder.filter((thread) => !small.includes(thread)), threadOf(small.flatMap((thread) => thread.facts).sort(byTime), true)];
@@ -1277,7 +1374,9 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   // The rest of the order's matters compete on weight like anything else, and
   // are carried into the next window when cut.
   const chosen = answerAmong(banded);
-  const answer = chosen === null ? [] : [chosen];
+  // Every other part of the order is answered too, and none is cut for room.
+  const otherParts = banded.filter((thread) => thread !== chosen && thread.answersTheOrder && thread.partKey !== null && thread.partKey !== chosen?.partKey);
+  const answer = chosen === null ? otherParts : [chosen, ...otherParts];
   const fights = banded.filter((thread) => !answer.includes(thread) && (thread.battle !== null || thread.mustTell));
   // The floor is met by one thing worth telling, never by a heap of small ones:
   // three "reviewed the legion's readiness" of ten each were a told entry.
@@ -1296,7 +1395,10 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
     const worthTelling = built.filter((thread) => !echoing(thread)).sort(byWeight);
     if (worthTelling.length > 0) threads = [worthTelling[0]!];
   }
-  if (threads.length === 0) return { entries: [], calls: 0, carried: [...input.facts] };
+  if (threads.length === 0) {
+    input.onSelected?.({ carried: [...input.facts], subjects: [] });
+    return { entries: [], calls: 0, carried: [...input.facts] };
+  }
   // In the order the reader could have come to know them, never in the order
   // of weight: the record reads forward in time, and a fact that reached the
   // court on the twentieth is told on the twentieth however early it happened.
@@ -1308,6 +1410,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   threads.sort((a, b) => firstKnowable(a) - firstKnowable(b) || a.facts[0]!.id.localeCompare(b.facts[0]!.id));
   const toldIds = new Set(threads.flatMap((thread) => thread.facts.map((fact) => fact.id)));
   const carried = input.facts.filter((fact) => !toldIds.has(fact.id));
+  input.onSelected?.({ carried, subjects: threads.map((thread) => [...new Set(thread.facts.flatMap((fact) => fact.affectedEntities.map(keyOf)))]) });
 
   const period = `${formatWorldDate(input.from, input.clock)} – ${formatWorldDate(input.to, input.clock)}`;
   const alreadySaid = (input.recentTitles ?? []).slice(0, 16);
@@ -1436,6 +1539,14 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
     const ids = new Set(thread.facts.map((fact) => fact.id));
     return utterances.filter((utterance) => utterance.factIds.some((factId) => ids.has(factId))).slice(0, 4);
   };
+  /** What each person is recorded saying in this matter: speeches and letters bound to its facts, and words quoted in the facts themselves. */
+  const linesOf = (thread: Thread): { speaker: string; line: string }[] => {
+    const ids = new Set(thread.facts.map((fact) => fact.id));
+    return [
+      ...saidIn(thread).map((utterance) => ({ speaker: utterance.speaker, line: utterance.line })),
+      ...spokenLines.filter((said) => thread.facts.some((fact) => ids.has(fact.id) && fact.summary.includes(said.line))),
+    ];
+  };
   /** Who may be quoted in a passage: the people in its facts, and anyone recorded speaking in it. */
   const speakersIn = (thread: Thread): Set<string> => new Set([
     ...thread.facts.flatMap((fact) => fact.affectedEntities.filter((entity) => entity.kind === "character").map((entity) => input.nameOf?.(entity) ?? null)),
@@ -1487,8 +1598,16 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
           ? (answering ? plainly(thread) : null)
           : entryOf(thread, passage.title, passage.body.trim());
         const own = passage?.quote ?? null;
-        if (entry !== null && own !== null && speakersIn(thread).has(own.speaker) && !borrowedLine(own, spokenLines)) {
-          entry = { ...entry, quote: { line: unquoted(own.line), speaker: own.speaker, occasion: own.occasion } };
+        // A quotation is somebody's recorded words, or it is not printed. The
+        // historian's own line is kept only where it is, near enough, what that
+        // same man is recorded saying in this matter -- and then the record's
+        // words are printed, not hers. "You are a traitor" was written for a
+        // man on record promising the opposite (R24).
+        const recorded = own === null || !speakersIn(thread).has(own.speaker) || borrowedLine(own, spokenLines)
+          ? null
+          : recordedLine(own, linesOf(thread));
+        if (entry !== null && own !== null && recorded !== null) {
+          entry = { ...entry, quote: { line: recorded, speaker: own.speaker, occasion: own.occasion } };
         }
       }
     } catch {
@@ -1535,6 +1654,29 @@ function borrowedLine(quote: { speaker: string; line: string }, spoken: readonly
     return shared / new Set([...mine, ...theirs]).size >= 0.4;
   });
 }
+
+/**
+ * The recorded words a historian's quotation stands for: the same speaker's
+ * line in the matter that shares most of its words, or that holds it whole.
+ * Null when he is recorded saying nothing like it.
+ */
+function recordedLine(quote: { speaker: string; line: string }, recorded: readonly { speaker: string; line: string }[]): string | null {
+  const wanted = unquoted(quote.line);
+  const mine = stemsOf(wanted);
+  let best: { line: string; score: number } | null = null;
+  for (const said of recorded) {
+    if (said.speaker !== quote.speaker) continue;
+    if (said.line.toLowerCase().includes(wanted.toLowerCase())) return unquoted(said.line);
+    const theirs = stemsOf(said.line);
+    if (mine.size === 0 || theirs.size === 0) continue;
+    const score = [...mine].filter((stem) => theirs.has(stem)).length / new Set([...mine, ...theirs]).size;
+    if (best === null || score > best.score) best = { line: unquoted(said.line), score };
+  }
+  return best !== null && best.score >= RECORDED_QUOTE_OVERLAP ? best.line : null;
+}
+
+/** How much of a quotation's wording must be the speaker's own recorded words. */
+const RECORDED_QUOTE_OVERLAP = 0.6;
 
 function unquoted(line: string): string {
   return line.trim().replace(/^["'“‘]+|["'”’]+$/g, "").trim();
