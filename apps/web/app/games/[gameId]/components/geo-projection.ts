@@ -172,7 +172,7 @@ const CONSOLIDATED_POLITY_PALETTE_SLOTS: Readonly<Record<string, number>> = {
   armenia: 1, paphlagonia: 4, colchis: 6, "pisidia-isauria": 10,
   // Iran, the Caucasus, Judea and Arabia.
   atropatene: 8, "caucasian-albania": 11, "caucasian-iberia": 12, "caspian-peoples": 13, "makran-tribes": 14, judea: 15,
-  gerrha: 0, "hejaz-tribes": 1, ituraeans: 2, kush: 3, lihyan: 4, minaeans: 5, nabataeans: 6, "najd-tribes": 7, qedar: 8, saba: 9, "scenitae-arabs": 10, "marsh-peoples": 11,
+  gerrha: 0, "hejaz-tribes": 1, ituraeans: 2, kush: 3, lihyan: 4, minaeans: 5, nabataeans: 6, "najd-tribes": 7, qedar: 8, saba: 9, "scenitae-arabs": 10, "marsh-peoples": 11, "zagros-tribes": 5,
 };
 
 function historicalFamilyForPolity(polityId: string): HistoricalPolityFamily {
@@ -186,7 +186,7 @@ function historicalFamilyForPolity(polityId: string): HistoricalPolityFamily {
   ) return "celtic";
   if (polityId.startsWith("germania-") || polityId.startsWith("low-countries-")) return "germanic";
   if (polityId.startsWith("iberia-") || polityId === "lusitanians" || polityId === "balearic-islanders") return "iberian";
-  if (polityId.startsWith("illyria-") || polityId.startsWith("thrace-") || polityId === "noric-communities") return "balkan";
+  if (polityId === "zagros-tribes" || polityId.startsWith("illyria-") || polityId.startsWith("thrace-") || polityId === "noric-communities") return "balkan";
   if (["ligurians", "taurini", "salassi", "raeti"].includes(polityId)) return "alpine";
   if (/(^|-)(hungary|hungarian|magyar|pannon|arpad)(-|$)/.test(polityId)) return "hungarian";
   if (/(^|-)(czech|bohemia|bohemian|moravia|moravian)(-|$)/.test(polityId)) return "czech";

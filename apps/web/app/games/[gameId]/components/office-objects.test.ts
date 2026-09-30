@@ -68,6 +68,10 @@ describe("which room a culture gets", () => {
     expect(roomStyleFor("", "seleucid-empire")).toBe("greek");
     expect(roomStyleFor("anatolian", "pontus")).toBe("greek");
     expect(roomStyleFor("celtic", "galatians-trocmi")).toBe("gallic");
+    // The Semitic peoples of the Near East take the nearest existing room.
+    expect(roomStyleFor("arabian", "nabataeans")).toBe("carthaginian");
+    expect(roomStyleFor("judaean", "judea")).toBe("carthaginian");
+    expect(roomStyleFor("mesopotamian", "marsh-peoples")).toBe("carthaginian");
   });
 
   it("falls back rather than guessing", () => {

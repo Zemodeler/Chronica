@@ -1,0 +1,544 @@
+{
+ "assignments": [
+  {
+   "id": "zagros-carduchian-hills",
+   "polity": "zagros-tribes",
+   "polygon": [
+    [
+     42.3,
+     37.0
+    ],
+    [
+     42.7,
+     36.92
+    ],
+    [
+     43.0,
+     36.6
+    ],
+    [
+     43.3,
+     36.75
+    ],
+    [
+     43.9,
+     36.6
+    ],
+    [
+     44.3,
+     36.5
+    ],
+    [
+     44.7,
+     36.25
+    ],
+    [
+     45.1,
+     35.8
+    ],
+    [
+     45.3,
+     35.3
+    ],
+    [
+     45.8,
+     35.05
+    ],
+    [
+     46.1,
+     35.4
+    ],
+    [
+     46.1,
+     35.98
+    ],
+    [
+     45.6,
+     36.2
+    ],
+    [
+     45.0,
+     36.5
+    ],
+    [
+     44.75,
+     37.05
+    ],
+    [
+     44.5,
+     37.26
+    ],
+    [
+     44.0,
+     37.15
+    ],
+    [
+     42.6,
+     37.12
+    ],
+    [
+     42.3,
+     37.1
+    ],
+    [
+     42.3,
+     37.0
+    ]
+   ],
+   "reason": "The Carduchian and Vaspurakan hills, Hakkari to the Sharazur: Xenophon found the Carduchi never subdued by the Great King; no Seleucid governor is attested there.",
+   "sources": [
+    "scripts/map-gen/zagros-polities.json",
+    "Xenophon Anabasis 3.5 and 4.1-3, Arrian 3.17, Diodorus 19.19, Strabo 15.3 (recalled)"
+   ],
+   "confidence": "medium"
+  },
+  {
+   "id": "zagros-cossaean-hills",
+   "polity": "zagros-tribes",
+   "polygon": [
+    [
+     46.25,
+     33.3
+    ],
+    [
+     46.625,
+     33.1
+    ],
+    [
+     47.0,
+     32.9
+    ],
+    [
+     47.3,
+     32.875
+    ],
+    [
+     47.6,
+     32.85
+    ],
+    [
+     48.1,
+     32.8
+    ],
+    [
+     48.4,
+     32.8
+    ],
+    [
+     48.7,
+     32.8
+    ],
+    [
+     48.75,
+     33.3
+    ],
+    [
+     48.5,
+     33.7
+    ],
+    [
+     48.4,
+     33.85
+    ],
+    [
+     48.15,
+     34.05
+    ],
+    [
+     47.9,
+     34.25
+    ],
+    [
+     47.4,
+     34.1
+    ],
+    [
+     46.9,
+     33.85
+    ],
+    [
+     46.5,
+     33.75
+    ],
+    [
+     46.25,
+     33.3
+    ]
+   ],
+   "reason": "The Cossaean hills of Luristan: Diodorus 19.19 says they never obeyed a king and took toll of the Persian kings; Antigonus paid or fought in 317.",
+   "sources": [
+    "scripts/map-gen/zagros-polities.json",
+    "Xenophon Anabasis 3.5 and 4.1-3, Arrian 3.17, Diodorus 19.19, Strabo 15.3 (recalled)"
+   ],
+   "confidence": "medium"
+  },
+  {
+   "id": "zagros-uxian-hills",
+   "polity": "zagros-tribes",
+   "polygon": [
+    [
+     49.0,
+     30.9
+    ],
+    [
+     49.15,
+     30.625
+    ],
+    [
+     49.3,
+     30.35
+    ],
+    [
+     49.9,
+     30.2
+    ],
+    [
+     50.25,
+     30.075
+    ],
+    [
+     50.6,
+     29.95
+    ],
+    [
+     50.95,
+     29.975
+    ],
+    [
+     51.3,
+     30.0
+    ],
+    [
+     51.7,
+     30.1
+    ],
+    [
+     51.725,
+     30.5
+    ],
+    [
+     51.75,
+     30.9
+    ],
+    [
+     51.2,
+     31.0
+    ],
+    [
+     50.85,
+     30.975
+    ],
+    [
+     50.5,
+     30.95
+    ],
+    [
+     50.05,
+     30.95
+    ],
+    [
+     49.6,
+     30.95
+    ],
+    [
+     49.0,
+     30.9
+    ]
+   ],
+   "reason": "The Uxian hills between Susiana and Persis: the upper Uxii took toll of the Persian kings (Arrian 3.17, Strabo 15.3.6).",
+   "sources": [
+    "scripts/map-gen/zagros-polities.json",
+    "Xenophon Anabasis 3.5 and 4.1-3, Arrian 3.17, Diodorus 19.19, Strabo 15.3 (recalled)"
+   ],
+   "confidence": "medium"
+  },
+  {
+   "id": "zagros-mardian-hills",
+   "polity": "zagros-tribes",
+   "polygon": [
+    [
+     50.4,
+     31.0
+    ],
+    [
+     50.8,
+     31.0
+    ],
+    [
+     51.2,
+     31.0
+    ],
+    [
+     51.55,
+     31.15
+    ],
+    [
+     51.525,
+     31.575
+    ],
+    [
+     51.5,
+     32.0
+    ],
+    [
+     51.3,
+     32.5
+    ],
+    [
+     51.1,
+     33.0
+    ],
+    [
+     51.0,
+     33.6
+    ],
+    [
+     50.65,
+     33.6
+    ],
+    [
+     50.3,
+     33.6
+    ],
+    [
+     50.3,
+     33.0
+    ],
+    [
+     50.35,
+     32.65
+    ],
+    [
+     50.4,
+     32.3
+    ],
+    [
+     50.45,
+     31.7
+    ],
+    [
+     50.425,
+     31.35
+    ],
+    [
+     50.4,
+     31.0
+    ]
+   ],
+   "reason": "The Bakhtiari and Alvand hills (Mardia): mountain Mardi beside the Uxii, with no attested Seleucid administration.",
+   "sources": [
+    "scripts/map-gen/zagros-polities.json",
+    "Xenophon Anabasis 3.5 and 4.1-3, Arrian 3.17, Diodorus 19.19, Strabo 15.3 (recalled)"
+   ],
+   "confidence": "medium"
+  },
+  {
+   "id": "urmia-west-shore-atropatene",
+   "polity": "atropatene",
+   "polygon": [
+    [
+     44.75,
+     37.15
+    ],
+    [
+     44.967,
+     37.15
+    ],
+    [
+     45.183,
+     37.15
+    ],
+    [
+     45.4,
+     37.15
+    ],
+    [
+     45.4,
+     37.417
+    ],
+    [
+     45.4,
+     37.683
+    ],
+    [
+     45.4,
+     37.95
+    ],
+    [
+     45.183,
+     37.95
+    ],
+    [
+     44.967,
+     37.95
+    ],
+    [
+     44.75,
+     37.95
+    ],
+    [
+     44.75,
+     37.683
+    ],
+    [
+     44.75,
+     37.417
+    ],
+    [
+     44.75,
+     37.15
+    ]
+   ],
+   "reason": "The Urmia plain and the west shore of Lake Urmia (Spauta) are Atropatene on Strabo 11.13; the ring stopped at lon 45.0-45.3 and left this strip to the Seleucid default as 'Northern Carduchia'.",
+   "sources": [
+    "https://en.wikipedia.org/wiki/Atropatene",
+    "Strabo 11.13.2-3 (recalled)"
+   ],
+   "confidence": "medium"
+  },
+  {
+   "id": "tyanitis-garsauritis-edge-cappadocia",
+   "polygon": [
+    [
+     33.45,
+     37.3
+    ],
+    [
+     33.733,
+     37.3
+    ],
+    [
+     34.017,
+     37.3
+    ],
+    [
+     34.3,
+     37.3
+    ],
+    [
+     34.3,
+     37.6
+    ],
+    [
+     34.3,
+     37.9
+    ],
+    [
+     34.3,
+     38.2
+    ],
+    [
+     34.017,
+     38.2
+    ],
+    [
+     33.733,
+     38.2
+    ],
+    [
+     33.45,
+     38.2
+    ],
+    [
+     33.45,
+     37.9
+    ],
+    [
+     33.45,
+     37.6
+    ],
+    [
+     33.45,
+     37.3
+    ]
+   ],
+   "polity": "cappadocia",
+   "reason": "Tyanitis and the Garsauris edge are Strabo's Cappadocian prefectures (12.1-2); the Seleucids never held Cappadocia proper (Antiochus I could not reduce it). The Cappadocian ring's west edge at lon 33.3-33.9 missed two provinces by their centres.",
+   "sources": [
+    "https://en.wikipedia.org/wiki/Antiochus_I_Soter",
+    "https://en.wikipedia.org/wiki/Kingdom_of_Cappadocia",
+    "Strabo 12.1.1, 12.2.7 (recalled)"
+   ],
+   "confidence": "medium"
+  },
+  {
+   "id": "gedrosia-edge-makran",
+   "polity": "makran-tribes",
+   "polygon": [
+    [
+     62.4,
+     27.9
+    ],
+    [
+     62.733,
+     27.9
+    ],
+    [
+     63.067,
+     27.9
+    ],
+    [
+     63.4,
+     27.9
+    ],
+    [
+     63.4,
+     28.067
+    ],
+    [
+     63.4,
+     28.233
+    ],
+    [
+     63.4,
+     28.4
+    ],
+    [
+     63.067,
+     28.4
+    ],
+    [
+     62.733,
+     28.4
+    ],
+    [
+     62.4,
+     28.4
+    ],
+    [
+     62.4,
+     28.233
+    ],
+    [
+     62.4,
+     28.067
+    ],
+    [
+     62.4,
+     27.9
+    ]
+   ],
+   "reason": "Gedrosia was among the lands Seleucus ceded to Chandragupta; the Makran ring already holds the rest of the lowland Gedrosia and this one province sat just outside its edge.",
+   "sources": [
+    "https://en.wikipedia.org/wiki/Gedrosia",
+    "Strabo 15.2.9 (recalled)"
+   ],
+   "confidence": "medium"
+  }
+ ],
+ "notes": [
+  "No Seleucid capital, anchor or settlement lies in any polygon; the Urmia, Tyanitis and Gedrosia assignments flip 3 + 2 + 1 = 6 provinces (arm-vmhbk, arm-ds5of, arm-01te6 to atropatene; cap-twz7l, cap-sxfpp to cappadocia; irn-b67yk to makran-tribes) and the four Zagros polygons flip 55, all Seleucid. Provinces in the polygons already held by the target polity are unchanged. No polygon overlaps another.",
+  "DECIDED by the lead: the Zagros and Taurus hill tribes become a new tribal polity, zagros-tribes, defined in zagros-polities.json and populated by the first four assignments of this file (55 provinces: the upland provinces of Carduchia, Vaspurakan, Cossaea, Uxia and Mardia, plus 3 Matiane uplands). The lowland, valley and coastal provinces of the same regions, about 65, stay Seleucid. The builder must add zagros to THEATRES so the polity id is known.",
+  "LOW: Ptolemaic reach in Cilicia. The First Syrian War is described as leaving Ptolemy 'most of Cilicia' (Wikipedia, First Syrian War) and Theocritus Idyll 17 lists Cilicia, but Tarsus and the plain are attested Seleucid later (Third Syrian War, 246, Ptolemy III takes Cilicia). The 9 Pedias provinces stay Seleucid; if the lead wants the western half (Soli, Mallus) Ptolemaic, a polygon lon 34.3-35.4, lat 36.6-37.1 would do it.",
+  "LOW: interior Caria (16 provinces) and inland Lycia/Milyas (4) are Seleucid by default. Coastal Caria was Ptolemaic and Stratonikeia was a Seleucid foundation of about 268; Cibyra and Milyas in 270 are unattested. Left.",
+  "LOW: Ionian cities. Miletus and Ephesus were Ptolemaic for parts of 280-260 and Smyrna leaned Seleucid; the earlier decision keeps all as ionia-communities. Left.",
+  "LOW: Damascus. The Ptolemaic ring holds the city and the Seleucid default holds its 7 northern and eastern hinterland provinces (Damascene) and Hauran NE (1). Sources say only that Damascus and the coast districts of Asia Minor changed hands (Antiochus I, Wikipedia). Left as is; if Damascus goes Seleucid, delete the Damascus ring in levant-caucasus-iran-polities.json instead.",
+  "LOW: Palmyrene steppe (31 provinces, lon 37.4-42, lat 33.6-35.7) is nomad country held by nobody in particular; Palmyra is first attested under the Seleucids. Left Seleucid.",
+  "LOW: Parikania (41 provinces, lon 56.6-60, lat 27.5-30.1). Bam and Jiroft belong to Carmania (Seleucid), but the Bampur and Sarbaz side is Gedrosia, ceded to Chandragupta on Strabo 15.2.9 and Pliny 6.23. A move of the part east of lon 58.5 and south of lat 28.6 to makran-tribes would hold about 20 provinces; not applied because whether Mauryan rule reached it is unattested.",
+  "LOW: Sophene edge. The 3 provinces labelled Sophene (lon 38.9-40.2, lat 37.6-37.75) are south of the Armenian ring, on the Commagene and Osrhoene side of the Taurus; they are Seleucid on the Antiochus I record. Orontid Armenia, and Sophene with it, may have been a Seleucid vassal in 270; the earlier decision has Armenia independent. Left.",
+  "LOW: Galatian south. Two 'Galatia' provinces (Lake Tatta shore, lon 32.4-32.7, lat 38.8-39.0) and one Southern Tolistobogia province (lon 31.6, lat 38.6) sit in the Seleucid default. Strabo puts Lake Tatta on the Galatian and Lycaonian border; the Galatian settlement is only 8 years old in 270. Left.",
+  "LOW: Hellespontine Mysia (15 provinces around the Rhyndacus and Lake Miletopolitis). Bithynia probably reached the Rhyndacus by 270; the Seleucid claim there rests on Antiochus I's letters to Ilion and Cyzicus alone. Left.",
+  "The Persian Gulf, Susiana, Elymais, Persis, Media, Hyrcania, Parthia, Aria, Drangiana and Margiana holdings match the record and need no change. Bactria and Sogdiana (Ai-Khanoum, Antiochia in Margiana) are east of the map.",
+  "Provinces of the Seleucid default that the smoothing pass in build-map-graph.ts may re-flip: the builder's smoothing is 8% bounded per polity, so re-run the build and read the 'polities whose land moved over 5%' line after applying these."
+ ]
+}

@@ -15,7 +15,7 @@ import { stableHash } from "../determinism";
  * Illyrian and Thracian names of common inscriptions, the Libyan names of the
  * Dougga dedication -- and belongs to nobody the histories remember.
  */
-export type Culture = "italic" | "etruscan" | "greek" | "celtic" | "germanic" | "iberian" | "illyrian" | "thracian" | "libyan" | "anatolian";
+export type Culture = "italic" | "etruscan" | "greek" | "celtic" | "germanic" | "iberian" | "illyrian" | "thracian" | "libyan" | "anatolian" | "iranian" | "arabian" | "sabaean" | "judaean" | "mesopotamian" | "nubian";
 
 export const POOLS: Readonly<Record<Culture, { readonly first: readonly string[]; readonly second?: readonly string[] }>> = {
   italic: {
@@ -47,11 +47,34 @@ export const POOLS: Readonly<Record<Culture, { readonly first: readonly string[]
   libyan: {
     first: ["Zelalsan", "Aelymas", "Iarbas", "Ateban", "Iepmatath", "Palu", "Ilaten", "Zamar"],
   },
-  // Iranian and native names of the Persian satrapies of Asia Minor and Armenia, which their dynasts still bore. It stands, until each
-  // has a pool of its own, for the peoples east and south of Anatolia too -- Iranian, Caucasian, Arabian, Nubian and Judaean: the
-  // closest stock there is, and not their own.
+  // Native and Iranian names of the Persian satrapies of Asia Minor, which their dynasts still bore. It also stands, for want of a
+  // pool of their own, for Caucasian Iberia, Albania and Colchis, whose names of 270 are hardly attested.
   anatolian: {
     first: ["Ariarathes", "Orophernes", "Datames", "Pharnaces", "Artabazus", "Mithrobuzanes", "Ariobarzanes", "Orontes", "Zariadres", "Artavasdes", "Pylaemenes", "Corylas", "Oltaces", "Kretines", "Kendebas", "Moagetes"],
+  },
+  // Achaemenid-Iranian stock as Greek writers spelled it: the Orontids of Armenia and the Median satraps of Atropatene.
+  iranian: {
+    first: ["Orontes", "Sames", "Arsames", "Abdissares", "Atropates", "Artabazanes", "Hydarnes", "Tiribazus", "Pharnabazus", "Artabanus", "Bagoas", "Mazaeus", "Oxathres", "Bagadates", "Mithrenes", "Artaphernes", "Rhoesaces", "Oxyartes", "Phraates", "Spitamenes"],
+  },
+  // North Arabian and Nabataean names from the Nabataean, Qedarite (Tell el-Maskhuta bowl) and Lihyanite inscriptions and their Greek spellings.
+  arabian: {
+    first: ["Aretas", "Malichus", "Obodas", "Rabbel", "Gashmu", "Qaynu", "Nuhai", "Hani", "Talmi", "Shahr", "Taymu", "Amru", "Wahballat", "Abdobodat", "Abdmanat"],
+  },
+  // South Arabian names of the Sabaean and Minaean royal inscriptions.
+  sabaean: {
+    first: ["Karibil", "Ilisharah", "Sumhuali", "Yadail", "Wahabil", "Yithiamar", "Abiyada", "Waqahil", "Ilyafa", "Dharih"],
+  },
+  // The Hebrew and Aramaic stock of Yehud, with the Greek forms Jewish families took in the third century: the priestly house, the Tobiads.
+  judaean: {
+    first: ["Onias", "Simon", "Eleazar", "Jochanan", "Matthias", "Judas", "Jason", "Joseph", "Tobias", "Hyrcanus", "Joshua", "Zadok", "Eliashib", "Jaddua", "Manasseh", "Jonathan", "Dositheus", "Nehemiah", "Hezekiah", "Hananiah", "Shemaiah"],
+  },
+  // Theophoric names of Seleucid Babylonia as the cuneiform tablets of Babylon and Uruk give them, for the Chaldean and Aramaic tribes of the marshes.
+  mesopotamian: {
+    first: ["Nabu-rimannu", "Kidinnu", "Bel-ahhe-iddina", "Anu-uballit", "Anu-belshunu", "Bel-reushunu", "Marduk-shapik-zeri", "Nanaya-iddin", "Shamash-iddin", "Nidintu-Anu", "Bel-zer-ibni", "Nabu-ahhe-iddin", "Anu-aha-ittannu"],
+  },
+  // Meroitic royal names (Arkamani, the Ergamenes of the Greeks, reigned about 270).
+  nubian: {
+    first: ["Arkamani", "Adikhalamani", "Amanislo", "Sabrakamani", "Arnekhamani", "Amanikhabale", "Yesbokheamani", "Tanyidamani"],
   },
 };
 
@@ -64,11 +87,13 @@ const GREEK = new Set([
   // Asia Minor's Greek cities and the Macedonian kingdoms that ruled the rest by Greek officials.
   "bithynia", "euxine-greek-cities", "heraclea-pontica", "hellespont-propontic-cities", "pergamon", "ptolemaic-egypt", "seleucid-empire",
 ]);
-const ANATOLIAN = new Set([
-  "armenia", "cappadocia", "colchis", "paphlagonia", "pisidia-isauria", "pontus",
-  "atropatene", "caspian-peoples", "caucasian-albania", "caucasian-iberia", "makran-tribes",
-  "gerrha", "hejaz-tribes", "ituraeans", "judea", "kush", "lihyan", "marsh-peoples", "minaeans", "nabataeans", "najd-tribes", "qedar", "saba", "scenitae-arabs",
-]);
+const ANATOLIAN = new Set(["cappadocia", "colchis", "paphlagonia", "pisidia-isauria", "pontus", "caucasian-albania", "caucasian-iberia"]);
+const IRANIAN = new Set(["armenia", "atropatene", "caspian-peoples", "makran-tribes", "zagros-tribes"]);
+const ARABIAN = new Set(["gerrha", "hejaz-tribes", "ituraeans", "lihyan", "najd-tribes", "nabataeans", "qedar", "scenitae-arabs"]);
+const SABAEAN = new Set(["minaeans", "saba"]);
+const JUDAEAN = new Set(["judea"]);
+const MESOPOTAMIAN = new Set(["marsh-peoples"]);
+const NUBIAN = new Set(["kush"]);
 const LIBYAN = new Set(["gaetuli", "garamantes", "mauretanian-peoples", "numidian-kingdoms", "canarian-peoples"]);
 
 export function cultureOf(polityId: string): Culture {
@@ -77,6 +102,12 @@ export function cultureOf(polityId: string): Culture {
   if (GREEK.has(polityId)) return "greek";
   if (LIBYAN.has(polityId)) return "libyan";
   if (ANATOLIAN.has(polityId)) return "anatolian";
+  if (IRANIAN.has(polityId)) return "iranian";
+  if (ARABIAN.has(polityId)) return "arabian";
+  if (SABAEAN.has(polityId)) return "sabaean";
+  if (JUDAEAN.has(polityId)) return "judaean";
+  if (MESOPOTAMIAN.has(polityId)) return "mesopotamian";
+  if (NUBIAN.has(polityId)) return "nubian";
   if (/^(germania-|low-countries-)/.test(polityId)) return "germanic";
   if (/^(iberia-|lusitanians|balearic)/.test(polityId)) return "iberian";
   if (/^(illyria-|pannonii)/.test(polityId)) return "illyrian";

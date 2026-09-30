@@ -1,0 +1,86 @@
+{
+  "assignments": [
+    {
+      "id": "armenia-ring-vaspurakan",
+      "polity": "armenia",
+      "onlyFrom": [
+        "seleucid-empire",
+        "zagros-tribes"
+      ],
+      "polygon": [
+        [
+          38.5,
+          38
+        ],
+        [
+          38.8,
+          37.8
+        ],
+        [
+          39.6,
+          37.8
+        ],
+        [
+          41,
+          37.7
+        ],
+        [
+          42.5,
+          37.2
+        ],
+        [
+          44,
+          37.2
+        ],
+        [
+          45.3,
+          37.5
+        ],
+        [
+          45.5,
+          39
+        ],
+        [
+          45.3,
+          41
+        ],
+        [
+          44,
+          41.3
+        ],
+        [
+          42.7,
+          41.6
+        ],
+        [
+          41.5,
+          41.2
+        ],
+        [
+          40.4,
+          41
+        ],
+        [
+          39.5,
+          40.3
+        ],
+        [
+          38.8,
+          39.6
+        ],
+        [
+          38.5,
+          38
+        ]
+      ],
+      "reason": "The Armenian ring of anatolia-polities.json reaches Vaspurakan and northern Carduchia, which lie in the Caucasus theatre, where the Seleucid default matched first; Seleucid provinces inside the ring go to armenia and so do the Zagros hill provinces inside it (the lead placed Vaspurakan and northern Carduchia with Armenia); every other owner is left as it is.",
+      "sources": [
+        "scripts/map-gen/anatolia-polities.json"
+      ],
+      "confidence": "medium"
+    }
+  ],
+  "notes": [
+    "Written by the builder's author to settle a first-match order between polity files, not by the research agents."
+  ]
+}

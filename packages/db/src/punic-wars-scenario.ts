@@ -4,7 +4,7 @@ import { POLITY_META, PUNIC_WARS_GRAPH_EDGES, PUNIC_WARS_GRAPH_POLITIES, PUNIC_W
 import { foundingPeople, romanSenators, withFinerSkills } from "./punic-wars-rulers";
 
 /**
- * The Mediterranean and the Near East of 270 BCE, on the generated map: 6,384 provinces, 163 powers
+ * The Mediterranean and the Near East of 270 BCE, on the generated map: 6,384 provinces, 164 powers
  * and every drawn town come from the map's graph (`punic-wars-map-graph.ts`,
  * built by `scripts/map-gen`), and this file adds what the graph cannot know --
  * how each power governs, who its people are, what armies and money they hold.

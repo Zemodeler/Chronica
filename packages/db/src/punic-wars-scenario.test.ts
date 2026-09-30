@@ -213,7 +213,7 @@ describe("the Punic Wars map as authoritative world state", () => {
   it("gives the east its powers too, each with ground, a cohesion and a government of its own", () => {
     const holders = new Set(provinces.map((province) => province.controllerPolityId));
     const east = ["armenia", "atropatene", "caspian-peoples", "caucasian-albania", "caucasian-iberia", "gerrha", "hejaz-tribes", "ituraeans", "judea", "kush", "lihyan",
-      "makran-tribes", "marsh-peoples", "scenitae-arabs", "minaeans", "nabataeans", "najd-tribes", "qedar", "saba"];
+      "makran-tribes", "marsh-peoples", "scenitae-arabs", "zagros-tribes", "minaeans", "nabataeans", "najd-tribes", "qedar", "saba"];
     for (const id of east) {
       const polity = world.map.polities.find((candidate) => candidate.id === id);
       expect(polity, `${id} is a polity of the world`).toBeDefined();

@@ -131,6 +131,35 @@ size and walls in its `AUTHORED_TOWNS`. A city or town within 4 km of the AWMC c
   for a town off the mask's shore: Failaka, Tylos). The builder snaps settlements offshore up to 25 km onto the province shore, and the
   validator fails any settlement outside its own province.
 
+### Who owns what: polity files, corrections, cleaning
+
+Order in `build-map-graph.ts`: old map owners, then the six polity files (`anatolia`, `egypt-arabia`, `levant-caucasus-iran`, `iraq`,
+`zagros`; a province is tested against `zagros-polities.json` first, then its own theatre's file, first match by province centre),
+then the **ownership corrections**, then the cleaning.
+
+- **Corrections**: every `scripts/map-gen/ownership-corrections*.json` (sorted by name, entries in order, later wins) is
+  `{ assignments: [{ id, polity | "unowned", polygon | polygons, reason, sources, confidence, openDesert?, onlyFrom? }] }`. A province whose
+  centre (a point inside it, nearest its centroid) lies in the polygon takes the polity. Polygons must be simple (they are closed if not);
+  unknown polities and self-crossing polygons are reported and skipped. A province holding a capital or an anchor, or a town another
+  polity's file gave to another polity, keeps its owner and the clash is printed as a conflict. Settlements in a corrected province follow it.
+  Given-away land stays owned even where it is open desert, unless the entry says `"openDesert": "unowned"` (then the desert rule applies).
+  `onlyFrom` limits an entry to provinces held by the listed polities (`ownership-corrections-vaspurakan.json` uses it).
+- **Pinning**: every province a correction decides, changed or not, is fixed against the cleaning, except a group of one or two that
+  stands as a spike or a neck (released, printed as "pins let go").
+- **Cleaning** is two stages sharing the drift bound. Stage 1 (the old pass): iterated conditional modes on the border length plus a pull to
+  the old map's owner, exclaves folded; polities may drift 8% from the old ground. Stage 2: a lighter pull, a curvature term (extra turns
+  of a polity's border around a province), provinces with 60% or more of their border against one other polity move to it, moves that
+  would cut their polity in two are refused, exclaves folded again; every polity stays within 10% of its land before and after stage 1
+  (2% for a polity a correction gave land to or took from). Provinces with a settlement stay fixed. A piece of 8 provinces or more holding
+  a polity-file town is a region, not an exclave (Persis behind the Zagros).
+- **Measures** (`border-metrics.ts`, printed by the builder before, between and after the stages, and by the validator on the emitted
+  graph as reported, non-failing lines): border km between polities and tortuosity (border length over half the convex hull perimeter of its
+  edge midpoints) per pair; spikes (60% of a province's border against one polity, or one own neighbour and two foreign); necks (a province
+  whose removal cuts off a piece of 2 or more, or at most two own neighbours and three foreign); teeth (a - b - a - b chains whose
+  middle provinces have no kin); exclaves per landmass. The validator's figures use the graph's centre-to-centre edge lengths, so they
+  differ from the builder's, which use shared border lengths.
+- Rebuilding ownership never regrows provinces: `map.json` stays as it is and the builder reproduces the geometry byte for byte.
+
 ## Relief tiles
 
 `build-relief-tiles.cjs` writes the sharp shaded relief under the atlas: an equirectangular tile pyramid,
