@@ -169,6 +169,8 @@ export interface WorldSlice {
     readonly ranks: readonly string[];
     /** How it means to fight when attacked, for whoever leads it. */
     readonly plan: string | null;
+    /** Under orders to hold: it starts no battle, and in one begun only defends. */
+    readonly holding: boolean;
   }[];
   /**
    * Places, with what stands in them.
@@ -205,6 +207,8 @@ export interface WorldSlice {
   readonly standingPlans: readonly { readonly id: string; readonly label: string; readonly effect: string; readonly where: string }[];
   /** Sieges this power lays or suffers, with how near each city is to yielding. */
   readonly sieges: readonly { readonly id: string; readonly line: string }[];
+  /** Armies facing each other with no order given, and fights begun and not yet decided (`engagements.ts`). */
+  readonly fields: readonly { readonly id: string; readonly line: string }[];
   /** The kinds of soldier this world has, for an order that reinforces an army with one. */
   readonly troopKinds: readonly { readonly id: string; readonly label: string }[];
   readonly politics: readonly { readonly id: string; readonly name: string; readonly office: string | null; readonly age: number; readonly faith: string | null;
@@ -544,6 +548,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       commander: name(force.commanderCharacterId),
       ranks: force.memberCharacterIds.map((id) => `${name(id)} [${id}]`),
       plan: reachesForce(force.id) && force.battlePlan != null ? force.battlePlan.rationale.slice(0, 160) : null,
+      holding: force.hold === true,
     }));
 
   // Every place the order might need to name, by the id it must name it by --
@@ -650,8 +655,37 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       const besieger = world.material.forces.find((force) => force.id === siege.forceId)?.name ?? siege.forceId;
       const city = world.map.provinces.flatMap((province) => province.settlements).find((settlement) => settlement.id === siege.settlementId)?.name
         ?? provinceName(siege.provinceId) ?? siege.provinceId;
-      return { id: siege.id, line: `${besieger} before ${city}, ${world.elapsedStep - siege.startedAtStep} days, ${Math.round(siege.pressureBps / 100)}% of the way to its yielding` };
+      const works = siege.works.filter((work) => work.status === "building" || work.status === "ready")
+        .map((work) => `${work.kind}${work.status === "building" ? ` (ready in ${Math.max(0, work.readyAtStep - world.elapsedStep)} days)` : ""}`);
+      return { id: siege.id, line: `${besieger} before ${city}, ${world.elapsedStep - siege.startedAtStep} days, ${Math.round(siege.pressureBps / 100)}% of the way to its yielding${works.length === 0 ? "" : `; works: ${works.join(", ")}`}` };
     });
+  // Face to face, or already at it: a fight goes on until someone is beaten,
+  // and facing is where one begins -- or does not, if nobody gives the order.
+  const forceName = (id: string): string => world.material.forces.find((force) => force.id === id)?.name ?? id;
+  const sideNames = (ids: readonly string[]): string => ids.map(forceName).join(" and ");
+  const concerns = (ids: readonly string[]): boolean => ownPolity === null || ids.some((id) => world.material.forces.find((force) => force.id === id)?.polityId === ownPolity);
+  const fields = world.engagements
+    .filter((engagement) => engagement.status !== "ended" && concerns([...engagement.attackerForceIds, ...engagement.defenderForceIds]))
+    .slice(0, CAPS.standingPlans)
+    .map((engagement) => {
+      const days = world.elapsedStep - engagement.openedAtStep;
+      const where = provinceName(engagement.provinceId) ?? engagement.provinceId;
+      return {
+        id: engagement.id,
+        line: engagement.status === "facing"
+          ? `${sideNames(engagement.attackerForceIds)} and ${sideNames(engagement.defenderForceIds)} face each other at ${where}, ${days} days, and nobody has ordered an attack`
+          : `${sideNames(engagement.attackerForceIds)} ${engagement.seeking === "battle" ? "offering battle to" : "harrying"} ${sideNames(engagement.defenderForceIds)} at ${where}, day ${days + 1}, ${engagement.pitchedRounds === 0 ? "no battle yet" : `${engagement.pitchedRounds} day${engagement.pitchedRounds === 1 ? "" : "s"} of battle`}; it goes on until one side is beaten`,
+      };
+    });
+  // Bread on the road, and ports shut in: what decides a standoff as surely as a battle.
+  const convoysOnTheRoad = world.convoys
+    .filter((convoy) => convoy.status === "on_the_road" && (ownPolity === null || convoy.polityId === ownPolity))
+    .slice(0, CAPS.standingPlans)
+    .map((convoy) => ({ id: convoy.id, line: `a convoy of ${convoy.days} days' bread for ${forceName(convoy.forceId)}, arriving in ${Math.max(0, convoy.arrivesAtStep - world.elapsedStep)} days` }));
+  const blockadeLines = world.blockades
+    .filter((blockade) => blockade.status === "active" && (ownPolity === null || blockade.blockadedPolityId === ownPolity || blockade.blockaderPolityId === ownPolity))
+    .slice(0, CAPS.standingPlans)
+    .map((blockade) => ({ id: blockade.id, line: `${world.map.polities.find((polity) => polity.id === blockade.blockaderPolityId)?.name ?? blockade.blockaderPolityId} blockades ${provinceName(blockade.provinceId)}, ${world.elapsedStep - blockade.sinceStep} days, ${blockade.tightnessBps >= 5_000 ? "shut tight" : "loosely watched"}` }));
   const standingPlans = world.contingencies
     .filter((plan) => plan.status === "armed" && (ownPolity === null || plan.ownerPolityId === ownPolity)
       && (speaksForTheGovernment || station === null || plan.ownerCharacterId === station.characterId))
@@ -1170,6 +1204,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     provinces,
     standingPlans,
     sieges,
+    fields: [...fields, ...convoysOnTheRoad, ...blockadeLines],
     troopKinds,
     faiths: world.faiths.slice(0, CAPS.faiths).map((faith) => faith.name),
     politics,
@@ -1257,11 +1292,12 @@ export function renderWorldSlice(slice: WorldSlice): string {
     if (force.banded) return `${force.name} [${force.id}] — about ${force.strength} men ${where}`;
     const short = force.paperStrength !== null && force.strength < force.paperStrength ? ` of ${force.paperStrength} on the books` : "";
     const fed = force.provisions === null || force.provisions === "provisioned" ? "" : `, ${force.provisions} of supply`;
-    return `${force.name} [${force.id}] — ${force.strength} men${short} ${where}, morale ${force.morale}/100${fed}${force.plan === null ? "" : `; if attacked: ${force.plan}`}`;
+    return `${force.name} [${force.id}] — ${force.strength} men${short} ${where}, morale ${force.morale}/100${fed}${force.holding ? ", under orders to hold" : ""}${force.plan === null ? "" : `; if attacked: ${force.plan}`}`;
   }));
   section("PLANS STANDING", slice.standingPlans.map((plan) =>
     `${plan.label} [${plan.id}] — ${plan.effect === "spring_trap" ? "prepared, and springs by itself" : "waiting to raise the alarm"}, in ${plan.where}`));
   section("SIEGES", slice.sieges.map((siege) => `${siege.line} [${siege.id}]`));
+  section("IN THE FIELD", slice.fields.map((field) => `${field.line} [${field.id}]`));
   section("KINDS OF SOLDIER", slice.troopKinds.length === 0 ? [] : [
     `${slice.troopKinds.map((kind) => `${kind.label} [${kind.id}]`).join("; ")}. A kind not listed here can be taken into an army anyway -- name it and say what sort of troops they are.`,
   ]);

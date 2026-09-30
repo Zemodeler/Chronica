@@ -31,5 +31,6 @@ export * from "./scenario";
 export * from "./standing-effects";
 export * from "./faith";
 export * from "./departments";
+export * from "./engagement";
 export * from "./war-weariness";
 export * from "./economy";

@@ -1,5 +1,7 @@
 import {
   SIEGE_BASE_DAYS,
+  SIEGE_WORKS,
+  type SiegeWorkKind,
   siegeRatio,
   siegeWalls,
   sameConfederation,
@@ -8,8 +10,13 @@ import {
   SIEGE_HUNGER_AFTER_DAYS,
   SIEGE_HUNGER_BPS_PER_DAY,
   SIEGE_REPORT_DAYS,
+  aptitude,
   atWar,
   boundedId,
+  isNavalForce,
+  retreatRoute,
+  skillShare,
+  stableHash,
   disbandForces,
   type FactProposalDraft,
   type Force,
@@ -17,6 +24,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { resolveEngagement, type BattleAccount } from "./battle";
+import { blockadeTightness } from "./blockades";
 import type { IdFactory } from "./ports";
 
 /**
@@ -68,6 +76,44 @@ function howItGoes(pressureBps: number): string {
   if (pressureBps < 6_000) return "rations in the city are short";
   if (pressureBps < 8_500) return "there is hunger in the city, and men are slipping over the walls";
   return "the city is starving";
+}
+
+/** What finished works multiply a siege's daily pressure by. */
+const RAMS_FACTOR = 1.25;
+const TOWERS_FACTOR = 1.35;
+const LINES_FACTOR = 1.1;
+/** What a mine fired under the walls adds to the pressure at once. */
+const MINE_BPS = 2_500;
+/** A garrison's chance of a sortie on a given day, in basis points, before its strength and its commander's boldness. */
+const SORTIE_BPS = 120;
+/** What a sortie that burns the works sets the siege back, in basis points of pressure. */
+const SORTIE_PRESSURE_BPS = 500;
+/** Past this pressure the walls are breached, and hungry men think of opening a gate. */
+export const BREACH_AT = 5_000;
+/** Past this the city offers terms. */
+export const TERMS_AT = 7_500;
+/** A day's chance of treachery at a gate, once the city is hungry enough, in basis points. */
+const TREACHERY_BPS = 25;
+
+function losses(force: Force, share: number, day: number, cause: string): Force {
+  if (share <= 0) return force;
+  const events: Force["history"] = [];
+  const personnel = force.personnel.map((group) => {
+    const lost = Math.floor(group.fit * share);
+    if (lost <= 0) return group;
+    events.push({ id: boundedId(force.id, group.categoryId, "siege", day), atStep: day, kind: "battle_death", categoryId: group.categoryId, count: lost, causeId: cause });
+    return { ...group, fit: group.fit - lost };
+  });
+  return { ...force, personnel, history: [...force.history, ...events].slice(-64) };
+}
+
+/** The garrison marching out under arms, on terms, to its own side's nearest ground. */
+export function marchOut(world: WorldState, forces: readonly Force[], garrison: readonly Force[], siege: Siege, besieger: Force): Force[] {
+  if (garrison.length === 0) return [...forces];
+  const to = retreatRoute(world, garrison[0]!, siege.provinceId, new Set([besieger.polityId]));
+  const going = new Set(garrison.map((force) => force.id));
+  if (to === null) return [...forces];
+  return forces.map((force) => (going.has(force.id) ? { ...force, locationId: to, positionId: null } : force));
 }
 
 /** A relief this much stronger than the besiegers makes them draw off without a battle. */
@@ -171,9 +217,96 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
     if (relief.reduce((sum, force) => sum + fitOf(force), 0) >= fitOf(besieger) * RELIEF_LIFTS_AT) {
       return end("lifted", "A relieving army came up.", "siege_lifted", `The siege of ${place} was raised: ${relief.map((force) => force.name).join(" and ")} came up to its relief, and ${besieger.name} drew off from the walls rather than be caught between them.`, 60);
     }
+    // Waiting on the besieging player's word: the siege stands still.
+    if (siege.awaiting !== null) return siege;
     const defenders = garrison.reduce((sum, force) => sum + fitOf(force), 0);
     const ratio = siegeRatio(fitOf(besieger), defenders, siegeWalls(world, siege));
-    const pressureBps = Math.min(10_000, siege.pressureBps + Math.round((days * ratio * 10_000) / SIEGE_BASE_DAYS));
+    // A port its own ships still reach is fed by sea: Lilybaeum held for
+    // nearly a decade while blockade runners slipped in and out.
+    const warfare = options.warfare === undefined ? undefined : warfareWith(world, options.warfare);
+    // Runners come from the city's own ships anywhere near, and a blockade
+    // stops them as tightly as it is kept: a fleet seals the port, a few
+    // watching ships let every other night's boat through.
+    const near = (provinceId: string): boolean => provinceId === siege.provinceId || world.map.edges.some((edge) => (edge.from === siege.provinceId && edge.to === provinceId) || (edge.to === siege.provinceId && edge.from === provinceId));
+    const friendsAtSea = forces.some((force) => force.polityId === siege.defenderPolityId && fitOf(force) > 0 && isNavalForce(force, warfare) && near(force.locationId));
+    const sealed = blockadeTightness(world, siege.provinceId, siege.defenderPolityId) / 10_000;
+    const blockadersHere = forces.some((force) => force.locationId === siege.provinceId && fitOf(force) > 0 && isNavalForce(force, warfare) && force.polityId === siege.besiegerPolityId);
+    const openness = friendsAtSea ? (blockadersHere ? Math.max(0, 1 - Math.max(sealed, 0.5)) : 1) : 0;
+    const runners = openness > 0;
+    let told = siege.told;
+    const tell = (key: string, kind: string, summary: string, significance: number, extraRefs: readonly { readonly kind: "character"; readonly id: string }[] = []): void => {
+      told = [...told, key].slice(-20);
+      facts.push({ localId: `${key}_${siege.id}_${toDay}`.slice(0, 60), kind, summary: summary.slice(0, 600), affectedRefs: [...extraRefs, ...refs], visibility: "public", discoveryState: "public", knowableInDays: 0, significance });
+    };
+    if (runners && !told.includes("runners")) tell("runners", "siege_event", `Ships of ${polityName(siege.defenderPolityId)} slipped into ${place} past the besiegers' lines with grain and men: while the sea is open, the city is not starved.`, 50);
+    // The works: finished on their day, and then pressing the city harder --
+    // rams and towers at the walls, lines that shut it in, a mine that brings
+    // a stretch of wall down the day it is fired.
+    let works = siege.works.map((work) => {
+      if (work.status !== "building" || work.readyAtStep > toDay) return work;
+      if (work.kind === "mine") {
+        tell(`mine@${toDay}`, "siege_event", `The besiegers fired their mine under the walls of ${place}, and a length of wall came down.`, 65);
+        return { ...work, status: "sprung" as const };
+      }
+      tell(`${work.kind}@${toDay}`, "siege_event", `${besieger.name}'s ${SIEGE_WORKS[work.kind].label} before ${place} are finished.`, 40);
+      return { ...work, status: "ready" as const };
+    });
+    const sprung = works.filter((work) => work.status === "sprung").length - siege.works.filter((work) => work.status === "sprung").length;
+    const ready = (kind: SiegeWorkKind): boolean => works.some((work) => work.kind === kind && work.status === "ready");
+    const worksFactor = (ready("rams") ? RAMS_FACTOR : 1) * (ready("towers") ? TOWERS_FACTOR : 1) * (ready("lines") ? LINES_FACTOR : 1);
+    let pressureBps = Math.min(10_000, siege.pressureBps + sprung * MINE_BPS + Math.round((days * ratio * worksFactor * (1 - 0.5 * openness) * 10_000) / SIEGE_BASE_DAYS));
+
+    // The siege's days, each with its chances: a sortie to burn the works, a
+    // traitor at a gate once the city is hungry enough to breed one.
+    const commanderOf = (force: Force | undefined) => world.characters.find((character) => character.id === force?.commanderCharacterId);
+    const defenderChief = commanderOf(garrison[0]);
+    const besiegerChief = commanderOf(besieger);
+    let betrayed = false;
+    for (let day = siege.pressedToStep + 1; day <= toDay && !betrayed; day += 1) {
+      const roll = (salt: string): number => stableHash([siege.id, salt, day]) % 10_000;
+      const boldness = defenderChief?.mind.temperament.boldness ?? 50;
+      // Lines of circumvallation make a sortie harder to get out and back.
+      const sortieBps = defenders === 0 ? 0 : Math.round(SORTIE_BPS * Math.min(1, (defenders * 3) / Math.max(1, fitOf(besieger))) * (boldness / 50) * (ready("lines") ? 0.5 : 1));
+      if (roll("sortie") < sortieBps) {
+        pressureBps = Math.max(0, pressureBps - SORTIE_PRESSURE_BPS);
+        forces = forces.map((force) => (force.id === besieger.id ? losses(force, 0.01, day, siege.id) : garrison.some((mine) => mine.id === force.id) ? losses(force, 0.015, day, siege.id) : force));
+        // What it burns: the towers first, then the rams. Lines are too long to
+        // burn, and a mine is underground, out of reach of fire.
+        const target = ["towers", "rams"].map((kind) => works.find((work) => work.kind === kind && (work.status === "ready" || work.status === "building")))
+          .find((work) => work !== undefined);
+        if (target !== undefined) works = works.map((work) => (work === target ? { ...work, status: "burned" as const } : work));
+        tell(`sortie@${day}`, "siege_event", target === undefined
+          ? `The garrison of ${place} came out by night against ${besieger.name}'s lines before it was driven back behind the walls.`
+          : `The garrison of ${place} came out by night and burned ${besieger.name}'s ${SIEGE_WORKS[target.kind].label} before it was driven back behind the walls.`, 50);
+      }
+      const treacheryBps = pressureBps < BREACH_AT ? 0 : Math.round(TREACHERY_BPS * (1 + (besiegerChief === undefined ? 0 : skillShare(aptitude(besiegerChief, "manipulation"), 1))));
+      if (roll("traitor") < treacheryBps) {
+        betrayed = true;
+        tell("treachery", "siege_event", `A gate of ${place} was opened to ${besieger.name} in the night by men inside who had had enough of the siege.`, 80);
+      }
+    }
+    if (betrayed) pressureBps = 10_000;
+
+    // The moments put to the besieger: a breach, and the city's offer of terms.
+    const player = options.playerCharacterId ?? null;
+    const hisSiege = player !== null && (besieger.commanderCharacterId === player || besieger.controllerCharacterId === player);
+    const moment = pressureBps < 10_000 && pressureBps >= TERMS_AT && !told.includes("terms") ? "terms" as const
+      : pressureBps < 10_000 && pressureBps >= BREACH_AT && !told.includes("breach") ? "breach" as const : null;
+    if (moment !== null) {
+      const chief = besiegerChief === undefined ? [] : [{ kind: "character" as const, id: besiegerChief.id }];
+      const question = moment === "breach"
+        ? `A breach has opened in the walls of ${place}. ${besiegerChief?.name ?? "The besieging commander"} must choose whether to storm it or keep the city closed and wait.`
+        : `${place} has offered terms to ${besieger.name}: its gates, if the garrison may march out under arms. ${besiegerChief?.name ?? "The besieging commander"} must accept or refuse.`;
+      tell(moment, "siege_event", question, 60, chief);
+      if (hisSiege) return { ...siege, pressureBps, pressedToStep: toDay, garrisonForceIds: stamped, told, works, awaiting: { kind: moment, askedAtStep: toDay } };
+      // An NPC takes terms if he is a careful man; a breach he leaves to his orders.
+      if (moment === "terms" && (besiegerChief?.mind.temperament.caution ?? 50) >= 40) {
+        const marched = marchOut(world, forces, garrison, siege, besieger);
+        forces = marched;
+        pressureBps = 10_000;
+        told = [...told, "terms_accepted"];
+      }
+    }
 
     // Hunger, once the stores are gone.
     const hungryDays = Math.max(0, toDay - Math.max(siege.pressedToStep, siege.startedAtStep + SIEGE_HUNGER_AFTER_DAYS));
@@ -195,18 +328,20 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
         const allTaken = settlements.every((city) => city.controllerPolityId === siege.besiegerPolityId);
         return { ...candidate, settlements, ...(allTaken ? { controllerPolityId: siege.besiegerPolityId, controlFirmnessBps: Math.min(candidate.controlFirmnessBps, 3_000), lostBy: { polityId: siege.defenderPolityId, atStep: toDay } } : {}) };
       });
-      yielded.push(...garrison.map((force) => force.id));
+      // A garrison that marched out on terms is not taken with the city.
+      const stillInside = garrison.filter((force) => forces.some((candidate) => candidate.id === force.id && candidate.locationId === siege.provinceId));
+      yielded.push(...stillInside.map((force) => force.id));
       forces = forces.filter((force) => !yielded.includes(force.id));
       return end(
         "taken",
-        "The city yielded.",
+        told.includes("terms_accepted") ? "The city yielded on terms." : betrayed ? "The city was betrayed." : "The city yielded.",
         "siege_ended",
         `${place} opened its gates to ${besieger.name} of ${polityName(siege.besiegerPolityId)} after ${toDay - siege.startedAtStep} days of siege${left > 0 ? `; ${left} men of its garrison laid down their arms` : ""}.`,
         85,
       );
     }
 
-    const pressed = { ...siege, pressureBps, pressedToStep: toDay, garrisonForceIds: stamped };
+    const pressed = { ...siege, pressureBps, pressedToStep: toDay, garrisonForceIds: stamped, told, works };
     if (toDay - siege.reportedAtStep < SIEGE_REPORT_DAYS) return pressed;
     facts.push({
       localId: `siege_report_${siege.id}_${toDay}`.slice(0, 60),

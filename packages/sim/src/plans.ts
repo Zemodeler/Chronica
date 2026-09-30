@@ -241,10 +241,11 @@ export function markWoken(world: WorldState, woken: readonly DueStep[]): WorldSt
  * learns of it can: "failure is information" (§5.3). The step is left for
  * `dueSteps` to wake him for.
  */
-export function settleOverdueSteps(world: WorldState, clock: ScenarioClock, localId: (prefix: string) => string): { readonly world: WorldState; readonly facts: readonly FactProposalDraft[]; readonly missed: number } {
+export function settleOverdueSteps(world: WorldState, clock: ScenarioClock, localId: (prefix: string) => string): { readonly world: WorldState; readonly facts: readonly FactProposalDraft[]; readonly missed: number; readonly slipped: number } {
   const today = world.instant.day;
   const facts: FactProposalDraft[] = [];
   let missed = 0;
+  let slipped = 0;
   const characters = world.characters.map((character) => {
     if (!character.alive) return character;
     let changed = false;
@@ -253,27 +254,46 @@ export function settleOverdueSteps(world: WorldState, clock: ScenarioClock, loca
       const late = ambition.steps.filter((step) => step.status === "pending" && today > step.dueDay);
       if (late.length === 0) return ambition;
       changed = true;
-      missed += late.length;
-      const lateIds = new Set(late.map((step) => step.id));
-      facts.push({
-        localId: localId("plan_behind"),
-        kind: "plan_fell_behind",
-        summary: `${character.name}'s plan to ${ambition.label} fell behind: ${late.map((step) => `"${step.act}" was not done by ${dayInWords(step.dueDay, clock)}`).join("; ")}.`,
-        affectedRefs: [{ kind: "character", id: character.id }],
-        visibility: "private",
-        discoveryState: "private",
-        knowableInDays: 0,
-        knownToRefs: [{ kind: "character", id: character.id }],
-        significance: 15,
-      });
+      // The first time a step his owner has already been shown runs past its
+      // day, the engine gives it the grace he would nearly always give it
+      // himself -- carry on, later -- and asks nobody. It is a settled rule,
+      // not a judgment: a plan that has not yet missed anything, and a step
+      // that has not yet slipped, are slipped once. Whoever has missed already,
+      // or a step already slipped, is asked what the plan now is.
+      const graced = trailingMisses(ambition) === 0
+        ? new Set(late.filter((step) => (step.slips ?? 0) === 0 && step.wokenOnDay !== null).map((step) => step.id))
+        : new Set<string>();
+      const behind = late.filter((step) => !graced.has(step.id));
+      slipped += graced.size;
+      missed += behind.length;
+      const lateIds = new Set(behind.map((step) => step.id));
+      if (behind.length > 0) {
+        facts.push({
+          localId: localId("plan_behind"),
+          kind: "plan_fell_behind",
+          summary: `${character.name}'s plan to ${ambition.label} fell behind: ${behind.map((step) => `"${step.act}" was not done by ${dayInWords(step.dueDay, clock)}`).join("; ")}.`,
+          affectedRefs: [{ kind: "character", id: character.id }],
+          visibility: "private",
+          discoveryState: "private",
+          knowableInDays: 0,
+          knownToRefs: [{ kind: "character", id: character.id }],
+          significance: 15,
+        });
+      }
       return {
         ...ambition,
-        steps: ambition.steps.map((step) => (lateIds.has(step.id) ? { ...step, status: "missed" as const, settledOnDay: today, wokenOnDay: null } : step)),
+        steps: ambition.steps.map((step) => {
+          if (lateIds.has(step.id)) return { ...step, status: "missed" as const, settledOnDay: today, wokenOnDay: null };
+          // Slipped: as long again as it was given, and never less than a fortnight.
+          // His owner has seen it once already, so it stays seen.
+          if (graced.has(step.id)) return { ...step, dueDay: today + Math.min(120, Math.max(14, step.dueDay - step.laidOnDay)), slips: (step.slips ?? 0) + 1 };
+          return step;
+        }),
       };
     });
     return changed ? { ...character, ambitions } : character;
   });
-  return { world: missed === 0 ? world : { ...world, characters }, facts, missed };
+  return { world: missed === 0 && slipped === 0 ? world : { ...world, characters }, facts, missed, slipped };
 }
 
 /**

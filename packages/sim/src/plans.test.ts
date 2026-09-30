@@ -119,11 +119,26 @@ describe("when it is time", () => {
 });
 
 describe("a step not taken by its day", () => {
-  it("is missed, in its owner's own record, and wakes him to decide what the plan is now", () => {
-    const { world } = laid();
+  it("is slipped once by the engine, unasked, when its owner has already been shown it", () => {
+    const { world, ambitionId } = laid();
     const late = at(markWoken(at(world, 14), dueSteps(at(world, 14), clock)), 21);
     const settled = settleOverdueSteps(late, clock, (prefix) => prefix);
+    expect(settled.missed).toBe(0);
+    expect(settled.slipped).toBe(1);
+    expect(settled.facts).toEqual([]);
+    const step = plansOf(settled.world).find((entry) => entry.id === ambitionId)!.steps[0]!;
+    // As long again as it was given, never less than a fortnight; still his, still pending, still seen.
+    expect(step).toMatchObject({ status: "pending", dueDay: 21 + 20, slips: 1 });
+    expect(dueSteps(settled.world, clock)).toEqual([]);
+  });
+
+  it("is missed, in its owner's own record, and wakes him, the second time it runs late", () => {
+    const { world } = laid();
+    const late = at(markWoken(at(world, 14), dueSteps(at(world, 14), clock)), 21);
+    const slipped = settleOverdueSteps(late, clock, (prefix) => prefix).world;
+    const settled = settleOverdueSteps(at(slipped, 42), clock, (prefix) => prefix);
     expect(settled.missed).toBe(1);
+    expect(settled.slipped).toBe(0);
     const [fact] = settled.facts;
     expect(fact!.visibility).toBe("private");
     expect(fact!.knownToRefs).toEqual([{ kind: "character", id: HIERON }]);
@@ -132,6 +147,13 @@ describe("a step not taken by its day", () => {
     expect(due[0]!.why).toContain("fallen behind");
     // Woken for it once, and then it is his to answer.
     expect(dueSteps(markWoken(settled.world, due), clock)).toEqual([]);
+  });
+
+  it("is missed at once when its owner was never shown it", () => {
+    const { world } = laid();
+    const settled = settleOverdueSteps(at(world, 25), clock, (prefix) => prefix);
+    expect(settled.missed).toBe(1);
+    expect(settled.slipped).toBe(0);
   });
 
   it("taken late still counts, but only if the answer left a mark", () => {

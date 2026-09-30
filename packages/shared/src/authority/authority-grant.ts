@@ -147,6 +147,7 @@ export const DOMAIN_POWER_BY_ACTION: Readonly<Record<string, AuthorityPower>> = 
   covert_plot_open: "punish",
   contingency_arm: "command",
   siege_lay: "command",
+  force_provision: "command",
   siege_lift: "command",
   contingency_disarm: "command",
   audit_open: "propose",

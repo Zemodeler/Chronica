@@ -16,6 +16,7 @@ import {
   type OrderPartyRef,
   type WorldState,
 } from "@chronica/shared";
+import { isBackgroundLetter } from "./letters";
 import { PLAN_SLOTS } from "./plans";
 
 /**
@@ -98,6 +99,8 @@ export interface AttentionInput {
   readonly alreadyAnswered?: ReadonlyMap<string, ReadonlySet<string>> | undefined;
   /** Who wrote each fact this burst, by character. Nobody is woken by his own act. */
   readonly authorOf?: ReadonlyMap<string, string> | undefined;
+  /** The player's power: a plain letter between two others wakes nobody (`isBackgroundLetter`). */
+  readonly ownPolityId?: string | null | undefined;
 }
 
 export function routeAttention(input: AttentionInput): AttentionResult {
@@ -227,7 +230,7 @@ export function routeAttention(input: AttentionInput): AttentionResult {
     // dormant decides the matter by silence.
     if (world.diplomacy.some(
       (message) =>
-        message.status === "awaiting_reply" && isDelivered(message, world.instant.day) &&
+        message.status === "awaiting_reply" && isDelivered(message, world.instant.day) && !isBackgroundLetter(message, input.ownPolityId) &&
         (message.toCharacterId === character.id || (message.toCharacterId === null && character.polityId !== null && message.toPolityId === character.polityId)),
     )) {
       score += 30;
@@ -332,6 +335,8 @@ export interface AmbientInput {
    * reserved places, taken from the cast rather than added to it.
    */
   readonly dueStepOwners?: ReadonlyMap<string, string> | undefined;
+  /** The player's power: a plain letter between two others wakes nobody (`isBackgroundLetter`). */
+  readonly ownPolityId?: string | null | undefined;
 }
 
 /**
@@ -456,7 +461,7 @@ export function routeAmbientActors(input: AmbientInput): RoutedActor[] {
     }
     if (world.diplomacy.some(
       (message) =>
-        message.status === "awaiting_reply" && isDelivered(message, world.instant.day) &&
+        message.status === "awaiting_reply" && isDelivered(message, world.instant.day) && !isBackgroundLetter(message, input.ownPolityId) &&
         (message.toCharacterId === character.id || (message.toCharacterId === null && character.polityId !== null && message.toPolityId === character.polityId)),
     )) {
       score += 28;
