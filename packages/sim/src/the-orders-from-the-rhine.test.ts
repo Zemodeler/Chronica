@@ -49,6 +49,19 @@ const GJIROKASTER = PUNIC_IDS.gjirokaster; // hills-uplands, the Aoos-side groun
 const COAST = PUNIC_IDS.carthage; // coastal-plain
 
 /** The opening world, with the three of them in it and Quintus's horse. */
+/**
+ * Every commander on the field willing to fight the day battle is offered. An
+ * order to attack now opens an engagement that a cautious defender may meet
+ * by keeping to his camp (`engagements.ts`); what is tested here is the
+ * battle itself.
+ */
+const readyToFight = (state: WorldState): WorldState => ({
+  ...state,
+  characters: state.characters.map((character) => (state.material.forces.some((force) => force.commanderCharacterId === character.id)
+    ? { ...character, mind: { ...character.mind, temperament: { ...character.mind.temperament, caution: 20 } } }
+    : character)),
+});
+
 function world(): WorldState {
   const base = WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
   const template = base.characters.find((character) => character.id === "quintus-ogulnius")!;
@@ -306,7 +319,7 @@ describe("the battle at the Aoos", () => {
   const engage = (state: WorldState, tactic: unknown, extra: Record<string, unknown> = {}) => order("gaius-furius", [{
     op: "force_engage", forceRef: "furius-legion", targetForceRef: "macedonian-army", posture: "offer_battle", tactic,
     reason: "Hammer and anvil at the Aoos.", ...extra,
-  }], state);
+  }], readyToFight(state));
 
   it("fights the Gauls in the same battle as the legion, not in a second one", () => {
     const result = engage(theAoos(), null);

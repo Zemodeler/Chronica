@@ -51,7 +51,10 @@ import { reviewContingencies } from "./contingencies";
 import type { BattleAccount } from "./battle";
 import { returnTheMended } from "./battle";
 import { pressSieges } from "./sieges";
-import { armiesMeet } from "./contact";
+import { fightEngagements, noteWhoFaces } from "./engagements";
+import { deliverConvoys } from "./grain";
+import { keepBlockades } from "./blockades";
+
 import { keepTheField } from "./campaign";
 import { interceptCrossings, perilsOfTheRoad } from "./crossings";
 import { raiseLevy } from "./levies";
@@ -73,6 +76,9 @@ import { keepDepartments } from "./departments";
 import { assignOverseers, polityOfWork } from "./overseers";
 import { fillAppointments } from "./appointments";
 import { reviewSkills } from "./skill-decline";
+
+/** A blockade looser than this does not shut a port's trade. */
+const LOOSE_BLOCKADE_BPS = 5_000;
 
 /** The world with its conflict overlay brought back in step with it. */
 const projectConflictsInto = (world: WorldState): WorldState => ({ ...world, conflicts: projectConflicts(world) });
@@ -295,7 +301,11 @@ export function runDeterministicTick(given: TickInput): TickResult {
     const besiegers = input.world.material.forces.filter(
       (force) => force.locationId === province.id && force.polityId !== controller && isNavalForce(force, input.warfare === undefined ? undefined : warfareWith(input.world, input.warfare)) && atWar(input.world.polityAgreements, force.polityId, controller),
     );
-    if (besiegers.length > 0) blockaded.add(controller);
+    // A few ships watching a harbour do not shut it: a blockade already known
+    // to be loose lets trade half through (`blockades.ts`), which is nothing
+    // the monthly reckoning can split, so it counts as open.
+    const known = input.world.blockades.find((blockade) => blockade.status === "active" && blockade.provinceId === province.id && blockade.blockadedPolityId === controller);
+    if (besiegers.length > 0 && (known === undefined || known.tightnessBps >= LOOSE_BLOCKADE_BPS)) blockaded.add(controller);
   }
   const blockadedTrade = (source: { readonly kind: string; readonly beneficiaryAccountId: string }): boolean => {
     if (source.kind !== "trade") return false;
@@ -1345,12 +1355,21 @@ export function runDeterministicTick(given: TickInput): TickResult {
   facts.push(...fielded.facts);
   const besieged = pressSieges(fielded.world, input.toDay, { warfare: input.warfare, ids: input.ids, playerCharacterId: input.playerCharacterId ?? null });
   facts.push(...besieged.facts);
-  // Enemy armies standing on the same ground meet (`contact.ts`) -- after the
-  // siege, whose lines are its own to fight over.
-  const met = input.warfare === undefined
+  // Fights begun by an order go on, a round a day, until one side is beaten
+  // (`engagements.ts`); enemy armies that only stand facing each other are
+  // noticed, and nothing more -- after the siege, whose lines are its own.
+  const fought = input.warfare === undefined
     ? { world: besieged.world, facts: [] as FactProposalDraft[], battles: [] as BattleAccount[] }
-    : armiesMeet({ world: besieged.world, toDay: input.toDay, warfare: input.warfare, ids: input.ids, playerCharacterId: input.playerCharacterId ?? null });
-  facts.push(...met.facts);
+    : fightEngagements({ world: besieged.world, toDay: input.toDay, warfare: input.warfare, ids: input.ids, playerCharacterId: input.playerCharacterId ?? null });
+  facts.push(...fought.facts);
+  const faced = input.warfare === undefined ? { world: fought.world, facts: [] as FactProposalDraft[] } : noteWhoFaces(fought.world, input.toDay, input.warfare, input.ids);
+  facts.push(...faced.facts);
+  // Bread on the road arrives, or is taken; fleets off ports are kept as blockades.
+  const delivered = deliverConvoys(faced.world, input.toDay, input.warfare);
+  facts.push(...delivered.facts);
+  const blockading = keepBlockades(delivered.world, input.toDay, input.warfare, input.ids);
+  facts.push(...blockading.facts);
+  const met = { world: blockading.world, battles: fought.battles };
   // The land reckoned for the month and the year; what treaties and debts
   // make happen; and misery and ambition that turn to risings and civil war --
   // before powers are reviewed, so a province full of yearning rises today.

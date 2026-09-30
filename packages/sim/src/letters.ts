@@ -54,6 +54,26 @@ export function addressWaitingLetters(world: WorldState, offices: readonly Offic
 }
 
 /**
+ * A plain letter between two powers, neither of them the player's.
+ *
+ * Nothing in it is asked of anybody who matters to the player: no agreement
+ * offered, no terms to carry out, no threat behind it. Carthage writing to
+ * Syracuse and Syracuse writing back is the world's background, and each reply
+ * was a full model call for a line the player reads, if at all, in a Chronicle
+ * paragraph. Such a letter no longer wakes its reader: it waits in his section,
+ * and he answers it if he is asked about something for another reason. It never
+ * lapses into silence unread (`tick`), so nobody is refused for it.
+ */
+export function isBackgroundLetter(message: DiplomaticMessage, ownPolityId: string | null | undefined): boolean {
+  if (ownPolityId === null || ownPolityId === undefined) return false;
+  if (message.fromPolityId === ownPolityId || message.toPolityId === ownPolityId || message.fromPolityId === message.toPolityId) return false;
+  return message.kind === "letter"
+    && (message.proposes ?? []).length === 0
+    && (message.clauses ?? []).length === 0
+    && (message.onRefusal ?? null) === null;
+}
+
+/**
  * Whom an unanswered letter is in front of: the person it names, or, for one
  * still addressed to a power at large, every one of that power's people -- the
  * same reading the cognition portrait uses to show it. Once it has reached
@@ -74,13 +94,13 @@ function isPutTo(message: DiplomaticMessage, characterId: string, polityId: stri
  * so none of them ever read what Rome asked. Each letter wakes its reader
  * once; after that his silence is his own.
  */
-export function lettersOwed(world: WorldState, clock: ScenarioClock, excludeIds: readonly string[] = []): Map<string, string> {
+export function lettersOwed(world: WorldState, clock: ScenarioClock, excludeIds: readonly string[] = [], ownPolityId: string | null = null): Map<string, string> {
   const excluded = new Set(excludeIds);
   const polityName = (id: string): string => world.map.polities.find((polity) => polity.id === id)?.name ?? id;
   const owed = new Map<string, string>();
   for (const message of world.diplomacy) {
     if (message.status !== "awaiting_reply" || message.putToRecipientOnDay != null || message.toCharacterId === null) continue;
-    if (!isDelivered(message, world.instant.day)) continue;
+    if (!isDelivered(message, world.instant.day) || isBackgroundLetter(message, ownPolityId)) continue;
     const reader = world.characters.find((character) => character.id === message.toCharacterId);
     if (reader === undefined || !reader.alive || excluded.has(reader.id) || owed.has(reader.id)) continue;
     const due = message.replyDueByStep === null ? "" : `, the answer due by ${formatWorldDate({ day: message.replyDueByStep, minute: 0 }, clock)}`;
@@ -130,11 +150,12 @@ export function nextReplyDueKey(world: WorldState, afterKey: number): number | u
  * reply date itself, and their silence was then dated to whatever came next
  * on the calendar, fifty days on.
  */
-export function aLetterWaitsOnItsReader(world: WorldState, excludeIds: readonly string[] = []): boolean {
+export function aLetterWaitsOnItsReader(world: WorldState, excludeIds: readonly string[] = [], ownPolityId: string | null = null): boolean {
   const excluded = new Set(excludeIds);
   const today = world.instant.day;
   return world.diplomacy.some((message) => {
     if (message.status !== "awaiting_reply" || message.toCharacterId === null || excluded.has(message.toCharacterId)) return false;
+    if (isBackgroundLetter(message, ownPolityId) && message.putToRecipientOnDay == null) return false;
     // Still on the road: its arrival is on the calendar (`nextReplyDueKey`).
     if (!isDelivered(message, today)) return false;
     if (message.putToRecipientOnDay != null) return message.replyDueByStep !== null && message.replyDueByStep <= today;

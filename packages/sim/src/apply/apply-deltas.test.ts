@@ -760,11 +760,17 @@ describe("what somebody can be made to believe", () => {
 
 describe("battle", () => {
   /** Two hostile armies standing on the same ground, which is all a battle needs. */
+  // Both commanders willing to fight the day battle is offered: what is tested
+  // here is the battle, not a cautious defender keeping to his camp.
   const facing = (state: WorldState = world()): WorldState => {
     const roman = state.material.forces.find((force) => force.polityId === "rome")!;
     const punic = state.material.forces.find((force) => force.polityId === "carthage")!;
+    const commanders = new Set([roman.commanderCharacterId, punic.commanderCharacterId]);
     return {
       ...state,
+      characters: state.characters.map((character) => (commanders.has(character.id)
+        ? { ...character, mind: { ...character.mind, temperament: { ...character.mind.temperament, caution: 20 } } }
+        : character)),
       material: {
         ...state.material,
         forces: state.material.forces.map((force) => (force.id === punic.id ? { ...force, locationId: roman.locationId } : force)),

@@ -48,6 +48,8 @@ export const ENEMY_NEAR_KM = 2 * REFERENCE_PROVINCE_KM;
 export const FERRY_GATHER_KM = 300;
 /** How far a man sees from his own ground: an army on the frontier is seen from the walls. */
 export const SIGHT_KM = REFERENCE_PROVINCE_KM;
+/** How far round an army the country gives it bread: half a reference province, the region a whole province once stood for. */
+export const COUNTRYSIDE_KM = REFERENCE_PROVINCE_KM / 2;
 /** Who can come for a man in trouble in the field. */
 export const RELIEF_KM = REFERENCE_PROVINCE_KM;
 /** How far a power reaches for its own officials and armies: eight reference provinces. */

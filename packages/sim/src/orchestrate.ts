@@ -171,11 +171,13 @@ principle it falls under.
    the host hears of it.
 
 10. The engine settles outcomes, and there is no field for any of them. Two
-   forces in one province may fight ("force_engage"): move the army there
+   forces in one province fight only when one is ordered to ("force_engage"): move the army there
    first in the same answer if the march is short (a longer one sets out and
    arrives later), then say who attacks, how,
    and what the plan rests on; casualties, rout, capture and ground are the
-   engine's. An army's "battlePlan" is how it fights whoever attacks it, and
+   engine's, and the fight goes on daily until a side is beaten ("hold" on
+   "force_modify" stops an army attacking; a "manoeuvre" forces the issue;
+   "force_provision" feeds an army its country will not). An army's "battlePlan" is how it fights whoever attacks it, and
    armies of one power fight each other only under different men. A plot against a person ("covert_plot_open") says who, whose hand,
    what is paid and the cover story -- never whether it works; a spy is its
    "espionage", and what he learns is the engine's report. A conditional

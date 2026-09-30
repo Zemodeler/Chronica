@@ -34,6 +34,7 @@ import { DiplomaticMessageSchema, PolityStanceSchema } from "./diplomacy";
 import { ConstitutionSchema, EMPTY_SOCIETY_MEMORY, SocietyMemorySchema } from "./constitution";
 import { SuccessionRuleSchema } from "../characters/character";
 import { AuditSchema, DepartmentSchema, DiversionSchema } from "./departments";
+import { BlockadeSchema, ConvoySchema, EngagementSchema } from "./engagement";
 import { EconomyMemorySchema } from "./economy";
 
 /**
@@ -299,6 +300,12 @@ export const WorldStateSchema = z
     contingencies: z.array(ContingencySchema).default([]),
     /** Cities held under siege (`siege.ts`), kept until they fall or the siege is lifted. */
     sieges: z.array(SiegeSchema).default([]),
+    /** Fights begun by an order and not yet decided, fought a round a day (`world/engagement.ts`). */
+    engagements: z.array(EngagementSchema).default([]),
+    /** Bread on the road to armies (`world/engagement.ts`). */
+    convoys: z.array(ConvoySchema).default([]),
+    /** Enemy fleets off ports, kept from the day they close in to the day they go. */
+    blockades: z.array(BlockadeSchema).default([]),
     /**
      * What measures before a council will do if carried -- see
      * `world/enactment.ts`. Defaulted, so every snapshot written before a law
