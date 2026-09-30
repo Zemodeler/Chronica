@@ -125,8 +125,8 @@
     "name": "Coast of the Iapyges",
     "settlement": "settlement-tarentum",
     "point": [
-      17.23,
-      40.47
+      17.25662,
+      40.46341
     ],
     "why": "Tarentum, the great city of the Apulian coast (Arpi and Luceria lie inland)",
     "regionProvinces": 31
@@ -180,8 +180,8 @@
     "name": "Coast of the Elymi",
     "settlement": "settlement-lilybaeum",
     "point": [
-      12.4297,
-      37.8027
+      12.45334,
+      37.80347
     ],
     "why": "Lilybaeum",
     "regionProvinces": 10

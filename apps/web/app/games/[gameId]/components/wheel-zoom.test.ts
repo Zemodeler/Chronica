@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SCALE, MAX_WHEEL_FACTOR, MIN_SCALE, MIN_WHEEL_FACTOR, wheelZoomFactor, zoomAbout } from "./wheel-zoom";
+import { MAX_SCALE, MAX_WHEEL_FACTOR, MIN_SCALE, MIN_WHEEL_FACTOR, PAN_OVERSCROLL, clampPan, wheelZoomFactor, zoomAbout } from "./wheel-zoom";
 
 const pixels = (deltaY: number, ctrlKey = false) => ({ deltaY, deltaMode: 0, ctrlKey });
 
@@ -54,5 +54,35 @@ describe("zooming about the cursor", () => {
     expect(back.scale).toBeCloseTo(start.scale, 10);
     expect(back.tx).toBeCloseTo(start.tx, 8);
     expect(back.ty).toBeCloseTo(start.ty, 8);
+  });
+});
+
+describe("keeping the map in the view", () => {
+  const W = 1600, H = 1000;
+
+  it("leaves a pan alone while the map still fills the view", () => {
+    const t = { scale: 4, tx: -900, ty: -1200 };
+    expect(clampPan(t, W, H)).toBe(t);
+  });
+
+  it("stops the map's edges being dragged in past the view's, less the overscroll", () => {
+    const right = clampPan({ scale: 4, tx: 5000, ty: -100 }, W, H);
+    expect(right.tx).toBeCloseTo(W * PAN_OVERSCROLL, 9);
+    const left = clampPan({ scale: 4, tx: -99999, ty: -100 }, W, H);
+    expect(left.tx).toBeCloseTo(W * (1 - 4) - W * PAN_OVERSCROLL, 9);
+    const down = clampPan({ scale: 2, tx: 0, ty: 4000 }, W, H);
+    expect(down.ty).toBeCloseTo(H * PAN_OVERSCROLL, 9);
+    const up = clampPan({ scale: 2, tx: 0, ty: -4000 }, W, H);
+    expect(up.ty).toBeCloseTo(H * (1 - 2) - H * PAN_OVERSCROLL, 9);
+  });
+
+  it("at scale 1 leaves only the overscroll, and never changes the scale", () => {
+    const t = clampPan({ scale: 1, tx: 700, ty: -700 }, W, H);
+    expect(t).toEqual({ scale: 1, tx: W * PAN_OVERSCROLL, ty: -H * PAN_OVERSCROLL });
+  });
+
+  it("does nothing for a view without size", () => {
+    const t = { scale: 3, tx: 9999, ty: 9999 };
+    expect(clampPan(t, 0, 0)).toBe(t);
   });
 });

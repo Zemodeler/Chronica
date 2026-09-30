@@ -1,6 +1,7 @@
 /**
  * Describes the Punic Wars map asset as its database row needs it (feature count, bounding box, byte size, checksum)
- * and writes `packages/db/src/punic-map-asset.ts`, so the row is written without reading the file at runtime.
+ * and writes `packages/db/src/punic-map-asset.ts`, so the row is written without reading the file at runtime and the map's
+ * version can follow what the file contains.
  * Usage: tsx scripts/map-gen/describe-map-asset.ts   (run again whenever the map is regenerated)
  */
 import { createHash } from 'node:crypto';

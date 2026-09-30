@@ -2,6 +2,7 @@ import { ScenarioDefinitionSchema, WorldStateSchema, type ScenarioDefinition, ty
 
 export { PUNIC_WARS_SCENARIO_ID, PUNIC_WARS_SLUG, punicWarsScenario, punicWarsFounding } from "./punic-wars-scenario";
 export { PUNIC_IDS, type PunicPlace } from "./punic-ids";
+export { PUNIC_WARS_MAP_ASSET } from "./punic-map-asset";
 export { foundingPeople, romanSenators, seatFoundingPeopleInto, withFinerSkills, type SeatingReport } from "./punic-wars-rulers";
 
 export const CHRONICA_SYSTEM_USER_ID = "00000000-0000-4000-8000-000000000001";

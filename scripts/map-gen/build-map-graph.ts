@@ -12,14 +12,14 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { haversineKm, polygonsOf, PolygonIndex, readPolylines, ringContains, signedArea, type Point, type Ring } from './map-geometry';
+import { haversineKm, polygonsOf, PolygonIndex, readPolylines, ringAreaKm2, ringContains, signedArea, type Point, type Ring } from './map-geometry';
 import { ancientNameOf, featureNameOf, regionOf, type Region } from './map-names';
 import { nameProvinces } from './map-region-names';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '../..');
 const DATA = process.env.MAP_GEN_DATA ?? join(ROOT, '.map-gen-data');
-const IN = process.argv.find((a) => a.startsWith('in='))?.slice(3) ?? 'v5';
+const IN = process.argv.find((a) => a.startsWith('in='))?.slice(3) ?? 'map';
 const SUFFIX = process.argv.find((a) => a.startsWith('out='))?.slice(4);
 const tag = SUFFIX === undefined || SUFFIX === '' ? '' : `-${SUFFIX}`;
 const OUT_GRAPH = join(ROOT, `packages/db/src/punic-wars-map-graph${tag}.ts`);
@@ -134,20 +134,26 @@ function tidy(ring: Ring): Ring | null {
   if (out.length > 1 && (out[0]![0] !== out[out.length - 1]![0] || out[0]![1] !== out[out.length - 1]![1])) out.push(out[0]!);
   return out.length >= 4 ? out : null;
 }
-const polygonsOfProvince: Ring[][][] = gen.rings.map((rings) => {
-  const cleaned = rings.map(tidy).filter((r): r is Ring => r !== null);
+/** Rings walked with the inside on the right become polygons: outer rings and the holes each lies in. */
+function assemble(rawRings: readonly Ring[]): Ring[][] {
+  const cleaned = rawRings.map(tidy).filter((r): r is Ring => r !== null);
   if (cleaned.length === 0) return [];
-  const orientation = Math.sign(signedArea(cleaned.reduce((a, b) => (Math.abs(signedArea(a)) >= Math.abs(signedArea(b)) ? a : b))));
-  const outers = cleaned.filter((r) => Math.sign(signedArea(r)) === orientation).map((r) => (signedArea(r) > 0 ? r : [...r].reverse()));
-  const holes = cleaned.filter((r) => Math.sign(signedArea(r)) !== orientation).map((r) => (signedArea(r) < 0 ? r : [...r].reverse()));
-  const polygons: Ring[][] = outers.map((outer) => [outer]);
-  for (const hole of holes) {
+  const areas = cleaned.map((r) => signedArea(r));
+  const orientation = Math.sign(areas.reduce((a, b) => (Math.abs(a) >= Math.abs(b) ? a : b)));
+  const polygons: { rings: Ring[]; box: number[] }[] = [];
+  const boxOf = (r: Ring): number[] => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const [x, y] of r) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; } return [x0, y0, x1, y1]; };
+  cleaned.forEach((r, k) => { if (Math.sign(areas[k]!) === orientation) { const outer = areas[k]! > 0 ? r : [...r].reverse(); polygons.push({ rings: [outer], box: boxOf(outer) }); } });
+  polygons.sort((a, b) => ringAreaKm2(a.rings[0]!) - ringAreaKm2(b.rings[0]!));
+  cleaned.forEach((hole0, k) => {
+    if (Math.sign(areas[k]!) === orientation) return;
+    const hole = areas[k]! < 0 ? hole0 : [...hole0].reverse();
     const probe: Point = [(hole[0]![0] + hole[1]![0] + hole[2]![0]) / 3, (hole[0]![1] + hole[1]![1] + hole[2]![1]) / 3];
-    const home = polygons.find((polygon) => ringContains(polygon[0]!, probe[0], probe[1]));
-    if (home) home.push(hole);
-  }
-  return polygons;
-});
+    const home = polygons.find((polygon) => probe[0] >= polygon.box[0]! && probe[0] <= polygon.box[2]! && probe[1] >= polygon.box[1]! && probe[1] <= polygon.box[3]! && ringContains(polygon.rings[0]!, probe[0], probe[1]));
+    if (home) home.rings.push(hole);
+  });
+  return polygons.map((p) => p.rings);
+}
+const polygonsOfProvince: Ring[][][] = gen.rings.map((rings) => assemble(rings));
 const outlineIndex = new PolygonIndex(polygonsOfProvince.flatMap((polygons) => polygons.map((rings) => rings)));
 const ownerOfPolygon: number[] = polygonsOfProvince.flatMap((polygons, i) => polygons.map(() => i));
 const provinceAt = (lon: number, lat: number): number => { const k = outlineIndex.find(lon, lat); return k < 0 ? -1 : ownerOfPolygon[k]!; };
@@ -190,7 +196,7 @@ const turkishThrace = (ring: Ring): boolean => Math.max(...ring.map((c) => c[1])
 const asiaMinors = polygonsOf(turkey.geometry).map((polygon) => polygon[0]!).filter((ring) => !turkishThrace(ring));
 // the settled countries of the eastern theatres, by their Natural Earth outlines
 const countryRings = (names: string[]): Ring[] => world.features.filter((f) => names.includes(f.properties.ADMIN)).flatMap((f) => polygonsOf(f.geometry).map((polygon) => polygon[0]!));
-const egyptArabiaRings = countryRings(['Egypt', 'Saudi Arabia']);
+const egyptArabiaRings = countryRings(['Egypt', 'Saudi Arabia', 'Sudan']);
 const iraqRings = countryRings(['Iraq', 'Kuwait']);
 const levantRings = countryRings(['Syria', 'Lebanon', 'Israel', 'Palestine', 'Jordan', 'Georgia', 'Armenia', 'Azerbaijan', 'Iran']);
 const shareIn = (rings: Ring[], i: number): number => {
@@ -295,19 +301,28 @@ interface Settlement { id: string; name: string; kind: string; type: string; pro
 const settlements: Settlement[] = [];
 const snapped: string[] = [];
 const offMap: string[] = [];
-function homeOf(lon: number, lat: number): { index: number; snapKm: number } {
+/** The province holding a place; one that lies offshore by a few km is put back on the shore, a kilometre and a half inside its province. */
+function homeOf(lon: number, lat: number): { index: number; snapKm: number; at: Point } {
   const inside = provinceAt(lon, lat);
-  if (inside >= 0) return { index: inside, snapKm: 0 };
+  if (inside >= 0) return { index: inside, snapKm: 0, at: [lon, lat] };
   let best = -1;
   let bestKm = Infinity;
+  let bestAt: Point = [lon, lat];
   for (let i = 0; i < N; i++) {
     if (haversineKm([lon, lat], P[i]!.centroid) > 150) continue;
     for (const polygon of polygonsOfProvince[i]!) for (const [x, y] of polygon[0]!) {
       const d = haversineKm([lon, lat], [x, y]);
-      if (d < bestKm) { bestKm = d; best = i; }
+      if (d < bestKm) { bestKm = d; best = i; bestAt = [x, y]; }
     }
   }
-  return { index: best, snapKm: bestKm };
+  if (best >= 0 && bestKm <= 25) {
+    const [cx, cy] = P[best]!.centroid;
+    const toCentre = haversineKm(bestAt, [cx, cy]);
+    const f = Math.min(0.5, 1.5 / Math.max(toCentre, 1e-6));
+    const moved: Point = [round5(bestAt[0] + (cx - bestAt[0]) * f), round5(bestAt[1] + (cy - bestAt[1]) * f)];
+    if (provinceAt(moved[0], moved[1]) === best) bestAt = moved;
+  }
+  return { index: best, snapKm: bestKm, at: bestAt };
 }
 const capitalOfPolity = new Map(old.polities.filter((p) => p.capitalSettlementId).map((p) => [p.capitalSettlementId!, p.polityId]));
 // Where a pin was wrong: the coordinate of the same place in Pleiades (scripts/map-gen/audit-settlements.cjs lists every pin
@@ -362,7 +377,7 @@ for (const s of old.settlements) {
   const home = homeOf(s.coordinate[0], s.coordinate[1]);
   if (home.snapKm > 0) snapped.push(`${s.id} ${home.snapKm.toFixed(1)} km`);
   if (home.snapKm > 25) { offMap.push(s.id); continue; }
-  settlements.push({ id: s.id, name: s.name, kind: s.kind, type: s.type, provinceIndex: home.index, controllerPolityId: s.controllerPolityId, size: s.size, fortificationLevel: s.fortificationLevel, lon: s.coordinate[0], lat: s.coordinate[1], snapKm: home.snapKm });
+  settlements.push({ id: s.id, name: s.name, kind: s.kind, type: s.type, provinceIndex: home.index, controllerPolityId: s.controllerPolityId, size: s.size, fortificationLevel: s.fortificationLevel, lon: home.snapKm > 0 && home.snapKm <= 25 ? home.at[0] : s.coordinate[0], lat: home.snapKm > 0 && home.snapKm <= 25 ? home.at[1] : s.coordinate[1], snapKm: home.snapKm });
 }
 const kindType: Record<string, string> = { city: 'city', town: 'town', village: 'village', fortress: 'fort', port: 'port' };
 const anatoliaCapital = new Map<string, string>();
@@ -376,7 +391,7 @@ for (const polity of anatolia) {
     const home = homeOf(s.lon, s.lat);
     if (home.snapKm > 0) snapped.push(`${s.settlementId} ${home.snapKm.toFixed(1)} km`);
     if (home.snapKm > 25) { offMap.push(s.settlementId); continue; }
-    settlements.push({ id: s.settlementId, name: s.name, kind: s.kind, type: kindType[s.kind] ?? 'town', provinceIndex: home.index, controllerPolityId: polity.id, size: s.size, fortificationLevel: s.fortificationLevel, lon: s.lon, lat: s.lat, snapKm: home.snapKm });
+    settlements.push({ id: s.settlementId, name: s.name, kind: s.kind, type: kindType[s.kind] ?? 'town', provinceIndex: home.index, controllerPolityId: polity.id, size: s.size, fortificationLevel: s.fortificationLevel, lon: home.snapKm > 0 && home.snapKm <= 25 ? home.at[0] : s.lon, lat: home.snapKm > 0 && home.snapKm <= 25 ? home.at[1] : s.lat, snapKm: home.snapKm });
     if (s === polity.capital) anatoliaCapital.set(polity.id, s.settlementId);
   }
 }
@@ -820,6 +835,26 @@ const unownedDesert: number[] = [];
     if (towns.some((t) => haversineKm(t, centreOf(i)) <= 80)) continue;
     controller[i] = null;
     unownedDesert.push(i);
+  }
+  // no bubbles: a few unowned provinces with owned country around them are part of it (only in the desert belt, so the rest of the map keeps its owners)
+  {
+    const inBelt = (i: number): boolean => { const [lon, lat] = centreOf(i); return (lon >= -18 && lon <= 37 && lat >= 15.5 && lat <= 35.5) || (lon >= 34 && lon <= 56 && lat >= 15.5 && lat <= 33.5); };
+    const seen = new Set<number>();
+    let filled = 0;
+    for (const start of unownedDesert) {
+      if (seen.has(start) || controller[start] !== null) continue;
+      const comp = [start];
+      seen.add(start);
+      for (let k = 0; k < comp.length; k++) for (const a of P[comp[k]!]!.adj) if (!seen.has(a.n) && controller[a.n] === null) { seen.add(a.n); comp.push(a.n); }
+      if (comp.length >= 5 || !comp.every(inBelt)) continue;
+      const votes = new Map<string, number>();
+      let owned = 0;
+      let total = 0;
+      for (const i of comp) for (const a of P[i]!.adj) { total += a.km; const c = controller[a.n]; if (c !== null && c !== undefined) { owned += a.km; votes.set(c, (votes.get(c) ?? 0) + a.km); } }
+      const best = [...votes.entries()].sort((x, y) => y[1] - x[1])[0];
+      if (best && owned >= 0.5 * total) { for (const i of comp) controller[i] = best[0]; filled += comp.length; }
+    }
+    console.log(`unowned bubbles inside owned country given to their surroundings: ${filled}`);
   }
 }
 

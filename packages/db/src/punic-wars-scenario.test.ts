@@ -34,16 +34,17 @@ describe("Punic Wars built-in scenario", () => {
     expect(crossing(PUNIC_IDS.rhegium, PUNIC_IDS.messana)).toBe("strait");
 
     // Nothing on foot gets from Messana to Rome or from Carthage to Lilybaeum...
+    const roads = new Map<string, string[]>();
+    for (const edge of edges) {
+      if (edge.crossing !== "land" && edge.crossing !== "pass") continue;
+      roads.set(edge.from, [...(roads.get(edge.from) ?? []), edge.to]);
+      roads.set(edge.to, [...(roads.get(edge.to) ?? []), edge.from]);
+    }
     const onFoot = (start: string): Set<string> => {
       const seen = new Set([start]);
       const queue = [start];
       while (queue.length > 0) {
-        const here = queue.pop()!;
-        for (const edge of edges) {
-          if (edge.crossing !== "land" && edge.crossing !== "pass") continue;
-          const next = edge.from === here ? edge.to : edge.to === here ? edge.from : null;
-          if (next !== null && !seen.has(next)) { seen.add(next); queue.push(next); }
-        }
+        for (const next of roads.get(queue.pop()!) ?? []) if (!seen.has(next)) { seen.add(next); queue.push(next); }
       }
       return seen;
     };

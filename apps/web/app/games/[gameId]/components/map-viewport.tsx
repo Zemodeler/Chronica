@@ -12,7 +12,7 @@ import {
   type PointerEvent,
   type KeyboardEvent,
 } from "react";
-import { clampScale, wheelZoomFactor, zoomAbout } from "./wheel-zoom";
+import { clampPan, clampScale, wheelZoomFactor, zoomAbout } from "./wheel-zoom";
 
 const ZOOM_STEP = 1.35;
 const PAN_PX = 40;
@@ -134,7 +134,10 @@ export const MapViewport = forwardRef<MapViewportHandle, MapViewportProps>(
     }, [requestRedraw]);
 
     // Write the CSS transform directly to the DOM — zero React re-renders per frame
-    const applyTransform = useCallback((t: ViewportTransform) => {
+    const applyTransform = useCallback((requested: ViewportTransform) => {
+      // The map may not be dragged out of the view (see clampPan).
+      const container = containerRef.current;
+      const t = container ? clampPan(requested, container.clientWidth, container.clientHeight) : requested;
       liveRef.current = t;
       const wrapper = wrapperRef.current;
       if (wrapper) {

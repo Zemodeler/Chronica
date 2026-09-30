@@ -1,3 +1,4 @@
+import { PUNIC_WARS_MAP_ASSET } from "@chronica/db";
 import type { GeoJsonMap, WorldState } from "@chronica/shared";
 import { europeNorthAfricaGeoJson } from "./europe-north-africa-geojson";
 import { punicWarsGeoJson } from "./punic-wars-map";
@@ -44,17 +45,26 @@ function namedByTheWorld(map: GeoJsonMap | undefined, world: Pick<WorldState, "m
 }
 
 /**
- * What names the map wears: the geometry is immutable per asset, so the only
- * thing that can make a copy stale is a province renamed in play. That is the
- * version the client keys its one download of the map by.
+ * What a map is made of, for its version: the checksum of the file it is served from, so that a rebuilt map is a new
+ * version and never a stale copy.
+ */
+function contentOf(mapAssetId: string): string {
+  return mapAssetId === PUNIC_WARS_MAP_ASSET_ID ? `${PUNIC_WARS_MAP_ASSET.checksum}\n` : "";
+}
+
+/**
+ * What the map is and what names it wears: the file it is drawn from, and the names the world gives its
+ * provinces (one renamed in play makes a new copy). That is the version the client keys its one download of the
+ * map by.
  */
 export function mapVersion(mapAssetId: string | null, world: Pick<WorldState, "map">): string | undefined {
   if (builtInScenarioMap(mapAssetId) === undefined || mapAssetId === null) return undefined;
   let hash = 0x811c9dc5;
-  for (const province of world.map.provinces) {
-    const line = `${province.id}\t${province.name}\n`;
-    for (let index = 0; index < line.length; index++) hash = Math.imul(hash ^ line.charCodeAt(index), 0x01000193);
-  }
+  const mix = (text: string): void => {
+    for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193);
+  };
+  mix(contentOf(mapAssetId));
+  for (const province of world.map.provinces) mix(`${province.id}\t${province.name}\n`);
   return `${mapAssetId.slice(-4)}-${(hash >>> 0).toString(36)}`;
 }
 
