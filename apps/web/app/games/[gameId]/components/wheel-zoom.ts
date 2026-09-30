@@ -35,6 +35,23 @@ export function clampScale(scale: number): number {
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
 }
 
+/** How far past the map's edge the view may be dragged, as a share of the view. */
+export const PAN_OVERSCROLL = .1;
+
+/**
+ * Holds a transform where the map still fills the view: the frame's edges may
+ * not be dragged in past the view's edges (less a small overscroll), so the
+ * player cannot lose the map in the black around it. At scale 1 the map is the
+ * view, and only the overscroll remains.
+ */
+export function clampPan(t: ZoomTransform, viewWidth: number, viewHeight: number, overscroll: number = PAN_OVERSCROLL): ZoomTransform {
+  if (viewWidth <= 0 || viewHeight <= 0) return t;
+  const clamp = (value: number, size: number) => Math.min(size * overscroll, Math.max(size * (1 - t.scale) - size * overscroll, value));
+  const tx = clamp(t.tx, viewWidth);
+  const ty = clamp(t.ty, viewHeight);
+  return tx === t.tx && ty === t.ty ? t : { scale: t.scale, tx, ty };
+}
+
 /**
  * The transform after zooming by `factor` about the point (`cx`, `cy`) of the
  * frame, in the frame's own pixels: the map under that point stays under it.

@@ -15,7 +15,7 @@ import { runDeterministicTick } from "./tick";
 /**
  * Open desert belongs to nobody.
  *
- * The map leaves forty-odd desert provinces without a holder: no town, no
+ * The map leaves some 365 desert provinces without a holder: no town, no
  * river, no sea within eighty kilometres of anybody's. What the engine does with
  * ground like that is: nobody taxes it or levies it, an army may cross it and
  * camp on it, it can be claimed by an order or by standing on it, and nobody's
@@ -155,7 +155,8 @@ describe("what nobody's ground costs and yields", () => {
       economy: { ...EMPTY_ECONOMY_MEMORY, lastReviewStep: 0 },
     };
     const land = reviewTheLand({ world: ruined, toDay: 120, warfare: definition.warfare, clock: definition.clock } as never);
-    const about = <F extends { affectedRefs?: readonly { id: string }[] | undefined }>(facts: readonly F[], id: string): F[] => facts.filter((fact) => (fact.affectedRefs ?? []).some((ref) => ref.id === id));
+    // A fact is about the place it opens with; people who fled the steppe and settled in a neighbour's fields are news of the neighbour.
+    const about = <F extends { affectedRefs?: readonly { id: string }[] | undefined }>(facts: readonly F[], id: string): F[] => facts.filter((fact) => fact.affectedRefs?.[0]?.id === id);
     expect(about(land.facts, crossing.from).map((fact) => String(fact.kind))).toContain("famine");
     expect(about(land.facts, crossing.desert)).toEqual([]);
 

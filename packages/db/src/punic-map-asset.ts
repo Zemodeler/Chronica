@@ -4,8 +4,8 @@
 // The Punic Wars map asset (apps/web/public/maps/punic-wars-provinces.geojson) as its database row records it.
 
 export const PUNIC_WARS_MAP_ASSET = {
-  featureCount: 6567,
-  boundingBox: [-18, 16.38, 62.9736, 59],
-  byteSize: 14555017,
-  checksum: "91a2902207de9c71a706823fab3f52c3e07383ff03b3d7e933f98a12369cb84e",
+  featureCount: 6637,
+  boundingBox: [-18, 16.1631, 62.9736, 59],
+  byteSize: 14345751,
+  checksum: "d82ec3620eba95cd307ed4e865c76a85aa2a6607140dcdb599ebd85f1148c469",
 } as const;

@@ -202,7 +202,7 @@ twenty provinces and ten polities while the map drew the western Mediterranean e
 difference was made up by a hardcoded overlay table merged in at render time. When that table stopped
 being merged, the rest of the map went blank — there had never been anything behind it.
 
-The whole drawn world is now authored state: 6,321 provinces, 15,117 borders and the 163 peoples who
+The whole drawn world is now authored state: 6,384 provinces, 16,363 borders and the 163 peoples who
 hold them, over Europe, North Africa and the Near East as far as Iran. The provinces are grown from the settlements alive in
 270 BCE and traced on shared vertices by `scripts/map-gen` (see its README and
 `docs/plans/imperator-density-map.md`); the same build step writes the province graph, checked in as
@@ -226,7 +226,7 @@ The invariants that make "authoritative" mean something are asserted in
 otherwise ship a border to a province that does not exist, or a sea lane out of a landlocked upland,
 and the first sign of it would be an army that cannot move.
 
-Some ground belongs to nobody: forty-odd provinces of open desert (desert-steppe with no town, river or
+Some ground belongs to nobody: some 365 provinces of open desert (desert-steppe with no town, river or
 coast, and none within eighty kilometres of one) have `controllerPolityId: null`. Nobody taxes or levies
 them (both loop over a power's own provinces), an army may cross and camp on them like any ground, and
 `province_control_set` claims one by standing in it or by holding the province next to it, without

@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GeoJsonMapSchema } from '../../packages/shared/src/world/geojson';
 import { ProvinceGraphSchema } from '../../packages/shared/src/world/map';
-import { haversineKm, polygonsOf, ringAreaKm2, signedArea, type Point } from './map-geometry';
+import { haversineKm, polygonsOf, PolygonIndex, ringAreaKm2, signedArea, type Point, type Ring } from './map-geometry';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '../..');
@@ -167,6 +167,97 @@ console.log('     biggest discrepancies (polities over 5000 km2 old, by km2 lost
 for (const r of big) console.log(`       ${r.id.padEnd(34)} old ${String(r.old).padStart(8)}  new ${String(r.now).padStart(8)}  ${(r.ratio * 100).toFixed(0)}%`);
 const newcomers = [...newArea.keys()].filter((id) => !oldArea.has(id));
 console.log(`     polities with no old land (the Anatolian file): ${newcomers.length ? newcomers.map((id) => `${id} ${Math.round(newArea.get(id)!)}`).join(', ') : 'none'}`);
+
+// ---- every settlement stands inside its own province
+{
+  const provPolys: Ring[][] = [];
+  const provOwner: string[] = [];
+  for (const f of geoProvinces) for (const polygon of polygonsOf(f.geometry)) { provPolys.push(polygon as Ring[]); provOwner.push(f.id); }
+  const provIndex = new PolygonIndex(provPolys);
+  const strays: string[] = [];
+  for (const f of geojson.features.filter((x) => x.properties.kind === 'settlement')) {
+    const [lon, lat] = (f.geometry as unknown as { coordinates: [number, number] }).coordinates;
+    const home = (f.properties as unknown as { provinceId: string }).provinceId;
+    const k = provIndex.find(lon, lat);
+    if (k < 0 || provOwner[k] !== home) strays.push(`${f.id} outside ${home}`);
+  }
+  check(strays.length === 0, `every settlement stands inside its own province (${strays.length} stray${strays.length ? `: ${strays.slice(0, 6).join('; ')}` : ''})`);
+}
+
+// ---- the desert belt of Africa and Arabia: no rings, stubs, discs, hard-cut ends or bubbles (reported, not failed: the shipped map has some)
+{
+  const inBelt = (lon: number, lat: number): boolean => (lon >= -18 && lon <= 37 && lat >= 15.5 && lat <= 35.5 && lat < 34.6) || (lon >= 34 && lon <= 56 && lat >= 15.5 && lat <= 33.5);
+  const beltIds = new Set(provinces.filter((p) => inBelt(p.geo.longitude, p.geo.latitude)).map((p) => p.id));
+  const landAdj = new Map<string, string[]>();
+  const waterEnds = new Set<string>();
+  for (const e of edges) {
+    if (e.crossing === 'land' || e.crossing === 'pass') { (landAdj.get(e.from) ?? landAdj.set(e.from, []).get(e.from)!).push(e.to); (landAdj.get(e.to) ?? landAdj.set(e.to, []).get(e.to)!).push(e.from); }
+    else { waterEnds.add(e.from); waterEnds.add(e.to); }
+  }
+  const town = new Set(settlements.map((t) => t.provinceId));
+  const deg = (id: string): number => (landAdj.get(id) ?? []).length;
+  // stubs: a chain of degree-two provinces from a dead end (no town) to a branch or a town, shorter than N
+  const N = +(process.env.STUB_N ?? 4);
+  let stubs = 0;
+  let leaves = 0;
+  let leavesNearCut = 0;
+  for (const id of beltIds) {
+    if (deg(id) !== 1 || town.has(id)) continue;
+    leaves++;
+    const p = provinces.find((q) => q.id === id)!;
+    if (Math.abs(p.geo.latitude - 20) < 1.6 || Math.abs(p.geo.latitude - 22) < 0.8 || (p.geo.latitude < 28 && p.geo.longitude < -6)) leavesNearCut++;
+    let length = 1;
+    let prev = id;
+    let at = landAdj.get(id)![0]!;
+    while (deg(at) === 2 && !town.has(at) && length < N) { const next = landAdj.get(at)!.find((x) => x !== prev)!; prev = at; at = next; length++; }
+    if (length < N && (deg(at) >= 3 || town.has(at))) stubs++;
+  }
+  // discs: land components of up to three provinces with no town and no sea crossing
+  const seenD = new Set<string>();
+  let discs = 0;
+  for (const id of beltIds) {
+    if (seenD.has(id)) continue;
+    const comp = [id]; seenD.add(id);
+    for (let k = 0; k < comp.length; k++) for (const n of landAdj.get(comp[k]!) ?? []) if (!seenD.has(n)) { seenD.add(n); comp.push(n); }
+    if (comp.length <= 3 && !comp.some((c) => town.has(c) || waterEnds.has(c))) discs++;
+  }
+  // unowned bubbles: small unowned groups whose neighbours are owned
+  const byId = new Map(provinces.map((p) => [p.id, p]));
+  const seenU = new Set<string>();
+  let bubbles = 0;
+  for (const id of beltIds) {
+    if (seenU.has(id) || byId.get(id)!.controllerPolityId !== null) continue;
+    const comp = [id]; seenU.add(id);
+    for (let k = 0; k < comp.length; k++) for (const n of landAdj.get(comp[k]!) ?? []) if (!seenU.has(n) && byId.get(n)!.controllerPolityId === null) { seenU.add(n); comp.push(n); }
+    const around = new Set(comp.flatMap((c) => landAdj.get(c) ?? []).filter((n) => !comp.includes(n)));
+    if (comp.length < 5 && around.size > 0) bubbles++;
+  }
+  // rings: voids inside the strips, found on a 0.04 degree grid over the provinces' polygons; a void that stays enclosed when the strips are thickened by one cell counts too
+  const GX0 = -18, GX1 = 57, GY0 = 15.5, GY1 = 36, STEP = 0.04;
+  const gw = Math.ceil((GX1 - GX0) / STEP), gh = Math.ceil((GY1 - GY0) / STEP);
+  const polys: Ring[][] = [];
+  for (const f of geoProvinces) for (const polygon of polygonsOf(f.geometry)) polys.push(polygon as Ring[]);
+  const index = new PolygonIndex(polys);
+  const land = new Uint8Array(gw * gh);
+  for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) land[y * gw + x] = index.find(GX0 + (x + 0.5) * STEP, GY1 - (y + 0.5) * STEP) >= 0 ? 1 : 0;
+  const voidsOf = (thick: number): { cells: number; lon: number; lat: number }[] => {
+    let g = land;
+    for (let t = 0; t < thick; t++) { const n = Uint8Array.from(g); for (let y = 1; y < gh - 1; y++) for (let x = 1; x < gw - 1; x++) if (g[y * gw + x] || g[y * gw + x - 1] || g[y * gw + x + 1] || g[(y - 1) * gw + x] || g[(y + 1) * gw + x]) n[y * gw + x] = 1; g = n; }
+    const seen = new Uint8Array(gw * gh); const out: { cells: number; lon: number; lat: number }[] = [];
+    for (let i0 = 0; i0 < gw * gh; i0++) {
+      if (g[i0] || seen[i0]) continue;
+      const stack = [i0]; seen[i0] = 1; let n = 0, sx = 0, sy = 0, open = false;
+      while (stack.length) { const q = stack.pop()!; n++; const x = q % gw, y = (q / gw) | 0; sx += x; sy += y; if (x === 0 || y === 0 || x === gw - 1 || y === gh - 1) open = true; for (const r of [q - 1, q + 1, q - gw, q + gw]) { if (r < 0 || r >= gw * gh || g[r] || seen[r]) continue; if (Math.abs((r % gw) - x) > 1) continue; seen[r] = 1; stack.push(r); } }
+      if (!open && n * STEP * STEP * 111 * 111 * 0.85 >= 3000) out.push({ cells: n, lon: GX0 + (sx / n + 0.5) * STEP, lat: GY1 - (sy / n + 0.5) * STEP });
+    }
+    return out;
+  };
+  const rings = voidsOf(0);
+  const nearRings = voidsOf(+(process.env.RING_THICK ?? 1));
+  const km2 = (c: number): number => Math.round(c * STEP * STEP * 111 * 111 * 0.85);
+  console.log(`     desert belt: ${beltIds.size} provinces; rings (enclosed voids over 3000 km2): ${rings.length}${rings.length ? ` [${rings.slice(0, 6).map((r) => `${km2(r.cells)} km2 at ${r.lon.toFixed(1)},${r.lat.toFixed(1)}`).join('; ')}]` : ''}; near-closed by one cell: ${nearRings.length}${nearRings.length ? ` [${nearRings.slice(0, 6).map((r) => `${km2(r.cells)} km2 at ${r.lon.toFixed(1)},${r.lat.toFixed(1)}`).join('; ')}]` : ''}`);
+  console.log(`     stubs shorter than ${N} provinces: ${stubs}; dead ends without a town: ${leaves} (${leavesNearCut} within reach of a belt limit); discs (isolated groups of up to 3, no town): ${discs}; unowned bubbles: ${bubbles}`);
+}
 
 console.log(failures === 0 ? '\nall checks passed' : `\n${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

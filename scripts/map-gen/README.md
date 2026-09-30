@@ -43,11 +43,11 @@ density of Imperator: Rome's territories, from open data. Plan and decisions:
 ```bash
 node scripts/map-gen/fetch-elevation.cjs
 node scripts/map-gen/pleiades-seeds.cjs x0=-18 x1=64 y0=15.5 y1=59 out=seeds270-v4.json
-node --max-old-space-size=14336 scripts/map-gen/generate-provinces.cjs out=v5 x0=-18 x1=64 y0=15.5 y1=59 \
+node --max-old-space-size=14336 scripts/map-gen/generate-provinces.cjs out=map x0=-18 x1=64 y0=15.5 y1=59 \
   nf=14 warp=2 ridge=1 crest=8 slope=4 min=140 seeds=seeds270-v4.json pin=scripts/map-gen/fill-pins.json
 ```
 
-Writes `v5.json` (rings per province in lon/lat), `v5.svg` and `v5.png`. (The window is the shipped map's; the exact knobs of the
+Writes `map.json` (rings per province in lon/lat), `map.fill.json` (the filler seeds, to copy over `fill-pins.json`), `map.svg` and `map.png`. (The window is the shipped map's; the exact knobs of the
 shipped run were not recorded. `fill-pins.json` pins the filler seeds of an earlier run, so widening the window does not move
 them; `klat` is pinned for the same reason.)
 Useful knobs: `nf` noise size, `crest`/`slope` ridge weight, `fill` filler spacing
@@ -111,6 +111,25 @@ size and walls in its `AUTHORED_TOWNS`. A city or town within 4 km of the AWMC c
   and no coast, 80 km or more from every town, has no controller (open desert). The validator allows nothing else unowned and
   reports outer edges that keep one heading for over `STRAIGHT_KM` (default 60) km.
 - `fill-pins.json` pins the filler seeds of the latest run.
+
+### Solid belts, and the ground the map leaves out
+
+- **Africa (lon -18..37, lat 15.5..35.5)** is shaped as solid belts: land within about 120 km of a coast or a main (perennial) river,
+  or 24 px of a town, is provinced whole; the open desert beyond stays empty. The belt tapers to a rounded end at Tarfaya (Cape Juby)
+  on the Atlantic and at Syene and Philae on the Nile (the Canary Islands keep the full band), its edges are closed, opened and rounded
+  with a mean filter, low ground it encloses is filled, rings of strips are opened, dead-end strips trimmed two cells deep and orphans
+  removed (`bband`, `btown`, `bclose`, `bopen`, `bsmooth`, `hfill`, `ringgap`, `stub`, `cap`). The Sirhan/Najd corner of Arabia gets
+  the same tidying without the band. The builder folds unowned bubbles inside owned country into their surroundings.
+- **Land left out of the map** (massifs above 2,000 m, deep desert, land no province covers) is not written anywhere. The generator
+  still labels it as one more cell of the arc network the provinces are traced from, so **a province's border with left-out land is
+  smoothed like a border between two provinces**, not like coast: there is no gap and no overlap with the neighbour, and the edge
+  stays a shared arc. That label is internal to the trace; dropping it would change the smoothing near the Alps and the massifs and
+  so the provinces themselves.
+- **Nile band to Meroe**: the belt is not cut by the southern wander (lon 28..36.5 lowers its limit to 15.4) and ends in a rounded cap
+  at Meroe (16.93N 33.72E); Sudan is part of the Egypt-Arabia country rings so `kush` owns the band.
+- **Towns keep a province**: every seed of the old map and the polity files gets a 10 px disc inside the belt scope (8 px island disc
+  for a town off the mask's shore: Failaka, Tylos). The builder snaps settlements offshore up to 25 km onto the province shore, and the
+  validator fails any settlement outside its own province.
 
 ## Relief tiles
 
