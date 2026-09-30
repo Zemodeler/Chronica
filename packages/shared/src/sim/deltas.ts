@@ -386,6 +386,8 @@ const ForceModifySchema = z.object({
    * not have, and the force then shows its power's first.
    */
   standardId: EntityIdSchema.optional(),
+  /** Hold: start no battle, and in one begun only defend. False lifts it. */
+  hold: z.boolean().optional(),
   locationId: EntityIdSchema.optional(),
   /**
    * Where in that province they actually stand.
@@ -1157,6 +1159,8 @@ const ForceEngageSchema = z.object({
    * themselves; this names anybody else's, or an ally's.
    */
   alliedForceRefs: z.array(RefSchema).max(8).optional(),
+  /** A way to force the issue with an enemy who will not come out, or to get away from one. */
+  manoeuvre: z.enum(["storm_camp", "night_attack", "provoke", "lure", "withdraw_by_night"]).optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -1804,6 +1808,21 @@ const SiegeLaySchema = z.object({
   localId: LocalIdSchema,
   forceRef: RefSchema,
   settlementId: MaybeIdSchema.default(null),
+  /** Siege works to build, now or for a siege already laid. */
+  works: z.array(z.enum(["rams", "towers", "mine", "lines"])).max(4).optional(),
+  reason: ReasonSchema,
+}).strict();
+
+/** Bread for an army: bought from a market, taken from the country, or sent up from home. */
+const ForceProvisionSchema = z.object({
+  op: z.literal("force_provision"),
+  forceRef: RefSchema,
+  how: z.enum(["buy", "requisition", "convoy"]),
+  days: z.number().int().min(1).max(120),
+  /** Convoy: where it is sent from. */
+  fromProvinceId: MaybeIdSchema.default(null),
+  /** Buy or convoy: who pays. */
+  payAccountRef: MaybeRefSchema.default(null),
   reason: ReasonSchema,
 }).strict();
 
@@ -1912,6 +1931,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   AuditOpenSchema,
   SiegeLaySchema,
   SiegeLiftSchema,
+  ForceProvisionSchema,
   FamilyTieSetSchema,
   CharacterDeathSchema,
   LegalStatusSetSchema,
@@ -1975,6 +1995,7 @@ export const WORLD_DELTA_OPS = [
   "audit_open",
   "siege_lay",
   "siege_lift",
+  "force_provision",
   "force_raid",
   "family_tie_set",
   "character_death",
@@ -2051,6 +2072,8 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   // A siege is an army's work, judged as ordering the army would be.
   siege_lay: "military",
   siege_lift: "military",
+  // Feeding an army is its commander's business, and whoever pays for the bread.
+  force_provision: "military",
   // Marrying and adopting are a family's business, and its head's.
   family_tie_set: "social",
   // Putting a man to death is the judicial power at its plainest; a duel or a

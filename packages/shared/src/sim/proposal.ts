@@ -170,6 +170,14 @@ export const ProposalSchema = z
   .strict();
 export type Proposal = z.infer<typeof ProposalSchema>;
 
+/**
+ * A person's own proposal. The same, except that the account of what they did
+ * is not asked for: they write the facts anyway, each with its own summary, so
+ * the account said everything twice and was the second dearest thing in every
+ * answer. Still accepted where a model writes one.
+ */
+export const CognitionProposalSchema = ProposalSchema.extend({ narrativeSummary: SummarySchema.default("") });
+
 export const PlayerDecisionSchema = z
   .object({
     prompt: z.string().trim().min(1).max(1_200),
@@ -306,9 +314,14 @@ export const CognitionOutputSchema = z
       .array(
         z.object({
           actorRef: OrderPartyRefSchema,
-          /** Reasoning from that actor's knowledge alone (VISION §28) -- kept for inspection, never applied. */
-          reasoning: SummarySchema,
-          proposal: ProposalSchema,
+          /**
+           * Reasoning from that actor's knowledge alone (VISION §28). Nothing reads it, so the
+           * prompt no longer asks for it (`cognition.ts` strips it from the schema it shows):
+           * it was up to 600 characters of output per person, which is the dearest token
+           * there is. An answer that still carries one is accepted and ignored.
+           */
+          reasoning: SummarySchema.default(""),
+          proposal: CognitionProposalSchema,
           plan: PlanProposalSchema.nullable().default(null),
           /** Steps of their own plan this answer carries out, by the ids in their section. */
           stepsTaken: z.array(EntityIdSchema).max(2).default([]),

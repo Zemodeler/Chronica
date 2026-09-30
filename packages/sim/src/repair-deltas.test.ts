@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, type Office, type ScenarioClock, type WorldState } from "@chronica/shared";
 import { runSimulationBurst, type BurstInput } from "./burst";
-import { repairDeltas } from "./repair-deltas";
+import { repairDeltas, worthRepairing } from "./repair-deltas";
 import type { SimModelPort, SimOperation } from "./ports";
 
 /**
@@ -211,5 +211,21 @@ describe("a correction written as a patch", () => {
     ] });
     expect(repaired.deltas).toHaveLength(1);
     expect(repaired.failure).toBeNull();
+  });
+});
+
+describe("refusals no correction can cure", () => {
+  it.each([
+    "An audit goes through a department's books or a household's; name one.",
+    "A letter must be between two powers that exist.",
+    'The force refers to "local:curius-consular-army", which nothing in this batch created.',
+    'The question refers to "local:senate-direction-debate", which nothing in this batch created.',
+  ])("spends no call on: %s", (reason) => {
+    expect(worthRepairing({ reason })).toBe(false);
+  });
+
+  it("still repairs a cut-off id, which the world can show the candidates for", () => {
+    expect(worthRepairing({ reason: 'No province "punic-italy-rhegium" exists to move this force to.' })).toBe(true);
+    expect(worthRepairing({ reason: 'No letter "message-12148423" exists to answer.' })).toBe(true);
   });
 });

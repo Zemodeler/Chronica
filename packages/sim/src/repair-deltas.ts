@@ -116,10 +116,17 @@ export async function repairDeltas(input: DeltaRepairInput): Promise<DeltaRepair
     .map((rejection, index) => `${index + 1}. ${JSON.stringify(rejection.delta)}\n   REFUSED: ${rejection.reason}${candidatesFor(rejection.reason, input.world)}`)
     .join("\n\n");
 
-  const message = `${input.worldText}\n\nThese changes were refused:\n\n${complaints}\n\nWrite them again, corrected.`;
+  // The world goes in the system message, not the user's. The provider reuses
+  // only a system message it has already seen (measured: seven thousand tokens
+  // of identical text in the user message were never read back from cache, and
+  // the same text in the system message was, all but the last few tokens), and
+  // every repair in a burst is written against the same slice. Five repairs
+  // paid full price for it each before this.
+  const system = `${DELTA_REPAIR_SYSTEM_PROMPT}\n\nThe world as it stood when the changes were written:\n\n${input.worldText}`;
+  const message = `These changes were refused:\n\n${complaints}\n\nWrite them again, corrected.`;
 
   try {
-    const raw = await input.port.complete("repair_deltas", DELTA_REPAIR_SYSTEM_PROMPT, message);
+    const raw = await input.port.complete("repair_deltas", system, message);
     const envelope = RepairEnvelopeSchema.safeParse(extractJson(raw));
     if (!envelope.success) {
       return nothing(envelope.error.issues.slice(0, 4).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; "), 1);
@@ -150,7 +157,18 @@ export async function repairDeltas(input: DeltaRepairInput): Promise<DeltaRepair
  * first and refused again after every repair is one the repair never fixes.
  * The first entry is a rule of the world dressed as a reference error.
  */
-const BEYOND_REPAIR = [/is the player's own purse, and the world does not spend it for him/];
+const BEYOND_REPAIR = [
+  /is the player's own purse, and the world does not spend it for him/,
+  // The repair is shown the player's world, not the ruler's who wrote these, and
+  // each refusal names something that world does not hold. An audit that names
+  // no department (thirteen refused, from the rulers of Messenia, Rhodes and
+  // western Crete); a letter between powers that do not exist; a force or a
+  // question that refers to a handle nothing in the answer created. Live, four
+  // of five repairs in one turn were these, at seven thousand tokens each.
+  /An audit goes through a department's books or a household's; name one\./,
+  /A letter must be between two powers that exist\./,
+  /which nothing in this batch created\./,
+];
 
 export function worthRepairing(rejection: { readonly reason: string }): boolean {
   return !BEYOND_REPAIR.some((pattern) => pattern.test(rejection.reason));

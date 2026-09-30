@@ -1,4 +1,6 @@
 import {
+  SIEGE_WORKS,
+  type SiegeWorkKind,
   DELTA_AUTHORITY_DOMAIN,
   adjustPolityLegitimacy,
   AGREEMENT_KIND_IN_WORDS,
@@ -102,6 +104,8 @@ import {
   CUSTOMARY_TAX_BURDEN,
 } from "@chronica/shared";
 import { resolveEngagement, type BattleAccount } from "../battle";
+import { fightRound, openEngagement } from "../engagements";
+import { GrainRefused, breadWhereItStands, sendConvoy } from "../grain";
 import { handOverForcesOf, killCharacter, mattersEnough } from "../mortality";
 import { carryOutEnactment } from "../enact";
 import { endPolity } from "../polity-end";
@@ -237,6 +241,9 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
     case "siege_lay":
       return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
+    // Bread paid for is spending from whoever pays; taken or sent, the army's business.
+    case "force_provision":
+      return delta.payAccountRef === null ? { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef } : { kind: "account", id: resolve(delta.payAccountRef) ?? delta.payAccountRef };
     // Raising a siege is the besieging army's act, whoever writes it.
     case "siege_lift": {
       const siegeId = resolve(delta.siegeRef) ?? delta.siegeRef;
@@ -486,6 +493,7 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   project_milestone_update: "propose",
   force_create: "command",
   force_modify: "command",
+  force_provision: "command",
   force_reinforce: "command",
   force_attrition: "command",
   character_create: "appoint",
@@ -1990,6 +1998,7 @@ function applyOne(
         ...force,
         ...(delta.name === undefined ? {} : { name: delta.name }),
         ...(delta.standardId === undefined ? {} : { standardId: delta.standardId }),
+        ...(delta.hold === undefined ? {} : { hold: delta.hold }),
         ...(delta.locationId === undefined ? {} : { locationId: delta.locationId }),
         ...(positionChange === null ? {} : positionChange),
         ...(commanderId === undefined ? {} : { commanderCharacterId: commanderId }),
@@ -2287,6 +2296,10 @@ function applyOne(
       if (defender === undefined) reject(`No force "${defenderId}" exists to be given battle.`, "reference");
 
       if (attacker.id === defender.id) reject("A force cannot give battle to itself.", "reference");
+      // (b) An army on hold starts no battle, whoever orders it: the hold is
+      // lifted by its own order first (`force_modify` with hold false).
+      // Getting away is not attacking: an army on hold may still slip off by night.
+      if (attacker.hold === true && delta.manoeuvre !== "withdraw_by_night") reject(`${attacker.name} is under orders to hold, and will not attack until the hold is lifted.`);
       // Armies of one power can fight each other -- a mutiny put down, a
       // consul marching on his colleague, a Rubicon -- so long as they answer
       // to different men. It was refused outright, which made civil war the
@@ -2388,27 +2401,48 @@ function applyOne(
       const defenderAllies = here.filter((force) => !attackerAllies.includes(force)
         && (civilStrife ? underTheSameMan(force, defender) : onOneSide(force, defender)));
 
-      // The engine decides what happens. Everything the model chose -- who, and
-      // how -- is already spent by this point.
+      // The order opens a fight, or adds to one already begun, and its first
+      // day is fought now (docs/plans/battles-that-last.md). The engine
+      // decides each day after it until one side is beaten.
       const battleId = context.ids.next("battle");
-      const engagement = resolveEngagement(
-        {
-          world,
-          attacker,
-          defender,
-          attackerAllies,
-          defenderAllies,
-          posture: delta.posture,
-          // The plan given with the order, or the one the army already had.
-          tactic: delta.tactic ?? attacker.battlePlan ?? null,
-          defenderTactic: defender.battlePlan ?? null,
-          warfare: warfareWith(world, context.warfare),
-          battleId,
-          seed: `${context.gameId}:${battleId}`,
-          playerCharacterId: context.playerCharacterId ?? null,
-        },
+      // At sea it is one day's battle and its pursuit, as it was: fleets beach
+      // at night and do not camp in sight of each other for a week
+      // (docs/plans/battles-that-last.md, decision 12).
+      if (isNavalForce(attacker, rules)) {
+        const seaFight = resolveEngagement({
+          world, attacker, defender, attackerAllies, defenderAllies, posture: delta.posture,
+          tactic: delta.tactic ?? attacker.battlePlan ?? null, defenderTactic: defender.battlePlan ?? null,
+          warfare: rules, battleId, seed: `${context.gameId}:${battleId}`, playerCharacterId: context.playerCharacterId ?? null,
+        }, world.material.forces.findIndex((force) => force.id === attackerId));
+        for (const fact of seaFight.facts) emitFact(fact);
+        if (seaFight.account !== undefined) emitAccount(seaFight.account);
+        return {
+          ...seaFight.world,
+          conflicts: {
+            ...seaFight.world.conflicts,
+            battles: [...seaFight.world.conflicts.battles.filter((battle) => battle.battleId !== battleId), {
+              battleId,
+              participantForceIds: [attacker.id, ...attackerAllies.map((force) => force.id), defender.id, ...defenderAllies.map((force) => force.id)],
+              attackerForceIds: [attacker.id, ...attackerAllies.map((force) => force.id)],
+            }].slice(-MAX_SHOWN_BATTLES),
+          },
+        };
+      }
+      const opened = openEngagement(world, {
+        attacker, defender, attackerAllies, defenderAllies, posture: delta.posture, atStep, id: context.ids.next("engagement"), manoeuvre: delta.manoeuvre,
+      });
+      // The plan given with the order is the army's own from now on, for every day of it.
+      const planned = delta.tactic === null ? opened.world : {
+        ...opened.world,
+        material: { ...opened.world.material, forces: opened.world.material.forces.map((force) => (force.id === attacker.id ? { ...force, battlePlan: delta.tactic } : force)) },
+      };
+      const firstDay = fightRound(
+        { world: planned, warfare: warfareWith(world, context.warfare), ids: context.ids, playerCharacterId: context.playerCharacterId ?? null },
+        opened.engagement.id,
+        atStep,
         world.material.forces.findIndex((force) => force.id === attackerId),
       );
+      const engagement = { world: firstDay.world, facts: firstDay.facts, account: firstDay.battles[0] };
       for (const fact of engagement.facts) emitFact(fact);
       if (civilStrife) {
         const polityName = world.map.polities.find((polity) => polity.id === attacker.polityId)?.name ?? attacker.polityId;
@@ -4584,9 +4618,10 @@ function applyOne(
       if (!atWar(world.polityAgreements, force.polityId, defenderId)) {
         reject(`${name(force.polityId)} is not at war with ${name(defenderId)}: a siege of ${place} is an act of war, and the war is declared first ("agreement_open").`);
       }
-      // Laid once: the same army at the same city is the siege already under way.
+      // Laid once: the same army at the same city is the siege already under way,
+      // and an order naming works for it raises them there.
       const standing = world.sieges.find((siege) => siege.status === "active" && siege.forceId === forceId && siege.provinceId === province.id && siege.settlementId === (settlement?.id ?? null));
-      if (standing !== undefined) return world;
+      if (standing !== undefined) return raiseWorks(world, standing, force, delta.works ?? [], atStep, context, emitFact);
       const siegeId = mint("siege", delta.localId);
       emitFact({
         localId: `siege_${siegeId}`.slice(0, 60),
@@ -4598,15 +4633,47 @@ function applyOne(
         knowableInDays: 0,
         significance: 55,
       });
-      return {
-        ...world,
-        sieges: [...world.sieges, {
-          id: siegeId, forceId: force.id, provinceId: province.id, settlementId: settlement?.id ?? null,
-          besiegerPolityId: force.polityId, defenderPolityId: defenderId,
-          startedAtStep: atStep, pressedToStep: atStep, reportedAtStep: atStep,
-          pressureBps: 0, status: "active" as const, endedAtStep: null, endedReason: null,
-        }],
+      const siege = {
+        id: siegeId, forceId: force.id, provinceId: province.id, settlementId: settlement?.id ?? null,
+        besiegerPolityId: force.polityId, defenderPolityId: defenderId,
+        startedAtStep: atStep, pressedToStep: atStep, reportedAtStep: atStep,
+        pressureBps: 0, awaiting: null, works: [], told: [], status: "active" as const, endedAtStep: null, endedReason: null,
       };
+      return raiseWorks({ ...world, sieges: [...world.sieges, siege] }, siege, force, delta.works ?? [], atStep, context, emitFact);
+    }
+
+    case "force_provision": {
+      const forceId = required(delta.forceRef, "The army to be fed");
+      const force = world.material.forces.find((candidate) => candidate.id === forceId);
+      if (force === undefined) reject(`No force "${forceId}" exists to feed.${nearestTo(forceId)}`, "reference");
+      if (isNavalForce(force, warfareWith(world, context.warfare))) reject(`${force.name} is a fleet, victualled in port, not an army to be fed in the field.`);
+      let got: ReturnType<typeof breadWhereItStands>;
+      try {
+        if (delta.how === "convoy") {
+          if (delta.fromProvinceId === null) reject("A convoy is sent from somewhere: name the province (\"fromProvinceId\").");
+          got = sendConvoy(world, force, delta.fromProvinceId, delta.days, atStep, context.ids);
+        } else {
+          got = breadWhereItStands(world, force, delta.how, delta.days, atStep);
+        }
+      } catch (refusal) {
+        if (refusal instanceof GrainRefused) reject(refusal.message);
+        throw refusal;
+      }
+      let fed = got.world;
+      if (got.cost > 0) {
+        // Whoever was named pays; failing that, whoever pays the army; failing
+        // that, its power's treasury.
+        const named = delta.payAccountRef === null ? null : required(delta.payAccountRef, "Who pays for the bread");
+        const obligationPayer = force.payObligationId === null ? undefined : world.material.obligations.find((obligation) => obligation.id === force.payObligationId)?.payerAccountId;
+        const treasury = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === force.polityId)?.id;
+        const payer = named ?? obligationPayer ?? treasury ?? null;
+        const purse = payer === null ? undefined : world.material.accounts.find((account) => account.id === payer);
+        if (purse === undefined) reject(`Nobody is named to pay the ${got.cost} the bread costs.`, "reference");
+        if (purse.balance < got.cost) reject(`The bread costs ${got.cost}, and ${purse.id} holds ${purse.balance}.`);
+        fed = moveMoney(fed, { from: purse.id, to: got.sellerAccountId, amount: got.cost, kind: "purchase", causeId: forceId, explanation: `Bread for ${force.name}.` }, context);
+      }
+      for (const fact of got.facts) emitFact(fact);
+      return fed;
     }
 
     case "siege_lift": {
@@ -5534,6 +5601,49 @@ const SELLER_CREDIT_BPS = 100;
  * world unexplained. So a sum moves only through here. `from` or `to` null is
  * money leaving or entering the modelled world.
  */
+/**
+ * Siege works raised at a siege: each paid for from the besiegers' power, at
+ * so much for every thousand men, and ready when its days are done. One of a
+ * kind at a time -- a second set of rams is the first set, rebuilt only if
+ * the first was burned.
+ */
+function raiseWorks(
+  world: WorldState,
+  siege: WorldState["sieges"][number],
+  force: Force,
+  kinds: readonly SiegeWorkKind[],
+  atStep: number,
+  context: ApplyContext,
+  emitFact: (fact: FactProposalDraft) => void,
+): WorldState {
+  const wanted = [...new Set(kinds)].filter((kind) => !siege.works.some((work) => work.kind === kind && work.status !== "burned"));
+  if (wanted.length === 0) return world;
+  const thousands = Math.max(1, force.personnel.reduce((sum, group) => sum + group.fit, 0) / 1_000);
+  const cost = Math.round(wanted.reduce((sum, kind) => sum + SIEGE_WORKS[kind].costPerThousand * thousands, 0));
+  const treasury = world.material.accounts.find((account) => account.owner.kind === "polity" && account.owner.id === force.polityId);
+  if (treasury === undefined) reject(`${force.name}'s power keeps no treasury to pay for siege works.`, "reference");
+  if (treasury.balance < cost) reject(`The works would cost ${cost}, and ${treasury.id} holds ${treasury.balance}.`);
+  const paid = moveMoney(world, { from: treasury.id, to: null, amount: cost, kind: "purchase", causeId: siege.id, explanation: `Siege works before the city: ${wanted.map((kind) => SIEGE_WORKS[kind].label).join(", ")}.` }, context);
+  const place = world.map.provinces.find((province) => province.id === siege.provinceId)?.name ?? siege.provinceId;
+  emitFact({
+    localId: `works_${siege.id}_${atStep}`.slice(0, 60),
+    kind: "siege_event",
+    summary: `${force.name} began raising ${wanted.map((kind) => SIEGE_WORKS[kind].label).join(" and ")} before ${place}.`,
+    affectedRefs: [{ kind: "force", id: force.id }, { kind: "province", id: siege.provinceId }],
+    visibility: "public",
+    discoveryState: "public",
+    knowableInDays: 0,
+    significance: 40,
+  });
+  return {
+    ...paid,
+    sieges: paid.sieges.map((candidate) => (candidate.id !== siege.id ? candidate : {
+      ...candidate,
+      works: [...candidate.works.filter((work) => !wanted.includes(work.kind)), ...wanted.map((kind) => ({ kind, readyAtStep: atStep + SIEGE_WORKS[kind].days, status: "building" as const }))].slice(-8),
+    })),
+  };
+}
+
 interface Movement {
   readonly from: string | null;
   readonly to: string | null;

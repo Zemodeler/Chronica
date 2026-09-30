@@ -53,6 +53,8 @@ import { createIdFactory, type SimModelPort } from "./ports";
 import { NEVER_PUBLISHED, OWN_BUSINESS_FLOOR, type NarrativeLine, type UtteranceLine } from "./chronicle";
 import { buildWorldSlice, renderWorldSlice, type AnsweredDecision, type SliceEvent } from "./slice";
 import { successionDecision, takeUpTheHouse } from "./mortality";
+import { answerEngagement, engagementDecision } from "./engagement-decisions";
+import { answerSiege, siegeDecision } from "./siege-decisions";
 import { fieldDecision, playerPlight, resolveFieldPerils } from "./field-perils";
 import { factsNamingRefusals, reconcileFacts } from "./reconcile-facts";
 import { repairDeltas, worthRepairing } from "./repair-deltas";
@@ -783,6 +785,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     if (playerDecision === null && input.actorRef.kind === "character") {
       const plight = playerPlight(world, input.actorRef.id);
       if (plight !== undefined) playerDecision = fieldDecision(world, plight);
+      // Or a fight of his come to a moment his word could change (`engagement-decisions.ts`).
+      else playerDecision = engagementDecision(world, input.actorRef.id, input.warfare) ?? siegeDecision(world, input.actorRef.id) ?? null;
     }
 
     // A fact that belongs to a secret thread is secret, whatever the model
@@ -954,7 +958,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       });
     }
 
-    narrative.push({ actorRef: author, line: proposal.narrativeSummary, factIds: actsForTheWorld ? [] : describes });
+    // A person's own answer carries no account (the facts say it); a blank line would only cost the historian a line.
+    if (proposal.narrativeSummary !== "") narrative.push({ actorRef: author, line: proposal.narrativeSummary, factIds: actsForTheWorld ? [] : describes });
     // A quotation has to have been said by somebody. The orchestrator answers
     // for the whole world in one breath -- for Rome and for the Boii chieftain
     // and for the weather -- so anything it "said" is attributable to no one,
@@ -1084,7 +1089,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       candidates.push({ entityId: madeId, delta: applied.delta, attempt, ofTheOrder: applied.ofTheOrder === true });
     }
     if (candidates.length > 0) {
-      const actText = actsForTheWorld && input.orderText !== null ? input.orderText : proposal.narrativeSummary;
+      const actText = actsForTheWorld && input.orderText !== null ? input.orderText : proposal.narrativeSummary || materialized.facts[0]?.summary || "";
       await offerMechanics(candidates, actorRef, actText);
     }
     return {
@@ -1189,6 +1194,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     if (playerDecision === null && input.actorRef.kind === "character") {
       const plight = playerPlight(world, input.actorRef.id);
       if (plight !== undefined) playerDecision = fieldDecision(world, plight);
+      // Or a fight of his come to a moment his word could change (`engagement-decisions.ts`).
+      else playerDecision = engagementDecision(world, input.actorRef.id, input.warfare) ?? siegeDecision(world, input.actorRef.id) ?? null;
     }
     if (ticked.factProposals.length > 0) {
       const materialized = materializeFacts({
@@ -1237,7 +1244,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // Plans whose steps passed their day undone. Each owner's own record of
     // it, and the step left for the router to wake him with.
     const behind = settleOverdueSteps(world, input.clock, (prefix) => `${prefix}_${newFacts.length}_${(planFactSerial += 1)}`);
-    if (behind.missed > 0) {
+    if (behind.missed > 0 || behind.slipped > 0) {
       world = behind.world;
       plans.missed += behind.missed;
       const materialized = materializeFacts({ proposals: behind.facts, now: world.instant, atStep: world.elapsedStep, ids, causalDepth: 0, assignedIds: new Map() });
@@ -1424,6 +1431,26 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     diedAtOnce = input.actorRef.kind === "character" && ended.died.includes(input.actorRef.id);
     // The report is his death; nothing else is waited for.
     if (diedAtOnce && input.actorRef.kind === "character") playerDecision = successionDecision(world, input.actorRef.id, world.instant.day);
+  }
+
+  // ── A fight of his that stood waiting on his word ───────────────────────
+  //
+  // Taken before anything else moves, as the surrounded man's is: the answer
+  // he just gave, or -- if he gave an order instead -- the course he was on.
+  if (input.actorRef.kind === "character") {
+    const fought = answerEngagement(world, input.actorRef.id, answeredOption, world.elapsedStep);
+    const besieged = answerSiege(fought.world, input.actorRef.id, answeredOption, world.elapsedStep, input.warfare, ids);
+    battleAccounts.push(...besieged.battles);
+    const answered = { world: besieged.world, facts: [...fought.facts, ...besieged.facts] };
+    world = answered.world;
+    if (answered.facts.length > 0) {
+      const materialized = materializeFacts({
+        proposals: answered.facts, now: world.instant, forces: world.material.forces, atStep: world.elapsedStep, ids, causalDepth: 0, assignedIds: new Map(),
+      });
+      newFacts.push(...materialized.facts);
+      for (const [factId, weight] of materialized.significanceByFactId) significanceByFactId.set(factId, weight);
+      significance += materialized.significance;
+    }
   }
 
   // ── The ruler's antagonist ──────────────────────────────────────────────
@@ -1730,6 +1757,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // else the world meant to ask.
   const plightNow = playerPlight(world, playerId);
   if (plightNow !== undefined) playerDecision = fieldDecision(world, plightNow);
+  else if (playerDecision === null) playerDecision = engagementDecision(world, playerId, input.warfare) ?? siegeDecision(world, playerId) ?? null;
 
   // ── Advancing the world ────────────────────────────────────────────────
   //
@@ -1777,6 +1805,11 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   let factsSeenByLastRound = 0;
   let lastRoundKey = 0;
   let hops = 0;
+  // Rounds in a row that were paid for and changed nothing in the world. Two of
+  // them mean the reactions have run dry, however much depth and budget remain:
+  // only whoever a plan or a letter still wants is asked until news starts a
+  // new chain.
+  let idleRounds = 0;
 
   while (playerDecision === null) {
     const elapsedDays = world.instant.day - startDay;
@@ -1838,7 +1871,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // A letter its reader has still to be shown, or has read past its term,
     // is settled within days, not at the next thing on the calendar -- while
     // there is still a call to pay him with.
-    const readerKey = modelCalls < budget.maxModelCalls && aLetterWaitsOnItsReader(world, input.actorRef.kind === "character" ? [input.actorRef.id] : [])
+    const readerKey = modelCalls < budget.maxModelCalls && aLetterWaitsOnItsReader(world, input.actorRef.kind === "character" ? [input.actorRef.id] : [], input.actorPolityId)
       ? reactionKey
       : Number.MAX_SAFE_INTEGER;
     const targetKey = Math.min(hops === 1 ? reactionKey : nextScheduled ?? idle, replyDueKey, readerKey, ceilingKey);
@@ -1860,6 +1893,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       chain += 1;
       causalDepth = 1;
       ambientOnlyRounds = 0;
+      idleRounds = 0;
       chainStartIterations = iterations;
       chainNewsFrom = factsSeenByLastRound;
       chainNewsAfterKey = lastRoundKey;
@@ -1873,10 +1907,20 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     };
     // Old news arriving now is news to this chain, at its first depth; old
     // news long since answered is not news at all.
+    // Two other powers writing plainly to each other, and answering, is the
+    // world's background: it is on the record and in the Chronicle, but it does
+    // not wake the reader for another letter (`isBackgroundLetter`). Only what
+    // this burst wrote is weighed: older facts have no weight to read here.
+    const backgroundChatter = (fact: Fact): boolean => {
+      if (input.actorPolityId === null || (fact.kind !== "letter_sent" && fact.kind !== "letter_answered")) return false;
+      const weight = significanceByFactId.get(fact.id);
+      if (weight === undefined || weight > (fact.kind === "letter_sent" ? 8 : 15)) return false;
+      return !fact.affectedEntities.some((entity) => entity.kind === "polity" && entity.id === input.actorPolityId);
+    };
     const reactTo = [
       ...[...input.knownFacts, ...newFacts.slice(0, chainNewsFrom)].filter(arrivedSince).map((fact) => ({ ...fact, causalDepth: 0 })),
       ...newFacts.slice(chainNewsFrom),
-    ];
+    ].filter((fact) => !backgroundChatter(fact));
     const attention = routeAttention({
       world,
       facts: reactTo,
@@ -1886,6 +1930,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       maxCausalDepth: budget.maxCausalDepth,
       alreadyAnswered: answeredBy,
       authorOf,
+      ownPolityId: input.actorPolityId,
     });
 
     // Actors who care but do not warrant a model call still record what they
@@ -1909,7 +1954,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       ...debatersOf(world, input.offices, world.instant.day, playerCharacterIds, input.successionRules ?? []),
       ...due.map((entry) => [entry.ownerId, entry.why] as const),
     ]);
-    for (const [readerId, why] of lettersOwed(world, input.clock, playerCharacterIds)) {
+    for (const [readerId, why] of lettersOwed(world, input.clock, playerCharacterIds, input.actorPolityId)) {
       const already = wanted.get(readerId);
       wanted.set(readerId, already === undefined ? why : `${already}; and ${why}`);
     }
@@ -1926,6 +1971,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       // week is busy is not a quarrel, it is a coincidence.
       nemesisCharacterId: nemesis?.characterId ?? null,
       dueStepOwners: wanted,
+      ownPolityId: input.actorPolityId,
     });
 
     // Where the antagonist stands is the world's to know and his to act on, so
@@ -1948,7 +1994,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // asked -- found by playing it by hand. Now whoever a plan wants is still
     // asked, alone with the others it wants: each step wakes him once, and the
     // call budget still bounds the whole.
-    const reactionsSpent = causalDepth > budget.maxCausalDepth;
+    const reactionsSpent = causalDepth > budget.maxCausalDepth || idleRounds >= 2;
     const asking = reactionsSpent ? cast.filter((actor) => dueWhy.has(actor.characterId)) : cast;
     // Nobody pressing means the rotation alone, and the burst pays for only
     // so many of those rounds: the world elsewhere gets its look, not a look
@@ -2017,9 +2063,11 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       askedSinceWindow = true;
       if (cognition.parseFailure !== null) parseFailures.push(cognition.parseFailure);
       salvaged.push(...cognition.salvaged);
+      let roundChanged = 0;
       for (const actor of cognition.output.actors) {
         const factsBeforeActor = newFacts.length;
         const acts = await applyProposal(actor.proposal, actor.actorRef, causalDepth);
+        roundChanged += acts.changed + (newFacts.length - factsBeforeActor);
         // Said and not done: kept, and weighed as what it was.
         if (acts.changed === 0) {
           for (const fact of newFacts.slice(factsBeforeActor)) {
@@ -2052,6 +2100,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
           if (laid || took.taken > 0) plans.actedOnAPlan += 1;
         }
       }
+      idleRounds = roundChanged === 0 ? idleRounds + 1 : 0;
       causalDepth += 1;
     }
 

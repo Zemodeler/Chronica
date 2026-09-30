@@ -157,7 +157,12 @@ describe("orchestrator prompt", () => {
     // Freed ~570 (2026-09-28), ceiling left where it is: the agreement kinds,
     // family kinds and government forms are named $defs, written once instead
     // of at each use (68 320 -> 67 751).
-    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(68_500);
+    // Raised 68.5k -> 69.5k (2026-09-29): battles that last
+    // (docs/plans/battles-that-last.md) -- "force_provision", bread bought,
+    // requisitioned or sent by convoy, and a siege's "works"; the fight that
+    // goes on until one side is beaten, "hold" and "manoeuvre" folded into
+    // principle 10.
+    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(69_500);
   });
 });
 
