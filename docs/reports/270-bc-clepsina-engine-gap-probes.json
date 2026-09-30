@@ -1,0 +1,9 @@
+{
+  "forceReferenceMissing": "done",
+  "acceptedWithoutWork": "started",
+  "acceptanceOnlyScoredAsCarriedOut": true,
+  "entryPresenceScoredAsInChronicle": true,
+  "unrelatedLetterSatisfiesOtherPromise": true,
+  "anyChangedAnswerCanCompleteClaimedStep": true,
+  "deadAuditorClosesAuditAs": "cleared"
+}

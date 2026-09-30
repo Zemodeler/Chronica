@@ -5,6 +5,7 @@ export * from "./world/siege";
 export * from "./world/war-score";
 export * from "./world/enactment";
 export * from "./world/covert-plot";
+export * from "./world/orders";
 export * from "./world/diplomacy";
 export * from "./ai-timeout";
 export * from "./coins";

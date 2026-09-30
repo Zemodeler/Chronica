@@ -67,6 +67,17 @@ export function describeBreach(delta: WorldDelta, world: WorldState, actorName: 
     case "agreement_close": return `${actorName} ended an agreement he had no power to end`;
     case "polity_stance_shift": return `${actorName} altered how the government stands toward a foreign power`;
     case "order_attempt_decide": return `${actorName} answered an order that was not put to him`;
+    case "force_provision": return delta.payAccountRef === null
+      ? `${actorName} bought supplies for ${force(delta.forceRef)} before anybody had given him leave to spend on them`
+      : `${actorName} bought supplies for ${force(delta.forceRef)} out of ${account(delta.payAccountRef)} before anybody had given him leave to`;
+    case "project_create": return delta.fundingAccountRef === null
+      ? `${actorName} set "${delta.label}" going without leave to`
+      : `${actorName} set "${delta.label}" going on ${account(delta.fundingAccountRef)} without leave to spend it`;
+    case "covert_plot_open": return delta.fundingAccountRef === null
+      ? `${actorName} set a man on somebody in secret without leave to`
+      : `${actorName} paid for secret work out of ${account(delta.fundingAccountRef)} without leave to`;
+    case "audit_open": return `${actorName} had books opened that were not his to open`;
+    case "siege_lay": return `${actorName} laid ${force(delta.forceRef)} before a city without leave to make war on it`;
     default: return `${actorName} acted beyond what his place allows`;
   }
 }

@@ -226,7 +226,7 @@ describe("the last window", () => {
     expect(new Set(entries[0]!.factIds)).toEqual(new Set([slight.id, grave.id]));
   });
 
-  it("does not wait for a window still being written, and what that window leaves stays untold", async () => {
+  it("does not wait for a window still being written, and still tells what that window carries to it", async () => {
     const first = fact({ time: { day: 20, minute: 0 }, summary: "Rhegium's garrison mutinies.", affectedEntities: [{ kind: "province", id: "rhegium" }] });
     const second = fact({ time: { day: 21, minute: 0 }, summary: "Tarentum's fleet puts to sea.", affectedEntities: [{ kind: "province", id: "tarentum" }] });
     const third = fact({ time: { day: 22, minute: 0 }, summary: "Croton closes its gates.", affectedEntities: [{ kind: "province", id: "croton" }] });
@@ -240,7 +240,8 @@ describe("the last window", () => {
     // The last window closes at once, before the first has been written.
     w.closed(window(1, 30, 31, [last], weights, [], true));
     const { entries } = await w.finish();
-    expect(entries).toHaveLength(4);
-    expect(entries.some((entry) => entry.factIds.includes(fourth.id))).toBe(false);
+    // The last window chose after the first had carried (C07): nothing is lost to the race.
+    expect(entries.some((entry) => entry.factIds.includes(fourth.id))).toBe(true);
+    expect(entries.some((entry) => entry.factIds.includes(last.id))).toBe(true);
   });
 });

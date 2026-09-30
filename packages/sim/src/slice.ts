@@ -8,6 +8,8 @@ import { forecastInWords, isChamberQuestion, voteDayOf } from "./senate";
 import { rulerOf, rulerOfficeOf, sovereignChamberOf } from "./constitutions";
 
 import {
+  ORDER_PART_STATUS_LABEL,
+  orderPartStatus,
   ALL_CHAMBER_POWERS,
   GOVERNMENT_FORM_IN_WORDS,
   INTEREST_IN_WORDS,
@@ -380,6 +382,12 @@ export interface WorldSlice {
   readonly dueEvents: readonly SliceEvent[];
   readonly pendingEvents: readonly SliceEvent[];
   readonly openOrders: readonly { readonly id: string; readonly recipient: string; readonly status: string }[];
+  /**
+   * What the actor ordered before and is not finished (`world/orders.ts`), with
+   * where each part stands. What a new order says again continues these; a
+   * part stopped or unanswered is for this order to take up.
+   */
+  readonly standingOrders: readonly { readonly said: string; readonly status: string; readonly why: string | null; readonly work: readonly string[] }[];
   /**
    * The threads the world is following (VISION §20). The orchestrator sees all
    * of them, secret ones included, for the same reason it sees every power's
@@ -1182,6 +1190,18 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     .slice(0, CAPS.events)
     .map((attempt) => ({ id: attempt.id, recipient: name(attempt.recipientRef.id), status: attempt.status }));
 
+  const standingOrders = world.orders
+    .filter((order) => order.actorCharacterId === input.actorRef.id)
+    .flatMap((order) => order.parts)
+    .filter((part) => part.closedAtStep === null && orderPartStatus(world, part) !== "done")
+    .slice(-CAPS.standingPlans)
+    .map((part) => ({
+      said: part.said,
+      status: ORDER_PART_STATUS_LABEL[orderPartStatus(world, part)],
+      why: part.refusal ?? part.whyNot,
+      work: part.workRefs.map((ref) => `${ref.kind} ${ref.id}`),
+    }));
+
   return {
     date: formatWorldDate(world.instant, input.clock),
     order: input.orderText,
@@ -1239,6 +1259,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     dueEvents: input.dueEvents.slice(0, CAPS.events),
     pendingEvents: input.pendingEvents.slice(0, CAPS.events),
     openOrders,
+    standingOrders,
     threads,
     seeds: input.narratorSeeds ?? (input.narratorSeed == null ? [] : [input.narratorSeed]),
   };
@@ -1402,7 +1423,9 @@ export function renderWorldSlice(slice: WorldSlice): string {
       const detail = entity.attributes.length === 0 ? "" : ` — ${entity.attributes.join(", ")}`;
       const does = entity.effects.length === 0 ? "" : `; ${entity.effects.join(", ")}`;
       const rule = entity.rule === null ? "" : `; rule: ${entity.rule}`;
-      return `${entity.label} [${entity.id}] (${entity.kind}${owner})${entity.retired ? ", repealed" : ""}${entity.lapsed ? ", fallen into disuse" : ""}${detail}${does}${rule}`;
+      // A pursuit is somebody's word for what he is doing, not work being done.
+      const idle = entity.kind === "pursuit" && entity.rule === null ? "; an intention only, nothing is being done about it" : "";
+      return `${entity.label} [${entity.id}] (${entity.kind}${owner}${idle})${entity.retired ? ", repealed" : ""}${entity.lapsed ? ", fallen into disuse" : ""}${detail}${does}${rule}`;
     }),
   );
   section("LANDS AND HOLDINGS", slice.holdings.map((holding) =>
@@ -1423,6 +1446,8 @@ export function renderWorldSlice(slice: WorldSlice): string {
   }));
   section("STANDING INTENTIONS", slice.intents.map((intent) => `${intent.actor} means to ${intent.action}: ${intent.rationale}`));
   section("ORDERS AWAITING AN ANSWER", slice.openOrders.map((order) => `${order.id} to ${order.recipient} — ${order.status}`));
+  section("YOUR STANDING ORDERS", slice.standingOrders.map((order) =>
+    `"${order.said}" — ${order.status}${order.why === null ? "" : `: ${order.why.slice(0, 200)}`}${order.work.length === 0 ? "" : ` [${order.work.join(", ")}]`}`));
   section("RECENT HISTORY (only what is known to them)", slice.recentHistory.map((entry) => `${entry.summary} [${entry.id}]`));
   // ── The world's own half ───────────────────────────────────────────────
   //

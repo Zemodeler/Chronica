@@ -123,6 +123,9 @@ export interface TreatyInput {
   readonly playerPolityId: string | null;
 }
 
+/** How long a refused conditional threat stands before it is spent: a year. */
+const STANDING_THREAT_DAYS = 365;
+
 export function keepTreaties(input: TreatyInput): { world: WorldState; facts: FactProposalDraft[] } {
   const { toDay, ids } = input;
   const facts: FactProposalDraft[] = [];
@@ -132,6 +135,49 @@ export function keepTreaties(input: TreatyInput): { world: WorldState; facts: Fa
     const owner = world.material.accounts.find((account) => account.id === accountId)?.owner;
     return owner?.kind === "polity" ? owner.id : null;
   };
+
+  // ── A standing threat, carried out on the attack it was made against ───
+  //
+  // "Cease hostilities or invite open war", refused in its wording while the
+  // pause held: the war waits for the next blow, and comes with it (R15).
+  // What counts is a fight the refusing power opens, or a siege it goes on
+  // pressing, against the threatening power or anybody it protects or is
+  // allied to -- after the day the threat began to stand. A year unused, and
+  // it is spent.
+  for (const message of world.diplomacy) {
+    const since = message.threatStandsSince;
+    if (since === null || since === undefined) continue;
+    const spent = toDay - since > STANDING_THREAT_DAYS;
+    const sheltered = new Set([message.fromPolityId, ...world.polityAgreements
+      .filter((agreement) => agreement.status === "active" && (agreement.kind === "protectorate" || agreement.kind === "alliance" || agreement.kind === "foedus")
+        && (agreement.polityId === message.fromPolityId || agreement.otherPolityId === message.fromPolityId))
+      .map((agreement) => (agreement.polityId === message.fromPolityId ? agreement.otherPolityId : agreement.polityId))]);
+    const polityOfForce = (id: string): string | null => world.material.forces.find((force) => force.id === id)?.polityId ?? null;
+    const struck = world.engagements.some((engagement) => engagement.openedAtStep > since
+      && polityOfForce(engagement.openedByForceId) === message.toPolityId
+      && [...engagement.attackerForceIds, ...engagement.defenderForceIds].some((id) => { const polity = polityOfForce(id); return polity !== null && sheltered.has(polity); }))
+      || world.sieges.some((siege) => siege.besiegerPolityId === message.toPolityId && sheltered.has(siege.defenderPolityId) && siege.pressedToStep > since);
+    if (!struck && !spent) continue;
+    world = { ...world, diplomacy: world.diplomacy.map((candidate) => candidate.id === message.id ? { ...candidate, threatStandsSince: null } : candidate) };
+    if (!struck || atWar(world.polityAgreements, message.fromPolityId, message.toPolityId)) continue;
+    world = {
+      ...world,
+      polityAgreements: openWar(world.polityAgreements, {
+        id: ids.next("agreement"), polityId: message.fromPolityId, otherPolityId: message.toPolityId, terms: message.terms.slice(0, 600),
+        atStep: toDay, sourceMessageId: message.id, reason: `${nameOf(world, message.toPolityId)} attacked again, as "${message.subject}" had warned against.`.slice(0, 400),
+      }),
+    };
+    facts.push({
+      localId: `threat_kept_${message.id}`.slice(0, 60),
+      kind: "war_declared",
+      summary: `${nameOf(world, message.fromPolityId)} made war on ${nameOf(world, message.toPolityId)}: it had attacked again, as "${message.subject}" had warned it not to.`.slice(0, 600),
+      affectedRefs: [{ kind: "polity", id: message.fromPolityId }, { kind: "polity", id: message.toPolityId }],
+      visibility: "public",
+      discoveryState: "public",
+      knowableInDays: 0,
+      significance: 70,
+    });
+  }
 
   // ── A tributary pays ───────────────────────────────────────────────────
   for (const agreement of world.polityAgreements) {

@@ -22,6 +22,7 @@ import {
   aimsAtWar,
   warsOf,
   openWar,
+  threatWaitsOnAttack,
   isNavalForce,
   nextDueMilestone,
   warfareWith,
@@ -104,6 +105,11 @@ const projectConflictsInto = (world: WorldState): WorldState => ({ ...world, con
 
 /** Guards a pathological cadence from being replayed thousands of times in one span. */
 const MAX_PERIODS_PER_TICK = 24;
+/** A warship's crew a month, and a soldier's: the scenario's own rates (`punic-wars-scenario.ts`). */
+const WARSHIP_PAY = 210 / 40;
+const SOLDIER_PAY = 35 / 1_000;
+/** How long a crossing waits, each time, for the march or the sailing that brings its army to the shore. */
+const LEG_WAIT_DAYS = 3;
 
 export interface TickInput {
   readonly world: WorldState;
@@ -556,6 +562,22 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const MORALE_LOSS_BPS_PER_PERIOD = 800;
   const DESERTION_RATE_PER_PERIOD = 0.03;
   const unpaidForces = input.world.material.forces.map((force) => {
+    // A term of service run out is said on its day, with what was promised at
+    // its end, and said once (R11).
+    if (force.serviceUntilStep !== undefined && force.serviceUntilStep <= input.toDay) {
+      facts.push({
+        localId: nextLocalId("service_ended"),
+        kind: "service_ended",
+        summary: `The men of ${force.name} have served the term they were bound to.${force.serviceTerms === undefined ? "" : ` What was promised them: ${force.serviceTerms}`}`.slice(0, 600),
+        affectedRefs: [{ kind: "force", id: force.id }, { kind: "polity", id: force.polityId }],
+        visibility: "polity",
+        discoveryState: "polity",
+        knowableInDays: 0,
+        significance: 55,
+      });
+      const { serviceUntilStep: _served, ...rest } = force;
+      force = rest;
+    }
     if (force.payObligationId === null) return force;
     const paying = obligations.find((obligation) => obligation.id === force.payObligationId);
     if (paying === undefined || paying.missedPeriods === force.payArrearsPeriods) return force;
@@ -626,6 +648,28 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const sponsorAccountId = (sponsor: WorldState["projects"][number]["sponsorEntityRef"]): string | undefined =>
     accounts.find((account) => account.owner.kind === sponsor.kind && account.owner.id === sponsor.id)?.id;
 
+  /**
+   * Who pays the men a public work raised. A fleet of 150 the Senate voted and
+   * the treasury built stood ready with nobody undertaking to pay its crews,
+   * and the Office asked the consul to see to it (R07). A power's work paid
+   * from its treasury goes on being paid from it, at the scenario's own rates:
+   * a warship as the Syracusan squadron's, five and a quarter a hull a month;
+   * any other soldier as the legions', thirty-five a thousand. A private man's
+   * work pays nobody's wages but by his own order.
+   */
+  const payOf = (project: WorldState["projects"][number], label: string, categoryId: string, strength: number, polityId: string): string | null => {
+    const funder = project.fundingAccountId ?? sponsorAccountId(project.sponsorEntityRef);
+    const account = accounts.find((candidate) => candidate.id === funder);
+    if (account === undefined || account.owner.kind !== "polity" || account.owner.id !== polityId) return null;
+    const amount = Math.max(1, Math.ceil(categoryId === "warship" ? strength * WARSHIP_PAY : strength * SOLDIER_PAY));
+    const obligationId = input.ids.next("obligation");
+    newPay.push({
+      id: obligationId, kind: "army_pay", label: `Pay of ${label}`.slice(0, 120), payerAccountId: account.id, amount,
+      cadenceSteps: 30, nextDueStep: input.toDay + 30, priority: 900, arrears: 0, missedPeriods: 0, active: true,
+    });
+    return obligationId;
+  };
+
   /** What finished projects produced this tick, folded into the world at the end. */
   const forces: WorldState["material"]["forces"][number][] = [];
   /** Armies a completed journey put somewhere else. */
@@ -634,6 +678,8 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const tolledOnTheRoad = new Map<string, WorldState["material"]["forces"][number]>();
   const structures: WorldState["structures"][number][] = [];
   const newIncome: WorldState["material"]["incomeSources"][number][] = [];
+  /** Pay undertaken for forces a finished project raised on a treasury (R07). */
+  const newPay: WorldState["material"]["obligations"][number][] = [];
 
   /**
    * The thing a finished project leaves behind.
@@ -652,6 +698,31 @@ export function runDeterministicTick(given: TickInput): TickResult {
 
   /** Why a project that declared a product could not deliver it, where the engine knows. */
   const unproduced = new Map<string, string>();
+  /**
+   * A stage that is the leave to do the work waits for the vote that gives it:
+   * the Anio survey marked "secure public authorization and arrange funding"
+   * done while the Senate was still gathering support (R40).
+   */
+  const waitsForItsVote = (project: WorldState["projects"][number], label: string): boolean => {
+    if (!/\b(authori[sz]|leave|approv|sanction|vote|senate)\w*/i.test(label)) return false;
+    const stems = (text: string): Set<string> => new Set(text.toLowerCase().split(/[^\p{L}]+/u).filter((word) => word.length > 3).map((word) => word.slice(0, 5)));
+    const work = stems(project.label);
+    return input.world.material.politicalProcedures.some((procedure) => procedure.outcome === null
+      && [...stems(procedure.label)].filter((stem) => work.has(stem)).length >= Math.min(2, work.size));
+  };
+  /**
+   * Whether the last stage of a crossing is due while the march or the sailing
+   * that brings its army and fleets to the shore is still under way.
+   */
+  const waitsForItsLegs = (project: WorldState["projects"][number], milestones: WorldState["projects"][number]["milestones"], milestoneId: string): boolean => {
+    const outcome = project.completionOutcome;
+    if (outcome?.kind !== "force_move" || outcome.embarkProvinceId === undefined || outcome.forceId === null) return false;
+    if (milestones.filter((milestone) => milestone.status === "pending").at(-1)?.id !== milestoneId) return false;
+    const movers = new Set([outcome.forceId, ...(outcome.fleetIds ?? [])]);
+    return input.world.projects.some((leg) => leg.id !== project.id && leg.status === "in_progress"
+      && leg.completionOutcome?.kind === "force_move" && leg.completionOutcome.provinceId === outcome.embarkProvinceId
+      && leg.completionOutcome.forceId !== null && movers.has(leg.completionOutcome.forceId));
+  };
   /** The country as the levies this tick left it: its manpower rolls, drawn down. */
   let leviedWorld: WorldState | undefined;
   const produceOutcome = (project: WorldState["projects"][number]): { entityId: string; summary: string } | null => {
@@ -698,7 +769,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
         fatigueBps: 0,
         provisionStatus: "provisioned",
         provisionedThroughStep: input.toDay + 30,
-        payObligationId: null,
+        payObligationId: payOf(project, outcome.label, category.id, strength, polityId),
         payArrearsPeriods: 0,
         history: [],
         memberCharacterIds: [],
@@ -900,6 +971,14 @@ export function runDeterministicTick(given: TickInput): TickResult {
       for (let guard = 0; guard < MAX_PERIODS_PER_TICK; guard += 1) {
         const dueMilestone = nextDueMilestone({ ...project, milestones }, input.toDay);
         if (dueMilestone === undefined) break;
+        // A crossing arranged from a shore waits for the army and its ships to
+        // be standing on it: a march held up on the road does not leave the
+        // fleet to sail empty (`passagePlanFor`).
+        if (waitsForItsLegs(project, milestones, dueMilestone.id) || waitsForItsVote(project, dueMilestone.label)) {
+          milestones = milestones.map((milestone) => milestone.id === dueMilestone.id ? { ...milestone, requiredAtElapsedOffset: milestone.requiredAtElapsedOffset + LEG_WAIT_DAYS } : milestone);
+          changed = true;
+          break;
+        }
         // The sponsor pays. A milestone whose sponsor cannot cover it still
         // completes -- the work was done on credit, and the shortfall is the
         // sponsor's problem to answer for.
@@ -1002,10 +1081,13 @@ export function runDeterministicTick(given: TickInput): TickResult {
       }
       notes.push(produced === null ? `${project.label} is complete.` : `${project.label} is complete: ${produced.summary}`);
 
+      // A journey that could not be made has not been made: the army is where
+      // it was, and the order that sent it is stopped, not done.
+      const stranded = produced === null && project.completionOutcome?.kind === "force_move" && unproduced.has(project.id);
       return {
         ...project,
         milestones,
-        status: "completed" as const,
+        status: stranded ? "failed" as const : "completed" as const,
         completedAtStep: input.toDay,
         linkedEntityIds: produced === null ? project.linkedEntityIds : [...project.linkedEntityIds, produced.entityId].slice(0, 20),
       };
@@ -1032,7 +1114,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
         provinceMaterial: leviedWorld?.material.provinceMaterial ?? input.world.material.provinceMaterial,
         accounts,
         incomeSources: newIncome.length === 0 ? incomeSources : [...incomeSources, ...newIncome],
-        obligations: servicedObligations,
+        obligations: newPay.length === 0 ? servicedObligations : [...servicedObligations, ...newPay],
         loans,
         forces: [
           ...unpaidForces.map((force) => {
@@ -1176,6 +1258,10 @@ export function runDeterministicTick(given: TickInput): TickResult {
     polityStances = [...applyDiplomaticAnswerToStance(polityStances, ignored, input.toDay)];
     silenced.push(message);
     // An ultimatum's threat, carried out when its term runs out unanswered.
+    // A threat that waits on an attack stands on silence; it is not carried out by it.
+    if ((message.onRefusal === "war" || message.onRefusal === "war_if_attacked") && threatWaitsOnAttack(message)) {
+      return { ...ignored, threatStandsSince: input.toDay };
+    }
     if (message.onRefusal === "war" && !atWar(agreements, message.fromPolityId, message.toPolityId)) {
       agreements = openWar(agreements, {
         id: input.ids.next("agreement"),

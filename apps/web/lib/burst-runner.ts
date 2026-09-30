@@ -24,7 +24,7 @@ import {
   type ChronicaDatabase,
 } from "@chronica/db";
 import { FactSchema, abortsTheTurn, formatWorldDate, type Fact, type Office, type OrderPartyRef, type ScenarioClock, type WorldState } from "@chronica/shared";
-import { DEFAULT_BUDGET, closeTheBooks, createWindowWriter, runSimulationBurst, type AnsweredDecision, type BurstProgress, type BurstResult, type ChronicleEntry, type SimModelPort } from "@chronica/sim";
+import { DEFAULT_BUDGET, closeTheBooks, createWindowWriter, orderOutcomeLines, runSimulationBurst, withOrderOutcomes, type AnsweredDecision, type BurstProgress, type BurstResult, type ChronicleEntry, type SimModelPort } from "@chronica/sim";
 import { eq } from "drizzle-orm";
 import { ABANDONED_ERROR, BURST_DEADLINE_MS, HEARTBEAT_MS, STALE_HOLD_MS, livenessAt } from "./burst-status";
 import { unopenableSave } from "./save-errors";
@@ -358,8 +358,20 @@ export async function runBurstToCommit(db: ChronicaDatabase, job: BurstJob, hook
     // asked. No model call, no historian, no judgment -- arithmetic. They
     // follow the passages rather than being sorted among them: the passages
     // are already in time order and the page has already shown them so.
+    // What each part of the order came to, in the engine's words, under the
+    // passage that answers it (`withOrderOutcomes`): read from the world as
+    // the burst left it, so a crossing begun and one landed read differently.
+    const answered = result.orderRecordId === null
+      ? chronicle.entries
+      : withOrderOutcomes(chronicle.entries, [
+        ...orderOutcomeLines(result.world, result.orderRecordId),
+        // A turn cut short for want of calls says so, rather than passing the
+        // engine's limit off as the world's quiet (R52, R80). What was left
+        // stays on the order, and the next order takes it up.
+        ...(result.stopReason === "budget_exhausted" ? ["The report stops here: not everybody concerned could be heard this time. What is still open stays in hand for your next order."] : []),
+      ], result.orderFactIds, result.world.instant.day * 1440 + result.world.instant.minute);
     const entries: ChronicleEntry[] = [
-      ...chronicle.entries,
+      ...answered,
       ...closeTheBooks({ world: result.world, clock, from, to: result.world.instant, polityId: actorPolityId }),
     ];
 

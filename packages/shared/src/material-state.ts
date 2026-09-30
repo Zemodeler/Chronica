@@ -911,6 +911,13 @@ export const ForceSchema = z.object({
   reckonedToStep: ElapsedStepSchema.optional(),
   payObligationId: EntityIdSchema.nullable(),
   payArrearsPeriods: z.number().int().nonnegative(),
+  /**
+   * A term of service the men are bound to, and what is owed them at its end:
+   * "ten years in a punitive legion, then citizens again" (R11). The tick says
+   * so on the day; what is done about it is the power's.
+   */
+  serviceUntilStep: ElapsedStepSchema.optional(),
+  serviceTerms: z.string().trim().min(1).max(300).optional(),
   history: z.array(ForcePersonnelEventSchema),
   /**
    * Named people serving in the ranks -- not the commander, who is named

@@ -27,6 +27,8 @@ export interface LetterPage {
   readonly dateLabel: string;
   /** A letter nobody has answered yet. */
   readonly awaiting: boolean;
+  /** Its time to be answered ran out with no answer: said on the letter, never as a page somebody wrote (R56). */
+  readonly lapsed?: string | null;
 }
 
 export interface Correspondence {
@@ -81,10 +83,13 @@ export function correspondenceOf(world: WorldState, characterId: string, clock?:
       body: message.terms,
       dateLabel: dateOf(message.sentAtStep),
       awaiting: message.status === "awaiting_reply",
+      lapsed: message.answer === "ignored" ? `${fromYou ? "No answer came" : "You sent no answer"}, ${dateOf(message.answeredAtStep ?? message.sentAtStep)}` : null,
       order: index * 2,
       step: message.sentAtStep,
     });
-    if (message.status === "answered" && message.answer !== null && !repliedInALetter.has(message.id)) {
+    // Silence is not a letter: an unanswered letter to the player was shown
+    // as one he had written, "No answer came", under "You wrote".
+    if (message.status === "answered" && message.answer !== null && message.answer !== "ignored" && !repliedInALetter.has(message.id)) {
       const step = message.answeredAtStep ?? message.sentAtStep;
       thread.pages.push({
         id: `${message.id}:answer`,

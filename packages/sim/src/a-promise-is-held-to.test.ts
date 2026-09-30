@@ -143,3 +143,28 @@ describe("a promise kept", () => {
     expect(balance(unpaid.world, consulPurse)).toBe(1_000);
   });
 });
+
+describe("a promise to hold back", () => {
+  // R23: "I will not call you a traitor without proof" fell due, no letter had
+  // been written, and it was marked broken -- a grievance, lost trust, a lesson
+  // in betrayal -- for a man who had done exactly what he said.
+  it("is kept by holding back, and breaks nothing when its day passes", () => {
+    const start = promised(opening(), { description: "I will not call you a traitor without proof" });
+    const due = keepPromises({ world: start, toDay: start.elapsedStep + 10, playerCharacterId: CONSUL });
+    const later = keepPromises({ world: due.world, toDay: start.elapsedStep + 10 + GRACE_DAYS, playerCharacterId: CONSUL });
+    expect(statusOf(later.world)).toBe("fulfilled");
+    expect([...due.facts, ...later.facts].some((fact) => fact.kind === "promise_broken")).toBe(false);
+    expect(trustOf(later.world, CONSUL, HIERON)).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("a promise that waits on an occasion", () => {
+  // R26: support "when we put the measure before the Senate" was broken on a
+  // date, with no measure ever put.
+  it("lapses without blame when the occasion never comes", () => {
+    const start = promised(opening(), { actionKind: "political_support", description: "to stand with you when we put the measure before the Senate" });
+    const due = keepPromises({ world: start, toDay: start.elapsedStep + 10, playerCharacterId: CONSUL });
+    expect(statusOf(due.world)).toBe("cancelled");
+    expect(due.facts.some((fact) => fact.kind === "promise_broken")).toBe(false);
+  });
+});

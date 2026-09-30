@@ -235,6 +235,10 @@ const ForceCreateSchema = z.object({
    * right reading of a warband and the wrong reading of a legion.
    */
   payObligationRef: MaybeRefSchema.default(null),
+  /** Men taken from an existing army, not raised. */
+  fromForceRef: MaybeRefSchema.optional(),
+  /** A term they are bound to serve, in years, and what is owed them at its end: "10 years, then citizenship". */
+  serviceTerms: z.string().trim().min(1).max(300).optional(),
   /**
    * What kind of fighting men, or ships, they are: one of the scenario's troop
    * categories ("warship" for a vessel). Everything raised used to be infantry,
@@ -389,6 +393,8 @@ const ForceModifySchema = z.object({
   /** Hold: start no battle, and in one begun only defend. False lifts it. */
   hold: z.boolean().optional(),
   locationId: EntityIdSchema.optional(),
+  /** Over water: the fleets to carry it. */
+  fleetRefs: z.array(RefSchema).max(4).optional(),
   /**
    * Where in that province they actually stand.
    *
@@ -1650,10 +1656,10 @@ const DiplomaticMessageSendSchema = z.object({
   clauses: z.array(TreatyClauseSchema).max(6).optional(),
   /**
    * What the sender does if it is refused, or no answer comes by
-   * "replyWithinDays": "war" for an ultimatum whose threat is war. The engine
-   * carries it out when the answer is known -- not before it is asked.
+   * "replyWithinDays": "war"; "war_if_attacked" when the threat is war only
+   * if they go on attacking. The engine carries it out.
    */
-  onRefusal: z.enum(["war"]).nullable().optional(),
+  onRefusal: z.enum(["war", "war_if_attacked"]).nullable().optional(),
   reason: ReasonSchema,
 }).strict();
 
@@ -1875,6 +1881,8 @@ const DiplomaticMessageAnswerSchema = z.object({
   agreementKind: PolityAgreementKindSchema.nullable().optional(),
   /** For tribute, protection and foedus: the power that pays, is protected, or follows. Null means the power accepting. */
   boundPolityId: MaybeRefSchema.optional(),
+  /** Accepting with terms the letter did not offer: sent back as a counter-offer. */
+  addedTerms: z.string().trim().min(1).max(600).nullable().optional(),
   reason: ReasonSchema,
 }).strict();
 

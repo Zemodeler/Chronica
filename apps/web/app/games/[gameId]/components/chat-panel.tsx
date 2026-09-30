@@ -35,6 +35,14 @@ interface ChatPanelProps {
   /** Set to open this panel directly on a specific session -- e.g. a conversation a character initiated. */
   readonly openSessionId?: string | null;
   readonly onOpenSessionConsumed?: () => void;
+  /** A name to search the letters for on arrival: the treaties' "Write to them". */
+  readonly searchSeed?: string | null;
+  /**
+   * Reads the game again: a letter is a turn of its own, and the Chronicle
+   * and the last report must show it the moment it is written, not after the
+   * next order (R79).
+   */
+  readonly onWorldChanged?: () => Promise<void>;
 }
 
 type Focus =
@@ -66,9 +74,12 @@ type Reply = "accepted" | "refused" | "countered";
  * the way a history records an exchange, not as chat bubbles. A
  * correspondence reads as the letters themselves, dated.
  */
-export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSessionConsumed }: ChatPanelProps) {
+export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSessionConsumed, searchSeed, onWorldChanged }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [contacts, setContacts] = useState<readonly ContactView[]>([]);
+  // Whether the people have been read yet. "Nobody yet" was shown while they
+  // loaded, and a save full of correspondents looked empty (R60).
+  const [directoryState, setDirectoryState] = useState<"loading" | "ready" | "failed">("loading");
   const [groups, setGroups] = useState<readonly DirectoryGroup[]>([]);
   const [letters, setLetters] = useState<readonly AwaitingLetter[]>([]);
   const [correspondence, setCorrespondence] = useState<readonly Correspondence[]>([]);
@@ -80,6 +91,7 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
   const [letterError, setLetterError] = useState<string | null>(null);
   const [letterSent, setLetterSent] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  useEffect(() => { if (searchSeed) setSearch(searchSeed); }, [searchSeed]);
   const [focus, setFocus] = useState<Focus>({ kind: "none" });
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<readonly MessageView[]>([]);
@@ -144,13 +156,15 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
   const fetchDirectory = useCallback(async () => {
     try {
       const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/directory`, { cache: "no-store" });
-      if (!res.ok) return;
+      if (!res.ok) { setDirectoryState((state) => (state === "ready" ? state : "failed")); return; }
       const data = await res.json() as { groups: DirectoryGroup[]; letters: AwaitingLetter[]; correspondence: Correspondence[] };
       setGroups(data.groups ?? []);
       setLetters(data.letters ?? []);
       setCorrespondence(data.correspondence ?? []);
+      setDirectoryState("ready");
     } catch {
       // The tray still shows the conversations already open.
+      setDirectoryState((state) => (state === "ready" ? state : "failed"));
     }
   }, [gameId]);
 
@@ -243,7 +257,7 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
       if (!res.ok) { setLetterError(data.error ?? "The letter did not go. Your words are still here; try again."); return; }
       setLetterBody("");
       setLetterSent(`Your letter is on its way to ${correspondentName}. They will answer when the world next moves.`);
-      await fetchDirectory();
+      await Promise.all([fetchDirectory(), onWorldChanged?.()]);
     } catch {
       setLetterError("The letter did not go. Your words are still here; try again.");
     } finally {
@@ -266,7 +280,7 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
       const data = await res.json().catch(() => ({})) as { error?: string };
       if (!res.ok) { setLetterError(data.error ?? "The answer did not go. Your words are still here; try again."); return; }
       const sender = { id: letter.fromCharacterId, name: personById.get(letter.fromCharacterId)?.name ?? letter.fromLabel.split(",")[0]! };
-      await fetchDirectory();
+      await Promise.all([fetchDirectory(), onWorldChanged?.()]);
       choosePerson(sender);
       setLetterSent(reply === "countered"
         ? `Your answer is on its way. ${sender.name} will write back when the world next moves.`
@@ -456,6 +470,7 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
                       const last = entry.pages.at(-1);
                       const state = entry.waitingOn === "you" ? "Waiting on your answer"
                         : entry.waitingOn === "them" ? "Awaiting their answer"
+                        : last?.lapsed != null ? last.lapsed
                         : last !== undefined && !last.fromYou ? `They wrote, ${last.dateLabel}` : `You wrote, ${last?.dateLabel ?? ""}`;
                       return (
                         <li key={entry.withCharacterId}>
@@ -505,7 +520,11 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
                 </section>
               ))}
 
-              {groups.length === 0 && contacts.length === 0 && <p className="letters__none">Nobody yet. Find someone nearby to speak with.</p>}
+              {groups.length === 0 && contacts.length === 0 && directoryState === "loading" && <p className="letters__none">Finding who you know…</p>}
+              {groups.length === 0 && contacts.length === 0 && directoryState === "failed" && (
+                <p className="letters__none">The list of people could not be read. <button type="button" className="word-button" onClick={() => { setDirectoryState("loading"); void fetchDirectory(); }}>Try again</button></p>
+              )}
+              {groups.length === 0 && contacts.length === 0 && directoryState === "ready" && <p className="letters__none">Nobody yet. Find someone nearby to speak with.</p>}
               {wanted.length > 0 && shownGroups.length === 0 && <p className="letters__none">Nobody you know of by that name. Find someone else to ask around.</p>}
             </div>
           </nav>
@@ -633,6 +652,7 @@ export function ChatPanel({ gameId, open, onClose, side, openSessionId, onOpenSe
                       {page.subject !== null && !page.body.startsWith(page.subject.replace(/…$/, "")) && <p className="letters__page-subject">{page.subject}</p>}
                       <p>{page.body}</p>
                       {page.awaiting && page.fromYou && <p className="letters__page-note">Not yet answered. The answer comes when the world next moves.</p>}
+                      {page.lapsed != null && <p className="letters__page-note">{page.lapsed}.</p>}
                       {answerable !== undefined && (
                         <button type="button" className="word-button" onClick={() => chooseLetter(answerable.id)}>Answer this letter</button>
                       )}

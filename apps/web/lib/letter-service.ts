@@ -99,7 +99,10 @@ export async function writeLetter(gameId: string, letter: NewLetter): Promise<Le
       }],
       orderText: `Write to ${reader.name}: ${body}`,
       title: `${writer.name} writes to ${reader.name}`,
-      body: `"${subject}" -- ${body}`,
+      // The subject is the letter's own first sentence when none was given, and
+      // printing both printed it twice: '"We are within our right" -- We are
+      // within our right' (R78).
+      body: body.startsWith(subject.replace(/…$/, "")) ? body : `"${subject}" -- ${body}`,
       subjectIds: [writer.id, reader.id],
     };
   });

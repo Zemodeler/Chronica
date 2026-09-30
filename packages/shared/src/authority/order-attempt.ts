@@ -96,7 +96,9 @@ export const OrderAttemptSchema = z
     if (isTerminalOrderAttemptStatus(attempt.status) && attempt.decidedAtStep === null) {
       context.addIssue({ code: "custom", path: ["decidedAtStep"], message: "A decided order attempt must record when it was decided." });
     }
-    if (!isTerminalOrderAttemptStatus(attempt.status) && attempt.decidedAtStep !== null) {
+    // Accepted is decided, though not finished: the man said yes on a day, and
+    // the work it hands him goes on after it.
+    if (!isTerminalOrderAttemptStatus(attempt.status) && attempt.status !== "accepted" && attempt.decidedAtStep !== null) {
       context.addIssue({ code: "custom", path: ["decidedAtStep"], message: "An order attempt still awaiting a decision cannot record when it was decided." });
     }
   });
@@ -156,7 +158,7 @@ export function decideOrderAttempt(attempt: OrderAttempt, decision: OrderAttempt
     ...attempt,
     status,
     recipientDecisionReason: reason,
-    decidedAtStep: decided ? atStep : null,
+    decidedAtStep: decided || status === "accepted" ? atStep : null,
   };
 }
 

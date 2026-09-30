@@ -52,6 +52,33 @@ function LedgerBody({ body }: { readonly body: string }) {
   );
 }
 
+/** The engine's account of what each part of the order came to, set under the passage (`withOrderOutcomes` in the sim). */
+const OUTCOME_HEADING = "What came of the order:";
+
+function Outcomes({ block }: { readonly block: string }) {
+  const lines = block.split("\n").slice(1).map((line) => line.replace(/^- /, "")).filter((line) => line.trim() !== "");
+  return (
+    <section className="chronicle-entry__outcomes" aria-label="What came of the order">
+      <h4>What came of the order</h4>
+      <ul>{lines.map((line, index) => <li key={index}><Linkify text={line} /></li>)}</ul>
+    </section>
+  );
+}
+
+function EntryBody({ entry }: { readonly entry: ChronicleEntry }) {
+  const at = entry.body.indexOf(OUTCOME_HEADING);
+  const prose = at < 0 ? entry.body : entry.body.slice(0, at).trimEnd();
+  const outcomes = at < 0 ? null : entry.body.slice(at);
+  return (
+    <>
+      {prose !== "" && (entry.kind === "recorded"
+        ? <LedgerBody body={prose} />
+        : <div className="chronicle-entry__body">{prose.split("\n\n").map((paragraph, index) => <p key={index}><Linkify text={paragraph} /></p>)}</div>)}
+      {outcomes !== null && <Outcomes block={outcomes} />}
+    </>
+  );
+}
+
 /** Which note a change's subject opens: a province is a place, a polity a power. A purse has none. */
 const NOTE_KIND: Readonly<Record<string, string>> = { province: "place", force: "force", character: "person", polity: "power" };
 const noteKeyOf = (change: { readonly kind: string; readonly id: string }): EntityKey | null =>
@@ -71,6 +98,7 @@ function Entry({ entry, onTag, focused }: { readonly entry: ChronicleEntry; read
         {(entry.date !== null || entry.unread) && (
           <p className="chronicle-entry__date">
             {entry.date !== null && <Era text={entry.date} />}
+            {entry.happened != null && <span className="chronicle-entry__happened"> (events from <Era text={entry.happened} />)</span>}
             {entry.unread && entry.published && <span className="chronicle-entry__new">New</span>}
           </p>
         )}
@@ -93,9 +121,7 @@ function Entry({ entry, onTag, focused }: { readonly entry: ChronicleEntry; read
         )}
       </header>
 
-      {entry.kind === "recorded"
-        ? <LedgerBody body={entry.body} />
-        : <div className="chronicle-entry__body">{entry.body.split("\n\n").map((paragraph, index) => <p key={index}><Linkify text={paragraph} /></p>)}</div>}
+      <EntryBody entry={entry} />
 
       {entry.quote !== null && (
         <figure className="chronicle-entry__quote">

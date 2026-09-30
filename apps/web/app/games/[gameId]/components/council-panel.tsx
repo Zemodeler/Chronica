@@ -56,7 +56,7 @@ export function CouncilPanel({
   }, []);
   // Empty means "as far as the order takes it", which the engine judges.
   const [span, setSpan] = useState<number | "">("");
-  const latest = latestReport(view.chronicle);
+  const latest = latestReport(view.chronicle, view.latestBurstId);
   const spanDays = span === "" ? undefined : span;
   const { elapsed, stamps } = useMovingClock(busy, progress.length);
   // Nothing can be sent from an empty purse; say so before the click, not after.
@@ -219,7 +219,7 @@ function UnderWay({ items }: { readonly items: readonly UnderWayItem[] }) {
         {items.map((item) => (
           <li key={item.key} className={item.stalled ? "is-stalled" : undefined}>
             <strong>{item.stalled && <span className="seal-dot"><span className="visually-hidden">Stalled: </span></span>}{item.label}</strong>
-            <span>{item.detail}</span>
+            <span>{item.detail}{item.secret === true && " Known only to you."}</span>
           </li>
         ))}
       </ul>

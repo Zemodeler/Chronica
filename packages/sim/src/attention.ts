@@ -226,6 +226,13 @@ export function routeAttention(input: AttentionInput): AttentionResult {
       score += 35;
       reasons.push("owes an answer to an order");
     }
+    // Took one on and has done nothing for it yet.
+    if (world.orderAttempts.some((attempt) => attempt.recipientRef.id === character.id && attempt.status === "accepted"
+      && !world.orders.some((order) => order.parts.some((part) => part.workRefs.some((ref) => ref.kind === "order_attempt" && ref.id === attempt.id)
+        && part.workRefs.some((ref) => ref.kind !== "order_attempt"))))) {
+      score += 30;
+      reasons.push("has an order to carry out");
+    }
     // A letter put to them, or to their government, and not yet answered. After
     // an unanswered order this is the likeliest reason in the world to want to
     // act -- and an unanswered letter is itself an answer, so leaving them

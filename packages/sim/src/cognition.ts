@@ -828,6 +828,19 @@ export function renderCharacterPortrait(
 
   if (character !== undefined) lines.push(...describeRelations(character, world, options.others ?? [], name));
 
+  // Orders they said yes to and have not finished. An accepted order used to
+  // leave the brief the moment it was accepted, so the man who took on "see
+  // the legion provisioned and carried over" was never reminded of it again,
+  // and nothing he did afterwards was ever for it.
+  const taken = world.orderAttempts.filter((attempt) => attempt.recipientRef.id === characterId && attempt.status === "accepted");
+  if (taken.length > 0) {
+    lines.push("Orders they have taken on and not finished (do the work: it is theirs now):", ...taken.map((attempt) => {
+      const work = world.orders.flatMap((order) => order.parts).find((part) => part.workRefs.some((ref) => ref.kind === "order_attempt" && ref.id === attempt.id));
+      const done = work === undefined ? 0 : work.workRefs.filter((ref) => ref.kind !== "order_attempt").length;
+      return `  - [${attempt.id}] "${attempt.instruction}"${done === 0 ? " -- nothing done about it yet" : ` -- ${done} piece(s) of work set going`}`;
+    }));
+  }
+
   const owed = world.orderAttempts.filter(
     (attempt) => attempt.recipientRef.id === characterId && (attempt.status === "issued" || attempt.status === "received" || attempt.status === "delayed"),
   );

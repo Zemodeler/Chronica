@@ -56,6 +56,13 @@ export const CommitmentSchema = z
     actionKind: CommitmentActionKindSchema,
     description: z.string().trim().min(1).max(400),
     conditions: z.string().trim().max(400).default(""),
+    /**
+     * A promise to do something, or to hold back from it. "I will not call you
+     * a traitor without proof" is kept by not doing it, and was broken for
+     * want of a letter on the day it fell due (R23). Absent on commitments
+     * made before this was kept: read from the words (`promiseFormOf`).
+     */
+    form: z.enum(["do", "refrain"]).optional(),
     /** Authority the promisor must hold to keep this at all -- an office they must currently occupy. */
     requiredOfficeId: EntityIdSchema.nullable().default(null),
     /** Resource the promisor must actually have on hand to keep this. */
@@ -360,4 +367,22 @@ export function cancelCommitment(
 /** Commitments whose review step has arrived and are still pending -- candidates for this turn's intent formation. */
 export function dueCommitments(commitments: readonly Commitment[], atStep: number): readonly Commitment[] {
   return commitments.filter((c) => (c.status === "pending" || c.status === "deferred") && c.reviewAtStep <= atStep);
+}
+
+/**
+ * Whether a promise is to hold back: "I will not…", "never", "shall not",
+ * "without proof". Read from its words where it was not recorded.
+ */
+export function promiseFormOf(commitment: Pick<Commitment, "form" | "description">): "do" | "refrain" {
+  if (commitment.form !== undefined) return commitment.form;
+  return /\b(will not|won't|shall not|shan't|would not|never|not\s+(?:to\s+)?(?:call|accuse|attack|speak|move|proclaim|betray|harm|raise|name|tell|reveal|march|declare))\b/i.test(commitment.description) ? "refrain" : "do";
+}
+
+/**
+ * Whether a promise waits on an occasion: "when we put the measure before the
+ * Senate", "if Carthage gives us cause". Such a promise is judged when its
+ * occasion comes, and lapses without blame if it never does (R26).
+ */
+export function isConditionalPromise(commitment: Pick<Commitment, "conditions" | "description">): boolean {
+  return commitment.conditions.trim() !== "" || /\b(when|if|once|should|unless|until|in case)\b/i.test(commitment.description);
 }

@@ -784,6 +784,17 @@ function personalSeeds(input: NarratorInput, firstOrdinal: number, count: number
       };
       about = onHim ? "" : `${who.name} is close to ${player.name} [${playerId}], and it will reach him.`;
     }
+    // A conspiracy is laid against him, never by him: the world does not
+    // decide that the ruler plots (R76). One that would fall on him goes to
+    // whoever of his circle thinks worst of him, or does not happen.
+    if (archetype.name === "conspiracy" && target.characterId === playerId) {
+      const plotter = circle
+        .map((id) => world.characters.find((character) => character.id === id)!)
+        .filter((character) => deriveRelationDimension(character, playerId, "trust") < 0)
+        .sort((a, b) => deriveRelationDimension(a, playerId, "trust") - deriveRelationDimension(b, playerId, "trust") || a.id.localeCompare(b.id))[0];
+      if (plotter === undefined) continue;
+      target = { ...target, provinceId: plotter.locationProvinceId, provinceName: provinceName(plotter.locationProvinceId), polityId: plotter.polityId, polityName: polityName(plotter.polityId), characterId: plotter.id, characterName: plotter.name };
+    }
     // A conspiracy in his circle is aimed at him, not at the government.
     const brief = archetype.name === "conspiracy" && target.characterId !== playerId
       ? `${target.characterName} [${target.characterId}] has begun something against ${player.name} [${playerId}], and means to keep it hidden. Decide what. Plant what drives them with "character_intent_set" (private), a "character_pressure_set" or a "belief_set", and record what they have already done as a private fact known to them alone. Do not carry out their acts for them.`

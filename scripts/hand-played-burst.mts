@@ -26,8 +26,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createHandAdapter } from "@chronica/ai";
 import { punicWarsScenario } from "@chronica/db";
-import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, formatWorldDate, type Fact, type WorldState } from "@chronica/shared";
-import { DEFAULT_BUDGET, runSimulationBurst, type PendingEvent, type PlanTally, type SimModelPort } from "@chronica/sim";
+import { ScenarioDefinitionSchema, WorldStateSchema, ensureProvinceMaterial, formatWorldDate, ordersUnderWay, type Fact, type WorldState } from "@chronica/shared";
+import { DEFAULT_BUDGET, orderOutcomeLines, runSimulationBurst, type PendingEvent, type PlanTally, type SimModelPort } from "@chronica/sim";
 
 const args = process.argv.slice(2);
 const option = (name: string, fallback: string): string => {
@@ -104,6 +104,9 @@ for (let index = 0; index < bursts; index += 1) {
   for (const rejected of result.frictions) say(`  friction: ${rejected.line.slice(0, 200)}`);
   if (result.parseFailures.length > 0) say(`  unreadable: ${result.parseFailures.join(" | ")}`);
   if (result.salvaged.length > 0) say(`  dropped to keep the answer: ${result.salvaged.join(", ")}`);
+  // What each part of the order came to, and what the Council would show.
+  if (result.orderRecordId !== null) for (const line of orderOutcomeLines(world, result.orderRecordId)) say(`  order: ${line}`);
+  for (const item of ordersUnderWay(world, player, definition.government.offices, definition.clock)) say(`  under way${item.stalled ? " (stalled)" : ""}: ${item.label} -- ${item.detail}`);
   console.log(report.slice(printedFrom).join("\n"));
 }
 

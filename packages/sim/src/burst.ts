@@ -10,6 +10,7 @@ import {
   formatWorldDate,
   ScheduledEventPayloadSchema,
   WorldStateSchema,
+  WorldDeltaSchema,
   type Fact,
   type FactProposalDraft,
   type Office,
@@ -32,6 +33,13 @@ import {
   type WorldDelta,
   type WorldInstant,
   type WorldState,
+  type OrderWorkRef,
+  capOrders,
+  isOrderPartOpen,
+  orderPartStatus,
+  ORDER_PART_STATUS_LABEL,
+  completeOrderAttempt,
+  abandonOrderAttempt,
 } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import type { BattleAccount } from "./battle";
@@ -332,6 +340,8 @@ export interface BurstResult {
    * the whole category of the reign's business.
    */
   readonly orderFactIds: readonly string[];
+  /** The order as the ledger keeps it (`world.orders`), when this burst answered one: what each part came to is read from it at the end. */
+  readonly orderRecordId: string | null;
   /** Fact id → the significance its author assigned it, for storage and pacing. */
   readonly significanceByFactId: ReadonlyMap<string, number>;
   readonly scheduled: readonly ScheduledEventDraft[];
@@ -487,7 +497,68 @@ interface OrderActs {
   /** Refused for any reason, the engine's included: the order was written, and none of it stood. */
   readonly refused: number;
   /** Each of the order's own acts, in its own words, and what became of it -- so each part of the order is judged by its own. */
-  readonly ownActs?: readonly { readonly said: string; readonly carried: boolean; readonly refusal: string | null }[];
+  readonly ownActs?: readonly { readonly said: string; readonly carried: boolean; readonly refusal: string | null; readonly work?: readonly OrderWorkRef[]; readonly delta?: WorldDelta; readonly breach?: string | null }[];
+  /** The ids its facts were given, by the localIds it wrote. */
+  readonly factIdsByLocalId?: ReadonlyMap<string, string>;
+}
+
+/** The accounts and forces an act names, resolved: what a breach of it is a breach of. */
+function refsOfAct(delta: WorldDelta, resolve: (ref: string) => string): OrderPartyRef[] {
+  const refs: OrderPartyRef[] = [];
+  for (const [key, value] of Object.entries(delta as Record<string, unknown>)) {
+    if (typeof value !== "string") continue;
+    if (/AccountRef$/.test(key)) refs.push({ kind: "account", id: resolve(value) });
+    else if (key === "forceRef") refs.push({ kind: "force", id: resolve(value) });
+  }
+  return refs.slice(0, 4);
+}
+
+/** Calls kept back from the world's own business for the people the player's order waits on. */
+const ORDER_RESERVE_CALLS = 3;
+
+/** How much of a private intent's words a fact must share to be that intent said aloud. */
+const PRIVATE_MIND_OVERLAP = 0.5;
+
+/** Words to compare by: lower case, five-letter stems, the small words left out. */
+function wordStems(text: string): Set<string> {
+  return new Set(text.toLowerCase().split(/[^\p{L}]+/u).filter((word) => word.length > 3).map((word) => word.slice(0, 5)));
+}
+
+/**
+ * What one carried act of an order set going, read from the world before and
+ * after it: the project, the vote, the letter, the audit, the plot, the army.
+ * A march is a project the engine makes (`setOutOn`), found by the force it moves.
+ */
+function workMadeBy(before: WorldState, after: WorldState, delta: WorldDelta, assignedIds: ReadonlyMap<string, string>): OrderWorkRef[] {
+  const made = "localId" in delta && typeof delta.localId === "string" ? assignedIds.get(delta.localId) ?? null : null;
+  const isNew = <T extends { readonly id: string }>(list: readonly T[], id: string | null): id is string =>
+    id !== null && list.some((entry) => entry.id === id);
+  switch (delta.op) {
+    case "project_create":
+      return isNew(after.projects, made) ? [{ kind: "project", id: made }] : [];
+    case "political_procedure_open":
+      return isNew(after.material.politicalProcedures, made) ? [{ kind: "procedure", id: made }] : [];
+    case "diplomatic_message_send":
+      return isNew(after.diplomacy, made) ? [{ kind: "message", id: made }] : [];
+    case "covert_plot_open":
+      return isNew(after.covertPlots, made) ? [{ kind: "plot", id: made }] : [];
+    case "force_create":
+      return isNew(after.material.forces, made) ? [{ kind: "force", id: made }] : [];
+    case "generic_entity_create":
+      return isNew(after.genericEntities, made) ? [{ kind: "entity", id: made }] : [];
+    default: {
+      // Audits, marches and crossings are made without a handle of their own:
+      // whatever of their kind is new since the act.
+      const newAudits = after.audits.filter((audit) => !before.audits.some((old) => old.id === audit.id)).map((audit) => ({ kind: "audit" as const, id: audit.id }));
+      if (delta.op === "audit_open") return newAudits.slice(-1);
+      if (delta.op === "force_modify" && delta.locationId !== undefined) {
+        const journeys = after.projects.filter((project) => !before.projects.some((old) => old.id === project.id)
+          && project.completionOutcome?.kind === "force_move");
+        return journeys.slice(-1).map((project) => ({ kind: "project" as const, id: project.id }));
+      }
+      return [];
+    }
+  }
 }
 
 /** An act's own prose: its reason, label, duties, subject -- every field written in words rather than ids. */
@@ -641,6 +712,133 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   };
 
   /** Applies one actor's proposal: deltas, then the facts and events it produced. */
+  /**
+   * Work done by somebody holding an accepted order, credited to it.
+   *
+   * Tiberius Coruncanius accepted "arrange the transport and the provisioning"
+   * and nothing he did afterwards was ever connected to it: the order said
+   * accepted for ever, the player could not tell agreement from progress, and
+   * nothing could say it had been carried out. His acts join the ledger part
+   * that handed him the order -- by their words where he holds several.
+   */
+  const creditDelegatedWork = (recipientId: string, acts: readonly { readonly said: string; readonly work: readonly OrderWorkRef[] }[], factIds: readonly string[]): void => {
+    const held = world.orderAttempts.filter((attempt) => attempt.recipientRef.id === recipientId && attempt.status === "accepted");
+    if (held.length === 0) return;
+    const instructions = held.map((attempt) => attempt.instruction);
+    const credited = new Map<string, OrderWorkRef[]>();
+    for (const act of acts) {
+      if (act.work.length === 0) continue;
+      const index = held.length === 1 ? 0 : partOfAct(instructions, act.said);
+      if (index === null) continue;
+      credited.set(held[index]!.id, [...(credited.get(held[index]!.id) ?? []), ...act.work]);
+    }
+    if (credited.size === 0) return;
+    world = {
+      ...world,
+      orderAttempts: world.orderAttempts.map((attempt) => !credited.has(attempt.id) ? attempt : {
+        ...attempt,
+        consequenceFactRefs: [...attempt.consequenceFactRefs, ...factIds].slice(-8),
+      }),
+      orders: world.orders.map((order) => ({
+        ...order,
+        parts: order.parts.map((part) => {
+          const extra = part.workRefs.flatMap((ref) => ref.kind === "order_attempt" ? credited.get(ref.id) ?? [] : []);
+          if (extra.length === 0) return part;
+          const fresh = extra.filter((ref) => !part.workRefs.some((known) => known.kind === ref.kind && known.id === ref.id));
+          return { ...part, workRefs: [...part.workRefs, ...fresh].slice(0, 12) };
+        }),
+      })),
+    };
+  };
+
+  /**
+   * An accepted order whose work is all finished has been carried out; one
+   * whose every piece of work failed has been abandoned.
+   */
+  const settleDelegations = (): void => {
+    let changed = false;
+    const attempts = world.orderAttempts.map((attempt) => {
+      if (attempt.status !== "accepted") return attempt;
+      const work = world.orders.flatMap((order) => order.parts)
+        .filter((part) => part.workRefs.some((ref) => ref.kind === "order_attempt" && ref.id === attempt.id))
+        .flatMap((part) => part.workRefs.filter((ref) => ref.kind !== "order_attempt" && ref.kind !== "procedure" && ref.kind !== "message"));
+      if (work.length === 0) return attempt;
+      const statuses = work.map((ref) => orderPartStatus(world, { said: "-", workRefs: [ref], refusal: null, note: null, whyNot: null, factIds: [], waitingOnProcedureId: null, retry: null, closedAtStep: null }));
+      if (statuses.every((status) => status === "done")) {
+        changed = true;
+        return completeOrderAttempt(attempt, world.elapsedStep);
+      }
+      if (statuses.every((status) => status === "blocked" || status === "refused")) {
+        changed = true;
+        return abandonOrderAttempt(attempt, world.elapsedStep);
+      }
+      return attempt;
+    });
+    if (changed) world = { ...world, orderAttempts: attempts };
+  };
+
+  /**
+   * Parts of the player's orders that waited on a vote, taken up again once it
+   * passes. "Seek the Senate's leave and carry the legion over" was refused for
+   * want of leave; the leave came ten days later, and the Senate's own record
+   * said "what it allows waits on somebody's order" -- although the order had
+   * been given. The refused act is tried once more, as the order's, and what it
+   * makes joins the part. A vote that fails ends the wait with its refusal.
+   */
+  const resumeWaitingOrders = (): void => {
+    let orders = world.orders;
+    let changed = false;
+    for (const [orderIndex, order] of orders.entries()) {
+      for (const [partIndex, part] of order.parts.entries()) {
+        if (part.closedAtStep !== null || part.waitingOnProcedureId === null || part.retry === null) continue;
+        const vote = world.material.politicalProcedures.find((procedure) => procedure.id === part.waitingOnProcedureId);
+        if (vote === undefined || vote.outcome === null) continue;
+        let next = { ...part, retry: null };
+        if (vote.outcome === "passed") {
+          const parsed = WorldDeltaSchema.safeParse(part.retry);
+          if (parsed.success) {
+            const actorRef = { kind: "character" as const, id: order.actorCharacterId };
+            const before = world;
+            const tried = applyDeltas(world, [parsed.data], {
+              now: world.instant, actorRef, offices: input.offices, ...(input.successionRules === undefined ? {} : { successionRules: input.successionRules }), warfare: input.warfare, ids, gameId: input.gameId,
+              clock: input.clock, orderDeltas: new Set([parsed.data]),
+              playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
+              ...(input.terrains === undefined ? {} : { terrains: input.terrains }),
+              ...(input.wealth === undefined ? {} : { wealth: input.wealth }),
+            });
+            recordAudit(tried, actorRef, "repair");
+            if (tried.applied.length > 0) {
+              world = tried.world;
+              next = { ...next, refusal: null, workRefs: [...next.workRefs, ...workMadeBy(before, world, parsed.data, tried.assignedIds)].slice(0, 12) };
+              const materialized = materializeFacts({
+                proposals: [...tried.factProposals, {
+                  localId: `order_resumed_${partIndex}`,
+                  kind: "order_resumed",
+                  summary: `With the vote on "${vote.label}" passed, the order was taken up again: "${part.said}".`.slice(0, 600),
+                  affectedRefs: [actorRef],
+                  visibility: "private" as const,
+                  discoveryState: "private" as const,
+                  knowableInDays: 0,
+                  knownToRefs: [actorRef],
+                  significance: 30,
+                }],
+                now: world.instant, forces: world.material.forces, atStep: world.elapsedStep, ids, causalDepth: 0, assignedIds: tried.assignedIds,
+              });
+              newFacts.push(...materialized.facts);
+              for (const [factId, weight] of materialized.significanceByFactId) significanceByFactId.set(factId, weight);
+            } else {
+              next = { ...next, refusal: tried.rejected[0]?.reason.slice(0, 600) ?? next.refusal };
+            }
+          }
+        } else {
+          next = { ...next, refusal: `The vote on "${vote.label}" ${vote.outcome === "failed" ? "failed" : `was ${vote.outcome}`}.`.slice(0, 600) };
+        }
+        orders = orders.map((candidate, index) => index !== orderIndex ? candidate : { ...candidate, parts: candidate.parts.map((old, at) => at === partIndex ? next : old) });
+        changed = true;
+      }
+    }
+    if (changed) world = { ...world, orders };
+  };
   const applyProposal = async (proposal: Proposal & { readonly worldDeltas?: readonly WorldDelta[] }, actorRef: OrderPartyRef, causalDepth: number, actsForTheWorld = false): Promise<OrderActs> => {
     // The world's own business first, so the order is carried out in the world
     // as it now stands -- a chieftain the world has just given the Boii is
@@ -658,6 +856,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     for (const delta of misfiled) {
       audit.push({ actorRef, op: delta.op, kind: "refiled", ofTheOrder: false, attempt: "first", reason: "Written into the order, but it makes something for another power with the actor nowhere in it: judged as the world's.", delta });
     }
+    const worldAtStart = world;
     const aliveBefore = new Set(world.characters.filter((character) => character.alive).map((character) => character.id));
     const stoodBefore = new Map(world.material.forces.map((force) => [force.id, force.locationId]));
     const applyContext = (assignedIds?: ReadonlyMap<string, string>, order: ReadonlySet<WorldDelta> | undefined = orderDeltas) => ({
@@ -802,8 +1001,29 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // it. A fact naming a handle this batch never assigned goes with the thing
     // it was about.
     const madeReal = (ref: string): boolean => !ref.startsWith("local:") || resolveStrict(ref) !== null;
+    // Nor did a work begin, or end, that the work itself says has not: "Dentatus
+    // began the Anio water works" was recorded while both Anio projects still
+    // waited on "Begin construction" (R77). A project's stages are the
+    // engine's; a fact claiming one is dropped unless the project agrees.
+    const claimsWorkProgress = (fact: FactProposalDraft): boolean => {
+      if (!/(^|_)(construction|works?|building|project)_?(started|begun|began|begins|completed|finished|done)$|_(started|begun|completed|finished)$/i.test(fact.kind)) return false;
+      const words = wordStems(fact.summary);
+      const finishing = /(completed|finished|done)$/i.test(fact.kind);
+      return world.projects.some((project) => {
+        if (project.status === "completed") return false;
+        const named = (fact.affectedRefs ?? []).some((ref) => ref.kind === "project" && (resolveStrict(ref.id) ?? ref.id) === project.id);
+        const label = wordStems(project.label);
+        const alike = label.size > 0 && [...label].filter((stem) => words.has(stem)).length / label.size >= 0.5;
+        if (!named && !alike) return false;
+        // Begun is fine once its first stage is behind it, or the day it is
+        // set going; finished never, while it is open.
+        return finishing || (project.startedAtStep < world.elapsedStep && project.milestones[0]?.status === "pending");
+      });
+    };
     const aboutRealThings = behind.facts.filter((fact) =>
-      fact.affectedRefs.every((ref) => madeReal(ref.id)) && (fact.storylineRef === null || madeReal(fact.storylineRef)));
+      fact.affectedRefs.every((ref) => madeReal(ref.id)) && (fact.storylineRef === null || madeReal(fact.storylineRef))
+      && !claimsWorkProgress(fact));
+    for (const fact of behind.facts.filter(claimsWorkProgress)) skipped.push({ stage: "engine_facts", reason: `"${fact.summary.slice(0, 80)}" claims a work's progress its project does not show.` });
     // And a fact about a refused act on something that does exist -- "a sum
     // left the consul's chest" beside a chest that stayed shut -- is taken
     // back by its author, who alone can tell which sentences described what.
@@ -871,7 +1091,24 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         skipped.push({ stage: "fact_places", reason: `"${fact.summary.slice(0, 80)}" named ${astray.map((ref) => ref.id).join(", ")}, where none of its armies stands; dropped from the fact.` });
         return { ...fact, affectedRefs: fact.affectedRefs.filter((ref) => !astray.includes(ref)) };
       });
+    // What a man privately means, restated as a fact, is still private: the
+    // model wrote Aristodemus's private wish for a match through private
+    // negotiation as a public fact, and it went into Rome's answer (R75).
+    const privateMinds = actorRef.kind !== "character" ? [] : world.characterIntents
+      .filter((intent) => intent.actorCharacterId === actorRef.id && intent.visibility === "private")
+      .map((intent) => wordStems(intent.rationale));
+    const restatesAPrivateMind = (summary: string): boolean => {
+      if (privateMinds.length === 0) return false;
+      const mine = wordStems(summary);
+      return privateMinds.some((stems) => {
+        const shared = [...stems].filter((stem) => mine.has(stem)).length;
+        return stems.size > 0 && shared / Math.min(stems.size, Math.max(1, mine.size)) >= PRIVATE_MIND_OVERLAP;
+      });
+    };
     const keptSecret = resolvedRefs.map((fact) => {
+      if (fact.visibility !== "private" && !actsForTheWorld && (restatesAPrivateMind(fact.summary) || /\b(privately|in private|in secret|secretly|private(?:ly)? negotiat\w*)\b/i.test(fact.summary))) {
+        return { ...fact, visibility: "private" as const, discoveryState: "private" as const, knownToRefs: [...fact.knownToRefs, actorRef] };
+      }
       if (fact.storylineRef === null) return fact;
       const storyline = world.storylines.find((candidate) => candidate.id === resolveId(fact.storylineRef!));
       if (storyline === undefined || storyline.visibility !== "private" || fact.visibility === "private") return fact;
@@ -901,7 +1138,9 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         localId: `breach_${newFacts.length}_${index}`,
         kind: "authority_breach",
         summary: describeBreach(breach.delta, world, actorName),
-        affectedRefs: [actorRef],
+        // The act's own things beside the actor -- the chest spent from, the
+        // army supplied -- so the breach is of something, not of nothing.
+        affectedRefs: [actorRef, ...refsOfAct(breach.delta, (ref) => result.assignedIds.get(ref.replace(/^local:/, "")) ?? ref)],
         visibility: "private",
         // Nobody notices some things, and that has to stay possible: a world
         // where every irregularity is always caught is one where nobody would
@@ -944,8 +1183,11 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // the account is kept for inspection and attached to nothing. Reported
     // difficulties still travel with the visible facts: friction is the
     // order's own business.
+    // A man's own account is bound to what he did in the open, never to what he
+    // did in secret: bound to both, one public fact published the whole of it,
+    // private half and all (C04).
     const visibleDescribed = materialized.facts.filter((fact) => fact.visibility !== "private").map((fact) => fact.id);
-    const describes = actsForTheWorld ? visibleDescribed : materialized.facts.map((fact) => fact.id);
+    const describes = visibleDescribed;
     const author = actsForTheWorld ? null : actorRef;
     // The account's fact handles are local ids until the batch assigns them.
     for (const account of result.battleAccounts) {
@@ -1046,13 +1288,17 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         // batch's handles.
         // A handle nothing in this batch created resolves to nothing: an event
         // stored with "local:plague" in it named a thread that never opened.
+        // And by name, as facts are (`resolveFactRef`): a report scheduled
+        // for "gaius-genucius-clepsina" was due to a player whose id is
+        // "declared-…", and it could never have reached him.
         payload: {
-          subjectIds: event.subjectRefs.map(resolveStrict).filter((id): id is string => id !== null),
+          subjectIds: event.subjectRefs.map(resolveStrict).filter((id): id is string => id !== null)
+            .map((id) => (world.characters.some((character) => character.id === id) ? id : resolveFactRef(world, { kind: "character" as const, id }).id)),
           visibility: event.visibility,
           significance: event.significance,
           knownTo: event.knownToRefs.flatMap((ref) => {
             const id = resolveStrict(ref.id);
-            return id === null ? [] : [{ kind: ref.kind, id }];
+            return id === null ? [] : [resolveFactRef(world, { kind: ref.kind, id })];
           }),
           storylineId: event.storylineRef === null ? null : resolveStrict(event.storylineRef),
         },
@@ -1092,6 +1338,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       const actText = actsForTheWorld && input.orderText !== null ? input.orderText : proposal.narrativeSummary || materialized.facts[0]?.summary || "";
       await offerMechanics(candidates, actorRef, actText);
     }
+    // A man who took on somebody's order and has now done something: what he
+    // made is that order's work, and the order's part says so (`creditDelegatedWork`).
+    if (!actsForTheWorld && actorRef.kind === "character") {
+      creditDelegatedWork(actorRef.id, result.applied.map((entry) => ({
+        said: wordsOfAct(entry.delta),
+        work: workMadeBy(worldAtStart, world, entry.delta, result.assignedIds),
+      })), materialized.facts.map((fact) => fact.id));
+    }
     return {
       changed: result.applied.filter((entry) => !CHANGES_NOTHING.has(entry.delta.op)).length,
       factLocalIds: new Set(keptSecret.map((fact) => fact.localId)),
@@ -1100,10 +1354,15 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       refusedByTheWorld: result.rejected.filter((rejection) => rejection.ofTheOrder === true && rejection.kind !== "reference").length,
       refused: result.rejected.filter((rejection) => rejection.ofTheOrder === true).length,
       ownActs: [
-        ...result.applied.filter((entry) => entry.ofTheOrder === true).map((entry) => ({ said: wordsOfAct(entry.delta), carried: true, refusal: null })),
+        ...result.applied.filter((entry) => entry.ofTheOrder === true).map((entry) => ({
+          said: wordsOfAct(entry.delta), carried: true, refusal: null, work: workMadeBy(worldAtStart, world, entry.delta, result.assignedIds), delta: entry.delta,
+          breach: result.breaches.some((breach) => breach.delta.op === entry.delta.op && wordsOfAct(breach.delta) === wordsOfAct(entry.delta))
+            ? describeBreach(entry.delta, world, actorName) : null,
+        })),
         ...result.rejected.filter((rejection) => rejection.ofTheOrder === true && rejection.kind !== "reference")
-          .map((rejection) => ({ said: wordsOfAct(rejection.delta), carried: false, refusal: rejection.reason })),
+          .map((rejection) => ({ said: wordsOfAct(rejection.delta), carried: false, refusal: rejection.reason, delta: rejection.delta })),
       ],
+      factIdsByLocalId: materialized.factIds,
     };
   };
 
@@ -1179,6 +1438,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       return;
     }
     world = holds.data;
+    resumeWaitingOrders();
+    settleDelegations();
     // A plan the ruler laid has sprung by itself. The burst stops at the end of
     // this hop and hands him back the wheel: he prepared against exactly this
     // moment, and reading about it in a month's Chronicle is no use to him.
@@ -1320,6 +1581,26 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
    * stream, where the attention router and the Chronicle can see it like
    * anything else.
    */
+  /**
+   * A report falling due is the report, not the instruction to make one.
+   * "Report transport or provisioning obstacles to the consul" fired as that
+   * sentence, word for word: history recorded that somebody should report,
+   * and nobody did. Addressed to the player, it says where each part of his
+   * standing orders now stands, read from the work (`orderPartStatus`).
+   */
+  const reportOf = (kind: string, summary: string, knownTo: readonly { readonly kind: string; readonly id: string }[]): string => {
+    if (!/report|account/i.test(`${kind} ${summary}`) || input.actorRef.kind !== "character") return summary;
+    if (!knownTo.some((ref) => ref.id === input.actorRef.id)) return summary;
+    const open = world.orders
+      .filter((order) => order.actorCharacterId === input.actorRef.id)
+      .flatMap((order) => order.parts)
+      .filter((part) => part.closedAtStep === null)
+      .slice(-6);
+    if (open.length === 0) return summary;
+    const lines = open.map((part) => `${part.said}: ${ORDER_PART_STATUS_LABEL[orderPartStatus(world, part)]}${part.refusal === null ? "" : ` (${part.refusal.slice(0, 120)})`}`);
+    return `A report came in. ${lines.join("; ")}.`.slice(0, 600);
+  };
+
   const fireDueEvents = (): void => {
     // Including what this burst scheduled a moment ago. An order that sets a
     // march in motion and then walks the world to its arrival must see the
@@ -1347,7 +1628,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         return {
           localId: `due_${event.id}_${index}`,
           kind: event.kind,
-          summary: event.summary,
+          summary: reportOf(event.kind, event.summary, details.knownTo),
           affectedRefs: details.subjectIds.flatMap((id) => {
             const ref = inferPartyRef(world, id);
             return ref === null ? [] : [ref];
@@ -1598,7 +1879,89 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     newFacts.push(...told.facts);
     for (const [factId, weight] of told.significanceByFactId) significanceByFactId.set(factId, weight);
   };
+  /**
+   * The order, part by part, with the work each part set going (`world/orders.ts`).
+   *
+   * Written after the parts are answered, so what the next order, a passed
+   * vote or the Council reads is what the world did, not what the prose said.
+   * An act is the part's its words share most with; one whose words match no
+   * part goes to the first part that has nothing else, so a one-part order
+   * owns everything it did. A part saying again what an earlier, still-open
+   * part said replaces it: "carry Legio I to Messana" given four times is one
+   * standing order, not four.
+   */
+  const recordOrder = (
+    parts: readonly { readonly said: string; readonly factLocalIds: readonly string[]; readonly whyNot: string | null }[],
+    summary: string,
+    acts: OrderActs,
+    attemptsBefore: ReadonlySet<string>,
+    orderFacts: readonly Fact[],
+  ): void => {
+    if (input.orderText === null || input.orderText.trim() === "" || orchestrationUnreadable || input.actorRef.kind !== "character") return;
+    const read = parts.length > 0 ? parts : [{ said: summary.slice(0, 200) || input.orderText.trim().slice(0, 200), factLocalIds: [], whyNot: null }];
+    const saids = read.map((part) => part.said);
+    const own = (acts.ownActs ?? []).map((act) => ({ ...act, part: read.length === 1 ? 0 : partOfAct(saids, act.said) }));
+    for (const act of own.filter((candidate) => candidate.part === null)) {
+      const empty = read.findIndex((_, index) => !own.some((other) => other.part === index));
+      act.part = empty < 0 ? null : empty;
+    }
+    const delegated = world.orderAttempts.filter((attempt) => !attemptsBefore.has(attempt.id) && attempt.issuerRef.id === input.actorRef.id);
+    const recordParts = read.map((part, index) => {
+      const mine = own.filter((act) => act.part === index);
+      const handedOn = delegated.filter((attempt) => (read.length === 1 ? 0 : partOfAct(saids, attempt.instruction)) === index);
+      const workRefs: OrderWorkRef[] = [
+        ...mine.flatMap((act) => act.work ?? []),
+        ...handedOn.map((attempt) => ({ kind: "order_attempt" as const, id: attempt.id })),
+      ].slice(0, 12);
+      const refused = mine.find((act) => !act.carried && act.refusal !== null);
+      const vote = workRefs.find((ref) => ref.kind === "procedure");
+      return {
+        said: part.said,
+        workRefs,
+        refusal: refused?.refusal?.slice(0, 600) ?? null,
+        whyNot: part.whyNot,
+        factIds: part.factLocalIds.map((localId) => acts.factIdsByLocalId?.get(localId)).filter((id): id is string => id !== undefined).slice(0, 12),
+        // What was refused beside a vote asked in the same breath is what the vote is for.
+        note: mine.map((act) => act.breach ?? null).filter((breach): breach is string => breach !== null).join("; ").slice(0, 400) || null,
+        waitingOnProcedureId: vote !== undefined && refused?.delta !== undefined ? vote.id : null,
+        retry: vote !== undefined && refused?.delta !== undefined ? (refused.delta as unknown as Record<string, unknown>) : null,
+        closedAtStep: null,
+      };
+    });
+    const superseded = world.orders.map((order) => order.actorCharacterId !== input.actorRef.id ? order : {
+      ...order,
+      parts: order.parts.map((part) => part.closedAtStep !== null || !isOrderPartOpen(world, part) || partOfAct(saids, part.said) === null
+        ? part
+        : { ...part, closedAtStep: world.elapsedStep }),
+    });
+    const record = { id: ids.next("order-record"), actorCharacterId: input.actorRef.id, text: input.orderText.trim().slice(0, 4_000), givenAtStep: world.elapsedStep, parts: recordParts };
+    world = { ...world, orders: capOrders(world, [...superseded, record]) };
+    orderRecordId = record.id;
+
+    // Each of the order's facts is stamped with the part it answers, so the
+    // Chronicle tells each part as its own matter (`matterKeys`) and never
+    // folds the transport into the ceasefire because both name the consul.
+    const partOfFact = (fact: Fact): number | null => {
+      const byLocal = recordParts.findIndex((part) => part.factIds.includes(fact.id));
+      if (byLocal >= 0) return byLocal;
+      const named = new Set(fact.affectedEntities.map((entity) => entity.id));
+      const byWork = recordParts.findIndex((part) => part.workRefs.some((ref) => named.has(ref.id)));
+      if (byWork >= 0) return byWork;
+      if (recordParts.length === 1) return 0;
+      return partOfAct(saids, fact.summary);
+    };
+    const stamped = new Map<string, Fact>();
+    for (const fact of orderFacts) {
+      const index = partOfFact(fact);
+      if (index !== null) stamped.set(fact.id, { ...fact, sourceActionId: `${record.id}-p${index}` });
+    }
+    newFacts.forEach((fact, at) => {
+      const replaced = stamped.get(fact.id);
+      if (replaced !== undefined) newFacts[at] = replaced;
+    });
+  };
   let orchestrationUnreadable = false;
+  let orderRecordId: string | null = null;
 
   // ── Iteration 0: the player's order ────────────────────────────────────
   const threadOf = (event: PendingEvent): string | undefined => {
@@ -1703,6 +2066,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     orchestrationUnreadable = orchestration.parseFailure !== null;
     salvaged.push(...orchestration.salvaged);
     const factsBefore = newFacts.length;
+    const attemptsBefore = new Set(world.orderAttempts.map((attempt) => attempt.id));
     const acts = await applyProposal(orchestration.output, input.actorRef, 0, true);
     // An order that left nothing in the world -- no act carried out, none the
     // world refused -- is still something the player is now doing. Without a
@@ -1713,7 +2077,10 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // for nothing to be done, and an unreadable answer is already its own fault.
     // Nor does a wait: the web's "let a month pass" sends no order text at all.
     if (
-      acts.carriedOut === 0 && acts.refusedByTheWorld === 0
+      // An order the engine tried and could not read is not a pursuit: it is a
+      // part that came to nothing, and the ledger says so (`recordOrder`). A
+      // pursuit is only what somebody said he was doing and wrote no act for.
+      acts.carriedOut === 0 && acts.refused === 0
       && input.orderText !== null && input.answeredDecision === undefined
       && orchestration.parseFailure === null && !/\?\s*$/.test(input.orderText.trim())
       && input.actorRef.kind === "character"
@@ -1737,6 +2104,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     }
     answerTheOrder(newFacts.slice(factsBefore), acts);
     answerTheParts(orchestration.output.intent.parts, acts);
+    recordOrder(orchestration.output.intent.parts, orchestration.output.intent.summary, acts, attemptsBefore, newFacts.slice(factsBefore));
     orderFactIds = newFacts.slice(factsBefore).map((fact) => fact.id);
     windowOrderFactIds = orderFactIds;
     if (orchestration.output.playerDecision !== null) playerDecision = orchestration.output.playerDecision;
@@ -1995,7 +2363,19 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // asked, alone with the others it wants: each step wakes him once, and the
     // call budget still bounds the whole.
     const reactionsSpent = causalDepth > budget.maxCausalDepth || idleRounds >= 2;
-    const asking = reactionsSpent ? cast.filter((actor) => dueWhy.has(actor.characterId)) : cast;
+    const castNow = reactionsSpent ? cast.filter((actor) => dueWhy.has(actor.characterId)) : cast;
+    // The last few calls are the order's: once the world's own business has
+    // spent all but `ORDER_RESERVE_CALLS`, only the people the player's order
+    // is waiting on are asked. A burst once ran out answering senators on the
+    // Anio waterworks while the man handed the transport was never asked (R80).
+    const orderPeople = new Set(world.orderAttempts
+      .filter((attempt) => attempt.issuerRef.id === input.actorRef.id && ["issued", "received", "delayed", "accepted"].includes(attempt.status))
+      .map((attempt) => attempt.recipientRef.id));
+    const reserved = modelCalls >= budget.maxModelCalls - ORDER_RESERVE_CALLS && orderPeople.size > 0;
+    const asking = reserved ? castNow.filter((actor) => orderPeople.has(actor.characterId)) : castNow;
+    if (reserved && asking.length < castNow.length) {
+      skipped.push({ stage: "cognition", reason: `hop ${hops} on ${today()}: the last calls are kept for the order; ${castNow.length - asking.length} others left unasked` });
+    }
     // Nobody pressing means the rotation alone, and the burst pays for only
     // so many of those rounds: the world elsewhere gets its look, not a look
     // every hop. Logged, never silent.
@@ -2156,6 +2536,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     stopReason,
     accumulatedSignificance: significance,
     orderFactIds,
+    orderRecordId,
     narrative,
     frictions,
     utterances,

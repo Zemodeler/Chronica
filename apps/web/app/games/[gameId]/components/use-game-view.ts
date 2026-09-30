@@ -72,6 +72,8 @@ export interface ChronicleEntry {
   readonly kind: "narrated" | "recorded";
   /** Already formatted in the scenario's own calendar. */
   readonly date: string | null;
+  /** When it happened, where the court learned of it days later; null when the two are the same. */
+  readonly happened?: string | null;
   readonly title: string;
   readonly body: string;
   readonly subjects: readonly PartyRef[];
@@ -103,6 +105,8 @@ export interface OpenDecision {
 
 export interface GameView {
   readonly chronicle: readonly ChronicleEntry[];
+  /** The burst that wrote the newest report: what "since your last order" shows. */
+  readonly latestBurstId?: string | null;
   readonly decision: OpenDecision | null;
   /** A burst still moving the world when the view was read. */
   readonly running: { readonly burstId: string } | null;
@@ -371,8 +375,15 @@ export const unreadCount = (chronicle: readonly ChronicleEntry[]): number =>
   chronicle.reduce((n, entry) => n + (entry.unread ? 1 : 0), 0);
 
 /** Everything the newest report produced -- not merely its last passage. */
-export function latestReport(chronicle: readonly ChronicleEntry[]): readonly ChronicleEntry[] {
+export function latestReport(chronicle: readonly ChronicleEntry[], latestBurstId?: string | null): readonly ChronicleEntry[] {
+  // The newest report is the last order's, not whichever passage sorts last:
+  // a letter written today can sort before a passage of yesterday's order
+  // dated later in the same day, and "since your last order" then showed the
+  // order before (R79).
+  const burst = latestBurstId ?? chronicle[chronicle.length - 1]?.burstId ?? null;
   const last = chronicle[chronicle.length - 1];
   if (last === undefined) return [];
-  return chronicle.filter((entry) => (entry.burstId === null ? entry.id === last.id : entry.burstId === last.burstId));
+  if (burst === null) return [last];
+  const of = chronicle.filter((entry) => entry.burstId === burst);
+  return of.length > 0 ? of : [last];
 }

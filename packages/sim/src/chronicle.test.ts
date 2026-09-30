@@ -534,16 +534,29 @@ describe("what an entry carries beside the prose", () => {
   };
   const names: Record<string, string> = { "marcus-atilius": "Marcus Atilius", hanno: "Hanno" };
 
-  it("lets the historian quote the one whose reign it is, when the moment is his", async () => {
+  it("lets the historian quote the one whose reign it is, when the moment is his and the words are on record", async () => {
     const surrounded = fact({ summary: "Marcus Atilius is surrounded at Messana.", affectedEntities: [{ kind: "character", id: "marcus-atilius" }, { kind: "polity", id: "rome" }] });
     const port = quotingPort("Marcus Atilius");
     const result = await compose(port, [surrounded], {
       significanceByFactId: new Map([[surrounded.id, 94]]),
       nameOf: (ref) => names[ref.id] ?? null,
       describePerson: (id) => names[id] ?? null,
+      utterances: [{ actorRef: { kind: "character", id: "marcus-atilius" }, speaker: "Marcus Atilius", line: "They made the ring long, so they made it thin.", occasion: "at the ford", factIds: [surrounded.id] }],
     });
     expect(result.entries[0]!.quote).toEqual({ speaker: "Marcus Atilius", line: "They made the ring long, so they made it thin.", occasion: "to his guard at the ford" });
     expect(port.userMessages[0]).toContain("the one whose reign this history is");
+  });
+
+  // R24: a generic broken promise became Fabricius calling Clepsina a traitor
+  // on the Almo, in quotation marks, when the record had him saying the opposite.
+  it("prints no quotation that nobody is recorded saying", async () => {
+    const surrounded = fact({ summary: "Marcus Atilius is surrounded at Messana.", affectedEntities: [{ kind: "character", id: "marcus-atilius" }, { kind: "polity", id: "rome" }] });
+    const result = await compose(quotingPort("Marcus Atilius"), [surrounded], {
+      significanceByFactId: new Map([[surrounded.id, 94]]),
+      nameOf: (ref) => names[ref.id] ?? null,
+      describePerson: (id) => names[id] ?? null,
+    });
+    expect(result.entries[0]!.quote).toBeNull();
   });
 
   it("drops a quotation put in the mouth of somebody not in the matter", async () => {
@@ -1079,6 +1092,13 @@ describe("the audit of a Roman consul's spring", () => {
     const result = await base([march, done], { [march.id]: 60, [done.id]: 60 }, { world: road() });
     expect(result.entries).toHaveLength(1);
     expect(result.entries[0]!.factIds).toEqual([march.id, done.id]);
+  });
+
+  it("does not gather the world's far-off weather into the order's passage", async () => {
+    const answer = fact({ summary: "Clepsina orders the fleet built.", affectedEntities: [{ kind: "character", id: "clepsina" }, { kind: "province", id: "latium" }] });
+    const shock = fact({ kind: "price_shock", summary: "Grain runs short in Iazygia.", affectedEntities: [{ kind: "province", id: "iazygia" }] });
+    const result = await base([answer, shock], { [answer.id]: 50, [shock.id]: 30 }, { orderFactIds: new Set([answer.id, shock.id]) });
+    expect(result.entries.map((entry) => entry.factIds)).not.toContainEqual([answer.id, shock.id]);
   });
 
   it("tells what else the order did inside its answer, not as entries of its own", async () => {

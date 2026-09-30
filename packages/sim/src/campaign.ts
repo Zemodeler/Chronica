@@ -197,6 +197,14 @@ export function keepTheField(input: KeepTheFieldInput): { world: WorldState; fac
 
     // ── Bread ──────────────────────────────────────────────────────────
     const source: Source | null | undefined = naval ? undefined : sourceOf(force, men);
+    // A fleet victuals in any friendly harbour, and carries its stores between.
+    // It was never reckoned at all: the Roman Navy read "fed" with its stores
+    // run out a month before (R49).
+    if (naval) {
+      const holder = world.map.provinces.find((province) => province.id === force.locationId)?.controllerPolityId ?? null;
+      const through = holder !== null && !hostile(force, holder) ? Math.max(force.provisionedThroughStep, toDay + CARRIED_DAYS) : force.provisionedThroughStep;
+      force = { ...force, provisionedThroughStep: through, provisionStatus: provisionStatusOn(through, toDay) };
+    }
     if (source !== undefined) {
       const material = materialOf(force.locationId);
       const people = Math.max(1, material?.population ?? 1);

@@ -65,6 +65,8 @@ export const CovertPlotSchema = z
     agentCharacterId: EntityIdSchema.nullable().default(null),
     /** What was paid for it. Money buys a better hand, and only up to a point. */
     spend: MoneyAmountSchema.default(0),
+    /** Whose money it was: the sponsor's own purse, or a treasury. Shown to the sponsor, so no purse is spent unseen (R73). */
+    fundingAccountId: EntityIdSchema.nullable().optional(),
     /** What the world is meant to believe if it goes wrong -- whom the blame falls on. */
     cover: z.string().trim().min(1).max(300),
     /** The engine's own figure, settled when the plot was laid and never rewritten. */
