@@ -155,7 +155,7 @@ land but have no leader or no forces, ranks them by whether the player is dealin
 whether they border us, and how much they hold, and states the gap in the slice. The orchestrator
 fills it in the call it was already making — no extra model call, no new contract surface.
 
-Relevance decides *which* countries, and size only orders equals. On a map of 163 peoples a quiet
+Relevance decides *which* countries, and size only orders equals. On a map of 164 peoples a quiet
 people holding sixty-four provinces would otherwise outrank the country the player is actually
 invading. A country also has to be in contact before the world owes it anyone: reachable across a
 border, already named in the facts, or large enough that the powers of the age would reckon with it.
@@ -202,7 +202,7 @@ twenty provinces and ten polities while the map drew the western Mediterranean e
 difference was made up by a hardcoded overlay table merged in at render time. When that table stopped
 being merged, the rest of the map went blank — there had never been anything behind it.
 
-The whole drawn world is now authored state: 6,384 provinces, 16,363 borders and the 163 peoples who
+The whole drawn world is now authored state: 6,384 provinces, 16,363 borders and the 164 peoples who
 hold them, over Europe, North Africa and the Near East as far as Iran. The provinces are grown from the settlements alive in
 270 BCE and traced on shared vertices by `scripts/map-gen` (see its README and
 `docs/plans/imperator-density-map.md`); the same build step writes the province graph, checked in as
@@ -226,7 +226,7 @@ The invariants that make "authoritative" mean something are asserted in
 otherwise ship a border to a province that does not exist, or a sea lane out of a landlocked upland,
 and the first sign of it would be an army that cannot move.
 
-Some ground belongs to nobody: some 365 provinces of open desert (desert-steppe with no town, river or
+Some ground belongs to nobody: some sixty provinces of open desert (desert-steppe with no town, river or
 coast, and none within eighty kilometres of one) have `controllerPolityId: null`. Nobody taxes or levies
 them (both loop over a power's own provinces), an army may cross and camp on them like any ground, and
 `province_control_set` claims one by standing in it or by holding the province next to it, without
@@ -238,7 +238,7 @@ seconds (`scripts/load-check-map.mts`): the opening world is 2.9 MB of JSON (0.4
 `WorldStateSchema.parse` takes about 60 ms, `ensureProvinceMaterial` 4 ms, `liveProvinceIds` 6 ms, the
 world view the client is sent 60 to 100 ms, a 30-day tick of the clock about 0.55 s and a year of them
 under 8 s, and the map document the client downloads once is 12.9 MB (built once per version in
-under a second, kept after). The Seleucid Empire holds 1,125 provinces and is written about as a power
+under a second, kept after). The Seleucid Empire holds about 1,040 provinces and is written about as a power
 of a dozen is: `a-thousand-provinces.test.ts` keeps its slice, its chambers and its facts short. What a
 map this size actually threatens is not speed but honesty: see the slice and population notes above, both
 of which had to start *choosing* once the world stopped being small enough to send whole.

@@ -15,7 +15,7 @@ import { runDeterministicTick } from "./tick";
 /**
  * Open desert belongs to nobody.
  *
- * The map leaves some 365 desert provinces without a holder: no town, no
+ * The map leaves some sixty desert provinces without a holder: no town, no
  * river, no sea within eighty kilometres of anybody's. What the engine does with
  * ground like that is: nobody taxes it or levies it, an army may cross it and
  * camp on it, it can be claimed by an order or by standing on it, and nobody's
@@ -42,18 +42,21 @@ const holderOf = (world: WorldState, id: string) => world.map.provinces.find((pr
 const neighboursOf = (world: WorldState, id: string): string[] =>
   world.map.edges.filter((edge) => edge.crossing === "land" && (edge.from === id || edge.to === id)).map((edge) => (edge.from === id ? edge.to : edge.from));
 
-/** A stretch of open desert with Carthage's ground on two sides: the Tripolitanian steppe. */
+/** A stretch of open desert with one power's ground on two sides of it (Egypt's, on this map). */
 const crossing = (() => {
   for (const province of initial.map.provinces) {
     if (province.controllerPolityId !== null) continue;
-    const carthaginian = neighboursOf(initial, province.id).filter((id) => holderOf(initial, id) === "carthage");
-    if (carthaginian.length >= 2) return { desert: province.id, from: carthaginian[0]!, to: carthaginian[1]! };
+    const beside = neighboursOf(initial, province.id).filter((id) => holderOf(initial, id) !== null && holderOf(initial, id) !== "rome");
+    for (const first of beside) {
+      const second = beside.find((id) => id !== first && holderOf(initial, id) === holderOf(initial, first));
+      if (second !== undefined) return { desert: province.id, from: first, to: second, polity: holderOf(initial, first)! };
+    }
   }
-  throw new Error("The map has no desert between two Carthaginian provinces");
+  throw new Error("The map has no desert between two provinces of one power");
 })();
 const withGarrisonAt = (world: WorldState, provinceId: string): WorldState => ({
   ...world,
-  material: { ...world.material, forces: world.material.forces.map((force) => (force.id === "carthaginian-garrison" ? { ...force, locationId: provinceId, positionId: null } : force)) },
+  material: { ...world.material, forces: world.material.forces.map((force) => (force.id === "carthaginian-garrison" ? { ...force, polityId: crossing.polity, locationId: provinceId, positionId: null } : force)) },
 });
 const garrison = (world: WorldState) => world.material.forces.find((force) => force.id === "carthaginian-garrison")!;
 
@@ -94,10 +97,10 @@ describe("claiming open desert", () => {
   it("is done by standing on it and saying so, with nobody's ground plundered", () => {
     const start = withGarrisonAt(opening(), crossing.desert);
     const chestBefore = start.material.accounts.find((account) => account.id === "carthaginian-garrison-chest")!.balance;
-    const claimed = apply(start, [{ op: "province_control_set", provinceId: crossing.desert, toPolityRef: "carthage", firmnessBps: 3_000, reason: "The garrison claims the steppe it stands on." }]);
+    const claimed = apply(start, [{ op: "province_control_set", provinceId: crossing.desert, toPolityRef: crossing.polity, firmnessBps: 3_000, reason: "The garrison claims the steppe it stands on." }]);
     expect(claimed.rejected).toEqual([]);
     const province = claimed.world.map.provinces.find((candidate) => candidate.id === crossing.desert)!;
-    expect(province.controllerPolityId).toBe("carthage");
+    expect(province.controllerPolityId).toBe(crossing.polity);
     expect(province.lostBy ?? null).toBeNull();
     const fact = claimed.factProposals.find((candidate) => candidate.kind === "province_control_change")!;
     expect(fact.summary).toMatch(/claimed .* which no power had held/);
@@ -108,9 +111,9 @@ describe("claiming open desert", () => {
 
   it("is done from the next province, with no army there, by a plain order", () => {
     const start = withGarrisonAt(opening(), crossing.from);
-    const claimed = apply(start, [{ op: "province_control_set", provinceId: crossing.desert, toPolityRef: "carthage", firmnessBps: 3_000, reason: "The steppe next to Carthage's land is Carthage's." }]);
+    const claimed = apply(start, [{ op: "province_control_set", provinceId: crossing.desert, toPolityRef: crossing.polity, firmnessBps: 3_000, reason: "The steppe next to the kingdom's land is the kingdom's." }]);
     expect(claimed.rejected).toEqual([]);
-    expect(holderOf(claimed.world, crossing.desert)).toBe("carthage");
+    expect(holderOf(claimed.world, crossing.desert)).toBe(crossing.polity);
   });
 
   it("is refused to a power with no army there and no ground next to it", () => {
@@ -124,13 +127,13 @@ describe("claiming open desert", () => {
 describe("what nobody's ground costs and yields", () => {
   it("pays nobody a tax: a power's ceiling is the sum of its own provinces, and the desert is not among them", () => {
     const world = opening();
-    const before = taxBurdens(world).get("carthage")!.bearable;
+    const before = [...taxBurdens(world)].map(([id, burden]) => [id, burden.bearable]);
     const richer: WorldState = {
       ...world,
       material: { ...world.material, provinceMaterial: world.material.provinceMaterial.map((row) => (row.provinceId === crossing.desert ? { ...row, population: 900_000, taxCapacity: 90_000 } : row)) },
     };
     expect(provinceTaxCapacity(richer, crossing.desert)).toBe(90_000);
-    expect(taxBurdens(richer).get("carthage")!.bearable).toBe(before);
+    expect([...taxBurdens(richer)].map(([id, burden]) => [id, burden.bearable])).toEqual(before);
     for (const [, burden] of taxBurdens(richer)) expect(burden.bearable).toBeGreaterThanOrEqual(0);
   });
 
@@ -138,7 +141,7 @@ describe("what nobody's ground costs and yields", () => {
     const world = withGarrisonAt(opening(), crossing.desert);
     const manpowerOf = (state: WorldState, id: string) => state.material.provinceMaterial.find((row) => row.provinceId === id)!.availableManpower;
     const rich: WorldState = { ...world, material: { ...world.material, provinceMaterial: world.material.provinceMaterial.map((row) => (row.provinceId === crossing.desert ? { ...row, availableManpower: 40_000 } : row)) } };
-    const levy = raiseLevy(rich, { polityId: "carthage", provinceId: crossing.desert, men: 3_000, atStep: 0, pays: false, payerAccountId: null, ids: createIdFactory("levy") } as never);
+    const levy = raiseLevy(rich, { polityId: crossing.polity, provinceId: crossing.desert, men: 3_000, atStep: 0, pays: false, payerAccountId: null, ids: createIdFactory("levy") } as never);
     expect(levy.men).toBeGreaterThan(0);
     expect(manpowerOf(levy.world, crossing.desert)).toBe(40_000);
   });
@@ -169,7 +172,7 @@ describe("what nobody's ground costs and yields", () => {
     const world = opening();
     const name = world.map.provinces.find((province) => province.id === crossing.desert)!.name;
     const text = renderWorldSlice(buildWorldSlice({
-      world, clock: definition.clock, offices: definition.government.offices, actorRef: { kind: "character", id: "hanno-carthage" }, actorPolityId: "carthage",
+      world, clock: definition.clock, offices: definition.government.offices, actorRef: { kind: "character", id: "hanno-carthage" }, actorPolityId: crossing.polity,
       orderText: `March the garrison into ${name}`, facts: [], dueEvents: [], pendingEvents: [],
     }));
     expect(text).toContain(`${name} [${crossing.desert}] — held by no one`);

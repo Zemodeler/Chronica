@@ -87,7 +87,7 @@ const STYLE_WORDS: readonly (readonly [RoomStyle, readonly string[]])[] = [
   // "rome" as well as "roman": the culture arrives as prose and the polity as
   // an id, and the id is the bare place name.
   ["roman", ["roman", "rome", "latin", "italic", "sabine", "etruscan"]],
-  ["carthaginian", ["carthag", "punic", "phoenic", "numid", "libyan"]],
+  ["carthaginian", ["carthag", "punic", "phoenic", "numid", "libyan", "arab", "sabaean", "judaean", "judea", "mesopot"]],
   ["greek", ["greek", "hellen", "syracus", "achaean", "macedon", "spartan", "athen", "anatol", "seleuc", "ptolem", "pergam"]],
   ["gallic", ["gaul", "gallic", "celt", "boii", "insubr", "briton"]],
 ];

@@ -8,10 +8,11 @@
  * Writes packages/db/src/punic-wars-map-graph.ts, apps/web/public/maps/punic-wars-provinces.geojson and
  * scripts/map-gen/anchors.json; with out=<suffix> the same three files with `-<suffix>` before the extension.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { measureBorders, type BorderInput, type BorderReport } from './border-metrics';
 import { haversineKm, polygonsOf, PolygonIndex, readPolylines, ringAreaKm2, ringContains, signedArea, type Point, type Ring } from './map-geometry';
 import { ancientNameOf, featureNameOf, regionOf, type Region } from './map-names';
 import { nameProvinces } from './map-region-names';
@@ -64,7 +65,8 @@ const samples = JSON.parse(readFileSync(join(DATA, `${IN}.samples.json`), 'utf8'
 const old = JSON.parse(readFileSync(join(DATA, 'old-map.json'), 'utf8')) as OldMap;
 // The polity files, one per theatre. Each lists its polities most-specific first; a province is tested against the list of its own theatre.
 // A polity named in two files (ptolemaic-egypt) is one polity: the later file's core replaces the earlier one's, and settlements and territory add up.
-const THEATRES = ['anatolia', 'egypt-arabia', 'levant-caucasus-iran', 'iraq'] as const;
+// The sixth file, zagros, is consulted before the theatre a province lies in: its tribes are the specific claims that outrank the Seleucid default.
+const THEATRES = ['anatolia', 'egypt-arabia', 'levant-caucasus-iran', 'iraq', 'zagros'] as const;
 type Theatre = (typeof THEATRES)[number];
 const territoryLists = new Map<Theatre, { id: string; rings: [number, number][][] }[]>();
 const definitions = new Map<string, AnatoliaPolity>();
@@ -99,7 +101,8 @@ const UNCERTAIN_SITES = new Set(['settlement-apamea-tigris', 'settlement-charax-
   if (seleucid !== undefined) seleucid.otherSettlements = [...seleucid.otherSettlements, ...seleucidCities.filter((c) => !UNCERTAIN_SITES.has(c.settlementId) && !seleucid.otherSettlements.some((o) => o.settlementId === c.settlementId) && c.settlementId !== seleucid.capital?.settlementId)];
 }
 const anatolia: AnatoliaPolity[] = [...definitions.values()];
-if (absentFiles.length > 0) console.log(`absent, so their provinces stay unowned: ${absentFiles.join(', ')}`);
+const missing = absentFiles.filter((f) => f !== 'zagros-polities.json');
+if (missing.length > 0) console.log(`absent, so their provinces stay unowned: ${missing.join(', ')}`);
 
 const N = gen.provinces.length;
 const P = gen.provinces;
@@ -262,10 +265,12 @@ const fromAnatoliaFile = new Set<number>();
 for (let i = 0; i < N; i++) {
   if (controller[i] !== null) continue;
   const theatre = theatreOf(i);
-  const list = theatre === null ? undefined : territoryLists.get(theatre);
-  if (list === undefined) continue;
+  // the zagros tribes first (specific claims that outrank the Seleucid default), then the province's own theatre in file order
+  const own = theatre === null ? [] : territoryLists.get(theatre) ?? [];
   const [x, y] = centreSample(i);
-  claim: for (const polity of list) for (const territory of polity.rings) if (ringContains(territory, x, y)) { controller[i] = polity.id; fromAnatoliaFile.add(i); break claim; }
+  const firstIn = (list: { id: string; rings: [number, number][][] }[]): string | null => { for (const polity of list) for (const territory of polity.rings) if (ringContains(territory, x, y)) return polity.id; return null; };
+  const claim = firstIn(territoryLists.get('zagros') ?? []) ?? firstIn(own);
+  if (claim !== null) { controller[i] = claim; fromAnatoliaFile.add(i); }
 }
 // Ground the old map did not cover and no polity claims (coastal slivers, the map's own fringe) goes to its land neighbours' commonest owner.
 const unowned = (): number[] => controller.flatMap((c, i) => (c === null ? [i] : []));
@@ -665,15 +670,110 @@ for (const [key, e] of edges) if (e.crossing === 'pass') {
   if (!(land(terrain[a]!) && land(terrain[b]!))) edges.set(key, { ...e, crossing: 'land' });
 }
 
-// ---- smoothing: polities as one flowing region each
-// A labelling problem on the province graph: minimise the border length between different polities plus a pull back toward
-// the old map's owner (iterated conditional modes), then fold every exclave on a landmass into the polity around it.
-const smoothing = { edgesBefore: 0, edgesAfter: 0, componentsBefore: 0, componentsAfter: 0, flipped: 0, folded: 0, foldedSettlements: [] as string[], remainingSplits: [] as string[] };
+// ---- ownership corrections (research files), then smoothing: polities as one flowing region each
+// The corrections are applied after the polity-file overlay and before the cleaning, so a corrected border comes out as clean as any other.
+// Each is a polygon and a polity; a province whose centre lies inside takes that polity (later entries win). A province that holds a capital, an anchor,
+// or a town a polity file gives to another polity keeps its owner, and the clash is reported. Files: scripts/map-gen/ownership-corrections*.json.
+// the towns a polity file gives to a polity: a piece of its land that holds one is a region of the polity, not a stray
+const fileSettlement = new Set<string>();
+for (const p of anatolia) for (const s of [p.capital, ...p.otherSettlements]) if (s) fileSettlement.add(s.settlementId);
+const correctionReport = {
+  files: [] as string[], invalid: [] as string[], changed: [] as { file: string; id: string; provinces: string[]; from: Record<string, number>; to: string }[],
+  conflicts: [] as string[], pairs: {} as Record<string, number>, settlementsFollowed: [] as string[], unknownPolities: [] as string[],
+};
+// what a correction gives away stays owned even where it is open desert, unless the entry says `"openDesert": "unowned"` (then the desert rule below still applies)
+const correctedProvinces = new Set<number>();
+const holdsDesert = new Set<number>();
+// every province a correction decides is pinned against the cleaning, changed or not (a tribal confederation with no capital would be folded back into its neighbour otherwise)
+const pinned = new Set<number>();
+{
+  const known = new Set<string>([...old.polities.map((p) => p.polityId), ...anatolia.map((p) => p.id), ...controller.filter((c): c is string => c !== null)]);
+  const holdsCapital = new Map<number, string>();
+  for (const s of settlements) {
+    if (s.provinceIndex < 0) continue;
+    if (capitalOfPolity.has(s.id) || [...anatoliaCapital.values()].includes(s.id)) holdsCapital.set(s.provinceIndex, `capital ${s.id}`);
+  }
+  for (const [, settlementId] of ANCHORS) { const s = settlements.find((x) => x.id === settlementId)!; holdsCapital.set(s.provinceIndex, `anchor ${s.id}`); }
+  const simple = (ring: [number, number][]): boolean => {
+    const m = ring.length - 1;
+    const cross = (a: number[], b: number[], c: number[], d: number[]): boolean => {
+      const o = (p: number[], q: number[], r: number[]): number => Math.sign((q[0]! - p[0]!) * (r[1]! - p[1]!) - (q[1]! - p[1]!) * (r[0]! - p[0]!));
+      return o(a, b, c) !== o(a, b, d) && o(c, d, a) !== o(c, d, b);
+    };
+    for (let i = 0; i < m; i++) for (let j = i + 2; j < m; j++) { if (i === 0 && j === m - 1) continue; if (cross(ring[i]!, ring[i + 1]!, ring[j]!, ring[j + 1]!)) return false; }
+    return true;
+  };
+  const files = readdirSync(HERE).filter((f) => /^ownership-corrections.*\.json$/.test(f)).sort();
+  for (const file of files) {
+    correctionReport.files.push(file);
+    const raw = JSON.parse(readFileSync(join(HERE, file), 'utf8')) as unknown;
+    const list = (Array.isArray(raw) ? raw : ((raw as Record<string, unknown>).assignments ?? (raw as Record<string, unknown>).corrections ?? [])) as {
+      id: string; polity: string; openDesert?: string; onlyFrom?: string[]; polygon?: [number, number][]; polygons?: [number, number][][]; polygonList?: [number, number][][];
+    }[];
+    for (const entry of list) {
+      const rings = (entry.polygons ?? entry.polygonList ?? (entry.polygon ? [entry.polygon] : [])).map((r) => {
+        const ring = r.map((c) => [Number(c[0]), Number(c[1])] as [number, number]);
+        if (ring.length > 0 && (ring[0]![0] !== ring[ring.length - 1]![0] || ring[0]![1] !== ring[ring.length - 1]![1])) ring.push([ring[0]![0], ring[0]![1]]);
+        return ring;
+      });
+      const bad = rings.length === 0 ? 'no polygon' : rings.some((r) => r.length < 4 || r.some((c) => !Number.isFinite(c[0]) || !Number.isFinite(c[1]))) ? 'fewer than three points or a non-number' : rings.some((r) => !simple(r)) ? 'crosses itself' : null;
+      if (bad !== null) { correctionReport.invalid.push(`${file} ${entry.id}: ${bad}`); continue; }
+      if (entry.polity !== 'unowned' && !known.has(entry.polity)) { correctionReport.unknownPolities.push(`${file} ${entry.id}: ${entry.polity}`); continue; }
+      const to = entry.polity === 'unowned' ? null : entry.polity;
+      const moved: string[] = [];
+      const from: Record<string, number> = {};
+      for (let i = 0; i < N; i++) {
+        const [x, y] = centreSample(i);
+        if (!rings.some((r) => ringContains(r, x, y))) continue;
+        if (entry.onlyFrom !== undefined && !entry.onlyFrom.includes(controller[i] ?? 'unowned')) continue;
+        if (controller[i] === to) { if (to !== null && !holdsCapital.has(i)) pinned.add(i); if (to !== null && entry.openDesert !== 'unowned') holdsDesert.add(i); else holdsDesert.delete(i); continue; }
+        const guard = holdsCapital.get(i) ?? settlements.filter((s) => s.provinceIndex === i && fileSettlement.has(s.id) && s.controllerPolityId !== to).map((s) => `polity-file town ${s.id}`)[0];
+        if (guard) { correctionReport.conflicts.push(`${file} ${entry.id}: ${idOf[i]} stays ${controller[i] ?? 'unowned'} (${guard}); correction says ${entry.polity}`); continue; }
+        const was = controller[i] ?? 'unowned';
+        from[was] = (from[was] ?? 0) + 1;
+        correctionReport.pairs[`${was} -> ${entry.polity}`] = (correctionReport.pairs[`${was} -> ${entry.polity}`] ?? 0) + 1;
+        for (const s of settlements) if (s.provinceIndex === i && to !== null && s.controllerPolityId !== to) { correctionReport.settlementsFollowed.push(`${s.id} ${s.controllerPolityId} -> ${to}`); s.controllerPolityId = to; }
+        controller[i] = to;
+        correctedProvinces.add(i);
+        pinned.add(i);
+        if (to !== null && entry.openDesert !== 'unowned') holdsDesert.add(i); else holdsDesert.delete(i);
+        moved.push(idOf[i]!);
+      }
+      correctionReport.changed.push({ file, id: entry.id, provinces: moved, from, to: entry.polity });
+    }
+  }
+}
+
+// The cleaning is a labelling problem on the province graph, in two stages that share one bound on how far a polity may drift.
+// Stage 1 minimises the border length between polities plus a pull back toward the old map's owner (iterated conditional modes).
+// Stage 2 is stricter about shape: a lighter pull, a curvature term that charges a border for every extra turn around a province,
+// an explicit removal of spikes (60% or more of a province's border against one other polity) and of provinces that would cut their
+// polity in two, then the exclaves folded again. The measures are in border-metrics.ts.
+const smoothing = { edgesBefore: 0, edgesAfter: 0, componentsBefore: 0, componentsAfter: 0, flipped: 0, folded: 0, foldedSettlements: [] as string[], remainingSplits: [] as string[], shifted: [] as string[], flippedStage2: 0, spikesRemoved: 0 };
+const borderInput = (): BorderInput => ({ n: N, adj: P.map((p) => p.adj), owner: controller, centroid: P.map((p) => p.centroid), landmass: P.map((_, i) => find(i)) });
+const borderReports: Record<string, BorderReport> = {};
+const areaByPolity = (): Map<string, number> => { const m = new Map<string, number>(); for (let i = 0; i < N; i++) if (controller[i]) m.set(controller[i]!, (m.get(controller[i]!) ?? 0) + P[i]!.areaKm2); return m; };
+const areaPreClean = areaByPolity();
+borderReports.overlay = measureBorders(borderInput());
+// a pinned group of one or two provinces that stands as a spike or a neck of its polity is let go to the cleaning, and reported
+const releasedPins: string[] = [];
+{
+  const flagged = new Set([...borderReports.overlay.spikes, ...borderReports.overlay.necks]);
+  const done = new Set<number>();
+  for (const start of [...pinned]) {
+    if (done.has(start)) continue;
+    const group = [start];
+    done.add(start);
+    for (let k = 0; k < group.length; k++) for (const a of P[group[k]!]!.adj) if (pinned.has(a.n) && !done.has(a.n) && controller[a.n] === controller[start]) { done.add(a.n); group.push(a.n); }
+    if (group.length <= 2 && group.some((i) => flagged.has(i))) for (const i of group) { pinned.delete(i); releasedPins.push(`${idOf[i]} (${controller[i]})`); }
+  }
+}
 {
   const LAMBDA = 0.25;
   const SEA_POWERS = new Set(['ptolemaic-egypt']);
   const fixed = new Set<number>(settlements.filter((s) => s.provinceIndex >= 0).map((s) => s.provinceIndex));
-  const protectedProvince = new Set<number>();
+  for (const i of pinned) fixed.add(i);
+  const protectedProvince = new Set<number>(pinned);
   for (const s of settlements) if (capitalOfPolity.has(s.id) || [...anatoliaCapital.values()].includes(s.id)) protectedProvince.add(s.provinceIndex);
   for (const [, settlementId] of ANCHORS) protectedProvince.add(settlements.find((x) => x.id === settlementId)!.provinceIndex);
   const origin = [...controller];
@@ -685,12 +785,25 @@ const smoothing = { edgesBefore: 0, edgesAfter: 0, componentsBefore: 0, componen
   const held = new Map<string, number>();
   for (const c of controller) if (c) held.set(c, (held.get(c) ?? 0) + 1);
   // a polity may not drift more than 8% from the land its old ground now amounts to
-  const areaHeld = new Map<string, number>();
-  for (let i = 0; i < N; i++) if (controller[i]) areaHeld.set(controller[i]!, (areaHeld.get(controller[i]!) ?? 0) + P[i]!.areaKm2);
+  const areaHeld = areaByPolity();
   const target = new Map<string, number>();
   for (const id of areaHeld.keys()) target.set(id, P.reduce((sum, p, i) => sum + p.areaKm2 * shareOf(i, id), 0));
   const allowed = (from: string, to: string, area: number): boolean =>
     ((target.get(from) ?? 0) < 3000 || areaHeld.get(from)! - area >= 0.92 * target.get(from)!) && ((target.get(to) ?? 0) < 3000 || (areaHeld.get(to) ?? 0) + area <= 1.08 * target.get(to)!);
+  // stage 2 holds every polity within 10% of the land it had before any cleaning and before stage 2; a polity a correction gave land to or took it from
+  // is held to 2%, so the cleaning does not move a border the research has just placed
+  const touchedByCorrection = new Set<string>();
+  for (const c of correctionReport.changed) if (c.provinces.length > 0) { touchedByCorrection.add(c.to); for (const f of Object.keys(c.from)) touchedByCorrection.add(f); }
+  let areaStage1 = new Map<string, number>();
+  const band = (id: string): number => (touchedByCorrection.has(id) ? 0.02 : 0.1);
+  const allowedTight = (from: string, to: string, area: number): boolean => {
+    const keeps = (id: string, delta: number): boolean => {
+      const held1 = areaHeld.get(id) ?? 0;
+      for (const base of [areaPreClean.get(id) ?? 0, areaStage1.get(id) ?? 0]) if (base >= 3000 && Math.abs(held1 + delta - base) > band(id) * base && Math.abs(held1 + delta - base) > Math.abs(held1 - base)) return false;
+      return true;
+    };
+    return keeps(from, -area) && keeps(to, area);
+  };
   const borderEdges = (): number => { let n = 0; for (let i = 0; i < N; i++) for (const a of P[i]!.adj) if (a.n > i && controller[i] !== controller[a.n]) n++; return n; };
   const componentsOf = (): Map<string, number[][]> => {
     const seen = new Set<number>();
@@ -704,8 +817,6 @@ const smoothing = { edgesBefore: 0, edgesAfter: 0, componentsBefore: 0, componen
     }
     return out;
   };
-  const areaBefore = new Map<string, number>();
-  for (let i = 0; i < N; i++) if (controller[i]) areaBefore.set(controller[i]!, (areaBefore.get(controller[i]!) ?? 0) + P[i]!.areaKm2);
   smoothing.edgesBefore = borderEdges();
   smoothing.componentsBefore = [...componentsOf().values()].reduce((s, c) => s + c.length, 0);
   const order = P.map((_, i) => i).sort((a, b) => idOf[a]!.localeCompare(idOf[b]!));
@@ -718,29 +829,82 @@ const smoothing = { edgesBefore: 0, edgesAfter: 0, componentsBefore: 0, componen
     areaHeld.set(to, (areaHeld.get(to) ?? 0) + P[i]!.areaKm2);
     controller[i] = to;
   };
-  for (let round = 0; round < 8; round++) {
-    let changed = 0;
-    for (let pass = 0; pass < 80; pass++) {
+  const flip = (i: number, to: string): void => {
+    const from = controller[i]!;
+    held.set(from, held.get(from)! - 1); held.set(to, (held.get(to) ?? 0) + 1);
+    areaHeld.set(from, areaHeld.get(from)! - P[i]!.areaKm2); areaHeld.set(to, (areaHeld.get(to) ?? 0) + P[i]!.areaKm2);
+    controller[i] = to;
+  };
+  // the neighbours of a province in the order they lie around it; a gap wider than 0.7 pi is coast, where the ring is open
+  const ring = P.map((p, i) => {
+    const cos = Math.cos((p.centroid[1] * Math.PI) / 180);
+    return p.adj.map((a) => ({ n: a.n, angle: Math.atan2(P[a.n]!.centroid[1] - p.centroid[1], (P[a.n]!.centroid[0] - p.centroid[0]) * cos) })).sort((u, v) => u.angle - v.angle);
+  });
+  /** turns beyond the one clean crossing that the border of `label` makes around province i */
+  const excessTurns = (i: number, label: string): number => {
+    const r = ring[i]!;
+    if (r.length < 3) return 0;
+    let turns = 0;
+    let open = false;
+    for (let k = 0; k < r.length; k++) {
+      const next = r[(k + 1) % r.length]!;
+      const gap = (next.angle - r[k]!.angle + 2 * Math.PI) % (2 * Math.PI);
+      if (gap > 0.7 * Math.PI) { open = true; continue; }
+      if ((controller[r[k]!.n] === label) !== (controller[next.n] === label)) turns++;
+    }
+    return turns === 0 ? 0 : Math.max(0, turns - (open ? 1 : 2));
+  };
+  // does the polity of province i stay in one piece around it if i leaves? (looked at locally, 300 provinces deep)
+  const staysWhole = (i: number): boolean => {
+    const own = P[i]!.adj.filter((a) => controller[a.n] === controller[i]).map((a) => a.n);
+    if (own.length <= 1) return true;
+    const seen = new Set<number>([own[0]!, i]);
+    const queue = [own[0]!];
+    for (let q = 0; q < queue.length && seen.size < 300; q++) for (const a of P[queue[q]!]!.adj) if (!seen.has(a.n) && controller[a.n] === controller[i]) { seen.add(a.n); queue.push(a.n); }
+    return seen.size >= 300 || own.every((n) => seen.has(n));
+  };
+  const icm = (params: { lambda: number; curvature: number; ok: (from: string, to: string, area: number) => boolean; spikes: boolean; connected: boolean }): number => {
+    let total = 0;
+    for (let pass = 0; pass < 120; pass++) {
       let moved = 0;
       for (const i of order) {
         if (fixed.has(i) || controller[i] === null || held.get(controller[i]!)! <= 1) continue;
         const candidates = new Set<string>([controller[i]!]);
         for (const a of P[i]!.adj) if (controller[a.n]) candidates.add(controller[a.n]!);
         if (candidates.size === 1) continue;
-        const energy = (label: string): number => P[i]!.adj.reduce((sum, a) => sum + (controller[a.n] !== label ? a.km : 0), 0) + LAMBDA * perimeter[i]! * (1 - shareOf(i, label));
+        const energy = (label: string): number => P[i]!.adj.reduce((sum, a) => sum + (controller[a.n] !== label ? a.km : 0), 0) + params.lambda * perimeter[i]! * (1 - shareOf(i, label)) + params.curvature * perimeter[i]! * excessTurns(i, label);
         let best = controller[i]!;
         let bestEnergy = energy(best) - 1e-6;
-        for (const label of [...candidates].sort()) { if (label !== controller[i] && !allowed(controller[i]!, label, P[i]!.areaKm2)) continue; const e = energy(label); if (e < bestEnergy) { bestEnergy = e; best = label; } }
-        if (best !== controller[i]) { const from = controller[i]!; held.set(from, held.get(from)! - 1); held.set(best, (held.get(best) ?? 0) + 1); areaHeld.set(from, areaHeld.get(from)! - P[i]!.areaKm2); areaHeld.set(best, (areaHeld.get(best) ?? 0) + P[i]!.areaKm2); controller[i] = best; moved++; smoothing.flipped++; }
+        for (const label of [...candidates].sort()) {
+          if (label === controller[i] || !params.ok(controller[i]!, label, P[i]!.areaKm2)) continue;
+          const e = energy(label);
+          if (e < bestEnergy) { bestEnergy = e; best = label; }
+        }
+        if (params.spikes && best === controller[i]) {
+          // a spike or a notch: most of the border against one other polity
+          const against = new Map<string, number>();
+          for (const a of P[i]!.adj) { const c = controller[a.n]; if (c && c !== controller[i]) against.set(c, (against.get(c) ?? 0) + a.km); }
+          const [top, km] = [...against.entries()].sort((u, v) => v[1] - u[1] || u[0].localeCompare(v[0]))[0] ?? [null, 0];
+          if (top !== null && km >= 0.6 * perimeter[i]! && params.ok(controller[i]!, top, P[i]!.areaKm2)) { best = top; smoothing.spikesRemoved++; }
+        }
+        if (best !== controller[i]) {
+          if (params.connected && !staysWhole(i)) continue;
+          flip(i, best);
+          moved++;
+          if (params.spikes) smoothing.flippedStage2++; else smoothing.flipped++;
+        }
       }
-      changed += moved;
+      total += moved;
       if (moved === 0) break;
     }
-    // exclaves: on one landmass a polity is one piece; a small piece with no capital or anchor joins the polity around it (the piece keeps the neighbour that can best take the land; a capital or anchor keeps its piece, and is reported)
+    return total;
+  };
+  // exclaves: on one landmass a polity is one piece; a small piece with no capital or anchor joins the polity around it (the piece keeps the neighbour that can best take the land; a capital or anchor keeps its piece, and is reported)
+  const foldExclaves = (): number => {
+    let changed = 0;
     for (const [polity, comps] of componentsOf()) {
       const byLandmass = new Map<number, number[][]>();
       for (const comp of comps) (byLandmass.get(find(comp[0]!)) ?? byLandmass.set(find(comp[0]!), []).get(find(comp[0]!))!).push(comp);
-      const total = comps.flat().reduce((s, i) => s + P[i]!.areaKm2, 0);
       for (const group of byLandmass.values()) {
         if (group.length < 2) continue;
         const areaOf = (c: number[]): number => c.reduce((s, i) => s + P[i]!.areaKm2, 0);
@@ -748,6 +912,8 @@ const smoothing = { edgesBefore: 0, edgesAfter: 0, componentsBefore: 0, componen
         for (const comp of group.slice(1)) {
           if (comp.some((i) => protectedProvince.has(i))) continue;
           // the Ptolemies held Asia Minor's coast by sea: a piece with a town of theirs is a garrison, not an exclave to fold
+          // a piece of eight provinces or more with a town its polity file gave it (Persepolis and Pasargadae behind the Zagros tribes) is a region, not an exclave
+          if (comp.length >= 8 && comp.some((i) => settlements.some((s) => s.provinceIndex === i && s.controllerPolityId === polity && fileSettlement.has(s.id)))) continue;
           if (SEA_POWERS.has(polity) && comp.some((i) => settlements.some((s) => s.provinceIndex === i && s.controllerPolityId === polity))) continue;
           const border = new Map<string, number>();
           for (const i of comp) for (const a of P[i]!.adj) { const c = controller[a.n]; if (c && c !== polity) border.set(c, (border.get(c) ?? 0) + a.km); }
@@ -761,6 +927,16 @@ const smoothing = { edgesBefore: 0, edgesAfter: 0, componentsBefore: 0, componen
         }
       }
     }
+    return changed;
+  };
+  for (let round = 0; round < 8; round++) {
+    const changed = icm({ lambda: LAMBDA, curvature: 0, ok: allowed, spikes: false, connected: false }) + foldExclaves();
+    if (changed === 0) break;
+  }
+  borderReports.stage1 = measureBorders(borderInput());
+  areaStage1 = areaByPolity();
+  for (let round = 0; round < 8; round++) {
+    const changed = icm({ lambda: 0.1, curvature: 0.12, ok: allowedTight, spikes: true, connected: true }) + foldExclaves();
     if (changed === 0) break;
   }
   smoothing.edgesAfter = borderEdges();
@@ -771,11 +947,9 @@ const smoothing = { edgesBefore: 0, edgesAfter: 0, componentsBefore: 0, componen
     for (const comp of comps) groups.set(find(comp[0]!), (groups.get(find(comp[0]!)) ?? 0) + 1);
     for (const [landmass, n] of groups) if (n > 1) smoothing.remainingSplits.push(`${polity}: ${n} pieces on landmass ${landmass} (${comps.filter((c) => find(c[0]!) === landmass).map((c) => c.length).join('+')} provinces)`);
   }
-  const shifted: string[] = [];
-  const areaAfter = new Map<string, number>();
-  for (let i = 0; i < N; i++) if (controller[i]) areaAfter.set(controller[i]!, (areaAfter.get(controller[i]!) ?? 0) + P[i]!.areaKm2);
-  for (const [id, a] of areaBefore) { const b = areaAfter.get(id) ?? 0; if (Math.abs(b - a) > 0.05 * a && a > 3000) shifted.push(`${id} ${Math.round(a)} -> ${Math.round(b)}`); }
-  (smoothing as Record<string, unknown>).shifted = shifted;
+  const areaAfter = areaByPolity();
+  for (const [id, a] of areaPreClean) { const b = areaAfter.get(id) ?? 0; if (Math.abs(b - a) > 0.05 * a && a > 3000) smoothing.shifted.push(`${id} ${Math.round(a)} -> ${Math.round(b)}`); }
+  borderReports.final = measureBorders(borderInput());
 }
 
 // ---- names
@@ -831,7 +1005,7 @@ const unownedDesert: number[] = [];
   const towns: Point[] = settlements.filter((t) => t.provinceIndex >= 0).map((t) => [t.lon, t.lat]);
   const hasTown = new Set(settlements.map((t) => t.provinceIndex));
   for (let i = 0; i < N; i++) {
-    if (controller[i] === null || terrain[i] !== 'desert-steppe' || hasTown.has(i) || P[i]!.riverFrac >= 0.02 || P[i]!.coast) continue;
+    if (controller[i] === null || terrain[i] !== 'desert-steppe' || hasTown.has(i) || holdsDesert.has(i) || P[i]!.riverFrac >= 0.02 || P[i]!.coast) continue;
     if (towns.some((t) => haversineKm(t, centreOf(i)) <= 80)) continue;
     controller[i] = null;
     unownedDesert.push(i);
@@ -1011,7 +1185,30 @@ console.log(`open desert left to no one: ${unownedDesert.length}`);
 console.log(`smoothing: border edges between polities ${smoothing.edgesBefore} -> ${smoothing.edgesAfter}; land components ${smoothing.componentsBefore} -> ${smoothing.componentsAfter}; provinces flipped ${smoothing.flipped}, folded as exclaves ${smoothing.folded}`);
 console.log(`  settlements whose controller followed a folded province: ${smoothing.foldedSettlements.join('; ') || 'none'}`);
 console.log(`  polities still in several pieces on one landmass: ${smoothing.remainingSplits.join('; ') || 'none'}`);
-console.log(`  polities whose land moved over 5%: ${((smoothing as unknown as { shifted: string[] }).shifted).join('; ') || 'none'}`);
+console.log(`  polities whose land moved over 5% (against before any cleaning): ${smoothing.shifted.join('; ') || 'none'}`);
+console.log(`  stage 2: ${smoothing.flippedStage2} provinces flipped, ${smoothing.spikesRemoved} of them as spikes or notches`);
+{
+  const line = (label: string, r: BorderReport): string => `${label.padEnd(9)} border ${Math.round(r.borderKm).toLocaleString('en')} km, tortuosity ${r.meanTortuosity.toFixed(3)}, spikes ${r.spikes.length}, necks ${r.necks.length}, teeth ${r.combs}, exclaves ${r.exclaves}`;
+  console.log('border cleanliness (whole map)');
+  for (const k of ['overlay', 'stage1', 'final'] as const) console.log('  ' + line(k, borderReports[k]!));
+  const area = new Map<string, number>();
+  for (let i = 0; i < N; i++) if (controller[i]) area.set(controller[i]!, (area.get(controller[i]!) ?? 0) + P[i]!.areaKm2);
+  const big = [...area.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([id]) => id);
+  console.log('  the ten biggest polities (border km / tortuosity / spikes / necks): overlay -> stage1 -> final');
+  for (const id of big) {
+    const cell = (r: BorderReport): string => { const q = r.perPolity.get(id); return q ? `${Math.round(q.borderKm)}/${q.tortuosity.toFixed(2)}/${q.spikes}/${q.necks}` : '-'; };
+    console.log(`    ${id.padEnd(24)} ${cell(borderReports.overlay!)} -> ${cell(borderReports.stage1!)} -> ${cell(borderReports.final!)}`);
+  }
+  const worst = borderReports.final!.pairs.slice().sort((a, b) => b.km * (b.tortuosity - 1) - a.km * (a.tortuosity - 1)).slice(0, 8);
+  console.log(`  raggedest borders left: ${worst.map((w) => `${w.a}|${w.b} ${Math.round(w.km)} km x${w.tortuosity.toFixed(2)}`).join('; ')}`);
+}
+console.log(`ownership corrections: files ${correctionReport.files.join(', ') || 'none'}; entries ${correctionReport.changed.length}; provinces changed ${correctionReport.changed.reduce((n, c) => n + c.provinces.length, 0)}`);
+for (const c of correctionReport.changed) console.log(`  ${c.file} ${c.id} -> ${c.to}: ${c.provinces.length} provinces ${JSON.stringify(c.from)}`);
+console.log(`  by polity pair: ${JSON.stringify(correctionReport.pairs)}`);
+console.log(`  conflicts (kept, not overridden): ${correctionReport.conflicts.join('; ') || 'none'}`);
+console.log(`  invalid polygons: ${correctionReport.invalid.join('; ') || 'none'}; unknown polities: ${correctionReport.unknownPolities.join('; ') || 'none'}`);
+console.log(`  pins let go (a group of one or two provinces standing as a spike or neck): ${releasedPins.join('; ') || 'none'}; pinned provinces ${pinned.size}`);
+console.log(`  settlements that followed their province: ${correctionReport.settlementsFollowed.join('; ') || 'none'}`);
 {
   const kinds = count(nameKind);
   let seed = 20260929;

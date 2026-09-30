@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GeoJsonMapSchema } from '../../packages/shared/src/world/geojson';
 import { ProvinceGraphSchema } from '../../packages/shared/src/world/map';
+import { measureBorders } from './border-metrics';
 import { haversineKm, polygonsOf, PolygonIndex, ringAreaKm2, signedArea, type Point, type Ring } from './map-geometry';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -94,6 +95,29 @@ const unowned = provinces.filter((p) => p.controllerPolityId === null);
 const townProvinces = new Set(settlements.map((s) => s.provinceId));
 const badlyUnowned = unowned.filter((p) => p.terrainId !== 'desert-steppe' || townProvinces.has(p.id));
 check(badlyUnowned.length === 0, `unowned provinces are all desert-steppe without a settlement (${unowned.length} unowned, ${badlyUnowned.length} not open desert${badlyUnowned.length ? `: ${badlyUnowned.slice(0, 5).map((p) => p.name).join(', ')}` : ''})`);
+
+// ---- border cleanliness (reported, not failing): the same measures the builder prints, on the emitted graph
+{
+  const index = new Map(provinces.map((p, i) => [p.id, i]));
+  const adj: { n: number; km: number }[][] = provinces.map(() => []);
+  const root = provinces.map((_, i) => i);
+  const top = (x: number): number => { while (root[x] !== x) { root[x] = root[root[x]!]!; x = root[x]!; } return x; };
+  for (const e of edges) {
+    if (e.crossing !== 'land' && e.crossing !== 'pass') continue;
+    const a = index.get(e.from)!, b = index.get(e.to)!;
+    adj[a]!.push({ n: b, km: e.distance }); adj[b]!.push({ n: a, km: e.distance });
+    root[top(a)] = top(b);
+  }
+  const report = measureBorders({ n: provinces.length, adj, owner: provinces.map((p) => p.controllerPolityId), centroid: provinces.map((p) => [p.geo.longitude, p.geo.latitude] as Point), landmass: provinces.map((_, i) => top(i)) });
+  console.log(`     borders between polities: ${Math.round(report.borderKm).toLocaleString('en')} km (centre to centre), tortuosity ${report.meanTortuosity.toFixed(3)}, spikes ${report.spikes.length}, necks ${report.necks.length}, teeth ${report.combs}, exclaves ${report.exclaves}`);
+  const worst = report.pairs.filter((q) => q.km >= 150).sort((x, y) => y.tortuosity - x.tortuosity).slice(0, 5);
+  console.log(`     raggedest borders over 150 km: ${worst.map((q) => `${q.a}|${q.b} x${q.tortuosity.toFixed(2)}`).join('; ')}`);
+  const areas = new Map<string, number>();
+  for (const p of provinces) if (p.controllerPolityId) areas.set(p.controllerPolityId, (areas.get(p.controllerPolityId) ?? 0) + p.areaKm2);
+  const big = [...areas.entries()].sort((x, y) => y[1] - x[1]).slice(0, 10).map(([id]) => id);
+  console.log(`     ten biggest polities, spikes/necks: ${big.map((id) => `${id} ${report.perPolity.get(id)?.spikes ?? 0}/${report.perPolity.get(id)?.necks ?? 0}`).join('; ')}`);
+  console.log(`     polities on the map: ${[...held.keys()].length}; zagros-tribes ${held.get('zagros-tribes') ?? 0} provinces, seleucid-empire ${held.get('seleucid-empire') ?? 0}`);
+}
 
 // ---- stats
 const km = edges.map((e) => e.distance).sort((a, b) => a - b);
