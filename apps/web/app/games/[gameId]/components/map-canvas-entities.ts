@@ -117,6 +117,38 @@ export function settlementLabelShown(capital: boolean, scale: number, importance
   return capital && (scale >= MEDIUM_ZOOM_SCALE || importance >= FAR_CAPITAL_LABEL_MIN_IMPORTANCE);
 }
 
+/** A letter of a settlement name is about this share of its font size wide, for reserving its room. */
+const SETTLEMENT_LABEL_CHARACTER_WIDTH = .6;
+
+/**
+ * The room each visible settlement's marker and name take, in world units, so
+ * the political names (map-canvas-labels.ts) are laid out around them rather
+ * than under them. It follows drawSettlements' own rules for what is shown.
+ * `pixelsPerDegree` is CSS pixels per world degree.
+ */
+export function settlementObstacles(world: StaticWorldGeometry, overlay: DynamicMapOverlay | null, scale: number, pixelsPerDegree: number, unit: number): { minX: number; minY: number; maxX: number; maxY: number }[] {
+  const capitalIds = new Set((overlay?.settlements ?? []).filter((s) => s.capitalPolityId !== null && s.capitalPolityId !== undefined).map((s) => s.settlementId));
+  const importanceById = new Map((overlay?.settlements ?? []).map((s) => [s.settlementId, s.importance]));
+  const boxes: { minX: number; minY: number; maxX: number; maxY: number }[] = [];
+  for (const settlement of world.settlements) {
+    const capital = capitalIds.has(settlement.id);
+    if (!capital) {
+      if (scale < MEDIUM_ZOOM_SCALE) continue;
+      if (scale < CLOSE_ZOOM_SCALE && (settlement.type === "town" || settlement.type === "village" || settlement.type === "fort" || settlement.type === "port")) continue;
+    }
+    const [x, y] = settlement.projected;
+    const radius = settlementPixelRadius(settlement.type, scale, unit) / pixelsPerDegree;
+    const reach = capital ? radius * 1.5 : radius;
+    boxes.push({ minX: x - reach, maxX: x + reach, minY: y - reach, maxY: y + reach });
+    if (!settlementLabelShown(capital, scale, importanceById.get(settlement.id))) continue;
+    const fontSize = settlementLabelPixelFont(settlement.type, scale, unit) / pixelsPerDegree;
+    const halfWidth = settlement.name.length * fontSize * SETTLEMENT_LABEL_CHARACTER_WIDTH / 2;
+    const baseline = y + reach + SETTLEMENT_LABEL_GAP_PIXELS * unit / pixelsPerDegree + fontSize * SETTLEMENT_LABEL_ASCENT;
+    boxes.push({ minX: x - halfWidth, maxX: x + halfWidth, minY: baseline - fontSize, maxY: baseline });
+  }
+  return boxes;
+}
+
 function drawDiamond(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number): void {
   ctx.beginPath();
   ctx.moveTo(x, y - radius);

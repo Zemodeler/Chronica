@@ -127,3 +127,28 @@ describe("guaranteed label collisions", () => {
     expect(placeLabelLayouts([layout("b", 1), layout("a", 2)]).map((entry) => entry.label.id)).toEqual(["a"]);
   });
 });
+
+describe("names around settlement markers", () => {
+  const layout = (guaranteed: boolean): PoliticalLabelLayout => ({
+    id: "a", polityId: "a", name: "Abcde", pathPoints: [[0, 0], [10, 0], [20, 0]], pathLength: 20, usableLength: 8,
+    fontSize: 2, priority: 1, guaranteed, minFontSize: 2, straight: false,
+  });
+  // A marker just left of the middle of the path, where the name would sit.
+  const marker = { minX: 9, maxX: 10, minY: -1, maxY: 1 };
+  const clearOfMarker = (entry: { characters: readonly { x: number }[]; label: PoliticalLabelLayout }) =>
+    entry.characters.every(({ x }) => x - entry.label.fontSize * .55 >= marker.maxX || x + entry.label.fontSize * .55 <= marker.minX);
+
+  it("slides a name along its path to clear a marker", () => {
+    for (const guaranteed of [false, true]) {
+      const [entry] = placeLabelLayouts([layout(guaranteed)], [marker]);
+      expect(entry).toBeDefined();
+      expect(clearOfMarker(entry!)).toBe(true);
+    }
+  });
+
+  it("keeps a guaranteed name even when no slide clears the marker, but drops an ordinary one", () => {
+    const wall = { minX: -5, maxX: 25, minY: -1, maxY: 1 };
+    expect(placeLabelLayouts([layout(false)], [wall])).toHaveLength(0);
+    expect(placeLabelLayouts([layout(true)], [wall])).toHaveLength(1);
+  });
+});

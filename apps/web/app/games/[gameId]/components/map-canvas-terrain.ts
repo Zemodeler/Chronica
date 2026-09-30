@@ -4,7 +4,7 @@ import { politicalColourWithAlpha, type PoliticalBorderSegment, type PoliticalMa
 import { detachedFragmentProvinces, GROUP_STRENGTH, PROVINCE_LINE_RGB, provinceLineStyle, strokeGroupOf, type ProvinceLineStyle } from "./border-strokes";
 import type { ViewportTransform } from "./map-viewport";
 import { drawPoliticalLabels } from "./map-canvas-labels";
-import { drawForces, drawSettlements } from "./map-canvas-entities";
+import { drawForces, drawSettlements, settlementObstacles } from "./map-canvas-entities";
 import type { ReliefLayer } from "./relief-tiles";
 import type { ForceFlagAsset } from "./army-standard";
 import { displayUnit } from "./map-display-unit";
@@ -153,6 +153,41 @@ function segmentPath(segment: PoliticalBorderSegment): Path2D {
   return path;
 }
 
+// Borders are traced along a 1 km pixel lattice, so a coast or a frontier
+// running at a slant is a staircase. Thin lines hide it; the wide outline band
+// does not, and read as a bright zigzag on the Egypt-Cyrene frontier. The band
+// is drawn along a corner-cut copy of each edge (its ends kept, so it still
+// meets its neighbours), and clipped to the province, so it never leaves it.
+const BAND_SMOOTHING_PASSES = 2;
+const _smoothPathCache = new WeakMap<PoliticalBorderSegment, Path2D>();
+
+function smoothedPoints(points: readonly (readonly [number, number])[]): (readonly [number, number])[] {
+  let current = points;
+  for (let pass = 0; pass < BAND_SMOOTHING_PASSES && current.length > 2; pass++) {
+    const next: [number, number][] = [[current[0]![0], current[0]![1]]];
+    for (let index = 0; index < current.length - 1; index++) {
+      const [ax, ay] = current[index]!;
+      const [bx, by] = current[index + 1]!;
+      next.push([ax * .75 + bx * .25, ay * .75 + by * .25], [ax * .25 + bx * .75, ay * .25 + by * .75]);
+    }
+    const last = current[current.length - 1]!;
+    next.push([last[0], last[1]]);
+    current = next;
+  }
+  return current as (readonly [number, number])[];
+}
+
+function smoothSegmentPath(segment: PoliticalBorderSegment): Path2D {
+  let path = _smoothPathCache.get(segment);
+  if (!path) {
+    const built = new Path2D();
+    smoothedPoints(segment.points).forEach(([x, y], index) => { if (index === 0) built.moveTo(x, -y); else built.lineTo(x, -y); });
+    _smoothPathCache.set(segment, built);
+    path = built;
+  }
+  return path;
+}
+
 /** An owned province's edges that face another power or the sea: the outline band. */
 function outerEdges(political: PoliticalMapState, provinceId: string): Path2D | undefined {
   const index = borderIndex(political);
@@ -162,7 +197,7 @@ function outerEdges(political: PoliticalMapState, provinceId: string): Path2D | 
   for (const segment of index.segmentsByProvince.get(provinceId) ?? []) {
     if (index.groups.get(segment) !== "outline") continue;
     edge ??= new Path2D();
-    edge.addPath(segmentPath(segment));
+    edge.addPath(smoothSegmentPath(segment));
   }
   index.outer.set(provinceId, edge ?? null);
   return edge;
@@ -337,14 +372,16 @@ export function drawTerrainToCanvas(
 
   const visibleRect: VisibleWorldRect = { minX: (0 - bx) / m, maxX: (containerW - bx) / m, minY: (0 - by) / m, maxY: (containerH - by) / m };
 
-  // 1-3 — water and raster images, straight onto the canvas every frame,
-  // inside the map's own bounds: beyond them the page shows through.
+  // 1-3 — water and raster images, straight onto the canvas every frame;
+  // the rasters stay inside the map's own bounds.
+  // The water colour runs on past the map's edge, so a wide window shows sea
+  // above and below the plate, not black bands of the page behind it.
+  ctx.fillStyle = WATER_FILL;
+  ctx.fillRect(visibleRect.minX, visibleRect.minY, visibleRect.maxX - visibleRect.minX, visibleRect.maxY - visibleRect.minY);
   ctx.save();
   ctx.beginPath();
   ctx.rect(vx, vy, vw, vh);
   ctx.clip();
-  ctx.fillStyle = WATER_FILL;
-  ctx.fillRect(vx, vy, vw, vh);
   if (baseImage) ctx.drawImage(baseImage, -180, -90, 360, 180);
   // The sharp relief over it, only where the player is looking.
   relief?.draw(ctx, visibleRect, m * dpr);
@@ -420,7 +457,7 @@ export function drawTerrainToCanvas(
 
   // 8 — political territory name labels, blitted from per-label bitmaps
   // (see map-canvas-labels.ts for why they are not drawn as text per frame)
-  drawPoliticalLabels(ctx, political, m, dpr, transform.scale, unit, visibleRect, interacting, requestRedraw);
+  drawPoliticalLabels(ctx, political, m, dpr, transform.scale, unit, visibleRect, interacting, requestRedraw, (cssPixelsPerDegree) => settlementObstacles(world, overlay, transform.scale, cssPixelsPerDegree, unit));
 
   // 9-10 — settlements and army/fleet standards (see map-canvas-entities.ts
   // for why these moved off the SVG layer too). `m` is CSS pixels per world

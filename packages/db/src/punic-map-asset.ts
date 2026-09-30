@@ -6,6 +6,6 @@
 export const PUNIC_WARS_MAP_ASSET = {
   featureCount: 6637,
   boundingBox: [-18, 16.1631, 62.9736, 59],
-  byteSize: 14345751,
-  checksum: "d82ec3620eba95cd307ed4e865c76a85aa2a6607140dcdb599ebd85f1148c469",
+  byteSize: 14345640,
+  checksum: "57e0a0cdc6a4a6e9055e09183bf0a30df42bca8e3779f9470fb57cc76282406d",
 } as const;
