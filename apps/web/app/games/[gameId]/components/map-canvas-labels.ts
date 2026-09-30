@@ -139,6 +139,9 @@ interface Box { minX: number; minY: number; maxX: number; maxY: number; }
 interface Footprint { readonly entry: PlacedLabel; readonly bounds: Box; readonly boxes: readonly Box[]; }
 interface Slot { footprint: Footprint; readonly original: PoliticalLabelLayout; }
 
+/** Something already on the plate that a name must not be drawn across: a settlement's marker or its name, in world units. */
+export type LabelObstacle = Box;
+
 const overlaps = (a: Box, b: Box) => a.minX < b.maxX && a.maxX > b.minX && a.minY < b.maxY && a.maxY > b.minY;
 
 function footprint(label: PoliticalLabelLayout, offset = 0): Footprint | null {
@@ -166,13 +169,35 @@ function slideRoom(label: PoliticalLabelLayout): number {
   return Math.max(0, (label.pathLength - label.usableLength) / 2);
 }
 
-function placeGuaranteed(slots: Slot[], label: PoliticalLabelLayout): void {
+/** Whether any character of the footprint lies on an obstacle. */
+const onObstacle = (candidate: Footprint, obstacles: readonly LabelObstacle[]) =>
+  obstacles.some((obstacle) => overlaps(candidate.bounds, obstacle) && candidate.boxes.some((box) => overlaps(box, obstacle)));
+
+/** The nearest slide of a label along its path (centre first) that clears every slot and obstacle; null if none does. */
+function slidClear(label: PoliticalLabelLayout, slots: readonly Slot[], obstacles: readonly LabelObstacle[]): Footprint | null {
+  const room = slideRoom(label);
+  for (let step = 0; step <= SLIDE_STEPS; step++) for (const sign of step === 0 ? [0] : [1, -1]) {
+    if (room === 0 && step > 0) return null;
+    const candidate = footprint(label, sign * room * step / SLIDE_STEPS);
+    if (candidate && !onObstacle(candidate, obstacles) && !slots.some((slot) => collide(candidate, slot.footprint))) return candidate;
+  }
+  return null;
+}
+
+function placeGuaranteed(slots: Slot[], label: PoliticalLabelLayout, obstacles: readonly LabelObstacle[]): void {
   const first = footprint(label);
   if (!first) return;
   const blockers = slots.filter((slot) => collide(first, slot.footprint));
-  if (blockers.length === 0) { slots.push({ footprint: first, original: label }); return; }
+  if (blockers.length === 0) {
+    if (!onObstacle(first, obstacles)) { slots.push({ footprint: first, original: label }); return; }
+    // A marker or a name sits on it: slide it clear at full size, then at the
+    // floor; a guaranteed name is never dropped, so at worst it keeps its place.
+    const slid = slidClear(label, slots, obstacles) ?? slidClear(steppedDown(label, 0), slots, obstacles);
+    slots.push({ footprint: slid ?? first, original: label });
+    return;
+  }
   const others = slots.filter((slot) => !blockers.includes(slot));
-  const clear = (candidate: Footprint, shrunk: readonly Footprint[]) => !others.some((slot) => collide(candidate, slot.footprint)) && !shrunk.some((b) => collide(candidate, b));
+  const clear = (candidate: Footprint, shrunk: readonly Footprint[]) => !onObstacle(candidate, obstacles) && !others.some((slot) => collide(candidate, slot.footprint)) && !shrunk.some((b) => collide(candidate, b));
   const commit = (candidate: Footprint, shrunk: readonly Footprint[]) => {
     blockers.forEach((slot, index) => { slot.footprint = shrunk[index]!; });
     slots.push({ footprint: candidate, original: label });
@@ -210,19 +235,22 @@ function placeGuaranteed(slots: Slot[], label: PoliticalLabelLayout): void {
  * the guaranteed set first (see placeGuaranteed), then the rest, most
  * important first, each dropped if it would overlap one already placed.
  */
-export function placeLabels(political: PoliticalMapState, cssPixelsPerDegree: number, scale?: number, unit = 1): PlacedLabel[] {
-  return placeLabelLayouts(derivePoliticalLabels(political, cssPixelsPerDegree, scale === undefined ? undefined : { scale, unit }));
+export function placeLabels(political: PoliticalMapState, cssPixelsPerDegree: number, scale?: number, unit = 1, obstacles: readonly LabelObstacle[] = []): PlacedLabel[] {
+  return placeLabelLayouts(derivePoliticalLabels(political, cssPixelsPerDegree, scale === undefined ? undefined : { scale, unit }), obstacles);
 }
 
-/** placeLabels for labels already derived. */
-export function placeLabelLayouts(derived: readonly PoliticalLabelLayout[]): PlacedLabel[] {
+/** placeLabels for labels already derived. Names slide along their path to clear the obstacles, and are dropped if they cannot. */
+export function placeLabelLayouts(derived: readonly PoliticalLabelLayout[], obstacles: readonly LabelObstacle[] = []): PlacedLabel[] {
   const labels = [...derived].sort((a, b) => b.priority - a.priority);
   const slots: Slot[] = [];
-  for (const label of labels) if (label.guaranteed) placeGuaranteed(slots, label);
+  for (const label of labels) if (label.guaranteed) placeGuaranteed(slots, label, obstacles);
   for (const label of labels) {
     if (label.guaranteed) continue;
     const candidate = footprint(label);
-    if (candidate && !slots.some((slot) => collide(candidate, slot.footprint))) slots.push({ footprint: candidate, original: label });
+    if (!candidate) continue;
+    if (!onObstacle(candidate, obstacles) && !slots.some((slot) => collide(candidate, slot.footprint))) { slots.push({ footprint: candidate, original: label }); continue; }
+    const slid = slidClear(label, slots, obstacles);
+    if (slid) slots.push({ footprint: slid, original: label });
   }
   return slots.map((slot) => slot.footprint.entry);
 }
@@ -271,6 +299,7 @@ export function drawPoliticalLabels(
   visibleRect: VisibleWorldRect,
   interacting: boolean,
   requestRedraw: () => void,
+  obstaclesAt: (cssPixelsPerDegree: number) => readonly LabelObstacle[] = () => [],
 ): void {
   const level = Math.round(Math.log2(pixelsPerDegree * dpr) * LEVELS_PER_OCTAVE);
   const devicePixelsPerUnit = 2 ** (level / LEVELS_PER_OCTAVE);
@@ -281,10 +310,11 @@ export function drawPoliticalLabels(
   }
   if (!levels) { levels = new Map(); _labelCache.set(political, levels); }
   const far = scale < FAR_ZOOM_SCALE;
-  const key = `${level}:${unit}:${far ? "far" : "near"}`;
+  // The settlements that are shown (and so the room left around them) change at 2.5 and 5.
+  const key = `${level}:${unit}:${far ? "far" : "near"}:${scale < 2.5 ? 0 : scale < 5 ? 1 : 2}`;
   for (const [cachedKey, cached] of levels) if (Math.abs(cached.level - level) > KEEP_LEVELS || cached.unit !== unit) levels.delete(cachedKey);
   let current = levels.get(key);
-  if (!current) { current = { level, unit, placed: placeLabels(political, devicePixelsPerUnit / dpr, scale, unit), bitmaps: new Map() }; levels.set(key, current); }
+  if (!current) { current = { level, unit, placed: placeLabels(political, devicePixelsPerUnit / dpr, scale, unit, obstaclesAt(devicePixelsPerUnit / dpr)), bitmaps: new Map() }; levels.set(key, current); }
   const nearestLevels = [...levels.values()].filter((l) => l !== current).sort((a, b) => Math.abs(a.level - level) - Math.abs(b.level - level));
 
   const deadline = performance.now() + LABEL_RENDER_BUDGET_MS;

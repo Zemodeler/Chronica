@@ -9,7 +9,7 @@
    "cohesionNote": "Equal to ligurians, hejaz-tribes and najd-tribes (2200): reed-country clans who answered to no common seat and paid the king little. Below qedar (2800), which at least has the sheikhs of Dumat.",
    "capital": {
     "settlementId": "settlement-bit-yakin",
-    "name": "Bit-Yakin (Chaldean tribal land, site unknown)",
+    "name": "Bit-Yakin",
     "lon": 47.25,
     "lat": 31.3,
     "kind": "village",
@@ -19,7 +19,7 @@
    "otherSettlements": [
     {
      "settlementId": "settlement-hammar-landing",
-     "name": "Hammar marsh landing (placeholder)",
+     "name": "Hammar marshes",
      "lon": 46.85,
      "lat": 31.0,
      "kind": "village",
@@ -28,7 +28,7 @@
     },
     {
      "settlementId": "settlement-hawizeh-landing",
-     "name": "Hawizeh marsh landing (placeholder)",
+     "name": "Hawizeh marshes",
      "lon": 47.55,
      "lat": 31.75,
      "kind": "village",
@@ -37,7 +37,7 @@
     },
     {
      "settlementId": "settlement-central-marsh-landing",
-     "name": "Central marsh landing (placeholder)",
+     "name": "Central marshes",
      "lon": 47.0,
      "lat": 31.65,
      "kind": "village",
@@ -157,7 +157,7 @@
     },
     {
      "settlementId": "settlement-wadi-hauran-camp",
-     "name": "Wadi Hauran encampments (placeholder)",
+     "name": "Wadi Hauran encampments",
      "lon": 41.2,
      "lat": 33.2,
      "kind": "village",

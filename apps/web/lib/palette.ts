@@ -51,11 +51,16 @@ export const ATLAS = {
   labelHalo: "rgb(230 216 186 / 88%)",
 } as const;
 
-/** The five great powers, in mineral pigments. Everyone else takes a family palette. */
+/**
+ * The great powers, in mineral pigments. Everyone else takes a family palette.
+ * The Seleucid empire is malachite green: its old lapis-blue swatch washed
+ * over tan relief into one flat grey across Mesopotamia and Iran.
+ */
 export const MAJOR_POLITY_PIGMENTS: Readonly<Record<string, string>> = {
   rome: "#9E2B25",
   carthage: "#5B2A5E",
   syracuse: "#9A6A2E",
   macedon: "#2F5A8A",
   cyrene: "#B08A2E",
+  "seleucid-empire": "#2E7D55",
 };

@@ -6628,12 +6628,12 @@
 {"type":"Feature","id":"settlement-anzali","geometry":{"type":"Point","coordinates":[49.46,37.47]},"properties":{"kind":"settlement","name":"Anzali coast (Bandar-e Anzali)","provinceId":"irn-9339m","type":"village"}},
 {"type":"Feature","id":"settlement-pura","geometry":{"type":"Point","coordinates":[60.46,27.2]},"properties":{"kind":"settlement","name":"Pura (Bampur)","provinceId":"irn-efm6t","type":"town"}},
 {"type":"Feature","id":"settlement-tis","geometry":{"type":"Point","coordinates":[60.64645,25.32066]},"properties":{"kind":"settlement","name":"Tis (Chabahar)","provinceId":"irn-myxot","type":"port"}},
-{"type":"Feature","id":"settlement-bit-yakin","geometry":{"type":"Point","coordinates":[47.25,31.3]},"properties":{"kind":"settlement","name":"Bit-Yakin (Chaldean tribal land, site unknown)","provinceId":"irn-zqzjr","type":"village"}},
-{"type":"Feature","id":"settlement-hammar-landing","geometry":{"type":"Point","coordinates":[46.85,31]},"properties":{"kind":"settlement","name":"Hammar marsh landing (placeholder)","provinceId":"irn-vp5ao","type":"village"}},
-{"type":"Feature","id":"settlement-hawizeh-landing","geometry":{"type":"Point","coordinates":[47.55,31.75]},"properties":{"kind":"settlement","name":"Hawizeh marsh landing (placeholder)","provinceId":"irn-efrh6","type":"village"}},
-{"type":"Feature","id":"settlement-central-marsh-landing","geometry":{"type":"Point","coordinates":[47,31.65]},"properties":{"kind":"settlement","name":"Central marsh landing (placeholder)","provinceId":"irn-9vql5","type":"village"}},
+{"type":"Feature","id":"settlement-bit-yakin","geometry":{"type":"Point","coordinates":[47.25,31.3]},"properties":{"kind":"settlement","name":"Bit-Yakin","provinceId":"irn-zqzjr","type":"village"}},
+{"type":"Feature","id":"settlement-hammar-landing","geometry":{"type":"Point","coordinates":[46.85,31]},"properties":{"kind":"settlement","name":"Hammar marshes","provinceId":"irn-vp5ao","type":"village"}},
+{"type":"Feature","id":"settlement-hawizeh-landing","geometry":{"type":"Point","coordinates":[47.55,31.75]},"properties":{"kind":"settlement","name":"Hawizeh marshes","provinceId":"irn-efrh6","type":"village"}},
+{"type":"Feature","id":"settlement-central-marsh-landing","geometry":{"type":"Point","coordinates":[47,31.65]},"properties":{"kind":"settlement","name":"Central marshes","provinceId":"irn-9vql5","type":"village"}},
 {"type":"Feature","id":"settlement-ain-al-tamr","geometry":{"type":"Point","coordinates":[43.62,32.6]},"properties":{"kind":"settlement","name":"Ain al-Tamr (Shithatha oasis)","provinceId":"ara-bhbt9","type":"village"}},
 {"type":"Feature","id":"settlement-rutba-wells","geometry":{"type":"Point","coordinates":[40.28,33.03]},"properties":{"kind":"settlement","name":"Rutba (Wadi Hauran wells, placeholder)","provinceId":"syr-8kech","type":"village"}},
 {"type":"Feature","id":"settlement-salman-wells","geometry":{"type":"Point","coordinates":[44.53,30.49]},"properties":{"kind":"settlement","name":"Sulman wells (southern desert)","provinceId":"irn-1fzo4","type":"village"}},
-{"type":"Feature","id":"settlement-wadi-hauran-camp","geometry":{"type":"Point","coordinates":[41.2,33.2]},"properties":{"kind":"settlement","name":"Wadi Hauran encampments (placeholder)","provinceId":"syr-p00yc","type":"village"}}
+{"type":"Feature","id":"settlement-wadi-hauran-camp","geometry":{"type":"Point","coordinates":[41.2,33.2]},"properties":{"kind":"settlement","name":"Wadi Hauran encampments","provinceId":"syr-p00yc","type":"village"}}
 ]}
