@@ -314,7 +314,9 @@ describe("E16, L3: a man learns why he was or was not elected", { timeout: 120_0
   it("settles his candidacy as failed when the college's places all went to men of no note", () => {
     // Nobody else in Rome the world names: the places go to the implied men.
     const alone = legionary();
-    const world = withStanding({ ...alone, characters: alone.characters.filter((character) => character.polityId !== "rome" || character.id === PLAYER) }, PLAYER, 3_200);
+    const kept = new Set(alone.characters.filter((character) => character.polityId !== "rome" || character.id === PLAYER).map((character) => character.id));
+    // The houses' family links go with the people they join.
+    const world = withStanding({ ...alone, characters: alone.characters.filter((character) => kept.has(character.id)), familyLinks: alone.familyLinks.filter((link) => kept.has(link.characterId) && kept.has(link.relatedCharacterId)) }, PLAYER, 3_200);
     const opened = stand(world, "Titus Vettius stands for the military tribunate").world;
     const counted = tick(tick(withStanding(opened, PLAYER, 2_500), 365).world, 386).world;
     const election = counted.material.politicalProcedures.find((procedure) => procedure.label.startsWith("Election of Military tribune"))!;

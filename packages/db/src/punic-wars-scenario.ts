@@ -563,7 +563,7 @@ const WRITTEN_OUT: ReadonlySet<string> = new Set(["rome", "carthage", "syracuse"
 
 const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
   schemaVersion: 3,
-  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 43, libraryVersion: 1 },
+  pins: { scenarioId: PUNIC_WARS_SCENARIO_ID, scenarioVersion: 44, libraryVersion: 1 },
   elapsedStep: 0,
   instant: { day: 0, minute: 0 },
   map: {
