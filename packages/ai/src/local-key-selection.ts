@@ -3,15 +3,30 @@ import { join } from "node:path";
 
 export type LocalAiProvider = "openai" | "anthropic" | "codex";
 
+/**
+ * How hard the Codex responder thinks. Medium is the default: on the
+ * 2026-10-02 play-test low wrote unreadable JSON five or six times a run, and
+ * high took twenty-three minutes a turn.
+ */
+export type LocalAiEffort = "low" | "medium" | "high";
+export const LOCAL_AI_EFFORTS: readonly LocalAiEffort[] = ["low", "medium", "high"];
+export const DEFAULT_LOCAL_AI_EFFORT: LocalAiEffort = "medium";
+
+export function isLocalAiEffort(value: unknown): value is LocalAiEffort {
+  return value === "low" || value === "medium" || value === "high";
+}
+
 export type LocalAiProviderConfiguration = Readonly<{
   available: boolean;
   activeProvider: LocalAiProvider;
   activeModel: string;
+  activeEffort: LocalAiEffort;
   openAiConfigured: boolean;
   anthropicConfigured: boolean;
   openAiModels: readonly string[];
   anthropicModels: readonly string[];
   codexModels: readonly string[];
+  efforts: readonly LocalAiEffort[];
 }>;
 
 const LOCAL_SETTINGS_FILE = ".chronica.local-ai.json";
@@ -37,31 +52,37 @@ export function getLocalAiProviderConfiguration(): LocalAiProviderConfiguration 
     : preferredProvider === "anthropic" && anthropicConfigured
       ? "anthropic"
       : openAiConfigured ? "openai" : anthropicConfigured ? "anthropic" : preferredProvider;
-  const selectedModel = readSelectedConfiguration()?.activeModel;
+  const selected = readSelectedConfiguration();
+  const selectedModel = selected?.activeModel;
   const activeModels = activeProvider === "codex" ? codexModels : activeProvider === "openai" ? openAiModels : anthropicModels;
   return {
     available: true,
     activeProvider,
     activeModel: selectedModel !== undefined && activeModels.includes(selectedModel) ? selectedModel : activeModels[0]!,
+    activeEffort: selected?.activeEffort ?? environmentEffort() ?? DEFAULT_LOCAL_AI_EFFORT,
     openAiConfigured,
     anthropicConfigured,
     openAiModels,
     anthropicModels,
     codexModels,
+    efforts: LOCAL_AI_EFFORTS,
   };
 }
 
-export function selectLocalAiConfiguration(provider: LocalAiProvider, model: string): void {
-  validateLocalAiConfiguration(provider, model);
+export function selectLocalAiConfiguration(provider: LocalAiProvider, model: string, effort?: LocalAiEffort): void {
+  validateLocalAiConfiguration(provider, model, effort);
   const settingsFile = settingsFilePath();
   const temporaryFile = `${settingsFile}.${process.pid}.tmp`;
-  writeFileSync(temporaryFile, `${JSON.stringify({ activeProvider: provider, activeModel: model }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  // A selection made without an effort keeps the one chosen before.
+  const kept = effort ?? readSelectedConfiguration()?.activeEffort;
+  const selection = { activeProvider: provider, activeModel: model, ...(kept === undefined ? {} : { activeEffort: kept }) };
+  writeFileSync(temporaryFile, `${JSON.stringify(selection, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   renameSync(temporaryFile, settingsFile);
   cachedSelection = null;
 }
 
 /** Validate before installation/sign-in so invalid browser submissions have no side effects. */
-export function validateLocalAiConfiguration(provider: LocalAiProvider, model: string): void {
+export function validateLocalAiConfiguration(provider: LocalAiProvider, model: string, effort?: LocalAiEffort): void {
   const configuration = getLocalAiProviderConfiguration();
   if (!configuration.available) {
     throw new Error("No configured local AI provider is available to select.");
@@ -74,6 +95,9 @@ export function validateLocalAiConfiguration(provider: LocalAiProvider, model: s
   }
   if (!modelsForProvider(provider).includes(model)) {
     throw new Error("The selected local AI model is not available for this provider.");
+  }
+  if (effort !== undefined && !isLocalAiEffort(effort)) {
+    throw new Error("The reasoning effort must be low, medium or high.");
   }
 }
 
@@ -91,6 +115,17 @@ export function getSelectedLocalAiModel(provider: LocalAiProvider): string | nul
   const configuration = getLocalAiProviderConfiguration();
   if (!configuration.available || configuration.activeProvider !== provider) return null;
   return configuration.activeModel;
+}
+
+/** The Codex responder's effort: the account screen's choice, else `CHRONICA_HAND_EFFORT`, else medium. */
+export function getSelectedLocalAiEffort(): LocalAiEffort {
+  const configuration = getLocalAiProviderConfiguration();
+  return configuration.available ? configuration.activeEffort : environmentEffort() ?? DEFAULT_LOCAL_AI_EFFORT;
+}
+
+function environmentEffort(): LocalAiEffort | undefined {
+  const value = process.env.CHRONICA_HAND_EFFORT?.trim();
+  return isLocalAiEffort(value) ? value : undefined;
 }
 
 function isLocalDevelopment(): boolean {
@@ -115,9 +150,10 @@ function primaryKeyName(provider: "openai" | "anthropic"): "OPENAI_API_KEY" | "A
  * a different model on the account screen still takes effect at once.
  */
 const SELECTION_CACHE_MS = 1_000;
-let cachedSelection: { at: number; value: { activeProvider: LocalAiProvider; activeModel?: string } | null } | null = null;
+type Selection = { activeProvider: LocalAiProvider; activeModel?: string; activeEffort?: LocalAiEffort };
+let cachedSelection: { at: number; value: Selection | null } | null = null;
 
-function readSelectedConfiguration(): { activeProvider: LocalAiProvider; activeModel?: string } | null {
+function readSelectedConfiguration(): Selection | null {
   const now = Date.now();
   if (cachedSelection !== null && now - cachedSelection.at < SELECTION_CACHE_MS) return cachedSelection.value;
   const value = readSelectedConfigurationFromDisk();
@@ -125,15 +161,16 @@ function readSelectedConfiguration(): { activeProvider: LocalAiProvider; activeM
   return value;
 }
 
-function readSelectedConfigurationFromDisk(): { activeProvider: LocalAiProvider; activeModel?: string } | null {
+function readSelectedConfigurationFromDisk(): Selection | null {
   try {
     const parsed: unknown = JSON.parse(readFileSync(settingsFilePath(), "utf8"));
     if (typeof parsed === "object" && parsed !== null && "activeProvider" in parsed) {
       if (parsed.activeProvider === "openai" || parsed.activeProvider === "anthropic" || parsed.activeProvider === "codex") {
+        const effort = "activeEffort" in parsed && isLocalAiEffort(parsed.activeEffort) ? { activeEffort: parsed.activeEffort } : {};
         if ("activeModel" in parsed && typeof parsed.activeModel === "string") {
-          return { activeProvider: parsed.activeProvider, activeModel: parsed.activeModel };
+          return { activeProvider: parsed.activeProvider, activeModel: parsed.activeModel, ...effort };
         }
-        return { activeProvider: parsed.activeProvider };
+        return { activeProvider: parsed.activeProvider, ...effort };
       }
     }
   } catch (error) {
@@ -165,11 +202,13 @@ function unavailableConfiguration(): LocalAiProviderConfiguration {
     available: false,
     activeProvider: "openai",
     activeModel: "gpt-6-luna",
+    activeEffort: DEFAULT_LOCAL_AI_EFFORT,
     openAiConfigured: false,
     anthropicConfigured: false,
     openAiModels: [],
     anthropicModels: [],
     codexModels: [],
+    efforts: [],
   };
 }
 

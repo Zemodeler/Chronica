@@ -192,7 +192,8 @@ export async function revokeDeveloperGift(formData: FormData): Promise<never> {
 export async function selectLocalAiProvider(formData: FormData): Promise<never> {
   const value = textValue(formData, "provider");
   if (value !== "openai" && value !== "anthropic" && value !== "codex") redirect("/account?aiProvider=invalid#ai-provider-status");
-  const result = await selectDeveloperLocalAiConfiguration(await headers(), value, textValue(formData, "model"));
+  const effort = textValue(formData, "effort");
+  const result = await selectDeveloperLocalAiConfiguration(await headers(), value, textValue(formData, "model"), effort === "low" || effort === "medium" || effort === "high" ? effort : undefined);
   redirect(`/account?aiProvider=${result}#ai-provider-status`);
 }
 

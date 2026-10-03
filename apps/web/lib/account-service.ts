@@ -18,7 +18,7 @@ import {
   updateAccountProfile,
 } from "@chronica/db";
 import type { AccountDashboardViewModel, DeveloperGiftCreate, ProfileUpdate } from "@chronica/shared";
-import { prepareHandCodex, selectLocalAiConfiguration, validateLocalAiConfiguration, type LocalAiProvider } from "@chronica/ai";
+import { prepareHandCodex, selectLocalAiConfiguration, validateLocalAiConfiguration, type LocalAiEffort, type LocalAiProvider } from "@chronica/ai";
 import { getAuthentication, isAuthenticationConfigured } from "./authentication";
 
 export async function resolveAccount(requestHeaders: Headers) {
@@ -161,15 +161,15 @@ export async function revokeGift(requestHeaders: Headers, giftCodeId: string, au
   finally { await database.close(); }
 }
 
-export async function selectDeveloperLocalAiConfiguration(requestHeaders: Headers, provider: LocalAiProvider, model: string): Promise<"updated" | "unauthorized" | "unavailable" | "connection_failed"> {
+export async function selectDeveloperLocalAiConfiguration(requestHeaders: Headers, provider: LocalAiProvider, model: string, effort?: LocalAiEffort): Promise<"updated" | "unauthorized" | "unavailable" | "connection_failed"> {
   const account = await resolveFreshDeveloper(requestHeaders);
   if (account === null) return "unauthorized";
-  try { validateLocalAiConfiguration(provider, model); } catch { return "unavailable"; }
+  try { validateLocalAiConfiguration(provider, model, effort); } catch { return "unavailable"; }
   if (provider === "codex") {
     try { await prepareHandCodex(); } catch { return "connection_failed"; }
   }
   try {
-    selectLocalAiConfiguration(provider, model);
+    selectLocalAiConfiguration(provider, model, effort);
     return "updated";
   } catch {
     return "unavailable";

@@ -39,6 +39,17 @@ describe("developer AI selection", () => {
     expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual({ activeProvider: "codex", activeModel: "gpt-6-luna" });
   });
 
+  it("defaults the Codex effort to medium, keeps a chosen effort across a model change, and refuses an unknown one", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    const api = await import("./local-key-selection");
+    expect(api.getSelectedLocalAiEffort()).toBe("medium");
+    api.selectLocalAiConfiguration("codex", "gpt-6-luna", "high");
+    expect(api.getLocalAiProviderConfiguration()).toMatchObject({ activeEffort: "high", efforts: ["low", "medium", "high"] });
+    api.selectLocalAiConfiguration("codex", "gpt-6-sol");
+    expect(api.getSelectedLocalAiEffort()).toBe("high");
+    expect(() => api.selectLocalAiConfiguration("codex", "gpt-6-luna", "max" as never)).toThrow("low, medium or high");
+  });
+
   it("routes Codex through the free hand adapter, captures its model, and switches back to the API", async () => {
     const api = await import("./index");
     const responder = await import("./adapters/hand-codex");
@@ -47,7 +58,7 @@ describe("developer AI selection", () => {
     expect(adapter.free).toBe(true);
     api.selectLocalAiConfiguration("openai", "gpt-6-luna");
     await expect(adapter.call("simulate_cognition", "S", "R")).resolves.toMatchObject({ model: "hand", inputTokens: 0 });
-    expect(responder.answerWithHandCodex).toHaveBeenCalledWith("S", "R", expect.any(String), "gpt-6-sol");
+    expect(responder.answerWithHandCodex).toHaveBeenCalledWith("S", "R", expect.any(String), { operation: "simulate_cognition", model: "gpt-6-sol" });
     expect(api.createAiAdapter().free).not.toBe(true);
   });
 

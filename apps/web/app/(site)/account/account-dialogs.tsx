@@ -473,6 +473,7 @@ function LocalAiProviderDialog({ configuration, onClose }: { configuration: Loca
   const providerModels = (value: LocalAiProvider) => value === "codex" ? configuration.codexModels : value === "openai" ? configuration.openAiModels : configuration.anthropicModels;
   const models = providerModels(provider);
   const [model, setModel] = useState(configuration.activeModel);
+  const [effort, setEffort] = useState(configuration.activeEffort);
 
   const changeProvider = (nextProvider: LocalAiProvider) => {
     const nextModels = providerModels(nextProvider);
@@ -508,6 +509,13 @@ function LocalAiProviderDialog({ configuration, onClose }: { configuration: Loca
           <select id="local-ai-model" name="model" value={models.includes(model) ? model : models[0] ?? ""} onChange={(event) => setModel(event.target.value)}>
             {models.map((availableModel) => <option key={availableModel} value={availableModel}>{availableModel}</option>)}
           </select>
+          {provider === "codex" && <>
+            <label htmlFor="local-ai-effort">Reasoning effort</label>
+            <select id="local-ai-effort" name="effort" value={effort} onChange={(event) => setEffort(event.target.value as typeof effort)}>
+              {configuration.efforts.map((available) => <option key={available} value={available}>{available}</option>)}
+            </select>
+            <p>Medium is the default, at several minutes a turn. Low is faster but writes more answers the game cannot read. High can take twenty minutes a turn.</p>
+          </>}
           <AiProviderSubmit />
         </form>
       </div>

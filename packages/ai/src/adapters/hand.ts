@@ -27,9 +27,9 @@ import type { AiAdapter, AiCallResult, AiConversationMessage, AiToolCall, AiTool
 
 export interface HandAdapterOptions {
   /** Automatic development responder; omit to retain manual file answering. */
-  readonly respond?: (system: string, asked: string, requestKey: string) => Promise<string>;
-  /** Separate automatic answers by model and protocol version. */
-  readonly cacheNamespace?: string;
+  readonly respond?: (system: string, asked: string, requestKey: string, operation: AiOperation) => Promise<string>;
+  /** Separate automatic answers by model, effort and protocol version: a change of any of them is a different answer. */
+  readonly cacheNamespace?: string | ((operation: AiOperation) => string);
   /** Where prompts and answers live. */
   readonly dir: string;
   /** How often to look for an answer. */
@@ -50,7 +50,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 async function answerFor(options: HandAdapterOptions, operation: AiOperation, system: string, asked: string): Promise<string> {
   const { dir } = options;
   mkdirSync(dir, { recursive: true });
-  const stem = handStem(operation, options.respond ? JSON.stringify([options.cacheNamespace, system, asked]) : asked);
+  const namespace = typeof options.cacheNamespace === "function" ? options.cacheNamespace(operation) : options.cacheNamespace;
+  const stem = handStem(operation, options.respond ? JSON.stringify([namespace, system, asked]) : asked);
   const answerPath = path.join(dir, `${stem}.json`);
   if (existsSync(answerPath)) {
     const cached = readFileSync(answerPath, "utf8");
@@ -71,7 +72,7 @@ async function answerFor(options: HandAdapterOptions, operation: AiOperation, sy
   if (options.respond) {
     // Keep the actual system instructions beside each request, including after prompt edits.
     writeFileSync(path.join(dir, `${stem}.system.txt`), system);
-    const answer = await options.respond(system, asked, answerPath);
+    const answer = await options.respond(system, asked, answerPath, operation);
     JSON.parse(answer);
     const temporary = `${answerPath}.${process.pid}.${Date.now()}.tmp`;
     writeFileSync(temporary, answer);
