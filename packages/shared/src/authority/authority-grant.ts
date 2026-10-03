@@ -74,6 +74,12 @@ export const AuthorityGrantSchema = z
     revokedAtStep: ElapsedStepSchema.nullable().default(null),
     revocationReason: z.string().trim().max(300).nullable().default(null),
     succeedsGrantId: EntityIdSchema.nullable().default(null),
+    /**
+     * Money voted, not a key to the chest: spending under this grant stops at
+     * `amount`, and `spent` is what has gone under it. A Senate that voted
+     * 5,000 for transports gave the consul 5,000, not the treasury.
+     */
+    cap: z.object({ amount: z.number().int().positive(), spent: z.number().int().nonnegative() }).strict().optional(),
   })
   .strict();
 export type AuthorityGrant = z.infer<typeof AuthorityGrantSchema>;
@@ -347,7 +353,8 @@ export function buildAuthorityIndex(
     ...deriveCommandGrants(material.forces, atStep),
     ...deriveOwnerGrants(material.accounts ?? [], atStep),
   ];
-  const persisted = (persistedGrants ?? []).filter((grant) => isActive(grant, atStep));
+  // A vote spent to the last coin opens nothing more.
+  const persisted = (persistedGrants ?? []).filter((grant) => isActive(grant, atStep) && (grant.cap === undefined || grant.cap.spent < grant.cap.amount));
   return { grants: [...derived, ...persisted] };
 }
 

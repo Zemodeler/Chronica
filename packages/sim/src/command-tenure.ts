@@ -15,6 +15,7 @@ import { chamberThatDecides } from "./apply/nobody-listens";
 import { commandTenureOf } from "./constitutions";
 import type { ElectionGovernment } from "./elections";
 import type { IdFactory } from "./ports";
+import { promagistrateGrants, revokeHoldGrants } from "./promagistrate";
 
 /**
  * What becomes of a commander's army when his year of office runs out
@@ -188,11 +189,12 @@ export function keepCommandTenure(input: CommandTenureInput): { world: WorldStat
   };
   const addHold = (hold: Omit<CommandHold, "id" | "status" | "endedAtStep" | "endedHow">): CommandHold => {
     const made: CommandHold = { ...hold, id: input.ids.next("command"), status: "active", endedAtStep: null, endedHow: null };
-    world = { ...world, commandHolds: [...world.commandHolds, made].slice(-200) };
+    // His imperium in the field, for as long as he holds it (`promagistrate.ts`).
+    world = { ...world, commandHolds: [...world.commandHolds, made].slice(-200), authorityGrants: [...world.authorityGrants, ...promagistrateGrants(world, made, day)] };
     return made;
   };
   const endHold = (id: string, how: string): void => {
-    world = { ...world, commandHolds: world.commandHolds.map((hold) => (hold.id === id ? { ...hold, status: "ended" as const, endedAtStep: day, endedHow: how.slice(0, 240) } : hold)) };
+    world = revokeHoldGrants({ ...world, commandHolds: world.commandHolds.map((hold) => (hold.id === id ? { ...hold, status: "ended" as const, endedAtStep: day, endedHow: how.slice(0, 240) } : hold)) }, id, day, how);
   };
   const reviseHold = (id: string, change: Partial<CommandHold>): void => {
     world = { ...world, commandHolds: world.commandHolds.map((hold) => (hold.id === id ? { ...hold, ...change } : hold)) };

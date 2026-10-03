@@ -2,6 +2,7 @@ import {
   adjustPolityLegitimacy, allOffices, allSuccessionRules, findOfficeForRole,
   type AuthorityCheckResult, type FactProposalDraft, type Office, type SuccessionRule, type WorldDelta, type WorldState,
 } from "@chronica/shared";
+import { vetoingOffice } from "../tribunes";
 
 /**
  * What a power-wide grant does not reach, however wide it is, and what the
@@ -101,9 +102,15 @@ export function whoseToGive(
       if ([actorId, sponsorId].some((who) => seatsOf(who).some((held) => conveners.includes(held.id)))) return { authority };
       return { authority, forbidden: `Only a ${conveners.map(label).join(", a ")} may put a question to the ${institution.name}. He may ask one of them to put it, and speak to it when it is put.` };
     }
+    // A tribune's veto: closing a question of his own republic as blocked is
+    // his office's act, where his grant names no such power (`tribunes.ts`).
+    case "political_procedure_resolve": {
+      const office = delta.outcome === "blocked" ? vetoingOffice(world, id(delta.procedureRef), actorId, scenarioOffices) : null;
+      return office === null ? { authority } : { authority: { authorized: true, grant: authority.grant, standing: "lawful", reason: `He forbids it as ${office.label}.` } };
+    }
     case "generic_entity_create": {
-      // A tribune's intercession is his office's own act.
-      if (!/intercession/i.test(delta.kind)) return { authority };
+      // A tribune's intercession, and his leading the plebs out, are his office's own acts.
+      if (!/intercession|secession/i.test(delta.kind)) return { authority };
       const tribune = seatsOf(actorId).find((held) => held.tribunician === true);
       return tribune === undefined
         ? { authority }
