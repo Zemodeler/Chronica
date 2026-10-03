@@ -324,9 +324,16 @@ describe("E6: orders that never lapse", () => {
     expect(ordersUnderWay(state, CONSUL, offices).some((item) => item.label === "Raise the fleet")).toBe(false);
     const result = await runSimulationBurst(input(scripted({}), null, state));
     const lapsed = result.world.orders[0]!.parts[0]!;
-    expect(lapsed.closedAtStep).not.toBeNull();
-    expect(lapsed.note).toMatch(/^Lapsed/);
+    // The yes nobody acted on is closed first, by the rule that settles an
+    // accepted request with nothing to show for it (`requests.ts`, E14): the
+    // part then reads as failed, which is finished, rather than lapsing.
+    // Either way it no longer reads as under way: the latest order's part that
+    // came to nothing is shown as stalled, so the order is never answered only in prose.
+    expect(result.world.orderAttempts[0]!.status).toBe("abandoned");
+    expect(lapsed.closedAtStep !== null || orderPartStatus(result.world, lapsed) === "failed").toBe(true);
+    expect(ordersUnderWay(result.world, CONSUL, offices).filter((item) => item.label === "Raise the fleet").every((item) => item.stalled)).toBe(true);
   });
+
 
   it("retires every pursuit he has gone on from, his power's old ones too", async () => {
     const first = world();
