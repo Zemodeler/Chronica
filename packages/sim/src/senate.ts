@@ -1,4 +1,5 @@
 import {
+  candidacyOffice,
   aptitude,
   deriveReputation,
   skillShare,
@@ -32,6 +33,7 @@ import { concernsOf } from "./questions";
 import { judgmentLean, sentenceByOutcome } from "./trials";
 import { rulerOf } from "./constitutions";
 import { tenureLean } from "./command-tenure";
+import { creditTheSpeech } from "./standing-deeds";
 
 /**
  * A chamber's questions, debated by its people and decided by the count.
@@ -90,7 +92,7 @@ export function isChamberQuestion(procedure: PoliticalProcedure): boolean {
 export function isElectiveCandidacy(procedure: PoliticalProcedure, electiveOffices: readonly Office[]): boolean {
   return CANDIDACY_TYPES.has(procedure.type)
     && procedure.subjectKind === "character"
-    && electiveOffices.some((office) => labelNamesOffice(procedure.label, office.label));
+    && candidacyOffice(procedure, electiveOffices) !== null;
 }
 
 /** The offices filled by election, which `holdElections` keeps. */
@@ -372,6 +374,8 @@ export interface HoldVotesInput {
   readonly offices: readonly Office[];
   /** How offices are filled, so a candidacy for an elected one is left to its election. */
   readonly successionRules?: readonly SuccessionRule[] | undefined;
+  /** Whose speeches on a question are remembered in his standing (`creditTheSpeech`). */
+  readonly playerCharacterId?: string | null | undefined;
   readonly toDay: number;
   readonly ids: IdFactory;
 }
@@ -480,6 +484,9 @@ export function holdVotes(input: HoldVotesInput): { world: WorldState; facts: Fa
       // As much as an election: what a republic's government may now do.
       significance: 60,
     });
+    const spoken = creditTheSpeech(world, settled, record, input.playerCharacterId ?? null);
+    world = spoken.world;
+    facts.push(...spoken.facts);
     // Carried, it does what it said it would, and moves the office it names.
     if (carried) {
       const enacted = carryOutEnactment(world, procedure.id, input.toDay, input.ids, input.offices, input.successionRules ?? []);

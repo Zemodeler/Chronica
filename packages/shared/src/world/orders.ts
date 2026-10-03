@@ -214,6 +214,8 @@ export function workStatus(world: WorldState, ref: OrderWorkRef): OrderPartStatu
       const procedure = world.material.politicalProcedures.find((candidate) => candidate.id === ref.id);
       if (procedure === undefined) return null;
       if (procedure.outcome === null) return "awaiting_authority";
+      // A man's candidacy carried is the thing done -- he was elected -- not leave to do it.
+      if (procedure.outcome === "passed" && (procedure.type === "nomination" || procedure.type === "appointment")) return "achieved";
       return procedure.outcome === "passed" ? "authorized" : "refused";
     }
     case "message": {
@@ -266,6 +268,20 @@ function stageStatus(world: WorldState, stage: OrderStage): OrderPartStatus | nu
   const waitsOnLetter = stage.waitsOn.some((condition) => condition.kind === "letter_answered"
     && world.diplomacy.find((message) => message.id === condition.messageId)?.status === "awaiting_reply");
   return waitsOnLetter ? "awaiting_reply" : "pending";
+}
+
+/**
+ * Why a question the part put was settled against it, in the settlement's own
+ * words: "Not admitted: standing 2,190 of 3,000 required", "Beaten: placed
+ * 5th of 9". The ledger said "refused" and nothing else.
+ */
+export function procedureReasonOf(world: WorldState, part: OrderPart): string | null {
+  for (const ref of part.workRefs) {
+    if (ref.kind !== "procedure") continue;
+    const procedure = world.material.politicalProcedures.find((candidate) => candidate.id === ref.id);
+    if (procedure?.outcome != null && procedure.outcome !== "passed" && procedure.outcomeReason !== null) return procedure.outcomeReason;
+  }
+  return null;
 }
 
 export function orderPartStatus(world: WorldState, part: OrderPart, options: { readonly without?: OrderWorkRef } = {}): OrderPartStatus {

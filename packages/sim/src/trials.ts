@@ -3,6 +3,7 @@ import {
   deriveReputation,
   leaning,
   readDepartments,
+  shiftStanding,
   skillShare,
   vacateOfficesOf,
   boundedId,
@@ -186,6 +187,10 @@ export function judgmentLean(world: WorldState, procedure: PoliticalProcedure, p
   return { lean: Math.max(-25, Math.min(25, lean)), reasons };
 }
 
+/** What a conviction costs a man's standing: a fine, and exile. */
+const FINE_STANDING_BPS = -800;
+const EXILE_STANDING_BPS = -1_500;
+
 /**
  * A man convicted. He pays back what an audit found he took, to whoever it
  * was taken from, as far as his purse goes; and then his sentence. Acquitted,
@@ -230,6 +235,8 @@ export function sentenceByOutcome(world: WorldState, procedure: PoliticalProcedu
   const purse = next.material.accounts.find((account) => account.id === convicted.personalAccountId)?.balance ?? 0;
   move(convicted.personalAccountId, treasuryOf(convicted.polityId), Math.floor(purse * FINE_SHARE));
   next = vacateOfficesOf(next, convicted.id, "removal", atStep);
+  // Convicted is disgraced: a fine is a blot, exile all but the end of a name.
+  next = shiftStanding(next, convicted.id, sentence === "exile" ? EXILE_STANDING_BPS : FINE_STANDING_BPS, "scandal");
   if (sentence === "exile") {
     next = { ...next, characters: next.characters.map((character) => (character.id === convicted.id ? { ...character, disqualifyingStatuses: [...new Set([...character.disqualifyingStatuses, "exiled"])] } : character)) };
   }

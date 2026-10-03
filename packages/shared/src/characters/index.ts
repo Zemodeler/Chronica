@@ -37,6 +37,7 @@ export * from "./reachability";
 export * from "./relationship-dimensions";
 export * from "./social-events";
 export * from "./standing-causes";
+export * from "./standing";
 export * from "./succession";
 export * from "./traits";
 export * from "./names";

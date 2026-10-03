@@ -10,6 +10,7 @@ import { forecastInWords, isChamberQuestion, voteDayOf } from "./senate";
 import { commandTenureOf, rulerOf, rulerOfficeOf, sovereignChamberOf } from "./constitutions";
 
 import {
+  standingLine,
   ORDER_PART_STATUS_LABEL,
   isOrderPartOpen,
   orderPartStatus,
@@ -152,6 +153,8 @@ export interface WorldSlice {
     readonly plight: string | null;
     /** His place in an army's ranks, where he serves in one (`army-words.ts`). */
     readonly service: string | null;
+    /** His standing, and the gates of his power's offices either side of it (`standing.ts`): "can I stand for quaestor?" */
+    readonly standing: string | null;
   };
   readonly economy: readonly { readonly id: string; readonly label: string; readonly balance: number }[];
   readonly monthlyIncome: number;
@@ -1280,6 +1283,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       ],
       plight: actor === undefined ? null : plightOf(world, actor),
       service: actor === undefined ? null : serviceInWords(world, actor),
+      standing: actor === undefined ? null : standingLine(world, input.offices, actor.id),
     },
     economy: accounts,
     monthlyIncome,
@@ -1340,6 +1344,7 @@ export function renderWorldSlice(slice: WorldSlice): string {
   if (slice.actor.portrait.length > 0) lines.push(slice.actor.portrait, "");
   if (slice.actor.plight !== null) lines.push(slice.actor.plight, "");
   if (slice.actor.service !== null) lines.push(`IN THE RANKS: ${slice.actor.service}`, "");
+  if (slice.actor.standing !== null) lines.push(`STANDING: ${slice.actor.standing}`, "");
   lines.push(
     "WHAT THIS PERSON MAY DO:",
     ...(slice.actor.permitted.length === 0

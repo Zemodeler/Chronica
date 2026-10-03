@@ -31,6 +31,7 @@ import {
 import { resolveEngagement, type BattleAccount } from "./battle";
 import { blockadeTightness } from "./blockades";
 import type { IdFactory } from "./ports";
+import { honourSieges, type SiegeDeed } from "./standing-deeds";
 
 /**
  * Sieges, pressed day by day (`world/siege.ts`).
@@ -189,6 +190,8 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
   const sacked: { provinceId: string; place: string; takerPolityId: string; loserPolityId: string; forceName: string; commanderId: string; commanderName: string }[] = [];
 
   const yielded: string[] = [];
+  // What the men who took a city, or held one, are owed in standing (`standing-deeds.ts`).
+  const deeds: SiegeDeed[] = [];
   const sieges = world.sieges.map((siege): Siege => {
     if (siege.status !== "active" || toDay <= siege.pressedToStep) return siege;
     const province = provinces.find((candidate) => candidate.id === siege.provinceId);
@@ -223,6 +226,7 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
     const stamped = siege.garrisonForceIds ?? garrison.map((force) => force.id).slice(0, 40);
     const relief = reliefOf({ ...world, material: { ...world.material, forces } }, { ...siege, garrisonForceIds: stamped });
     if (relief.reduce((sum, force) => sum + fitOf(force), 0) >= fitOf(besieger) * RELIEF_LIFTS_AT) {
+      deeds.push({ kind: "relieved", siegeId: siege.id, place, forceIds: [...garrison, ...relief].map((force) => force.id) });
       return end("lifted", "A relieving army came up.", "siege_lifted", `The siege of ${place} was raised: ${relief.map((force) => force.name).join(" and ")} came up to its relief, and ${besieger.name} drew off from the walls rather than be caught between them.`, 60);
     }
     // Waiting on the besieging player's word: the siege stands still.
@@ -353,6 +357,8 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
       // A garrison that marched out on terms is not taken with the city.
       const stillInside = garrison.filter((force) => forces.some((candidate) => candidate.id === force.id && candidate.locationId === siege.provinceId));
       yielded.push(...stillInside.map((force) => force.id));
+      // Carried by assault (`assaultSiege` brings it here at full pressure), not given up on terms or by a traitor.
+      deeds.push({ kind: "taken", siegeId: siege.id, place, provinceId: siege.provinceId, polityId: siege.besiegerPolityId, stormed: siege.pressureBps >= 10_000 && !betrayed && !told.includes("terms_accepted") });
       forces = forces.filter((force) => !yielded.includes(force.id));
       return end(
         "taken",
@@ -382,7 +388,8 @@ export function pressSieges(given: WorldState, toDay: number, options: PressSieg
   // what it paid go with it (`disbandForces`).
   const pressed: WorldState = { ...world, sieges, map: { ...world.map, provinces }, material: { ...world.material, forces: [...forces, ...world.material.forces.filter((force) => yielded.includes(force.id))] } };
   const after = sackCities(reconcileCapitals(disbandForces(pressed, new Set(yielded), null)), sacked, toDay);
-  return { world: after.world, facts: [...facts, ...after.facts], battles };
+  const honoured = honourSieges(after.world, deeds, toDay, options.playerCharacterId ?? null);
+  return { world: honoured.world, facts: [...facts, ...after.facts, ...honoured.facts], battles };
 }
 
 /** Of a sacked city's people, this share killed or sold. */
