@@ -109,8 +109,17 @@ describe("a dictated peace, and a surrender", () => {
 });
 
 describe("a power with nothing left", () => {
-  it("ends after sixty days with no ground and no army", () => {
+  it("gives itself up at once to the power at war with it that took its last city and its army (deditio)", () => {
     const world = messanaFallen();
+    const disarmed: WorldState = { ...world, material: { ...world.material, forces: world.material.forces.filter((force) => force.polityId !== "mamertines") } };
+    const yielded = reviewPowers({ ...disarmed, elapsedStep: 10 }, 10, createIdFactory("deditio-1")).world;
+    expect(yielded.map.polities.find((polity) => polity.id === "mamertines")!.absorbedByPolityId).toBe("rome");
+  });
+
+  it("ends after sixty days with no ground and no army, where nobody at war with it took it", () => {
+    // Its city lost, and the war over without terms: nobody to give itself up to.
+    const fallen = messanaFallen();
+    const world: WorldState = { ...fallen, polityAgreements: fallen.polityAgreements.map((agreement) => (agreement.kind === "war" && [agreement.polityId, agreement.otherPolityId].includes("mamertines") ? { ...agreement, status: "ended" as const, endedAtStep: 0, endedReason: "Lapsed." } : agreement)) };
     const disarmed: WorldState = { ...world, material: { ...world.material, forces: world.material.forces.filter((force) => force.polityId !== "mamertines") } };
     const first = reviewPowers({ ...disarmed, elapsedStep: 10 }, 10, createIdFactory("empty-1")).world;
     expect(first.map.polities.find((polity) => polity.id === "mamertines")!.endedAtStep ?? null).toBeNull();

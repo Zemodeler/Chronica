@@ -789,6 +789,8 @@ export const PoliticalProcedureSchema = z
     concerns: z.array(QuestionConcernSchema).max(8).optional(),
     /** The chamber that sent it here, when a failed vote was referred on: it is not referred twice. */
     referredFromInstitutionId: EntityIdSchema.nullable().optional(),
+    /** How often a house too undecided to answer has put it off to another day (`sim/senate.ts`). */
+    adjournments: z.number().int().nonnegative().max(12).optional(),
     /**
      * What a conviction on it costs the man it is against (`sim/trials.ts`):
      * a fine of a fifth of his purse, exile, or his life. Absent, a man

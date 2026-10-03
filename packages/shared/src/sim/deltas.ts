@@ -876,7 +876,11 @@ const EnactmentProposalSchema = z
      * it passes. The Senate voted a fleet 119 to 0 and not a keel was laid,
      * because carrying it changed nothing.
      */
-    budget: z.object({ accountRef: RefSchema, amount: z.number().int().positive().nullable().default(null), purpose: TitleSchema }).strict().optional(),
+    budget: z.object({
+      accountRef: RefSchema, amount: z.number().int().positive().nullable().default(null), purpose: TitleSchema,
+      /** Who may spend it, for a year: a person, or an office whose holder does. Absent, the sponsor. */
+      holderRef: MaybeRefSchema.optional(),
+    }).strict().optional(),
     project: z.object({
       kind: z.string().trim().min(1).max(80),
       label: TitleSchema,
@@ -886,6 +890,18 @@ const EnactmentProposalSchema = z
     }).strict().optional(),
     /** One man excused the ladder -- age, the rung below, the gap -- for one office, for a year. */
     waiver: z.object({ characterRef: RefSchema, officeId: EntityIdSchema }).strict().optional(),
+    /** The citizenship given to allies by law; those that will have it are taken in (`sim/submission.ts`). */
+    franchise: z.object({ polityIds: z.array(RefSchema).max(12), status: z.enum(["citizenship", "sine_suffragio"]) }).strict().optional()
+      .describe("Allies given citizenship"),
+    /**
+     * An agrarian law and a debt law: who gets land, and how much is forgiven,
+     * the engine sizes (`reform-laws.ts`). Bare values, because every
+     * character of the schema is sent with every call: the province whose
+     * public land is shared out (null, the capital's), and the share of private
+     * debts forgiven -- the interest on them is capped at the old uncial rate.
+     */
+    land: EntityIdSchema.nullable().optional().describe("Agrarian law: province; null capital's"),
+    debt: BasisPointsSchema.optional().describe("Debt law: share forgiven"),
     /** Its armies remade: doctrines, recruitment, terms of service, a body redrawn. */
     military: MilitaryReformSchema.optional(),
     /**
@@ -1643,7 +1659,8 @@ const TreatyClauseSchema = z.discriminatedUnion("kind", [
        * ground, people and money become the victor's, its army is disbanded,
        * and it is no more -- though its people remember (`sim/polity-end.ts`).
        */
-      z.object({ kind: z.literal("submission"), polityId: RefSchema, toPolityId: RefSchema }).strict(),
+      z.object({ kind: z.literal("submission"), polityId: RefSchema, toPolityId: RefSchema }).strict()
+        .describe("Union/surrender into toPolityId: an ally offered union is this clause. Submit or war: ultimatum, onRefusal war"),
       /**
        * Anything else one side takes on: men sent, grain delivered, a port
        * opened. It becomes its ruler's promise to the other's, judged like any

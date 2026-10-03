@@ -88,8 +88,7 @@ import {
   type ForcePersonnelCategory,
   daysInSeason,
   monthOfDay,
-  strictKmBetween,
-  DETOUR_FACTOR,
+  mustCrossAPass,
   adjacentTo,
   describeKm,
   MARCH_KM_PER_DAY,
@@ -102,7 +101,6 @@ import {
   createPressure,
   decideOrderAttempt,
   findWorldReferenceViolations,
-  openStorylines,
   receiveOrderAttempt,
   refreshPressure,
   resolvePressure,
@@ -148,11 +146,17 @@ import { endObligationsOfEndedAgreements } from "../treaties";
 import { trespassOf } from "../trespass";
 import { SOVEREIGN_AGREEMENTS, chamberThatDecides, fleesHisMaster, listensAnyway, nobodyListens, nobodyRises, notHisToSpend } from "./nobody-listens";
 import { isOwnBusiness } from "./own-business";
+import { asGarrison, isGarrison, proportionalDraw } from "./detachments";
+import { hireAtThePlace } from "./hiring-market";
+import { budgetHolderOf, chargeVotedBudget, withinVotedBudget } from "../voted-budgets";
+import { carryOutUnion, unionVerdict } from "../submission";
+import { namesShips, owesShipsTo, requisitionAlliedHulls } from "../socii-navales";
 import { sacrilegeOf, whoseToGive } from "./whose-to-give";
 import { endContract } from "../contracts";
 import { accountOf, normalizeRefs, peopleNamedButNeverMade } from "./normalize-refs";
 import { arrangementNetIncome, recruitSkillBiasIn } from "../standing-effects";
 import { isBindingChamberQuestion, overruleCost, seatByOutcome, voteDayOf } from "../senate";
+import { vetoFact } from "../tribunes";
 import { constitutionOf, rulerOf, sovereignChamberOf } from "../constitutions";
 import { attemptRegimeChange } from "../regime";
 import { concernsOf } from "../questions";
@@ -170,6 +174,8 @@ import { restedCeilingOf } from "../campaign";
 import { enemyFleetOff, perilsOfTheRoad } from "../crossings";
 import { diplomaticAnswererOf } from "../letters";
 import { moneyMadeBetween, newIssues } from "./what-a-batch-did";
+import { journeysOf, onTheWayTo, settledCourse, shoreItMakesFor, turnOnTheRoad, wasTurnedOnTheRoad } from "./marches";
+import { WORLD_THREAD_CAP, makeRoomForTheOrder, worldThreadsFull } from "../storyline-cap";
 
 /**
  * Applies a validated batch of deltas to the world.
@@ -259,6 +265,11 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
     // fitting out a ship, a noble raising his clients. Weighed then against the
     // purse that pays, through the obligation that says who does.
     case "force_create": {
+      // Men detached from an army are that army's business: a consul leaving
+      // a garrison at Rhegium was judged as raising a new army at Rome's cost.
+      if (delta.fromForceRef != null) return { kind: "force", id: resolve(delta.fromForceRef) ?? delta.fromForceRef };
+      // An ally's hulls called for under its treaty: the caller's own government's act.
+      if (actorPolityId !== null && namesShips(delta.categoryId) && owesShipsTo(world, resolve(delta.polityId) ?? delta.polityId, actorPolityId)) return { kind: "polity", id: actorPolityId };
       const obligationId = delta.payObligationRef == null ? undefined : resolve(delta.payObligationRef) ?? delta.payObligationRef;
       const payer = obligationId === undefined ? undefined : world.material.obligations.find((obligation) => obligation.id === obligationId)?.payerAccountId;
       const privately = payer !== undefined && world.material.accounts.find((account) => account.id === payer)?.owner.kind === "character";
@@ -493,9 +504,6 @@ const REST_RECOVERY_BPS = 500;
 
 /** What walking out on a paid contract costs a man's name. */
 const WALKED_OUT_STANDING_BPS = 300;
-
-/** How many threads the world follows at once before it must close one. */
-const MAX_OPEN_STORYLINES = 12;
 
 /**
  * How many battles the map shows at once.
@@ -1004,6 +1012,7 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
         // motion to its own Senate.
         (granted, wanted) => granted.kind === "polity" && polityOfScope(wanted, current, context.offices) === granted.id,
       );
+      authority = withinVotedBudget(authority, current, context.actorRef, scope, delta);
       // A colleague's army and an elected seat are not the government's to
       // hand about, however wide its grant (`whose-to-give.ts`).
       if (answerable && context.actorRef.kind === "character") {
@@ -1066,7 +1075,8 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
         }
       }
       const beforeAct = current;
-      current = recordUnrecordedMoney(beforeAct, applyOne(current, delta, context, assignedIds, resolve, emitFact, emitAccount), delta, context);
+      current = recordUnrecordedMoney(beforeAct, applyOne(current, delta, ofTheOrder ? { ...context, forTheOrder: true } : context, assignedIds, resolve, emitFact, emitAccount), delta, context);
+      current = chargeVotedBudget(beforeAct, current, authority, delta);
       current = reconcileCapitals(current);
       // A tribune's person is sacrosanct.
       const sacrilege = context.actorRef.kind === "character" ? sacrilegeOf(delta, beforeAct, current, context.actorRef.id, context.offices, () => context.ids.next("cause")) : null;
@@ -1473,9 +1483,6 @@ export function awaitingTheQuestion(
  * captain sailed it off toward Rhegium on his own account, the sailing was
  * called off, and the crossing failed for want of it. Its master may turn it.
  */
-/** Days a commander other than the player holds a course he set before he may turn it. */
-const SETTLED_COURSE_DAYS = 14;
-
 function keptToItsWork(world: WorldState, forceId: string, actorId: string, to: string): boolean {
   const force = world.material.forces.find((candidate) => candidate.id === forceId);
   if (force === undefined || force.controllerCharacterId === null || force.controllerCharacterId === actorId) return false;
@@ -1486,21 +1493,30 @@ function keptToItsWork(world: WorldState, forceId: string, actorId: string, to: 
     && (project.completionOutcome.forceId === forceId || (project.completionOutcome.fleetIds ?? []).includes(forceId)));
 }
 
-function callOffMarches(world: WorldState, forceId: string, keepTo: string | null, emitFact: (fact: FactProposalDraft) => void): WorldState {
-  const overridden = world.projects.filter((project) =>
-    project.status === "in_progress"
-    && project.completionOutcome?.kind === "force_move"
-    && project.completionOutcome.forceId === forceId
-    && project.completionOutcome.provinceId !== keepTo);
+function callOffMarches(
+  world: WorldState,
+  forceId: string,
+  keepTo: string | null,
+  emitFact: (fact: FactProposalDraft) => void,
+  // The journeys the new order leaves standing: by default those already on
+  // its way (`onTheWayTo`).
+  keeps: (project: WorldState["projects"][number]) => boolean = (project) => keepTo !== null && onTheWayTo(world, project, keepTo),
+): WorldState {
+  const overridden = journeysOf(world, forceId).filter((project) => !keeps(project));
   if (overridden.length === 0) return world;
   const cancelled = new Set(overridden.map((project) => project.id));
   const force = world.material.forces.find((candidate) => candidate.id === forceId);
   const provinceName = (id: string | null): string => world.map.provinces.find((province) => province.id === id)?.name ?? id ?? "where it was going";
+  // It goes on from where the road had brought it, not from home with the
+  // days already walked thrown away. A crossing's army has not left the shore.
+  const walk = overridden.find((project) => project.kind !== "crossing");
+  const onTheRoad = force === undefined || walk === undefined ? force : turnOnTheRoad(world, force, walk);
   for (const project of overridden) {
+    const near = project === walk && onTheRoad !== undefined && onTheRoad.locationId !== force?.locationId ? provinceName(onTheRoad.locationId) : null;
     emitFact({
       localId: `called_off_${project.id}`.slice(0, 60),
       kind: "march_called_off",
-      summary: `${force?.name ?? forceId} turned back from the road to ${provinceName(project.completionOutcome?.provinceId ?? null)}${keepTo === null ? "" : ` and makes for ${provinceName(keepTo)} instead`}: a later order sent it elsewhere, and "${project.label}" is called off.`.slice(0, 600),
+      summary: `${force?.name ?? forceId} turned ${near === null ? "back from the road to" : `on the road near ${near}, short of`} ${provinceName(project.completionOutcome?.provinceId ?? null)}${keepTo === null ? "" : ` and makes for ${provinceName(keepTo)} instead`}: a later order sent it elsewhere, and "${project.label}" is called off.`.slice(0, 600),
       affectedRefs: [{ kind: "force", id: forceId }, { kind: "project", id: project.id }],
       visibility: "polity",
       discoveryState: "polity",
@@ -1514,7 +1530,10 @@ function callOffMarches(world: WorldState, forceId: string, keepTo: string | nul
       significance: 35,
     });
   }
-  return { ...world, projects: world.projects.map((project) => (cancelled.has(project.id) ? { ...project, status: "cancelled" as const } : project)) };
+  const projects = world.projects.map((project) => (cancelled.has(project.id) ? { ...project, status: "cancelled" as const } : project));
+  return onTheRoad === undefined || onTheRoad === force
+    ? { ...world, projects }
+    : { ...world, projects, material: { ...world.material, forces: world.material.forces.map((candidate) => (candidate.id === forceId ? onTheRoad : candidate)) } };
 }
 
 /** The years a term of service runs, as written: "10 years", "ten years". Null when it names none. */
@@ -1538,9 +1557,9 @@ function yearsIn(terms: string): number | null {
  */
 function arrangeCrossing(
   world: WorldState,
-  army: Force,
+  sent: Force,
   to: string,
-  plan: PassagePlan,
+  planned: PassagePlan,
   localId: string,
   context: ApplyContext,
   assignedIds: Map<string, string>,
@@ -1548,6 +1567,29 @@ function arrangeCrossing(
   emitFact: (fact: FactProposalDraft) => void,
   emitAccount: (account: BattleAccount) => void,
 ): WorldState {
+  // Told again to cross where its crossing is already arranged, it is that
+  // crossing under way, not a second one announced.
+  const arranged = journeysOf(world, sent.id).find((project) => project.kind === "crossing" && project.completionOutcome?.provinceId === to);
+  if (arranged !== undefined) {
+    assignedIds.set(localId, arranged.id);
+    return world;
+  }
+  // Its own walk to the shore is the crossing's march, not one to call off:
+  // the legion told to make for Messana while it walked to Rhegium to take
+  // ship for Messana turned back, and began again from Latium.
+  const toTheShore = (shore: string) => (project: WorldState["projects"][number]): boolean => project.kind !== "crossing" && project.completionOutcome?.provinceId === shore;
+  const fleetIds = planned.fleets.map((entry) => entry.fleet.id);
+  const making = shoreItMakesFor(world, sent, to);
+  const fromThere = making === null ? null : passagePlanFor(world, { ...sent, locationId: making.shore }, to, warfareWith(world, context.warfare), monthOf(context), fleetIds);
+  const chosen = making !== null && fromThere?.embarkProvinceId === making.shore ? { ...fromThere, marchKm: making.marchKm } : planned;
+  let next = callOffMarches(world, sent.id, to, emitFact, (project) => project.completionOutcome?.provinceId === to || toTheShore(chosen.embarkProvinceId)(project));
+  const army = next.material.forces.find((force) => force.id === sent.id) ?? sent;
+  // Turned on the road, it takes ship from the shore best reached from where it got to.
+  const plan = army.locationId === sent.locationId ? chosen
+    : passagePlanFor(next, army, to, warfareWith(next, context.warfare), monthOf(context), fleetIds) ?? chosen;
+  const walking = journeysOf(next, army.id).find(toTheShore(plan.embarkProvinceId));
+  const gatherDays = walking === undefined ? plan.gatherDays
+    : Math.max(1, walking.startedAtStep + Math.max(0, ...walking.milestones.map((milestone) => milestone.requiredAtElapsedOffset)) - next.elapsedStep, ...plan.fleets.map((entry) => sailDaysFor(entry.sailKm)));
   const provinceName = (id: string): string => world.map.provinces.find((province) => province.id === id)?.name ?? id;
   const shore = provinceName(plan.embarkProvinceId);
   const leg = (mover: Force, days: number, kind: "march" | "sailing"): WorldDelta => ({
@@ -1565,11 +1607,10 @@ function arrangeCrossing(
     },
     reason: `To carry ${army.name} over to ${provinceName(to)}.`,
   });
-  let next = callOffMarches(world, army.id, to, emitFact);
   for (const entry of plan.fleets.filter((candidate) => candidate.sailKm > 0)) {
     next = applyOne(next, leg(entry.fleet, sailDaysFor(entry.sailKm), "sailing"), context, assignedIds, resolve, emitFact, emitAccount);
   }
-  if (plan.marchKm > 0) next = applyOne(next, leg(army, Math.ceil(marchDaysFor(plan.marchKm)), "march"), context, assignedIds, resolve, emitFact, emitAccount);
+  if (plan.marchKm > 0 && walking === undefined) next = applyOne(next, leg(army, Math.ceil(marchDaysFor(plan.marchKm)), "march"), context, assignedIds, resolve, emitFact, emitAccount);
   const fleets = plan.fleets.map((entry) => entry.fleet.name).join(" and ");
   const crossing: WorldDelta = {
     op: "project_create",
@@ -1579,8 +1620,8 @@ function arrangeCrossing(
     sponsorRef: context.actorRef,
     fundingAccountRef: null,
     milestones: [
-      { label: `${army.name} and ${fleets} meet at ${shore}`.slice(0, 160), dueInDays: Math.max(1, plan.gatherDays), costAmount: 0 },
-      { label: `${army.name} is landed in ${provinceName(to)}`.slice(0, 160), dueInDays: Math.max(2, plan.gatherDays + plan.crossingDays), costAmount: 0 },
+      { label: `${army.name} and ${fleets} meet at ${shore}`.slice(0, 160), dueInDays: Math.max(1, gatherDays), costAmount: 0 },
+      { label: `${army.name} is landed in ${provinceName(to)}`.slice(0, 160), dueInDays: Math.max(2, gatherDays + plan.crossingDays), costAmount: 0 },
     ],
     completionOutcome: null,
     reason: `${describePassagePlan(world, army, plan)}.`.slice(0, 400),
@@ -1604,7 +1645,7 @@ function arrangeCrossing(
   emitFact({
     localId: `crossing_${army.id}`.slice(0, 60),
     kind: "crossing_arranged",
-    summary: `${describePassagePlan(world, army, plan)}: about ${plan.gatherDays + plan.crossingDays} days until the last of it is landed in ${provinceName(to)}.`.slice(0, 600),
+    summary: `${describePassagePlan(world, army, plan)}: about ${gatherDays + plan.crossingDays} days until the last of it is landed in ${provinceName(to)}.`.slice(0, 600),
     affectedRefs: [{ kind: "force", id: army.id }, ...plan.fleets.map((entry) => ({ kind: "force" as const, id: entry.fleet.id })), { kind: "province", id: to }],
     visibility: "polity",
     discoveryState: "polity",
@@ -1641,12 +1682,17 @@ function setOutOn(
   // answered "move on Messana" three times, and three journeys were
   // made, three arrivals told. The march under way is the order
   // carried out; the rest of the order still happens today.
-  const underWay = world.projects.some((project) =>
-    project.status === "in_progress"
-    && project.completionOutcome?.kind === "force_move"
-    && project.completionOutcome.forceId === forceId
-    && project.completionOutcome.provinceId === to);
+  // So is one sent to the shore its crossing leaves from: told Rhegium
+  // while the crossing from Rhegium to Messana was arranged, the legion gave
+  // the crossing up and set out from Latium again.
+  const goesThere = (project: WorldState["projects"][number]): boolean => project.completionOutcome?.provinceId === to || project.completionOutcome?.embarkProvinceId === to;
+  const underWay = journeysOf(world, forceId).some(goesThere);
   if (underWay) return applyOne(world, { ...delta, locationId: undefined }, context, assignedIds, resolve, emitFact, emitAccount);
+  // A march kept as on the way (`onTheWayTo`) that this journey does not
+  // take over is called off now, and the journey is reckoned again from
+  // where the road had brought the army.
+  const strayed = callOffMarches(world, forceId, to, emitFact, goesThere);
+  if (strayed !== world) return applyOne(strayed, delta, context, assignedIds, resolve, emitFact, emitAccount);
   // Ships sail; only an army marches (R63).
   const sails = isNavalForce(force, warfareWith(world, context.warfare));
   const journey: WorldDelta = {
@@ -1665,11 +1711,13 @@ function setOutOn(
     reason: carried === null ? `Marching about ${describeKm(km)}.` : `Crossing ${carried}.`,
   };
   const setOut = applyOne(world, journey, context, assignedIds, resolve, emitFact, emitAccount);
+  // Turned, it goes on from where it got to; it did not set out from home again.
+  const whence = wasTurnedOnTheRoad(force) ? `turned on the road near ${provinceName(force.locationId)} and makes` : `${sails ? "sailed" : "set out"} from ${provinceName(force.locationId)}`;
   emitFact({
     localId: `march_${forceId}`.slice(0, 60),
     kind: carried === null ? "march_begun" : "crossing_begun",
     summary: carried === null
-      ? `${force.name} ${sails ? "sailed" : "set out"} from ${provinceName(force.locationId)} for ${provinceName(to)}, about ${describeKm(km)} off: about ${days} days ${sails ? "at sea" : "on the road"}.`
+      ? `${force.name} ${whence} for ${provinceName(to)}, about ${describeKm(km)} off: about ${days} days ${sails ? "at sea" : "on the road"}.`
       : `${force.name} began crossing from ${provinceName(force.locationId)} to ${provinceName(to)} ${carried}: about ${days} days until the last of it is over.`,
     affectedRefs: [{ kind: "force", id: forceId }, { kind: "province", id: to }],
     visibility: "polity",
@@ -2047,7 +2095,17 @@ function applyOne(
       const marching = delta.completionOutcome?.kind === "force_move" ? delta.completionOutcome : null;
       if (marching !== null && marching.forceRef !== null && marching.provinceId !== null) {
         if (keptToItsWork(world, resolve(marching.forceRef) ?? marching.forceRef, context.actorRef.id, marching.provinceId)) reject(`${world.material.forces.find((force) => force.id === (resolve(marching.forceRef!) ?? marching.forceRef))?.name ?? "That force"} is already on the work its master sent it on, and keeps to it.`);
-        const turned = callOffMarches(world, resolve(marching.forceRef) ?? marching.forceRef, marching.provinceId, emitFact);
+        const movingId = resolve(marching.forceRef) ?? marching.forceRef;
+        const recent = settledCourse(world, movingId, marching.provinceId, context);
+        if (recent !== undefined) reject(`${world.material.forces.find((force) => force.id === movingId)?.name ?? "That force"} set out on "${recent.label}" ${atStep - recent.startedAtStep} days ago and holds that course.`);
+        // Already going there, or to the shore its crossing there leaves from:
+        // that journey is this one.
+        const already = journeysOf(world, movingId).find((project) => project.completionOutcome?.provinceId === marching.provinceId || project.completionOutcome?.embarkProvinceId === marching.provinceId);
+        if (already !== undefined) {
+          assignedIds.set(delta.localId, already.id);
+          return world;
+        }
+        const turned = callOffMarches(world, movingId, marching.provinceId, emitFact);
         if (turned !== world) return applyOne(turned, delta, context, assignedIds, resolve, emitFact, emitAccount);
       }
       const id = mint("project", delta.localId);
@@ -2289,15 +2347,11 @@ function applyOne(
       if (source !== undefined) {
         const drawn = Math.min(delta.authorizedStrength, source.personnel.reduce((sum, group) => sum + group.fit, 0));
         if (drawn <= 0) reject(`${source.name} has no men left to give.`);
-        let left = drawn;
-        const taken = source.personnel.map((group) => {
-          const share = Math.min(group.fit, left);
-          left -= share;
-          return { ...group, fit: share, unavailable: [] };
-        }).filter((group) => group.fit > 0);
-        const remaining = source.personnel.map((group, index) => ({ ...group, fit: group.fit - (taken[index]?.fit ?? 0) }));
+        const shares = proportionalDraw(source.personnel, drawn);
+        const taken = source.personnel.map((group, index) => ({ ...group, fit: shares[index]!, unavailable: [] })).filter((group) => group.fit > 0);
+        const remaining = source.personnel.map((group, index) => ({ ...group, fit: group.fit - shares[index]! }));
         const emptied = remaining.every((group) => group.fit <= 0);
-        const force = {
+        const detached: Force = {
           id, name: delta.name, polityId: forcePolityId, ...(delta.outlaw === true ? { outlaw: true } : {}),
           commanderCharacterId: commanderId, controllerCharacterId: controllerId, locationId: source.locationId, positionId: null,
           authorizedStrength: drawn, personnel: taken,
@@ -2305,6 +2359,8 @@ function applyOne(
           provisionStatus: source.provisionStatus, provisionedThroughStep: source.provisionedThroughStep,
           payObligationId, payArrearsPeriods: 0, ...service, history: [], memberCharacterIds: [],
         };
+        const garrison = isGarrison(`${delta.name} ${delta.localId} ${delta.reason}`);
+        const force = garrison ? asGarrison(world, detached) : detached;
         const chest = { id: context.ids.next("account"), owner: { kind: "force" as const, id }, currencyId: world.material.currency.id, balance: 0, status: "active" as const, visibility: "polity" as const };
         const withForce: WorldState = {
           ...world,
@@ -2324,7 +2380,19 @@ function applyOne(
           knowableInDays: 0,
           significance: 45,
         });
-        return emptied ? disbandForces(withForce, new Set([source.id]), null) : withForce;
+        if (garrison) emitFact({ localId: `garrison_${id}`.slice(0, 60), kind: "garrison_set", summary: `${delta.name} stands as the garrison of ${world.map.provinces.find((province) => province.id === delta.locationId)?.name ?? delta.locationId}, ${drawn} men under orders to hold it.`.slice(0, 600), affectedRefs: [{ kind: "force", id }, { kind: "province", id: delta.locationId }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 40 });
+        const settled = emptied ? disbandForces(withForce, new Set([source.id]), null) : withForce;
+        // Left to hold a place the army is not in: drawn off here and sent there.
+        return delta.locationId === source.locationId || !world.map.provinces.some((province) => province.id === delta.locationId) ? settled
+          : applyOne(settled, { op: "force_modify", forceRef: id, locationId: delta.locationId, reason: delta.reason } as WorldDelta, context, assignedIds, resolve, emitFact, emitAccount);
+      }
+      // An ally's ships called for: raised in its harbours, at its cost (`socii-navales.ts`).
+      const leader = actorPolityOf(world, context);
+      if (leader !== null && "naval" in category && category.naval === true && owesShipsTo(world, forcePolityId, leader)) {
+        const sent = requisitionAlliedHulls(world, { id, chestId: context.ids.next("account"), allyId: forcePolityId, name: delta.name, wanted: delta.authorizedStrength, commanderId, controllerId, categoryId: category.id, label: category.label, atStep });
+        if (typeof sent === "string") reject(sent);
+        emitFact({ localId: `requisitioned_${id}`.slice(0, 60), kind: "hulls_requisitioned", summary: `${sent.hulls} ${category.label.toLowerCase()} were requisitioned from ${world.map.polities.find((polity) => polity.id === forcePolityId)?.name ?? forcePolityId}, as its treaty with ${world.map.polities.find((polity) => polity.id === leader)?.name ?? leader} binds it, and gather at ${world.map.provinces.find((province) => province.id === sent.shore)?.name ?? sent.shore}.`.slice(0, 600), affectedRefs: [{ kind: "force", id }, { kind: "polity", id: forcePolityId }, { kind: "polity", id: leader }], visibility: "polity", discoveryState: "polity", knowableInDays: 0, significance: 40 });
+        return sent.world;
       }
       // Raised out of a country and paid for, and a large levy musters over
       // days (`levies.ts`): whoever pays its wages pays its bounties.
@@ -2396,13 +2464,8 @@ function applyOne(
         // the fortnight holds his first course: Hannibal Gisco sent his fleet
         // to the Sikeloi coast, then Rhegium, then the Sikeloi coast, then
         // Rhegium again, one burst after another, and it never arrived.
-        if (context.actorRef.id !== context.playerCharacterId && context.playerCharacterId != null) {
-          const recent = world.projects.find((project) => project.status === "in_progress" && project.completionOutcome?.kind === "force_move"
-            && project.completionOutcome.forceId === forceId && project.completionOutcome.provinceId !== delta.locationId
-            && project.sponsorEntityRef?.kind === "character" && project.sponsorEntityRef.id === context.actorRef.id
-            && atStep - project.startedAtStep < SETTLED_COURSE_DAYS);
-          if (recent !== undefined) reject(`${force.name} set out on "${recent.label}" ${atStep - recent.startedAtStep} days ago and holds that course.`);
-        }
+        const recent = settledCourse(world, forceId, delta.locationId, context);
+        if (recent !== undefined) reject(`${force.name} set out on "${recent.label}" ${atStep - recent.startedAtStep} days ago and holds that course.`);
         const turned = callOffMarches(world, forceId, delta.locationId, emitFact);
         if (turned !== world) return applyOne(turned, delta, context, assignedIds, resolve, emitFact, emitAccount);
       }
@@ -2479,7 +2542,10 @@ function applyOne(
           // seventh either way on top.
           const supplied = readDepartments(world).headLift({ kind: "polity", id: force.polityId }, "supply");
           // And winter, when the roads are mud and the passes snow.
-          const overPass = strictKmBetween(world, force.locationId, delta.locationId, (crossing) => crossing === "land" || crossing === "river", km * DETOUR_FACTOR) === null;
+          // Only a pass on the map is a pass: asked whether there was a way by
+          // land and river alone, a march with a crossing at the end of it was
+          // timed as a winter pass.
+          const overPass = mustCrossAPass(world, force.locationId, delta.locationId);
           // Ships sail it: a fleet sent 300 km along the coast was timed at a
           // marching pace and took 25 days.
           const days = isNavalForce(force, warfareWith(world, context.warfare))
@@ -3436,7 +3502,7 @@ function applyOne(
         ...withWork,
         enactments: [...withWork.enactments, {
           procedureId: id,
-          budget: delta.enacts.budget === undefined ? null : { accountId: required(delta.enacts.budget.accountRef, "The budget account"), amount: delta.enacts.budget.amount, purpose: delta.enacts.budget.purpose },
+          budget: delta.enacts.budget === undefined ? null : { accountId: required(delta.enacts.budget.accountRef, "The budget account"), amount: delta.enacts.budget.amount, purpose: delta.enacts.budget.purpose, ...budgetHolderOf(world, delta.enacts.budget.holderRef, resolve, allOffices(world, context.offices)) },
           projectId,
           polityId,
           effects: delta.enacts.effects ?? [],
@@ -3473,6 +3539,10 @@ function applyOne(
             };
           })(),
           waiver: delta.enacts.waiver === undefined ? null : { characterId: required(delta.enacts.waiver.characterRef, "The man excused"), officeId: delta.enacts.waiver.officeId },
+          franchise: delta.enacts.franchise === undefined ? null : { polityIds: delta.enacts.franchise.polityIds.map((ref) => required(ref, "The ally given the citizenship")), status: delta.enacts.franchise.status },
+          // Land for the landless and debts eased, sized the day it passes (`reform-laws.ts`).
+          land: delta.enacts.land === undefined ? null : { provinceId: delta.enacts.land },
+          debt: delta.enacts.debt === undefined ? null : { interestCapBps: null, forgiveBps: delta.enacts.debt },
           // Its armies remade, carried out the day it passes (`military-reform.ts`).
           // A body to redraw has to be one the power's establishment has.
           military: (() => {
@@ -3663,6 +3733,9 @@ function applyOne(
       if (isBindingChamberQuestion(world, procedure) && (delta.outcome === "passed" || delta.outcome === "failed")) {
         reject(`"${procedure.label}" is decided when the ${world.material.institutions.find((institution) => institution.id === procedure.institutionId)?.name ?? "assembly"} votes on it, in ${Math.max(0, voteDayOf(procedure) - atStep)} days; speak for it or against it, or win men over, instead.`);
       }
+      // A tribune's veto, said aloud as he closes it (`tribunes.ts`).
+      const vetoed = delta.outcome === "blocked" && context.actorRef.kind === "character" ? vetoFact(world, procedure, context.actorRef.id, context.offices) : null;
+      if (vetoed !== null) emitFact(vetoed);
       // Stage and outcome move together: the schema refuses a resolved
       // procedure with no outcome, and an unresolved one that has one.
       const stage = delta.outcome === "withdrawn" ? "withdrawn" as const : delta.outcome === "blocked" ? "blocked" as const : "resolved" as const;
@@ -4213,15 +4286,18 @@ function applyOne(
       }
       // Bounded, or a world that opens a thread for every incident drowns the
       // slice in them. The cap is generous; the narrator stops seeding well
-      // before it and the prompt asks for threads to be closed.
-      if (openStorylines(world.storylines).length >= MAX_OPEN_STORYLINES) {
-        reject(`The world is already following ${MAX_OPEN_STORYLINES} threads; close one before opening another.`);
+      // before it and the prompt asks for threads to be closed. The order's own
+      // thread is never refused (E24): a seed taken up is the world's, though.
+      const ordersOwn = context.actsForTheWorld !== true || (context.forTheOrder === true && delta.seedKey === null);
+      if (!ordersOwn && worldThreadsFull(world)) {
+        reject(`The world is already following ${WORLD_THREAD_CAP} threads of its own; close one before opening another.`);
       }
       const id = mint("storyline", delta.localId);
+      const roomy = ordersOwn ? makeRoomForTheOrder(world, atStep, delta.title) : world;
       return {
-        ...world,
+        ...roomy,
         storylines: [
-          ...world.storylines,
+          ...roomy.storylines,
           {
             id,
             title: delta.title,
@@ -4232,7 +4308,7 @@ function applyOne(
             history: [],
             nextDevelopment: delta.nextDevelopment,
             visibility: delta.visibility,
-            origin: context.actsForTheWorld === true ? ("world" as const) : ("character" as const),
+            origin: ordersOwn ? ("character" as const) : ("world" as const),
             openedByRef: context.actorRef,
             openedAtStep: atStep,
             updatedAtStep: atStep,
@@ -4455,6 +4531,10 @@ function applyOne(
     }
 
     case "service_contract_open": {
+      // A town named where the man should be: he is found there (`hiring-market.ts`).
+      const named = resolve(delta.employeeRef) ?? delta.employeeRef;
+      const market = world.characters.some((character) => character.id === named) ? null : hireAtThePlace(world, named, delta.role, atStep, context.ids);
+      if (market !== null) return applyOne(market.world, { ...delta, employeeRef: market.characterId }, context, assignedIds, resolve, emitFact, emitAccount);
       const id = mint("contract", delta.localId);
       const employerAccountId = required(delta.employerAccountRef, "The account that pays");
       const employer = world.material.accounts.find((account) => account.id === employerAccountId);
@@ -5019,6 +5099,9 @@ function applyOne(
       if (message !== undefined && !isDelivered(message, atStep)) {
         reject(`"${message.subject}" has not reached ${message.toCharacterId === null ? polityName(world, message.toPolityId) : characterName(world, message.toCharacterId)} yet: it arrives in ${message.deliveredOnDay! - atStep} day(s).`);
       }
+      // An ally offered union answers by rule; the reply is only its voice (`submission.ts`).
+      const ruled = unionVerdict(world, message);
+      if (ruled !== null && (ruled.answer !== delta.answer || (delta.refusedClauses ?? []).length > 0 || delta.addedTerms != null)) return applyOne(world, { ...delta, answer: ruled.answer, answerText: `${delta.answerText} ${ruled.why}`.slice(0, 1_200), refusedClauses: [], addedTerms: null }, context, assignedIds, resolve, emitFact, emitAccount);
       // An acceptance that adds terms is an answer with terms of its own: the
       // player's reply is read for them (`termsAddedIn`), a model's is told in
       // "addedTerms". It binds nothing until the other side takes them (R13).
@@ -5099,8 +5182,10 @@ function applyOne(
           score: -10, dimensions: { fear: 15, affection: -15, trust: -10 },
         }], atStep, boundedId("ultimatum", messageId))
         : replied;
-      if (delta.answer === "accepted") return bindTheAcceptance(threatened, answered);
-      return delta.answer === "refused" || delta.answer === "ignored" ? carryOutTheThreat(threatened, answered) : threatened;
+      const settled = delta.answer === "accepted" ? bindTheAcceptance(threatened, answered)
+        : delta.answer === "refused" || delta.answer === "ignored" ? carryOutTheThreat(threatened, answered) : threatened;
+      // Taken in, or the refusal remembered, whatever else the letter offered (`submission.ts`).
+      return ruled === null ? settled : carryOutUnion(settled, ruled, atStep, emitFact);
     }
 
     case "agreement_open": {
@@ -6947,7 +7032,7 @@ function splitDetachmentsNamedIn(delta: WorldDelta, world: WorldState, assignedI
       const parent = next.material.forces
         .filter((force) => slug.startsWith(`${force.id.toLowerCase()}-`) || slug.startsWith(`${force.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-`))
         .sort((a, b) => b.id.length - a.id.length)[0]
-        ?? (theirs.length === 1 && /scout|detach|party|picket|patrol|guard|escort|squad|band/i.test(slug) ? theirs[0] : undefined);
+        ?? (theirs.length === 1 && /scout|detach|party|picket|patrol|guard|escort|squad|band|garrison|praesidi/i.test(slug) ? theirs[0] : undefined);
       if (parent === undefined) return;
       const personnel = parent.personnel
         .map((category) => ({ ...category, fit: Math.floor(category.fit * DETACHMENT_SHARE), unavailable: [] }))
@@ -6967,7 +7052,7 @@ function splitDetachmentsNamedIn(delta: WorldDelta, world: WorldState, assignedI
               personnel: force.personnel.map((category) => ({ ...category, fit: category.fit - (taken.get(category.categoryId) ?? 0) })),
               authorizedStrength: Math.max(1, force.authorizedStrength - personnel.reduce((sum, category) => sum + category.fit, 0)),
             }),
-            {
+            ((detached: Force) => (isGarrison(slug) ? asGarrison(next, detached) : detached))({
               ...structuredClone(parent),
               id,
               name: name.slice(0, 120),
@@ -6977,7 +7062,7 @@ function splitDetachmentsNamedIn(delta: WorldDelta, world: WorldState, assignedI
               payArrearsPeriods: 0,
               history: [],
               memberCharacterIds: [],
-            },
+            }),
           ],
         },
       };

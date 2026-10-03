@@ -32,6 +32,7 @@ import { concernsOf } from "./questions";
 import { judgmentLean, sentenceByOutcome } from "./trials";
 import { rulerOf } from "./constitutions";
 import { tenureLean } from "./command-tenure";
+import { intercessionsAgainst, settleSecessions, type SecessionHooks } from "./tribunes";
 
 /**
  * A chamber's questions, debated by its people and decided by the count.
@@ -145,6 +146,44 @@ export function seatByOutcome(world: WorldState, procedure: PoliticalProcedure, 
 /** The day the chamber votes on it. */
 export const voteDayOf = (procedure: PoliticalProcedure): number => procedure.deadlineStep ?? procedure.openedAtStep + MOTION_VOTING_DAYS;
 
+/** Told with a carried question that does nothing by being carried. */
+const BEGINS_NOTHING = "It gives leave and begins nothing by itself: what it allows waits on somebody's order.";
+
+/** The kinds of question that move a man -- seat him, unseat him, try him -- by being carried. */
+const MOVES_A_MAN = new Set<PoliticalProcedure["type"]>(["appointment", "command_assignment", "nomination", "removal", "denunciation"]);
+
+/**
+ * A carried question that does nothing by being carried: no law it enacts, no
+ * man it seats or tries, no treaty or command waiting on it.
+ *
+ * "Authorize a fleet budget and begin building toward three hundred ships"
+ * passed 191 to 40 and no keel was laid, because the question itself began no
+ * work, and the player read "carried" and waited four months for ships. That
+ * was warned of only for a question about a whole power; a plebiscite the
+ * player carried in the Council of the Plebs, about nothing in particular,
+ * passed in silence and did nothing.
+ */
+export function beginsNothing(world: WorldState, procedure: PoliticalProcedure): boolean {
+  if (world.enactments.some((enactment) => enactment.procedureId === procedure.id && enactment.enactedAtStep === null)) return false;
+  if (procedure.subjectId !== null && (procedure.subjectKind === "character" || procedure.type === "removal") && MOVES_A_MAN.has(procedure.type)) return false;
+  if (procedure.type === "treaty_ratification" || world.diplomacy.some((message) => message.ratification?.procedureId === procedure.id)) return false;
+  // A command prorogued or a triumph asked: `command-tenure.ts` reads the outcome.
+  return !(procedure.id.startsWith("prorogation:") || world.commandHolds.some((hold) => hold.procedureId === procedure.id));
+}
+
+/** How a secession asks the house, and carries what it gives way on, as a vote would. */
+const secessionHooks = (input: HoldVotesInput): SecessionHooks => ({
+  houseLean: (world, procedure, institution) => {
+    const leanings = blocLeanings(world, procedure, institution);
+    const weight = leanings.reduce((sum, leaning) => sum + leaning.bloc.weight, 0);
+    return weight === 0 ? 0 : Math.round(leanings.reduce((sum, leaning) => sum + leaning.lean * leaning.bloc.weight, 0) / weight);
+  },
+  carry: (world, settled) => {
+    const enacted = carryOutEnactment(world, settled.id, input.toDay, input.ids, input.offices, input.successionRules ?? []);
+    return { world: sentenceByOutcome(seatByOutcome(enacted.world, settled, input.toDay, input.offices), settled, input.toDay), facts: enacted.facts };
+  },
+});
+
 /** How long a ruler has to take or leave his council's advice before its silence decides. */
 export const ADVICE_DAYS = 30;
 
@@ -158,7 +197,7 @@ function powersNeeded(world: WorldState, procedure: PoliticalProcedure, concerns
   }
   const enactment = world.enactments.find((candidate) => candidate.procedureId === procedure.id);
   if (enactment !== undefined) {
-    if (enactment.effects.length > 0 || enactment.office !== null || enactment.body !== null || enactment.department != null) needed.add("laws");
+    if (enactment.effects.length > 0 || enactment.office !== null || enactment.body !== null || enactment.department != null || enactment.land != null || enactment.debt != null) needed.add("laws");
     if (enactment.constitution != null) needed.add("constitution");
   }
   if (procedure.type === "removal" || procedure.type === "denunciation") needed.add("judgment");
@@ -228,9 +267,42 @@ const clampScore = (score: number): number => Math.max(-100, Math.min(100, Math.
 export interface BlocLeaning {
   readonly bloc: VotingBloc;
   readonly lean: number;
+  /** How most of it votes. */
   readonly choice: "yes" | "no" | "abstain";
+  /** Its weight, divided by its lean (`splitOfBloc`). */
+  readonly split: BlocSplit;
   readonly reasons: readonly string[];
 }
+
+export interface BlocSplit {
+  readonly yes: number;
+  readonly no: number;
+  readonly abstain: number;
+}
+
+/**
+ * How a bloc's weight divides on a question, by how far it leans.
+ *
+ * A bloc used to vote as one man by its thresholds: at +14 against a line of
+ * +15 every one of its sixty members abstained, and at -16 every one of a
+ * small bloc's members voted no, so a house that hardly cared either way
+ * rejected a measure on the word of its smallest part. Past a threshold the
+ * whole bloc goes that way; between them its members divide in proportion --
+ * some for, the rest abstaining, at a lean above the middle of its lines; some
+ * against below it.
+ */
+export function splitOfBloc(bloc: Pick<VotingBloc, "weight" | "yesThreshold" | "noThreshold">, lean: number): BlocSplit {
+  if (lean >= bloc.yesThreshold) return { yes: bloc.weight, no: 0, abstain: 0 };
+  if (lean <= bloc.noThreshold) return { yes: 0, no: bloc.weight, abstain: 0 };
+  const middle = (bloc.yesThreshold + bloc.noThreshold) / 2;
+  const yes = lean > middle ? Math.round((bloc.weight * (lean - middle)) / (bloc.yesThreshold - middle)) : 0;
+  const no = lean < middle ? Math.round((bloc.weight * (middle - lean)) / (middle - bloc.noThreshold)) : 0;
+  return { yes, no, abstain: bloc.weight - yes - no };
+}
+
+/** How most of a bloc voted: the largest part, an even split counted as abstaining. */
+const choiceOf = (split: BlocSplit): BlocLeaning["choice"] =>
+  split.yes > split.no && split.yes > split.abstain ? "yes" : split.no > split.yes && split.no > split.abstain ? "no" : "abstain";
 
 /**
  * How each bloc of the chamber leans on a question, today.
@@ -300,14 +372,14 @@ export function blocLeanings(world: WorldState, procedure: PoliticalProcedure, i
     if (forIt.length > 0) reasons.push(`${forIt.join(", ")} spoke for it`);
     if (againstIt.length > 0) reasons.push(`${againstIt.join(", ")} spoke against it`);
     const score = clampScore(lean);
-    const choice = score >= bloc.yesThreshold ? "yes" : score <= bloc.noThreshold ? "no" : "abstain";
-    return { bloc, lean: score, choice, reasons: reasons.map((reason) => reason.slice(0, 200)) };
+    const split = splitOfBloc(bloc, score);
+    return { bloc, lean: score, choice: choiceOf(split), split, reasons: reasons.map((reason) => reason.slice(0, 200)) };
   });
 }
 
 /** The count, as the chamber's own rules have it. */
 function countVote(id: string, procedure: PoliticalProcedure, institution: GovernmentInstitution, leanings: readonly BlocLeaning[], atStep: number): VoteRecord {
-  const weightOf = (choice: BlocLeaning["choice"]) => leanings.filter((leaning) => leaning.choice === choice).reduce((sum, leaning) => sum + leaning.bloc.weight, 0);
+  const weightOf = (choice: BlocLeaning["choice"]) => leanings.reduce((sum, leaning) => sum + leaning.split[choice], 0);
   const yesWeight = weightOf("yes");
   const noWeight = weightOf("no");
   const abstainWeight = weightOf("abstain");
@@ -319,7 +391,10 @@ function countVote(id: string, procedure: PoliticalProcedure, institution: Gover
   return {
     id,
     motionId: procedure.id,
-    votes: leanings.map((leaning) => ({ blocId: leaning.bloc.id, choice: leaning.choice, weight: leaning.bloc.weight, supportScore: leaning.lean, reasons: [...leaning.reasons] })),
+    // A divided bloc is recorded as its parts, each with the weight that went that way.
+    votes: leanings.flatMap((leaning) => (["yes", "no", "abstain"] as const)
+      .filter((choice) => leaning.split[choice] > 0)
+      .map((choice) => ({ blocId: leaning.bloc.id, choice, weight: leaning.split[choice], supportScore: leaning.lean, reasons: [...leaning.reasons] }))),
     yesWeight,
     noWeight,
     abstainWeight,
@@ -331,14 +406,31 @@ function countVote(id: string, procedure: PoliticalProcedure, institution: Gover
   };
 }
 
+/** How often a question is put off for want of a mind before a failed count stands. */
+export const MAX_ADJOURNMENTS = 1;
+
+/**
+ * A count that would fail with most of the house undecided puts the question
+ * off to its next sitting instead: a house that has not made up its mind has
+ * not refused. Once only; a second time, the count stands.
+ */
+function adjourns(procedure: PoliticalProcedure, record: VoteRecord): boolean {
+  return record.outcome === "failed" && record.abstainWeight * 2 > record.presentWeight && (procedure.adjournments ?? 0) < MAX_ADJOURNMENTS;
+}
+
 const CHOICE_WORDS = { yes: "for", no: "against", abstain: "abstaining" } as const;
 
 /** "the patrician houses", and "the citizens" for a bloc already called "The citizens". */
 const theBloc = (name: string): string => (/^the\s/iu.test(name) ? `the${name.slice(3)}` : `the ${name}`);
 
-/** "the patrician houses for, the plebeian new men against" */
+/** "the patrician houses for, the plebeian new men 27 against and 13 abstaining" */
 function howTheyVoted(leanings: readonly BlocLeaning[]): string {
-  return leanings.map((leaning) => `${theBloc(leaning.bloc.name)} ${CHOICE_WORDS[leaning.choice]}`).join(", ");
+  return leanings.map((leaning) => {
+    const parts = (["yes", "no", "abstain"] as const).filter((choice) => leaning.split[choice] > 0);
+    return parts.length <= 1
+      ? `${theBloc(leaning.bloc.name)} ${CHOICE_WORDS[leaning.choice]}`
+      : `${theBloc(leaning.bloc.name)} ${parts.map((choice) => `${leaning.split[choice]} ${CHOICE_WORDS[choice]}`).join(" and ")}`;
+  }).join(", ");
 }
 
 /** How the house leans on a question, in words, for whoever may lobby it. */
@@ -351,20 +443,32 @@ export function forecastInWords(world: WorldState, procedure: PoliticalProcedure
   }
   const leanings = blocLeanings(world, procedure, institution);
   const record = countVote("forecast", procedure, institution, leanings, world.elapsedStep);
-  const each = leanings.map((leaning) => `${theBloc(leaning.bloc.name)} (${leaning.bloc.weight} votes) leans ${leaning.lean >= 0 ? "+" : ""}${leaning.lean}, ${leaning.choice === "abstain" ? "would abstain" : `would vote ${CHOICE_WORDS[leaning.choice]}`} (for at ${leaning.bloc.yesThreshold}, against at ${leaning.bloc.noThreshold})`);
-  return `${each.join("; ")}. As it stands it would ${record.outcome === "passed" ? "pass" : "fail"}, ${record.yesWeight} to ${record.noWeight}.`;
+  const each = leanings.map((leaning) => {
+    const parts = (["yes", "no", "abstain"] as const).filter((choice) => leaning.split[choice] > 0);
+    const how = parts.length > 1 ? `would divide, ${parts.map((choice) => `${leaning.split[choice]} ${CHOICE_WORDS[choice]}`).join(", ")}` : leaning.choice === "abstain" ? "would abstain" : `would vote ${CHOICE_WORDS[leaning.choice]}`;
+    return `${theBloc(leaning.bloc.name)} (${leaning.bloc.weight} votes) leans ${leaning.lean >= 0 ? "+" : ""}${leaning.lean}, ${how} (all for at ${leaning.bloc.yesThreshold}, all against at ${leaning.bloc.noThreshold})`;
+  });
+  const outcome = record.outcome === "passed" ? "pass" : adjourns(procedure, record) ? "be put off, too few minds made up" : "fail";
+  return `${each.join("; ")}. As it stands it would ${outcome}, ${record.yesWeight} to ${record.noWeight}.`;
 }
 
-/** Whoever holds a vetoing office of the chamber's power and stands against the question, with the office. */
+/**
+ * Whoever holds a vetoing office of the chamber's power and stands against the
+ * question, with the office -- and every tribune whose intercession stands
+ * against the man who put it, which used to stop only his next motion and not
+ * the one already before the house (`tribunes.ts`).
+ */
 function vetoesOf(world: WorldState, procedure: PoliticalProcedure, institution: GovernmentInstitution, offices: readonly Office[]): { name: string; office: string }[] {
   const vetoOffices = allOffices(world, offices).filter((office) => office.vetoes === true && office.polityId === institution.polityId);
-  return latestPositions(world, procedure.id).flatMap((position) => {
+  const opposed = latestPositions(world, procedure.id).flatMap((position) => {
     if (position.supporterKind !== "character" || position.position !== "oppose") return [];
     const office = vetoOffices.find((candidate) => world.material.officeSeats.some((seat) =>
       seat.officeId === candidate.id && seat.holderCharacterId === position.supporterId && seat.status === "held"));
     const character = world.characters.find((candidate) => candidate.id === position.supporterId);
     return office === undefined || character === undefined || !character.alive ? [] : [{ name: character.name, office: office.label }];
   });
+  const interceding = intercessionsAgainst(world, procedure, institution, offices).filter((veto) => !opposed.some((known) => known.name === veto.name));
+  return [...opposed, ...interceding];
 }
 
 export interface HoldVotesInput {
@@ -380,9 +484,15 @@ export interface HoldVotesInput {
 export function holdVotes(input: HoldVotesInput): { world: WorldState; facts: FactProposalDraft[] } {
   let world = input.world;
   const facts: FactProposalDraft[] = [];
+  // The plebs out of the city first: a demand the house gives way to is
+  // carried today, and a power whose plebs are still out does no business in
+  // its chambers until they come back (`tribunes.ts`).
+  const seceded = settleSecessions(world, input.offices, input.toDay, secessionHooks(input));
+  world = seceded.world;
+  facts.push(...seceded.facts);
   const elective = electiveOfficesOf(world, input.offices, input.successionRules ?? []);
   for (const { procedure, institution } of openQuestions(world, elective)) {
-    if (voteDayOf(procedure) > input.toDay) continue;
+    if (voteDayOf(procedure) > input.toDay || seceded.out.has(institution.polityId)) continue;
     // Forbidden, it is not put to the house at all.
     const vetoes = vetoesOf(world, procedure, institution, input.offices);
     if (vetoes.length > 0) {
@@ -430,18 +540,36 @@ export function holdVotes(input: HoldVotesInput): { world: WorldState; facts: Fa
       forIt.length === 0 ? null : `${forIt.join(", ")} spoke for it`,
       againstIt.length === 0 ? null : `${againstIt.join(", ")} against it`,
     ].filter((part) => part !== null).join("; ");
+    // Most of the house undecided: put off to another day, not refused.
+    if (adjourns(procedure, record)) {
+      const said = `The ${institution.name} could not make up its mind on "${procedure.label}", ${tally}: ${howTheyVoted(leanings)}. It is put off, to be put again in ${MOTION_VOTING_DAYS} days.`;
+      world = {
+        ...world,
+        material: {
+          ...world.material,
+          politicalProcedures: world.material.politicalProcedures.map((candidate) => (candidate.id === procedure.id
+            ? { ...candidate, deadlineStep: input.toDay + MOTION_VOTING_DAYS, adjournments: (candidate.adjournments ?? 0) + 1, outcomeReason: said.slice(0, 400) }
+            : candidate)),
+        },
+      };
+      facts.push({
+        localId: `vote_${facts.length + 1}`,
+        kind: "motion_adjourned",
+        summary: said,
+        affectedRefs: [{ kind: "procedure", id: procedure.id }, { kind: "polity", id: institution.polityId }, { kind: "character", id: procedure.sponsorCharacterId }],
+        visibility: "public",
+        discoveryState: "public",
+        knowableInDays: 0,
+        significance: 45,
+      });
+      continue;
+    }
     const verdict = carried
       ? `The ${institution.name} carried "${procedure.label}", ${tally}: ${howTheyVoted(leanings)}.`
       : !record.quorumMet
         ? `The ${institution.name} could not muster a quorum on "${procedure.label}", and it fell.`
         : `The ${institution.name} rejected "${procedure.label}", ${tally}: ${howTheyVoted(leanings)}.`;
-    // A vote that carries leave and nothing else. "Authorize a fleet budget
-    // and begin building toward three hundred ships" passed 191 to 40 and no
-    // keel was laid, because the question itself began no work; the player
-    // read "carried" and waited four months for ships.
-    const beganNothing = carried && procedure.subjectKind === "polity"
-      && !world.enactments.some((enactment) => enactment.procedureId === procedure.id && enactment.enactedAtStep === null);
-    const leave = beganNothing ? `${verdict} It gives leave and begins nothing by itself: what it allows waits on somebody's order.` : verdict;
+    const leave = carried && beginsNothing(world, procedure) ? `${verdict} ${BEGINS_NOTHING}` : verdict;
     const said = debate.length === 0 ? leave : `${leave} ${debate[0]!.toUpperCase()}${debate.slice(1)}.`;
     const settled: PoliticalProcedure = {
       ...procedure,
@@ -567,9 +695,9 @@ function settleAdvice(world: WorldState, input: HoldVotesInput): { world: WorldS
     if (record === undefined || institution === undefined) continue;
     const carried = record.outcome === "passed";
     const said = carried
-      ? `Nobody overruled the ${institution.name}, and "${procedure.label}" was done as it advised.`
+      ? `Nobody overruled the ${institution.name}, and "${procedure.label}" was done as it advised.${beginsNothing(next, procedure) ? ` ${BEGINS_NOTHING}` : ""}`
       : `Nobody overruled the ${institution.name}, and "${procedure.label}" was let drop as it advised.`;
-    const settled: PoliticalProcedure = { ...procedure, stage: carried ? "resolved" : "withdrawn", outcome: carried ? "passed" : "withdrawn", outcomeReason: said, resolvedAtStep: input.toDay };
+    const settled: PoliticalProcedure = { ...procedure, stage: carried ? "resolved" : "withdrawn", outcome: carried ? "passed" : "withdrawn", outcomeReason: said.slice(0, 400), resolvedAtStep: input.toDay };
     next = { ...next, material: { ...next.material, politicalProcedures: next.material.politicalProcedures.map((candidate) => (candidate.id === procedure.id ? settled : candidate)) } };
     if (carried) {
       const enacted = carryOutEnactment(next, procedure.id, input.toDay, input.ids, input.offices, input.successionRules ?? []);

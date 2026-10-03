@@ -1,4 +1,5 @@
 import { powersDealtWith } from "./far-powers";
+import { powersNamedIn } from "./powers-named";
 import { armyInWords, serviceInWords } from "./army-words";
 import { findPolityGaps } from "./population";
 import { distancesFrom, placeIndex, provinceIdsIn, provincesNamedIn } from "./place-index";
@@ -8,6 +9,7 @@ import { isOpenIntent, mostPressingFirst } from "./intents";
 import { ruleInWords } from "./mechanics/mechanic-words";
 import { forecastInWords, isChamberQuestion, voteDayOf } from "./senate";
 import { commandTenureOf, rulerOf, rulerOfficeOf, sovereignChamberOf } from "./constitutions";
+import { promagistrateInWords } from "./promagistrate";
 
 import {
   ORDER_PART_STATUS_LABEL,
@@ -198,7 +200,8 @@ export interface WorldSlice {
     readonly id: string;
     readonly name: string;
     readonly controller: string;
-    readonly cities: readonly { readonly id: string; readonly name: string; readonly controller: string; readonly walls: number }[];
+    readonly controllerId: string | null;
+    readonly cities: readonly { readonly id: string; readonly name: string; readonly controller: string; readonly controllerId: string | null; readonly walls: number }[];
     readonly ground: readonly { readonly id: string; readonly label: string; readonly type: string }[];
     /** What stands there and what it does. */
     readonly buildings: readonly string[];
@@ -465,6 +468,10 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   const name = (id: string): string => characterNames.get(id) ?? id;
   const provinceName = (id: string): string => provinceNames.get(id) ?? id;
   const polityName = (id: string): string => polityNames.get(id) ?? id;
+  // A power named anywhere a letter, a treaty or a stance might have to be addressed
+  // to it carries its id: a letter to Syracuse could not be written when Syracuse's
+  // id appeared only under OTHER POWERS, and Syracuse was not among them (E23).
+  const power = (id: string): string => `${polityName(id)} [${id}]`;
 
   const actor = world.characters.find((character) => character.id === input.actorRef.id);
   const ownPolity = input.actorPolityId;
@@ -648,10 +655,12 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       id: province.id,
       name: province.name,
       controller: province.controllerPolityId === null ? "uncontrolled" : polityName(province.controllerPolityId),
+      controllerId: province.controllerPolityId,
       cities: province.settlements.slice(0, CAPS.citiesPerProvince).map((settlement) => ({
         id: settlement.id,
         name: settlement.name,
         controller: settlement.controllerPolityId === null ? "uncontrolled" : polityName(settlement.controllerPolityId),
+        controllerId: settlement.controllerPolityId,
         walls: settlement.fortificationLevel,
       })),
       // Only ground somebody authored or made. Every province has a generated
@@ -715,7 +724,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   const blockadeLines = world.blockades
     .filter((blockade) => blockade.status === "active" && (ownPolity === null || blockade.blockadedPolityId === ownPolity || blockade.blockaderPolityId === ownPolity))
     .slice(0, CAPS.standingPlans)
-    .map((blockade) => ({ id: blockade.id, line: `${world.map.polities.find((polity) => polity.id === blockade.blockaderPolityId)?.name ?? blockade.blockaderPolityId} blockades ${provinceName(blockade.provinceId)}, ${world.elapsedStep - blockade.sinceStep} days, ${blockade.tightnessBps >= 5_000 ? "shut tight" : "loosely watched"}` }));
+    .map((blockade) => ({ id: blockade.id, line: `${power(blockade.blockaderPolityId)} blockades ${provinceName(blockade.provinceId)}, ${world.elapsedStep - blockade.sinceStep} days, ${blockade.tightnessBps >= 5_000 ? "shut tight" : "loosely watched"}` }));
   const standingPlans = world.contingencies
     .filter((plan) => plan.status === "armed" && (ownPolity === null || plan.ownerPolityId === ownPolity)
       && (speaksForTheGovernment || station === null || plan.ownerCharacterId === station.characterId))
@@ -752,7 +761,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
   const diplomacy = (speaksForTheGovernment ? world.polityStances : [])
     .filter((stance) => ownPolity === null || stance.polityId === ownPolity)
     .slice(0, CAPS.stances)
-    .map((stance) => ({ toward: polityName(stance.towardPolityId), trust: stance.trustScore, why: stance.lastShiftReason }));
+    .map((stance) => ({ toward: power(stance.towardPolityId), trust: stance.trustScore, why: stance.lastShiftReason }));
 
   // What this world's powers have standing between them. §27 asks the slice to
   // carry active wars; before agreements existed the answer to "are we at war?"
@@ -782,7 +791,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       id: agreement.id,
       kind: agreement.kind,
       ours: agreement.polityId === ownPolity || agreement.otherPolityId === ownPolity,
-      between: `${polityName(agreement.polityId)} and ${polityName(agreement.otherPolityId)}`,
+      between: `${power(agreement.polityId)} and ${power(agreement.otherPolityId)}`,
       terms: agreement.terms,
       endsInDays: agreement.untilStep === null ? null : agreement.untilStep - world.elapsedStep,
     }));
@@ -807,8 +816,8 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       id: message.id,
       kind: message.kind,
       ours: message.fromPolityId === ownPolity,
-      from: polityName(message.fromPolityId),
-      to: polityName(message.toPolityId),
+      from: power(message.fromPolityId),
+      to: power(message.toPolityId),
       subject: message.subject,
       terms: message.terms,
       dueInDays: message.replyDueByStep === null ? null : message.replyDueByStep - world.elapsedStep,
@@ -1055,7 +1064,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       id: source.id,
       label: source.label,
       amount: source.amount,
-      counterparty: polityName(source.counterpartyPolityId ?? ""),
+      counterparty: power(source.counterpartyPolityId ?? ""),
       active: source.active,
     }));
 
@@ -1133,6 +1142,12 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     ...world.polityStances.filter((stance) => stance.towardPolityId === ownPolity).map((stance) => stance.polityId),
   ].filter((id) => id !== ownPolity));
 
+  // A power the order names, or that holds ground the order names, comes first:
+  // a letter to Syracuse needs Syracuse here, wherever it stands (E23). Holders
+  // of the places listed come before the merely large.
+  const namedByTheOrder = new Set(input.orderText === null ? [] : powersNamedIn(world, input.orderText));
+  for (const [id, weight] of pressing) if (weight === 0 && typeof controllerOf.get(id) === "string") namedByTheOrder.add(controllerOf.get(id)!);
+  const holdsAListedPlace = new Set(provinces.map((province) => province.controllerId));
   // Our own allies are named once, under WHERE THE POWERS STAND, and do not
   // take the places of the powers we might have to fight.
   const foreignPowers = world.map.polities
@@ -1158,7 +1173,7 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
     .filter((power) => power.provinces > 0 || power.leaders.length > 0 || power.forces.length > 0)
     .sort((a, b) => {
       const weight = (power: { id: string }): number =>
-        (neighbouringPolities.has(power.id) ? 0 : entangled.has(power.id) ? 1 : 2);
+        (namedByTheOrder.has(power.id) ? 0 : neighbouringPolities.has(power.id) ? 1 : entangled.has(power.id) ? 2 : holdsAListedPlace.has(power.id) ? 3 : 4);
       return weight(a) - weight(b) || b.provinces - a.provinces || a.id.localeCompare(b.id);
     })
     .slice(0, CAPS.foreignFigures);
@@ -1251,7 +1266,9 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
       id: input.actorRef.id,
       name: actor?.name ?? input.actorRef.id,
       office: actor?.officeId ?? null,
-      officeLabel: allOffices(world, input.offices).find((office) => office.id === actor?.officeId)?.label ?? null,
+      // A consul prorogued is a proconsul, not a senator with an army.
+      officeLabel: promagistrateInWords(world, input.actorRef.id, input.offices, String)?.title
+        ?? allOffices(world, input.offices).find((office) => office.id === actor?.officeId)?.label ?? null,
       polityId: ownPolity,
       polityName: ownPolity === null ? null : polityName(ownPolity),
       // The world knew a minor Carthaginian admiral's temperament, drives and
@@ -1262,6 +1279,8 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
         : renderCharacterPortrait(input.actorRef.id, actor.name, world, input.clock, { others: [] }),
       permitted: actor === undefined ? [] : [
         ...describeAuthority(buildStation({ world, characterId: input.actorRef.id, offices: input.offices }), world),
+        // His imperium past his year, said whole (`promagistrate.ts`).
+        ...[promagistrateInWords(world, input.actorRef.id, input.offices, (step) => formatWorldDate({ day: step, minute: 0 }, input.clock))?.line].filter((line): line is string => line !== undefined),
         // The tribune's one great power is no grant at all: opposing a
         // question before his power's chambers forbids it (`senate.ts`).
         ...allOffices(world, input.offices)
@@ -1270,7 +1289,10 @@ export function buildWorldSlice(input: WorldSliceInput): WorldSlice {
         // And a magistrate's act inside the city, by interceding against him.
         ...allOffices(world, input.offices)
           .filter((office) => office.tribunician === true && world.material.officeSeats.some((seat) => seat.officeId === office.id && seat.holderCharacterId === input.actorRef.id && seat.status === "held"))
-          .map(() => `intercede against a magistrate's act within the city (not in the field, not a dictator's): generic_entity_create kind "intercession", owner himself, attributes {against: the magistrate's id, act: "levy" | "spending" | "motion" | "appointment" | "all"}; retire it to lift it. His person is sacrosanct.`),
+          .flatMap(() => [
+            `intercede against a magistrate's act within the city (not in the field, not a dictator's): generic_entity_create kind "intercession", owner himself, attributes {against: the magistrate's id, act: "levy" | "spending" | "motion" | "appointment" | "all"}; retire it to lift it. His person is sacrosanct.`,
+            `veto an open question: political_procedure_resolve "blocked". Lead the plebs out until a question is granted: generic_entity_create kind "secession", owner himself, attributes {demand: its id}.`,
+          ]),
         // Who may lay a question before which chamber: a senator speaks when
         // asked, and moves nothing himself.
         ...(() => {
@@ -1335,7 +1357,7 @@ export function renderWorldSlice(slice: WorldSlice): string {
 
   lines.push(`CURRENT DATE: ${slice.date}`, "");
   lines.push(
-    `ACTING FOR: ${slice.actor.name} [${slice.actor.id}]${slice.actor.officeLabel === null ? "" : `, ${slice.actor.officeLabel}`}, of ${slice.actor.polityName ?? slice.actor.polityId ?? "no polity"}`,
+    `ACTING FOR: ${slice.actor.name} [${slice.actor.id}]${slice.actor.officeLabel === null ? "" : `, ${slice.actor.officeLabel}`}, of ${slice.actor.polityName === null ? slice.actor.polityId ?? "no polity" : `${slice.actor.polityName} [${slice.actor.polityId}]`}`,
     "",
   );
   if (slice.actor.portrait.length > 0) lines.push(slice.actor.portrait, "");
@@ -1392,17 +1414,26 @@ export function renderWorldSlice(slice: WorldSlice): string {
   section("KINDS OF SOLDIER", slice.troopKinds.length === 0 ? [] : [
     `${slice.troopKinds.map((kind) => `${kind.label} [${kind.id}]`).join("; ")}. A kind not listed here can be taken into an army anyway -- name it and say what sort of troops they are.`,
   ]);
+  // A holder's id is said where the holder is first named (E23), not on every
+  // line: forty provinces each repeating "[rome]" would cost more than it tells.
+  // Our own power and the ones under OTHER POWERS carry theirs there already.
+  const namedHolders = new Set<string>([slice.actor.polityId ?? "", ...slice.foreignPowers.map((power) => power.id)]);
+  const holder = (name: string, id: string | null): string => {
+    if (id === null || namedHolders.has(id)) return name;
+    namedHolders.add(id);
+    return `${name} [${id}]`;
+  };
   section("PLACES", slice.provinces.map((province) => {
     const cities = province.cities.length === 0
       ? ""
       // A city is named with its holder only where that is not the province's.
-      : `. Cities: ${province.cities.map((city) => `${city.name} [${city.id}]${city.controller === province.controller ? "" : `, ${city.controller}`}, walls ${city.walls}/10`).join("; ")}`;
+      : `. Cities: ${province.cities.map((city) => `${city.name} [${city.id}]${city.controller === province.controller ? "" : `, ${holder(city.controller, city.controllerId)}`}, walls ${city.walls}/10`).join("; ")}`;
     const ground = province.ground.length === 0
       ? ""
       : `. Ground: ${province.ground.map((spot) => `${spot.label} [${spot.id}], ${spot.type}`).join("; ")}`;
     const buildings = province.buildings.length === 0 ? "" : `. Standing there: ${province.buildings.join("; ")}`;
     const belief = province.belief.length === 0 ? "" : `. Believe: ${province.belief.join(", ")}, the rest as of old`;
-    return `${province.name} [${province.id}] — ${province.controller === "uncontrolled" ? "held by no one" : `held by ${province.controller}`}${cities}${ground}${buildings}${belief}`;
+    return `${province.name} [${province.id}] — ${province.controller === "uncontrolled" ? "held by no one" : `held by ${holder(province.controller, province.controllerId)}`}${cities}${ground}${buildings}${belief}`;
   }));
   section("FAITHS", slice.faiths.length === 0 ? [] : [`${slice.faiths.join("; ")}. A faith not listed is founded by naming it.`]);
   section("OTHER POWERS", slice.foreignPowers.map((power) => {

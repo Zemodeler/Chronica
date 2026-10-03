@@ -28,7 +28,9 @@ describe("Punic Wars built-in scenario", () => {
       "Hastati of Legio I", "Principes of Legio I", "Triarii of Legio I", "Velites of Legio I", "Equites of Legio I",
       "Allied cohorts of the first Ala of the allies", "Extraordinarii of the first Ala of the allies", "Allied horse of the first Ala of the allies",
     ]);
-    expect(forces.filter((force) => force.personnel.some((category) => category.categoryId === "warship"))).toHaveLength(4);
+    // Three war fleets, and the allied Greek hulls, which carry and do not fight.
+    expect(forces.filter((force) => force.personnel.some((category) => category.categoryId === "warship"))).toHaveLength(3);
+    expect(forces.find((force) => force.id === "allied-greek-hulls")?.personnel.map((category) => category.categoryId)).toEqual(["transport"]);
   });
 
   it("makes Sicily an island", () => {

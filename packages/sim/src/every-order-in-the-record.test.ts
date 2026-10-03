@@ -554,7 +554,9 @@ describe("conquest, and what the world still refuses (orders 49, 56, 73)", () =>
       ...state,
       material: {
         ...state.material,
-        forces: state.material.forces.map((force) => (force.id === "roman-field-army" ? { ...force, locationId: LILYBAEUM } : force)),
+        // The Greek hulls as warships, thirty men a load: too few for the open sea to Africa.
+        forces: state.material.forces.map((force) => (force.id === "roman-field-army" ? { ...force, locationId: LILYBAEUM }
+          : force.id === "allied-greek-hulls" ? { ...force, personnel: [{ categoryId: "warship", label: "Allied transports", fit: 18, unavailable: [] }] } : force)),
       },
     });
 

@@ -16,8 +16,13 @@
 /** The old map's typical distance between neighbouring province centres; what "a province" meant in every hop count. */
 export const REFERENCE_PROVINCE_KM = 85;
 
-/** A legion on the road: eight days over a reference province, fifteen or twenty miles a day over a region. */
-export const MARCH_KM_PER_DAY = REFERENCE_PROVINCE_KM / 8;
+/**
+ * A legion on the road with its baggage: about 21 km a day, four days over a
+ * reference province. It was eight, a little over 10 km a day -- half what a
+ * Roman army made on a road, so the consul's march from Latium to Rhegium
+ * took seven weeks before any season or pass was counted.
+ */
+export const MARCH_KM_PER_DAY = REFERENCE_PROVINCE_KM / 4;
 /** The fastest any march is made, however well fed: a day per reference province. */
 export const FASTEST_MARCH_KM_PER_DAY = REFERENCE_PROVINCE_KM;
 

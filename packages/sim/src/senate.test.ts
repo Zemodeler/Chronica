@@ -67,18 +67,22 @@ describe("a question before the Senate", () => {
     const counted = vote(world, 30);
     expect(WorldStateSchema.safeParse(counted.world).success).toBe(true);
     const settled = question(counted.world, id);
-    // The Patricians lean for the government's business (20, for at 15); the
-    // Populars (-10) sit between their thresholds and abstain.
+    // The Patricians lean for the government's business (20, all for at 15);
+    // the Populars (-10) sit between their thresholds and divide by their
+    // lean: two thirds of the way to their line against, so 27 of their 40
+    // vote against and 13 abstain.
     expect(settled.outcome).toBe("passed");
     const record = counted.world.material.voteRecords.find((candidate) => candidate.id === settled.voteRecordId)!;
-    expect(record).toMatchObject({ yesWeight: 60, noWeight: 0, abstainWeight: 40, quorumMet: true, thresholdMet: true });
-    expect(counted.facts[0]!.summary).toContain("The Senate carried \"Wartime taxes and a Roman navy\", 60 to 0, 40 abstaining");
+    expect(record).toMatchObject({ yesWeight: 60, noWeight: 27, abstainWeight: 13, quorumMet: true, thresholdMet: true });
+    expect(counted.facts[0]!.summary).toContain("The Senate carried \"Wartime taxes and a Roman navy\", 60 to 27, 13 abstaining");
+    expect(counted.facts[0]!.summary).toContain("the plebeian new men 27 against and 13 abstaining");
     expect(counted.world.genericEntities.some((entity) => entity.kind === "law")).toBe(true);
   });
 
   it("is carried by the votes cast, however many abstain", () => {
-    // The fleet for the southern allies: 49 for, none against, 51 undecided.
-    // Counted over the whole house it failed, as if the undecided had voted no.
+    // The fleet for the southern allies: 49 for, the rest undecided or mildly
+    // against. Counted over the whole house it failed, as if the undecided had
+    // voted no; counted over the votes cast, 49 to 34 carries it.
     const { world, id } = warTaxes();
     const reweighed: WorldState = { ...world, material: { ...world.material, institutions: world.material.institutions.map((institution) => (institution.id !== "roman-senate" ? institution : {
       ...institution,
@@ -87,7 +91,7 @@ describe("a question before the Senate", () => {
     const counted = vote(reweighed, 30);
     const settled = question(counted.world, id);
     const record = counted.world.material.voteRecords.find((candidate) => candidate.id === settled.voteRecordId)!;
-    expect(record).toMatchObject({ yesWeight: 49, noWeight: 0, abstainWeight: 51 });
+    expect(record).toMatchObject({ yesWeight: 49, noWeight: 34, abstainWeight: 17 });
     expect(settled.outcome).toBe("passed");
   });
 

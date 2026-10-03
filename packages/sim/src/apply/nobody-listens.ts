@@ -167,6 +167,8 @@ export function nobodyListens(
     // who pays from his own purse has a private band; a man who only promises
     // has an audience.
     case "force_create": {
+      // Men drawn from his own army follow him into the detachment.
+      if (delta.fromForceRef != null) return ignoredBy(delta.fromForceRef);
       const obligationId = delta.payObligationRef === null ? null : resolve(delta.payObligationRef) ?? delta.payObligationRef;
       const payer = world.material.obligations.find((obligation) => obligation.id === obligationId)?.payerAccountId;
       if (payer !== undefined && ownsAccount(payer)) return null;

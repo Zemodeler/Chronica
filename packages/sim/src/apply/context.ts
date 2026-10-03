@@ -82,6 +82,12 @@ export interface ApplyContext {
    */
   readonly orderDeltas?: ReadonlySet<WorldDelta> | undefined;
   /**
+   * Set while one act of `orderDeltas` is applied. The act a handler sees has
+   * often been rewritten -- references put right -- and is no longer the one
+   * in the set, so a handler that must know whose act it is asks this.
+   */
+  readonly forTheOrder?: boolean | undefined;
+  /**
    * Acts the chamber whose question they waited on has carried: the vote is
    * their authority. A senator's war, moved in the Senate and voted, is the
    * Republic's war, though no office of his makes war.
