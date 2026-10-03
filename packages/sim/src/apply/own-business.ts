@@ -87,16 +87,31 @@ export function isOwnBusiness(
     // tribune's legion. Only that, and only his own -- the rest of the army
     // is its commander's to order.
     case "force_modify": {
-      if (delta.formationRef === undefined) return false;
       const said = Object.entries(delta).filter(([key, value]) => value !== undefined && !["op", "forceRef", "formationRef", "drilling", "reason"].includes(key));
-      if (said.length > 0) return false;
+      if (said.length > 0 || delta.drilling === undefined) return false;
       const force = world.material.forces.find((candidate) => candidate.id === id(delta.forceRef));
+      if (force === undefined) return false;
+      const posts = (force.posts ?? []).filter((post) => post.characterId === actorId);
+      // A man in the ranks with no post drilling with his comrades drills his
+      // own unit, and nothing else (`practiseInArmy`): a legionary's drill was
+      // recorded as insubordination for want of a post (E12).
+      const service = world.characters.find((character) => character.id === actorId)?.service;
+      if (posts.length === 0) {
+        return service?.forceId === force.id && service.formationId !== null && service.unitIndex !== null
+          && (delta.formationRef === undefined || id(delta.formationRef) === service.formationId);
+      }
+      if (delta.formationRef === undefined) return false;
       const formationId = id(delta.formationRef);
-      const formation = force?.formations?.find((candidate) => candidate.id === formationId);
-      if (force === undefined || formation === undefined) return false;
-      return (force.posts ?? []).some((post) => post.characterId === actorId
-        && (post.formationId === formation.id || (post.unitIndex === null && force.formations?.find((candidate) => candidate.id === post.formationId)?.bodyId === formation.bodyId)));
+      const formation = force.formations?.find((candidate) => candidate.id === formationId);
+      if (formation === undefined) return false;
+      return posts.some((post) => post.formationId === formation.id
+        || (post.unitIndex === null && force.formations?.find((candidate) => candidate.id === post.formationId)?.bodyId === formation.bodyId));
     }
+    // Standing for office, or putting a man forward: a candidacy is his own
+    // voice, however the chamber takes it. Exempt from the convener's rule in
+    // `whoseToGive` and still recorded as a breach (E12).
+    case "political_procedure_open":
+      return delta.type === "nomination" && (isActor(delta.sponsorCharacterRef) || (delta.subjectKind === "character" && isActor(delta.subjectRef)));
     default:
       return false;
   }

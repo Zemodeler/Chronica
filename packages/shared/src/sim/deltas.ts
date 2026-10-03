@@ -1630,6 +1630,23 @@ const ForceMembershipSetSchema = z.object({
   reason: ReasonSchema,
 }).strict();
 
+/**
+ * A man put in a post in an army: made optio, centurion, legate. No act could
+ * set one, so a man in the ranks could rise only when the man over him died
+ * (E15). Judged by who gives the post (`appointedBy`): the centurion his
+ * optio, the tribunes the centurions, the general his legates.
+ */
+const ForcePostSetSchema = z.object({
+  op: z.literal("force_post_set"),
+  forceRef: RefSchema,
+  rankId: EntityIdSchema,
+  characterRef: RefSchema,
+  /** Absent: his own formation and unit. Unbounded here, as every character of this schema is paid on every call; the engine holds them to the army. */
+  formationRef: RefSchema.optional(),
+  unitIndex: z.number().optional(),
+  reason: ReasonSchema,
+}).strict().describe("A man given a post in an army");
+
 const ForceRaidSchema = z.object({
   op: z.literal("force_raid"),
   forceRef: RefSchema,
@@ -1985,6 +2002,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   HoldingCreateSchema,
   HoldingImproveSchema,
   ForceMembershipSetSchema,
+  ForcePostSetSchema,
   TradeVentureOpenSchema,
   TradeVentureCloseSchema,
   GenericEntityUpdateSchema,
@@ -2051,6 +2069,7 @@ export const WORLD_DELTA_OPS = [
   "holding_create",
   "holding_improve",
   "force_membership_set",
+  "force_post_set",
   "trade_venture_open",
   "trade_venture_close",
   "generic_entity_update",
@@ -2120,6 +2139,7 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   holding_create: "fiscal",
   holding_improve: "fiscal",
   force_membership_set: "military",
+  force_post_set: "military",
   trade_venture_open: "fiscal",
   trade_venture_close: "fiscal",
   generic_entity_update: "civil",

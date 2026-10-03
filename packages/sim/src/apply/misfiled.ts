@@ -1,4 +1,4 @@
-import type { OrderPartyRef, WorldDelta, WorldState } from "@chronica/shared";
+import { allOffices, type Office, type OrderPartyRef, type WorldDelta, type WorldState } from "@chronica/shared";
 import { normalizeRefs } from "./normalize-refs";
 
 /**
@@ -51,7 +51,7 @@ function partiesOf(delta: WorldDelta, world: WorldState): readonly string[] | nu
   }
 }
 
-export function misfiledWorldActs(orderDeltas: readonly WorldDelta[], world: WorldState, actorRef: OrderPartyRef): Set<WorldDelta> {
+export function misfiledWorldActs(orderDeltas: readonly WorldDelta[], world: WorldState, actorRef: OrderPartyRef, offices: readonly Office[] = []): Set<WorldDelta> {
   if (actorRef.kind !== "character") return new Set();
   const actor = world.characters.find((character) => character.id === actorRef.id);
   if (actor === undefined) return new Set();
@@ -85,6 +85,19 @@ export function misfiledWorldActs(orderDeltas: readonly WorldDelta[], world: Wor
 
   const misfiled = new Set<WorldDelta>();
   for (const delta of orderDeltas) {
+    // What a province's stores and people came to -- drained by a levy, burnt
+    // by a raid, fed by a convoy -- is the world's account of a consequence,
+    // unless the actor's own men stand there or his office moves provinces.
+    // Read as his act, a tribune's letter left "laid hands on Samnium's own
+    // stores and people" on his record (E12).
+    if (delta.op === "province_material_shift") {
+      const hisMenThere = world.material.forces.some((force) => force.locationId === delta.provinceId
+        && (force.commanderCharacterId === actor.id || force.controllerCharacterId === actor.id));
+      const moves = world.material.officeSeats.some((seat) => seat.status === "held" && seat.holderCharacterId === actor.id
+        && allOffices(world, offices).some((office) => office.id === seat.officeId && office.authorisedActionIds.includes("province_material_shift")));
+      if (!hisMenThere && !moves) misfiled.add(delta);
+      continue;
+    }
     if (mentions(delta, his)) continue;
     if (BETWEEN_POWERS.has(delta.op)) {
       const parties = partiesOf(delta, world);
@@ -102,4 +115,11 @@ export function misfiledWorldActs(orderDeltas: readonly WorldDelta[], world: Wor
     misfiled.add(delta);
   }
   return misfiled;
+}
+
+/** Why an act was taken out of the order, for the audit. */
+export function whyMisfiled(delta: WorldDelta): string {
+  return delta.op === "province_material_shift"
+    ? "Written into the order, but it says what befell a province where the actor has no men and no office: judged as the world's."
+    : "Written into the order, but it makes something for another power with the actor nowhere in it: judged as the world's.";
 }

@@ -99,25 +99,31 @@ const ROME: EstablishmentDraft = {
   ],
   ranks: [
     { id: "consul", label: "Consul", level: "army", filledBy: "elected", words: ["consul", "general"], officeIds: ["roman-consul"] },
-    { id: "legate", label: "Legate", level: "army", grade: 1, filledBy: "appointed", words: ["legate", "legatus"] },
+    { id: "legate", label: "Legate", level: "army", grade: 1, filledBy: "appointed", words: ["legate", "legatus"], appointedBy: "army_commander" },
     // Six to a legion, commanding two at a time by turns (Polybius 6.34); the
     // people had elected sixteen of them a year since 311 (Livy 9.30), the
     // consuls named the rest.
     { id: "military-tribune", label: "Military tribune", level: "body", filledBy: "elected", formationIds: ["velites", "hastati", "principes", "triarii", "equites"], words: ["tribune", "military tribune"], officeIds: ["roman-military-tribune"] },
     // Twelve to a consular army, named by the consuls (Polybius 6.26).
-    { id: "prefect-of-the-allies", label: "Prefect of the allies", level: "body", filledBy: "appointed", formationIds: ["allied-foot", "extraordinarii", "allied-horse"], words: ["prefect", "praefectus"] },
+    { id: "prefect-of-the-allies", label: "Prefect of the allies", level: "body", filledBy: "appointed", formationIds: ["allied-foot", "extraordinarii", "allied-horse"], words: ["prefect", "praefectus"], appointedBy: "army_commander" },
     { id: "duumvir-navalis", label: "Duumvir of the fleet", level: "body", filledBy: "elected", formationIds: ["ships"], words: ["duumvir", "admiral"] },
     // The tribunes chose ten centurions for merit and then ten more, and the
     // first chosen sat in the council (Polybius 6.24); the first centurion of
     // the triarii is the primus pilus.
-    { id: "primus-pilus", label: "Primus pilus", level: "unit", grade: 0, filledBy: "valour", formationIds: ["triarii"], words: ["primus pilus", "first spear"] },
-    { id: "centurio-prior", label: "Centurio prior", level: "unit", grade: 1, filledBy: "valour", formationIds: ["hastati", "principes", "triarii"], words: ["centurion", "centurio", "prior"] },
-    { id: "centurio-posterior", label: "Centurio posterior", level: "sub", grade: 2, filledBy: "valour", formationIds: ["hastati", "principes", "triarii"], words: ["centurion", "centurio", "posterior"] },
-    // Each centurion chose his own rear-officer (Polybius 6.24).
-    { id: "optio", label: "Optio", level: "sub", filledBy: "appointed", formationIds: ["hastati", "principes", "triarii"], words: ["optio"] },
+    { id: "primus-pilus", label: "Primus pilus", level: "unit", grade: 0, filledBy: "valour", formationIds: ["triarii"], words: ["primus pilus", "first spear"], appointedBy: "body_officer" },
+    { id: "centurio-prior", label: "Centurio prior", level: "unit", grade: 1, filledBy: "valour", formationIds: ["hastati", "principes", "triarii"], words: ["centurion", "centurio", "prior"], appointedBy: "body_officer" },
+    { id: "centurio-posterior", label: "Centurio posterior", level: "sub", grade: 2, filledBy: "valour", formationIds: ["hastati", "principes", "triarii"], words: ["centurion", "centurio", "posterior"], appointedBy: "body_officer" },
+    // The ladder a man climbs from the ranks: the centurion's optio, his
+    // rear-officer, then the standard, then a century of his own. The optio
+    // had no grade, so it read as grade 0 and stood above the centurio
+    // posterior (E15); the signifer stood as a maniple's officer, above both
+    // centurions of a century. Each centurion chose his own rear-officer
+    // (Polybius 6.24).
+    { id: "optio", label: "Optio", level: "sub", grade: 4, filledBy: "appointed", formationIds: ["hastati", "principes", "triarii"], words: ["optio"], appointedBy: "unit_officer" },
     // Two standard-bearers to a maniple, chosen by the centurions.
-    { id: "signifer", label: "Signifer", level: "unit", grade: 3, filledBy: "appointed", formationIds: ["hastati", "principes", "triarii"], words: ["signifer", "standard-bearer"] },
-    { id: "decurion", label: "Decurion", level: "unit", filledBy: "appointed", formationIds: ["equites", "allied-horse"], words: ["decurion"] },
+    { id: "signifer", label: "Signifer", level: "sub", grade: 3, filledBy: "appointed", formationIds: ["hastati", "principes", "triarii"], words: ["signifer", "standard-bearer"], appointedBy: "unit_officer" },
+    // Chosen with their turmae by the tribunes (Polybius 6.25).
+    { id: "decurion", label: "Decurion", level: "unit", filledBy: "appointed", formationIds: ["equites", "allied-horse"], words: ["decurion"], appointedBy: "body_officer" },
     { id: "eques", label: "Eques", level: "ranks", formationIds: ["equites", "allied-horse"], words: ["eques", "trooper", "horseman"] },
     { id: "veles", label: "Veles", level: "ranks", formationIds: ["velites"], words: ["veles", "skirmisher"] },
     { id: "miles", label: "Miles", level: "ranks", words: ["legionary", "soldier", "miles"] },

@@ -1,5 +1,6 @@
 import {
   boundedId,
+  drillOneUnit,
   isCombatDoctrine,
   refitDaysFor,
   type Doctrine,
@@ -103,10 +104,18 @@ export function practiseInArmy(
   let next = force;
   let doctrines = world.doctrines;
 
-  // Drill: the whole army, or one formation of it on its officer's word.
+  // Drill: the whole army, or one formation of it on its officer's word --
+  // or, on the word of a man in its ranks who holds no post and no command,
+  // his own unit and nothing more (M4).
   if (delta.drilling !== undefined) {
     const formationId = delta.formationRef === undefined ? null : resolve(delta.formationRef) ?? delta.formationRef;
-    if (formationId !== null && (next.formations ?? []).some((formation) => formation.id === formationId)) {
+    const service = world.characters.find((character) => character.id === actorId)?.service;
+    const unit = service?.forceId === force.id && service.formationId !== null && service.unitIndex !== null ? { formationId: service.formationId, index: service.unitIndex } : null;
+    const ranker = actorId !== null && force.commanderCharacterId !== actorId && force.controllerCharacterId !== actorId && !(force.posts ?? []).some((post) => post.characterId === actorId);
+    if (ranker && unit !== null) {
+      const withForce = { ...world, material: { ...world.material, forces: world.material.forces.map((candidate) => (candidate.id === force.id ? next : candidate)) } };
+      next = drillOneUnit(withForce, force.id, unit.formationId, unit.index, delta.drilling).material.forces.find((candidate) => candidate.id === force.id) ?? next;
+    } else if (formationId !== null && (next.formations ?? []).some((formation) => formation.id === formationId)) {
       next = { ...next, formations: (next.formations ?? []).map((formation) => (formation.id === formationId ? { ...formation, drilling: delta.drilling } : formation)) };
     } else {
       next = { ...next, drilling: delta.drilling };

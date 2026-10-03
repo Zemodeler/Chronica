@@ -53,7 +53,7 @@ function holdsSalariedPost(world: WorldState, characterId: string): boolean {
 }
 
 /** The faction he belongs to, if its leader is at odds with the man giving the order. */
-function factionAgainst(world: WorldState, recipient: Character, issuerId: string): string | null {
+export function factionAgainst(world: WorldState, recipient: Character, issuerId: string): string | null {
   for (const membership of world.material.groupMemberships) {
     if (membership.characterId !== recipient.id || membership.leftAtStep !== null) continue;
     const group = world.material.politicalGroups.find((candidate) => candidate.id === membership.groupId && candidate.active);

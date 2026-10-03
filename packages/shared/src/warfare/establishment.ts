@@ -92,6 +92,18 @@ export const RankTemplateSchema = z
      * `roman-military-tribune` serving in a legion is one of its tribunes.
      */
     officeIds: z.array(EntityIdSchema).max(4).optional(),
+    /**
+     * Who gives this post: the officer over the man's unit (a centurion chose
+     * his own optio), the officer over his body (the tribunes chose the
+     * centurions), the army's commander (the consul named his legates), or
+     * the holders of these offices. Nothing said who did, so no act could set
+     * a post and a man in the ranks could never be made anything (E15).
+     * Absent: the army's commander.
+     */
+    appointedBy: z.union([
+      z.enum(["unit_officer", "body_officer", "army_commander"]),
+      z.object({ officeIds: z.array(EntityIdSchema).min(1).max(4) }).strict(),
+    ]).optional(),
   })
   .strict();
 export type RankTemplate = z.infer<typeof RankTemplateSchema>;
