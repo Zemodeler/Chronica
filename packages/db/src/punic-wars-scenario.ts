@@ -76,6 +76,9 @@ const office = (fields: Record<string, unknown>) => ({
 
 const ladderRequirements = [
   ...[25, 30, 35, 38].map((years) => ({ id: `req-age-${years}`, kind: "min_age", label: `At least ${years} years old`, params: { years } })),
+  // The military tribunes were young men who had served, not consulars: twenty to forty-five.
+  { id: "req-age-20", kind: "min_age", label: "At least 20 years old", params: { years: 20 } },
+  { id: "req-age-at-most-45", kind: "max_age", label: "No older than 45", params: { years: 45 } },
   ...[3_000, 4_000, 5_000, 6_000, 7_500].map((minPrestigeBps) => ({ id: `req-standing-${minPrestigeBps}`, kind: "min_prestige", label: `Of standing at least ${minPrestigeBps}`, params: { minPrestigeBps } })),
   ...(["quaestor", "praetor", "consul"] as const).map((rung) => ({ id: `req-held-${rung}`, kind: "held_office", label: `Has been ${rung}`, params: { officeId: `roman-${rung}` } })),
   { id: "req-free-born", kind: "legal_status", label: "Born free", params: { statuses: ["free"] } },
@@ -118,7 +121,7 @@ const romanOffices = [
   // people elected sixteen in the tribes, and the consuls named the rest, the
   // "rufuli": an elected college a consul may add to. An officer of the legion
   // he is posted to, with no command of his own but what his consul gives him.
-  office({ id: "roman-military-tribune", label: "Military tribune", polityId: "rome", kind: "membership", seatCount: 16, termDays: 365, authorisedActionIds: ["social_events", "belief_set", "character_intent_set", "political_support_set"], successionRuleId: "roman-military-tribunes", eligibilityRequirementIds: [...romanReqs, "req-standing-3000"] }),
+  office({ id: "roman-military-tribune", label: "Military tribune", polityId: "rome", kind: "membership", seatCount: 16, termDays: 365, authorisedActionIds: ["social_events", "belief_set", "character_intent_set", "political_support_set"], successionRuleId: "roman-military-tribunes", eligibilityRequirementIds: [...romanReqs, "req-standing-3000", "req-age-20", "req-age-at-most-45"] }),
   office({ id: "roman-pontifex-maximus", label: "Pontifex maximus", polityId: "rome", kind: "priesthood", authorisedActionIds: CIVIL, successionRuleId: "roman-cooptation", eligibilityRequirementIds: romanReqs }),
   office({ id: "roman-pontiff", label: "Roman pontiff", polityId: "rome", kind: "priesthood", seatCount: 9, ordoSeats: { plebeian: 4 }, authorisedActionIds: CIVIL, successionRuleId: "roman-cooptation", eligibilityRequirementIds: romanReqs }),
   // An augur who saw bad omens could stop an assembly meeting that day. Five of

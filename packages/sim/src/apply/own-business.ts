@@ -1,4 +1,5 @@
 import { peaceOfferMetadata, type WorldDelta, type WorldState } from "@chronica/shared";
+import { isOwnBenefaction } from "./benefaction";
 
 /**
  * Kinds of message a man writes as himself. The rest -- an alliance offered,
@@ -112,6 +113,9 @@ export function isOwnBusiness(
     // `whoseToGive` and still recorded as a breach (E12).
     case "political_procedure_open":
       return delta.type === "nomination" && (isActor(delta.sponsorCharacterRef) || (delta.subjectKind === "character" && isActor(delta.subjectRef)));
+    case "public_benefaction": return isOwnBenefaction(delta, world, actorId, resolve);
+    // How he means to bear himself in the next battle is his own to say.
+    case "force_membership_set": return delta.change === "conduct" && isActor(delta.characterRef);
     default:
       return false;
   }

@@ -1626,7 +1626,23 @@ const ForceMembershipSetSchema = z.object({
   /** "conduct": how he means to bear himself in the next battle, in "conduct". */
   change: z.enum(["enlist", "discharge", "desert", "conduct"]),
   /** In his place, after glory, or keeping his head down: the bold are decorated and die, the timid live and are sometimes punished. */
-  conduct: z.enum(["steady", "glory", "cautious"]).optional(),
+  conduct: z.enum(["steady", "glory", "cautious"]).optional().describe("glory: more often decorated, or killed"),
+  reason: ReasonSchema,
+}).strict();
+
+/**
+ * Games, a feast, a dole or a building given to the people in a man's name
+ * (`sim/apply/benefaction.ts`): it costs what is spent, and buys standing --
+ * more for an aedile, less for the same gift twice in a year -- and a calmer
+ * city. An aedile may hold games out of his power's treasury, within the
+ * allowance his office carries, without the Senate's vote.
+ */
+const PublicBenefactionSchema = z.object({
+  op: z.literal("public_benefaction"),
+  payerAccountRef: MaybeRefSchema.default(null).describe("null: giver's purse; aedile: treasury, for games"),
+  amount: MoneySchema,
+  kind: z.enum(["games", "feast", "dole", "building"]),
+  provinceId: MaybeIdSchema.default(null),
   reason: ReasonSchema,
 }).strict();
 
@@ -2037,6 +2053,7 @@ export const WorldDeltaSchema = z.discriminatedUnion("op", [
   ServiceContractOpenSchema,
   ServiceContractCloseSchema,
   RegimeChangeSchema,
+  PublicBenefactionSchema,
 ]).meta({ id: "WorldDelta" });
 export type WorldDelta = z.infer<typeof WorldDeltaSchema>;
 export type WorldDeltaOp = WorldDelta["op"];
@@ -2104,6 +2121,7 @@ export const WORLD_DELTA_OPS = [
   "service_contract_open",
   "service_contract_close",
   "regime_change",
+  "public_benefaction",
 ] as const satisfies readonly WorldDeltaOp[];
 
 /**
@@ -2189,4 +2207,6 @@ export const DELTA_AUTHORITY_DOMAIN: Record<WorldDeltaOp, AuthorityDomain> = {
   service_contract_close: "fiscal",
   // No office authorises taking the state: every attempt is a breach, and the record says so.
   regime_change: "military",
+  // Spending on the people: his own purse is his own business, the treasury is not.
+  public_benefaction: "fiscal",
 };

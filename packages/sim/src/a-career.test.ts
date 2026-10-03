@@ -91,7 +91,8 @@ describe("a Roman career", () => {
     const failed = eligibleFor(opening(), LUCIUS, "roman-consul");
     expect(failed.eligible).toBe(false);
     expect(failed.failedReasons.join(" ")).not.toMatch(/younger than|roman-praetor|roman-quaestor/);
-    expect(failed.failedReasons.join(" ")).toMatch(/prestige/);
+    // And says by how much: the numbers, not "below the required minimum".
+    expect(failed.failedReasons.join(" ")).toMatch(/standing 3,200 of 6,000 required/);
     expect(eligibleFor(opening(), LUCIUS, "roman-quaestor").eligible).toBe(true);
   });
 

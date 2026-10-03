@@ -32,9 +32,28 @@ function labelTokens(value: string): Set<string> {
       .toLowerCase()
       .replace(/[^a-z0-9\s]/g, " ")
       .split(/\s+/)
+      .map((token) => OFFICE_STEMS[token] ?? token)
       .filter((token) => token.length > 2 && !GENERIC_ROLE_WORDS.has(token)),
   );
 }
+
+/**
+ * The office a word is the holding of. "Vettius stands for the military
+ * tribunate" named no office, because the office is "Military tribune": the
+ * candidacy matched nothing, was never put to the election, and sat "waiting
+ * on a vote" for ever. The same for an aedileship, a consulship, a praetorship.
+ */
+const OFFICE_STEMS: Readonly<Record<string, string>> = {
+  tribunate: "tribune", tribuneship: "tribune", tribunes: "tribune",
+  aedileship: "aedile", aediles: "aedile",
+  consulship: "consul", consulate: "consul", consuls: "consul",
+  praetorship: "praetor", praetors: "praetor",
+  quaestorship: "quaestor", quaestors: "quaestor",
+  censorship: "censor", censors: "censor",
+  dictatorship: "dictator",
+  suffetes: "suffete",
+  plebeian: "plebs", plebeians: "plebs",
+};
 
 /**
  * Words that carry no identifying weight in a role or an office label. Without
@@ -162,15 +181,30 @@ export function officesTheRoleOnceHeld(offices: readonly Office[], text: string)
 
 /**
  * Whether a piece of text names an office: every meaningful word of the
- * office's label appears in it. "Elect a consul for the year" names "Roman
- * consul" only if it says Roman too, so a Roman office is never matched by a
- * Carthaginian question that happens to share a word.
+ * office's label appears in it, a holding read as its office ("the
+ * consulship" names "Roman consul"; a nationality is not a meaningful word).
  */
 export function labelNamesOffice(text: string, officeLabel: string): boolean {
   const officeTokens = labelTokens(officeLabel);
   if (officeTokens.size === 0) return false;
   const textTokens = labelTokens(text);
   return [...officeTokens].every((token) => textTokens.has(token));
+}
+
+/**
+ * The office a piece of text names, the most particular where it names
+ * several: "stand for plebeian aedile" names the curule "Roman aedile" too,
+ * on "aedile" alone, and is the plebs' own. Null where it names none.
+ */
+export function officeNamedIn<T extends Pick<Office, "label">>(text: string, offices: readonly T[]): T | null {
+  let best: T | null = null;
+  let bestSize = 0;
+  for (const office of offices) {
+    if (!labelNamesOffice(text, office.label)) continue;
+    const size = labelTokens(office.label).size;
+    if (size > bestSize) { best = office; bestSize = size; }
+  }
+  return best;
 }
 
 export function findOfficeSeatForRole(
