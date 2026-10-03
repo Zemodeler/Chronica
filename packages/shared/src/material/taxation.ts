@@ -53,8 +53,10 @@ export interface TaxBurden {
   readonly bearable: number;
   /** What its domestic revenues ask, per month, after their collection rates. */
   readonly asked: number;
-  /** The share of each domestic revenue that actually arrives: 1 unless it asks more than can be borne. */
+  /** The share of each domestic revenue that actually arrives: 1 unless it asks more than can be borne, or an enemy holds some of its land. */
   readonly collectedShare: number;
+  /** The share of its own land's capacity it still holds: below 1 while an enemy occupies some of it, whose districts pay nobody. */
+  readonly held: number;
   /** How far below baseline the power's provinces settle on account of it, in basis points (0 or negative). */
   readonly stabilityShiftBps: number;
 }
@@ -109,6 +111,7 @@ export function taxBurdens(world: WorldState): Map<string, TaxBurden> {
       bearable: Math.round(bearable),
       asked: Math.round(askedMonthly),
       collectedShare: askedMonthly <= 0 ? held : Math.min(held, bearable / askedMonthly),
+      held,
       stabilityShiftBps: burden <= CUSTOMARY_TAX_BURDEN
         ? 0
         : -Math.min(MAX_TAX_UNREST_BPS, Math.round((burden - CUSTOMARY_TAX_BURDEN) * TAX_UNREST_BPS_PER_BURDEN)),
@@ -124,4 +127,27 @@ export function taxBurdenInWords(burden: TaxBurden): string {
   if (ratio <= 0.8) return "felt, and resented";
   if (ratio <= 1) return "pressing hard; order is suffering for it";
   return "more than the land can give; the collectors fall short and order is breaking down";
+}
+
+/**
+ * The line a government hears when its collectors come back short, or null
+ * when they did not.
+ *
+ * It used to be written whenever the collected share fell below one, and always
+ * blamed the tax. But occupied ground lowers the share while a skilled treasury
+ * raises the take by up to a seventh, and the chronicle read "asked more of its
+ * lands than they could bear: of 816 due, the collectors raised 874". A surplus
+ * is nobody's news. A shortfall names its cause: a tax pressed past what the
+ * land bears, districts the enemy holds, or both.
+ */
+export function taxShortfallSummary(name: string, burden: TaxBurden | undefined, tally: { readonly asked: number; readonly raised: number }): string | null {
+  if (tally.raised >= tally.asked) return null;
+  const overAsked = burden === undefined || burden.asked > burden.bearable;
+  const occupied = burden !== undefined && burden.held < 1;
+  const cause = overAsked && occupied
+    ? "asked more of the lands it still holds than they could bear, and its occupied districts paid nothing"
+    : occupied
+      ? "could not reach its occupied districts, which paid nothing"
+      : "asked more of its lands than they could bear";
+  return `${name} ${cause}: of ${tally.asked} due in taxes and dues, the collectors raised ${tally.raised}.`;
 }

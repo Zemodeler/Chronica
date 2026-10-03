@@ -59,8 +59,9 @@ export async function reconcileFacts<F extends { readonly localId: string; reado
 }): Promise<FactReconcileResult<F>> {
   if (input.facts.length === 0 || input.refused.length === 0) return { facts: input.facts, calls: 0, failure: null };
 
+  // Twenty, not twelve: a round's people are reconciled in one call.
   const refusals = input.refused
-    .slice(0, 12)
+    .slice(0, 20)
     .map((rejection, index) => `${index + 1}. ${JSON.stringify(rejection.delta)}\n   REFUSED: ${rejection.reason}`)
     .join("\n");
   const facts = input.facts.map((fact) => `- ${fact.localId}: ${fact.summary}`).join("\n");

@@ -2,6 +2,8 @@ import { diffWorlds, findOrderPart, orderPartStatus, type Fact, type Office, typ
 import type { BattleAccount } from "./battle";
 import type { WindowSnapshot } from "./burst";
 import {
+  FAR_THREADS_PER_BURST,
+  FAR_THREADS_PER_WINDOW,
   MUST_TELL,
   WINDOW_MAX_ENTRIES,
   composeChronicle,
@@ -124,6 +126,9 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
   const chosenSubjects: (readonly string[])[] = [];
   /** Whether any window has chosen anything at all to tell. */
   let anythingChosen = false;
+  /** Passages of far news chosen so far this burst: one a window, `FAR_THREADS_PER_BURST` in all (L16). */
+  let farTold = 0;
+  const farRoom = (): number => Math.min(FAR_THREADS_PER_WINDOW, Math.max(0, FAR_THREADS_PER_BURST - farTold));
   /** Settled when the window before has chosen what to tell and what to carry. */
   let selecting: Promise<void> = Promise.resolve();
 
@@ -167,8 +172,10 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
         // earlier window is continued at the later date, never rewritten.
         recentSubjects: [...chosenSubjects, ...said.map((entry) => entry.subjects.map(keyOf)), ...input.recentSubjects],
         recentTitles: [...[...said].reverse().map((entry) => entry.title), ...input.recentTitles],
+        maxFarThreads: farRoom(),
         onSelected: (selection) => {
           pool = [...pool, ...selection.carried];
+          farTold += selection.farTold;
           chosenSubjects.push(...selection.subjects);
           if (selection.subjects.length > 0) anythingChosen = true;
           chosen();
@@ -251,6 +258,7 @@ export function createWindowWriter(input: WindowWriterInput): WindowWriter {
           recentSubjects: [...said.map((entry) => entry.subjects.map(keyOf)), ...input.recentSubjects],
           recentTitles: [...[...said].reverse().map((entry) => entry.title), ...input.recentTitles],
           maxEntries: WINDOW_MAX_ENTRIES,
+          maxFarThreads: farRoom(),
           fallback: true,
         }).catch((error: unknown) => {
           console.error("[chronicle] the closing passage could not be written:", error);

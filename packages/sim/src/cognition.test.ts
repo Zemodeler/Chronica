@@ -361,8 +361,8 @@ describe("a large cast, dealt onto two calls", () => {
     world.characters.filter((character) => character.alive).slice(0, count).map((character) => actorFor(world, character.id));
 
   it("still answers for everybody, in the order the router chose", async () => {
-    const world = peopled(baseWorld(), 8);
-    const actors = cast(world, 8);
+    const world = peopled(baseWorld(), 10);
+    const actors = cast(world, 10);
     const port = answeringPort();
 
     const result = await runCognition(port, actors, world, clock);
@@ -383,8 +383,8 @@ describe("a large cast, dealt onto two calls", () => {
     // block: it is built from everyone in view, and had the halves each been
     // told only about themselves, a man would have stopped having opinions
     // about the people who happened to land in the other call.
-    const world = peopled(baseWorld(), 8);
-    const actors = cast(world, 8);
+    const world = peopled(baseWorld(), 10);
+    const actors = cast(world, 10);
     const everyone = actors.map((actor) => actor.characterId);
 
     const split = answeringPort();
@@ -404,8 +404,8 @@ describe("a large cast, dealt onto two calls", () => {
   });
 
   it("keeps half a round when the other half cannot be read", async () => {
-    const world = peopled(baseWorld(), 8);
-    const actors = cast(world, 8);
+    const world = peopled(baseWorld(), 10);
+    const actors = cast(world, 10);
     let calls = 0;
     const port: SimModelPort = {
       complete(_operation, _system, userMessage) {
@@ -430,9 +430,9 @@ describe("a large cast, dealt onto two calls", () => {
 
     expect(calls).toBe(3);
     expect(result.parseFailure).not.toBeNull();
-    // The first four still acted. Before the split, one unreadable answer lost
+    // The first five still acted. Before the split, one unreadable answer lost
     // the whole round.
-    expect(result.output.actors.map((actor) => actor.actorRef.id)).toEqual(actors.slice(0, 4).map((actor) => actor.characterId));
+    expect(result.output.actors.map((actor) => actor.actorRef.id)).toEqual(actors.slice(0, 5).map((actor) => actor.characterId));
   });
 });
 
@@ -496,10 +496,14 @@ describe("how a cast is dealt onto calls", () => {
     const cast = state.characters.filter((character) => character.alive).slice(0, 5).map((character) => actorFor(state, character.id));
     const ten = [...cast, ...cast].map((actor, index) => ({ ...actor, characterId: `${actor.characterId}-${index}` }));
     expect(deal(cast)).toHaveLength(1);
-    expect(deal(ten).map((batch) => batch.length)).toEqual([4, 4, 2]);
+    // A cast of eight is one call, and ten are two (L17): a round is worth
+    // calls against the burst's cap, not only seconds.
+    expect(deal(ten.slice(0, 8))).toHaveLength(1);
+    expect(deal(ten).map((batch) => batch.length)).toEqual([5, 5]);
+    expect(deal([...ten, ...ten].slice(0, 12)).map((batch) => batch.length)).toEqual([6, 6]);
     expect(deal(ten, { maxBatches: 2, actorsPerCall: 5 }).map((batch) => batch.length)).toEqual([5, 5]);
     expect(deal(ten, { maxBatches: 4, actorsPerCall: 3 }).map((batch) => batch.length)).toEqual([3, 3, 3, 1]);
-    expect(deal(ten.slice(0, 7), { maxBatches: 4, actorsPerCall: 2 }).map((batch) => batch.length)).toEqual([2, 2, 2, 1]);
+    expect(deal(ten.slice(0, 9), { maxBatches: 4, actorsPerCall: 2 }).map((batch) => batch.length)).toEqual([3, 3, 3]);
   });
 });
 

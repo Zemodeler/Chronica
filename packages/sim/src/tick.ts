@@ -12,6 +12,7 @@ import {
   domesticRevenuePolity,
   provinceTaxCapacity,
   taxBurdens,
+  taxShortfallSummary,
   agreementsBetween,
   atWar,
   expireDatedAgreements,
@@ -421,7 +422,9 @@ export function runDeterministicTick(given: TickInput): TickResult {
       const burden = levied === null ? undefined : burdens.get(levied);
       const room = burden === undefined || burden.asked <= 0 ? Infinity : burden.bearable / burden.asked;
       const received = Math.round(owed * Math.min(share * handled, handled > 1 ? Math.max(share, room) : Infinity));
-      if (levied !== null && share < 1) {
+      // Short only where less came in than was due: a good collector on
+      // half-occupied ground can still bring in more than the roll asked.
+      if (levied !== null && share < 1 && received < owed) {
         const tally = shortfalls.get(levied) ?? { asked: 0, raised: 0 };
         shortfalls.set(levied, { asked: tally.asked + owed, raised: tally.raised + received });
       }
@@ -1215,10 +1218,12 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // it is the kind of thing a government hears about and has to answer for.
   for (const [polityId, tally] of shortfalls) {
     const name = input.world.map.polities.find((polity) => polity.id === polityId)?.name ?? polityId;
+    const summary = taxShortfallSummary(name, burdens.get(polityId), tally);
+    if (summary === null) continue;
     facts.push({
       localId: nextLocalId("tax_short"),
       kind: "tax_shortfall",
-      summary: `${name} asked more of its lands than they could bear: of ${tally.asked} due in taxes and dues, the collectors raised ${tally.raised}.`,
+      summary,
       affectedRefs: [{ kind: "polity", id: polityId }],
       visibility: "polity",
       discoveryState: "polity",

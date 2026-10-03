@@ -1143,6 +1143,60 @@ describe("the audit of a Roman consul's spring", () => {
     expect(told).not.toContain(unjoined.id);
   });
 
+  describe("a flood of far news (L16)", () => {
+    // Seven far-off wars, each in a country of its own, each weighty
+    // enough to travel; beside them the consul's own small business and his
+    // country's. Forty days of play wrote 487 facts, most of them like these.
+    const flood = () => Array.from({ length: 7 }, (_, index) => fact({
+      kind: "war_declared", summary: `King ${index} goes to war with his neighbour.`,
+      affectedEntities: [{ kind: "polity", id: `far-king-${index}` }, { kind: "province", id: `east-${4 + index}` }],
+    }));
+    const weights = (far: readonly Fact[], ...near: readonly [Fact, number][]) => Object.fromEntries([...far.map((candidate, index) => [candidate.id, 95 - index] as const), ...near.map(([candidate, weight]) => [candidate.id, weight] as const)]);
+
+    it("tells the consul's own and his country's business, and folds the far world into one passage", async () => {
+      const far = flood();
+      const drill = fact({ kind: "drill", summary: "Clepsina drills Legio I.", affectedEntities: [{ kind: "character", id: "clepsina" }, { kind: "force", id: "legio-i" }] });
+      const senate = fact({ kind: "debate", summary: "The Senate debates the grain dole.", affectedEntities: [{ kind: "institution", id: "senate" }] });
+      let selection: { carried: readonly Fact[]; farTold: number } | undefined;
+      const result = await base([...far, drill, senate], weights(far, [drill, 30], [senate, 40]), {
+        world: road(), maxEntries: 3, onSelected: (chosen) => { selection = chosen; },
+      });
+      const told = result.entries.map((entry) => entry.factIds);
+      expect(told.flat()).toContain(drill.id);
+      expect(told.flat()).toContain(senate.id);
+      // One passage of the far world, of its three weightiest matters, under the engine's own heading.
+      const elsewhere = result.entries.filter((entry) => entry.factIds.some((id) => far.some((candidate) => candidate.id === id)));
+      expect(elsewhere).toHaveLength(1);
+      expect(elsewhere[0]!.title).toBe("Elsewhere in the world");
+      expect([...elsewhere[0]!.factIds].sort()).toEqual(far.slice(0, 3).map((candidate) => candidate.id).sort());
+      expect(selection?.farTold).toBe(1);
+      // And the far matters it did not tell are let go, not carried to crowd the next window.
+      expect(selection?.carried.some((candidate) => far.includes(candidate))).toBe(false);
+    });
+
+    it("tells a lone far matter on its own, and none once the burst has told its share", async () => {
+      const [war] = flood();
+      const lone = await base([war!], weights([war!]), { world: road() });
+      expect(lone.entries).toHaveLength(1);
+      expect(lone.entries[0]!.title).not.toBe("Elsewhere in the world");
+
+      const far = flood();
+      const drill = fact({ kind: "drill", summary: "Clepsina drills Legio I.", affectedEntities: [{ kind: "character", id: "clepsina" }, { kind: "force", id: "legio-i" }] });
+      let carried: readonly Fact[] = [];
+      const spent = await base([...far, drill], weights(far, [drill, 30]), { world: road(), maxFarThreads: 0, onSelected: (chosen) => { carried = chosen.carried; } });
+      expect(spent.entries.flatMap((entry) => entry.factIds)).toEqual([drill.id]);
+      expect(carried.some((candidate) => far.includes(candidate))).toBe(false);
+    });
+
+    it("never crowds out the consul's own news, however much far news there is", async () => {
+      const far = flood();
+      const own = Array.from({ length: 3 }, (_, index) => fact({ kind: "levy", summary: `Clepsina raises cohort ${index}.`, affectedEntities: [{ kind: "character", id: "clepsina" }, { kind: "province", id: "latium" }] }));
+      const result = await base([...far, ...own], weights(far, ...own.map((candidate) => [candidate, 50] as [Fact, number])), { world: road(), maxEntries: 3 });
+      const told = result.entries.flatMap((entry) => entry.factIds);
+      for (const candidate of own) expect(told).toContain(candidate.id);
+    });
+  });
+
   it("shows a change only on the entry whose facts made it, and the world's routine on none", async () => {
     const office = fact({ summary: "Rome creates the office of admiral.", affectedEntities: [{ kind: "polity", id: "rome" }, { kind: "institution", id: "senate" }] });
     const fleet = fact({ summary: "The fleet is laid down.", affectedEntities: [{ kind: "polity", id: "rome" }, { kind: "project", id: "fleet-1" }] });

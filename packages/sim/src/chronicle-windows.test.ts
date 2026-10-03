@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { firstPunicWarScenario } from "@chronica/db";
-import { ScenarioClockSchema, WorldStateSchema, emitFacts, type Fact, type FactDraft, type WorldState } from "@chronica/shared";
+import { firstPunicWarScenario, punicWarsScenario } from "@chronica/db";
+import { ScenarioClockSchema, WorldStateSchema, emitFacts, newsDaysBetween, type Fact, type FactDraft, type WorldState } from "@chronica/shared";
 import type { WindowSnapshot } from "./burst";
 import { createWindowWriter } from "./chronicle-windows";
 import type { ChronicleEntry } from "./chronicle";
@@ -243,5 +243,32 @@ describe("the last window", () => {
     // The last window chose after the first had carried (C07): nothing is lost to the race.
     expect(entries.some((entry) => entry.factIds.includes(fourth.id))).toBe(true);
     expect(entries.some((entry) => entry.factIds.includes(last.id))).toBe(true);
+  });
+});
+
+describe("far news across a burst (L16)", () => {
+  it("tells one passage of far news a window, and three in a whole burst", async () => {
+    // The whole map, where far is far: the first war's is Sicily and its coasts.
+    const state = WorldStateSchema.parse(structuredClone(punicWarsScenario.initialWorld));
+    const roman = state.map.provinces.filter((province) => province.controllerPolityId === "rome").map((province) => province.id);
+    // Provinces a fortnight and more from anything Rome holds.
+    const far = state.map.provinces.filter((province) => province.controllerPolityId !== "rome"
+      && roman.every((seat) => newsDaysBetween(state, province.id, seat) >= 16)).map((province) => province.id);
+    expect(far.length).toBeGreaterThanOrEqual(2);
+    const w = writer(historian());
+    const told: Fact[][] = [];
+    for (let index = 0; index < 5; index += 1) {
+      const wars = far.slice(0, 4).map((provinceId, at) => fact({
+        time: { day: index * 6, minute: 0 }, kind: "war_declared", summary: `War in a far country, the ${index}-${at}.`,
+        affectedEntities: [{ kind: "polity", id: `far-${index}-${at}` }, { kind: "province", id: provinceId }],
+      }));
+      told.push(wars);
+      w.closed({ ...window(index, index * 6, index * 6 + 6, wars, weigh(wars, 95), [], index === 4), worldBefore: state, worldAfter: state });
+      await tick();
+    }
+    const { entries } = await w.finish();
+    const farEntries = entries.filter((entry) => entry.factIds.some((id) => told.flat().some((candidate) => candidate.id === id)));
+    expect(farEntries.length).toBeGreaterThan(0);
+    expect(farEntries.length).toBeLessThanOrEqual(3);
   });
 });
