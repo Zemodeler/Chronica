@@ -1,5 +1,6 @@
 import type { Character, Office } from "./character";
 import { currentAgeYears } from "./age";
+import { standingShortOf } from "./standing-causes";
 import { DAYS_PER_YEAR } from "../world/clock";
 import type { EligibilityRequirement, GroupMembership, MaterialWorldState, PoliticalProcedure } from "../material-state";
 
@@ -67,7 +68,7 @@ function checkRequirement(
       const minPrestigeBps = (params.minPrestigeBps as number | undefined) ?? 0;
       return character.prestigeBps >= minPrestigeBps
         ? null
-        : `${character.name}'s prestige is below the required minimum.`;
+        : `${character.name} stands too low: ${standingShortOf(character.prestigeBps, minPrestigeBps)}.`;
     }
     case "holds_office": {
       const officeId = params.officeId as string | undefined;
@@ -87,6 +88,10 @@ function checkRequirement(
     case "min_age": {
       const years = (params.years as number | undefined) ?? 0;
       return currentAgeYears(character, world.elapsedStep ?? 0) >= years ? null : `${character.name} is younger than ${years}.`;
+    }
+    case "max_age": {
+      const years = (params.years as number | undefined) ?? 120;
+      return currentAgeYears(character, world.elapsedStep ?? 0) <= years ? null : `${character.name} is older than ${years}: it is a young man's post.`;
     }
     case "held_office": {
       const officeId = params.officeId as string | undefined;
@@ -138,7 +143,7 @@ function checkRequirement(
 }
 
 /** The requirements a waiver can set aside: the ladder, never the man. */
-const LADDER_REQUIREMENTS = new Set<EligibilityRequirement["kind"]>(["min_age", "held_office", "not_held_within_years", "min_prestige", "min_campaigns"]);
+const LADDER_REQUIREMENTS = new Set<EligibilityRequirement["kind"]>(["min_age", "max_age", "held_office", "not_held_within_years", "min_prestige", "min_campaigns"]);
 
 /** Resolves every named requirement against `characterId`. Missing requirement ids fail closed. */
 export function resolveEligibility(

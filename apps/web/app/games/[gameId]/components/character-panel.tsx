@@ -68,6 +68,11 @@ export function CharacterPanel(props: CharacterPanelProps & {
   const traits = mirror?.traits ?? [];
   const skills = mirror?.skills ?? [];
   const reputationValue = mirror === null ? PENDING : traits[0] ?? mirror.standing;
+  // The number every office's gate is written in, shown whatever he is known
+  // for: it used to sit behind the first trait, so a man with any trait never
+  // saw how far he stood from the quaestorship.
+  const gates = mirror?.gates ?? [];
+  const nextGate = gates.find((gate) => !gate.met);
   const relations = mirror?.relations ?? [];
   const family = relations.filter((relation) => relation.category === "family");
   const others = relations.filter((relation) => relation.category === "other");
@@ -120,6 +125,22 @@ export function CharacterPanel(props: CharacterPanelProps & {
                   ? <ul className="mirror__list">{authorityHoldings.map((entry) => <li key={entry}><strong>{entry}</strong></li>)}</ul>
                   : <p>No public office. {title}.</p>}
                 {!holdsAuthority && props.declaredAuthority.length > 0 && <p>Reputed background, unverified: {props.declaredAuthority.join("; ")}</p>}
+              </>}
+            />
+          </li>
+          <li>
+            <NoteRow
+              label="Standing"
+              value={mirror === null ? PENDING : mirror.standingFigure}
+              suffix={nextGate === undefined ? undefined : `${nextGate.office} at ${nextGate.needed}`}
+              kicker={mirror === null ? "Your standing" : capitalise(mirror.standing)}
+              body={<>
+                <p>What every office&apos;s gate is written in. Deeds in the field, a city taken, a year in office, games and feasts given raise it; defeats, lost elections and convictions lower it.</p>
+                {gates.length > 0 && (
+                  <ul className="mirror__list">
+                    {gates.map((gate) => <li key={gate.office}><strong>{gate.office}</strong> {gate.needed}{gate.short === null ? ", within reach" : `, ${gate.short}`}</li>)}
+                  </ul>
+                )}
               </>}
             />
           </li>

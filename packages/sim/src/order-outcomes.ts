@@ -1,5 +1,5 @@
 import { formatWorldDate, letterTally, letterTallyInWords, spentForOrderPart, type ScenarioClock } from "@chronica/shared";
-import { orderPartLabel, orderPartStatus, type OrderPart, type WorldState } from "@chronica/shared";
+import { orderPartLabel, orderPartStatus, procedureReasonOf, type OrderPart, type WorldState } from "@chronica/shared";
 import type { ChronicleEntry } from "./chronicle";
 import { refOfPart, whyNothingSetAside } from "./order-money";
 
@@ -41,7 +41,7 @@ export function lineOf(world: WorldState, part: OrderPart, actorId: string, cloc
   // otherwise reads as though it had been so all along (E8).
   const settledAt = part.refusedAtStep ?? part.stages.reduce<number | null>((latest, stage) => stage.failedAtStep === null ? latest : Math.max(latest ?? 0, stage.failedAtStep), null);
   const on = clock === undefined || settledAt === null || (status !== "refused" && status !== "failed" && status !== "partly_done") ? "" : ` on ${formatWorldDate({ day: settledAt, minute: 0 }, clock)}`;
-  const why = part.refusal ?? part.whyNot;
+  const why = part.refusal ?? part.whyNot ?? procedureReasonOf(world, part);
   const reason = why === null || status === "achieved" || status === "under_way" ? "" : `: ${sentencesWithin(why.replace(/\s+/g, " "), 320)}`;
   // Secret work says what it cost and whose money it was, to the man who paid.
   const plotRef = part.workRefs.find((ref) => ref.kind === "plot");

@@ -16,6 +16,7 @@ import {
   putInPost,
   ranksIn,
   serveInArmy,
+  shiftStanding,
   skillShare,
   stableHash,
   unitOfficerRank,
@@ -36,6 +37,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+import { standingFromTheLine } from "./standing-deeds";
 
 /**
  * Armies as the men in them live them (docs/plans/armies-in-detail.md).
@@ -74,6 +76,12 @@ const VICTORY_EXPERIENCE_BPS = 200;
 const CAMPAIGN_DAYS = 365;
 
 const STANDING_BPS = { slight: 150, marked: 400, great: 800 } as const;
+/**
+ * How often a man who keeps his place in a won battle is decorated. It was one
+ * in twenty-five: a steady soldier could fight ten years without one, and the
+ * decoration was the only thing a battle did for his name.
+ */
+const STEADY_DECORATION_ON_A_WIN = 0.09;
 
 export interface KeepTheRanksInput {
   readonly world: WorldState;
@@ -526,6 +534,10 @@ export function recordTheFight(world: WorldState, result: BattleResult, fates: r
   };
   for (const fate of fates) {
     if (fate.outcome === "killed") continue;
+    // Spoken of in the camp, or in the city, whatever his record (`standing-deeds.ts`).
+    const line = standingFromTheLine(next, result, fate, playerId);
+    next = line.world;
+    facts.push(...line.facts);
     const person = next.characters.find((character) => character.id === fate.characterId);
     const service = person?.service;
     const force = next.material.forces.find((candidate) => candidate.id === fate.forceId);
@@ -537,27 +549,23 @@ export function recordTheFight(world: WorldState, result: BattleResult, fates: r
     const roll = (stableHash([result.battleId, person.id, "deed"]) % 1_000) / 1_000;
     const bold = service.conduct === "glory";
     const timid = service.conduct === "cautious";
-    const decorateChance = bold ? (won(force.id) ? 0.3 : lost(force.id) ? 0.1 : 0.18) : service.conduct === "steady" ? (won(force.id) ? 0.04 : 0.01) : 0;
+    const decorateChance = bold ? (won(force.id) ? 0.3 : lost(force.id) ? 0.1 : 0.18) : service.conduct === "steady" ? (won(force.id) ? STEADY_DECORATION_ON_A_WIN : 0.01) : 0;
     const punishChance = timid && lost(force.id) ? 0.25 : timid ? 0.06 : 0;
     if (roll < decorateChance) {
       const honour = pickHonour(establishment, "decoration", hurt ? ["saving_a_comrade", "valour"] : ["valour", "saving_a_comrade"], `${result.battleId}:${person.id}`);
       if (honour === undefined) continue;
       next = withService(next, person.id, (record) => ({ ...record, decorations: [...record.decorations, { label: honour.label, atStep: next.elapsedStep, reason: `At the battle in ${result.battleId.split(":")[0] ?? "the field"}` }].slice(-20) }));
-      next = shiftStanding(next, person.id, STANDING_BPS[honour.standing]);
+      next = shiftStanding(next, person.id, STANDING_BPS[honour.standing], "victory");
       facts.push(deedFact(person, `${person.name} is given the ${honour.label} for his conduct in the battle.`, person.id === playerId, result.battleId));
     } else if (roll > 1 - punishChance) {
       const honour = pickHonour(establishment, "punishment", ["flight", "disobedience"], `${result.battleId}:${person.id}`);
       if (honour === undefined) continue;
       next = withService(next, person.id, (record) => ({ ...record, punishments: [...record.punishments, { label: honour.label, atStep: next.elapsedStep, reason: "Seen to hang back when the line was pressed" }].slice(-20) }));
-      next = shiftStanding(next, person.id, -STANDING_BPS[honour.standing]);
+      next = shiftStanding(next, person.id, -STANDING_BPS[honour.standing], "scandal");
       facts.push(deedFact(person, `${person.name} is punished with ${honour.label}: he was seen to hang back when the line was pressed.`, person.id === playerId, result.battleId));
     }
   }
   return { world: next, facts };
-}
-
-function shiftStanding(world: WorldState, characterId: string, bps: number): WorldState {
-  return { ...world, characters: world.characters.map((character) => (character.id === characterId ? { ...character, prestigeBps: clampBps(character.prestigeBps + bps) } : character)) };
 }
 
 function deedFact(person: Character, summary: string, isPlayer: boolean, battleId: string): FactProposalDraft {

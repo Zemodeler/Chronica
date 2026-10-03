@@ -3,7 +3,9 @@ import { readAbroad, type TreatyPosture } from "../authority/abroad";
 import { readPerson } from "../characters/acquaintance";
 import { lettersDirectory } from "../characters/directory";
 import { allOffices, allSuccessionRules, type Office, type SuccessionRule } from "../characters/character";
-import { electableFor, isBeneath, isEligibleFor, officeRequirements } from "../characters/candidates";
+import { admissionRefusal, electableFor, isBeneath, officeRequirements } from "../characters/candidates";
+import { standingGateOf } from "../characters/standing";
+import { formatStanding } from "../characters/standing-causes";
 import { describeOfficePowers } from "./office-powers-text";
 import { labelNamesOffice } from "../characters/player-materialization";
 import type { CharacterBelief, KnowledgeChannel } from "../characters/beliefs";
@@ -165,7 +167,7 @@ export interface OfficeNext {
   readonly standing: readonly Linked[];
   /** Men the electors would think of unprompted, likeliest first. */
   readonly talkedOf: readonly Linked[];
-  /** "You could stand", "You are talked of for it"; null when neither. */
+  /** "You could stand", "You are talked of for it", "Not yet: you stand at 2,900; the office asks 3,000"; null when it is beneath him. */
   readonly youLabel: string | null;
 }
 
@@ -428,14 +430,23 @@ function whoCouldBeNext(
   const likely = electableFor(world, office, officesById, world.elapsedStep);
   const talkedOf = likely.slice(0, 4).map((character) => person(character.id)).filter((linked): linked is Linked => linked !== null && !standing.some((s) => s.key === linked.key));
   const { requirementIds, minStanding } = officeRequirements(world, office);
-  const couldStand = !isBeneath(world, office, officesById, viewer) && isEligibleFor(world, office, requirementIds, viewer, world.elapsedStep);
+  const beneath = isBeneath(world, office, officesById, viewer);
+  const refusal = admissionRefusal(world, office, requirementIds, viewer, world.elapsedStep);
+  const couldStand = !beneath && refusal === null;
   const talkedOfYou = likely.slice(0, 4).some((character) => character.id === viewer.id);
+  // Why not, in numbers: the note said nothing at all to a man who could not
+  // stand, so a legionary at 2,900 could not tell he was one deed short.
+  const gate = standingGateOf(world, office);
+  const whyNot = refusal === null || beneath ? null
+    : gate !== null && viewer.prestigeBps < gate
+      ? `Not yet: you stand at ${formatStanding(viewer.prestigeBps)}; the office asks ${formatStanding(gate)}.`
+      : `Not yet: ${refusal}`;
   const due = election?.deadlineStep ?? null;
   return {
     pollingLabel: due === null ? null : `Polling day is ${clock === undefined ? `day ${due}` : formatWorldDate({ day: due, minute: 0 }, clock)}`,
     standing,
     talkedOf: talkedOf.filter((linked) => linked.key !== entityKey("person", viewer.id)),
-    youLabel: talkedOfYou ? "You are talked of for it." : couldStand && viewer.prestigeBps >= minStanding ? "You could stand." : couldStand ? "You could stand, though few would think of you for it." : null,
+    youLabel: talkedOfYou ? "You are talked of for it." : couldStand && viewer.prestigeBps >= minStanding ? "You could stand." : couldStand ? "You could stand, though few would think of you for it." : whyNot,
   };
 }
 

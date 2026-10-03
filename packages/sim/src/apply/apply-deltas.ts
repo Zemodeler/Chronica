@@ -1,5 +1,6 @@
 import { hiringGroups } from "./action-groups";
 import {
+  serveInArmy,
   takenBy,
   openPeaceTable,
   ownerOf,
@@ -179,6 +180,8 @@ import { diplomaticAnswererOf } from "../letters";
 import { moneyMadeBetween, newIssues } from "./what-a-batch-did";
 import { journeysOf, onTheWayTo, settledCourse, shoreItMakesFor, turnOnTheRoad, wasTurnedOnTheRoad } from "./marches";
 import { WORLD_THREAD_CAP, makeRoomForTheOrder, worldThreadsFull } from "../storyline-cap";
+import { admitCandidacy } from "../candidacy";
+import { benefactionPayer, giveToThePeople } from "./benefaction";
 
 /**
  * Applies a validated batch of deltas to the world.
@@ -374,6 +377,11 @@ function scopeOf(delta: WorldDelta, world: WorldState, resolve: (ref: string) =>
       return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
     case "force_post_set":
       return { kind: "force", id: resolve(delta.forceRef) ?? delta.forceRef };
+    // A gift to the people is weighed by the purse that pays: his own is his own business.
+    case "public_benefaction": {
+      const payer = benefactionPayer(world, delta, actorRef.kind === "character" ? actorRef.id : null, resolve);
+      return payer === null ? polityFallback : { kind: "account", id: payer };
+    }
     // An arrangement kept at somebody's expense is weighed like the money that
     // keeps it: a shrine a man endows from his purse is his to endow, and one
     // kept out of the treasury is spending the treasury. Before, the account
@@ -606,6 +614,7 @@ const POWER_BY_OP: Record<WorldDelta["op"], AuthorityPower> = {
   service_contract_close: "spend",
   // Taking a state is the power nobody's office grants: every attempt is recorded as a breach.
   regime_change: "override",
+  public_benefaction: "spend",
 };
 
 /** The power an act needs: founding something is proposing it, and keeping it at an account's expense is spending from it. */
@@ -3498,7 +3507,8 @@ function applyOne(
         resultingEventIds: [],
         ...(delta.concerns === undefined ? {} : { concerns: [...delta.concerns] }),
       };
-      const opened: WorldState = { ...world, material: { ...world.material, politicalProcedures: existingQuestion === undefined ? [...world.material.politicalProcedures, procedure] : world.material.politicalProcedures } };
+      // A man standing for an elected office is admitted or refused now, with the numbers (`candidacy.ts`).
+      const opened: WorldState = admitCandidacy({ ...world, material: { ...world.material, politicalProcedures: existingQuestion === undefined ? [...world.material.politicalProcedures, procedure] : world.material.politicalProcedures } }, existingQuestion === undefined ? id : null, context.offices, context.successionRules ?? [], atStep, emitFact);
       if (delta.enacts == null) return withConcerns(opened, id);
       // What it will do if carried, kept until then with every reference
       // resolved now: an account named today is the one that pays.
@@ -3877,8 +3887,9 @@ function applyOne(
       if (delta.change === "conduct") {
         if (!force.memberCharacterIds.includes(characterId)) reject(`${person.name} is not in the ranks of ${force.name}.`);
         if (delta.conduct === undefined) reject("Say how he means to bear himself: steady, glory or cautious.");
-        if (person.service === undefined) return world;
-        return { ...world, characters: world.characters.map((character) => (character.id === characterId && character.service !== undefined ? { ...character, service: { ...character.service, conduct: delta.conduct! } } : character)) };
+        // A man in the ranks with no record yet is given one, so what he says is kept: it was dropped.
+        const enrolled = person.service === undefined ? serveInArmy(world, { characterId, forceId, role: "soldier", atStep, nameTheChain: false }) : world;
+        return { ...enrolled, characters: enrolled.characters.map((character) => (character.id === characterId && character.service !== undefined ? { ...character, service: { ...character.service, conduct: delta.conduct! } } : character)) };
       }
 
       if (delta.change === "enlist") {
@@ -3978,6 +3989,12 @@ function applyOne(
         significance: 45,
       });
       return putInPost(world, force.id, { formationId: formation.id, unitIndex, rankId: rank.id, characterId }, atStep);
+    }
+    case "public_benefaction": {
+      const given = giveToThePeople(world, delta, context, resolve);
+      if ("refusal" in given) reject(given.refusal, given.kind);
+      emitFact(given.fact);
+      return given.world;
     }
 
     case "trade_venture_open": {
