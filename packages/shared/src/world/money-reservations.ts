@@ -67,7 +67,13 @@ export function spentForOrderPart(world: import("./world-state").WorldState, par
   const record = world.orders.find((order) => order.parts.includes(part));
   const index = record?.parts.indexOf(part) ?? -1;
   const source = record === undefined ? null : `${record.id}-p${index}`;
-  const causes = new Set(part.workRefs.map((ref) => ref.id));
+  // And what that work pays by the month: a hire's wages are paid by the tick
+  // against its obligation, never against the contract, so an order that hired
+  // a shipmaster read "0 spent" while its purse emptied (E3).
+  const wages = part.workRefs.flatMap((ref) => ref.kind !== "contract" ? [] : [world.material.contracts.find((contract) => contract.id === ref.id)?.obligationId ?? null])
+    .filter((id): id is string => id !== null);
+  const owed = source === null ? [] : world.material.obligations.filter((obligation) => obligation.sourceActionId === source).map((obligation) => obligation.id);
+  const causes = new Set([...part.workRefs.map((ref) => ref.id), ...wages, ...owed]);
   // A bare payment names no work: the part's own "paid" goal is what ties it.
   const paidTo = new Set(part.goals.flatMap((goal) => goal.kind === "paid" ? [goal.toAccountId] : []));
   const since = record?.givenAtStep ?? 0;

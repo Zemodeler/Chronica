@@ -15,6 +15,9 @@ import type { WorldState } from "./world-state";
  * doing now is read from the work itself (`orderPartStatus`), never from a
  * sentence written when the order was given.
  */
+/** The most goals a part keeps: four of its own, and one answer for each of its letters besides. */
+export const MAX_PART_GOALS = 12;
+
 export const OrderWorkRefSchema = z
   .object({
     kind: z.enum(["project", "procedure", "message", "audit", "plot", "order_attempt", "force", "entity", "contract", "siege"]),
@@ -56,6 +59,14 @@ export const OrderStageSchema = z
     status: z.enum(["waiting", "resumed", "failed"]).default("waiting"),
     /** Why it failed, when it did. */
     reason: z.string().trim().max(400).nullable().default(null),
+    /**
+     * When it was first held. A crossing held "until enough ships are
+     * available" waited for ever: nothing could say the ships were never
+     * coming, because nothing knew how long it had waited.
+     */
+    heldSinceStep: ElapsedStepSchema.nullable().default(null),
+    /** When it failed, so the record can say on what day, not only that it did. */
+    failedAtStep: ElapsedStepSchema.nullable().default(null),
   })
   .strict();
 export type OrderStage = z.infer<typeof OrderStageSchema>;
@@ -83,13 +94,25 @@ export const OrderPartSchema = z
     /**
      * What it is for, as the world can be read for it (`world/goals.ts`): the
      * legion in Messana, not the transport accepted. Empty for a part that
-     * only wanted something said or done once.
+     * only wanted something said or done once. Up to four of its own, and an
+     * answer wanted for each letter besides: eight letters sent for one part
+     * kept the goals of the first four, and the other four were nobody's.
      */
-    goals: z.array(OrderGoalSchema).max(4).default([]),
+    goals: z.array(OrderGoalSchema).max(MAX_PART_GOALS).default([]),
     /** Everything this part set going, in the order it was made. */
     workRefs: z.array(OrderWorkRefSchema).max(12).default([]),
     /** Why the world would not have it, when it would not. */
     refusal: z.string().trim().max(600).nullable().default(null),
+    /** When the refusal was written, so the record can say on what day. */
+    refusedAtStep: ElapsedStepSchema.nullable().default(null),
+    /**
+     * How many of the order's own acts were written for it, carried and not.
+     * "Leave the army and travel to Rome" read as done on the strength of its
+     * facts, while the discharge it wrote had been refused: a part answered
+     * only by being said is one the answer wrote no act for.
+     */
+    actsCarried: z.number().int().nonnegative().max(99).default(0),
+    actsRefused: z.number().int().nonnegative().max(99).default(0),
     /**
      * What the player should know about how it was done, when it was done in a
      * way his place did not allow: "bought bread for the legion out of the
@@ -169,30 +192,43 @@ export function findOrderPart(world: WorldState, ref: string): { readonly order:
  * Where one part of an order stands, read from its goals and its work.
  *
  * - `achieved`: what it was for is so -- the legion stands in Messana.
+ * - `partly_done`: some of it came about and some could not: six of eight
+ *   letters answered as wanted, or the legion landed while an act held for it
+ *   failed.
  * - `under_way`: something is being done: a march, an audit, a plot.
  * - `acknowledged`: whoever it was handed to took it up, and has done nothing yet.
  * - `authorized`: the leave or the money was given, and nothing is being done with it.
  * - `awaiting_authority`: it waits on a vote.
  * - `awaiting_reply`: a letter is on its way or unanswered.
+ * - `awaiting_condition`: an act of it is held until what it needs is so --
+ *   the army there, ships enough to carry it. The consul's own crossing, held
+ *   for ships, read "handed on, not yet taken up" to the man holding it.
  * - `pending`: handed to somebody who has not yet taken it up.
  * - `blocked`: its work was stopped.
  * - `failed`: it cannot come about any more, or its work finished without it.
- * - `refused`, `unanswered`: nobody would, or nothing came of it.
+ * - `refused`: somebody would not. `unanswered`: nobody answered, or nothing
+ *   came of it -- a letter ignored is not a letter refused.
  *
  * Taking an order up, and being allowed to, are progress and are shown as
  * such; neither is the thing done.
  */
-export type OrderPartStatus =
-  | "achieved" | "under_way" | "acknowledged" | "authorized" | "awaiting_authority" | "awaiting_reply" | "pending"
-  | "blocked" | "failed" | "refused" | "unanswered";
+export const ORDER_PART_STATUSES = [
+  "achieved", "partly_done", "under_way", "acknowledged", "authorized", "awaiting_authority", "awaiting_reply", "awaiting_condition", "pending",
+  "blocked", "failed", "refused", "unanswered",
+] as const;
+export type OrderPartStatus = (typeof ORDER_PART_STATUSES)[number];
 
 /** Least finished first: a part stands where its least finished work stands. */
 const RANK: Record<OrderPartStatus, number> = {
-  blocked: 0, failed: 1, under_way: 2, acknowledged: 3, awaiting_authority: 4, awaiting_reply: 5, pending: 6, authorized: 7, refused: 8, unanswered: 9, achieved: 10,
+  blocked: 0, failed: 1, under_way: 2, acknowledged: 3, awaiting_authority: 4, awaiting_reply: 5, awaiting_condition: 6, pending: 7, authorized: 8,
+  refused: 9, unanswered: 10, partly_done: 11, achieved: 12,
 };
 
 /** The statuses a part is finished at, one way or another. */
-const FINISHED: ReadonlySet<OrderPartStatus> = new Set(["achieved", "failed", "refused", "unanswered"]);
+const FINISHED: ReadonlySet<OrderPartStatus> = new Set(["achieved", "partly_done", "failed", "refused", "unanswered"]);
+
+/** Statuses with something still moving in the world: a march, a vote, a letter on the road, an act held for its moment. */
+const MOVING: ReadonlySet<OrderPartStatus> = new Set(["under_way", "awaiting_authority", "awaiting_reply", "awaiting_condition"]);
 
 /** Where one piece of work stands, or null when it has no life of its own to read (a made army, an arrangement) or no longer exists. */
 export function workStatus(world: WorldState, ref: OrderWorkRef): OrderPartStatus | null {
@@ -220,7 +256,10 @@ export function workStatus(world: WorldState, ref: OrderWorkRef): OrderPartStatu
       const message = world.diplomacy.find((candidate) => candidate.id === ref.id);
       if (message === undefined) return null;
       if (message.status === "awaiting_reply") return "awaiting_reply";
-      return message.answer === "refused" || message.answer === "ignored" ? "refused" : "achieved";
+      // Silence is not a refusal: one ignored letter of eight once made the
+      // whole part read "refused" although the other seven went.
+      if (message.answer === "ignored") return "unanswered";
+      return message.answer === "refused" ? "refused" : "achieved";
     }
     case "audit": {
       const audit = world.audits.find((candidate) => candidate.id === ref.id);
@@ -265,36 +304,111 @@ function stageStatus(world: WorldState, stage: OrderStage): OrderPartStatus | nu
   if (waitsOnVote) return "awaiting_authority";
   const waitsOnLetter = stage.waitsOn.some((condition) => condition.kind === "letter_answered"
     && world.diplomacy.find((message) => message.id === condition.messageId)?.status === "awaiting_reply");
-  return waitsOnLetter ? "awaiting_reply" : "pending";
+  return waitsOnLetter ? "awaiting_reply" : "awaiting_condition";
+}
+
+/** What a part's letters came to, counted, when it sent more than one. */
+export interface LetterTally {
+  readonly sent: number;
+  readonly accepted: number;
+  readonly countered: number;
+  readonly refused: number;
+  readonly unanswered: number;
+  readonly waiting: number;
+}
+
+/**
+ * A part that sent several letters is answered by all of them together, not
+ * by the least finished one: "write to the eight Italian allies" read
+ * "refused" because one of the eight was ignored while six had agreed.
+ */
+export function letterTally(world: WorldState, part: Pick<OrderPart, "workRefs">): LetterTally | null {
+  const ids = [...new Set(part.workRefs.filter((ref) => ref.kind === "message").map((ref) => ref.id))];
+  const letters = ids.map((id) => world.diplomacy.find((message) => message.id === id)).filter((message) => message !== undefined);
+  if (letters.length < 2) return null;
+  const count = (test: (message: (typeof letters)[number]) => boolean): number => letters.filter(test).length;
+  return {
+    sent: letters.length,
+    accepted: count((message) => message.status !== "awaiting_reply" && message.answer === "accepted"),
+    countered: count((message) => message.status !== "awaiting_reply" && message.answer === "countered"),
+    refused: count((message) => message.status !== "awaiting_reply" && message.answer === "refused"),
+    unanswered: count((message) => message.status !== "awaiting_reply" && (message.answer === "ignored" || message.answer === null)),
+    waiting: count((message) => message.status === "awaiting_reply"),
+  };
+}
+
+/** "8 letters: 6 accepted, 1 refused, 1 unanswered." */
+export function letterTallyInWords(tally: LetterTally): string {
+  const counts = [
+    [tally.accepted, "accepted"], [tally.countered, "answered with terms"], [tally.refused, "refused"],
+    [tally.unanswered, "unanswered"], [tally.waiting, "still awaiting an answer"],
+  ] as const;
+  return `${tally.sent} letters: ${counts.filter(([count]) => count > 0).map(([count, word]) => `${count} ${word}`).join(", ")}`;
+}
+
+function tallyStatus(tally: LetterTally): OrderPartStatus {
+  if (tally.waiting > 0) return "awaiting_reply";
+  const answered = tally.accepted + tally.countered;
+  if (answered === tally.sent) return "achieved";
+  if (answered > 0) return "partly_done";
+  return tally.unanswered === tally.sent ? "unanswered" : "refused";
 }
 
 export function orderPartStatus(world: WorldState, part: OrderPart, options: { readonly without?: OrderWorkRef } = {}): OrderPartStatus {
-  const reading = goalsMet(world, part.goals);
-  if (reading === "met") return "achieved";
   const work = options.without === undefined ? part.workRefs : part.workRefs.filter((ref) => ref.kind !== options.without!.kind || ref.id !== options.without!.id);
+  // Several letters are read together, and the answer each one wanted with them.
+  const tally = letterTally(world, { workRefs: work });
+  const gathered = new Set(tally === null ? [] : work.filter((ref) => ref.kind === "message").map((ref) => ref.id));
+  const reading = goalsMet(world, part.goals.filter((goal) => goal.kind !== "answer_from" || !gathered.has(goal.messageId)));
   const statuses = [
-    ...work.map((ref) => workStatus(world, ref)),
+    ...work.filter((ref) => !gathered.has(ref.id)).map((ref) => workStatus(world, ref)),
+    ...(tally === null ? [] : [tallyStatus(tally)]),
     ...part.stages.map((stage) => stageStatus(world, stage)),
   ].filter((status): status is OrderPartStatus => status !== null);
-  if (reading === "impossible") return statuses.includes("refused") || (statuses.length === 0 && part.refusal !== null) ? "refused" : "failed";
+  if (reading === "met") {
+    // What it was for is so, and something it set going still was not: the
+    // Senate's fleet question read "done" while the act held for it had
+    // failed on a handle nothing made.
+    // So is an act of it refused for good: "leave the army and travel to
+    // Rome" read done with the man discharged and the journey refused (E5).
+    const tallied = tally === null ? null : tallyStatus(tally);
+    if (part.actsRefused > 0 || part.stages.some((stage) => stage.status === "failed") || (tallied !== null && tallied !== "achieved" && tallied !== "awaiting_reply")) return "partly_done";
+    return tallied === "awaiting_reply" ? "awaiting_reply" : "achieved";
+  }
+  if (reading === "impossible") {
+    if (statuses.includes("refused") || (statuses.length === 0 && part.refusal !== null)) return "refused";
+    return statuses.length > 0 && statuses.every((status) => status === "unanswered") ? "unanswered" : "failed";
+  }
   if (statuses.length === 0) {
     if (part.refusal !== null) return "refused";
-    // A part with nothing to read the world for was answered by being said.
-    return reading === null && part.factIds.length > 0 ? "achieved" : "unanswered";
+    if (reading === "not_yet") return "unanswered";
+    // A part with nothing to read the world for was done by the act written
+    // for it; and one the answer wrote no act for at all was answered by
+    // being said. Never by its facts when its only acts were refused.
+    if (part.actsCarried > 0) return part.actsRefused > 0 ? "partly_done" : "achieved";
+    return part.actsRefused === 0 && part.factIds.length > 0 ? "achieved" : "unanswered";
   }
   const worst = statuses.reduce((least, status) => (RANK[status] < RANK[least] ? status : least));
   // Its work is finished and what it was for is not so: finishing was not enough.
-  if (reading === "not_yet" && worst === "achieved") return "failed";
-  return worst;
+  if (reading === "not_yet" && (worst === "achieved" || worst === "partly_done")) return "failed";
+  return worst === "achieved" && part.actsRefused > 0 ? "partly_done" : worst;
 }
+
+/** A note that says how a part came out, not that it was done beyond his authority. */
+const NOT_A_BREACH = /^(Not needed|Not all of it|It could not be carried out as written|Lapsed)/;
 
 /**
  * The status word for a part, as the player reads it. Done beyond the actor's
  * authority is said so: "Declare war on Carthage -- done" read as success
- * while the breach was in a private fact nobody showed him.
+ * while the breach was in a private fact nobody showed him. Given the world,
+ * a held part says what it is held for.
  */
-export function orderPartLabel(status: OrderPartStatus, part: Pick<OrderPart, "note">): string {
-  if (status === "achieved" && part.note !== null && !/^Not needed/.test(part.note)) return "done, beyond his authority";
+export function orderPartLabel(status: OrderPartStatus, part: Pick<OrderPart, "note" | "stages">, world?: WorldState): string {
+  if (status === "achieved" && part.note !== null && !NOT_A_BREACH.test(part.note)) return "done, beyond his authority";
+  if (status === "awaiting_condition" && world !== undefined) {
+    const until = waitingUntil(world, part);
+    if (until !== null) return `waiting until ${until}`;
+  }
   return ORDER_PART_STATUS_LABEL[status];
 }
 
@@ -304,14 +418,62 @@ export function isOrderPartOpen(world: WorldState, part: OrderPart): boolean {
   return !FINISHED.has(orderPartStatus(world, part));
 }
 
+/** A part nothing more has been done for in this long, and that waits on nothing, lapses. */
+export const ORDER_PART_LAPSES_DAYS = 60;
+
+/**
+ * Whether an open part has gone stale: given two months ago or more, with no
+ * act held for its moment and nothing of it moving in the world. Parts never
+ * lapsed, so the Council listed a season's dead orders beside the live ones,
+ * and an order taken up and never acted on stood "taken up" for ever.
+ */
+export function isOrderPartStale(world: WorldState, order: Pick<OrderRecord, "givenAtStep">, part: OrderPart): boolean {
+  if (part.closedAtStep !== null || world.elapsedStep - order.givenAtStep < ORDER_PART_LAPSES_DAYS) return false;
+  if (part.stages.some((stage) => stage.status === "waiting")) return false;
+  const status = orderPartStatus(world, part);
+  return !FINISHED.has(status) && !MOVING.has(status);
+}
+
+/** A condition a held act waits on, as the player would say it: "Legio I reaches Messana". */
+export function conditionAwaitedInWords(world: WorldState, condition: StageCondition): string {
+  const forceName = (id: string): string => world.material.forces.find((force) => force.id === id)?.name ?? "the army";
+  const provinceName = (id: string): string => {
+    const province = world.map.provinces.find((candidate) => candidate.id === id);
+    return province?.settlements.find((settlement) => settlement.kind === "port")?.name ?? province?.name ?? "its destination";
+  };
+  switch (condition.kind) {
+    case "force_at": return `${forceName(condition.forceId)} reaches ${provinceName(condition.provinceId)}`;
+    case "force_named": return `the ${condition.name} force is raised`;
+    case "transport_capacity": return `there are ships enough to carry ${forceName(condition.forceId)} to ${provinceName(condition.provinceId)}`;
+    case "procedure_passed": {
+      const label = world.material.politicalProcedures.find((procedure) => procedure.id === condition.procedureId)?.label;
+      return label === undefined ? "the vote passes" : `the vote on "${label}" passes`;
+    }
+    case "project_done": return `${world.projects.find((project) => project.id === condition.projectId)?.label ?? "the work it needs"} is finished`;
+    case "funds": return `${Math.round(condition.amount).toLocaleString("en-GB")} is to hand`;
+    case "letter_answered": {
+      const subject = world.diplomacy.find((message) => message.id === condition.messageId)?.subject;
+      return `${subject === undefined ? "the letter" : `"${subject}"`} is ${condition.answer === "any" ? "answered" : condition.answer}`;
+    }
+  }
+}
+
+/** What a part's held acts wait on, in words, or null when nothing is held. */
+export function waitingUntil(world: WorldState, part: Pick<OrderPart, "stages">): string | null {
+  const awaited = [...new Set(part.stages.filter((stage) => stage.status === "waiting").flatMap((stage) => stage.waitsOn).map((condition) => conditionAwaitedInWords(world, condition)))];
+  return awaited.length === 0 ? null : awaited.slice(0, 3).join(" and ");
+}
+
 /** A short, plain word for the status, as the player reads it. */
 export const ORDER_PART_STATUS_LABEL: Record<OrderPartStatus, string> = {
   achieved: "done",
+  partly_done: "partly done",
   under_way: "under way",
   acknowledged: "taken up, nothing done yet",
   authorized: "allowed, not yet carried out",
   awaiting_authority: "waiting on a vote",
   awaiting_reply: "waiting on an answer",
+  awaiting_condition: "waiting until what it needs is ready",
   pending: "handed on, not yet taken up",
   blocked: "stopped",
   failed: "failed",

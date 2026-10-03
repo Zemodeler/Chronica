@@ -62,4 +62,9 @@ console.log(`  powers that acted by rule: ${new Set(log.map((entry) => entry.pol
 console.log(`  sieges laid: ${kinds.get("siege_laid") ?? 0}, cities given up: ${kinds.get("siege_ended") ?? 0}, provinces occupied: ${kinds.get("province_occupied") ?? 0}, raids: ${kinds.get("province_raided") ?? 0}, powers ended: ${kinds.get("polity_ended") ?? 0}`);
 console.log(`  provinces held by somebody other than their owner now: ${world.map.provinces.filter((province) => province.ownerPolityId != null && province.ownerPolityId !== province.controllerPolityId).length}`);
 console.log(`  acts the applier refused: ${refused}`);
-if (saveAt !== null) writeFileSync(saveAt, JSON.stringify(world));
+if (saveAt !== null) {
+  // A world that will not load is never saved as though it would (E1).
+  const loadable = WorldStateSchema.safeParse(world);
+  if (!loadable.success) throw new Error(`The world would not load (${loadable.error.issues.slice(0, 3).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}); it was not written.`);
+  writeFileSync(saveAt, JSON.stringify(loadable.data));
+}

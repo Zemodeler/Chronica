@@ -4,7 +4,7 @@ import type { Office } from "../characters/character";
 import type { WorldState } from "../world/world-state";
 import type { Project } from "../world/project";
 import { formatWorldDate, type ScenarioClock } from "../world/clock";
-import { orderPartLabel, orderPartStatus } from "../world/orders";
+import { isOrderPartStale, letterTally, letterTallyInWords, orderPartLabel, orderPartStatus, waitingUntil } from "../world/orders";
 
 /**
  * What the player's orders are doing, as they could know it.
@@ -130,9 +130,11 @@ export function ordersUnderWay(
   for (const order of world.orders) {
     if (order.actorCharacterId !== characterId) continue;
     for (const [index, part] of order.parts.entries()) {
-      if (part.closedAtStep !== null) continue;
+      // Gone stale is as good as closed, here as in the ledger (`isOrderPartStale`):
+      // a season's dead orders stood beside the live ones (E6).
+      if (part.closedAtStep !== null || isOrderPartStale(world, order, part)) continue;
       const status = orderPartStatus(world, part);
-      const finished = status === "achieved" || status === "failed" || status === "refused" || status === "unanswered";
+      const finished = status === "achieved" || status === "partly_done" || status === "failed" || status === "refused" || status === "unanswered";
       if (finished && order !== latest) continue;
       if (status === "achieved" && part.note === null) continue;
       // Shown already, as its own work: a project above, or an audit, a plot or
@@ -146,23 +148,15 @@ export function ordersUnderWay(
       if (status !== "blocked" && status !== "failed" && status !== "authorized" && status !== "acknowledged" && part.note === null && part.workRefs.length > 0
         && part.workRefs.every((ref) => (ref.kind === "project" && shown.has(ref.id)) || listedBelow(ref) || ref.kind === "force" || ref.kind === "entity")) continue;
       const why = part.refusal ?? part.whyNot;
-      const waiting = part.stages.filter((stage) => stage.status === "waiting").flatMap((stage) => stage.waitsOn).map((condition) => {
-        switch (condition.kind) {
-          case "force_at": return `${forceName(condition.forceId) ?? "the army"} to reach ${provinceName(condition.provinceId) ?? "its destination"}`;
-          case "force_named": return `the ${condition.name} force to be raised`;
-          case "transport_capacity": return "enough ships to carry the army";
-          case "procedure_passed": return `the vote on ${world.material.politicalProcedures.find((procedure) => procedure.id === condition.procedureId)?.label ?? "the motion"}`;
-          case "project_done": return `${world.projects.find((project) => project.id === condition.projectId)?.label ?? "the prerequisite work"} to finish`;
-          case "funds": return `${money(condition.amount)} to be available`;
-          case "letter_answered": return `${world.diplomacy.find((message) => message.id === condition.messageId)?.subject ?? "the letter"} to be ${condition.answer === "any" ? "answered" : condition.answer}`;
-        }
-      });
-      const stateLabel = waiting.length > 0 ? `Waiting for ${[...new Set(waiting)].join(" and ")}` : upperFirst(orderPartLabel(status, part));
+      // What a held act waits on, said as the ledger says it (`waitingUntil`).
+      const until = waitingUntil(world, part);
+      const stateLabel = until !== null ? `Waiting until ${until}` : upperFirst(orderPartLabel(status, part, world));
+      const tally = letterTally(world, part);
       items.push({
         key: `order:${order.id}:${index}`,
         kind: "order",
         label: part.said,
-        detail: `${stateLabel}.${why === null || status === "achieved" ? "" : ` ${lastSentenceWithin(why, 320)}`}${part.note === null ? "" : ` ${upperFirst(part.note)}.`}`,
+        detail: `${stateLabel}.${tally === null ? "" : ` ${letterTallyInWords(tally)}.`}${why === null || status === "achieved" ? "" : ` ${lastSentenceWithin(why, 320)}`}${part.note === null ? "" : ` ${upperFirst(part.note)}.`}`,
         stalled: status === "blocked" || status === "failed" || status === "refused" || status === "unanswered" || status === "authorized" || status === "acknowledged",
       });
     }

@@ -183,7 +183,7 @@ describe("the order's record", () => {
     const world: WorldState = { ...opening(), orders: [{
       id: "order-1", actorCharacterId: CONSUL, text: "Sail Legio I to Messana", givenAtStep: 0,
       parts: [{ said: "Sail Legio I to Messana", goals: [], workRefs: [], refusal: null, note: null, whyNot: null, factIds: [], spend: null, attribution: "tagged", closedAtStep: null,
-        stages: [{ held: { op: "resume_instruction" }, waitsOn: [{ kind: "transport_capacity", forceId: "roman-field-army", provinceId: MESSANA }], status: "waiting", reason: null }] }],
+        stages: [{ held: { op: "resume_instruction" }, waitsOn: [{ kind: "transport_capacity", forceId: "roman-field-army", provinceId: MESSANA }], status: "waiting", reason: null, heldSinceStep: 0, failedAtStep: null }], refusedAtStep: null, actsCarried: 0, actsRefused: 0 }],
     }] };
     const rows = readStandingOrders(world, CONSUL, offices, definition.clock).rows;
     expect(rows[0]!.summary).toMatch(/ to /);

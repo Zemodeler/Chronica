@@ -61,7 +61,9 @@ export function outcomeOfOrder(result: BurstResult, entries: readonly ChronicleE
     parts,
     refusedByWorld: summaries("execution_friction"),
     ignored: summaries("order_ignored"),
-    malformed: summaries("engine_rejection"),
+    // Counted from what the engine kept for itself, not from facts: its
+    // refusals are no longer facts anybody can be told (E11).
+    malformed: [...result.unwritten],
     answeredOnly,
     unreadable: result.parseFailures,
     salvaged: result.salvaged,

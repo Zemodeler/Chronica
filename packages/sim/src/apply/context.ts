@@ -118,6 +118,19 @@ export interface AppliedDelta {
   readonly authority: AuthorityCheckResult;
   /** Whether it was one of the order's own acts. */
   readonly ofTheOrder?: boolean | undefined;
+  /**
+   * The money lines and standing obligations the act wrote, so the order part
+   * it answers can call them its own spending (`stampOrderMoney`). A payment
+   * was tagged with the man who made it, never the order, and an order's
+   * purse emptied while its record said nothing was spent (E3).
+   */
+  readonly madeMoney?: MadeMoney | undefined;
+}
+
+/** What one act wrote into the books. */
+export interface MadeMoney {
+  readonly transactionIds: readonly string[];
+  readonly obligationIds: readonly string[];
 }
 
 export interface RejectedDelta {

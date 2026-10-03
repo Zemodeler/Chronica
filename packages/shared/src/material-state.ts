@@ -123,6 +123,12 @@ export const MoneyObligationSchema = z.object({
    * somebody ends it.
    */
   remainingPeriods: z.number().int().nonnegative().optional(),
+  /**
+   * The part of an order that set it up (`orderPartRef`), copied onto every
+   * payment it makes: what an order spends goes on being its spending after
+   * the day it was given.
+   */
+  sourceActionId: EntityIdSchema.nullable().optional(),
 });
 export type MoneyObligation = z.infer<typeof MoneyObligationSchema>;
 

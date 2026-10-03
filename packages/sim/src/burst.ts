@@ -63,12 +63,15 @@ import {
   ORDER_PART_STATUS_LABEL,
   completeOrderAttempt,
   abandonOrderAttempt,
+  isOrderPartStale,
+  OrderRecordSchema,
+  OrderPartSchema,
 } from "@chronica/shared";
 import { applyDeltas } from "./apply/apply-deltas";
 import { settleRatifications } from "./ratification";
 import { commandChanges } from "./command-changes";
 import type { BattleAccount } from "./battle";
-import type { ApplyResult, AuthorityBreach, RejectedDelta } from "./apply/context";
+import type { ApplyResult, AuthorityBreach, MadeMoney, RejectedDelta } from "./apply/context";
 import { keepAsArrangement } from "./apply/keep-as-arrangement";
 import { actsBehindFacts, asClaim, isClaim, whereTheActorIs } from "./apply/fill-gaps";
 import { kindsIn } from "./bare-refs";
@@ -114,6 +117,10 @@ import { reviewPushback } from "./pushback";
 import { decideVillainy, seizeThrones, usurpations } from "./villainy";
 import { powersDealtWith, powersNearThePlayer } from "./far-powers";
 import { keepFarNewsHome } from "./far-news";
+import { brokenBy, whyItWillNotLoad } from "./checkpoint";
+import { theOrdersOwnParts } from "./order-parts";
+import { actsHeCanDo, dedupeStages, resolveHandles } from "./order-stages";
+import { stampOrderMoney } from "./order-money";
 
 /**
  * One simulation burst: everything that happens between the player pressing
@@ -381,6 +388,12 @@ export interface BurstResult {
   readonly orderFactIds: readonly string[];
   /** The order as the ledger keeps it (`world.orders`), when this burst answered one: what each part came to is read from it at the end. */
   readonly orderRecordId: string | null;
+  /**
+   * The order's own acts the engine could not read after every attempt, in
+   * its own words. For scoring a run (`outcomeOfOrder`), never for the
+   * player: these were once facts, and reached him (E11).
+   */
+  readonly unwritten: readonly string[];
   /** Fact id → the significance its author assigned it, for storage and pacing. */
   readonly significanceByFactId: ReadonlyMap<string, number>;
   readonly scheduled: readonly ScheduledEventDraft[];
@@ -471,7 +484,8 @@ export interface AuditEntry {
    */
   readonly attempt: "first" | "repair" | "keep" | "floor";
   readonly reason: string;
-  readonly delta: WorldDelta;
+  /** The act, or -- for a part of the order refiled as the world's -- the part as the orchestrator wrote it. */
+  readonly delta: WorldDelta | { readonly op: "order_part"; readonly said: string; readonly acts: readonly number[] };
 }
 
 /** Acts that only make sense where the army has got to: fighting, a siege, a raid. */
@@ -513,6 +527,16 @@ function holdForArrival<T extends { readonly output: OrchestratorOutput }>(orche
 
 /** How long what a man said he was doing stands once he has gone on to real work. */
 const PURSUIT_LAPSES_DAYS = 60;
+
+/** How long a crossing is held for ships before they are not coming. */
+const TRANSPORT_WAIT_DAYS = 60;
+
+/**
+ * What the player is told of an act of his order the engine could not read:
+ * that it could not be done as he wrote it, never the engine's reason -- "No
+ * force legio-phantasma exists" reached the Chronicle and the Council (E11).
+ */
+const UNWRITTEN = "It could not be carried out as written.";
 
 /**
  * What somebody is now doing, as an arrangement of kind "pursuit": the one
@@ -587,6 +611,10 @@ interface OrderActs {
   readonly factIdsByLocalId?: ReadonlyMap<string, string>;
   /** The ids its handles were given. */
   readonly assignedIds?: ReadonlyMap<string, string>;
+  /** The places in `deltas` of acts written into the order that were the world's business (`misfiledWorldActs`). */
+  readonly misfiledIndexes?: ReadonlySet<number>;
+  /** The order's own acts the engine could not read after every attempt, in its own words: for the audit's count, never the player. */
+  readonly unwritten?: readonly string[];
 }
 
 /** A part of the order as the orchestrator read it. */
@@ -604,6 +632,14 @@ interface OwnAct {
   readonly index?: number | null;
   /** What it was for, read from the act (`goalsOfAct`). */
   readonly goals?: readonly OrderGoal[];
+  /** The money it moved and the obligations it left, to be filed as its part's (`stampOrderMoney`). */
+  readonly money?: MadeMoney | undefined;
+  /**
+   * Refused because the engine could not read it, and not put right. Never
+   * the part's refusal -- "No force legio-phantasma exists" is not history --
+   * but a part whose only acts were these did not come about (E5, E11).
+   */
+  readonly unwritten?: boolean;
 }
 
 /**
@@ -619,6 +655,9 @@ function assignActs(parts: readonly { readonly said: string; readonly acts?: rea
       const named = parts.findIndex((part) => (part.acts ?? []).includes(act.index!));
       if (named >= 0) return { part: named, guessed: false };
     }
+    // An answer to an order put to him is no part of an order he gives:
+    // placed by its words, "already answered" became a new order's refusal (E6).
+    if (act.delta?.op === "order_attempt_decide") return { part: null, guessed: false };
     if (parts.length === 1) return { part: 0, guessed: false };
     return { part: partOfAct(saids, act.said), guessed: true };
   });
@@ -894,6 +933,31 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     }
   };
 
+  /** The last world known to load whole: the one the burst was given, then each tick that held. */
+  let lastSound: WorldState = world;
+  /**
+   * A step of the burst's own bookkeeping, kept only if what it wrote loads.
+   *
+   * The tick is held to the schema (`tickTo`) and so is every batch of acts
+   * (`applyDeltas`); the order ledger, held acts, envelopes and plans were
+   * written straight into the world, and a single bad field from any of them
+   * -- a plan step slipped a fourth time, a "paid" goal of nothing -- left a
+   * saved world that would not load (E1). A step that would is set aside,
+   * with what it wrote, and the path it broke is kept with the burst.
+   */
+  const checkpoint = (stage: string, step: () => void): boolean => {
+    const before = world;
+    const factsBefore = newFacts.length;
+    step();
+    if (world === before) return true;
+    const broken = brokenBy(before, world);
+    if (broken === null) return true;
+    world = before;
+    newFacts.splice(factsBefore);
+    skipped.push({ stage: "invariant", reason: `${stage} wrote what would not load, and was set aside: ${broken}` });
+    return false;
+  };
+
   /** Applies one actor's proposal: deltas, then the facts and events it produced. */
   /**
    * Work done by somebody holding an accepted order, credited to it.
@@ -906,14 +970,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
    */
   const creditDelegatedWork = (
     recipientId: string,
-    acts: readonly { readonly said: string; readonly delta: WorldDelta; readonly work: readonly OrderWorkRef[]; readonly index: number | null; readonly goals: readonly OrderGoal[] }[],
+    acts: readonly { readonly said: string; readonly delta: WorldDelta; readonly work: readonly OrderWorkRef[]; readonly index: number | null; readonly goals: readonly OrderGoal[]; readonly money?: MadeMoney | undefined }[],
     factIds: readonly string[],
     serves: readonly { readonly ref: string; readonly acts: readonly number[] }[],
   ): void => {
     const held = world.orderAttempts.filter((attempt) => attempt.recipientRef.id === recipientId && attempt.status === "accepted");
     if (held.length === 0) return;
     const instructions = held.map((attempt) => attempt.instruction);
-    const credited = new Map<string, { work: OrderWorkRef[]; goals: OrderGoal[]; guessed: boolean }>();
+    const credited = new Map<string, { work: OrderWorkRef[]; goals: OrderGoal[]; guessed: boolean; money: (MadeMoney | undefined)[] }>();
     for (const act of acts) {
       // By the order he said the act was for; where he held one order only,
       // that one; only otherwise by its words, and then as a guess.
@@ -922,10 +986,15 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       if (index === null || index < 0) continue;
       const guessed = named === undefined && held.length > 1;
       if (guessed) audit.push({ actorRef: { kind: "character", id: recipientId }, op: act.delta.op, kind: "attribution_uncertain", ofTheOrder: false, attempt: "first", reason: `Work credited to "${held[index]!.instruction.slice(0, 120)}" by its words alone.`, delta: act.delta });
-      const entry = credited.get(held[index]!.id) ?? { work: [], goals: [], guessed: false };
-      credited.set(held[index]!.id, { work: [...entry.work, ...act.work], goals: [...entry.goals, ...act.goals], guessed: entry.guessed || guessed });
+      const entry = credited.get(held[index]!.id) ?? { work: [], goals: [], guessed: false, money: [] };
+      credited.set(held[index]!.id, { work: [...entry.work, ...act.work], goals: [...entry.goals, ...act.goals], guessed: entry.guessed || guessed, money: [...entry.money, act.money] });
     }
     if (credited.size === 0) return;
+    // What he spent doing it is the order's spending (`stampOrderMoney`).
+    for (const attempt of held) {
+      const entry = credited.get(attempt.id);
+      if (entry !== undefined && attempt.servesRef !== null) world = stampOrderMoney(world, entry.money, attempt.servesRef);
+    }
     world = {
       ...world,
       orderAttempts: world.orderAttempts.map((attempt) => !credited.has(attempt.id) ? attempt : {
@@ -965,7 +1034,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       const readable = parts.filter((part) => part.goals.length > 0 || part.workRefs.some((ref) => ref.kind !== "order_attempt"));
       if (readable.length === 0) return attempt;
       const statuses = readable.map((part) => orderPartStatus(world, part, { without: self }));
-      if (statuses.every((status) => status === "achieved")) {
+      if (statuses.every((status) => status === "achieved" || status === "partly_done")) {
         changed = true;
         return completeOrderAttempt(attempt, world.elapsedStep);
       }
@@ -978,13 +1047,37 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     if (changed) world = { ...world, orderAttempts: attempts };
   };
 
+  /**
+   * Parts of orders nothing has moved for in two months, closed as lapsed
+   * (`isOrderPartStale`). Parts never lapsed: a season's dead orders stood
+   * beside the live ones, and the next order's words were matched against
+   * all of them (E6).
+   */
+  const lapseStaleParts = (): void => {
+    if (!world.orders.some((order) => order.parts.some((part) => isOrderPartStale(world, order, part)))) return;
+    world = {
+      ...world,
+      orders: world.orders.map((order) => !order.parts.some((part) => isOrderPartStale(world, order, part)) ? order : {
+        ...order,
+        parts: order.parts.map((part) => !isOrderPartStale(world, order, part) ? part : {
+          ...part,
+          closedAtStep: world.elapsedStep,
+          note: `Lapsed: nothing more was done for it in ${world.elapsedStep - order.givenAtStep} days${part.note === null ? "" : `; ${part.note}`}`.slice(0, 400),
+        }),
+      }),
+    };
+  };
+
   /** Where a held act's condition stands. */
-  const conditionReading = (condition: StageCondition): "met" | "not_yet" | "impossible" => {
+  const conditionReading = (condition: StageCondition, heldSinceStep: number | null = null): "met" | "not_yet" | "impossible" => {
     switch (condition.kind) {
       case "transport_capacity": {
         const force = world.material.forces.find((candidate) => candidate.id === condition.forceId);
         if (force === undefined) return "impossible";
-        return passageFor(world, force, condition.provinceId, input.warfare).by !== null || passagePlanFor(world, force, condition.provinceId, input.warfare) !== null ? "met" : "not_yet";
+        if (passageFor(world, force, condition.provinceId, input.warfare).by !== null || passagePlanFor(world, force, condition.provinceId, input.warfare) !== null) return "met";
+        // Ships that have not come in two months are not coming: the wait
+        // could never end, and the crossing stood held for ever (E10).
+        return heldSinceStep !== null && world.elapsedStep - heldSinceStep >= TRANSPORT_WAIT_DAYS ? "impossible" : "not_yet";
       }
       case "force_named":
         return world.material.forces.some((force) => force.polityId === condition.polityId && normalizeName(force.name).includes(normalizeName(condition.name))) ? "met" : "not_yet";
@@ -1012,9 +1105,9 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   };
 
   /** A condition as the player reads it, for the reason a held act failed. */
-  const conditionInWords = (condition: StageCondition): string => {
+  const conditionInWords = (condition: StageCondition, heldSinceStep: number | null = null): string => {
     switch (condition.kind) {
-      case "transport_capacity": return "enough ships are available to carry the army";
+      case "transport_capacity": return heldSinceStep === null ? "enough ships are available to carry the army" : `no ships enough to carry the army came in ${world.elapsedStep - heldSinceStep} days`;
       case "force_named": return `a force named ${condition.name} is raised`;
       case "procedure_passed": {
         const vote = world.material.politicalProcedures.find((procedure) => procedure.id === condition.procedureId);
@@ -1052,9 +1145,69 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       for (const [partIndex, part] of order.parts.entries()) {
         if (part.closedAtStep !== null || !part.stages.some((stage) => stage.status === "waiting")) continue;
         let next: OrderPart = part;
-        for (const [stageIndex, stage] of part.stages.entries()) {
+        const ref = orderPartRef(order.id, partIndex);
+        // What an act held here made, by the handle it was written with, for
+        // the acts held beside it that name it (E9).
+        const handles = new Map<string, string>();
+        /** Held acts done as the order's, by the man who gave it, and what became of them. */
+        const carryOut = (acts: readonly WorldDelta[], stage: OrderStage, stageIndex: number): OrderStage => {
+          const actorRef = { kind: "character" as const, id: order.actorCharacterId };
+          const before = world;
+          const tried = applyDeltas(world, acts, {
+            now: world.instant, actorRef, offices: input.offices, ...(input.successionRules === undefined ? {} : { successionRules: input.successionRules }), warfare: input.warfare, ids, gameId: input.gameId,
+            clock: input.clock, orderDeltas: new Set(acts), assignedIds: handles,
+            // A vote it waited on, carried, is the act's authority.
+            ...(stage.waitsOn.some((condition) => condition.kind === "procedure_passed") ? { sanctionedDeltas: new Set(acts) } : {}),
+            playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
+            ...(input.terrains === undefined ? {} : { terrains: input.terrains }),
+            ...(input.wealth === undefined ? {} : { wealth: input.wealth }),
+          });
+          recordAudit(tried, actorRef, "repair");
+          if (tried.applied.length === 0) {
+            // The engine's own refusal is the audit's, never the order's
+            // answer: "No force ... exists" reached the Council as a part's
+            // refusal (E11).
+            const rejection = tried.rejected[0];
+            const unreadable = rejection === undefined || rejection.kind === "reference";
+            const reason = unreadable ? UNWRITTEN : rejection.reason.slice(0, 400);
+            next = unreadable ? { ...next, whyNot: UNWRITTEN } : { ...next, refusal: reason, refusedAtStep: world.elapsedStep };
+            return { ...stage, status: "failed", reason, failedAtStep: world.elapsedStep };
+          }
+          world = tried.world;
+          for (const [handle, id] of tried.assignedIds) handles.set(handle, id);
+          world = stampOrderMoney(world, tried.applied.map((entry) => entry.madeMoney), ref);
+          const made = acts.flatMap((act) => workMadeBy(before, world, act, tried.assignedIds));
+          const resolve = refResolver(world, tried.assignedIds);
+          const goals = mergeGoals([...next.goals, ...acts.flatMap((act) => goalsOfAct(before, act, made, resolve))], []).goals;
+          next = {
+            ...next, refusal: null, refusedAtStep: null, goals, actsCarried: Math.min(99, next.actsCarried + tried.applied.length),
+            workRefs: [...next.workRefs, ...made.filter((work) => !next.workRefs.some((known) => known.id === work.id))].slice(0, 12),
+          };
+          const materialized = materializeFacts({
+            proposals: [...tried.factProposals, {
+              localId: `order_resumed_${partIndex}_${stageIndex}`,
+              kind: "order_resumed",
+              summary: `What it waited on was settled, and the order was taken up again: "${part.said}".`.slice(0, 600),
+              affectedRefs: [actorRef],
+              visibility: "private" as const,
+              discoveryState: "private" as const,
+              knowableInDays: 0,
+              knownToRefs: [actorRef],
+              significance: 30,
+            }],
+            now: world.instant, forces: world.material.forces, atStep: world.elapsedStep, ids, causalDepth: 0, assignedIds: tried.assignedIds,
+          });
+          newFacts.push(...materialized.facts.map((fact) => ({ ...fact, sourceActionId: ref })));
+          for (const [factId, weight] of materialized.significanceByFactId) significanceByFactId.set(factId, weight);
+          return { ...stage, status: "resumed" };
+        };
+        for (let stageIndex = 0; stageIndex < next.stages.length; stageIndex += 1) {
+          // Read from the part as it now stands: an act held beside one just
+          // done may name what that one made.
+          const stage = next.stages[stageIndex]!;
           if (stage.status !== "waiting") continue;
-          const readings = stage.waitsOn.map(conditionReading);
+          const since = stage.heldSinceStep ?? order.givenAtStep;
+          const readings = stage.waitsOn.map((condition) => conditionReading(condition, since));
           const blocked = stage.waitsOn.find((_, at) => readings[at] === "impossible");
           let settled: OrderStage | null = null;
           if (blocked !== undefined && blocked.kind === "letter_answered" && world.diplomacy.find((message) => message.id === blocked.messageId)?.status !== "awaiting_reply" && world.diplomacy.some((message) => message.id === blocked.messageId)) {
@@ -1063,73 +1216,37 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
             settled = { ...stage, status: "resumed", reason: `Not needed: ${conditionInWords(blocked)}.`.slice(0, 400) };
             next = { ...next, note: settled.reason, closedAtStep: world.elapsedStep };
           } else if (blocked !== undefined) {
-            settled = { ...stage, status: "failed", reason: `It was waiting until ${conditionInWords(blocked)}.`.slice(0, 400) };
-            next = { ...next, refusal: `It could not go ahead: ${conditionInWords(blocked)}.`.slice(0, 600) };
+            const why = conditionInWords(blocked, blocked.kind === "transport_capacity" ? since : null);
+            settled = { ...stage, status: "failed", reason: `It could not go ahead: ${why}.`.slice(0, 400), failedAtStep: world.elapsedStep };
+            next = { ...next, refusal: `It could not go ahead: ${why}.`.slice(0, 600), refusedAtStep: world.elapsedStep };
           } else if (readings.every((reading) => reading === "met")) {
             if (stage.held.op === "resume_instruction") {
-              const military = /force|legion|defend|troops|ships|transport|hunt/i.test(String(stage.held.instruction));
-              const officesForWork = new Set(allOffices(world, input.offices).filter((office) => office.authorisedActionIds.includes(military ? "force_modify" : "project_create")).map((office) => office.id));
-              const qualified = (id: string) => world.material.officeSeats.some((seat) => seat.holderCharacterId === id && seat.status === "held" && officesForWork.has(seat.officeId));
-              const recipient = world.characters.filter((character) => character.alive && character.id !== order.actorCharacterId && character.polityId === world.characters.find((actor) => actor.id === order.actorCharacterId)?.polityId && world.material.officeSeats.some((seat) => seat.holderCharacterId === character.id && seat.status === "held"))
-                .sort((a, b) => Number(qualified(b.id)) - Number(qualified(a.id)) || (b.skills.subSkills.logistics ?? 0) - (a.skills.subSkills.logistics ?? 0) || b.prestigeBps - a.prestigeBps)[0];
-              if (recipient !== undefined) {
-                const before = new Set(world.orderAttempts.map((attempt) => attempt.id));
-                world = recordDelegations(world, [{ localId: `resume_${partIndex}_${stageIndex}`, issuerRef: { kind: "character", id: order.actorCharacterId }, recipientRef: { kind: "character", id: recipient.id }, claimedAuthorityGrantRef: null, instruction: String(stage.held.instruction), part: null }], ids, new Map(), input.offices);
-                const attempt = world.orderAttempts.find((candidate) => !before.has(candidate.id));
-                if (attempt !== undefined) { world = { ...world, orderAttempts: world.orderAttempts.map((candidate) => candidate.id === attempt.id ? { ...candidate, servesRef: orderPartRef(order.id, partIndex) } : candidate) }; next = { ...next, whyNot: null, workRefs: [...next.workRefs, { kind: "order_attempt", id: attempt.id }] }; settled = { ...stage, status: "resumed" }; }
-              }
-              if (settled !== null) { next = { ...next, stages: next.stages.map((old, at) => at === stageIndex ? settled! : old) }; changed = true; }
-              continue;
-            }
-            const parsed = WorldDeltaSchema.safeParse(stage.held);
-            if (!parsed.success) {
-              settled = { ...stage, status: "failed", reason: "The act it held could no longer be read." };
-            } else {
-              const actorRef = { kind: "character" as const, id: order.actorCharacterId };
-              const before = world;
-              const tried = applyDeltas(world, [parsed.data], {
-                now: world.instant, actorRef, offices: input.offices, ...(input.successionRules === undefined ? {} : { successionRules: input.successionRules }), warfare: input.warfare, ids, gameId: input.gameId,
-                clock: input.clock, orderDeltas: new Set([parsed.data]),
-                // A vote it waited on, carried, is the act's authority.
-                ...(stage.waitsOn.some((condition) => condition.kind === "procedure_passed") ? { sanctionedDeltas: new Set([parsed.data]) } : {}),
-                playerCharacterId: input.actorRef.kind === "character" ? input.actorRef.id : null,
-                ...(input.terrains === undefined ? {} : { terrains: input.terrains }),
-                ...(input.wealth === undefined ? {} : { wealth: input.wealth }),
-              });
-              recordAudit(tried, actorRef, "repair");
-              if (tried.applied.length > 0) {
-                world = tried.world;
-                const made = workMadeBy(before, world, parsed.data, tried.assignedIds);
-                const goals = mergeGoals([...next.goals, ...goalsOfAct(world, parsed.data, made, refResolver(world, tried.assignedIds))], []).goals;
-                next = { ...next, refusal: null, goals, workRefs: [...next.workRefs, ...made.filter((ref) => !next.workRefs.some((known) => known.id === ref.id))].slice(0, 12) };
-                settled = { ...stage, status: "resumed" };
-                const materialized = materializeFacts({
-                  proposals: [...tried.factProposals, {
-                    localId: `order_resumed_${partIndex}_${stageIndex}`,
-                    kind: "order_resumed",
-                    summary: `What it waited on was settled, and the order was taken up again: "${part.said}".`.slice(0, 600),
-                    affectedRefs: [actorRef],
-                    visibility: "private" as const,
-                    discoveryState: "private" as const,
-                    knowableInDays: 0,
-                    knownToRefs: [actorRef],
-                    significance: 30,
-                  }],
-                  now: world.instant, forces: world.material.forces, atStep: world.elapsedStep, ids, causalDepth: 0, assignedIds: tried.assignedIds,
-                });
-                const ref = orderPartRef(order.id, partIndex);
-                newFacts.push(...materialized.facts.map((fact) => ({ ...fact, sourceActionId: ref })));
-                for (const [factId, weight] of materialized.significanceByFactId) significanceByFactId.set(factId, weight);
+              const instruction = String(stage.held.instruction);
+              // What he commands, or is, he does himself (E10); only the rest is handed on.
+              const his = actsHeCanDo(world, order.actorCharacterId, next.goals, instruction);
+              if (his.length > 0) {
+                settled = carryOut(his, stage, stageIndex);
               } else {
-                const reason = tried.rejected[0]?.reason.slice(0, 400) ?? "The world would not have it.";
-                settled = { ...stage, status: "failed", reason };
-                next = { ...next, refusal: reason };
+                const military = /force|legion|defend|troops|ships|transport|hunt/i.test(instruction);
+                const officesForWork = new Set(allOffices(world, input.offices).filter((office) => office.authorisedActionIds.includes(military ? "force_modify" : "project_create")).map((office) => office.id));
+                const qualified = (id: string) => world.material.officeSeats.some((seat) => seat.holderCharacterId === id && seat.status === "held" && officesForWork.has(seat.officeId));
+                const recipient = world.characters.filter((character) => character.alive && character.id !== order.actorCharacterId && character.polityId === world.characters.find((actor) => actor.id === order.actorCharacterId)?.polityId && world.material.officeSeats.some((seat) => seat.holderCharacterId === character.id && seat.status === "held"))
+                  .sort((a, b) => Number(qualified(b.id)) - Number(qualified(a.id)) || (b.skills.subSkills.logistics ?? 0) - (a.skills.subSkills.logistics ?? 0) || b.prestigeBps - a.prestigeBps)[0];
+                if (recipient !== undefined) {
+                  const before = new Set(world.orderAttempts.map((attempt) => attempt.id));
+                  world = recordDelegations(world, [{ localId: `resume_${partIndex}_${stageIndex}`, issuerRef: { kind: "character", id: order.actorCharacterId }, recipientRef: { kind: "character", id: recipient.id }, claimedAuthorityGrantRef: null, instruction, part: null }], ids, new Map(), input.offices);
+                  const attempt = world.orderAttempts.find((candidate) => !before.has(candidate.id));
+                  if (attempt !== undefined) { world = { ...world, orderAttempts: world.orderAttempts.map((candidate) => candidate.id === attempt.id ? { ...candidate, servesRef: ref } : candidate) }; next = { ...next, whyNot: null, workRefs: [...next.workRefs, { kind: "order_attempt", id: attempt.id }] }; settled = { ...stage, status: "resumed" }; }
+                }
               }
+            } else {
+              const parsed = WorldDeltaSchema.safeParse(resolveHandles(stage.held, handles));
+              settled = parsed.success ? carryOut([parsed.data], stage, stageIndex) : { ...stage, status: "failed", reason: "The act it held could no longer be read.", failedAtStep: world.elapsedStep };
             }
           }
           if (settled !== null) {
             const done = settled;
-            next = { ...next, stages: next.stages.map((old, at) => (at === stageIndex ? done : old)) };
+            next = { ...next, stages: next.stages.map((old, at) => (at === stageIndex ? done : old.status === "waiting" ? { ...old, held: resolveHandles(old.held, handles) } : old)) };
           }
         }
         if (next !== part) {
@@ -1177,7 +1294,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       parts: order.parts.map((part, index) => {
         if (part.spend === null) return part;
         const status = orderPartStatus(world, part);
-        if (part.closedAtStep !== null || ["achieved", "failed", "refused", "unanswered"].includes(status)) {
+        if (part.closedAtStep !== null || ["achieved", "partly_done", "failed", "refused", "unanswered"].includes(status)) {
           const held = reservations.find((reservation) => reservation.id === part.spend!.reservationId && reservation.status === "active");
           if (held !== undefined) { reservations = reservations.map((reservation) => reservation.id === held.id ? releaseMoneyReservation(reservation, world.elapsedStep) : reservation); changed = true; }
           return part;
@@ -1740,23 +1857,28 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // An order nobody obeyed is neither: it is a scene. Everybody who was
     // there saw a man give orders to people who do not take them from him,
     // and that travels.
+    //
+    // The engine catching a malformed payload is no fact at all: it is in the
+    // audit (`recordAudit`) already, and made a private fact it was found by
+    // what answers the order and told -- "No force ... exists" in the
+    // Chronicle and the Council (E11).
     for (const rejection of result.rejected) {
-      const isWorldFriction = rejection.kind === "world";
+      if (rejection.kind === "reference") continue;
       const ignored = rejection.kind === "ignored";
       const friction = materializeFacts({
         proposals: [{
           localId: `friction_${scheduled.length}_${newFacts.length}`,
-          kind: ignored ? "order_ignored" : isWorldFriction ? "execution_friction" : "engine_rejection",
+          kind: ignored ? "order_ignored" : "execution_friction",
           summary: rejection.reason,
           affectedRefs: [actorRef],
-          visibility: ignored ? "public" : isWorldFriction ? "polity" : "private",
-          discoveryState: ignored ? "public" : isWorldFriction ? "polity" : "private",
+          visibility: ignored ? "public" : "polity",
+          discoveryState: ignored ? "public" : "polity",
           knowableInDays: 0,
           // A part of the ruler's own order the world would not have is his
           // business, and weighs what his business must to be told
           // (`OWN_BUSINESS_FLOOR`); the world's own frictions stay small.
-          significance: ignored ? 30 : isWorldFriction ? (rejection.ofTheOrder === true ? OWN_BUSINESS_FLOOR : 5) : 0,
-          knownToRefs: isWorldFriction || ignored ? [actorRef] : [],
+          significance: ignored ? 30 : rejection.ofTheOrder === true ? OWN_BUSINESS_FLOOR : 5,
+          knownToRefs: [actorRef],
         }],
         now: world.instant,
         atStep: world.elapsedStep,
@@ -1841,11 +1963,19 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // A man who took on somebody's order and has now done something: what he
     // made is that order's work, and the order's part says so (`creditDelegatedWork`).
     if (!actsForTheWorld && actorRef.kind === "character") {
-      creditDelegatedWork(actorRef.id, result.applied.filter((entry) => entry.changed !== false && !CHANGES_NOTHING.has(entry.delta.op)).map((entry) => {
+      checkpoint("crediting delegated work", () => creditDelegatedWork(actorRef.id, result.applied.filter((entry) => entry.changed !== false && !CHANGES_NOTHING.has(entry.delta.op)).map((entry) => {
         const work = workMadeBy(worldAtStart, world, entry.delta, result.assignedIds);
-        return { said: wordsOfAct(entry.delta), delta: entry.delta, work, index: indexIn(entry), goals: goalsOfAct(worldAtStart, entry.delta, work, resolveRefs) };
-      }), materialized.facts.map((fact) => fact.id), serves);
+        return { said: wordsOfAct(entry.delta), delta: entry.delta, work, index: indexIn(entry), goals: goalsOfAct(worldAtStart, entry.delta, work, resolveRefs), money: entry.madeMoney };
+      }), materialized.facts.map((fact) => fact.id), serves));
     }
+    // A letter already on its way, written again, is still that letter: the
+    // engine sends it once, and the part that wrote it has it as its work. As
+    // nothing it was no part's work, and eight letters counted seven (E4).
+    const letterAgain = (entry: (typeof result.applied)[number]): OrderWorkRef[] => {
+      if (entry.delta.op !== "diplomatic_message_send") return [];
+      const id = result.assignedIds.get(entry.delta.localId);
+      return id !== undefined && world.diplomacy.some((message) => message.id === id) ? [{ kind: "message", id }] : [];
+    };
     return {
       changed: result.applied.filter((entry) => entry.changed !== false && !CHANGES_NOTHING.has(entry.delta.op)).length,
       changedIndexes: new Set(result.applied.filter((entry) => entry.changed !== false && !CHANGES_NOTHING.has(entry.delta.op)).map(indexIn).filter((at): at is number => at !== null)),
@@ -1862,13 +1992,22 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
             goals: [...goalsOfAct(worldAtStart, entry.delta, work, resolveRefs), ...renamedOrRecommanded(entry.delta, resolveRefs)],
             breach: result.breaches.some((breach) => breach.delta.op === entry.delta.op && wordsOfAct(breach.delta) === wordsOfAct(entry.delta))
               ? describeBreach(entry.delta, world, actorName) : null,
+            money: entry.madeMoney,
           };
+        }),
+        ...result.applied.filter((entry) => entry.changed === false && entry.ofTheOrder === true && letterAgain(entry).length > 0).map((entry) => {
+          const work = letterAgain(entry);
+          return { said: wordsOfAct(entry.delta), carried: true, refusal: null, work, delta: entry.delta, index: indexIn(entry), goals: goalsOfAct(world, entry.delta, work, resolveRefs) };
         }),
         ...result.rejected.filter((rejection) => rejection.ofTheOrder === true && rejection.kind !== "reference")
           .map((rejection) => ({ said: wordsOfAct(rejection.delta), carried: false, refusal: rejection.reason, delta: rejection.delta, index: indexIn(rejection), goals: goalsOfAct(world, rejection.delta, [], resolveRefs) })),
+        ...result.rejected.filter((rejection) => rejection.ofTheOrder === true && rejection.kind === "reference")
+          .map((rejection) => ({ said: wordsOfAct(rejection.delta), carried: false, refusal: null, unwritten: true, delta: rejection.delta, index: indexIn(rejection) })),
       ],
       factIdsByLocalId: materialized.factIds,
       assignedIds: result.assignedIds,
+      misfiledIndexes: new Set(proposal.deltas.flatMap((delta, at) => misfiled.has(delta) ? [at] : [])),
+      unwritten: result.rejected.filter((rejection) => rejection.ofTheOrder === true && rejection.kind === "reference").map((rejection) => rejection.reason),
     };
   };
 
@@ -1950,6 +2089,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       skipped.push({ stage: "invariant", reason: `the tick to day ${toDay} left ${violation}` });
     }
     const beforeTick = world;
+    lastSound = holds.data;
     world = commandersFollowTheirArmies(holds.data);
     const handedOver = commandChanges(beforeTick, world);
     if (handedOver.length > 0) {
@@ -1958,10 +2098,11 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       for (const [factId, weight] of told.significanceByFactId) significanceByFactId.set(factId, weight);
     }
     const factsBeforeStages = newFacts.length;
-    advanceStages();
+    checkpoint("taking up held acts", advanceStages);
     ratifyWhatWasVoted();
-    holdEnvelopes();
-    settleDelegations();
+    checkpoint("holding what orders allowed", holdEnvelopes);
+    checkpoint("settling delegated orders", settleDelegations);
+    checkpoint("lapsing stale orders", lapseStaleParts);
     // A plan the ruler laid has sprung by itself. The burst stops at the end of
     // this hop and hands him back the wheel: he prepared against exactly this
     // moment, and reading about it in a month's Chronicle is no use to him.
@@ -2028,14 +2169,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     // Plans whose steps passed their day undone. Each owner's own record of
     // it, and the step left for the router to wake him with.
     const behind = settleOverdueSteps(world, input.clock, (prefix) => `${prefix}_${newFacts.length}_${(planFactSerial += 1)}`);
-    if (behind.missed > 0 || behind.slipped > 0) {
+    if (behind.missed > 0 || behind.slipped > 0) checkpoint("settling overdue plan steps", () => {
       world = behind.world;
       plans.missed += behind.missed;
       const materialized = materializeFacts({ proposals: behind.facts, now: world.instant, atStep: world.elapsedStep, ids, causalDepth: 0, assignedIds: new Map() });
       newFacts.push(...materialized.facts);
       for (const [factId, weight] of materialized.significanceByFactId) significanceByFactId.set(factId, weight);
       significance += materialized.significance;
-    }
+    });
   };
 
   /**
@@ -2347,12 +2488,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     const who = world.characters.find((character) => character.id === input.actorRef.id)?.name ?? "The ruler";
     const order = input.orderText.trim().replace(/\s+/g, " ");
     const quoted = order.length > 300 ? `${order.slice(0, 297)}...` : order;
-    const obstacles = answer.filter((fact) => fact.kind === "engine_rejection" || fact.kind === "execution_friction").map((fact) => fact.summary);
+    // What the world would not have, in its own words; what the engine could
+    // not read, never in the engine's (E11).
+    const obstacles = answer.filter((fact) => fact.kind === "execution_friction").map((fact) => fact.summary);
     const outcome = orchestrationUnreadable && answer.length === 0
       ? "Word of it went out, and nothing came back that anyone could make sense of."
       : obstacles.length > 0
         ? `It could not be done as given: ${obstacles.slice(0, 3).join(" ")}`
-        : "Nothing came of it that anyone could see.";
+        : allRefused ? "It could not be done as written." : "Nothing came of it that anyone could see.";
     const answered = materializeFacts({
       proposals: [{
         localId: "order_answered",
@@ -2473,7 +2616,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         act.guessed = true;
       }
     }
-    for (const act of own.filter((candidate) => candidate.part === null)) {
+    for (const act of own.filter((candidate) => candidate.part === null && candidate.delta?.op !== "order_attempt_decide")) {
       const empty = read.findIndex((_, index) => !own.some((other) => other.part === index) && !(asksAVote(read[index]!.said) && !isVoteAct(act)));
       act.part = empty < 0 ? null : empty;
     }
@@ -2534,8 +2677,14 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         .filter((project) => project !== undefined && project.completionOutcome?.kind === "force" && project.status !== "completed")
         .map((project) => ({ kind: "project_done" as const, projectId: project!.id }));
       const waitsOn = [...votes, ...moves, ...builds].slice(0, 4);
-      const stages: OrderStage[] = waitsOn.length === 0 ? [] : refused.filter((act) => act.delta !== undefined).slice(0, 6)
-        .map((act) => ({ held: act.delta as unknown as Record<string, unknown>, waitsOn, status: "waiting" as const, reason: null }));
+      // Held with the ids its own answer gave its handles: tried again later,
+      // "local:fleet-question" named nothing (E9).
+      const hold = (delta: WorldDelta, on: StageCondition[]): OrderStage => ({
+        held: resolveHandles(delta, acts.assignedIds ?? new Map()),
+        waitsOn: on, status: "waiting", reason: null, heldSinceStep: world.elapsedStep, failedAtStep: null,
+      });
+      const heldActs = new Map((waitsOn.length === 0 ? [] : refused.filter((act) => act.delta !== undefined).slice(0, 6)).map((act) => [act, hold(act.delta!, [...waitsOn])] as const));
+      const stages: OrderStage[] = [...heldActs.values()];
       for (const act of refused) {
         const delta = act.delta;
         if (delta === undefined || !/ships|hulls|loads|carry.*men/i.test(act.refusal ?? "")) continue;
@@ -2544,9 +2693,13 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         const forceId = forceRef == null ? null : resolve(forceRef, "force");
         if (forceId !== null && provinceId != null) {
           const condition: StageCondition = { kind: "transport_capacity", forceId, provinceId };
-          const held = stages.find((stage) => stage.held === delta);
+          const held = heldActs.get(act);
           if (held !== undefined && held.waitsOn.length < 4) held.waitsOn.push(condition);
-          else stages.push({ held: delta as unknown as Record<string, unknown>, waitsOn: [condition], status: "waiting", reason: null });
+          else if (held === undefined) {
+            const stage = hold(delta, [condition]);
+            heldActs.set(act, stage);
+            stages.push(stage);
+          }
         }
       }
       const priorGoals = (part.afterParts ?? []).filter((at) => at !== index).flatMap((at) => own.filter((act) => act.part === at).flatMap((act) => act.goals ?? []));
@@ -2560,23 +2713,39 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       if (futureName !== null && actorPolityId !== null) dependencies.push({ kind: "force_named", name: futureName, polityId: actorPolityId });
       if (dependencies.length > 0) {
         const deferred = part.deferredActs ?? [];
-        if (deferred.length > 0) stages.push(...deferred.map((delta) => ({ held: delta as unknown as Record<string, unknown>, waitsOn: dependencies.slice(0, 4), status: "waiting" as const, reason: null })));
-        else if (mine.every((act) => !act.carried)) stages.push({ held: { op: "resume_instruction", instruction: part.said }, waitsOn: dependencies.slice(0, 4), status: "waiting", reason: null });
+        if (deferred.length > 0) stages.push(...deferred.map((delta) => hold(delta, dependencies.slice(0, 4))));
+        else if (mine.every((act) => !act.carried)) stages.push({ held: { op: "resume_instruction", instruction: part.said }, waitsOn: dependencies.slice(0, 4), status: "waiting", reason: null, heldSinceStep: world.elapsedStep, failedAtStep: null });
       }
       const payer = part.spend === null || part.spend === undefined ? null : resolve(part.spend.payerAccountRef, "account");
+      // A part some of whose acts were carried was not refused: the eight
+      // letters went although one of them could not. What could not is said
+      // beside it, never as its answer (E4).
+      const carried = mine.filter((act) => act.carried);
+      const refusal = stages.length > 0 || carried.length > 0 ? null : refused[0]?.refusal?.slice(0, 600) ?? null;
+      const breaches = mine.map((act) => act.breach ?? null).filter((breach): breach is string => breach !== null);
+      const shortBy = refused.find((act) => !heldActs.has(act))?.refusal ?? (mine.some((act) => act.unwritten === true) ? UNWRITTEN : null);
+      const short = carried.length > 0 && shortBy !== null ? `Not all of it: ${shortBy}` : null;
+      // An act the engine could not read is not the world refusing it, and
+      // its reason is the engine's own: the part says only that it could not
+      // be done as written (E5, E11).
+      const unwritten = carried.length === 0 && refused.length === 0 && mine.some((act) => act.unwritten === true) ? UNWRITTEN : null;
       return {
         said: part.said,
         goals: merged.goals,
         workRefs,
         // A refusal that is waiting on a vote is not yet the part's answer.
-        refusal: stages.length > 0 ? null : refused[0]?.refusal?.slice(0, 600) ?? null,
+        refusal,
+        refusedAtStep: refusal === null ? null : world.elapsedStep,
         whyNot: stages.length > 0 ? null : part.whyNot,
         factIds: part.factLocalIds.map((localId) => acts.factIdsByLocalId?.get(localId)).filter((id): id is string => id !== undefined).slice(0, 12),
-        note: mine.map((act) => act.breach ?? null).filter((breach): breach is string => breach !== null).join("; ").slice(0, 400) || null,
-        stages: stages.slice(0, 6),
+        note: [...breaches, ...(short === null ? [] : [short]), ...(unwritten === null ? [] : [unwritten])].join("; ").slice(0, 400) || null,
+        stages: dedupeStages(stages).slice(0, 6),
         spend: payer === null || part.spend === null || part.spend === undefined ? null : { payerAccountId: payer, cap: part.spend.cap, reservationId: null },
         attribution: mine.some((act) => act.guessed) || handedOn.some((attempt) => partOfAttempt(attempt).guessed) ? "guessed" as const : "tagged" as const,
         closedAtStep: null,
+        actsCarried: Math.min(99, carried.filter((act) => act.delta === undefined || !CHANGES_NOTHING.has(act.delta.op)).length),
+        // Refused for good: what is held for later is not refused yet.
+        actsRefused: Math.min(99, mine.filter((act) => !act.carried && !heldActs.has(act)).length),
       };
     });
     // A part that wants what an earlier open part of his wants replaces it:
@@ -2609,14 +2778,32 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
           const heir = heirOf(part);
           inherited.set(heir, [...(inherited.get(heir) ?? []), ...waiting]);
         }
-        return { ...part, closedAtStep: world.elapsedStep, stages: part.stages.map((stage) => stage.status === "waiting" ? { ...stage, status: "failed" as const, reason: "Taken over by a later order." } : stage) };
+        return { ...part, closedAtStep: world.elapsedStep, stages: part.stages.map((stage) => stage.status === "waiting" ? { ...stage, status: "failed" as const, reason: "Taken over by a later order.", failedAtStep: world.elapsedStep } : stage) };
       }),
     });
     for (const [heir, stages] of inherited) {
       const part = recordParts[heir];
-      if (part !== undefined) recordParts[heir] = { ...part, refusal: null, whyNot: null, stages: [...part.stages, ...stages].slice(0, 6) };
+      // Once: the crossing held by three orders is one crossing held (E10).
+      if (part !== undefined) recordParts[heir] = { ...part, refusal: null, refusedAtStep: null, whyNot: null, stages: dedupeStages([...part.stages, ...stages]).slice(0, 6) };
     }
-    const record = { id: recordId, actorCharacterId: input.actorRef.id, text: input.orderText.trim().slice(0, 4_000), givenAtStep: world.elapsedStep, parts: recordParts };
+    // Held to its schema before it is written: a "paid" goal of nothing went
+    // into the ledger unread and the saved world would not load (E2). A part
+    // that will not hold is kept as what was said and what it set going.
+    const keepable = (part: OrderPart): OrderPart => {
+      const whole = OrderPartSchema.safeParse(part);
+      if (whole.success) return part;
+      skipped.push({ stage: "invariant", reason: `the order's part "${part.said.slice(0, 80)}" would not hold (${whole.error.issues[0]?.path.join(".") ?? "?"}: ${whole.error.issues[0]?.message ?? "?"}); kept without its goals and held acts` });
+      return { ...part, goals: [], stages: [], note: part.note?.slice(0, 400) ?? null, refusal: part.refusal?.slice(0, 600) ?? null };
+    };
+    const record = { id: recordId, actorCharacterId: input.actorRef.id, text: input.orderText.trim().slice(0, 4_000), givenAtStep: world.elapsedStep, parts: recordParts.map(keepable) };
+    if (!OrderRecordSchema.safeParse(record).success) {
+      skipped.push({ stage: "invariant", reason: "the order would not hold to its schema and was not written to the ledger" });
+      return;
+    }
+    // What each part's own acts spent is that part's spending (E3).
+    for (const [index] of record.parts.entries()) {
+      world = stampOrderMoney(world, own.filter((act) => act.part === index).map((act) => act.money), orderPartRef(recordId, index));
+    }
     world = {
       ...world,
       orders: capOrders(world, [...superseded, record]),
@@ -2664,6 +2851,8 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   };
   let orchestrationUnreadable = false;
   let orderRecordId: string | null = null;
+  /** The order's own acts the engine could not read after every attempt (`BurstResult.unwritten`). */
+  let unwrittenOfTheOrder: readonly string[] = [];
   /** Who became owed a turn in this burst: they have not waited a whole one yet. */
   const owedThisBurst = new Set<string>();
   /**
@@ -2828,22 +3017,45 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         recordAudit(recorded, input.actorRef, "floor");
       }
     } else if (input.actorRef.kind === "character" && acts.carriedOut > 0) {
-      // What he said he was doing lapses once it is old and he has since been
-      // doing real things: "keep the siege of Syracuse tight" stood in his
-      // standing business for thirty turns after the city opened its gates.
+      // What he said he was doing lapses once he has gone on to real things:
+      // "keep the siege of Syracuse tight" stood in his standing business for
+      // thirty turns after the city opened its gates. His own, now that he
+      // has given a new order that did something; his power's, once they are
+      // two months old -- all of them, not one a burst (E6). One that a rule
+      // the world wrote is running is business going on, and stands.
       const actorId = input.actorRef.id;
-      const stale = world.genericEntities.find((entity) => entity.kind === "pursuit" && entity.ownerRef?.kind === "character" && entity.ownerRef.id === actorId
-        && !("retiredAtStep" in entity.attributes) && typeof entity.attributes.sinceDay === "number" && world.instant.day - entity.attributes.sinceDay > PURSUIT_LAPSES_DAYS);
-      if (stale !== undefined) {
-        const retired = applyDeltas(world, [{ op: "generic_entity_update", entityRef: stale.id, attributes: {}, retire: true, reason: "Overtaken by what he has since done." }], {
+      const stale = world.genericEntities.filter((entity) => entity.kind === "pursuit" && entity.mechanic === undefined && !("retiredAtStep" in entity.attributes)
+        && ((entity.ownerRef?.kind === "character" && entity.ownerRef.id === actorId)
+          || (entity.ownerRef?.kind === "polity" && entity.ownerRef.id === input.actorPolityId && typeof entity.attributes.sinceDay === "number" && world.instant.day - entity.attributes.sinceDay > PURSUIT_LAPSES_DAYS)));
+      if (stale.length > 0) {
+        const lapsed: WorldDelta[] = stale.map((entity) => ({ op: "generic_entity_update", entityRef: entity.id, attributes: {}, retire: true, reason: "Overtaken by what he has since done." }));
+        const retired = applyDeltas(world, lapsed, {
           now: world.instant, actorRef: input.actorRef, offices: input.offices, warfare: input.warfare, ids, gameId: input.gameId,
+          // The world's housekeeping, not an act of his.
+          actsForTheWorld: true, orderDeltas: new Set(),
         });
         if (retired.applied.length > 0) world = retired.world;
       }
     }
     answerTheOrder(newFacts.slice(factsBefore), acts);
-    answerTheParts(orchestration.output.intent.parts, acts);
-    recordOrder(orchestration.output.intent.parts, orchestration.output.intent.summary, acts, attemptsBefore, newFacts.slice(factsBefore), orchestration.output.delegations);
+    // Only the parts that are the order's: the world's business the
+    // orchestrator wrote as parts of it -- "Give the Umbrians their own
+    // ruler" -- is refiled, as its acts already were (E7).
+    const sorted = theOrdersOwnParts(orchestration.output.intent.parts, {
+      orderText: input.orderText ?? "",
+      deltas: orchestration.output.deltas,
+      misfiled: acts.misfiledIndexes ?? new Set(),
+      worldBusiness: [...offeredSeeds.flatMap((seed) => [seed.brief, seed.why]), ...dueNow.map((event) => event.summary)],
+      emptyPowers: slice.populationGaps.map((gap) => gap.name),
+    });
+    for (const { part, why } of sorted.refiled) {
+      audit.push({ actorRef: input.actorRef, op: "order_part", kind: "refiled", ofTheOrder: false, attempt: "first", reason: `Refiled part "${part.said}": ${why}.`, delta: { op: "order_part", said: part.said, acts: part.acts } });
+    }
+    const delegations = orchestration.output.delegations.map((delegation) => delegation.part === null || delegation.part === undefined ? delegation : { ...delegation, part: sorted.index.get(delegation.part) ?? null });
+    unwrittenOfTheOrder = acts.unwritten ?? [];
+    answerTheParts(sorted.kept, acts);
+    checkpoint("the order ledger", () => recordOrder(sorted.kept, orchestration.output.intent.summary, acts, attemptsBefore, newFacts.slice(factsBefore), delegations));
+    if (orderRecordId !== null && !world.orders.some((order) => order.id === orderRecordId)) orderRecordId = null;
     orderFactIds = newFacts.slice(factsBefore).map((fact) => fact.id);
     windowOrderFactIds = orderFactIds;
     if (orchestration.output.playerDecision !== null) playerDecision = orchestration.output.playerDecision;
@@ -3327,14 +3539,13 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
         // step it named (E11).
         const leftAMark = acts.changed > 0;
         const served = servedByChange(actor.serves, acts.changedIndexes);
-        const took = takeSteps(world, ownerId, served);
-        world = claimPromisesKept(took.world, ownerId, served);
+        const stepped = takeSteps(world, ownerId, served);
+        const took = { taken: checkpoint("taking plan steps", () => { world = claimPromisesKept(stepped.world, ownerId, served); }) ? stepped.taken : 0 };
         plans.taken += took.taken;
         let laid = false;
         if (actor.plan !== null) {
           const planned = layPlan(world, ownerId, actor.plan, ids, acts.assignedIds);
-          world = planned.world;
-          laid = planned.ambitionId !== null;
+          laid = checkpoint("laying a plan", () => { world = planned.world; }) && planned.ambitionId !== null;
           if (laid) plans.laid += 1;
         }
         if (leftAMark) {
@@ -3383,6 +3594,16 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
       .map((entry) => (owedThisBurst.has(entry.characterId) ? entry : { ...entry, bursts: entry.bursts + 1 }))
       .filter((entry) => entry.bursts < MAX_OWED_BURSTS),
   };
+  // Never a world that will not load: the burst used to hand back whatever it
+  // had, and the caller saved it (E1). What the guards above did not catch is
+  // caught here, and the last world that held is what is kept.
+  const unsound = whyItWillNotLoad(world);
+  if (unsound !== null) {
+    skipped.push({ stage: "invariant", reason: `the burst ended on a world that would not load (${unsound}); the last world that held, of day ${lastSound.instant.day}, was kept` });
+    parseFailures.push(`the world this report ended on would not load (${unsound}), and the last one that held was kept`);
+    world = lastSound;
+    if (orderRecordId !== null && !world.orders.some((order) => order.id === orderRecordId)) orderRecordId = null;
+  }
   // The last window: the clock will not move again in this burst.
   closeWindow(true);
   report({ kind: "settled", date: today() });
@@ -3407,6 +3628,7 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
     accumulatedSignificance: significance,
     orderFactIds,
     orderRecordId,
+    unwritten: unwrittenOfTheOrder,
     narrative,
     frictions,
     utterances,

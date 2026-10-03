@@ -1,6 +1,7 @@
-import { spentForOrderPart } from "@chronica/shared";
+import { formatWorldDate, letterTally, letterTallyInWords, spentForOrderPart, type ScenarioClock } from "@chronica/shared";
 import { orderPartLabel, orderPartStatus, type OrderPart, type WorldState } from "@chronica/shared";
 import type { ChronicleEntry } from "./chronicle";
+import { refOfPart, whyNothingSetAside } from "./order-money";
 
 /**
  * What came of each part of an order, in the engine's words, set under the
@@ -14,10 +15,10 @@ import type { ChronicleEntry } from "./chronicle";
  * it is not the historian's to write. One line a part, read from the work
  * itself (`orderPartStatus`), after the prose.
  */
-export function orderOutcomeLines(world: WorldState, orderRecordId: string): readonly string[] {
+export function orderOutcomeLines(world: WorldState, orderRecordId: string, clock?: ScenarioClock): readonly string[] {
   const order = world.orders.find((candidate) => candidate.id === orderRecordId);
   if (order === undefined) return [];
-  const told = order.parts.map((part) => lineOf(world, part, order.actorCharacterId));
+  const told = order.parts.map((part) => lineOf(world, part, order.actorCharacterId, clock));
   // A one-part order carried out is answered by its passage, and a line
   // saying "done" under it says nothing the passage did not.
   if (order.parts.length === 1 && orderPartStatus(world, order.parts[0]!) === "achieved" && order.parts[0]!.note === null) return [];
@@ -25,7 +26,7 @@ export function orderOutcomeLines(world: WorldState, orderRecordId: string): rea
 }
 
 /** One part's line: what it came to, in the engine's words. */
-export function lineOf(world: WorldState, part: OrderPart, actorId: string): string {
+export function lineOf(world: WorldState, part: OrderPart, actorId: string, clock?: ScenarioClock): string {
   const status = orderPartStatus(world, part);
   const project = part.workRefs.find((ref) => ref.kind === "project");
   const work = project === undefined ? undefined : world.projects.find((candidate) => candidate.id === project.id);
@@ -33,6 +34,13 @@ export function lineOf(world: WorldState, part: OrderPart, actorId: string): str
   const how = status === "under_way" && work !== undefined
     ? `: ${work.label}${next === undefined ? "" : `, next ${lowerFirst(next.label)}`}`
     : "";
+  // Several letters are told as what they came to, counted (E4).
+  const tally = letterTally(world, part);
+  const letters = tally === null ? "" : `: ${letterTallyInWords(tally)}`;
+  // On the day it was refused or failed: a line read at the end of the report
+  // otherwise reads as though it had been so all along (E8).
+  const settledAt = part.refusedAtStep ?? part.stages.reduce<number | null>((latest, stage) => stage.failedAtStep === null ? latest : Math.max(latest ?? 0, stage.failedAtStep), null);
+  const on = clock === undefined || settledAt === null || (status !== "refused" && status !== "failed" && status !== "partly_done") ? "" : ` on ${formatWorldDate({ day: settledAt, minute: 0 }, clock)}`;
   const why = part.refusal ?? part.whyNot;
   const reason = why === null || status === "achieved" || status === "under_way" ? "" : `: ${sentencesWithin(why.replace(/\s+/g, " "), 320)}`;
   // Secret work says what it cost and whose money it was, to the man who paid.
@@ -45,12 +53,12 @@ export function lineOf(world: WorldState, part: OrderPart, actorId: string): str
   const reservation = part.spend?.reservationId == null ? undefined : world.material.reservations.find((candidate) => candidate.id === part.spend!.reservationId);
   const spent = spentForOrderPart(world, part);
   const envelope = part.spend === null ? ""
-    : reservation === undefined
-      ? ` (up to ${part.spend.cap} allowed; ${spent} spent; nothing currently set aside)`
-      : ` (up to ${part.spend.cap} allowed; ${reservation.status === "active" ? reservation.remainingAmount : 0} currently set aside, ${Math.max(spent, reservation.reservedAmount - reservation.remainingAmount)} spent)`;
+    : reservation === undefined || reservation.status !== "active"
+      ? ` (up to ${part.spend.cap} allowed; ${spent} spent; ${whyNothingSetAside(world, part, refOfPart(world, part))})`
+      : ` (up to ${part.spend.cap} allowed; ${reservation.remainingAmount} currently set aside, ${Math.max(spent, reservation.reservedAmount - reservation.remainingAmount)} spent)`;
   const guessed = part.attribution === "guessed" ? " (its work was matched to it by the words alone)" : "";
   const note = `${paid}${envelope}${part.note === null ? "" : ` (${part.note})`}${guessed}`;
-  return `"${part.said}" -- ${orderPartLabel(status, part)}${how}${reason}${note}.`.replace(/\.\.$/, ".");
+  return `"${part.said}" -- ${orderPartLabel(status, part, world)}${on}${how}${letters}${reason}${note}.`.replace(/\.\.$/, ".");
 }
 
 /** Whole sentences up to a length, never a word cut in half. */
@@ -71,9 +79,15 @@ const lowerFirst = (text: string): string => (text.length === 0 ? text : `${text
 export const ORDER_OUTCOME_HEADING = "What came of the order:";
 
 /**
- * The entries with the outcome lines set under the one that answers the order
- * -- the entry holding most of its facts -- or, when none does, in an entry of
- * their own at the end.
+ * The entries with the outcome lines set under a passage of the day they were
+ * read on -- `atInstantSortKey`, the end of the report -- the one of those
+ * holding most of the order's facts, else the latest; or, when no passage
+ * reaches that day, in an entry of their own dated then.
+ *
+ * The lines are read from the world as the report left it, and they were set
+ * under the passage holding the order's facts, dated the day it was given:
+ * "the Senate refused it" stood in an entry dated a fortnight before the vote
+ * (E8).
  */
 export function withOrderOutcomes(
   entries: readonly ChronicleEntry[],
@@ -83,13 +97,12 @@ export function withOrderOutcomes(
 ): readonly ChronicleEntry[] {
   if (lines.length === 0) return entries;
   const ofTheOrder = new Set(orderFactIds);
-  const scored = entries.map((entry, index) => ({ index, held: entry.factIds.filter((id) => ofTheOrder.has(id)).length }));
-  const best = scored.filter((entry) => entry.held > 0).sort((a, b) => b.held - a.held || a.index - b.index)[0];
+  const scored = entries.map((entry, index) => ({ index, held: entry.factIds.filter((id) => ofTheOrder.has(id)).length, current: entry.toInstantSortKey >= atInstantSortKey }));
+  const best = scored.filter((entry) => entry.current).sort((a, b) => b.held - a.held || b.index - a.index)[0];
   const block = `${ORDER_OUTCOME_HEADING}\n${lines.map((line) => `- ${line}`).join("\n")}`;
   if (best !== undefined) {
     return entries.map((entry, index) => index !== best.index ? entry : { ...entry, body: `${entry.body.trimEnd()}\n\n${block}` });
   }
-  const last = entries.at(-1);
   return [...entries, {
     kind: "recorded",
     title: "What came of the order",
@@ -99,8 +112,8 @@ export function withOrderOutcomes(
     tags: [],
     changes: [],
     quote: null,
-    fromInstantSortKey: last?.toInstantSortKey ?? atInstantSortKey,
-    toInstantSortKey: last?.toInstantSortKey ?? atInstantSortKey,
+    fromInstantSortKey: atInstantSortKey,
+    toInstantSortKey: atInstantSortKey,
   }];
 }
 

@@ -143,10 +143,10 @@ describe("a part that waited on a vote", () => {
         parts: [{
           said: "Carry Legio I to Messana once the Senate gives leave", workRefs: [{ kind: "procedure", id: voteId }], refusal: null,
           goals: [{ kind: "force_at", forceId: "roman-field-army", provinceId: MESSANA }], spend: null, attribution: "tagged",
-          note: null, whyNot: null, factIds: [], closedAtStep: null,
+          note: null, whyNot: null, factIds: [], closedAtStep: null, refusedAtStep: null, actsCarried: 0, actsRefused: 0,
           stages: [{
             held: { op: "force_modify", forceRef: "roman-field-army", locationId: MESSANA, fleetRefs: ["roman-navy"], reason: "Carry Legio I over." },
-            waitsOn: [{ kind: "procedure_passed", procedureId: voteId }], status: "waiting", reason: null,
+            waitsOn: [{ kind: "procedure_passed", procedureId: voteId }], status: "waiting", reason: null, heldSinceStep: 0, failedAtStep: null,
           }],
         }],
       }],

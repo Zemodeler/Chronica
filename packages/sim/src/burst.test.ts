@@ -314,10 +314,13 @@ describe("friction the player hears about", () => {
     const port = scriptedPort({ simulate_orchestrate: [PHANTOM], simulate_cognition: [JSON.stringify({ actors: [] })] });
     const result = await runSimulationBurst(input(port));
 
-    const noise = result.newFacts.find((fact) => fact.kind === "engine_rejection");
-    expect(noise).toBeDefined();
-    expect(factsVisibleTo([noise!], { kind: "character", id: "marcus-atilius" }, result.world.instant)).toHaveLength(0);
+    // Kept for the audit, and nowhere a fact could carry it (E11): as a private
+    // fact it was found by what answers the order, and told.
+    expect(result.newFacts.some((fact) => fact.kind === "engine_rejection")).toBe(false);
+    expect(result.audit.some((entry) => entry.kind === "reference" && entry.reason.includes("legio-phantasma"))).toBe(true);
+    expect(result.unwritten.some((reason) => reason.includes("legio-phantasma"))).toBe(true);
     expect(result.newFacts.some((fact) => fact.kind === "execution_friction")).toBe(false);
+    expect(result.newFacts.some((fact) => fact.summary.includes("legio-phantasma"))).toBe(false);
   });
 });
 

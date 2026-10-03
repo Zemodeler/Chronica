@@ -1,4 +1,6 @@
 import {
+  MAX_PART_GOALS,
+  OrderGoalSchema,
   PolityAgreementKindSchema,
   normalizeName,
   spelledAlike,
@@ -81,7 +83,9 @@ export function goalsOfAct(
       return id === null ? [] : [{ kind: "exists", of: "entity", id }];
     }
     case "money_transfer": {
-      if (delta.toAccountRef === null) return [];
+      // Nothing paid is nothing to wait for: a "paid" goal of 0 broke the
+      // save it was written into (M1).
+      if (delta.toAccountRef === null || delta.amount <= 0) return [];
       const toAccountId = resolve(delta.toAccountRef, "account");
       const fromAccountId = resolve(delta.fromAccountRef, "account");
       return toAccountId === null ? [] : [{ kind: "paid", toAccountId, fromAccountId, amount: delta.amount, sinceStep: world.elapsedStep }];
@@ -108,6 +112,19 @@ export function goalsOfAct(
     case "province_control_set": {
       const polityId = resolve(delta.toPolityRef, "polity");
       return polityId === null ? [] : [{ kind: "control", provinceId: delta.provinceId, settlementId: null, polityId }];
+    }
+    case "character_state_set": {
+      // Gone somewhere: done when he is there, not when the act was written.
+      if (delta.moveToProvinceId == null || !world.map.provinces.some((province) => province.id === delta.moveToProvinceId)) return [];
+      const characterId = resolve(delta.characterRef, "character");
+      return characterId === null ? [] : [{ kind: "character_at", characterId, provinceId: delta.moveToProvinceId }];
+    }
+    case "force_membership_set": {
+      // Out of the army: done when the ranks and his own record both say so.
+      if (delta.change !== "discharge" && delta.change !== "desert") return [];
+      const characterId = resolve(delta.characterRef, "character");
+      const forceId = resolve(delta.forceRef, "force");
+      return characterId === null || forceId === null ? [] : [{ kind: "out_of_service", characterId, forceId }];
     }
     default:
       return [];
@@ -191,8 +208,12 @@ export function mergeGoals(derived: readonly OrderGoal[], named: readonly OrderG
   const goals: OrderGoal[] = [];
   const conflicts: string[] = [];
   const key = (goal: OrderGoal): string => JSON.stringify(goal.kind === "paid" ? { ...goal, sinceStep: 0 } : goal);
-  for (const goal of derived) if (!goals.some((known) => key(known) === key(goal))) goals.push(goal);
-  for (const goal of named) {
+  // Only goals the ledger can keep: one that fails its own schema -- a "paid"
+  // of nothing -- is not a goal, and written into the order it made the whole
+  // world fail to load (E2).
+  const keepable = (goal: OrderGoal): boolean => OrderGoalSchema.safeParse(goal).success;
+  for (const goal of derived) if (keepable(goal) && !goals.some((known) => key(known) === key(goal))) goals.push(goal);
+  for (const goal of named.filter(keepable)) {
     if (goals.some((known) => key(known) === key(goal))) continue;
     const clash = goal.kind === "force_at" && goals.some((known) => known.kind === "force_at" && known.forceId === goal.forceId && known.provinceId !== goal.provinceId);
     if (clash) {
@@ -203,5 +224,9 @@ export function mergeGoals(derived: readonly OrderGoal[], named: readonly OrderG
     }
     goals.push(goal);
   }
-  return { goals: goals.slice(0, 4), conflicts };
+  // Four of its own, and the answer each letter wanted besides: eight letters
+  // kept the goals of the first four, and the other four were nobody's (E4).
+  const own: readonly OrderGoal[] = goals.filter((goal) => goal.kind !== "answer_from").slice(0, 4);
+  const answers: readonly OrderGoal[] = goals.filter((goal) => goal.kind === "answer_from").slice(0, MAX_PART_GOALS - own.length);
+  return { goals: goals.filter((goal) => own.includes(goal) || answers.includes(goal)), conflicts };
 }

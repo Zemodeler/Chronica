@@ -169,6 +169,7 @@ import { bandedShift, practiseInArmy } from "./army-practice";
 import { restedCeilingOf } from "../campaign";
 import { enemyFleetOff, perilsOfTheRoad } from "../crossings";
 import { diplomaticAnswererOf } from "../letters";
+import { moneyMadeBetween, newIssues } from "./what-a-batch-did";
 
 /**
  * Applies a validated batch of deltas to the world.
@@ -1123,8 +1124,11 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
     }
     invariants = new Set(afterInvariants);
 
-    const changed = delta.op !== "diplomatic_message_send" || current.diplomacy.length > previous.diplomacy.length;
-    applied.push({ delta, written, authority, ofTheOrder, changed });
+    // An answer to an order already answered changes nothing, and is no part
+    // of anybody's order (`order_attempt_decide`).
+    const changed = (delta.op !== "diplomatic_message_send" || current.diplomacy.length > previous.diplomacy.length)
+      && (delta.op !== "order_attempt_decide" || current.orderAttempts !== previous.orderAttempts);
+    applied.push({ delta, written, authority, ofTheOrder, changed, madeMoney: moneyMadeBetween(previous, current) });
     if (changed && assumed.length > 0) assumptions.push({ delta, assumed, ofTheOrder });
     if (changed) factProposals.push(...emitted);
     battleAccounts.push(...emittedAccounts);
@@ -1141,6 +1145,14 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
   // above already catches the realistic failure, and re-parsing a whole world
   // once per delta is not worth the marginal safety.
   const parsed = WorldStateSchema.safeParse(current);
+  // Only what this batch broke is this batch's fault. A world already invalid
+  // when it came in -- a plan step slipped past its limit by the tick -- had
+  // every batch after it refused as "would have left the world invalid", the
+  // player's order with them, and was then saved anyway (E1).
+  const broke = parsed.success ? [] : newIssues(parsed.error.issues, world);
+  if (!parsed.success && broke.length === 0) {
+    return { world: current, applied, rejected, breaches, factProposals, battleAccounts, assignedIds, assumptions };
+  }
   if (!parsed.success) {
     return {
       world,
@@ -1151,7 +1163,7 @@ function applyUngroupedDeltas(world: WorldState, deltas: readonly WorldDelta[], 
         delta,
         // The path matters more than the message: "Too small: expected array to
         // have >=1 items" names nothing on its own.
-        reason: `The batch would have left the world invalid: ${describeIssue(parsed.error.issues[0])}.`,
+        reason: `The batch would have left the world invalid: ${describeIssue(broke[0])}.`,
         kind: "reference" as const,
       })),
       factProposals: [],
@@ -1860,6 +1872,9 @@ function applyOne(
 
   switch (delta.op) {
     case "money_transfer": {
+      // A payment of nothing pays nothing: its "paid" goal of 0 once left the
+      // order ledger, and with it the whole save, failing its schema (M1).
+      if (delta.amount <= 0) reject(`Nothing to pay: "${delta.reason.slice(0, 120)}" named no sum.`, "reference");
       const fromId = required(delta.fromAccountRef, "The paying account");
       const from = world.material.accounts.find((account) => account.id === fromId);
       if (from === undefined) reject(`No account "${fromId}" exists to pay from.`, "reference");
@@ -1887,7 +1902,9 @@ function applyOne(
       }
       return moveMoney(world, {
         from: fromId, to: toId, amount: paying, kind: toId === null ? "purchase" : "transfer",
-        causeId: context.actorRef.id, explanation: delta.reason,
+        // A rule's toll is the rule's doing, and is filed under it: an order
+        // that set up the arrangement can then call what it takes its own.
+        causeId: context.firingMechanic?.entityId ?? context.actorRef.id, explanation: delta.reason,
       }, context);
     }
 
@@ -3789,12 +3806,20 @@ function applyOne(
       }
 
       if (!force.memberCharacterIds.includes(characterId)) reject(`${person.name} is not in the ranks of ${force.name}.`);
+      // Out of the ranks is out of the service record too, and out of any post
+      // he held in it: a legionary discharged by order was struck from the
+      // roll and went on "serving" in his own record, in his unit, at his rank
+      // -- which is all the slice and his sheet read (E5). The discharge the
+      // seasons owe a veteran has always done both (`ranks.ts`).
       const left: WorldState = {
         ...world,
+        characters: world.characters.map((character) => (character.id === characterId && character.service !== undefined && character.service.forceId === forceId
+          ? { ...character, service: { ...character.service, forceId: null, formationId: null, unitIndex: null, ...(delta.change === "discharge" ? { dischargedAtStep: atStep, dischargeClaim: character.service.dischargeClaim ?? "none" } : {}) } }
+          : character)),
         material: {
           ...world.material,
           forces: world.material.forces.map((candidate) => (candidate.id === forceId
-            ? { ...candidate, memberCharacterIds: candidate.memberCharacterIds.filter((id) => id !== characterId) }
+            ? { ...candidate, memberCharacterIds: candidate.memberCharacterIds.filter((id) => id !== characterId), posts: (candidate.posts ?? []).filter((post) => post.characterId !== characterId) }
             : candidate)),
         },
       };
@@ -6079,9 +6104,10 @@ function applyOne(
       const attemptId = required(delta.orderAttemptRef, "The order");
       const attempt = world.orderAttempts.find((candidate) => candidate.id === attemptId);
       if (attempt === undefined) reject(`No order attempt "${attemptId}" exists to answer.`, "reference");
-      if (attempt.status !== "received" && attempt.status !== "delayed" && attempt.status !== "issued") {
-        reject(`Order attempt "${attemptId}" has already been answered (${attempt.status}).`);
-      }
+      // Answered already: deciding it again does nothing, and is nobody's
+      // refusal. Refused as the world's, "already been answered" was told to
+      // the player and pinned by its words on a new order's parts (E6, M3).
+      if (attempt.status !== "received" && attempt.status !== "delayed" && attempt.status !== "issued") return world;
       // An unauthorized order that is nonetheless obeyed is recorded as
       // subversion, never as compliance -- `decideOrderAttempt` enforces this,
       // and it is the difference between a lawful chain of command and a
