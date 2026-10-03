@@ -1151,6 +1151,23 @@ export const TradeVentureSchema = z
     /** Why it is not paying, if it is not. */
     interruptedBy: z.enum(["war", "blockade"]).nullable().default(null),
     status: z.enum(["running", "closed"]),
+    /**
+     * A cargo at sea, for a venture between two ports (play-test L9). Trade by
+     * sea paid a trickle every month for ever, as if a ship were a shop; now
+     * the goods are bought, sail, and are sold when they come in, at what the
+     * markets at both ends make of them (`sim/cargoes.ts`). Absent for trade
+     * in one market or overland, which still pays by the month.
+     */
+    cargo: z.object({
+      /** What the goods cost: what is sold at the other end, at a margin. */
+      cost: MoneyAmountSchema,
+      sailedAtStep: ElapsedStepSchema,
+      arrivesAtStep: ElapsedStepSchema,
+      /** Cargoes landed so far. */
+      voyages: z.number().int().nonnegative().max(10_000).default(0),
+      /** A regular trade buys the next cargo out of what the last one sold for; a single cargo is done when it is sold. */
+      rollsOver: z.boolean(),
+    }).strict().optional(),
   })
   .strict();
 export type TradeVenture = z.infer<typeof TradeVentureSchema>;

@@ -1,4 +1,4 @@
-import { readService, type ServiceReading } from "@chronica/shared";
+import { difficultyRules, readService, type ServiceReading } from "@chronica/shared";
 import {
   LOOSE_COHESION_BPS,
   adjacentTo,
@@ -687,7 +687,8 @@ export function decideNarratorSeeds(input: NarratorInput): NarratorSeed[] {
   // always his made half of everything that stirred a grain merchant's
   // private trouble, and the world he lived in got the other half. The
   // fraction is a roll, so a quiet season still sometimes brings him one.
-  const share = wanted / 3;
+  // The share is the difficulty's (`personalSeedShare`): a third on normal, half on hard (L11).
+  const share = wanted * difficultyRules(input.world.difficulty).personalSeedShare;
   const personalCount = Math.floor(share) + (stableChoice([input.gameId, "narrator", "personal-count", ledger.seedCount], 12) < Math.round((share % 1) * 12) ? 1 : 0);
   const personal = input.playerCharacterId === null || personalCount === 0 ? [] : personalSeeds(input, ledger.seedCount + wanted, personalCount);
   for (let index = 0; index < wanted - personal.length; index += 1) {

@@ -12,6 +12,8 @@ import {
 } from "@chronica/shared";
 import { constitutionOf, foundDeposedParty, readForm, recast, rulerOf, rulerOfficeOf, type GovernmentRules } from "./constitutions";
 import { armyLoyaltyTo } from "./society";
+import { prosecutionOf } from "./command-tenure";
+import { remember } from "./grievances";
 
 /**
  * A government taken by force, or dictated by a conqueror.
@@ -200,6 +202,19 @@ export function attemptRegimeChange(input: RegimeChangeInput): RegimeChangeResul
       });
       next = { ...next, characters: [...punish.characters], characterPressures: [...punish.characterPressures] };
     }
+    // Outlawed, and tried for it (the coup run): hunted was a pressure and no
+    // more, and a failed usurper stood in the Forum the next day unaccused.
+    // He is put outside the law, the men who rule hold it against him, and he
+    // is prosecuted for treason before the court that judges.
+    next = {
+      ...next,
+      characters: next.characters.map((character) => (character.id === actorId && !character.disqualifyingStatuses.includes("outlaw")
+        ? { ...character, disqualifyingStatuses: [...character.disqualifyingStatuses, "outlaw"].slice(-8) } : character)),
+    };
+    if (ruler !== null) next = remember(next, [{ subjectCharacterId: ruler.id, targetCharacterId: actorId, label: `He tried to ${how} ${polity.name}.`, score: -20, dimensions: { trust: -50, fear: 10 }, decayPerYearBps: 0 }], input.atStep, `regime:${actorId}:${input.atStep}`);
+    const trial = prosecutionOf(next, actorId, polityId, [{ label: `treason, for trying to ${how} ${polity.name} by force`, weight: 10 }], input.atStep, null, "", 1);
+    const tried: FactProposalDraft[] = trial === null ? [] : [{ localId: `treason_${actorId}_${input.atStep}`.slice(0, 60), ...trial.fact }];
+    if (trial !== null) next = { ...next, material: { ...next.material, politicalProcedures: [...next.material.politicalProcedures, trial.procedure] } };
     return {
       world: next,
       succeeded: false,
@@ -207,13 +222,13 @@ export function attemptRegimeChange(input: RegimeChangeInput): RegimeChangeResul
       facts: [{
         localId: `regime_failed_${actorId}_${input.atStep}`.slice(0, 60),
         kind: "regime_change_failed",
-        summary: `${actor.name} tried to ${how} ${polity.name}, and failed${defenders > 0 ? `: the ${defenders} men who held the capital stood by its government` : ""}. He has lost his offices and much of his name, and is hunted.`,
+        summary: `${actor.name} tried to ${how} ${polity.name}, and failed${defenders > 0 ? `: the ${defenders} men who held the capital stood by its government` : ""}. He has lost his offices and much of his name, is declared an outlaw, and is hunted.`,
         affectedRefs: [{ kind: "character", id: actorId }, { kind: "polity", id: polityId }, ...(ruler === null ? [] : [{ kind: "character" as const, id: ruler.id }])],
         visibility: "public",
         discoveryState: "public",
         knowableInDays: 0,
         significance: 85,
-      }],
+      }, ...tried],
     };
   }
 

@@ -216,3 +216,169 @@ export function rosterPeople(offices: readonly Office[], takenSeats: readonly { 
   }
   return { characters, accounts, officeSeats };
 }
+
+// ── The great houses' families (play-test L10) ──────────────────────────────
+//
+// The scenario had no family at all: no wife, no daughter, no son, and its
+// only women were the six Vestals -- so a man could not marry into the
+// nobility, nobody had an heir to be born, and a house was one man. These are
+// the households of the principal men, by name where the sources name them and
+// invented where they do not, each marked in its `creationReason` as one or the
+// other. Ages are as of 270.
+
+interface Kin {
+  readonly name: string;
+  readonly age: number;
+  readonly gender: "male" | "female";
+  /** What the kinsman is to the head of the house. */
+  readonly is: "wife" | "son" | "daughter" | "sister" | "brother";
+  /** Where the sources name this person, and where; absent, the person is invented. */
+  readonly historical?: string;
+  /** Somebody already in the world, given the tie and no new person. */
+  readonly existing?: boolean;
+  /** For a wife: her own father, already in the world. */
+  readonly fatherName?: string;
+}
+
+interface House {
+  /** The head's name, as he stands in the world. */
+  readonly head: string;
+  readonly kin: readonly Kin[];
+}
+
+const HOUSES: readonly House[] = [
+  // The Cornelii: Blasio, consul this year.
+  { head: "Gnaeus Cornelius Blasio", kin: [
+    { name: "Sulpicia", age: 34, gender: "female", is: "wife" },
+    { name: "Cornelia Blasionis", age: 16, gender: "female", is: "daughter" },
+    { name: "Gnaeus Cornelius Blasio the Younger", age: 12, gender: "male", is: "son" },
+  ] },
+  // The Fabii: the praetor, his brother Numerius, and the son who wrote Rome's first history in Greek.
+  { head: "Gaius Fabius Pictor", kin: [
+    { name: "Fulvia", age: 30, gender: "female", is: "wife" },
+    { name: "Quintus Fabius Pictor", age: 1, gender: "male", is: "son", historical: "the historian, son of Gaius Fabius Pictor, born about 270" },
+    { name: "Fabia Pictoris", age: 14, gender: "female", is: "daughter" },
+    { name: "Numerius Fabius Pictor", age: 30, gender: "male", is: "brother", existing: true, historical: "consul in 266, brother of Gaius" },
+  ] },
+  // The Claudii: the sons of Appius Claudius Caecus, and their sister Claudia, whose arrogance in 246 cost her a fine.
+  { head: "Appius Claudius Russus", kin: [
+    { name: "Valeria", age: 30, gender: "female", is: "wife" },
+    { name: "Claudia", age: 15, gender: "female", is: "sister", historical: "daughter of Appius Claudius Caecus, fined in 246 (Livy, Periochae 19)" },
+    { name: "Claudia Russi", age: 13, gender: "female", is: "daughter" },
+  ] },
+  // The Aemilii: the old censor.
+  { head: "Quintus Aemilius Papus", kin: [
+    { name: "Aemilia Papia", age: 17, gender: "female", is: "daughter" },
+    { name: "Lucius Aemilius Papus", age: 24, gender: "male", is: "son" },
+  ] },
+  // The Sempronii: Sophus, consul in 268.
+  { head: "Publius Sempronius Sophus", kin: [
+    { name: "Postumia", age: 35, gender: "female", is: "wife" },
+    { name: "Sempronia", age: 16, gender: "female", is: "daughter" },
+    { name: "Publius Sempronius Sophus the Younger", age: 10, gender: "male", is: "son" },
+  ] },
+  // The Atilii: Regulus and Marcia, whose sons were consuls in the 220s.
+  { head: "Marcus Atilius Regulus", kin: [
+    { name: "Marcia", age: 22, gender: "female", is: "wife", historical: "wife of Marcus Atilius Regulus (Silius Italicus, Punica 6)" },
+  ] },
+  // The Otacilii.
+  { head: "Manius Otacilius Crassus", kin: [
+    { name: "Mamilia", age: 30, gender: "female", is: "wife" },
+    { name: "Otacilia", age: 14, gender: "female", is: "daughter" },
+    { name: "Titus Otacilius Crassus", age: 29, gender: "male", is: "brother", existing: true, historical: "consul in 261, of the same house" },
+  ] },
+  // The Genucii: the consul.
+  { head: "Gaius Genucius Clepsina", kin: [
+    { name: "Aurelia", age: 38, gender: "female", is: "wife" },
+    { name: "Genucia", age: 17, gender: "female", is: "daughter" },
+    { name: "Lucius Genucius the Younger", age: 15, gender: "male", is: "son" },
+  ] },
+  // Hieron married Philistis, Leptines' daughter, to bind the best house of Syracuse to him (Polybius 1.9).
+  { head: "Hieron II", kin: [
+    { name: "Philistis", age: 24, gender: "female", is: "wife", historical: "queen of Syracuse, daughter of Leptines (Polybius 1.9)", fatherName: "Leptines of Syracuse" },
+  ] },
+  // Carthage: Hanno's house, and Gisco's.
+  { head: "Hanno of Carthage", kin: [
+    { name: "Arishat", age: 40, gender: "female", is: "wife" },
+    { name: "Batbaal", age: 16, gender: "female", is: "daughter" },
+    { name: "Bomilcar son of Hanno", age: 20, gender: "male", is: "son" },
+  ] },
+  { head: "Hannibal Gisco", kin: [
+    { name: "Elishat", age: 30, gender: "female", is: "wife" },
+    { name: "Sophonba", age: 12, gender: "female", is: "daughter" },
+  ] },
+];
+
+/** The Barcids, whose head the sources do not name: only that Hamilcar, born about 275, was of the house. */
+const BARCID_HEAD = { name: "Hannibal the Barcid", age: 46, prestige: 5_200 };
+const BARCID_KIN: readonly Kin[] = [
+  { name: "Imilce", age: 34, gender: "female", is: "wife" },
+  { name: "Hamilcar Barca", age: 5, gender: "male", is: "son", historical: "Hamilcar Barca, born about 275, father of Hannibal" },
+  { name: "Arisha Barcid", age: 15, gender: "female", is: "daughter" },
+];
+
+export interface HouseFamilies {
+  readonly characters: readonly Record<string, unknown>[];
+  readonly accounts: readonly Record<string, unknown>[];
+  readonly familyLinks: readonly Record<string, unknown>[];
+}
+
+/**
+ * The great houses' wives, daughters, sons, brothers and sisters, as people
+ * and as family ties, for the characters already written. Throws on a head the
+ * world does not have: a house written for nobody is a mistake in this file.
+ */
+export function houseFamilies(people: readonly Record<string, unknown>[]): HouseFamilies {
+  type Person = { id: string; name: string; polityId: string; cultureId: string; faithId: string; locationProvinceId: string; prestigeBps: number };
+  const all = people as unknown as readonly Person[];
+  const named = (name: string): Person => {
+    const found = all.find((person) => person.name === name);
+    if (found === undefined) throw new Error(`A house is written for somebody the world does not have: ${name}`);
+    return found;
+  };
+  const characters: Record<string, unknown>[] = [];
+  const accounts: Record<string, unknown>[] = [];
+  const familyLinks: Record<string, unknown>[] = [];
+  const link = (characterId: string, relatedCharacterId: string, kind: string): void => {
+    familyLinks.push({ id: `family-${stableHash([characterId, relatedCharacterId, kind]).toString(36)}`, characterId, relatedCharacterId, kind, startedAtStep: 0, endedAtStep: null, visibility: "public", provenanceEventId: null });
+  };
+  const person = (head: Person, id: string, name: string, age: number, prestigeBps: number, gender: "male" | "female", why: string, traits: readonly string[] = []): Person => {
+    const made = personFor({
+      id, name, polityId: head.polityId, cultureId: head.cultureId, faithId: head.faithId, provinceId: head.locationProvinceId,
+      age, prestigeBps, focus: gender === "female" ? "diplomacy" : "learning", traits, gender, officeId: null, balance: age < 14 ? 0 : 100,
+    }, 0);
+    characters.push({ ...made.character, creationReason: why });
+    accounts.push(made.account);
+    return { ...head, id, name, prestigeBps };
+  };
+  const seat = (head: Person, kin: readonly Kin[]): void => {
+    const made = kin.map((member) => ({
+      member,
+      person: member.existing === true
+        ? named(member.name)
+        : person(head, `${head.polityId}-kin-${stableHash([head.name, member.name]).toString(36).slice(0, 6)}`, member.name, member.age,
+          Math.round(head.prestigeBps * (member.is === "wife" ? 0.4 : 0.3)), member.gender,
+          member.historical === undefined ? `Invented: the sources do not name this ${member.is} of ${head.name}.` : `Historical: ${member.historical}.`),
+    }));
+    const wife = made.find((entry) => entry.member.is === "wife");
+    for (const { member, person: kinsman } of made) {
+      if (member.is === "wife") {
+        link(head.id, kinsman.id, "spouse_or_partner");
+        if (member.fatherName !== undefined) link(named(member.fatherName).id, kinsman.id, "parent");
+      } else if (member.is === "son" || member.is === "daughter") {
+        link(head.id, kinsman.id, "parent");
+        // Hers too, where she was old enough to have borne the child.
+        if (wife !== undefined && wife.member.age - member.age >= 15) link(wife.person.id, kinsman.id, "parent");
+      } else {
+        link(head.id, kinsman.id, "sibling");
+      }
+    }
+  };
+  for (const house of HOUSES) seat(named(house.head), house.kin);
+  // The Barcid head is a person of his own, at Carthage.
+  const carthage = named("Hanno of Carthage");
+  const barcid = person(carthage, `carthage-kin-${stableHash(["Barcid", BARCID_HEAD.name]).toString(36).slice(0, 6)}`, BARCID_HEAD.name, BARCID_HEAD.age, BARCID_HEAD.prestige, "male",
+    "Invented: the sources name Hamilcar Barca's house, not his father.", ["ambitious"]);
+  seat(barcid, BARCID_KIN);
+  return { characters, accounts, familyLinks };
+}

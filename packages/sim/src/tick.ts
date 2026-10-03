@@ -76,6 +76,9 @@ import { betweenHarvests, reviewTheLand } from "./economy";
 import { endObligationsOfEndedAgreements, keepTreaties } from "./treaties";
 import { keepPromises } from "./promises";
 import { settleDebts, termTheLoans } from "./debts";
+import { keepPatronage, soldierPayShares } from "./money";
+import { landCargoes } from "./cargoes";
+import { answerMarriageOffers } from "./marriage";
 import { reviewUnrest } from "./unrest";
 import type { IdFactory } from "./ports";
 import { holdElections, type ElectionGovernment } from "./elections";
@@ -265,10 +268,16 @@ export function runDeterministicTick(given: TickInput): TickResult {
     ? { world: given.world, facts: [] as FactProposalDraft[], battles: [] as BattleAccount[] }
     : interceptCrossings({ world: given.world, toDay: given.toDay, month, warfare: given.warfare, ids: given.ids, playerCharacterId: given.playerCharacterId ?? null });
   // Before anything is paid: nothing is paid on a treaty that has ended, and a
-  // loan's instalment is what it still owes (`treaties.ts`, `debts.ts`).
-  const beforePayments = termTheLoans(endObligationsOfEndedAgreements(intercepted.world));
+  // loan's instalment is what it still owes (`treaties.ts`, `debts.ts`); a
+  // patron's stipends stand or end (`money.ts`), and cargoes that have come in
+  // are sold (`cargoes.ts`).
+  const patronage = keepPatronage(intercepted.world, given.ids, given.toDay);
+  const landed = landCargoes(patronage.world, given.toDay, given.ids, given.warfare);
+  // Offers of marriage that have reached their readers are answered by rule (`marriage.ts`).
+  const wed = answerMarriageOffers(landed.world, given.ids, given.toDay, given.playerCharacterId ?? null);
+  const beforePayments = termTheLoans(endObligationsOfEndedAgreements(wed.world));
   const input: TickInput = beforePayments === given.world ? given : { ...given, world: beforePayments };
-  const facts: FactProposalDraft[] = [...intercepted.facts];
+  const facts: FactProposalDraft[] = [...intercepted.facts, ...patronage.facts, ...landed.facts, ...wed.facts];
   const notes: string[] = [];
   let accounts = input.world.material.accounts;
   let reservations = input.world.material.reservations;
@@ -471,11 +480,22 @@ export function runDeterministicTick(given: TickInput): TickResult {
         credit(obligation.payerAccountId, -owed);
         if (obligation.recipientAccountId !== undefined) credit(obligation.recipientAccountId, owed);
         paid += owed;
-        transactions.push({
+        // The named men's pay reaches their purses, out of what the treasury
+        // paid and not on top of it: it left the chest and landed nowhere (E18).
+        const shares = obligation.recipientAccountId === undefined ? soldierPayShares(input.world, obligation, owed) : [];
+        for (const share of shares) {
+          credit(share.accountId, share.amount);
+          transactions.push({
+            id: input.ids.next("txn"), atStep: due, kind: "salary", amount: share.amount, sourceAccountId: obligation.payerAccountId, destinationAccountId: share.accountId,
+            cause: { kind: "obligation", id: obligation.id, explanation: `${obligation.label}: a soldier's pay`.slice(0, 240) }, visibility: "private",
+          });
+        }
+        const toTheRanks = owed - shares.reduce((sum, share) => sum + share.amount, 0);
+        if (toTheRanks > 0) transactions.push({
           id: input.ids.next("txn"),
           atStep: due,
           kind: obligation.kind === "army_pay" || obligation.kind === "army_upkeep" ? "upkeep" : "transfer",
-          amount: owed,
+          amount: toTheRanks,
           sourceAccountId: obligation.payerAccountId,
           // Never to itself. An obligation whose payer and recipient are the
           // same account is refused at creation now, but one already standing

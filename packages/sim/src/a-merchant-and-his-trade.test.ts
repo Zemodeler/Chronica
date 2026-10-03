@@ -78,6 +78,11 @@ function withTheVenture(): WorldState {
 
 /** Leptines' purse gained this month, less what his estate paid him. */
 const tradeReturn = (before: WorldState, after: WorldState): number => balance(after, "leptines-purse") - balance(before, "leptines-purse") - 90;
+/** What his cargoes brought in, less the next cargoes bought, since `before`: his purse's trade rows. */
+const cargoReturn = (before: WorldState, after: WorldState): number => after.material.transactions.slice(before.material.transactions.length)
+  .filter((row) => (row.destinationAccountId === "leptines-purse" && row.kind === "income" && row.cause.kind === "scheduled_income" && row.cause.explanation.startsWith("Sale of the cargo"))
+    || (row.sourceAccountId === "leptines-purse" && row.kind === "purchase" && row.cause.explanation.startsWith("The next cargo")))
+  .reduce((sum, row) => sum + (row.kind === "income" ? row.amount : -row.amount), 0);
 
 describe("a merchant and his trade", () => {
   it("opens a venture between two ports from his own purse, lawfully, at the engine's price", () => {
@@ -111,39 +116,68 @@ describe("a merchant and his trade", () => {
     expect(tradeReturn(result.world, month)).toBe(terms.monthlyReturn);
   });
 
-  it("pays him every month while the sea is open", () => {
+  // Between two ports a venture is a cargo (play-test L9): no monthly trickle,
+  // a sale when the ship comes in. The three tests below were written for the
+  // trickle -- "pays him every month" -- and now pin the cargo instead.
+  it("sails a cargo, pays nothing by the month, and sells it at a margin when it comes in", () => {
     const opened = withTheVenture();
-    const month = tick(opened, 30).world;
-    expect(tradeReturn(opened, month)).toBe(ventureTerms(opened, SYRACUSE, MESSANA, "marked")!.monthlyReturn);
+    const venture = opened.material.ventures[0]!;
+    const cargo = venture.cargo!;
+    expect(cargo.cost).toBe(ventureTerms(opening(), SYRACUSE, MESSANA, "marked")!.price);
+    expect(opened.material.incomeSources.find((source) => source.id === venture.incomeSourceId)!.active).toBe(false);
+    expect(cargo.arrivesAtStep).toBeGreaterThan(0);
+    const before = tick(opened, cargo.arrivesAtStep - 1);
+    expect(cargoReturn(opened, before.world)).toBe(0);
+    const landed = tick(before.world, cargo.arrivesAtStep);
+    const sold = landed.world.material.transactions.filter((row) => row.kind === "income" && row.cause.id === venture.incomeSourceId);
+    expect(sold).toHaveLength(1);
+    // Between three twentieths and two fifths over what it cost.
+    expect(sold[0]!.amount).toBeGreaterThanOrEqual(Math.round(cargo.cost * 1.15));
+    expect(sold[0]!.amount).toBeLessThanOrEqual(Math.round(cargo.cost * 1.4));
+    expect(landed.factProposals.some((fact) => fact.kind === "cargo_sold" && fact.summary.includes("came in at") && fact.summary.includes(`sold for ${sold[0]!.amount}`))).toBe(true);
+    // A regular trade ("marked") buys the next cargo and sails again; the profit stays.
+    expect(cargoReturn(opened, landed.world)).toBe(sold[0]!.amount - cargo.cost);
+    expect(landed.world.material.ventures[0]!.status).toBe("running");
+    expect(landed.world.material.ventures[0]!.cargo!.arrivesAtStep).toBeGreaterThan(cargo.arrivesAtStep);
   });
 
-  it("stops when his country is at war with the power at its far end, says so, and resumes at peace", () => {
-    const opened = withTheVenture();
-    const atWar = atWarWith(opened, "syracuse", "mamertines");
-    const month = tick(atWar, 30);
-    expect(tradeReturn(atWar, month.world)).toBe(0);
-    expect(month.factProposals.some((fact) => fact.kind === "venture_interrupted" && fact.summary.includes("war"))).toBe(true);
-    expect(month.world.material.ventures[0]!.interruptedBy).toBe("war");
+  it("winds up a single cargo once it is sold", () => {
+    const single = apply(opening(), [{ ...THE_VENTURE, band: "slight" }], as("leptines-syracuse")).world;
+    const landed = tick(single, single.material.ventures[0]!.cargo!.arrivesAtStep);
+    expect(landed.world.material.ventures[0]!.status).toBe("closed");
+    expect(cargoReturn(single, landed.world)).toBeGreaterThan(0);
+  });
 
-    const peace: WorldState = { ...month.world, polityAgreements: month.world.polityAgreements.map((agreement) => ({ ...agreement, status: "ended" as const })) };
-    const resumed = tick(peace, 60);
+  it("is held out of a port at war with his country, says so, and comes in at peace", () => {
+    const opened = withTheVenture();
+    const arrives = opened.material.ventures[0]!.cargo!.arrivesAtStep;
+    const atWar = atWarWith(opened, "syracuse", "mamertines");
+    const held = tick(atWar, arrives);
+    expect(cargoReturn(atWar, held.world)).toBe(0);
+    expect(held.factProposals.some((fact) => fact.kind === "venture_interrupted" && fact.summary.includes("war"))).toBe(true);
+    expect(held.world.material.ventures[0]!.interruptedBy).toBe("war");
+
+    const peace: WorldState = { ...held.world, polityAgreements: held.world.polityAgreements.map((agreement) => ({ ...agreement, status: "ended" as const })) };
+    const resumed = tick(peace, arrives + 30);
     expect(resumed.factProposals.some((fact) => fact.kind === "venture_resumed")).toBe(true);
+    expect(cargoReturn(peace, resumed.world)).toBeGreaterThan(0);
     expect(resumed.world.material.ventures[0]!.interruptedBy).toBeNull();
   });
 
-  it("stops when an enemy fleet sits off one of its own ports -- and only its own", () => {
+  it("is held when an enemy fleet sits off one of its own ports -- and only its own", () => {
     const opened = withTheVenture();
+    const arrives = opened.material.ventures[0]!.cargo!.arrivesAtStep;
     const war = atWarWith(opened, "carthage", "syracuse");
-    // The Carthaginian fleet at Lilybaeum, far from his route: his trade goes on.
-    const elsewhere = tick(war, 30);
-    expect(tradeReturn(war, elsewhere.world)).toBeGreaterThan(0);
-    // The fleet off Syracuse itself: it stops.
+    // The Carthaginian fleet at Lilybaeum, far from his route: his cargo comes in.
+    const elsewhere = tick(war, arrives);
+    expect(cargoReturn(war, elsewhere.world)).toBeGreaterThan(0);
+    // The fleet off Syracuse itself: the next one does not.
     const blockaded: WorldState = {
       ...elsewhere.world,
       material: { ...elsewhere.world.material, forces: elsewhere.world.material.forces.map((force) => (force.id === "carthaginian-fleet" ? { ...force, locationId: SYRACUSE } : force)) },
     };
-    const shut = tick(blockaded, 60);
-    expect(tradeReturn(blockaded, shut.world)).toBe(0);
+    const shut = tick(blockaded, elsewhere.world.material.ventures[0]!.cargo!.arrivesAtStep);
+    expect(cargoReturn(blockaded, shut.world)).toBe(0);
     expect(shut.world.material.ventures[0]!.interruptedBy).toBe("blockade");
   });
 

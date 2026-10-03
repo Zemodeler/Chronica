@@ -1,5 +1,7 @@
 import {
   LOOSE_COHESION_BPS,
+  atWar,
+  readDepartments,
   deriveRelationDimension,
   openStorylines,
   stableChoice,
@@ -80,14 +82,34 @@ function arenaFor(character: Character, world: WorldState, player: Character | u
   return "political";
 }
 
-/** What the arena means he is trying to do, in words the thread can carry. */
-export function arenaStakes(arena: NemesisArena, rival: string, ruler: string): string {
+/**
+ * What the player is, for sizing his antagonist (play-test E21): the ruler of
+ * his power, a magistrate, a man in command of an army, or a private man. A
+ * private plebeian was handed Carthage's admiral as his nemesis and told he was
+ * "the ruler"; his quarrels are a private man's.
+ */
+export type PlayerStation = "ruler" | "magistrate" | "commander" | "private";
+
+export function stationOf(world: WorldState, playerCharacterId: string): PlayerStation {
+  const player = world.characters.find((character) => character.id === playerCharacterId);
+  if (player === undefined) return "private";
+  if (player.polityId !== null && readDepartments(world).rulers(player.polityId).some((ruler) => ruler.id === playerCharacterId)) return "ruler";
+  if (player.officeId !== null || world.material.officeSeats.some((seat) => seat.holderCharacterId === playerCharacterId && seat.status === "held")) return "magistrate";
+  if (world.material.forces.some((force) => force.outlaw !== true && (force.commanderCharacterId === playerCharacterId || force.controllerCharacterId === playerCharacterId))) return "commander";
+  return "private";
+}
+
+/** What the arena means he is trying to do, in words the thread can carry, sized to what the player is. */
+export function arenaStakes(arena: NemesisArena, rival: string, ruler: string, station: PlayerStation = "ruler"): string {
   switch (arena) {
     case "political":
+      if (station === "private") return `${rival} means to stand where ${ruler} would stand -- the same patrons, the same office, the same name in the Forum -- and to get there over him.`;
       return `${rival} means to have what ${ruler} holds, and to take it by the constitution rather than against it.`;
     case "military":
+      if (station === "private") return `${rival} has men under him, ${ruler} among them or beside them, and means to see ${ruler} kept down or broken.`;
       return `${rival} commands men, and what he does with them is no longer certain to be what ${ruler} wants done.`;
     case "dynastic":
+      if (station !== "ruler") return `${rival} is of ${ruler}'s own house, and believes its name and its money should be his to dispose of.`;
       return `${rival} is of ${ruler}'s own house, and believes the succession should have run through him.`;
     case "separatist":
       return `${rival} governs ground far enough from the centre to be held against it, and has begun to wonder whether it should be.`;
@@ -96,16 +118,125 @@ export function arenaStakes(arena: NemesisArena, rival: string, ruler: string): 
   }
 }
 
+/** How far above a private man his antagonist may stand, in standing: a peer, not a power. */
+const PEER_SPAN_BPS = 2_000;
+
+/** What the player's own world is: what he holds, whom he fights beside and against, whom he stands against for office. */
+interface Sphere {
+  readonly player: Character;
+  readonly station: PlayerStation;
+  /** Holds imperium: rules, or commands an army. */
+  readonly imperium: boolean;
+  /** Powers an army he commands is at war with. */
+  readonly warredOnByHisArmy: ReadonlySet<string>;
+  /** Commanders of enemy armies facing one he serves in or commands. */
+  readonly enemyCommanders: ReadonlySet<string>;
+  /** His officers: the men over him in the army he serves in. */
+  readonly officers: ReadonlySet<string>;
+  /** Men standing against him for the same office. */
+  readonly rivalCandidates: ReadonlySet<string>;
+}
+
+const menOf = (force: WorldState["material"]["forces"][number]): number => force.personnel.reduce((count, category) => count + category.fit, 0);
+
+function sphereOf(world: WorldState, player: Character): Sphere {
+  const station = stationOf(world, player.id);
+  const his = world.material.forces.filter((force) => force.commanderCharacterId === player.id || force.controllerCharacterId === player.id);
+  const serves = world.material.forces.filter((force) => force.memberCharacterIds.includes(player.id) || (force.posts ?? []).some((post) => post.characterId === player.id));
+  const near = (a: string, b: string): boolean => a === b || world.map.edges.some((edge) => (edge.from === a && edge.to === b) || (edge.from === b && edge.to === a));
+  const enemyCommanders = new Set<string>();
+  for (const own of [...his, ...serves]) {
+    for (const force of world.material.forces) {
+      if (force.polityId !== own.polityId && atWar(world.polityAgreements, force.polityId, own.polityId) && near(force.locationId, own.locationId)) enemyCommanders.add(force.commanderCharacterId);
+    }
+  }
+  // The officers over him: his unit's, and the army's own commander.
+  const officers = new Set<string>();
+  for (const force of serves) {
+    officers.add(force.commanderCharacterId);
+    const unit = player.service?.forceId === force.id ? player.service : undefined;
+    for (const post of force.posts ?? []) {
+      if (post.characterId !== player.id && unit !== undefined && post.formationId === unit.formationId && (post.unitIndex === null || post.unitIndex === unit.unitIndex)) officers.add(post.characterId);
+    }
+  }
+  // Candidacies open beside his own, before the same body.
+  const candidateOf = (procedure: WorldState["material"]["politicalProcedures"][number]): string | null => (procedure.subjectKind === "character" ? procedure.subjectId : procedure.sponsorCharacterId);
+  const standing = world.material.politicalProcedures.filter((procedure) => procedure.outcome === null && (procedure.type === "nomination" || procedure.type === "appointment"));
+  const mine = standing.filter((procedure) => candidateOf(procedure) === player.id);
+  const rivalCandidates = new Set(standing
+    .filter((procedure) => mine.some((own) => own.id !== procedure.id && own.institutionId === procedure.institutionId))
+    .map(candidateOf)
+    .filter((id): id is string => id !== null && id !== player.id));
+  return {
+    player,
+    station,
+    imperium: station === "ruler" || his.length > 0,
+    warredOnByHisArmy: new Set(world.polityAgreements.filter((agreement) => agreement.status === "active" && agreement.kind === "war" && his.some((force) => force.polityId === agreement.polityId || force.polityId === agreement.otherPolityId))
+      .flatMap((agreement) => [agreement.polityId, agreement.otherPolityId])
+      .filter((polityId) => !his.some((force) => force.polityId === polityId))),
+    enemyCommanders,
+    officers,
+    rivalCandidates,
+  };
+}
+
+/**
+ * What this man has against the player, or nothing: distrust or contempt, a
+ * thread they are both caught in, his own house, the same office sought, or
+ * an enemy army facing the one the player is in. Capability alone chose
+ * Carthage's admiral for a private plebeian he had never heard of (E21).
+ */
+function grievancesOf(character: Character, world: WorldState, sphere: Sphere): string[] {
+  const player = sphere.player;
+  const grievances: string[] = [];
+  if (deriveRelationDimension(character, player.id, "trust") <= -30) grievances.push("does not trust him");
+  if (deriveRelationDimension(character, player.id, "respect") <= -30) grievances.push("does not respect him");
+  if (character.dynastyId !== null && character.dynastyId === player.dynastyId) grievances.push("is of his house");
+  if (openStorylines(world.storylines).some((storyline) => storyline.participantIds.includes(character.id) && storyline.participantIds.includes(player.id))) grievances.push("is already in a thread with him");
+  if (sphere.rivalCandidates.has(character.id)) grievances.push("stands against him for the same office");
+  if (sphere.enemyCommanders.has(character.id)) grievances.push("commands the enemy facing him");
+  return grievances;
+}
+
+/**
+ * Whether this man's world touches the player's at all, and is the size of
+ * it. A foreigner only where the player's own army is at war with his power,
+ * or the player holds imperium and the man commands against him; a private
+ * man's antagonist is a peer -- a rival, his own officer, a man standing
+ * against him -- never a power.
+ */
+function inHisSphere(character: Character, world: WorldState, sphere: Sphere, grievances: readonly string[]): boolean {
+  const player = sphere.player;
+  if (character.polityId !== player.polityId) {
+    if (character.polityId === null) return false;
+    const atWarWithHim = sphere.warredOnByHisArmy.has(character.polityId) || (sphere.imperium && sphere.enemyCommanders.has(character.id));
+    if (!atWarWithHim) return false;
+  }
+  if (sphere.station !== "private") return true;
+  if (sphere.officers.has(character.id) || sphere.rivalCandidates.has(character.id)) return true;
+  if (character.polityId !== player.polityId) return false;
+  const great = character.prestigeBps > player.prestigeBps + PEER_SPAN_BPS
+    || world.material.forces.some((force) => force.commanderCharacterId === character.id && menOf(force) >= 5_000)
+    || readDepartments(world).rulers(character.polityId ?? "").some((ruler) => ruler.id === character.id);
+  return !great && grievances.length > 0;
+}
+
 /**
  * How much of a problem this man could be, and how much he wants to be one.
  *
  * Capability and grievance both, because either alone is nothing: a bitter man
  * with no office and no men is a complainer, and a powerful man with no reason
- * to move is a colleague.
+ * to move is a colleague. Without a grievance he is nobody's nemesis.
  */
-function scoreOf(character: Character, world: WorldState, player: Character | undefined, ownPolityId: string | null): Candidate | null {
+function scoreOf(character: Character, world: WorldState, sphere: Sphere, ownPolityId: string | null): Candidate | null {
+  const player: Character | undefined = sphere.player;
+  const grievances = grievancesOf(character, world, sphere);
+  if (grievances.length === 0 || !inHisSphere(character, world, sphere, grievances)) return null;
   const reasons: string[] = [];
   let score = 0;
+  if (sphere.rivalCandidates.has(character.id)) { score += 3; reasons.push("stands against him for the same office"); }
+  if (sphere.enemyCommanders.has(character.id)) { score += 3; reasons.push("commands the enemy facing him"); }
+  if (sphere.officers.has(character.id)) { score += 1; reasons.push("is over him in the ranks"); }
 
   // ── What he could do about it ─────────────────────────────────────────
   if (character.officeId !== null) { score += 3; reasons.push("holds an office"); }
@@ -183,9 +314,11 @@ export function chooseNemesis(input: NemesisInput): { characterId: string; arena
   if (world.nemeses.length > 0 && since < REVIEW_EVERY_DAYS) return null;
 
   const player = world.characters.find((character) => character.id === playerCharacterId);
+  if (player === undefined) return null;
+  const sphere = sphereOf(world, player);
   const candidates = world.characters
     .filter((character) => character.alive && character.id !== playerCharacterId)
-    .map((character) => scoreOf(character, world, player, input.ownPolityId))
+    .map((character) => scoreOf(character, world, sphere, input.ownPolityId))
     .filter((candidate): candidate is Candidate => candidate !== null)
     .sort((a, b) => b.score - a.score || a.character.id.localeCompare(b.character.id));
 
@@ -230,11 +363,18 @@ export function nemesisMethod(character: Character): NemesisMethod {
  * carries up to ten people a round, and he is the one the whole system exists
  * to give more room to.
  */
-export function conductInWords(character: Character, ruler: string): string {
+export function conductInWords(character: Character, ruler: string, station: PlayerStation = "ruler"): string {
   const lines: string[] = [];
   const { boldness, caution, sociability, discipline } = character.mind.temperament;
   const { status, family, duty, revenge, security } = character.mind.drives;
   const risk = character.mind.riskTolerance;
+
+  // ── Who it is aimed at: the size of the quarrel is the size of the man ──
+  if (station === "private") {
+    lines.push(`${ruler} holds no office and commands no army: this is a private quarrel, fought over his name, his purse, his patrons and his prospects, with what one private man has against another -- never with a state's armies or treasury.`);
+  } else if (station === "commander" || station === "magistrate") {
+    lines.push(`${ruler} is a ${station === "commander" ? "commander" : "magistrate"}, not the ruler of his country: it is his command, his office and his name that are at stake.`);
+  }
 
   // ── The spine: whether a thing is done in front of him or behind him ──
   switch (nemesisMethod(character)) {
@@ -310,9 +450,10 @@ export function conductInWords(character: Character, ruler: string): string {
 export function nemesisStance(world: WorldState, nemesis: Nemesis, ownPolityId: string | null): NemesisStance {
   const rival = world.characters.find((character) => character.id === nemesis.characterId);
   if (rival === undefined || !rival.alive) return "dormant";
-  // A man who has lost everything he could fight with is not fighting.
+  // A man who has lost everything he could fight with is not fighting --
+  // unless the quarrel is a private one, fought with what private men have.
   const commands = world.material.forces.some((force) => force.commanderCharacterId === rival.id);
-  if (rival.officeId === null && !commands && nemesis.arena !== "dynastic") return "dormant";
+  if (rival.officeId === null && !commands && nemesis.arena !== "dynastic" && stationOf(world, nemesis.targetCharacterId) !== "private") return "dormant";
 
   if (nemesis.arena === "foreign") return "opposed";
 
@@ -377,7 +518,7 @@ export function recordNemesis(
   // Names are the world's, up to a hundred and twenty characters each, and two
   // of them in a thread title the schema caps at a hundred and sixty is a save
   // that will not load. Clipped, never refused: the quarrel still begins.
-  const stakes = clip(arenaStakes(chosen.arena, rival.name, ruler.name), 320);
+  const stakes = clip(arenaStakes(chosen.arena, rival.name, ruler.name, stationOf(world, targetCharacterId)), 320);
   return {
     ...world,
     storylines: [

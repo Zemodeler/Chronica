@@ -1,6 +1,7 @@
 import {
   FactProposalSchema,
   WorldDeltaSchema,
+  difficultyRules,
   readDepartments,
   stableHash,
   type Character,
@@ -103,6 +104,9 @@ export function decideVillainy(input: VillainyInput): StatecraftDecision[] {
     plotting.add(plotter.id);
   }
 
+  // ── A personal enemy of the player's moves against him (L11) ───────────
+  decisions.push(...vendettas(input, plotting));
+
   // ── Contested successions ──────────────────────────────────────────────
   // A ruler new to his seat -- the old one dead, a boy or a weak man in his
   // place -- is the moment an ambitious general or a great man of the court
@@ -163,6 +167,79 @@ export function decideVillainy(input: VillainyInput): StatecraftDecision[] {
         visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 65,
       })],
     });
+  }
+  return decisions;
+}
+
+/** A man who does not let a slight go, and one who hates the player this much, moves against him. */
+const VENGEFUL_AT = 65;
+const HATRED_AT = -30;
+/** What a whispering campaign costs a man's standing. */
+const DEFAMED_BPS = 400;
+
+/**
+ * The player's personal enemies, played out (play-test L11).
+ *
+ * The world pushed back on Rome and never on the man: on hard, nobody who
+ * hated the player ever did anything about it unless the model thought to.
+ * Once a month, a man of his own world who does not let a slight go and hates
+ * him -- not one the model is playing -- may move against him, by the
+ * difficulty's odds (`plotAgainstPlayerTwelfths`): a cruel one has him
+ * waylaid and beaten (an attempt on him, which against the player lands as a
+ * maiming, `plots.ts`), a bold one has him seized, and anybody else blackens
+ * his name. The plots' own odds carry the difficulty's edge.
+ */
+function vendettas(input: VillainyInput, plotting: Set<string>): StatecraftDecision[] {
+  const { world } = input;
+  const twelfths = difficultyRules(world.difficulty).plotAgainstPlayerTwelfths;
+  const player = input.playerCharacterId === null ? undefined : world.characters.find((character) => character.id === input.playerCharacterId && character.alive);
+  if (player === undefined || twelfths <= 0) return [];
+  const month = Math.floor(world.instant.day / 30);
+  const decisions: StatecraftDecision[] = [];
+  const enemies = world.characters
+    .filter((enemy) => enemy.alive && enemy.id !== player.id && !input.playedByModel.has(enemy.id) && !plotting.has(enemy.id) && enemy.polityId !== null)
+    .filter((enemy) => enemy.mind.drives.revenge >= VENGEFUL_AT && opinionOf(enemy, player.id) <= HATRED_AT)
+    // Within reach of him: his own people, or men where he is.
+    .filter((enemy) => enemy.polityId === player.polityId || enemy.locationProvinceId === player.locationProvinceId)
+    .sort((a, b) => opinionOf(a, player.id) - opinionOf(b, player.id) || a.id.localeCompare(b.id));
+  for (const enemy of enemies.slice(0, 1)) {
+    if (stableHash([input.gameId, "vendetta", enemy.id, String(month)]) % 12 >= twelfths) continue;
+    const why = `${enemy.name} has not forgiven ${player.name}, and means him harm`;
+    const purse = world.material.accounts.find((account) => account.id === enemy.personalAccountId);
+    const spend = Math.max(0, Math.min(200, Math.round((purse?.balance ?? 0) * 0.1)));
+    const { cruelty, boldness } = enemy.mind.temperament;
+    if (cruelty >= 60 || boldness >= 60) {
+      decisions.push({
+        polityId: enemy.polityId!, actorCharacterId: enemy.id, act: "plot", targetPolityId: null, why: why.slice(0, 400),
+        deltas: [delta({
+          op: "covert_plot_open", localId: `vendetta_${enemy.id}`.slice(0, 60), kind: cruelty >= 60 ? "assassination" : "abduction",
+          targetCharacterRef: player.id, sponsorCharacterRef: enemy.id, agentCharacterRef: null,
+          fundingAccountRef: purse === undefined || spend === 0 ? null : purse.id, spend,
+          cover: cruelty >= 60 ? `Footpads, in a dark street.` : `Bandits on the road.`, expectedInDays: 45, reason: `${why}.`.slice(0, 240),
+        })],
+        facts: [],
+      });
+    } else {
+      // A whispering campaign: done, not laid -- the talk is in the Forum by the month's end.
+      decisions.push({
+        polityId: enemy.polityId!, actorCharacterId: enemy.id, act: "plot", targetPolityId: null, why: why.slice(0, 400),
+        deltas: [delta({ op: "character_state_set", characterRef: player.id, standingDeltaBps: -DEFAMED_BPS, standingCause: "scandal", reason: `${enemy.name} has his name blackened.`.slice(0, 240) })],
+        facts: [
+          FactProposalSchema.parse({
+            localId: `defamed_${player.id}_${month}`.slice(0, 60), kind: "scandal",
+            summary: `Ugly stories about ${player.name} are going round, and people are repeating them.`.slice(0, 400),
+            affectedRefs: [{ kind: "character", id: player.id }], visibility: "public", discoveryState: "public", knowableInDays: 0, significance: 40,
+          }),
+          FactProposalSchema.parse({
+            localId: `defamer_${enemy.id}_${month}`.slice(0, 60), kind: "defamation",
+            summary: `${enemy.name} has put the stories about ${player.name} about.`.slice(0, 400),
+            affectedRefs: [{ kind: "character", id: enemy.id }, { kind: "character", id: player.id }], visibility: "private", discoveryState: "private", knowableInDays: 0, significance: 30,
+            knownToRefs: [{ kind: "character", id: enemy.id }],
+          }),
+        ],
+      });
+    }
+    plotting.add(enemy.id);
   }
   return decisions;
 }
