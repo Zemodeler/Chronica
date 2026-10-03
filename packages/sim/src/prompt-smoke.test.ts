@@ -162,7 +162,11 @@ describe("orchestrator prompt", () => {
     // requisitioned or sent by convoy, and a siege's "works"; the fight that
     // goes on until one side is beaten, "hold" and "manoeuvre" folded into
     // principle 10.
-    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(69_500);
+    // Raised 69.5k -> 79k (2026-10-03): already 75.8k from the living-world build
+    // (febddc8), then the play-test fixes' generated schema: force_post_set, a
+    // request's ask, public_benefaction, a soldier's conduct, a vote's budget
+    // holder, franchise, land and debt laws, the submission clause, a loan offer.
+    expect(ORCHESTRATOR_SYSTEM_PROMPT.length).toBeLessThan(79_000);
   });
 });
 

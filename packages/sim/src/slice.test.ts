@@ -138,7 +138,10 @@ describe("what the player's government can see of the world", () => {
     // standing toward Massalia, Egypt and the Boii, and the Insubres and
     // Massalia among the powers it can see. Far powers' aims and treaties
     // were taken out again (`powersDealtWith`): the world AI pursues them.
-    expect(text.length).toBeLessThan(19_500);
+    // Moved 19.5k -> 20k (2026-10-03): the play-test fixes -- every power named
+    // with its id, the actor's standing and the gates ahead, a proconsul's
+    // powers, and orders already answered kept apart from those awaiting one.
+    expect(text.length).toBeLessThan(20_000);
   });
 });
 

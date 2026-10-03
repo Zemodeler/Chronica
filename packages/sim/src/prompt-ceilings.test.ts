@@ -25,7 +25,8 @@ describe("the system prompts stay the size they are", () => {
     // orchestrator's: a field added to `deltas.ts` grows both. The margin is
     // a little wider than the orchestrator's for that reason, so a change
     // that pays its way there is not refused here.
-    expect(COGNITION_SYSTEM_PROMPT.length).toBeLessThan(63_000);
+    // Raised 63k -> 73k (2026-10-03), for the same schema as the orchestrator's.
+    expect(COGNITION_SYSTEM_PROMPT.length).toBeLessThan(73_000);
   });
 
   it("the historian, the repairer and the reconciler: prose only", () => {
