@@ -217,7 +217,13 @@ export function honourTheSitting(world: WorldState, scenarioOffices: readonly Of
       continue;
     }
     counted.set(seat.id, since + months * OFFICE_MONTH_DAYS);
-    next = credit(next, facts, seat.holderCharacterId, months * OFFICE_MONTH_BPS, "office", playerId,
+    // Less the higher he already stands, past 4,000: a month as consul is the making of a
+    // new man and nothing to a Fabius. A flat hundred a month walked every
+    // magistrate of a long game up to the ceiling (Curius, 9,500 to 10,000 in a year).
+    const holder = next.characters.find((character) => character.id === seat.holderCharacterId);
+    const monthly = Math.round(OFFICE_MONTH_BPS * Math.min(1, Math.max(0, 10_000 - (holder?.prestigeBps ?? 10_000)) / 6_000));
+    if (monthly <= 0) continue;
+    next = credit(next, facts, seat.holderCharacterId, months * Math.min(OFFICE_MONTH_BPS, monthly), "office", playerId,
       (person) => `${months === 1 ? "A month" : `${months} months`} as ${office.label} add${months === 1 ? "s" : ""} to ${person.name}'s name.`,
       localIdOf("standing_office", seat.id, toDay), 10);
   }

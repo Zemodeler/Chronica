@@ -199,6 +199,18 @@ describe("L2: standing is earned by deeds, the same way every time", () => {
     expect(me(honourTheSitting(again.world, offices, 120, PLAYER).world).prestigeBps).toBe(2_000 + 4 * OFFICE_MONTH_BPS);
   });
 
+  it("adds less for a month in office the higher a man already stands, and nothing at the top", () => {
+    const at = (bps: number): WorldState => {
+      const world = seatCharacterInOffice(legionary(), PLAYER, { office: offices.find((office) => office.id === "roman-quaestor")!, vacantSeatId: null }, 0, 365);
+      return { ...world, characters: world.characters.map((character) => (character.id === PLAYER ? { ...character, prestigeBps: bps } : character)) };
+    };
+    // Full measure up to 4,000; half at 7,000; none at 10,000. A flat hundred
+    // walked every magistrate of a long game up to the ceiling.
+    expect(me(honourTheSitting(at(4_000), offices, 35, PLAYER).world).prestigeBps).toBe(4_000 + OFFICE_MONTH_BPS);
+    expect(me(honourTheSitting(at(7_000), offices, 35, PLAYER).world).prestigeBps).toBe(7_000 + OFFICE_MONTH_BPS / 2);
+    expect(me(honourTheSitting(at(10_000), offices, 35, PLAYER).world).prestigeBps).toBe(10_000);
+  });
+
   it("credits a speech on the side that carried, by how well he speaks, and costs one on a side routed", () => {
     const world = legionary();
     const question = { id: "procedure-q", label: "Send the legions to Sicily" } as PoliticalProcedure;
