@@ -970,8 +970,14 @@ const EMPTY: CognitionOutput = { actors: [] };
  * This buys wall time, not tokens: the same portraits go out and the same
  * proposals come back. The only duplication is a second copy of the system
  * prompt, which is the one part of the request that is cached.
+ *
+ * Nine, not six (L17): the split was tuned for a provider that answered in
+ * seconds and ran calls side by side for free. In hand mode every call is a
+ * minute or two and counts against the burst's call cap, and a round of ten
+ * dealt onto three calls spent three of a month's eighteen. A cast of eight
+ * is one call.
  */
-const BATCH_SPLIT_THRESHOLD = 6;
+const BATCH_SPLIT_THRESHOLD = 9;
 
 /**
  * Roughly how many people one call should answer for once the cast is split.
@@ -979,12 +985,13 @@ const BATCH_SPLIT_THRESHOLD = 6;
  * A round costs the slowest of its calls, so the shorter each one's answer the
  * sooner the round is done. Not smaller than this, though: every call repeats
  * the whole cast's context, and past a point the fixed cost of another request
- * outweighs the shorter answer it produces.
+ * outweighs the shorter answer it produces. Seven, under the twelve a single
+ * answer may hold (`CognitionOutputSchema`).
  */
-const ACTORS_PER_CALL = 4;
+const ACTORS_PER_CALL = 7;
 
-/** Not wider than the database pool is prepared to hold coin holds open. */
-const MAX_BATCHES = 3;
+/** Not wider than the database pool is prepared to hold coin holds open, and two since a round is worth calls, not seconds (L17). */
+const MAX_BATCHES = 2;
 
 /** How a cast is dealt onto calls. The defaults are the measured guess; `CHRONICA_COGNITION_SHARDS` overrides them to measure another. */
 export interface CognitionSharding {

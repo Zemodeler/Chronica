@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { firstPunicWarScenario } from "@chronica/db";
 import { ScenarioDefinitionSchema, WorldStateSchema, emitFacts, type Fact, type FactDraft, type Office, type WorldState } from "@chronica/shared";
-import { routeAmbientActors, routeAttention } from "./attention";
+import { hasSomethingNew, playersPeopleFirst, routeAmbientActors, routeAttention } from "./attention";
 
 const offices: readonly Office[] = ScenarioDefinitionSchema.parse(firstPunicWarScenario.definition).government.offices;
 const world = (): WorldState => WorldStateSchema.parse(structuredClone(firstPunicWarScenario.initialWorld));
@@ -140,7 +140,7 @@ describe("why an actor is woken", () => {
   it("selects the same actors for the same world, every time", () => {
     // A replay that woke different people would make every other guarantee
     // meaningless.
-    const facts = [fact()];
+    const facts = [fact({ affectedEntities: [{ kind: "polity", id: "rome" }, { kind: "polity", id: "carthage" }, { kind: "polity", id: "syracuse" }] })];
     const first = route(facts).focused.map((actor) => actor.characterId);
     const second = route(facts).focused.map((actor) => actor.characterId);
     expect(first).toEqual(second);
@@ -197,5 +197,35 @@ describe("who is pressing", () => {
     expect(rotation.every((actor) => !actor.pressing)).toBe(true);
     const handed = routeAmbientActors({ world: state, facts: [], offices, excludeCharacterIds: ["marcus-atilius"], max: 2, priorityCharacterIds: ["marcus-atilius-minor"] });
     expect(handed.find((actor) => actor.characterId === "marcus-atilius-minor")?.pressing).toBe(true);
+  });
+});
+
+describe("who is asked, and in what order, when calls are dear (L17)", () => {
+  it("takes the people the player is waiting on before anybody else the news woke", () => {
+    const facts = [fact({ affectedEntities: [{ kind: "polity", id: "rome" }, { kind: "polity", id: "carthage" }, { kind: "polity", id: "syracuse" }] })];
+    const unordered = routeAttention({ world: world(), facts, offices, excludeCharacterIds: [], maxFocused: 1, maxCausalDepth: 3 });
+    const all = routeAttention({ world: world(), facts, offices, excludeCharacterIds: [], maxFocused: 10, maxCausalDepth: 3 });
+    expect(all.focused.length).toBeGreaterThanOrEqual(2);
+    const last = all.focused.at(-1)!;
+    expect(unordered.focused[0]!.characterId).not.toBe(last.characterId);
+    const ordered = routeAttention({ world: world(), facts, offices, excludeCharacterIds: [], maxFocused: 1, maxCausalDepth: 3, firstCharacterIds: new Set([last.characterId]) });
+    expect(ordered.focused.map((actor) => actor.characterId)).toEqual([last.characterId]);
+    expect(playersPeopleFirst(all.focused, new Set([last.characterId]))[0]!.characterId).toBe(last.characterId);
+  });
+
+  it("asks nobody again who has nothing new to answer", () => {
+    const seen = fact();
+    const news = fact({ summary: "Carthage answers." });
+    const ambient = { characterId: "hanno", impetus: "own_business" as const, knownFacts: [seen] };
+    // Never asked this burst: his first look.
+    expect(hasSomethingNew(ambient, undefined, new Map(), new Set())).toBe(true);
+    // Asked, and shown the same again: nothing new.
+    expect(hasSomethingNew(ambient, new Set([seen.id]), new Map(), new Set())).toBe(false);
+    // News since, a step of his plan, or an order to answer: something new.
+    expect(hasSomethingNew({ ...ambient, knownFacts: [seen, news] }, new Set([seen.id]), new Map(), new Set())).toBe(true);
+    expect(hasSomethingNew(ambient, new Set([seen.id]), new Map([["hanno", "a step of his plan is due"]]), new Set())).toBe(true);
+    expect(hasSomethingNew(ambient, new Set([seen.id]), new Map(), new Set(["hanno"]))).toBe(true);
+    // A reactor was woken by news he had not been shown.
+    expect(hasSomethingNew({ ...ambient, impetus: "reaction" }, new Set([seen.id]), new Map(), new Set())).toBe(true);
   });
 });

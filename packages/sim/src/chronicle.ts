@@ -207,6 +207,15 @@ const NEAR_NEWS_DAYS = 6;
 const FAR_NEWS_DAYS = 14;
 const FAR_NEWS_WEIGHT = 70;
 
+/** Passages of far news one window may write, a lone matter or a gathering of them (L16). */
+export const FAR_THREADS_PER_WINDOW = 1;
+/** And a whole burst. */
+export const FAR_THREADS_PER_BURST = 3;
+/** How many far matters one gathering holds. */
+const FAR_DIGEST_THREADS = 3;
+/** What a gathering of far news is headed: the engine's title, not the historian's. */
+export const ELSEWHERE_TITLE = "Elsewhere in the world";
+
 /**
  * Bookkeeping the historian must never see, whoever it happened to.
  *
@@ -501,7 +510,12 @@ export interface ChronicleInput {
    * side by side (C07). Called once, whatever is chosen, and before the
    * historian is asked anything.
    */
-  readonly onSelected?: ((selection: { readonly carried: readonly Fact[]; readonly subjects: readonly (readonly string[])[] }) => void) | undefined;
+  readonly onSelected?: ((selection: { readonly carried: readonly Fact[]; readonly subjects: readonly (readonly string[])[]; readonly farTold: number }) => void) | undefined;
+  /**
+   * How many passages of far news this call may write (`farOff`): one a
+   * window, and none once the burst has told `FAR_THREADS_PER_BURST`.
+   */
+  readonly maxFarThreads?: number | undefined;
 }
 
 export interface ChronicleEntry {
@@ -560,8 +574,11 @@ interface Thread {
   readonly orderFacts: number;
   /** Who is who among the people in it, so two of them cannot become one. */
   readonly people: readonly string[];
-  /** Several small matters of the reader's own, gathered into one passage (`OWN_HEADLINE_FLOOR`). */
-  readonly digest: boolean;
+  /**
+   * Several matters gathered into one passage: the reader's own small ones
+   * (`OWN_HEADLINE_FLOOR`), or the far world's (`FAR_THREADS_PER_WINDOW`).
+   */
+  readonly digest: "own" | "elsewhere" | null;
   /** The part of an order it tells, when it tells one (`matterKeys`). Two parts are two passages. */
   readonly partKey: string | null;
   /** Where that part stands, read from the world: what the passage must say and not contradict. */
@@ -1108,8 +1125,11 @@ function renderThread(thread: Thread, index: number, said: readonly UtteranceLin
   // How to tell it, carried with the matter rather than added to the
   // historian's standing instructions: an order nobody obeyed is comedy, and
   // told in the register of a campaign it reads as one.
-  if (thread.digest) {
+  if (thread.digest === "own") {
     lines.push("Register: these are several small matters of the same days, gathered into one passage. Tell each in a sentence or two, in the order they happened; the headline names the chief of them.");
+  }
+  if (thread.digest === "elsewhere") {
+    lines.push("Register: word from far off, none of it the reader's business, gathered into one passage. A sentence or two each, as news that reached the court.");
   }
   if (thread.facts.some((fact) => fact.kind === "order_ignored")) {
     lines.push("Register: somebody gave orders to people who did not have to take them. Tell it with a straight face and a dry wit; the joke is in the facts.");
@@ -1135,7 +1155,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   };
   const selected = selectFacts(input.facts, input.observer, input.observerPolityId, input.ownEntityIds ?? null, input.to, weightOf, input.world, input.orderFactIds ?? new Set());
   if (selected.length === 0) {
-    input.onSelected?.({ carried: [...input.facts], subjects: [] });
+    input.onSelected?.({ carried: [...input.facts], subjects: [], farTold: 0 });
     return { entries: [], calls: 0, carried: [...input.facts] };
   }
 
@@ -1226,7 +1246,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
 
   /** Where a part of an order stands, as the engine says it (`order-outcomes.ts`). */
   const outcomeOf = (partKey: string | null): Thread["outcome"] => (partKey === null ? null : input.orderOutcome?.(partKey) ?? null);
-  const threadOf = (facts: readonly Fact[], digest = false): Thread => {
+  const threadOf = (facts: readonly Fact[], digest: Thread["digest"] = null): Thread => {
     const ids = new Set(facts.map((fact) => fact.id));
     const belongs = (line: { readonly factIds: readonly string[] }): boolean => line.factIds.some((factId) => ids.has(factId));
     return {
@@ -1304,7 +1324,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   const small = afterOrder.filter((thread) => thread !== answered && thread.ours && slight(thread) && thread.peak >= OWN_BUSINESS_FLOOR && thread.partKey === null);
   const built: Thread[] = small.length < 2
     ? afterOrder
-    : [...afterOrder.filter((thread) => !small.includes(thread)), threadOf(small.flatMap((thread) => thread.facts).sort(byTime), true)];
+    : [...afterOrder.filter((thread) => !small.includes(thread)), threadOf(small.flatMap((thread) => thread.facts).sort(byTime), "own")];
 
   /**
    * How far off a thread happened, in days by road from the nearest place the
@@ -1388,10 +1408,39 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
 
   const ours = built.filter((thread) => thread.ours).sort(byWeight);
   const home = built.filter((thread) => !thread.ours && thread.home && !thread.reported && thread.weight >= HOME_THRESHOLD && !echoing(thread)).sort(byWeight);
+  /**
+   * The wider world's matters that happened far off (L16): past
+   * `NEAR_NEWS_DAYS` by road from anywhere the reader hears things, and not
+   * his campaign. A flood of them -- every power's wars and levies, every
+   * month -- took the seen band's three places in every window and was carried
+   * forward when cut, so the Chronicle of a Roman consul read as a gazetteer of
+   * the Hellenistic East. Now a window tells one far matter, or gathers its
+   * three weightiest into one passage of news from elsewhere; a burst tells
+   * `FAR_THREADS_PER_BURST` such passages at most (`maxFarThreads`); and a
+   * far matter not told is let go, never carried. Nothing of the reader's own,
+   * or his country's, is ever far.
+   */
+  const farOff = (thread: Thread): boolean => {
+    if (thread.ours || thread.home) return false;
+    if (input.campaignIds !== undefined && thread.facts.some((fact) => fact.affectedEntities.some((entity) => input.campaignIds!.has(entity.id)))) return false;
+    const days = daysOff(thread);
+    return days !== null && days > NEAR_NEWS_DAYS;
+  };
   const seen = built.filter((thread) => !thread.ours && !thread.home && !thread.reported && thread.weight >= threshold && carriesThisFar(thread) && !echoing(thread)).sort(byWeight);
   const hearsay = built.filter((thread) => !thread.ours && thread.reported && thread.weight >= threshold && carriesThisFar(thread) && !echoing(thread)).sort(byWeight);
+  const far = [...seen, ...hearsay].filter(farOff).sort(byWeight);
+  const farRoom = Math.max(0, input.maxFarThreads ?? FAR_THREADS_PER_WINDOW);
+  const farTold = farRoom === 0 || far.length === 0 ? []
+    : far.length === 1 ? [far[0]!]
+      : [threadOf(far.slice(0, FAR_DIGEST_THREADS).flatMap((thread) => thread.facts).sort(byTime), "elsewhere")];
 
-  const banded = [...ours, ...home.slice(0, MAX_HOME_THREADS), ...seen.slice(0, MAX_SEEN_THREADS), ...hearsay.slice(0, MAX_REPORTED_THREADS)];
+  const banded = [
+    ...ours,
+    ...home.slice(0, MAX_HOME_THREADS),
+    ...seen.filter((thread) => !far.includes(thread)).slice(0, MAX_SEEN_THREADS),
+    ...hearsay.filter((thread) => !far.includes(thread)).slice(0, MAX_REPORTED_THREADS),
+    ...farTold,
+  ];
   // The answer to the order and any battle are never cut: the cap is for the
   // world's business, and neither of those is the world's. The rest fill what
   // room is left, by band and then by weight; the reader's own business among
@@ -1424,12 +1473,16 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   // better blank: the floor exists so a reader is not met with nothing when
   // something happened, not so they are met with the same thing twice.
   if (threads.length === 0 && (input.fallback ?? true)) {
-    const worthTelling = built.filter((thread) => !echoing(thread)).sort(byWeight);
+    const worthTelling = built.filter((thread) => !echoing(thread) && (farRoom > 0 || !farOff(thread))).sort(byWeight);
     if (worthTelling.length > 0) threads = [worthTelling[0]!];
   }
+  // A far matter not told now is let go: carried, it came back every window
+  // until it crowded out something nearer.
+  const farIds = new Set(built.filter(farOff).flatMap((thread) => thread.facts.map((fact) => fact.id)));
   if (threads.length === 0) {
-    input.onSelected?.({ carried: [...input.facts], subjects: [] });
-    return { entries: [], calls: 0, carried: [...input.facts] };
+    const kept = input.facts.filter((fact) => !farIds.has(fact.id));
+    input.onSelected?.({ carried: kept, subjects: [], farTold: 0 });
+    return { entries: [], calls: 0, carried: kept };
   }
   // In the order the reader could have come to know them, never in the order
   // of weight: the record reads forward in time, and a fact that reached the
@@ -1441,8 +1494,12 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
   const firstKnowable = (thread: Thread): number => Math.min(...thread.facts.map(knowableKey));
   threads.sort((a, b) => firstKnowable(a) - firstKnowable(b) || a.facts[0]!.id.localeCompare(b.facts[0]!.id));
   const toldIds = new Set(threads.flatMap((thread) => thread.facts.map((fact) => fact.id)));
-  const carried = input.facts.filter((fact) => !toldIds.has(fact.id));
-  input.onSelected?.({ carried, subjects: threads.map((thread) => [...new Set(thread.facts.flatMap((fact) => fact.affectedEntities.map(keyOf)))]) });
+  const carried = input.facts.filter((fact) => !toldIds.has(fact.id) && !farIds.has(fact.id));
+  input.onSelected?.({
+    carried,
+    subjects: threads.map((thread) => [...new Set(thread.facts.flatMap((fact) => fact.affectedEntities.map(keyOf)))]),
+    farTold: threads.filter((thread) => thread.digest === "elsewhere" || far.includes(thread)).length,
+  });
 
   const period = `${formatWorldDate(input.from, input.clock)} – ${formatWorldDate(input.to, input.clock)}`;
   const alreadySaid = (input.recentTitles ?? []).slice(0, 16);
@@ -1510,7 +1567,7 @@ export async function composeChronicle(input: ChronicleInput): Promise<Chronicle
     const subjects = subjectsOf(thread.facts);
     return {
       kind: "narrated",
-      title,
+      title: thread.digest === "elsewhere" ? ELSEWHERE_TITLE : title,
       body,
       factIds: thread.facts.map((fact) => fact.id),
       subjects,
