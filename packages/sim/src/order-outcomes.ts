@@ -1,5 +1,5 @@
 import { spentForOrderPart } from "@chronica/shared";
-import { orderPartLabel, orderPartStatus, type OrderPart, type WorldState } from "@chronica/shared";
+import { orderPartLabel, orderPartStatus, procedureReasonOf, type OrderPart, type WorldState } from "@chronica/shared";
 import type { ChronicleEntry } from "./chronicle";
 
 /**
@@ -33,7 +33,7 @@ export function lineOf(world: WorldState, part: OrderPart, actorId: string): str
   const how = status === "under_way" && work !== undefined
     ? `: ${work.label}${next === undefined ? "" : `, next ${lowerFirst(next.label)}`}`
     : "";
-  const why = part.refusal ?? part.whyNot;
+  const why = part.refusal ?? part.whyNot ?? procedureReasonOf(world, part);
   const reason = why === null || status === "achieved" || status === "under_way" ? "" : `: ${sentencesWithin(why.replace(/\s+/g, " "), 320)}`;
   // Secret work says what it cost and whose money it was, to the man who paid.
   const plotRef = part.workRefs.find((ref) => ref.kind === "plot");

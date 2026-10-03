@@ -5,6 +5,8 @@ import { allOffices, type Office, type ScenarioGovernmentRules } from "./charact
 import { familyLinksOf, reciprocalFamilyLinkKind, type FamilyLinkKind } from "./family";
 import { computeOpinion } from "./opinion";
 import { skillsInWords, standingInWords, traitsInWords } from "./skills-in-words";
+import { standingFigure, standingGates } from "./standing";
+import { formatStanding } from "./standing-causes";
 import type { WorldState } from "../world/world-state";
 import { formatWorldDate, type ScenarioClock } from "../world/clock";
 
@@ -61,9 +63,27 @@ export interface MirrorReading {
   readonly moneyChanges: readonly MirrorMoneyChange[];
   readonly authority: readonly string[];
   readonly traits: readonly string[];
+  /** His standing in words, on the bands the ladder's gates break at. */
   readonly standing: string;
+  /** And as the number every gate is written in, "2,190 of 10,000": his own name is his business to see. */
+  readonly standingFigure: string;
+  readonly standingBps: number;
+  /**
+   * Every office of his power that asks a standing, lowest first, with what it
+   * asks and how far short he is: the next rung, always in sight.
+   */
+  readonly gates: readonly MirrorGate[];
   readonly skills: readonly string[];
   readonly relations: readonly MirrorRelation[];
+}
+
+export interface MirrorGate {
+  readonly office: string;
+  /** "3,000". */
+  readonly needed: string;
+  readonly met: boolean;
+  /** "810 short", or null once met. */
+  readonly short: string | null;
 }
 
 /** What the declaration said of someone, used only for its words: the world decides who is on the list. */
@@ -238,6 +258,14 @@ export function readTheMirror(input: MirrorInput): MirrorReading | null {
     authority: deriveAuthoritySummary(world, characterId, input.government),
     traits: traitsInWords(me.traits),
     standing: standingInWords(me.prestigeBps),
+    standingFigure: standingFigure(me.prestigeBps),
+    standingBps: me.prestigeBps,
+    gates: standingGates(world, offices, me).map((gate) => ({
+      office: gate.label,
+      needed: formatStanding(gate.neededBps),
+      met: gate.met,
+      short: gate.met ? null : `${formatStanding(gate.neededBps - me.prestigeBps)} short`,
+    })),
     skills: skillsInWords(me.skills),
     relations: [...family, ...others],
   };

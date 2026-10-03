@@ -523,6 +523,8 @@ export const EligibilityRequirementKindSchema = z.enum([
   "custom_scenario_flag",
   /** `params.years`: at least this old. */
   "min_age",
+  /** `params.years`: no older than this -- the military tribunes were young men, not consulars. */
+  "max_age",
   /** `params.officeId`: has held that office, now or before -- the rung below. */
   "held_office",
   /** `params.officeId`, `params.years`: has not held that office within so many years. */
@@ -669,6 +671,12 @@ export const OfficeSeatSchema = z
      * after, it went two months without any in the middle of a war.
      */
     designateCharacterId: EntityIdSchema.nullable().optional(),
+    /**
+     * The day through which its holder has been credited the standing a
+     * month in office earns (`sim/standing-deeds.ts`). A magistrate's year
+     * added nothing to his name but the day he was elected.
+     */
+    honouredThroughStep: ElapsedStepSchema.optional(),
   })
   .strict()
   .superRefine((seat, context) => {

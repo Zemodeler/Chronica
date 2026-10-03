@@ -349,6 +349,17 @@ export const CharacterSchema = z
      * who has never served in an army that keeps one.
      */
     service: ServiceRecordSchema.optional(),
+    /**
+     * Games, feasts, doles and buildings given in his name (`sim/apply/benefaction.ts`):
+     * what each cost, and whether the treasury paid. Kept so a second feast in
+     * a year is worth less than the first, and an aedile's allowance is counted.
+     */
+    benefactions: z.array(z.object({
+      atStep: ElapsedStepSchema,
+      kind: z.enum(["games", "feast", "dole", "building"]),
+      amount: z.number().nonnegative(),
+      fromTreasury: z.boolean(),
+    }).strict()).max(12).optional(),
   })
   .strict()
   .superRefine((character, context) => {

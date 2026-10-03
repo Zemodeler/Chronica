@@ -79,12 +79,20 @@ export function skillsInWords(skills: CharacterSkills, howMany = 3): string[] {
  * Reputation is by definition what other people hold, so this is the one
  * number on the panel that is honestly the player's business to see the shape
  * of -- and it is still shown as a standing rather than a score.
+ *
+ * The bands break where the ladder's gates do (3,000 for a quaestor or a
+ * military tribune, 4,000 an aedile, 5,000 a praetor, 6,000 a consul, 7,500 a
+ * censor), so crossing a gate changes the words: "of no particular standing"
+ * covered 2,000 to 3,999, and a man who had just become eligible for the
+ * quaestorship read exactly as he had the day before.
  */
 export function standingInWords(prestigeBps: number): string {
-  if (prestigeBps >= 8_000) return "a name spoken well beyond his own city";
+  if (prestigeBps >= 7_500) return "a name spoken well beyond his own city";
   if (prestigeBps >= 6_000) return "a man of consequence";
+  if (prestigeBps >= 5_000) return "a man of note in his city";
   if (prestigeBps >= 4_000) return "known and respected in his own circle";
-  if (prestigeBps >= 2_000) return "of no particular standing";
+  if (prestigeBps >= 3_000) return "a name that is beginning to be known";
+  if (prestigeBps >= 1_500) return "of no particular standing";
   return "a person of no account at all";
 }
 

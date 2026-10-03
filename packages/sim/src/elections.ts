@@ -1,15 +1,20 @@
 import {
+  admissionRefusal,
   allOffices,
   allSuccessionRules,
   boundedId,
+  candidacyOffice,
+  candidateOf,
+  candidateScore,
   createPressure,
-  labelNamesOffice,
+  officeNamedIn,
   ELECTABLE_MIN_PRESTIGE_BPS,
   isBeneath,
   isMagistracy,
   isEligibleFor,
   officeRequirements,
   seatCharacterInOffice,
+  shiftStanding,
   vacateMagistraciesOf,
   type Character,
   type FactProposalDraft,
@@ -20,7 +25,9 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import { newsReach, powersNearThePlayer } from "./far-powers";
+import { remember } from "./grievances";
 import type { IdFactory } from "./ports";
+import { honourTheSitting } from "./standing-deeds";
 
 /**
  * Magistracies that fall vacant, and the elections that fill them.
@@ -69,6 +76,9 @@ export const ELECTED_TERM_DAYS = 365;
 const SERVED_BELOW_BPS = 600;
 /** What winning an election adds to a man's standing. */
 const ELECTION_STANDING_BPS = 500;
+/** What losing one costs him, and what coming last of three or more does. */
+const ELECTION_LOST_BPS = -100;
+const ELECTION_LAST_BPS = -300;
 /** How many of the likeliest candidates are told the seat is theirs to seek. */
 const MAX_CANDIDATES_TOLD = 3;
 
@@ -94,29 +104,29 @@ export interface HoldElectionsResult {
 const OPEN_STAGES = new Set<PoliticalProcedure["stage"]>(["proposed", "gathering_support", "deliberating", "voting_or_deciding"]);
 const isOpen = (procedure: PoliticalProcedure): boolean => OPEN_STAGES.has(procedure.stage);
 
-/** The election itself: a question about one of the office's seats, or one naming the office outright. */
-function isElectionFor(procedure: PoliticalProcedure, office: Office, seatIds: ReadonlySet<string>): boolean {
+/**
+ * The election itself: a question about one of the office's seats, or one
+ * naming the office outright -- the most particular office it names, so the
+ * plebeian aediles' election is not taken for the curule pair's as well.
+ */
+function isElectionFor(procedure: PoliticalProcedure, office: Office, seatIds: ReadonlySet<string>, electiveOffices: readonly Office[]): boolean {
   if (procedure.subjectKind !== "office_seat" || procedure.type === "nomination") return false;
-  return procedure.subjectId === null ? labelNamesOffice(procedure.label, office.label) : seatIds.has(procedure.subjectId);
+  return procedure.subjectId === null ? officeNamedIn(procedure.label, electiveOffices)?.id === office.id : seatIds.has(procedure.subjectId);
 }
 
 /**
- * The man a candidacy puts forward: the person it names, or -- for "Gaius
- * stands for consul", written as a question about the office -- whoever moved
- * it. Written that way, the player's own candidacy matched nothing, stood open
- * for ever, and the election was held without him.
+ * A man standing: a nomination or appointment of a person, in words that name
+ * the office (`candidacyOffice`). Written as a question about the office --
+ * "Gaius stands for consul" -- the man is whoever moved it (`candidateOf`);
+ * written that way the player's own candidacy once matched nothing, stood
+ * open for ever, and the election was held without him.
  */
-function candidateOf(procedure: PoliticalProcedure): string | null {
-  return procedure.subjectKind === "character" ? procedure.subjectId : procedure.sponsorCharacterId;
+function isCandidacyFor(procedure: PoliticalProcedure, office: Office, electiveOffices: readonly Office[]): boolean {
+  return candidacyOffice(procedure, electiveOffices)?.id === office.id;
 }
 
-/** A man standing: a nomination or appointment of a person, in words that name the office. */
-function isCandidacyFor(procedure: PoliticalProcedure, office: Office): boolean {
-  if (procedure.type !== "nomination" && procedure.type !== "appointment") return false;
-  if (!labelNamesOffice(procedure.label, office.label)) return false;
-  if (procedure.subjectKind === "character") return procedure.subjectId !== null;
-  return procedure.subjectKind === "office_seat" && procedure.type === "nomination";
-}
+const ordinal = (n: number): string => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : (["th", "st", "nd", "rd"][n % 10] ?? "th")}`;
+const placed = (place: number, of: number): string => `placed ${ordinal(place)} of ${of}`;
 
 /** Net declared influence on a question: for, less against, counting only each supporter's latest word. */
 function netSupport(world: WorldState, procedureId: string): number {
@@ -153,6 +163,7 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
   const rulesById = new Map(allSuccessionRules(input.world, input.government.successionRules).map((rule) => [rule.id, rule]));
   const offices = allOffices(input.world, input.government.offices);
   const officesById = new Map(offices.map((office) => [office.id, office]));
+  const electiveOffices = offices.filter((office) => rulesById.get(office.successionRuleId)?.kind === "elective");
   let world = input.world;
   let localId = 0;
   const nextLocalId = (): string => `election_${(localId += 1)}`;
@@ -215,7 +226,7 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
     };
     // A college's election falls due a term after the last one was called --
     // the first a term after the opening.
-    const lastCalled = Math.max(-Infinity, ...world.material.politicalProcedures.filter((procedure) => isElectionFor(procedure, office, seatIds)).map((procedure) => procedure.openedAtStep));
+    const lastCalled = Math.max(-Infinity, ...world.material.politicalProcedures.filter((procedure) => isElectionFor(procedure, office, seatIds, electiveOffices)).map((procedure) => procedure.openedAtStep));
     const cycle = office.cycleDays ?? termDays ?? 0;
     const collegeDueDay = college ? (Number.isFinite(lastCalled) ? lastCalled + cycle : cycle) : null;
     const vacant = (): Place[] => (collegeDueDay !== null && input.toDay < collegeDueDay ? [] : openPlaces());
@@ -230,7 +241,7 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
     const electable = (): Character[] =>
       world.characters
         .filter((character) => character.id !== player && character.prestigeBps >= minStanding && !beneath(character) && eligible(character))
-        .sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id));
+        .sort((a, b) => candidateScore(office, b, input.toDay) - candidateScore(office, a, input.toDay) || a.id.localeCompare(b.id));
 
     /**
      * Custom, where it was not law: the voters preferred a man who had served
@@ -289,10 +300,10 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
     }
 
     // ── 3. An election whose day has come is decided. ──────────────────────
-    for (const election of world.material.politicalProcedures.filter((procedure) => isOpen(procedure) && isElectionFor(procedure, office, seatIds))) {
+    for (const election of world.material.politicalProcedures.filter((procedure) => isOpen(procedure) && isElectionFor(procedure, office, seatIds, electiveOffices))) {
       const pollingDay = election.deadlineStep ?? election.openedAtStep + ELECTION_POLLING_DAYS;
       if (pollingDay > input.toDay) continue;
-      const candidacies = world.material.politicalProcedures.filter((procedure) => isOpen(procedure) && isCandidacyFor(procedure, office));
+      const candidacies = world.material.politicalProcedures.filter((procedure) => isOpen(procedure) && isCandidacyFor(procedure, office, electiveOffices));
       // Every place open on polling day, whether or not the next term's is due yet.
       const places = openPlaces();
 
@@ -304,32 +315,74 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
       // Who stood: whoever called it, and whoever was put forward. If that is
       // fewer men than there are seats, the Senate finds the rest itself.
       const standing = new Map<string, number>();
-      const stand = (characterId: string, net: number) => {
+      // A man put forward whom the presiding magistrate would not take, and
+      // why. He used to be dropped without a word: missing from the count,
+      // missing from the beaten, and never told he had not been on the ballot.
+      const refused = new Map<string, string>();
+      const stand = (characterId: string, net: number, declared: boolean) => {
         const character = world.characters.find((candidate) => candidate.id === characterId);
-        if (character === undefined || !eligible(character)) return;
-        standing.set(characterId, Math.max(standing.get(characterId) ?? Number.NEGATIVE_INFINITY, character.prestigeBps + served(character) + net));
+        if (character === undefined) return;
+        const refusal = admissionRefusal(world, office, requirementIds, character, input.toDay);
+        if (refusal !== null) {
+          if (declared && !standing.has(characterId)) refused.set(characterId, refusal);
+          return;
+        }
+        refused.delete(characterId);
+        standing.set(characterId, Math.max(standing.get(characterId) ?? Number.NEGATIVE_INFINITY, candidateScore(office, character, input.toDay) + served(character) + net));
       };
       // Whoever called it stands -- unless it is beneath him, when he was only
       // presiding: a former consul calling the quaestors' election is not a
       // candidate for quaestor. A man who puts himself forward still is.
       const caller = world.characters.find((character) => character.id === election.sponsorCharacterId);
-      if (caller !== undefined && !beneath(caller)) stand(caller.id, netSupport(world, election.id));
-      for (const candidacy of candidacies) { const candidate = candidateOf(candidacy); if (candidate !== null) stand(candidate, netSupport(world, candidacy.id)); }
+      if (caller !== undefined && !beneath(caller)) stand(caller.id, netSupport(world, election.id), false);
+      for (const candidacy of candidacies) { const candidate = candidateOf(candidacy); if (candidate !== null) stand(candidate, netSupport(world, candidacy.id), true); }
       for (const character of electable()) {
         if (standing.size >= places.length) break;
-        if (!standing.has(character.id)) standing.set(character.id, character.prestigeBps + served(character));
+        if (!standing.has(character.id)) standing.set(character.id, candidateScore(office, character, input.toDay) + served(character));
+      }
+      const nameOf = (id: string): string => world.characters.find((character) => character.id === id)?.name ?? id;
+      for (const [id, refusal] of refused) {
+        facts.push({
+          localId: nextLocalId(),
+          kind: "candidacy_refused",
+          summary: `The presiding magistrate refused ${nameOf(id)}'s name for ${office.label}: ${refusal}`.slice(0, 600),
+          affectedRefs: [{ kind: "character", id }, { kind: "polity", id: office.polityId }],
+          knownToRefs: [{ kind: "character", id }],
+          visibility: "public",
+          discoveryState: "public",
+          knowableInDays: 0,
+          significance: id === player ? 45 : 20,
+        });
       }
 
       const ranked = [...standing.entries()].sort(([a, scoreA], [b, scoreB]) => scoreB - scoreA || a.localeCompare(b));
       const winners = withReservedPlaces(ranked.slice(0, places.length).map(([id]) => id), ranked.map(([id]) => id));
+      // What each man who stood is told of his own candidacy: elected, beaten
+      // and where he came, or not admitted and why. Every candidacy used to
+      // carry the one verdict, and a man refused read "elected X over Y".
+      const placeOf = (id: string): number => ranked.findIndex(([candidate]) => candidate === id) + 1;
+      const reasonFor = (candidacy: PoliticalProcedure, verdict: string): string => {
+        const id = candidateOf(candidacy);
+        if (id === null) return verdict;
+        if (winners.includes(id)) return `Elected: ${placed(placeOf(id), ranked.length)}. ${verdict}`;
+        const refusal = refused.get(id);
+        if (refusal !== undefined) return `Not admitted: ${refusal}`;
+        if (!standing.has(id)) return `Not admitted. ${verdict}`;
+        const kept = placeOf(id) <= places.length ? ", and the law kept a place for a man of the other order" : "";
+        return `Beaten: ${placed(placeOf(id), ranked.length)}${kept}. ${verdict}`;
+      };
+      const settleCandidacies = (verdict: string): PoliticalProcedure[] =>
+        candidacies.map((candidacy) => settle(candidacy, winners.includes(candidateOf(candidacy) ?? "") ? "passed" : "failed", reasonFor(candidacy, verdict), input.toDay));
       // Rome did not go without a praetor because nobody the world names stood:
-      // the places went to men of no note, as most of them always did.
+      // the places went to men of no note, as most of them always did. The
+      // election is carried; a man refused his name is not, though every
+      // candidacy used to be settled as passed with it.
       if (winners.length === 0 && college) {
-        world = replaceProcedures(world, [election, ...candidacies].map((procedure) => settle(procedure, "passed", `The places as ${office.label} went to men of no particular note.`, input.toDay)));
+        world = replaceProcedures(world, [settle(election, "passed", `The places as ${office.label} went to men of no particular note.`, input.toDay), ...settleCandidacies(`The places as ${office.label} went to men of no particular note.`)]);
         continue;
       }
       if (winners.length === 0) {
-        world = replaceProcedures(world, [election, ...candidacies].map((procedure) => settle(procedure, "failed", `Nobody eligible stood for ${office.label}.`, input.toDay)));
+        world = replaceProcedures(world, [settle(election, "failed", `Nobody eligible stood for ${office.label}.`, input.toDay), ...settleCandidacies(`Nobody eligible stood for ${office.label}.`)]);
         facts.push({
           localId: nextLocalId(),
           kind: "election_failed",
@@ -350,8 +403,8 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
         const ahead = places[index]!.seatId === null ? undefined : world.material.officeSeats.find((seat) => seat.id === places[index]!.seatId && seat.status === "held");
         if (ahead !== undefined) {
           designated.push(winnerId);
-          world = { ...world, material: { ...world.material, officeSeats: world.material.officeSeats.map((seat) => (seat.id === ahead.id ? { ...seat, designateCharacterId: winnerId } : seat)) },
-            characters: world.characters.map((character) => (character.id === winnerId ? { ...character, prestigeBps: Math.min(10_000, character.prestigeBps + ELECTION_STANDING_BPS) } : character)) };
+          world = shiftStanding({ ...world, material: { ...world.material, officeSeats: world.material.officeSeats.map((seat) => (seat.id === ahead.id ? { ...seat, designateCharacterId: winnerId } : seat)) } },
+            winnerId, ELECTION_STANDING_BPS, "office");
           return;
         }
         // Rising, he lays down the magistracy he held before: a man holds one.
@@ -360,23 +413,46 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
         world = seatCharacterInOffice(risen, winnerId, { office, vacantSeatId: places[index]!.seatId }, input.toDay, termDays);
         // Winning is standing. The Senate that elected him thinks more of him
         // for having done it, and it shows at the next count.
-        world = { ...world, characters: world.characters.map((character) => (character.id === winnerId
-          ? { ...character, prestigeBps: Math.min(10_000, character.prestigeBps + ELECTION_STANDING_BPS) }
-          : character)) };
+        world = shiftStanding(world, winnerId, ELECTION_STANDING_BPS, "office");
       });
       const heldBefore = new Set(winners.filter((id) => world.characters.find((character) => character.id === id)?.officesHeld?.some((held) => held.officeId === office.id) === true));
-      const names = winners.map((id) => world.characters.find((character) => character.id === id)?.name ?? id);
+      const names = winners.map(nameOf);
       const losers = [...standing.keys()].filter((id) => !winners.includes(id));
-      const loserNames = losers.map((id) => world.characters.find((character) => character.id === id)?.name ?? id);
+      const loserNames = losers.map(nameOf);
       const verdict = `The ${body} elected ${joinNames(names)}${losers.length > 0 ? `, over ${joinNames(loserNames)}` : ""}.`;
-      world = replaceProcedures(world, [
-        settle(election, "passed", verdict, input.toDay),
-        ...candidacies.map((candidacy) => settle(candidacy, winners.includes(candidateOf(candidacy) ?? "") ? "passed" : "failed", verdict, input.toDay)),
-      ]);
+      world = replaceProcedures(world, [settle(election, "passed", verdict, input.toDay), ...settleCandidacies(verdict)]);
+      // Beaten is a blow to a name, and last of three or more a worse one; and
+      // a beaten man remembers who took the place he stood for -- in a college,
+      // the last man in. The grudge a lost election leaves is where a rival
+      // is made (`grievances.ts`, as a trial's and a death's are).
+      const lastIn = winners[winners.length - 1]!;
+      for (const loser of losers) {
+        world = shiftStanding(world, loser, ranked.length >= 3 && placeOf(loser) === ranked.length ? ELECTION_LAST_BPS : ELECTION_LOST_BPS, "defeat");
+      }
+      world = remember(world, losers.map((loser) => ({
+        subjectCharacterId: loser, targetCharacterId: lastIn, label: `He took the place as ${office.label} I stood for.`,
+        score: -8, dimensions: { affection: -15, respect: -5 },
+      })), input.toDay, `${election.id}:beaten`);
+      // Each man who put himself forward hears his own result.
+      for (const candidacy of candidacies) {
+        const id = candidateOf(candidacy);
+        if (id === null || refused.has(id) || !standing.has(id)) continue;
+        facts.push({
+          localId: nextLocalId(),
+          kind: winners.includes(id) ? "candidacy_won" : "candidacy_lost",
+          summary: `${nameOf(id)} stood for ${office.label}: ${reasonFor(candidacy, "").trim()}`.slice(0, 600),
+          affectedRefs: [{ kind: "character", id }, { kind: "polity", id: office.polityId }],
+          knownToRefs: [{ kind: "character", id }],
+          visibility: "public",
+          discoveryState: "public",
+          knowableInDays: 0,
+          significance: id === player ? 50 : 15,
+        });
+      }
       facts.push({
         localId: nextLocalId(),
         kind: "election_held",
-        summary: `${verdict.slice(0, -1)}, ${winners.length > 1 ? `to hold the office of ${office.label}` : `to be ${office.label}`}${designated.length === 0 ? "" : designated.length === winners.length ? ", taking office when the present term runs out" : `; ${joinNames(designated.map((id) => world.characters.find((character) => character.id === id)?.name ?? id))} when the present term runs out`}.`,
+        summary: `${verdict.slice(0, -1)}, ${winners.length > 1 ? `to hold the office of ${office.label}` : `to be ${office.label}`}${designated.length === 0 ? "" : designated.length === winners.length ? ", taking office when the present term runs out" : `; ${joinNames(designated.map(nameOf))} when the present term runs out`}.`,
         // Winners first, then as many of the beaten as a fact can name: a
         // college of sixteen tribunes stood seventeen men, one over the cap,
         // and the election that should have filled it crashed the burst.
@@ -394,11 +470,21 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
       });
     }
 
+    // A man put forward while an election was open, which was then settled
+    // some other way -- the model resolved the vote -- was never counted, and
+    // his order read "waiting on a vote" until the next year's. He is told.
+    const passedOver = world.material.politicalProcedures.filter((candidacy) => isOpen(candidacy) && isCandidacyFor(candidacy, office, electiveOffices)
+      && world.material.politicalProcedures.some((election) => isElectionFor(election, office, seatIds, electiveOffices) && !isOpen(election)
+        && (election.resolvedAtStep ?? -1) >= candidacy.openedAtStep));
+    if (passedOver.length > 0) {
+      world = replaceProcedures(world, passedOver.map((candidacy) => settle(candidacy, "withdrawn", `The election of ${office.label} he stood in was settled without his name being counted; the next is called when a place falls due.`, input.toDay)));
+    }
+
     // ── 2. A vacant seat, and nobody yet calling the election. ─────────────
     const places = vacant();
     if (places.length === 0) continue;
-    const called = world.material.politicalProcedures.some((procedure) => isOpen(procedure) && (isElectionFor(procedure, office, seatIds) || isCandidacyFor(procedure, office)));
-    const electionOpen = world.material.politicalProcedures.some((procedure) => isOpen(procedure) && isElectionFor(procedure, office, seatIds));
+    const called = world.material.politicalProcedures.some((procedure) => isOpen(procedure) && (isElectionFor(procedure, office, seatIds, electiveOffices) || isCandidacyFor(procedure, office, electiveOffices)));
+    const electionOpen = world.material.politicalProcedures.some((procedure) => isOpen(procedure) && isElectionFor(procedure, office, seatIds, electiveOffices));
     if (electionOpen) continue;
 
     const vacatedAt = collegeDueDay ?? Math.min(...places.map((place) => seats().find((seat) => seat.id === place.seatId)?.termExpiresAtStep ?? input.toDay));
@@ -418,7 +504,7 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
     // name, without an election nobody stands in.
     if (college && !called && likeliest.length === 0) continue;
     if (called || canvassOver || likeliest.length === 0) {
-      const candidacy = world.material.politicalProcedures.find((procedure) => isOpen(procedure) && isCandidacyFor(procedure, office));
+      const candidacy = world.material.politicalProcedures.find((procedure) => isOpen(procedure) && isCandidacyFor(procedure, office, electiveOffices));
       const colleague = seats().find((seat) => seat.status === "held" && seat.holderCharacterId !== null)?.holderCharacterId ?? null;
       const anyEligible = world.characters.filter((character) => character.id !== player && !beneath(character) && eligible(character)).sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))[0];
       const sponsor = candidacy?.sponsorCharacterId ?? colleague ?? likeliest[0]?.id ?? anyEligible?.id ?? null;
@@ -488,6 +574,10 @@ export function holdElections(input: HoldElectionsInput): HoldElectionsResult {
   }
 
   world = enrolFormerMagistrates(world, offices, input.toDay, facts, nextLocalId);
+  // And every month a magistrate sits is a month of his name being made.
+  const sitting = honourTheSitting(world, input.government.offices, input.toDay, player);
+  world = sitting.world;
+  facts.push(...sitting.facts);
   // Ninety powers electing on one day is the calendar, not Rome's news: a far
   // power's elections are told to its own people (`far-powers.ts`).
   const near = facts.length === 0 ? null : powersNearThePlayer(world, player);

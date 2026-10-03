@@ -1646,7 +1646,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
   // And every other question before a chamber whose day has come is counted.
   const votes = input.government === undefined
     ? { world: elections.world, facts: [] as readonly FactProposalDraft[] }
-    : holdVotes({ world: elections.world, offices: input.government.offices, successionRules: input.government.successionRules, toDay: input.toDay, ids: input.ids });
+    : holdVotes({ world: elections.world, offices: input.government.offices, successionRules: input.government.successionRules, toDay: input.toDay, ids: input.ids, playerCharacterId: input.playerCharacterId ?? null });
 
   // What a year's end does to a commander's army: prorogued, kept until his
   // successor arrives, handed over -- and what he answers for, out of office.
