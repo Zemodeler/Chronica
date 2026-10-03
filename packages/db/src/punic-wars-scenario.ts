@@ -354,6 +354,11 @@ const definition: ScenarioDefinition = ScenarioDefinitionSchema.parse({
       // A quinquereme is a fighting ship and a transport at once, which is what
       // the whole war turned on: whoever held the sea decided who could cross.
       { id: "warship", label: "Warships", combatWeightBps: 9_000, steadinessBps: 6_000, mobilityBps: 8_000, naval: true, transportPerHead: 30 },
+      // And the hull that carries and does not fight: merchantmen and horse-
+      // transports the allied cities sent, four times the men of a quinquereme
+      // a load. Written as warships at thirty a hull, the eighteen at Rhegium
+      // could not put a consular army over the strait.
+      { id: "transport", label: "Transports", combatWeightBps: 1_500, steadinessBps: 3_000, mobilityBps: 6_000, naval: true, transportPerHead: 120 },
       // The arm both powers actually fought these wars with and the scenario
       // had no word for: Numidian and Gallic horse, worth more per head than a
       // foot soldier and far quicker, and worth much less standing still. An
@@ -1129,7 +1134,7 @@ const unformedWorld: WorldState = WorldStateSchema.parse(withFoundingPeople({
       { id: "campanian-legion", name: "Campanian legion of Rhegium", polityId: "rhegium-campanians", commanderCharacterId: "decius-vibellius", controllerCharacterId: "decius-vibellius", locationId: PUNIC_IDS.rhegium, authorizedStrength: 4_000, personnel: [{ categoryId: "infantry", label: "Campanian mercenaries", fit: 3_600, unavailable: [] }], moraleBps: 6_500, cohesionBps: 7_000, fatigueBps: 1_000, provisionStatus: "shortage", provisionedThroughStep: 120, payObligationId: null, payArrearsPeriods: 0, history: [] },
       { id: "carthaginian-fleet", name: "Carthaginian fleet", polityId: "carthage", commanderCharacterId: "hannibal-gisco", controllerCharacterId: "hannibal-gisco", locationId: PUNIC_IDS.lilybaeum, authorizedStrength: 120, personnel: [{ categoryId: "warship", label: "Quinqueremes", fit: 110, unavailable: [] }], moraleBps: 8_000, cohesionBps: 7_500, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "carthage-fleet-pay", payArrearsPeriods: 0, history: [] },
       { id: "syracusan-squadron", name: "Syracusan squadron", polityId: "syracuse", commanderCharacterId: "leptines-syracuse", controllerCharacterId: "leptines-syracuse", locationId: PUNIC_IDS.syracuse, authorizedStrength: 40, personnel: [{ categoryId: "warship", label: "Triremes", fit: 35, unavailable: [] }], moraleBps: 7_500, cohesionBps: 7_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "syracuse-squadron-pay", payArrearsPeriods: 0, history: [] },
-      { id: "allied-greek-hulls", name: "Allied Greek hulls", polityId: "rome", commanderCharacterId: "gaius-genucius", controllerCharacterId: "gaius-genucius", locationId: PUNIC_IDS.rhegium, authorizedStrength: 20, personnel: [{ categoryId: "warship", label: "Allied transports", fit: 18, unavailable: [] }], moraleBps: 6_500, cohesionBps: 6_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "rome-allied-hulls", payArrearsPeriods: 0, history: [] },
+      { id: "allied-greek-hulls", name: "Allied Greek hulls", polityId: "rome", commanderCharacterId: "gaius-genucius", controllerCharacterId: "gaius-genucius", locationId: PUNIC_IDS.rhegium, authorizedStrength: 20, personnel: [{ categoryId: "transport", label: "Allied transports", fit: 18, unavailable: [] }], moraleBps: 6_500, cohesionBps: 6_000, fatigueBps: 500, provisionStatus: "provisioned", provisionedThroughStep: 365, payObligationId: "rome-allied-hulls", payArrearsPeriods: 0, history: [] },
       // Carthage fought by nations (v42): Libyan subjects for the heavy foot,
       // Numidian horse, Balearic slingers, and hired Iberians and Gauls, each
       // under its own captains. It was "Infantry 3 000" before. The same men,

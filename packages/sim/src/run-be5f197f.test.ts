@@ -59,9 +59,9 @@ describe("the crossing to Messana", () => {
     const world = hullsAtRhegium(opening(), 300);
     const army = world.material.forces.find((force) => force.id === "roman-field-army")!;
     const plan = passagePlanFor(world, army, MESSANA, definition.warfare);
-    // The ships come to the legion -- they sail 85 km a day and it walks ten
-    // -- and the whole of it is over in well under the 47 days a march to
-    // Rhegium would take, counting the ships' own voyage to the shore.
+    // The ships come to the legion -- they sail 85 km a day and it walks
+    // about twenty -- and the whole of it is over sooner than the month a
+    // march to Rhegium would take, counting the ships' own voyage to the shore.
     expect(plan).not.toBeNull();
     expect(plan!.fleets.map((entry) => entry.fleet.id)).toContain("allied-greek-hulls");
     expect(plan!.gatherDays).toBeGreaterThanOrEqual(Math.ceil(plan!.fleets[0]!.sailKm / 85));

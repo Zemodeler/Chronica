@@ -686,3 +686,29 @@ describe("what a soldier costs", () => {
     expect(forConsul("gaius-genucius")).toContain("Our soldiers are paid 35/month for every 1,000 men.");
   });
 });
+
+describe("every power the slice names, named so it can be addressed (E23)", () => {
+  it("shows a power the order names among the powers, with the id a letter to it needs", () => {
+    // The play-test: a letter to Syracuse could not be addressed, because
+    // Syracuse's id was printed nowhere the model could read it.
+    const shown = slice(world(), "Send a letter to Hieron at Syracuse offering friendship");
+    expect(shown.foreignPowers[0]!.id).toBe("syracuse");
+    expect(renderWorldSlice(shown)).toContain("Syracuse [syracuse]");
+  });
+
+  it("names the holder of every place listed by its id", () => {
+    const shown = slice();
+    const text = renderWorldSlice(shown);
+    const holders = new Set(shown.provinces.flatMap((province) => [province.controllerId, ...province.cities.map((city) => city.controllerId)]));
+    holders.delete(null);
+    expect(holders.size).toBeGreaterThan(1);
+    for (const id of holders) expect(text).toContain(`[${id}]`);
+  });
+
+  it("names both parties to every treaty and stance by id", () => {
+    const shown = slice();
+    expect(shown.agreements.length + shown.diplomacy.length).toBeGreaterThan(0);
+    for (const agreement of shown.agreements) expect(agreement.between).toMatch(/^.+ \[[a-z0-9-]+\] and .+ \[[a-z0-9-]+\]$/);
+    for (const stance of shown.diplomacy) expect(stance.toward).toMatch(/ \[[a-z0-9-]+\]$/);
+  });
+});

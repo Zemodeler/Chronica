@@ -23,9 +23,14 @@ export function monthOfDay(day: number, clock: ScenarioClock): number {
   return calendarDateOf({ day, minute: 0 }, clock).month;
 }
 
-/** November to March: the roads are mud or snow, the passes shut, the sea dangerous. */
+/**
+ * November to February: the roads are mud or snow, the passes shut, the sea
+ * dangerous. March is Mars's month, when the legions took the field: counted
+ * as winter, every scenario that opens on 1 March began its first campaign
+ * at a winter crawl. The sea is still only half open then (`sailingSeason`).
+ */
 export function isWinterMonth(month: number | null): boolean {
-  return month !== null && (month >= 11 || month <= 3);
+  return month !== null && (month >= 11 || month <= 2);
 }
 
 /** June to September: the months a camp sickens in. */

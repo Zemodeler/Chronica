@@ -148,6 +148,7 @@ describe("an ally called with an army already afoot", () => {
     const armed: WorldState = { ...seen, material: { ...seen.material, forces: [...seen.material.forces.filter((force) => force.polityId !== ally), levy] } };
     const atWar: WorldState = { ...armed, polityAgreements: openWar(armed.polityAgreements, { id: "war-c", polityId: "rome", otherPolityId: "carthage", terms: "War.", atStep: 1, sourceMessageId: null, reason: "War." }) };
     const ticked = runDeterministicTick({ world: atWar, toDay: 2, ids: createIdFactory("afoot-2"), warfare: definition.warfare });
-    expect(ticked.world.material.forces.filter((force) => force.polityId === ally).map((force) => force.id)).toEqual(["ally-levy"]);
+    // Its harbours may send hulls besides (`socii-navales.ts`); its men march once.
+    expect(ticked.world.material.forces.filter((force) => force.polityId === ally && !force.personnel.some((group) => group.categoryId === "transport")).map((force) => force.id)).toEqual(["ally-levy"]);
   });
 });

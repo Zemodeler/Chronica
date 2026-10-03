@@ -105,9 +105,20 @@ export const EnactmentSchema = z
     /** A work it pays for, kept "proposed" until it passes and begun then. */
     projectId: EntityIdSchema.nullable().default(null),
     /** Spending authority adopted by the chamber, distinct from an actual payment. */
-    budget: z.object({ accountId: EntityIdSchema, amount: z.number().int().positive().nullable(), purpose: z.string().max(240) }).strict().nullable().optional(),
+    budget: z.object({
+      accountId: EntityIdSchema, amount: z.number().int().positive().nullable(), purpose: z.string().max(240),
+      /** Who spends it: this man, or whoever holds this office the day it passes. Neither, the sponsor. */
+      holderCharacterId: EntityIdSchema.nullable().optional(),
+      holderOfficeId: EntityIdSchema.nullable().optional(),
+    }).strict().nullable().optional(),
     /** A man excused the ladder for one office (`resolveEligibility`). */
     waiver: z.object({ characterId: EntityIdSchema, officeId: EntityIdSchema }).strict().nullable().default(null),
+    /** The citizenship given to these allies, full or without the vote (`sim/submission.ts`). */
+    franchise: z.object({ polityIds: z.array(EntityIdSchema).min(1).max(12), status: z.enum(["citizenship", "sine_suffragio"]) }).strict().nullable().optional(),
+    /** An agrarian law: public land in this province (null: the capital's) allotted to the landless (`sim/reform-laws.ts`). */
+    land: z.object({ provinceId: EntityIdSchema.nullable() }).strict().nullable().optional(),
+    /** A debt law: private loans held to a yearly rate of interest, and a share of what is owed forgiven. */
+    debt: z.object({ interestCapBps: z.number().int().min(0).max(10_000).nullable(), forgiveBps: z.number().int().min(0).max(10_000) }).strict().nullable().optional(),
     /** Its armies remade (`sim/military-reform.ts`): doctrines, recruitment, terms of service, a body redrawn. */
     military: MilitaryReformSchema.nullable().default(null),
     /** Set when it was carried out, so it is never carried out twice. */

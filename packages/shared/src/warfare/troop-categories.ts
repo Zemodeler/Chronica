@@ -26,9 +26,33 @@ export function allTroopCategories(
   scenarioCategories: readonly TroopCategoryDefinition[] = [],
 ): readonly TroopCategoryDefinition[] {
   const made = world.troopCategories ?? [];
-  if (made.length === 0) return scenarioCategories;
-  const authored = new Set(scenarioCategories.map((category) => category.id));
-  return [...scenarioCategories, ...made.filter((category) => !authored.has(category.id))];
+  const opened = withTransports(scenarioCategories);
+  if (made.length === 0) return opened;
+  const authored = new Set(opened.map((category) => category.id));
+  return [...opened, ...made.filter((category) => !authored.has(category.id))];
+}
+
+/**
+ * The hull that carries and does not fight: a merchantman or horse-transport
+ * pressed into service, holding four times the men of a quinquereme and worth
+ * almost nothing in a sea fight. Every period with warships had them, and a
+ * scenario that wrote only warships ferried its armies at thirty men a hull --
+ * which is why a consul with eighteen allied hulls could not cross the strait.
+ */
+export const TRANSPORT_CATEGORY: TroopCategoryDefinition = {
+  id: "transport",
+  label: "Transports",
+  combatWeightBps: 1_500,
+  steadinessBps: 3_000,
+  mobilityBps: 6_000,
+  naval: true,
+  transportPerHead: 120,
+};
+
+/** A scenario that has ships at all has transports, whether or not it wrote them down; one without ships has neither. */
+function withTransports(categories: readonly TroopCategoryDefinition[]): readonly TroopCategoryDefinition[] {
+  if (!categories.some((category) => category.naval) || categories.some((category) => category.id === TRANSPORT_CATEGORY.id)) return categories;
+  return [...categories, TRANSPORT_CATEGORY];
 }
 
 /**

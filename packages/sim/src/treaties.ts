@@ -22,6 +22,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+import { ALLIED_HULL_CATEGORY, alliedHullsAvailable, requisitionAlliedHulls } from "./socii-navales";
 
 /**
  * What a treaty makes happen, done on the calendar (VISION §3, §27).
@@ -91,7 +92,7 @@ export function hasGrievance(world: WorldState, polityId: string, againstPolityI
   return economyOf(world).grievances.some((grievance) => grievance.polityId === polityId && grievance.againstPolityId === againstPolityId);
 }
 
-function addGrievance(world: WorldState, polityId: string, againstPolityId: string, reason: string, atStep: number): WorldState {
+export function addGrievance(world: WorldState, polityId: string, againstPolityId: string, reason: string, atStep: number): WorldState {
   if (hasGrievance(world, polityId, againstPolityId)) return world;
   return withMemory(world, { grievances: [...economyOf(world).grievances, { polityId, againstPolityId, reason: reason.slice(0, 240), sinceStep: atStep }].slice(-200) });
 }
@@ -353,6 +354,7 @@ function levyContingents(world: WorldState, war: PolityAgreement, ids: IdFactory
   for (const [leader, enemy] of [[war.polityId, war.otherPolityId], [war.otherPolityId, war.polityId]] as const) {
     const allies = alliesLedBy(next.polityAgreements, leader).filter((ally) => ally !== enemy && !atWar(next.polityAgreements, ally, leader)).sort();
     const sent: { polityId: string; men: number }[] = [];
+    const shipsSent: { polityId: string; hulls: number }[] = [];
     for (const ally of allies) {
       const polity = next.map.polities.find((candidate) => candidate.id === ally);
       if (polity === undefined || !isStanding(polity)) continue;
@@ -372,9 +374,19 @@ function levyContingents(world: WorldState, war: PolityAgreement, ids: IdFactory
         });
         continue;
       }
+      // A port-holding ally sends its hulls as well as its men (`socii-navales.ts`).
+      const captain = next.characters.filter((character) => character.alive && character.polityId === ally).sort((a, b) => b.prestigeBps - a.prestigeBps || a.id.localeCompare(b.id))[0];
+      if (captain !== undefined && alliedHullsAvailable(next, ally).hulls > 0) {
+        const forceId = ids.next("force");
+        const afloat = requisitionAlliedHulls(next, { id: forceId, chestId: ids.next("account"), allyId: ally, name: `The ${polity.name} hulls`.slice(0, 120), wanted: Number.MAX_SAFE_INTEGER, commanderId: captain.id, controllerId: captain.id, categoryId: ALLIED_HULL_CATEGORY, label: "Allied transports", atStep: war.sinceStep });
+        if (typeof afloat !== "string") {
+          next = afloat.world;
+          shipsSent.push({ polityId: ally, hulls: afloat.hulls });
+        }
+      }
       // An ally with an army already afoot answers with it: a second levy
       // beside the first is the same men counted twice.
-      const afoot = next.material.forces.filter((force) => force.polityId === ally && fitOf(force) >= CONTINGENT_MIN && !force.personnel.every((group) => /ship|galley|hull|fleet/i.test(group.categoryId)))
+      const afoot = next.material.forces.filter((force) => force.polityId === ally && fitOf(force) >= CONTINGENT_MIN && !force.personnel.every((group) => /ship|galley|hull|fleet|transport/i.test(group.categoryId)))
         .sort((a, b) => fitOf(b) - fitOf(a) || a.id.localeCompare(b.id))[0];
       if (afoot !== undefined) {
         sent.push({ polityId: ally, men: fitOf(afoot) });
@@ -435,6 +447,18 @@ function levyContingents(world: WorldState, war: PolityAgreement, ids: IdFactory
         discoveryState: "public",
         knowableInDays: 0,
         significance: 50,
+      });
+    }
+    if (shipsSent.length > 0) {
+      facts.push({
+        localId: `hulls_levied_${war.id}_${leader}`.slice(0, 60),
+        kind: "allies_levied",
+        summary: `${listed(shipsSent.map((entry) => nameOf(next, entry.polityId)))} sent ${shipsSent.reduce((sum, entry) => sum + entry.hulls, 0)} transports to ${nameOf(next, leader)}'s war with ${nameOf(next, enemy)}, as their treaties bind their harbours.`.slice(0, 600),
+        affectedRefs: [{ kind: "polity", id: leader }, { kind: "polity", id: enemy }, ...shipsSent.slice(0, 6).map((entry) => ({ kind: "polity" as const, id: entry.polityId }))],
+        visibility: "public",
+        discoveryState: "public",
+        knowableInDays: 0,
+        significance: 40,
       });
     }
   }

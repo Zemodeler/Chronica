@@ -32,8 +32,9 @@ describe("distance is kilometres, not provinces", () => {
     const coarse = marchDaysFor(kmBetween(COARSE, "p0", "p2")!);
     const fine = marchDaysFor(kmBetween(FINE, "p0", "p8")!);
     expect(fine).toBeCloseTo(coarse, 9);
-    // An old-map province was eight days of march.
-    expect(marchDaysFor(REFERENCE_PROVINCE_KM)).toBeCloseTo(8, 9);
+    // An old-map province is four days of march, about 21 km a day: a Roman
+    // army's pace on a road, where it was once eight days, half that.
+    expect(marchDaysFor(REFERENCE_PROVINCE_KM)).toBeCloseTo(4, 9);
     expect(coarse).toBeCloseTo(360 / MARCH_KM_PER_DAY, 9);
   });
 

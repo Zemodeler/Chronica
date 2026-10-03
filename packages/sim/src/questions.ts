@@ -50,6 +50,8 @@ export function enactedConcerns(enactment: Enactment | undefined, rulerOfficeId:
   }
   if (enactment.body !== null) found.push("new_office");
   if (enactment.department != null) found.push("new_office");
+  if (enactment.land != null) found.push("land");
+  if (enactment.debt != null) found.push("debt");
   const constitution = enactment.constitution ?? null;
   if (constitution !== null) {
     const form = constitution.form ?? null;

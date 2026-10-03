@@ -14,6 +14,9 @@ import {
 import type { IdFactory } from "./ports";
 import { amend, type ChangeVia } from "./constitutions";
 import { carryOutDepartment } from "./departments";
+import { carryOutReformLaws } from "./reform-laws";
+import { grantForBudget } from "./voted-budgets";
+import { grantFranchise } from "./submission";
 
 /**
  * A measure carried, and what it does.
@@ -58,6 +61,12 @@ export function carryOutEnactment(
         linkedEntityIds: [budget.accountId], createdAtStep: atStep, provenanceEventIds: [], provinceId: null, effects: [],
       }] };
       said.push(budget.amount === null ? `a dedicated budget is established from ${account.id} for ${budget.purpose}` : `${budget.amount} is authorised from ${account.id} for ${budget.purpose}`);
+      // And somebody may spend it (`voted-budgets.ts`).
+      const grant = grantForBudget(next, enactment, procedure?.sponsorCharacterId ?? null, atStep);
+      if (grant !== null) {
+        next = { ...next, authorityGrants: [...next.authorityGrants.filter((existing) => existing.id !== grant.id), grant] };
+        said.push(`${next.characters.find((character) => character.id === grant.holder.id)?.name ?? grant.holder.id} is to spend it`);
+      }
     }
   }
 
@@ -222,6 +231,19 @@ export function carryOutEnactment(
       };
       said.push(`${excused.name} may stand for ${office.label} as the law would otherwise forbid`);
     }
+  }
+
+  // Land for the landless, and debts eased (`reform-laws.ts`).
+  const reformed = carryOutReformLaws(next, enactment, atStep, ids, procedure?.sponsorCharacterId ?? null);
+  next = reformed.world;
+  said.push(...reformed.said);
+
+  // The citizenship given to allies: those that will have it are one state with it now (`submission.ts`).
+  if (enactment.franchise != null) {
+    const given = grantFranchise(next, enactment.polityId, enactment.franchise.polityIds, enactment.franchise.status, atStep, procedureId);
+    next = given.world;
+    facts.push(...given.facts);
+    said.push(...given.said);
   }
 
   // The work it voted, begun today: every stage falls due from the day of the

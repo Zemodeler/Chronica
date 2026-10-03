@@ -13,6 +13,7 @@ import {
   passagePlanFor,
   releaseMoneyReservation,
   calendarDateOf,
+  isWinterMonth,
   normalizeName,
   spelledAlike,
   whoIsNamed,
@@ -2923,9 +2924,9 @@ export async function runSimulationBurst(input: BurstInput): Promise<BurstResult
   // is shown only the ones that need somebody to decide something.
   const offeredSeeds: NarratorSeed[] = [];
   for (const seed of seeds) {
-    // November to March: the months that shut passes and close roads.
+    // The months that shut passes and close roads (`isWinterMonth`).
     const month = calendarDateOf(world.instant, input.clock).month;
-    const work = engineWork(seed, month >= 11 || month <= 3);
+    const work = engineWork(seed, isWinterMonth(month));
     if (work === null) {
       offeredSeeds.push(seed);
       continue;

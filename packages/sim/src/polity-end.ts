@@ -10,6 +10,7 @@ import {
   type WorldState,
 } from "@chronica/shared";
 import type { IdFactory } from "./ports";
+import { deditio } from "./submission";
 
 /**
  * Powers ending, and rising again.
@@ -223,9 +224,11 @@ export function endPolity(
  * The calendar's part: powers with nothing left end, and yearning grows and
  * boils over. Monthly steps, so a burst covering ten days moves a third.
  */
-export function reviewPowers(world: WorldState, toDay: number, ids: IdFactory): { world: WorldState; facts: FactProposalDraft[] } {
-  const facts: FactProposalDraft[] = [];
-  let next = world;
+export function reviewPowers(world: WorldState, toDay: number, ids: IdFactory, playerPolityId: string | null = null): { world: WorldState; facts: FactProposalDraft[] } {
+  // A power beaten to nothing by the one it fights gives itself up to it (`submission.ts`).
+  const yielded = deditio(world, toDay, playerPolityId);
+  const facts: FactProposalDraft[] = [...yielded.facts];
+  let next = yielded.world;
 
   // ── No ground ──────────────────────────────────────────────────────────
   for (const polity of next.map.polities) {

@@ -63,7 +63,8 @@ describe("a fleet hired", () => {
   it("says, when the legion cannot cross, what ships its power has and what they carry", () => {
     const refused = passageFor(opening(), army(opening()), SICILY, definition.warfare);
     expect(refused.by).toBeNull();
-    expect(refused.by === null && refused.reason).toMatch(/Allied Greek hulls, lie in .* and carry 540/);
+    // Eighteen transports, 120 men a hull (E22).
+    expect(refused.by === null && refused.reason).toMatch(/Allied Greek hulls, lie in .* and carry 2160/);
   });
 });
 

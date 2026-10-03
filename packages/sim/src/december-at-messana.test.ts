@@ -45,6 +45,9 @@ const UP_THE_COAST = (() => {
 const AGRIGENTUM = PUNIC_IDS.agrigentum;
 const forceOf = (state: WorldState, id: string) => state.material.forces.find((force) => force.id === id)!;
 
+/** The Greek hulls as warships, thirty men a hull, as the scenario wrote them before it had transports (E22). */
+const asWarships = (force: WorldState["material"]["forces"][number], fit = 18) => (force.id === "allied-greek-hulls" ? { ...force, personnel: [{ categoryId: "warship", label: "Allied transports", fit, unavailable: [] }] } : force);
+
 /** Legio I on the Italian shore, the Greek hulls with it, and forty hired transports a province or two up the coast. */
 function beforeTheCrossing(): WorldState {
   const state = world();
@@ -66,7 +69,7 @@ function beforeTheCrossing(): WorldState {
       ...state.material,
       forces: [
         ...state.material.forces.map((force) =>
-          force.id === "roman-field-army" || force.id === "allied-greek-hulls" ? { ...force, locationId: BRUTTIUM, positionId: null } : force),
+          force.id === "roman-field-army" || force.id === "allied-greek-hulls" ? asWarships({ ...force, locationId: BRUTTIUM, positionId: null }) : force),
         transports,
       ],
     },
@@ -98,10 +101,11 @@ describe("an army ferried over in loads", () => {
   });
 
   it("still refuses when the ships within reach would take more loads than a crossing can", () => {
+    // Five hulls, 150 a load: sixty loads, more than 45 days of a load a day.
     const state = world();
     const alone: WorldState = {
       ...state,
-      material: { ...state.material, forces: state.material.forces.map((force) => (force.id === "roman-field-army" || force.id === "allied-greek-hulls" ? { ...force, locationId: BRUTTIUM } : force)) },
+      material: { ...state.material, forces: state.material.forces.map((force) => (force.id === "roman-field-army" || force.id === "allied-greek-hulls" ? asWarships({ ...force, locationId: BRUTTIUM }, 5) : force)) },
     };
     const result = applyDeltas(alone, [WorldDeltaSchema.parse({ op: "force_modify", forceRef: "roman-field-army", locationId: MESSANA, reason: "Cross." })], context());
     expect(result.rejected).toHaveLength(1);
