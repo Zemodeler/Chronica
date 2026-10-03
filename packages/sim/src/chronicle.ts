@@ -132,7 +132,7 @@ const AMBIENT_KINDS: ReadonlySet<string> = new Set(["price_shock", "illness", "f
  * two-month siege of Messana nothing at all.
  */
 export const MUST_TELL: ReadonlySet<string> = new Set([
-  "motion_passed", "motion_failed", "motion_vetoed", "motion_referred", "council_advised", "council_overruled",
+  "motion_passed", "motion_failed", "motion_vetoed", "motion_referred", "motion_adjourned", "council_advised", "council_overruled", "secession_begun", "secession_ended",
   "siege_laid", "siege_progress", "siege_ended", "siege_lifted", "war_declared", "city_taken", "province_control_change", "order_part_unanswered", "political_position_changed",
   // A treaty broken, an ally's call, a province or an army rising: the engine's own turns of fortune (`treaties.ts`, `unrest.ts`).
   "treaty_breached", "call_to_arms", "rising", "civil_war",

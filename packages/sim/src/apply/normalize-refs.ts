@@ -327,7 +327,7 @@ export function peopleNamedButNeverMade(
     // made and named after a tribe.
     const bare = value.replace(/^local:/, "");
     if (world.map.polities.some((polity) => polity.id === bare || polity.id.endsWith(`-${bare}`))
-      || placeIndex(world).byId.has(bare) || provinceNamedExactly(placeIndex(world), bare) !== null) return value;
+      || placeIndex(world).byId.has(bare) || placeIndex(world).provinceOfSettlement.has(bare) || provinceNamedExactly(placeIndex(world), bare) !== null) return value;
     const handle = value.replace(/^local:/, "").replace(/[^a-z0-9_-]/gi, "_").toLowerCase();
     toMake.set(handle, nameFrom(value));
     return `local:${handle}`;

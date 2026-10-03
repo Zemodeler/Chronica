@@ -93,18 +93,28 @@ describe("a march over the strait", () => {
     return now;
   };
 
+  /**
+   * Three hulls at Rhegium, ninety men a load: a hundred loads, not a ferry.
+   * The eighteen allied transports the scenario now has carry the legion over
+   * the strait in a few days (E22), so the refusal needs too few to be had.
+   */
+  const fewHulls = (): WorldState => {
+    const state = world();
+    return { ...state, material: { ...state.material, forces: state.material.forces.map((force) => (force.id === "allied-greek-hulls" ? { ...force, personnel: [{ categoryId: "warship", label: "Allied transports", fit: 3, unavailable: [] }] } : force)) } };
+  };
+
   it("is refused without ships to cross in", () => {
-    // Legio I in Latium with 18 Greek hulls in Bruttium, carrying 540 men, and
-    // Syracuse refusing to ferry it: "Transport Legio I across the strait"
-    // completed anyway, and the legion walked into Messana.
-    const result = applyDeltas(world(), [march], context);
+    // Legio I in Latium with too few Greek hulls in Bruttium, and Syracuse
+    // refusing to ferry it: "Transport Legio I across the strait" completed
+    // anyway, and the legion walked into Messana.
+    const result = applyDeltas(fewHulls(), [march], context);
     expect(result.rejected).toHaveLength(1);
     expect(result.rejected[0]!.reason).toMatch(/over water/);
     expect(result.world.projects.some((project) => project.completionOutcome?.kind === "force_move")).toBe(false);
   });
 
   it("refuses a project written to carry it over, too", () => {
-    const result = applyDeltas(world(), [WorldDeltaSchema.parse({
+    const result = applyDeltas(fewHulls(), [WorldDeltaSchema.parse({
       op: "project_create", localId: "transport", kind: "transport", label: "Transport Legio I across the strait to Messana",
       sponsorRef: { kind: "character", id: "gaius-genucius" }, fundingAccountRef: null,
       milestones: [{ label: "Embark and cross", dueInDays: 20, costAmount: 0 }],

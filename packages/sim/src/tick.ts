@@ -72,6 +72,7 @@ import { interceptCrossings, perilsOfTheRoad } from "./crossings";
 import { raiseLevy } from "./levies";
 import { lapseAilments } from "./ailments";
 import { reviewPowers } from "./polity-end";
+import { settleUnionOffers } from "./submission";
 import { betweenHarvests, reviewTheLand } from "./economy";
 import { endObligationsOfEndedAgreements, keepTreaties } from "./treaties";
 import { keepPromises } from "./promises";
@@ -91,6 +92,7 @@ import { keepDepartments } from "./departments";
 import { assignOverseers, polityOfWork } from "./overseers";
 import { fillAppointments } from "./appointments";
 import { reviewSkills } from "./skill-decline";
+import { sweepThreadsOverTheCap } from "./storyline-cap";
 
 /** A blockade looser than this does not shut a port's trade. */
 const LOOSE_BLOCKADE_BPS = 5_000;
@@ -1204,7 +1206,8 @@ export function runDeterministicTick(given: TickInput): TickResult {
   );
   // Who has held what, written down before any term ends -- so the man whose
   // year ran out today is remembered as having held it.
-  const recovered = recordTenures(materialAdvanced, input.toDay);
+  // An ally offered union and unable, or slow, to answer is answered by rule, before silence is counted (`submission.ts`).
+  const recovered = settleUnionOffers(recordTenures(materialAdvanced, input.toDay), input.toDay, facts);
 
   // Collectors who came back short. Once a tick per power, not per payment:
   // it is the kind of thing a government hears about and has to answer for.
@@ -1284,6 +1287,9 @@ export function runDeterministicTick(given: TickInput): TickResult {
       stale.includes(storyline) ? { ...storyline, phase: "closed" as const, closedAtStep: input.toDay, updatedAtStep: input.toDay } : storyline,
     );
   for (const storyline of stale) notes.push(`The matter of ${storyline.title} has gone quiet.`);
+  // Engine paths open threads without asking; the world's cap is kept here (E24).
+  const capped = sweepThreadsOverTheCap(recovered, storylines, input.toDay);
+  for (const storyline of capped.closed) notes.push(`The matter of ${storyline.title} has been set aside.`);
 
   /**
    * Letters whose term has run out.
@@ -1479,7 +1485,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
     ...recovered,
     // Ground held with no war left under it is the holder's (`settleOrphanedOccupations`).
     map: { ...recovered.map, provinces: settleOrphanedOccupations(recovered.map.provinces, polityAgreements, input.toDay) as typeof recovered.map.provinces },
-    storylines,
+    storylines: capped.storylines,
     diplomacy,
     polityStances,
     polityAgreements,
@@ -1586,7 +1592,7 @@ export function runDeterministicTick(given: TickInput): TickResult {
   const unrest = reviewUnrest({ world: promised.world, toDay: input.toDay, months: land.months, ids: input.ids, burdens, government: input.government, playerCharacterId: input.playerCharacterId ?? null });
   facts.push(...unrest.facts);
   // Powers with nothing left end; ground that wants its own rises for it.
-  const powers = reviewPowers(unrest.world, input.toDay, input.ids);
+  const powers = reviewPowers(unrest.world, input.toDay, input.ids, playerPolityId);
   facts.push(...powers.facts);
   const standing = settleStandingEffects({ world: powers.world, toDay: input.toDay, ids: input.ids });
   facts.push(...standing.facts);

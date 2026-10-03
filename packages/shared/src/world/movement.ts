@@ -1,7 +1,7 @@
 import type { CrossingType, Province, ProvinceEdge } from "./map";
 import type { WorldState } from "./world-state";
 import { isWaterCrossing } from "../warfare/sea";
-import { MAX_ROUTE_KM } from "./travel";
+import { DETOUR_FACTOR, MAX_ROUTE_KM } from "./travel";
 
 /**
  * Whether an army can get there from here (VISION §3's "army continuity").
@@ -228,6 +228,21 @@ export function landKmBetween(world: MapWorld, fromProvinceId: string, toProvinc
 /** How far off using only crossings this admits. Null when there is no such way. */
 export function strictKmBetween(world: MapWorld, fromProvinceId: string, toProvinceId: string, admits: (crossing: CrossingType) => boolean, budgetKm = MAX_ROUTE_KM): number | null {
   return routeKm(world, fromProvinceId, toProvinceId, { budgetKm, passable: (edge) => admits(edge.crossing) });
+}
+
+/**
+ * Whether the way there on foot has to go over a mountain pass: the map's own
+ * pass edges, with no way round them that is not twice as long. A march with
+ * no way on foot at all goes by sea, which is no pass.
+ *
+ * It used to be "no way by land and river alone", and the strait at the end
+ * of a march to Messana counted as the Alps: the consul's road to Rhegium in
+ * March was timed as a winter pass, 87 days.
+ */
+export function mustCrossAPass(world: MapWorld, fromProvinceId: string, toProvinceId: string): boolean {
+  const onFoot = landKmBetween(world, fromProvinceId, toProvinceId);
+  if (onFoot === null || onFoot === 0) return false;
+  return strictKmBetween(world, fromProvinceId, toProvinceId, (crossing) => crossing !== "pass" && !isWaterCrossing(crossing), onFoot * DETOUR_FACTOR) === null;
 }
 
 /**
